@@ -1,9 +1,15 @@
-ARG BUILD_FROM=ghcr.io/home-assistant/base:latest
+# Base image pinned by digest (fatherdoctor fork, CG-6): the multi-arch index that
+# ghcr.io/home-assistant/base:latest pointed to on 2026-11-06. Moving it is a release of ours.
+ARG BUILD_FROM=ghcr.io/home-assistant/base:latest@sha256:58422480a299b16b6ea376c2167463206d430619ed02b40cd687c8bd6875519e
 FROM $BUILD_FROM
 
 ARG BUILD_VERSION=dev
 ARG BUILD_ARCH=amd64
-ARG CODEX_VERSION=0.165.0
+# Codex CLI pinned (fatherdoctor fork, CG-6): the packaged build from OpenAI's GitHub release,
+# checked against these SHA-256 sums. The npm build cannot run `codex remote-control`.
+ARG CODEX_VERSION=0.166.0
+ARG CODEX_SHA256_AMD64=1d44b28bc4ac9937d7d3532264baa68a507ce364956a0d4ebb856f331cdee254
+ARG CODEX_SHA256_AARCH64=7821b77dda2e6283fb1f63f3165177a271da8833e857cf673c6ca1c9db3bfcc6
 
 LABEL \
     io.hass.version="${BUILD_VERSION}" \
@@ -17,6 +23,7 @@ RUN apk add --no-cache \
     chromium \
     font-noto \
     coreutils \
+    curl \
     git \
     jq \
     nodejs \
@@ -36,10 +43,29 @@ RUN chmod 0755 /opt/codex-sandbox/bwrap
 
 ENV PATH="/opt/codex-sandbox:${PATH}"
 
-RUN npm install -g --prefix /usr/local "@openai/codex@${CODEX_VERSION}" \
-    && test -x /usr/local/bin/codex \
+# The package unpacks to /opt/codex/<version>, root-owned and read-only, so the CLI can never
+# replace itself (self-update is also off in config.toml); a CLI move is a new release of ours.
+# `current` is a relative symlink, so the package resolves inside the image (the lab's installer
+# wrote an absolute one). The package's own bwrap is pointed at the HAOS wrapper above, so every
+# sandbox start goes through the one path the readiness probe checks.
+RUN case "${BUILD_ARCH}" in \
+        amd64) triple=x86_64-unknown-linux-musl; sum="${CODEX_SHA256_AMD64}" ;; \
+        aarch64) triple=aarch64-unknown-linux-musl; sum="${CODEX_SHA256_AARCH64}" ;; \
+        *) echo "unsupported arch ${BUILD_ARCH}" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL -o /tmp/codex-package.tar.gz \
+        "https://github.com/openai/codex/releases/download/rust-v${CODEX_VERSION}/codex-package-${triple}.tar.gz" \
+    && echo "${sum}  /tmp/codex-package.tar.gz" | sha256sum -c - \
+    && mkdir -p "/opt/codex/${CODEX_VERSION}" \
+    && tar -xzf /tmp/codex-package.tar.gz -C "/opt/codex/${CODEX_VERSION}" --no-same-owner \
+    && rm -f /tmp/codex-package.tar.gz \
+    && test -x "/opt/codex/${CODEX_VERSION}/bin/codex" \
+    && ln -sf /opt/codex-sandbox/bwrap "/opt/codex/${CODEX_VERSION}/codex-resources/bwrap" \
+    && ln -s "${CODEX_VERSION}" /opt/codex/current \
+    && ln -sf /opt/codex/current/bin/codex /usr/local/bin/codex \
+    && chmod -R a-w "/opt/codex/${CODEX_VERSION}" \
     && test "$(command -v codex)" = /usr/local/bin/codex \
-    && /usr/local/bin/codex --version
+    && /usr/local/bin/codex --version | grep -F "${CODEX_VERSION}"
 
 # Alpine packages Chromium for both supported architectures. Use its browser,
 # rather than downloading a glibc-only Playwright build into the image.

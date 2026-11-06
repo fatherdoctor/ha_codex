@@ -1,416 +1,103 @@
-# Codex for Home Assistant
+# Codex for Home Assistant (fatherdoctor fork)
 
-[![Release][release-badge]][release-url]
-[![HACS][hacs-badge]][hacs-url]
+A Home Assistant app and integration that let one household member ask OpenAI's Codex, in plain words and from the
+Home Assistant app, to explain the house or make a configuration change, with one confirmation per change.
+
 [![License][license-badge]][license-url]
 
----
+This is a fork of [moryoav/home-assistant-codex](https://github.com/moryoav/home-assistant-codex) (MIT), built on its
+release **0.1.81**. **Status: pre-release.** Nothing from this fork is installed anywhere yet; the permission,
+sign-in and recovery changes listed under [Versions](#versions) are still being built and reviewed.
 
-## ❤️ Help support this project
+## Table of contents
 
-If this project is useful to you, you can support my work:
+- [Features](#features)
+- [Preview](#preview)
+- [Installation](#installation)
+- [Updating](#updating)
+- [Uninstalling](#uninstalling)
+- [Usage](#usage)
+- [Versions](#versions)
+- [Making contributions](#making-contributions)
+- [License](#license)
 
-<p>
-  <a href="https://ko-fi.com/Y5B124NZ2L"><img src="https://img.shields.io/badge/Support_on_Ko--fi-FF5E5B?style=for-the-badge&amp;logo=kofi&amp;logoColor=white" alt="Support on Ko-fi" height="36"></a>
-  &nbsp;
-  <a href="https://github.com/sponsors/moryoav"><img src="https://img.shields.io/badge/Sponsor_on_GitHub-EA4AAA?style=for-the-badge&amp;logo=githubsponsors&amp;logoColor=white" alt="Sponsor on GitHub" height="36"></a>
-</p>
+## Features
 
----
+- A chat page inside Home Assistant (Ingress), with saved conversations and a task queue.
+- Codex works on the Home Assistant configuration folder inside its sandbox, saves a copy of each file before
+  changing it, and asks Home Assistant to check the configuration after YAML edits.
+- Answers Codex offers are shown as buttons, in the chat and on mobile app notifications.
+- Sign-in with a ChatGPT account by device code, shown as a QR code in a Home Assistant notification.
+- Dashboards inspected in a real browser, at desktop and mobile sizes.
+- A local copy of the Home Assistant documentation, so lookups need no web search.
+- **In this fork:** the Codex CLI is pinned (the packaged 0.166.0 build, checked by SHA-256) and cannot update
+  itself; the base image is pinned by digest. A CLI or base image move is a release of this fork.
 
-Use Codex CLI to inspect and edit your configuration through a chat in Home Assistant.
+## Preview
 
-## Example Flow
-
-Ask Home Assistant Assist to make a configuration or dashboard change:
-
-![Home Assistant Assist starting a Codex task to update a dashboard card label][assist-screenshot]
-
-Codex runs the task and sends a Home Assistant notification when it finishes:
-
-![Home Assistant persistent notification confirming a completed Codex task][notification-screenshot]
-
-## Conversations
-
-Open the worker web UI to browse saved chats in the left sidebar. Select a chat to read its messages and continue with the same Codex context, or choose **New chat** to start a separate conversation. Drag the sidebar divider to resize it, or focus it and use the arrow keys. On phones, use the menu button to open the chat list. Account sign-in and the AGENTS.md editor are under **Settings**.
-
-The sidebar shows recently active chats first and includes **Load older chats**. Messages, responses, and per-exchange results are saved across worker restarts. Older tasks remain available, but responses overwritten before this feature was added cannot be recovered by the new history view.
-
-The chat formats Markdown in your messages and in Codex's answers. Wrap code in triple backticks to send it as a code block, or in single backticks for inline code. Headings, bold and italic text, lists, tables, quotes, and links are formatted too.
-
-Dashboard verification can collect additional blocked browser requests for you to approve together. Open **Review blocked browser requests** in the inspection result, select requests you trust, and choose **Allow selected and retry**. You can remember exceptions for that dashboard and revoke them in **Settings > Browser permissions**. Approvals retry only the capture; they do not rerun the task. See [browser permission scopes and limits](codex-cli-worker/VERIFICATION.md#approving-additional-browser-requests).
-
-Use **Copy response** below an answer to copy its summary, details, and any question as original Markdown, including code blocks and YAML indentation. This also works for saved answers. If automatic copying is blocked, a dialog offers the selected text for manual copying. Images, activity logs, and separate configuration/backup/verification cards are not included.
-
-The worker runs one task at a time. While a chat is working, you can still send messages in new chats or other saved chats: they wait under **In queue** at the top of the sidebar and start one after another when the running chat finishes. A waiting message can be edited or removed until it starts.
-
-When Codex needs a decision, it can offer up to three answers as buttons under its question. Pick one, or type a different answer. With a mobile app notify service, the same buttons appear on the notification.
-
-### Chat UI preview
-
-Screenshots use demo conversations from the local test fixture.
-
-![Desktop chat UI with a resizable conversation sidebar and saved messages](examples/chat-ui/desktop.png)
-
-<p>
-  <img src="examples/chat-ui/mobile.png" alt="Mobile chat UI showing a saved conversation and reply box" width="300">
-  <img src="examples/chat-ui/mobile-dark.png" alt="Mobile chat UI in dark mode" width="300">
-</p>
-
-<p>
-  <img src="examples/chat-ui/model-picker.png" alt="Per-conversation model menu" width="300">
-  <img src="examples/chat-ui/reasoning-picker.png" alt="Per-conversation reasoning slider" width="300">
-</p>
-
-![Desktop chat UI showing an image generated by Codex under its response, with a download link](examples/chat-ui/generated-image.png)
-
-![Desktop chat UI showing a sent message with a code block and an answer with a heading, lists, a code block, a table, and a link](examples/chat-ui/markdown.png)
-
-![Desktop chat UI with two messages waiting in the queue while another chat is working](examples/chat-ui/queue.png)
-
-![Desktop chat UI showing a question from Codex with two answers offered as buttons under it](examples/chat-ui/choices.png)
-
-This repository contains two pieces:
-
-- `codex-cli-worker`: a Home Assistant app/add-on that runs Codex CLI with read-write access to `/config`.
-- `custom_components/codex_cli`: a Home Assistant custom integration that exposes entities and actions for starting tasks, checking status, signing in, cancelling work, and continuing saved conversations.
-
-## What It Does
-
-- Starts Codex tasks from Home Assistant actions, scripts, automations, or Assist/LLM tools.
-- Keeps saved conversations so you can return to an earlier chat and continue with its context.
-- Provides a chat UI with a resizable sidebar, mobile navigation, and light/dark themes.
-- Shows what Codex is doing while it works: reasoning headlines, commands, file edits, searches, and tool calls appear live under your message, with a timer from the moment you send it.
-- Formats Markdown in the chat, in your messages and in Codex's answers: code blocks, inline code, headings, lists, tables, and links.
-- Queues messages sent while another chat is working and starts them in order, with the option to edit or remove them first.
-- Offers answers to its own questions as buttons, in the chat and on mobile app notifications, so a decision takes one tap.
-- Asks Home Assistant to check the configuration after YAML edits and fails the task on errors.
-- Instructs Codex to save a copy of each existing file before changing it, reports reviewed files without a valid copy, and removes old backups after a configurable retention period. Known credential files are excluded; see [backup coverage and limits](codex-cli-worker/DOCS.md#backups).
-- Mounts the Home Assistant config folder as `/config` inside the worker app.
-- Runs tasks non-interactively and stores task logs/results under `/config/codex_tasks`.
-- Supports Codex device-code sign-in through Home Assistant persistent notifications.
-- Reports active task count, latest task status, auth status, and task-running state.
-- Uses Home Assistant Ingress for the app UI; the worker HTTP port is not exposed to the LAN.
-- Inspects dashboards in a real browser at desktop and mobile sizes, with screenshots and check results in the conversation.
-- Fetches fresh entity states, checks saved dashboard configuration, and reads Core logs to help verify changes and diagnose problems.
-- Keeps a local copy of the official Home Assistant documentation, refreshed after each Home Assistant update, so Codex can look things up without a web search.
-
-## History and statistics
-
-Read-only MCP tools let Codex fetch Home Assistant state history and recorder statistics for sensor analysis, troubleshooting, and automation design. They work in `workspace-write` and `read-only` without shell network approval or a manually configured API token. Results are saved in private temporary JSON files so Codex can calculate over the data without large tool outputs being cut off. Queries use explicit IDs and time windows, with limits and clear missing-data/truncation results. See [the tools and limits](codex-cli-worker/DOCS.md#historical-data-and-statistics).
-
-## Dashboard browser verification
-
-By toggling the option **Enable built-in browser** to ON, Codex can open your Home Assistant dashboards in a real browser, capture desktop and mobile screenshots, and inspect them while working on a change. It can use those images to review the layout and revise its work. Screenshots and check results appear with the conversation, including missing cards, failed resources, and browser errors.
-
-The bundled browser signs in automatically with a temporary, local, read-only identity. No Home Assistant password or manually created token is needed. Matching Fully Kiosk devices can also supply screenshots of the view they are displaying. See [verification behavior and limits](codex-cli-worker/VERIFICATION.md).
-
-## Security Notes
-
-This app is powerful by design. It gives Codex access to your Home Assistant config folder so it can edit automations, scripts, dashboards, integrations, and related files.
-
-The packaged worker follows the current Home Assistant app security guidance:
-
-- No published LAN port.
-- Ingress enabled for the web UI.
-- Exact Ingress proxy source validation.
-- Token-protected worker API for non-Ingress calls.
-- AppArmor enabled with a custom profile.
-- Bubblewrap namespace setup is isolated in a nested AppArmor profile, and
-  sandboxed commands start with all Linux capabilities dropped.
-- No Docker API access.
-- No host network.
-- No host PID/UTS access.
-- No `full_access`.
-- No elevated Supervisor role.
-
-The `/config` mount is intentionally read-write because editing Home Assistant configuration is the core purpose of the project.
-
-## Disclaimer
-
-Use this project at your own risk. Codex for Home Assistant can read and modify your Home Assistant configuration, dashboards, scripts, automations, and related files. AI-generated changes can be incomplete, incorrect, unsafe, or incompatible with your setup.
-
-You are solely responsible for reviewing changes, keeping backups, testing safely, and deciding whether to run this tool in your environment. The maintainer is not responsible or liable for damage, data loss, service interruption, security issues, misconfiguration, broken automations, device behavior, or any other loss or claim arising from installing, configuring, or using this project.
-
-This project is provided "as is", without warranty of any kind, express or implied. See the repository license for the full warranty and liability disclaimer.
-
-## Supported Architectures
-
-The packaged setup requires Home Assistant Supervisor and app support. HACS
-requires Home Assistant **2026.5.0** or newer for this integration.
-
-Prebuilt app images are published for:
-
-- `amd64`
-- `aarch64`
+Screenshots of this fork are not taken yet (see [screenshots/NEEDED.md](screenshots/NEEDED.md)). Upstream's chat
+screens are in [examples/chat-ui](examples/chat-ui).
 
 ## Installation
 
-### 1. Add the Worker App Repository
+You need Home Assistant OS or Supervised (the worker is an app), Home Assistant 2026.5 or later, and a ChatGPT plan
+with Codex. Before signing in, turn on **Enable device code authorization for Codex** in ChatGPT
+(**Settings** > **Security**).
 
-[![Add the Codex app repository to Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fmoryoav%2Fhome-assistant-codex)
+1. **Add the app repository.** **Settings** > **Apps** > **Install app** > menu (top right) > **Repositories**, then
+   add `https://github.com/fatherdoctor/ha_codex`.
+2. **Install and start the app.** Install **Codex CLI Worker**, review its options, start it.
+3. **Install the integration.** In HACS, add `https://github.com/fatherdoctor/ha_codex` as a custom repository
+   (type **Integration**), download **Codex**, and restart Home Assistant. Manual: copy `custom_components/codex_cli`
+   to `/config/custom_components/codex_cli` and restart.
+4. **Add the integration.** **Settings** > **Devices & services** > **Add integration** > **Codex**. It finds the
+   app by itself; there is no address or token to enter.
+5. **Sign in.** In the app's page, **Settings** > **Sign in**; scan the QR code in the notification, or open the
+   link, and enter the code.
 
-Use the button above to add this repository to Home Assistant's Apps store.
+Every app option is described in [codex-cli-worker/DOCS.md](codex-cli-worker/DOCS.md).
 
-If you prefer to do it manually:
+## Updating
 
-In Home Assistant:
+The app and the integration carry the same version. Update the app from **Settings** > **Apps**, and the
+integration from HACS, then restart Home Assistant. Home Assistant can take a backup of the app before an app update.
 
-1. Go to **Settings** -> **Apps**.
-2. Select **Install app**.
-3. Open the menu in the top right.
-4. Choose **Repositories**.
-5. Add this repository URL:
+## Uninstalling
 
-```text
-https://github.com/moryoav/home-assistant-codex
-```
+1. **Settings** > **Devices & services** > **Codex** > delete the integration entry.
+2. Remove **Codex** in HACS (or delete `/config/custom_components/codex_cli`) and restart Home Assistant.
+3. Uninstall **Codex CLI Worker** under **Settings** > **Apps**. Task logs stay in `/config/codex_tasks` until you
+   delete that folder.
 
-### 2. Install and Start the Worker App
+## Usage
 
-[![Open the Codex CLI Worker app page](https://my.home-assistant.io/badges/supervisor_addon.svg)](https://my.home-assistant.io/redirect/supervisor_addon/?addon=8a8d906b_codex_cli_worker&repository_url=https%3A%2F%2Fgithub.com%2Fmoryoav%2Fhome-assistant-codex)
+Open **Codex** in the sidebar and type. The integration's entities, its actions (`codex_cli.*`) with YAML examples,
+the task output format and the Assist example are documented upstream and still apply to this release: see
+[docs/upstream-README.md](docs/upstream-README.md) and the
+[integration README](custom_components/codex_cli/README.md).
 
-Use the button above after adding the repository. It opens the **Codex CLI Worker** app page.
+## Versions
 
-1. Install **Codex CLI Worker**.
-2. Review the app options.
-3. Start the app.
+A fork version is upstream's plus one number: `0.1.81.1` is the first build of this fork on upstream 0.1.81. The
+daily upstream watch ([ci/upstream-watch.yml](ci/upstream-watch.yml), moved to `.github/workflows/` on the default
+branch) opens one issue when upstream releases something newer.
 
-The app keeps an internal worker API token in private app storage. The **Codex** integration provisions and rotates that token automatically through Home Assistant's Supervisor-managed app stdin, so you do not need to view, copy, or configure a token.
+| Version | Changes |
+|---|---|
+| 0.1.81.1 (unreleased) | Packaged Codex CLI 0.166.0 pinned by checksum, no self-update, base image by digest, links and maintainer for the fork. Details in the [changelog](codex-cli-worker/CHANGELOG.md). |
 
-The app's web UI is available through Home Assistant Ingress. Do not try to open port `9123` directly; it is intentionally not exposed.
+Planned for the fork's v1, not in this release: full-access mode removed, approvals tied to a Home Assistant admin,
+category denials (locks, alarm, garage, cameras, messages to people) enforced outside the model, a page for sign-in
+and recovery without a terminal, and remote control from the ChatGPT app managed by the app.
 
-I recommend **`danger-full-access`** for working freely in Home Assistant, even though the name sounds scary. The app still offers backups, checks, and verification. `workspace-write` remains the default; in sandboxed modes, the chat shows **Allow once** and **Deny** buttons when a command or file change needs extra access. See [sandbox modes and permission requests](https://github.com/moryoav/home-assistant-codex/blob/main/codex-cli-worker/DOCS.md#sandbox) for the scope of approvals and the limits of these safeguards.
+## Making contributions
 
-The app options include dropdowns for the Codex model and reasoning effort:
+Issues and pull requests are welcome on this fork. Changes that are not specific to the fork belong upstream first;
+see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-- **Model:** `default` lets the bundled Codex CLI choose a model for your account, which the chat shows by name. Explicit choices include GPT-6 Astra, GPT-6.1 Sol, GPT-6.1 Terra, GPT-6 Sol, GPT-6 Luna, and the older GPT-5.6 Sol, Terra, and Luna. The legacy GPT-5.5 choice runs GPT-5.6 Sol. Availability depends on your account.
-- **Reasoning:** `medium` is the default. The app options offer `low`, `medium`, `high`, and `xhigh`; the legacy `minimal` value runs `medium`. The chat also offers Max and Ultra where the selected model supports them.
-- **Reasoning summaries:** `reasoning_summary` controls the activity list's reasoning summaries: `concise` headlines by default, `detailed`, or `none`.
-- **Configuration checks:** `config_check`, on by default, asks Home Assistant to check its configuration after YAML changes. An invalid result fails the task; an unavailable check is reported as unverified. Recovery information points to saved copies where available.
-- **Backups:** `backup_retention_days` defaults to 7. Codex is instructed to save per-file copies before editing; `full_snapshot`, off by default, also archives tracked configuration files before each message. Known credentials, large files, and excluded folders are not included in snapshots. See [Backups](codex-cli-worker/DOCS.md#backups).
-- **Local documentation:** `local_docs`, on by default, keeps a copy of the official Home Assistant documentation for Codex to search. Turn it off to stop downloads.
+## License
 
-The app web UI can view and save `/config/AGENTS.md`. You can also set the masked `HA_TOKEN` option when Codex tasks need a Home Assistant token in their environment. Codex then also gets `HA_URL`, the address to use with it, from the **Home Assistant API URL** option (`http://homeassistant:8123` by default).
+MIT, as upstream: [LICENSE](LICENSE) (copyright Yoav Mor). Fork changes by David Allison, under the same license.
 
-The worker also includes an SSH client for optional connections to existing SSH apps, NAS devices, and Linux servers. Configure keys and connections through chat in private `/data/.ssh` storage, without adding credentials to `/config`. The SSH server controls remote permissions; sandboxed modes use the existing chat approvals for shell networking. See [SSH setup and limits](codex-cli-worker/DOCS.md#ssh-connections).
-
-### 3. Sign In to Codex
-
-Before starting sign-in, enable **Enable device code authorization for Codex** in ChatGPT:
-
-1. Open the ChatGPT website.
-2. Click your profile.
-3. Go to **Settings** -> **Security**.
-4. Turn on **Enable device code authorization for Codex** near the bottom of the page.
-
-This setting is in ChatGPT, not the Codex website.
-
-For a managed workspace, an administrator may need to enable device-code login in the workspace permissions. See [Codex authentication](https://learn.chatgpt.com/docs/auth#preferred-device-code-authentication-beta).
-
-Open the app web UI and choose **Settings > Sign in**, or call the `codex_cli.start_login` action after the integration is installed.
-
-The app sends a Home Assistant persistent notification with:
-
-- A QR code.
-- A sign-in link.
-- The one-time device code.
-
-Scan the QR code or open the link, then enter the device code shown in the notification.
-
-Sign-in uses your ChatGPT account and its Codex allowance. Availability and usage limits depend on your plan and workspace permissions. The worker does not provide an OpenAI API-key option for Codex tasks.
-
-### 4. Install the Integration
-
-#### HACS
-
-[![Open the Codex HACS repository](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=moryoav&repository=home-assistant-codex&category=integration)
-
-Codex is available in the default HACS catalog, so no custom repository setup is required.
-
-1. Select the button above, or open HACS and search for **Codex** under **Integrations**.
-2. Select **Codex** and choose **Download**.
-3. Restart Home Assistant.
-
-#### Manual
-
-Copy:
-
-```text
-custom_components/codex_cli
-```
-
-to:
-
-```text
-/config/custom_components/codex_cli
-```
-
-Then restart Home Assistant.
-
-### 5. Add the Integration
-
-[![Add the Codex integration](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=codex_cli)
-
-Use the button above after Home Assistant restarts. It opens the **Codex** integration setup flow.
-
-In Home Assistant:
-
-1. Go to **Settings** -> **Devices & services**.
-2. Add integration **Codex**.
-
-The integration auto-detects the installed worker app and provisions its internal worker API token. There is no worker URL or API token to enter.
-
-Until the integration is installed and added, the app's web UI shows a line at the top of the chat that says so. It also says when the integration is older than the app needs.
-
-## Actions
-
-The integration exposes these Home Assistant actions:
-
-- `codex_cli.start_task`
-- `codex_cli.start_login`
-- `codex_cli.logout`
-- `codex_cli.get_login_status`
-- `codex_cli.list_tasks`
-- `codex_cli.get_task`
-- `codex_cli.cancel_task`
-- `codex_cli.reply_task`
-- `codex_cli.continue_task`
-
-The integration also provides diagnostic sensors for auth status, active tasks, last task, and the usage windows reported by Codex `/status`, plus a task-running binary sensor. Usage sensors show the percentage remaining, with separate timestamp sensors for reset times. Depending on the account and plan, Codex may report both 5-hour and weekly limits or only a weekly limit. When a window is omitted, its entities remain `unknown` with `reported: false`. Reset attributes use ISO datetime strings when a reset time can be parsed, with the original text available in `reset_text`.
-
-When a Codex task completes, fails, or needs input, the worker fires a Home Assistant event named `codex_cli_task_result` in addition to the notification. Automations can listen for that event and read fields such as `task_id`, `turn_id`, `status`, `summary`, `question`, `choices`, `details`, `attachments`, and the nested `response` object from `trigger.event.data`.
-
-Example:
-
-```yaml
-action: codex_cli.start_task
-data:
-  prompt: Check my Home dashboard for broken cards and suggest fixes.
-response_variable: codex_result
-```
-
-### Home Assistant actions
-
-List the 10 most recently active tasks:
-
-```yaml
-action: codex_cli.list_tasks
-data:
-  limit: 10
-  order: updated_desc
-  summary: true
-response_variable: recent_chats
-```
-
-Optional filters are `limit` (1–500), `offset` (zero-based), `status`, `order` (`created_asc` or `updated_desc`), and `summary`. The response includes `tasks`, `total`, `next_offset`, and `active_task_id`. With no options, the action keeps returning all tasks, oldest-created first. Use `codex_cli.get_task` with a `task_id` to retrieve the full conversation in `task.turns`.
-
-Continue a previous task:
-
-```yaml
-action: codex_cli.continue_task
-data:
-  task_id: "YOUR_TASK_ID"
-  message: "Apply the first suggestion from your previous answer."
-response_variable: continued_chat
-```
-
-Completed, failed, cancelled, and waiting tasks can continue if their saved Codex session is available. The task ID stays the same. Each message adds a new exchange, and the task-level status and result describe the latest exchange. Only one task can run at a time. The chat UI can queue messages; these Home Assistant actions return an error while another task is active or messages are already queued. A missing session produces an error instead of silently starting a new conversation.
-
-The existing `codex_cli.reply_task` action still answers tasks waiting for input. New tasks do not automatically inherit context from other chats.
-
-Answer a waiting question:
-
-```yaml
-action: codex_cli.reply_task
-data:
-  task_id: "{{ trigger.event.data.task_id }}"
-  turn_id: "{{ trigger.event.data.turn_id }}"
-  reply: "Don't change anything"
-```
-
-`reply` is free text. When Codex offered answers, they are in the event's `choices` list, and sending one of them picks it. `turn_id` is optional: with it, the reply is refused once that question is no longer the one waiting, so a late reply cannot answer a newer question. See [Human Input](codex-cli-worker/DOCS.md#human-input).
-
-## Task Output
-
-Codex tasks return a structured response with `status`, `summary`, `question`, `details`, and `choices`. The first four are plain strings, and how they are displayed depends on the Home Assistant consumer or notification service that receives them. `choices` is a list of up to three short answers Codex offers with a question, and is empty otherwise. The worker web UI formats Markdown in them; see [Formatted messages](codex-cli-worker/DOCS.md#formatted-messages).
-
-You can request a preferred output style through `/config/AGENTS.md`, which is editable from the worker app web UI. Codex treats this as guidance rather than a formatting guarantee. If you want Markdown-friendly task output, you can add this instruction:
-
-```md
-For the final structured response, use concise Markdown in summary, question,
-and details when it improves readability. Use only short lists, emphasis, inline
-code, and fenced code blocks. Do not use raw HTML, images, or embedded content.
-```
-
-## Assist / LLM Script Example
-
-See [examples/scripts.yaml](examples/scripts.yaml) for a starter script you can expose to Assist or another LLM integration.
-
-## Community-Created Cards
-
-Community-created dashboard cards are maintained in their own repositories:
-
-- [Home Assistant Codex Card](https://github.com/Rschmidt79/home-assistant-codex-card) by [Rschmidt79](https://github.com/Rschmidt79), a Lovelace chat card for starting and following Codex tasks from a Home Assistant dashboard.
-
-## Stable and Dev Branches
-
-Use the default repository URL for stable releases:
-
-```text
-https://github.com/moryoav/home-assistant-codex
-```
-
-The `dev` branch can be used for optional worker app development and canary builds:
-
-```text
-https://github.com/moryoav/home-assistant-codex#dev
-```
-
-The `#dev` URL applies to the worker app repository. HACS installs the
-integration from the ZIP attached to a release. To test integration changes
-from a development branch, use the manual installation instructions above.
-
-## Publishing Images
-
-The repository includes a GitHub Actions workflow that builds and publishes multi-architecture images to GitHub Container Registry:
-
-```text
-ghcr.io/moryoav/codex-cli-worker
-```
-
-The app `config.yaml` points at that image. Home Assistant uses the app version as the image tag.
-
-Release builds also publish the `latest` image tag. Manual workflow builds from development branches publish the app version and branch name tags, but do not move `latest`.
-
-To prepare a release, set the same version in `codex-cli-worker/config.yaml`
-and `custom_components/codex_cli/manifest.json`, and add its notes to
-`codex-cli-worker/CHANGELOG.md`. After merging and checking CI, push a
-`vX.Y.Z` tag for that commit. The release workflow validates the repository,
-attaches `codex_cli.zip`, and publishes the worker images. Release packaging
-rejects mismatched versions and missing changelog notes.
-
-## Development Layout
-
-```text
-.
-├── codex-cli-worker/
-│   ├── config.yaml
-│   ├── Dockerfile
-│   ├── server.py
-│   └── ...
-├── custom_components/
-│   └── codex_cli/
-├── examples/
-├── repository.yaml
-└── hacs.json
-```
-
-[assist-screenshot]: https://raw.githubusercontent.com/moryoav/home-assistant-codex/main/examples/codex-1.JPG
-[notification-screenshot]: https://raw.githubusercontent.com/moryoav/home-assistant-codex/main/examples/codex-2.JPG
-[hacs-badge]: https://img.shields.io/badge/HACS-41BDF5.svg?style=flat-square
-[hacs-url]: #installation
-[release-badge]: https://img.shields.io/github/v/release/moryoav/home-assistant-codex?style=flat-square
-[release-url]: https://github.com/moryoav/home-assistant-codex/releases/latest
-[license-badge]: https://img.shields.io/github/license/moryoav/home-assistant-codex?style=flat-square
-[license-url]: https://github.com/moryoav/home-assistant-codex/blob/main/LICENSE
+[license-badge]: https://img.shields.io/github/license/fatherdoctor/ha_codex
+[license-url]: LICENSE

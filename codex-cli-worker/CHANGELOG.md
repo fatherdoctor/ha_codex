@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.81.1
+
+First release of the fatherdoctor fork (`fatherdoctor/ha_codex`), built on upstream 0.1.81 (`63269cc6`). Versions are upstream's plus one number: `0.1.81.1` is the first fork build on 0.1.81.
+
+- The app bundles the **packaged** Codex CLI **0.166.0** from OpenAI's release, checked against a SHA-256 sum per architecture, in place of the npm build 0.165.0 (the npm build cannot run `codex remote-control`).
+- The CLI cannot update itself: it is unpacked read-only under `/opt/codex/0.166.0`, and `check_for_update_on_startup` stays off. Moving the CLI is a new release of the fork.
+- The package's own `bwrap` points at the app's HAOS sandbox wrapper, so the sandbox readiness check proves the path every task uses.
+- The base image is pinned by digest instead of `:latest`.
+- Repository, image, issue and documentation links point at the fork; maintainer David Allison.
+
 ## 0.1.81
 
 - Added the OpenSSH client for optional connections to existing SSH servers, including Home Assistant's SSH apps, NAS devices, and Linux machines.

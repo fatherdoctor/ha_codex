@@ -155,10 +155,10 @@ downloads it to your system; it is not part of this app's image.
 This app is distributed from:
 
 ```text
-https://github.com/moryoav/home-assistant-codex
+https://github.com/fatherdoctor/ha_codex
 ```
 
-Prebuilt images are published to `ghcr.io/moryoav/codex-cli-worker` for `amd64` and `aarch64`.
+Prebuilt images are published to `ghcr.io/fatherdoctor/codex-cli-worker` for `amd64` and `aarch64`.
 
 ## Security Model
 
@@ -180,7 +180,7 @@ The token is not your OpenAI or ChatGPT credential. Codex authentication is stil
 
 The app's web UI works without the **Codex** integration, but some features need it. From **0.1.71**, the web UI shows a line at the top of the chat, above the messages, in three cases:
 
-- **Not installed:** there is no `/config/custom_components/codex_cli/manifest.json`. See [Installation](https://github.com/moryoav/home-assistant-codex#installation).
+- **Not installed:** there is no `/config/custom_components/codex_cli/manifest.json`. See [Installation](https://github.com/fatherdoctor/ha_codex#installation).
 - **Out of date:** the version in that file is below the app's general minimum integration version. The line names the version to update to. Restart Home Assistant after updating.
 - **Installed but not connected:** the files are there, but the integration has not called the app for two minutes. It normally calls every 30 seconds. Restart Home Assistant if you have not done so since installing the integration, then add **Codex** under **Settings** > **Devices & services**.
 
@@ -196,7 +196,7 @@ API: `GET /status` has `integration` with `state` (`ok`, `starting`, `not_instal
 
 ## Model
 
-`codex_model` is a dropdown. The default value, `default`, lets the bundled Codex CLI choose a model for your account. Explicit choices are `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6.1-terra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. Availability depends on your account. The app bundles Codex CLI **0.165.0**.
+`codex_model` is a dropdown. The default value, `default`, lets the bundled Codex CLI choose a model for your account. Explicit choices are `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6.1-terra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. Availability depends on your account. The app bundles the packaged Codex CLI **0.166.0** (pinned by version and checksum; it never updates itself).
 
 The worker treats the legacy `gpt-5.3-codex` value as `default`. The retired `gpt-5.5` choice stays in the app's option list for existing installations and runs `gpt-5.6-sol`; it is not offered in the chat's model picker.
 
@@ -432,7 +432,7 @@ Messages are treated as untrusted text:
 - Images are never loaded from a message, because a remote image would tell its server that the message was read. They appear as links. Images that Codex generates or that you attach are shown as before.
 - A message longer than 50,000 characters, or one that takes unusually long to format, is shown as plain text.
 
-The Markdown parser, [marked](https://github.com/markedjs/marked) 18.0.14, is bundled with the app under `web/assets/vendor/` with its MIT license, so the chat does not load scripts from another server. Codex decides how it writes its answers; to ask for Markdown, add an instruction to `/config/AGENTS.md` as described under [Task Output](https://github.com/moryoav/home-assistant-codex/blob/main/README.md#task-output).
+The Markdown parser, [marked](https://github.com/markedjs/marked) 18.0.14, is bundled with the app under `web/assets/vendor/` with its MIT license, so the chat does not load scripts from another server. Codex decides how it writes its answers; to ask for Markdown, add an instruction to `/config/AGENTS.md` as described under [Task Output](https://github.com/fatherdoctor/ha_codex/blob/main/README.md#task-output).
 
 ### Queueing messages while another chat works
 

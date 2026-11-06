@@ -1,3 +1,3 @@
-name: Codex for Home Assistant
-url: https://github.com/moryoav/home-assistant-codex
-maintainer: Yoav Mor <moryoav@gmail.com>
+name: Codex for Home Assistant (fatherdoctor fork)
+url: https://github.com/fatherdoctor/ha_codex
+maintainer: David Allison

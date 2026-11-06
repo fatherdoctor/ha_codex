@@ -46,8 +46,8 @@ Because this project can modify a Home Assistant configuration folder, features 
 Clone the repository:
 
 ```bash
-git clone https://github.com/moryoav/home-assistant-codex.git
-cd home-assistant-codex
+git clone https://github.com/fatherdoctor/ha_codex.git
+cd ha_codex
 ```
 
 The repository layout is:
@@ -156,13 +156,13 @@ Container images for the worker app are built through GitHub Actions and publish
 Stable users should use the default repository URL:
 
 ```text
-https://github.com/moryoav/home-assistant-codex
+https://github.com/fatherdoctor/ha_codex
 ```
 
 For optional worker development and canary testing, use the `dev` branch:
 
 ```text
-https://github.com/moryoav/home-assistant-codex#dev
+https://github.com/fatherdoctor/ha_codex#dev
 ```
 
 To prepare a release, follow [Publishing Images](README.md#publishing-images). The release workflow checks version alignment, attaches the HACS ZIP, and publishes worker images. Ordinary pushes to `main` run validation and tests without creating a release or publishing images. Documentation-only changes do not need a version bump.

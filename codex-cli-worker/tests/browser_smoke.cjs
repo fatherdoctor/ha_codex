@@ -196,7 +196,7 @@ function pngBuffer(width = 8, height = 6) {
         .locator("a")
         .evaluate((link) => [link.href, link.target, link.rel]),
       [
-        "https://github.com/moryoav/home-assistant-codex#installation",
+        "https://github.com/fatherdoctor/ha_codex#installation",
         "_blank",
         "noreferrer noopener",
       ],

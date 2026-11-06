@@ -6,7 +6,7 @@ Codex connects Home Assistant to the local Codex CLI Worker app. It lets Home As
 
 Use the My Home Assistant buttons in the repository README for the fastest setup.
 
-1. Add `https://github.com/moryoav/home-assistant-codex` as a Home Assistant app repository.
+1. Add `https://github.com/fatherdoctor/ha_codex` as a Home Assistant app repository.
 2. Install and start the Codex CLI Worker app.
 3. Open the app web UI and choose **Settings > Sign in** to sign in to Codex. See the [sign-in prerequisites](../../README.md#3-sign-in-to-codex).
 4. Open HACS, search for **Codex** under **Integrations**, select it, and choose **Download**.

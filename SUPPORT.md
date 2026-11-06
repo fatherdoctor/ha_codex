@@ -14,7 +14,7 @@ Start with the project documentation:
 
 ## Reporting Bugs
 
-Use the [bug report template](https://github.com/moryoav/home-assistant-codex/issues/new?template=bug_report.yml) when something is not working as expected.
+Use the [bug report template](https://github.com/fatherdoctor/ha_codex/issues/new?template=bug_report.yml) when something is not working as expected.
 
 Please include:
 
@@ -29,7 +29,7 @@ Do not include secrets, tokens, device codes, private URLs, personal paths, or p
 
 ## Feature Requests
 
-Use the [feature request template](https://github.com/moryoav/home-assistant-codex/issues/new?template=feature_request.yml) for new ideas or improvements.
+Use the [feature request template](https://github.com/fatherdoctor/ha_codex/issues/new?template=feature_request.yml) for new ideas or improvements.
 
 Please explain the Home Assistant workflow you want to improve and whether you think the change belongs in the worker app, the custom integration, or both.
 

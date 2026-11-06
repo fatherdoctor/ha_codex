@@ -11,7 +11,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-TAG_PATTERN = re.compile(r"v\d+\.\d+\.\d+")
+TAG_PATTERN = re.compile(r"v\d+\.\d+\.\d+(?:\.\d+)?")
 DOMAIN = "codex_cli"
 ASSET_NAME = "codex_cli.zip"
 CHANGELOG = ROOT / "codex-cli-worker" / "CHANGELOG.md"
@@ -20,7 +20,7 @@ CHANGELOG = ROOT / "codex-cli-worker" / "CHANGELOG.md"
 def build(tag: str, output_dir: Path) -> Path:
     """Validate release metadata and write the integration ZIP and release notes."""
     if TAG_PATTERN.fullmatch(tag) is None:
-        raise ValueError(f"Expected a vX.Y.Z tag, got {tag!r}")
+        raise ValueError(f"Expected a vX.Y.Z or vX.Y.Z.N tag, got {tag!r}")
 
     version = tag[1:]
     component_dir = ROOT / "custom_components" / DOMAIN
@@ -31,7 +31,7 @@ def build(tag: str, output_dir: Path) -> Path:
         raise ValueError(f"Manifest version {manifest.get('version')!r} does not match {tag}")
 
     worker_config = (ROOT / "codex-cli-worker" / "config.yaml").read_text(encoding="utf-8")
-    worker_version = re.search(r'^version:\s*"?(\d+\.\d+\.\d+)"?\s*$', worker_config, re.MULTILINE)
+    worker_version = re.search(r'^version:\s*"?(\d+\.\d+\.\d+(?:\.\d+)?)"?\s*$', worker_config, re.MULTILINE)
     if worker_version is None or worker_version.group(1) != version:
         raise ValueError(f"Worker config version does not match {tag}")
 

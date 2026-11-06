@@ -357,7 +357,7 @@ function renderUsage(usage) {
 }
 // Where the line at the top of the chat sends someone to install the integration.
 const INTEGRATION_INSTALL_URL =
-  "https://github.com/moryoav/home-assistant-codex#installation";
+  "https://github.com/fatherdoctor/ha_codex#installation";
 /**
  * Show a line at the top of the chat while the Codex integration is not
  * installed, is older than the worker needs, or is not in touch with the
