@@ -16,6 +16,23 @@ from test_server import server
 from approvals import AppServerSession, COMMAND_APPROVAL, FILE_APPROVAL, DISPLAY_LIMIT
 
 
+ADMIN_ID = "a" * 32
+# Home Assistant's config/auth/list answer: one administrator, one ordinary user, one inactive administrator.
+HA_USERS = [
+    {"id": ADMIN_ID, "name": "Owner", "is_active": True, "system_generated": False, "group_ids": ["system-admin"]},
+    {"id": "u" * 32, "name": "Guest", "is_active": True, "system_generated": False, "group_ids": ["system-users"]},
+    {"id": "i" * 32, "name": "Former", "is_active": False, "system_generated": False, "group_ids": ["system-admin"]},
+]
+
+
+def ingress_as(user_id: str | None = ADMIN_ID) -> dict:
+    """Return test-client keyword arguments for a request that Supervisor Ingress proxied for this user."""
+    headers = {"X-Ingress-Path": "/api/hassio_ingress/test"}
+    if user_id:
+        headers["X-Remote-User-Id"] = user_id
+    return {"headers": headers, "environ_base": {"REMOTE_ADDR": server.INGRESS_PROXY_IP}}
+
+
 class Transport(io.StringIO):
     """Keep sent messages available after the adapter closes its input pipe."""
 
@@ -168,6 +185,20 @@ class ApprovalTests(unittest.TestCase):
         self.assertEqual(self.records[-1]["changes"][0]["diff"], "-old\n+new value")
         self.session.decide(approval_id, "allow")
         self.assertEqual(self.writer.messages()[-1]["result"], {"decision": "accept"})
+
+    def test_change_to_the_protected_policy_can_only_be_denied(self):
+        """A file change to the app's policy, its rules or its settings has no Allow, even when fully shown."""
+        for index, path in enumerate(["/usr/share/ha_codex/policy.json", "/data/codex-home/AGENTS.md", "/data/options.json"]):
+            self.session.receive({"method": "item/started", "params": {
+                "threadId": "thread", "turnId": "turn", "item": {"id": "item", "type": "fileChange",
+                    "changes": [{"path": path, "kind": {"type": "update"}, "diff": "-old\n+new"}]}}})
+            approval_id = self.request(method=FILE_APPROVAL, request_id=index)
+            self.assertFalse(self.records[-1]["can_allow"])
+            self.assertIn("permission policy", self.records[-1]["note"])
+            self.assertEqual(self.records[-1]["prompt_kind"], "file_change")
+            with self.assertRaises(ValueError):
+                self.session.decide(approval_id, "allow")
+            self.session.decide(approval_id, "deny")
 
     def test_masked_file_diff_or_path_cannot_be_allowed(self):
         """A masked diff or path cannot hide an edit behind an Allow button."""
@@ -326,6 +357,8 @@ class ApprovalApiTests(unittest.TestCase):
         self.patches = [patch.object(server, "tasks", {}), patch.object(server, "approval_sessions", {}),
                         patch.object(server, "running_processes", {}), patch.object(server, "save_task_index"),
                         patch.object(server, "api_token", return_value="worker-secret"),
+                        patch.object(server, "lookup_ha_users", return_value=HA_USERS),
+                        patch.object(server, "admin_cache", {}),
                         patch.object(server, "get_task_dir", return_value=Path(self.temp.name) / "task"),
                         patch.object(server, "task_root", return_value=Path(self.temp.name)),
                         patch.object(server, "TASK_STATE_FILE", Path(self.temp.name) / "index.json"),
@@ -349,11 +382,43 @@ class ApprovalApiTests(unittest.TestCase):
         self.approval_id = server.tasks["task"]["approvals"][0]["approval_id"]
         self.client = server.app.test_client()
 
-    def answer(self, payload=None, *, authorized=True, task_id="task"):
-        """Send a browser decision through the real authenticated Flask route."""
+    def answer(self, payload=None, *, authorized=True, task_id="task", user_id=ADMIN_ID):
+        """Send a browser decision through the real Flask route, as the Ingress page for this user."""
         return self.client.post(f"/tasks/{task_id}/approvals/{self.approval_id}",
                                 json=payload if payload is not None else {"decision": "allow", "turn_id": "worker-turn"},
-                                headers={"Authorization": "Bearer worker-secret"} if authorized else {})
+                                **(ingress_as(user_id) if authorized else {}))
+
+    def test_only_an_ingress_administrator_can_answer(self):
+        """The worker token, a missing identity, an ordinary or inactive user and a failed lookup are all refused."""
+        token_only = self.client.post(f"/tasks/task/approvals/{self.approval_id}",
+                                      json={"decision": "allow", "turn_id": "worker-turn"},
+                                      headers={"Authorization": "Bearer worker-secret"})
+        self.assertEqual(token_only.status_code, 403)
+        self.assertEqual(self.answer(user_id=None).status_code, 403)
+        self.assertEqual(self.answer(user_id="u" * 32).status_code, 403)
+        self.assertEqual(self.answer(user_id="i" * 32).status_code, 403)
+        self.assertEqual(self.answer(user_id="z" * 32).status_code, 403)
+        with patch.object(server, "lookup_ha_users", side_effect=RuntimeError("offline")):
+            refused = self.answer()
+        self.assertEqual(refused.status_code, 403)
+        self.assertIn("Could not confirm", refused.get_json()["error"])
+        # Nothing reached Codex and the request still waits.
+        self.assertEqual(self.writer.messages(), [])
+        self.assertEqual(server.tasks["task"]["approvals"][0]["status"], "pending")
+        self.assertEqual(self.answer().status_code, 200)
+        record = server.tasks["task"]["approvals"][0]
+        self.assertEqual(record["decided_by"], {"user_id": ADMIN_ID, "name": "Owner"})
+
+    def test_prompts_are_counted_by_kind_for_the_conversation(self):
+        """Each new request adds one to its kind; a decision or a re-save does not count it again."""
+        self.assertEqual(server.tasks["task"]["approval_counts"],
+                         {"command": 1, "command_input": 0, "file_change": 0, "other": 0, "total": 1})
+        self.assertEqual(self.answer().status_code, 200)
+        self.session.receive({"id": 11, "method": COMMAND_APPROVAL, "params": {
+            "threadId": "thread", "turnId": "turn", "itemId": "second", "command": "cat", "cwd": "/config",
+            "kind": "writeStdin"}})
+        self.assertEqual(server.tasks["task"]["approval_counts"],
+                         {"command": 1, "command_input": 1, "file_change": 0, "other": 0, "total": 2})
 
     def test_authentication_turn_binding_and_single_use(self):
         """Unauthenticated, stale, and repeated decisions do not reach the child process."""
@@ -466,6 +531,7 @@ class ApprovalApiTests(unittest.TestCase):
             "type": "workspaceWrite", "networkAccess": False, "writableRoots": ["/config"]})
         self.assertTrue(server.uses_user_approvals({}))
         self.assertTrue(server.uses_user_approvals({"codex_sandbox": "read-only"}))
+        # A refused mode never gets the approval-free exec path either: run_task stops it before launch.
         self.assertFalse(server.uses_user_approvals({"codex_sandbox": "danger-full-access"}))
 
     def test_restore_marks_pending_audit_expired_and_active_task_failed(self):
@@ -596,8 +662,9 @@ class ApprovalRunTests(unittest.TestCase):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
-        for name in ["tasks", "running_processes", "approval_sessions", "task_activity"]:
+        for name in ["tasks", "running_processes", "approval_sessions", "task_activity", "admin_cache"]:
             self.stack.enter_context(patch.object(server, name, {}))
+        self.stack.enter_context(patch.object(server, "lookup_ha_users", return_value=HA_USERS))
         self.options = {**server.DEFAULT_OPTIONS, "local_docs": False, "task_timeout_seconds": 30,
                         "config_check": False, "auto_save_lovelace": False}
         self.stack.enter_context(patch.object(server, "read_options", return_value=self.options))
@@ -777,7 +844,7 @@ class ApprovalRunTests(unittest.TestCase):
         self.notified.assert_called_once()
         self.assertEqual(self.notified.call_args.args[1]["approval_id"], record["approval_id"])
         response = server.app.test_client().post(f"/tasks/task/approvals/{record['approval_id']}",
-            json={"turn_id": "worker-turn", "decision": "allow"}, headers={"Authorization": "Bearer test-token"})
+            json={"turn_id": "worker-turn", "decision": "allow"}, **ingress_as())
         self.assertEqual(response.status_code, 200)
         runner.join(5)
         self.assertFalse(runner.is_alive())

@@ -84,10 +84,10 @@ branch) opens one issue when upstream releases something newer.
 
 | Version | Changes |
 |---|---|
+| 0.1.81.2 (unreleased) | No full-access mode; a protected permission policy and house rules in the image; permission answers and the integration's actions only from Home Assistant administrators; a permission-prompt sensor. |
 | 0.1.81.1 (unreleased) | Packaged Codex CLI 0.166.0 pinned by checksum, no self-update, base image by digest, links and maintainer for the fork. Details in the [changelog](codex-cli-worker/CHANGELOG.md). |
 
-Planned for the fork's v1, not in this release: full-access mode removed, approvals tied to a Home Assistant admin,
-category denials (locks, alarm, garage, cameras, messages to people) enforced outside the model, a page for sign-in
+Planned for the fork's v1, not in this release: category denials (locks, alarm, garage, cameras, messages to people) enforced outside the model, a page for sign-in
 and recovery without a terminal, and remote control from the ChatGPT app managed by the app.
 
 ## Making contributions
