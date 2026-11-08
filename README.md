@@ -61,6 +61,7 @@ Every app option is described in [codex-cli-worker/DOCS.md](codex-cli-worker/DOC
 
 The app and the integration carry the same version. Update the app from **Settings** > **Apps**, and the
 integration from HACS, then restart Home Assistant. Home Assistant can take a backup of the app before an app update.
+How releases are tested and how a bad one is rolled back: [docs/updates-and-rollback.md](docs/updates-and-rollback.md).
 
 ## Uninstalling
 

@@ -165,7 +165,7 @@ For optional worker development and canary testing, use the `dev` branch:
 https://github.com/fatherdoctor/ha_codex#dev
 ```
 
-To prepare a release, follow [Publishing Images](README.md#publishing-images). The release workflow checks version alignment, attaches the HACS ZIP, and publishes worker images. Ordinary pushes to `main` run validation and tests without creating a release or publishing images. Documentation-only changes do not need a version bump.
+To prepare a release, set the same version in `codex-cli-worker/config.yaml` and `custom_components/codex_cli/manifest.json` and add its notes to `codex-cli-worker/CHANGELOG.md`. A release is tagged only after it passes on a Home Assistant OS test machine, with `scripts/fork_release.py`; a bad release is undone by releasing the last good code under the next version. Both are described in [Updates and rollback](docs/updates-and-rollback.md). The release workflow checks version alignment, attaches the HACS ZIP, and publishes worker images. Ordinary pushes to `main` run validation and tests without creating a release or publishing images. Documentation-only changes do not need a version bump.
 
 ## Code of Conduct
 
