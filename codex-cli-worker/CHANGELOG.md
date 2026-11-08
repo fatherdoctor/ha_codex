@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Sign-in without a terminal: a banner above the chat while the app is not signed in; the one-time code in large letters that stays unchanged until the sign-in ends or is canceled, in a font that tells 0 from O; the QR code served by the app (it no longer depends on `/local/`); a **Cancel** button; a second **Sign in** keeps the running sign-in.
+- New **Signed in** binary sensor in the integration, and a clearer repair when the sign-in has expired or was revoked.
+- New `model_pin` option (default `gpt-6.1-sol`): every run names the pinned model, and a request for any other model is stopped with an error instead of running on it. `none` turns it off.
+- **Pause the assistant** in Settings: new messages are refused and queued ones wait until it is resumed; kept across restarts.
+
 ## 0.1.81.1
 
 First release of the fatherdoctor fork (`fatherdoctor/ha_codex`), built on upstream 0.1.81 (`63269cc6`). Versions are upstream's plus one number: `0.1.81.1` is the first fork build on 0.1.81.

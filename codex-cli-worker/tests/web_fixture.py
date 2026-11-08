@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import struct
+import os
 import tempfile
 import threading
 import time
@@ -50,7 +51,19 @@ def main():
         server.AGENTS_PATH = root / "AGENTS.md"
         server.CODEX_HOME = root / "codex-home"
         server.api_token = lambda: "preview-only"
-        server.auth_status_payload = lambda: {"status": "authenticated", "message": "Signed in (local preview)"}
+        server.PAUSE_FILE = root / "paused.json"
+        signed_in = {"status_ok": True, "message": "Signed in (local preview)"}
+        server.auth_status_payload = lambda: {
+            "status": "authenticated", "message": "Signed in (local preview)", "pending": False, "codex_login": signed_in,
+        }
+        if os.environ.get("CODEX_FIXTURE_SIGN_IN") == "pending":
+            # Show the page as it looks while a sign-in waits for its code to be entered.
+            server.auth_state.update({"login_id": "preview", "verification_url": "https://auth.openai.com/codex/device"})
+            server.auth_status_payload = lambda: {
+                "status": "waiting_for_user", "pending": True, "login_id": "preview", "user_code": "ABCD-EFGH2",
+                "verification_url": "https://auth.openai.com/codex/device", "qr_path": "auth/qr.svg?login=preview",
+                "codex_login": {"status_ok": False, "message": "Not logged in"},
+            }
         server.fire_ha_event = lambda *args: (True, "")
         server.notify = lambda *args, **kwargs: None
         server.refresh_usage_status_async = lambda **kwargs: None

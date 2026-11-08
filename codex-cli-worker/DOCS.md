@@ -198,6 +198,8 @@ API: `GET /status` has `integration` with `state` (`ok`, `starting`, `not_instal
 
 `codex_model` is a dropdown. The default value, `default`, lets the bundled Codex CLI choose a model for your account. Explicit choices are `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6.1-terra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. Availability depends on your account. The app bundles the packaged Codex CLI **0.166.0** (pinned by version and checksum; it never updates itself).
 
+`model_pin` (default `gpt-6.1-sol`) is the only model the app runs. With the pin set, a run on `default` names the pinned model to the CLI, the chat's model picker offers only that model, and a chat, saved conversation or `codex_model` choice that asks for another model is stopped with an error before Codex starts, never run on a different model. Set `model_pin` to `none` to turn the pin off and use `codex_model` as described here.
+
 The worker treats the legacy `gpt-5.3-codex` value as `default`. The retired `gpt-5.5` choice stays in the app's option list for existing installations and runs `gpt-5.6-sol`; it is not offered in the chat's model picker.
 
 `model_reasoning_effort` controls how much reasoning Codex asks supported models to use for each task. The app passes it for each exchange, through the app-server turn in sandboxed modes or a `codex exec` configuration override in full access. Available values are:
@@ -286,6 +288,8 @@ For a managed workspace, an administrator may need to enable device-code login i
 
 The app posts a Home Assistant persistent notification containing a QR code, link, and one-time device code. The QR code opens the OpenAI device page; type the code from the same notification into that page. The app refreshes the notification when the code appears and detects completion automatically. You do not need to run `docker exec`.
 
+While the app is not signed in, a banner above the chat offers **Sign in**. During a sign-in, the banner and **Settings** show the one-time code in large letters, a QR code of the sign-in page served by the app itself, and the link. The code stays on screen, unchanged, until the sign-in completes or you press **Cancel**; pressing **Sign in** again keeps the running sign-in and its code. When a saved sign-in expires or is revoked, the banner returns and the integration raises a Home Assistant repair; the integration's **Signed in** binary sensor turns off.
+
 When opened through Home Assistant Ingress, the app web UI can start the login flow without entering the worker API token because Home Assistant already authenticated the session. Direct HTTP/API calls still require the worker API token.
 
 Use **Settings > Sign out** in the app web UI or the Home Assistant action `codex_cli.logout` to run `codex logout` and remove saved Codex CLI credentials from the worker. Logout is blocked while a Codex task is actively running.
@@ -293,6 +297,10 @@ Use **Settings > Sign out** in the app web UI or the Home Assistant action `code
 The app uses the built-in Supervisor token for Home Assistant notifications and dashboard saves through the Home Assistant Core API proxy. No Home Assistant long-lived access token is required.
 
 Sign-in uses your ChatGPT account and its Codex allowance. Availability and usage limits depend on your plan and workspace permissions. The worker does not provide an OpenAI API-key option for Codex tasks.
+
+## Pausing the assistant
+
+**Settings > Pause the assistant** stops the app from taking new messages: new chats and replies are refused, and queued messages wait. A banner above the chat says so and offers **Resume the assistant**, which also starts the oldest queued message. A running task is not stopped; use **Stop task** for that. The pause is kept across app restarts.
 
 ## AGENTS.md and HA_TOKEN
 
