@@ -276,6 +276,18 @@ The request and decision remain in the exchange's `approvals` history, with sens
 
 Authenticated API clients can answer a live request using `POST /tasks/<task_id>/approvals/<approval_id>` with `{"turn_id":"<current_turn_id>","decision":"allow"}` or `"deny"`. Read the redacted `approvals` records from `GET /tasks/<task_id>` first. A stale or already answered request returns HTTP 409. Task summaries include `permission_required` while an exchange is waiting. Permission decisions are made directly on the live exchange and are never queued as chat messages.
 
+## Remote control from the ChatGPT app
+
+OpenAI's remote control (`codex remote-control`) lets the ChatGPT app on a phone or tablet work on this Home Assistant through OpenAI's relay. The app runs it for you; there is no terminal step.
+
+- **Off until you turn it on.** Open the app page, then **Settings**, then **Remote control from the ChatGPT app**. The choice is saved and holds across app restarts.
+- **One supervised process.** The app runs `codex remote-control --no-daemon` in the foreground and starts it again, with a growing delay, if it exits. **Turn off** stops it.
+- **Machine name.** The ChatGPT app lists this machine as **Home Assistant** unless you change the **Remote control machine name** option. Codex has no name setting, so the app starts it with that name as its host name inside a private namespace. A name that cannot be used as written becomes `Home-Assistant`.
+- **Pairing.** The pairing code is shown as large text and as a QR code. Pairing is kept in the app's private storage with the Codex sign-in, so a restart does not ask for it again. **New pairing code** asks Codex for a fresh one when the ChatGPT app has lost this machine.
+- **No Home Assistant credentials.** The remote-control process gets no Home Assistant token and no Supervisor token, even when the `HA_TOKEN` option is set for the chat page.
+- **Why Turn on can be unavailable.** Commands from the ChatGPT app do not pass through this app's Allow and Deny buttons. Remote control can be turned on only in a version that also ships a command check outside the model, which refuses locks, alarms, garage doors, cameras and messages to people for those commands. Until then, the button stays disabled and says why. The chat page works either way.
+- Remote control is experimental upstream. If it breaks, the chat page is not affected.
+
 ## Codex Sign-In
 
 Choose **Settings > Sign in** in the app web UI or call the Home Assistant action `codex_cli.start_login` to start `codex login --device-auth`.

@@ -2685,6 +2685,70 @@ async function loadLogin() {
   )
     loginTimer = setTimeout(() => loadLogin().catch(settingsError), 3000);
 }
+let remoteTimer;
+/**
+ * Show the remote-control state in the settings dialog: on or off, the
+ * machine name, the pairing code as large text and a QR code, and the recent
+ * messages. Checks again every five seconds while the dialog is open.
+ */
+async function loadRemoteControl() {
+  clearTimeout(remoteTimer);
+  const { remote_control: rc } = await api("remote-control");
+  renderRemoteControl(rc);
+  if ($("settings").open)
+    remoteTimer = setTimeout(
+      () => loadRemoteControl().catch(settingsError),
+      rc.enabled ? 5000 : 15000,
+    );
+}
+/** Draw one remote-control state; the buttons follow what can be done now. */
+function renderRemoteControl(rc) {
+  const name = rc.machine_name || rc.configured_name;
+  let status = rc.message || rc.state || "Unknown";
+  if (!rc.available) status = rc.blocked_reason;
+  else if (!rc.enabled) status = `Off. When on, this Home Assistant shows in the ChatGPT app as “${rc.configured_name}”.`;
+  $("remote-control-status").textContent = status;
+  const card = $("remote-control-card");
+  card.replaceChildren();
+  if (rc.enabled && rc.pairing_code) {
+    card.append(
+      textNode("p", `Pairing code for “${name}”:`),
+      textNode("p", rc.pairing_code, "pairing-code"),
+    );
+    if (rc.pairing_qr && rc.pairing_qr.startsWith("data:image/svg+xml;base64,")) {
+      const img = document.createElement("img");
+      img.src = rc.pairing_qr;
+      img.alt = `QR code for pairing code ${rc.pairing_code}`;
+      img.className = "pairing-qr";
+      card.append(img);
+    }
+  }
+  $("remote-control-start").hidden = rc.enabled;
+  $("remote-control-start").disabled = !rc.available;
+  $("remote-control-stop").hidden = !rc.enabled;
+  $("remote-control-pair").hidden = !rc.enabled;
+  $("remote-control-log").textContent = (rc.log || []).join("\n");
+  $("remote-control-log-box").hidden = !(rc.log || []).length;
+}
+for (const [id, action] of [
+  ["remote-control-start", "start"],
+  ["remote-control-stop", "stop"],
+  ["remote-control-pair", "pair"],
+]) {
+  $(id).onclick = async () => {
+    $(id).disabled = true;
+    try {
+      const data = await api(`remote-control/${action}`, {});
+      renderRemoteControl(data.remote_control);
+      $("settings-result").textContent = "";
+    } catch (error) {
+      settingsError(error);
+    } finally {
+      $(id).disabled = false;
+      loadRemoteControl().catch(settingsError);
+    }
+  };
+}
 /** Show an error in the result line of the settings dialog. */
 function settingsError(error) {
   $("settings-result").textContent = String(error.message || error);
@@ -2697,6 +2761,7 @@ $("settings-button").onclick = async () => {
   $("save-agents").disabled = true;
   const results = await Promise.allSettled([
     loadLogin(),
+    loadRemoteControl(),
     loadBrowserPermissions(),
     api("agents").then((data) => {
       $("agents").value = data.content || "";
@@ -2708,7 +2773,10 @@ $("settings-button").onclick = async () => {
     if (result.status === "rejected") settingsError(result.reason);
 };
 $("close-settings").onclick = () => $("settings").close();
-$("settings").addEventListener("close", () => clearTimeout(loginTimer));
+$("settings").addEventListener("close", () => {
+  clearTimeout(loginTimer);
+  clearTimeout(remoteTimer);
+});
 for (const [id, path] of [
   ["login", "auth/start"],
   ["logout", "auth/logout"],

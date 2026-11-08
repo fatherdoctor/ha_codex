@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Remote control from the ChatGPT app can be managed from the app's Settings page: turn on and off, status, machine name (default **Home Assistant**), pairing code as text and QR code, a new pairing code, and recent messages. The app runs `codex remote-control --no-daemon` as one supervised process with restart backoff, without any Home Assistant or Supervisor token. It stays off until turned on, and **Turn on** is refused until a command check outside the model is shipped with the app; this version does not ship it yet.
+- New option **Remote control machine name**.
+
 ## 0.1.81.1
 
 First release of the fatherdoctor fork (`fatherdoctor/ha_codex`), built on upstream 0.1.81 (`63269cc6`). Versions are upstream's plus one number: `0.1.81.1` is the first fork build on 0.1.81.

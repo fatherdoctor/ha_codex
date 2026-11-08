@@ -40,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from verification import DEFAULT_BROWSER_MEMORY_LIMIT_MIB, Verification, public_check
 from approvals import APPROVAL_GONE, AppServerSession
 from ha_data import HomeAssistantData
+import remote_control
 
 
 class _ToolWorker:
@@ -5379,6 +5380,42 @@ def require_ingress(func):
     return wrapper
 
 
+remote_control_supervisor = remote_control.Supervisor(
+    codex_binary=CODEX_BINARY,
+    state_path=DATA_ROOT / "remote_control.json",
+    env_factory=lambda: codex_env(),
+    name_factory=lambda: read_options().get("remote_control_name"),
+)
+
+
+@app.get("/remote-control")
+@require_auth
+def get_remote_control() -> Response:
+    """Return the remote-control state: on or off, connected or not, machine name, pairing code, recent log."""
+    return jsonify({"ok": True, "remote_control": remote_control_supervisor.snapshot()})
+
+
+@app.post("/remote-control/<action>")
+@require_auth
+@require_ingress
+def change_remote_control(action: str) -> Response | tuple[Response, int]:
+    """Turn remote control on or off, or ask for a new pairing code; only from the app page, never with the API token."""
+    if action == "start":
+        ok, state = remote_control_supervisor.start()
+        if not ok:
+            return jsonify({"ok": False, "error": state.get("blocked_reason") or "Remote control could not start.",
+                            "remote_control": state}), 409
+    elif action == "stop":
+        state = remote_control_supervisor.stop()
+    elif action == "pair":
+        ok, state = remote_control_supervisor.pair()
+        if not ok:
+            return jsonify({"ok": False, "error": state.get("error") or "No pairing code.", "remote_control": state}), 409
+    else:
+        return jsonify({"ok": False, "error": "unknown action"}), 404
+    return jsonify({"ok": True, "remote_control": state})
+
+
 @app.get("/browser-permissions")
 @require_auth
 @require_ingress
@@ -5602,6 +5639,8 @@ def main() -> None:
     prepare_ha_docs()
     threading.Thread(target=ha_docs_refresh_loop, daemon=True).start()
     auto_start_login_if_needed()
+    # Remote control runs again only if the owner left it on and the command gate is installed.
+    remote_control_supervisor.resume()
     threading.Thread(target=stdin_reader, daemon=True).start()
     # Messages that were waiting when the worker stopped carry on in order.
     start_next_queued()
