@@ -403,6 +403,24 @@ The web UI lists recent chats in a resizable sidebar and opens their messages on
 
 To make the text easier to read, tap **Aa** at the top of the chat (or open **Settings** > **Text size**) and choose **Normal**, **Larger** or **Largest**. The choice applies to the whole page and is saved in that browser only, so a phone and a tablet can each keep their own size.
 
+### Commands
+
+Type `/` at the start of the message box to see the commands, with a line on what each does. Keep typing to narrow the list, then tap one, or move with the arrow keys and press **Enter** or **Tab**. Typing a whole command, such as `/new`, and sending it does the same. **Settings** > **Commands** lists them all.
+
+| Command | What it does |
+| --- | --- |
+| `/new` | Start a new chat |
+| `/stop` | Stop the chat that is working (listed only while one is) |
+| `/model` | Choose the model for this chat |
+| `/reasoning` | Choose how long Codex thinks before it answers |
+| `/rename` | Rename this chat (listed only with a chat open) |
+| `/usage` or `/status` | Show how much of your ChatGPT plan is used |
+| `/size` | Change the text size |
+| `/settings` | Open Settings |
+| `/help` | List the commands |
+
+The page runs these commands itself. Messages reach Codex through `codex exec`, which does not read the slash commands of the Codex terminal app, so a command sent as a message would reach the model as plain words. Text that only starts with `/`, such as `/config/automations.yaml has an error`, is sent to Codex as usual.
+
 Below **Home Assistant workspace**, the sidebar shows how much of the account's 5-hour and 7-day quota is left. From **0.1.67**, each has a bar next to the percentage. The filled part is the quota left: green, and red when less than 5% is left. Hover over a bar to see when the quota resets. The worker checks the quota every few minutes, and not while a task is running. Until it has a value, the bar is an empty outline.
 
 From **0.1.54**, the web UI reopens the chat you left open the next time it loads, for example after the Home Assistant app on a phone reloads the panel. Choosing **New chat** is remembered as well. The chat id is kept in the browser's local storage under the Home Assistant origin, so it applies to that browser only. Opening the chat requests it from the worker as usual, but the worker does not record which chat you had open. If the remembered chat was deleted from another tab or device, the UI starts with a new chat instead.

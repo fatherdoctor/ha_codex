@@ -174,11 +174,21 @@
           <p id="error" role="alert" hidden></p>
           <form id="composer">
             <div id="pending-files" class="pending-files" hidden></div>
+            <div
+              id="slash-popover"
+              class="slash-popover"
+              role="listbox"
+              aria-label="Commands"
+              hidden
+            ></div>
             <label class="sr-only" for="message">Message Codex</label
             ><textarea
               id="message"
               rows="2"
               placeholder="Ask Codex about your Home Assistant…"
+              aria-autocomplete="list"
+              aria-controls="slash-popover"
+              aria-expanded="false"
               required
             ></textarea>
             <div class="compose-bottom">
@@ -424,6 +434,15 @@
                 ><small>130 %</small></label
               >
         </fieldset>
+      </section>
+      <section id="settings-commands">
+        <h3>Commands</h3>
+        <p class="muted">
+          Type <kbd>/</kbd> at the start of the message box to see them, then
+          tap one or pick it with the arrow keys and Enter. The page runs them
+          itself; they are not sent to Codex.
+        </p>
+        <dl id="command-list" class="command-list"></dl>
       </section>
       <section>
         <h3>ChatGPT account</h3>

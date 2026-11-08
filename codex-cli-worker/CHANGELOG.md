@@ -3,6 +3,7 @@
 ## Unreleased
 
 - **Text size** for the chat page: Normal, Larger (115 %) or Largest (130 %), from the **Aa** button above the chat or under **Settings**. It scales the messages, code, buttons, sign-in text and the list of steps together, is remembered on each device, and still fits a phone screen at Largest.
+- **Slash commands** in the message box: typing `/` lists `/new`, `/stop`, `/model`, `/reasoning`, `/rename`, `/usage` (or `/status`), `/size`, `/settings` and `/help` with a line on each, filtered as you type and picked by a tap or with the arrow keys and Enter. Only the commands the page can run at that moment are listed. The page runs them itself; they are never sent to Codex. **Settings** > **Commands** lists them.
 
 ## 0.1.81.1
 
