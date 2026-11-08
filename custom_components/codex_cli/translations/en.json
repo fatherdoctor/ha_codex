@@ -60,6 +60,10 @@
     "codex_not_signed_in": {
       "title": "Codex is not signed in",
       "description": "The Codex worker is reachable, but Codex CLI is not signed in. Start the Codex sign-in flow from the add-on web UI or by running the `codex_cli.start_login` action."
+    },
+    "remote_control_config_change": {
+      "title": "Review a change made while remote control was on",
+      "description": "{count} change(s) to your configuration since remote control from the ChatGPT app was turned on add actions that Codex may not add on its own. The first is {what} in {where}: `{text}`. Review it before you reload or restart Home Assistant. Then open the Codex app page, Settings, Remote control, and choose Mark reviewed."
     }
   },
   "services": {

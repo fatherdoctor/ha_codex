@@ -2,8 +2,9 @@
 
 ## Unreleased
 
-- Remote control from the ChatGPT app can be managed from the app's Settings page: turn on and off, status, machine name (default **Home Assistant**), pairing code as text and QR code, a new pairing code, and recent messages. The app runs `codex remote-control --no-daemon` as one supervised process with restart backoff, without any Home Assistant or Supervisor token. It stays off until turned on, and **Turn on** is refused until a command check outside the model is shipped with the app; this version does not ship it yet.
+- Remote control from the ChatGPT app can be managed from the app's Settings page: turn on and off, status, machine name (default **Home Assistant**), pairing code as text and QR code, a new pairing code, and recent messages. The app runs `codex remote-control --no-daemon` as one supervised process with restart backoff, without any Home Assistant or Supervisor token. It stays off until turned on, and **Turn on** is refused until a command check outside the model is shipped with the app.
 - New option **Remote control machine name**.
+- A command check outside the model for remote control: managed Codex requirements (no full-access sandbox, only the app's hooks), a managed hook that refuses commands needing more than the sandbox while remote control is on and always refuses credential reads and edits that add actions on locks, alarms, garage doors, cameras or messages to people, and a config watch that raises a Home Assistant repair for such changes made any other way. **Turn on** now works when the check is installed and passes its self-test. The hook's input format follows the Codex 0.166 binary and is to be confirmed on a test machine before a release.
 
 ## 0.1.81.1
 

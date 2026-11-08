@@ -4935,6 +4935,7 @@ def status() -> Response:
             "auth_flow": auth_status_payload(),
             "codex_usage": usage_status_payload(),
             "integration": integration_status(),
+            "remote_control": remote_control_summary(),
         }
     )
 
@@ -5385,7 +5386,14 @@ remote_control_supervisor = remote_control.Supervisor(
     state_path=DATA_ROOT / "remote_control.json",
     env_factory=lambda: codex_env(),
     name_factory=lambda: read_options().get("remote_control_name"),
+    watch=remote_control.ConfigWatch(CONFIG_ROOT, DATA_ROOT / "remote_control_baseline.json"),
 )
+
+
+def remote_control_summary() -> dict[str, Any]:
+    """Return what the integration needs for its repair: on or off, and the config changes not yet reviewed."""
+    state = remote_control_supervisor.snapshot()
+    return {key: state.get(key) for key in ("enabled", "state", "config_findings", "config_findings_count")}
 
 
 @app.get("/remote-control")
@@ -5399,7 +5407,10 @@ def get_remote_control() -> Response:
 @require_auth
 @require_ingress
 def change_remote_control(action: str) -> Response | tuple[Response, int]:
-    """Turn remote control on or off, or ask for a new pairing code; only from the app page, never with the API token."""
+    """Turn remote control on or off, ask for a new pairing code, or mark config changes reviewed.
+
+    Only from the app page, never with the API token.
+    """
     if action == "start":
         ok, state = remote_control_supervisor.start()
         if not ok:
@@ -5407,6 +5418,8 @@ def change_remote_control(action: str) -> Response | tuple[Response, int]:
                             "remote_control": state}), 409
     elif action == "stop":
         state = remote_control_supervisor.stop()
+    elif action == "review":
+        state = remote_control_supervisor.review()
     elif action == "pair":
         ok, state = remote_control_supervisor.pair()
         if not ok:

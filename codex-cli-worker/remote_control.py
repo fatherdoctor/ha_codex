@@ -9,8 +9,10 @@ it on, and the choice survives restarts.
 Commands that arrive from the ChatGPT app do not pass through this app's
 approval buttons. So remote control can only be turned on when a command gate
 that holds outside the model is installed in the image (``GATE_MARKER`` and the
-files it names). Until then, Start is refused with a plain reason and the chat
-page works as before.
+files it names) and its hook passes a self-test. Otherwise, Start is refused
+with a plain reason and the chat page works as before. ``ConfigWatch`` is the
+gate's detective layer: it reports refused actions that appear in ``/config``
+YAML while remote control is on and that the hook could not see.
 
 Codex 0.166 has no machine-name setting and uses the host name, so the process
 starts in its own user and UTS namespace (``unshare -Ur -u``) with the host name
@@ -27,12 +29,17 @@ import os
 import re
 import signal
 import subprocess
+import sys
+import tempfile
 import threading
 import time
+import tomllib
 from collections import deque
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
+import gate_rules
 
 DEFAULT_NAME = "Home Assistant"
 FALLBACK_NAME = "Home-Assistant"
@@ -44,6 +51,10 @@ GATE_MISSING = (
     "Remote control cannot be turned on in this version. Commands from the ChatGPT app skip this app's "
     "approval buttons, and the check that refuses locks, alarms, garage doors, cameras and messages to people "
     "for those commands is not installed yet. The chat page works as usual."
+)
+GATE_BROKEN = (
+    "Remote control cannot be turned on: the check that refuses locks, alarms, garage doors, cameras and "
+    "messages to people for commands from the ChatGPT app is installed but does not hold: "
 )
 # Seconds to wait before restarting a process that exited on its own, doubling up to the cap.
 BACKOFF_START = 5.0
@@ -100,8 +111,71 @@ def remote_env(base: dict[str, str]) -> dict[str, str]:
     return env
 
 
+def requirements_problem(path: Path) -> str:
+    """Return what is wrong with the managed requirements file, or an empty string when it holds."""
+    try:
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return f"the managed requirements could not be read ({exc})"
+    modes = data.get("allowed_sandbox_modes")
+    if not isinstance(modes, list) or not modes or "danger-full-access" in modes:
+        return "the managed requirements do not rule out the full-access sandbox"
+    if data.get("allow_managed_hooks_only") is not True:
+        return "the managed requirements do not keep hooks to the managed ones"
+    return ""
+
+
+# What the hook must refuse, and let through, before remote control may start: (event, remote on, input, refused).
+SELF_TEST_CASES = (
+    ("PermissionRequest", True, {"hook_event_name": "PermissionRequest", "tool_name": "shell",
+                                 "tool_input": {"command": ["curl", "http://homeassistant.invalid:8123/api/"]}}, True),
+    ("PreToolUse", True, {"hook_event_name": "PreToolUse", "tool_name": "shell",
+                          "tool_input": {"command": ["curl", "-s", "http://homeassistant.invalid/"],
+                                         "sandbox_permissions": "require_escalated"}}, True),
+    ("PreToolUse", False, {"hook_event_name": "PreToolUse", "tool_name": "shell",
+                           "tool_input": {"command": ["cat", "/proc/1/environ"]}}, True),
+    ("PreToolUse", False, {"hook_event_name": "PreToolUse", "tool_name": "shell",
+                           "tool_input": {"command": ["ls", "/config"]}}, False),
+)
+_self_test_cache: dict[tuple[str, float], str] = {}
+
+
+def hook_problem(hook: Path, run: Callable[..., Any] = subprocess.run) -> str:
+    """Run the hook on the self-test cases; return what it got wrong, or an empty string when it holds.
+
+    The result is kept per hook file and modification time: the image's copy never changes while the app runs.
+    """
+    try:
+        key = (str(hook), hook.stat().st_mtime)
+    except OSError:
+        return "the command check is missing"
+    if key in _self_test_cache:
+        return _self_test_cache[key]
+    problem = ""
+    with tempfile.TemporaryDirectory() as tmp:
+        for event, remote_on, payload, refused in SELF_TEST_CASES:
+            state = Path(tmp) / "state.json"
+            state.write_text(json.dumps({"enabled": remote_on}), encoding="utf-8")
+            try:
+                result = run([sys.executable, "-I", str(hook), "--event", event, "--state", str(state)],
+                             input=json.dumps(payload), capture_output=True, text=True, timeout=20, check=False)
+            except (OSError, subprocess.SubprocessError) as exc:
+                problem = f"the command check could not run ({exc})"
+                break
+            if (result.returncode == 2) != refused:
+                problem = "the command check " + ("let through" if refused else "refused") + " a test request"
+                break
+    _self_test_cache[key] = problem
+    return problem
+
+
 def gate_problem(marker: Path | None = None) -> str:
-    """Return why remote control may not start, or an empty string when the command gate is installed."""
+    """Return why remote control may not start, or an empty string when the command gate is installed and holds.
+
+    The marker must list the gate's files, every one must exist, the managed
+    requirements it names must rule out full access and outside hooks, and the
+    hook it names must refuse and pass the self-test requests.
+    """
     marker = marker or GATE_MARKER
     try:
         data = json.loads(marker.read_text(encoding="utf-8"))
@@ -113,6 +187,12 @@ def gate_problem(marker: Path | None = None) -> str:
     missing = [item for item in files if not Path(item).is_file()]
     if missing:
         return GATE_MISSING + " (missing: " + ", ".join(missing) + ")"
+    hook, requirements = data.get("hook"), data.get("requirements")
+    if not isinstance(hook, str) or not isinstance(requirements, str) or not {hook, requirements} <= set(files):
+        return GATE_MISSING
+    problem = requirements_problem(Path(requirements)) or hook_problem(Path(hook))
+    if problem:
+        return GATE_BROKEN + problem + "."
     return ""
 
 
@@ -138,6 +218,129 @@ def qr_data_url(text: str) -> str:
     return "data:image/svg+xml;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
+# Folders under /config the config watch does not read: Home Assistant's own stores, code, caches and media.
+WATCH_SKIP_DIRS = {".storage", ".git", ".cache", "custom_components", "node_modules", "www", "deps", "tts",
+                   "backups", "__pycache__", "blueprints_cache"}
+WATCH_MAX_FILES = 3000
+WATCH_MAX_BYTES = 2 * 1024 * 1024
+WATCH_INTERVAL = 30.0
+WATCH_SHOWN = 20
+SCRIPT_KEY_RE = re.compile(r"^([a-z0-9_]+)\s*:\s*(?:#.*)?$")
+
+
+class ConfigWatch:
+    """Find actions on refused domains that appeared in /config YAML since remote control was turned on.
+
+    The hook refuses such edits made with the patch tool. A command that writes
+    a file directly (``python -c``, ``sed -i``) is not a patch, so this watch
+    compares every YAML file under the config folder with a baseline taken when
+    the owner turned remote control on. What it finds is shown on the app page
+    and raised as a Home Assistant repair until the owner marks it reviewed.
+    It detects; it does not prevent. Remote control cannot reload or restart
+    Home Assistant, so the person who next reloads sees the repair first.
+
+    The baseline is saved in the app's private storage, so a restart of the app
+    compares with the same baseline and does not absorb a change.
+    """
+
+    def __init__(self, root: Path, baseline_path: Path,
+                 rules: Callable[[], dict[str, Any]] = gate_rules.load_rules) -> None:
+        self.root = root
+        self.baseline_path = baseline_path
+        self.rules = rules
+
+    def files(self) -> list[Path]:
+        """Return the YAML files the watch reads, sorted, skipping stores, code, caches and very large files."""
+        found: list[Path] = []
+        for folder, dirs, names in os.walk(self.root):
+            dirs[:] = sorted(d for d in dirs if d not in WATCH_SKIP_DIRS and not d.startswith("."))
+            for name in sorted(names):
+                if not name.lower().endswith((".yaml", ".yml")) or name == "secrets.yaml":
+                    continue
+                path = Path(folder) / name
+                try:
+                    if path.is_symlink() or path.stat().st_size > WATCH_MAX_BYTES:
+                        continue
+                except OSError:
+                    continue
+                found.append(path)
+                if len(found) >= WATCH_MAX_FILES:
+                    return found
+        return found
+
+    def refused_scripts(self, texts: dict[str, str], rules: dict[str, Any]) -> set[str]:
+        """Return the ids of scripts whose own steps act on a refused domain (scripts.yaml and scripts/)."""
+        refused: set[str] = set()
+        for rel, text in texts.items():
+            if rel != "scripts.yaml" and not rel.startswith("scripts/"):
+                continue
+            current, block = "", []
+            for line in text.splitlines() + ["__end__:"]:
+                key = SCRIPT_KEY_RE.match(line)
+                if key:
+                    if current and gate_rules.find_refused("\n".join(block), rules):
+                        refused.add(current)
+                    current, block = key.group(1), []
+                else:
+                    block.append(line)
+        return refused
+
+    def scan(self) -> dict[str, list[gate_rules.Finding]]:
+        """Return the refused actions in every YAML file, by path relative to the config folder."""
+        rules = self.rules()
+        texts: dict[str, str] = {}
+        for path in self.files():
+            try:
+                texts[path.relative_to(self.root).as_posix()] = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+        scripts = self.refused_scripts(texts, rules)
+        return {rel: found for rel, text in texts.items() if (found := gate_rules.find_refused(text, rules, scripts))}
+
+    def has_baseline(self) -> bool:
+        """Return whether a baseline is saved, that is, remote control was on and its changes are not reviewed."""
+        return self.baseline_path.is_file()
+
+    def take_baseline(self) -> None:
+        """Save what is in the config folder now as the baseline later scans compare with."""
+        data = {rel: [list(f.key()) for f in found] for rel, found in self.scan().items()}
+        self.baseline_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.baseline_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"taken": time.time(), "files": data}), encoding="utf-8")
+        os.replace(tmp, self.baseline_path)
+
+    def clear(self) -> None:
+        """Forget the baseline; the watch stops until remote control is turned on again."""
+        try:
+            self.baseline_path.unlink()
+        except FileNotFoundError:
+            pass
+
+    def new_findings(self) -> list[dict[str, Any]]:
+        """Return the refused actions that are in the config folder now and were not in the baseline.
+
+        Findings are matched by reason and line text, so an action that only
+        moved is not new; a second copy of an existing line is. An unreadable
+        baseline counts as empty, so everything refused is reported.
+        """
+        try:
+            base = json.loads(self.baseline_path.read_text(encoding="utf-8")).get("files") or {}
+        except (OSError, ValueError, AttributeError):
+            base = {}
+        out: list[dict[str, Any]] = []
+        for rel, found in sorted(self.scan().items()):
+            left: dict[tuple[str, str], int] = {}
+            for reason, text in base.get(rel, []):
+                left[(reason, text)] = left.get((reason, text), 0) + 1
+            for finding in found:
+                if left.get(finding.key(), 0) > 0:
+                    left[finding.key()] -= 1
+                    continue
+                out.append({"file": rel, "line": finding.line, "reason": finding.reason,
+                            "text": redact(finding.text.strip())[:200]})
+        return out
+
+
 class Supervisor:
     """Own the one remote-control process: start, stop, restart with backoff, and report its state."""
 
@@ -151,6 +354,8 @@ class Supervisor:
         popen: Callable[..., Any] = subprocess.Popen,
         run: Callable[..., Any] = subprocess.run,
         clock: Callable[[], float] = time.monotonic,
+        watch: ConfigWatch | None = None,
+        watch_interval: float = WATCH_INTERVAL,
     ) -> None:
         self.codex_binary = codex_binary
         self.state_path = state_path
@@ -160,6 +365,11 @@ class Supervisor:
         self.popen = popen
         self.run = run
         self.clock = clock
+        self.watch = watch
+        self.watch_interval = watch_interval
+        self.findings: list[dict[str, Any]] = []
+        self.watch_thread: threading.Thread | None = None
+        self.watch_wake = threading.Event()
         self.lock = threading.RLock()
         self.wake = threading.Event()
         self.proc: Any = None
@@ -187,7 +397,15 @@ class Supervisor:
     # Actions ------------------------------------------------------------------------------------
 
     def resume(self) -> dict[str, Any]:
-        """At app start, run remote control again if the owner left it on and the gate allows it."""
+        """At app start, run remote control again if the owner left it on and the gate allows it.
+
+        The config watch carries on with its saved baseline, also while remote
+        control is off with changes not yet reviewed.
+        """
+        if self.watch is not None and self.enabled() and not self.watch.has_baseline():
+            self.watch.take_baseline()
+            self.log.append("No saved baseline for the config watch; took one now.")
+        self._start_watch()
         if not self.enabled():
             return self.snapshot()
         problem = self.gate()
@@ -202,7 +420,12 @@ class Supervisor:
         if problem:
             self.set_status("blocked", problem)
             return False, self.snapshot()
+        if self.watch is not None:
+            self.watch.take_baseline()
+            with self.lock:
+                self.findings = []
         self.save_enabled(True)
+        self._start_watch()
         return True, self._launch()
 
     def stop(self) -> dict[str, Any]:
@@ -214,8 +437,52 @@ class Supervisor:
         self._terminate(proc)
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout=STOP_GRACE + 10)
+        if self.watch is not None:
+            findings = self.watch.new_findings()
+            with self.lock:
+                self.findings = findings
+            if not findings:
+                self.watch.clear()
         self.set_status("off", "Remote control is off.", pairing_code="")
         return self.snapshot()
+
+    def review(self) -> dict[str, Any]:
+        """Mark the config changes found as reviewed: compare with what is there now from here on.
+
+        While remote control is on, the current config becomes the new baseline;
+        while it is off, the watch stops until remote control is turned on again.
+        """
+        if self.watch is not None:
+            if self.enabled():
+                self.watch.take_baseline()
+            else:
+                self.watch.clear()
+        with self.lock:
+            self.findings = []
+        return self.snapshot()
+
+    def _start_watch(self) -> None:
+        """Start the config watch thread when there is a baseline to compare with and it is not running."""
+        if self.watch is None or not self.watch.has_baseline():
+            return
+        with self.lock:
+            if self.watch_thread is not None and self.watch_thread.is_alive():
+                return
+            self.watch_wake.clear()
+            self.watch_thread = threading.Thread(target=self._watch_loop, name="remote-control-watch", daemon=True)
+            self.watch_thread.start()
+
+    def _watch_loop(self) -> None:
+        """Scan the config folder against the baseline until the baseline is gone (reviewed after Turn off)."""
+        while self.watch is not None and self.watch.has_baseline():
+            try:
+                findings = self.watch.new_findings()
+            except Exception as exc:  # noqa: BLE001 - a scan error is shown, the watch keeps going
+                findings = [{"file": "", "line": 0, "reason": f"the config watch could not scan: {exc}", "text": ""}]
+            with self.lock:
+                self.findings = findings
+            if self.watch_wake.wait(self.watch_interval):
+                self.watch_wake.clear()
 
     def pair(self) -> tuple[bool, dict[str, Any]]:
         """Ask Codex for a new pairing code, for when the ChatGPT app has lost this machine."""
@@ -341,6 +608,7 @@ class Supervisor:
         with self.lock:
             status = dict(self.status)
             log = list(self.log)
+            findings = list(self.findings)
         problem = self.gate()
         code = status.get("pairing_code") or ""
         return {
@@ -351,4 +619,6 @@ class Supervisor:
             "configured_name": machine_name(self.name_factory()),
             "pairing_qr": qr_data_url(code) if code else "",
             "log": log,
+            "config_findings": findings[:WATCH_SHOWN],
+            "config_findings_count": len(findings),
         }

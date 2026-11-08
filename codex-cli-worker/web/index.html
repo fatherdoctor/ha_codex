@@ -376,6 +376,22 @@
         </p>
         <p id="remote-control-status" class="muted" role="status">Loading…</p>
         <div id="remote-control-card"></div>
+        <div id="remote-control-findings" hidden>
+          <p class="remote-control-warning" role="alert">
+            Changes to your configuration since remote control was turned on
+            add actions Codex may not add on its own. Review them before you
+            reload or restart Home Assistant.
+          </p>
+          <ul id="remote-control-findings-list"></ul>
+          <button id="remote-control-review" class="subtle">Mark reviewed</button>
+        </div>
+        <p id="remote-control-note" class="muted" hidden>
+          While remote control is on, commands that need more than the sandbox
+          are refused, from the ChatGPT app and from this page alike, and
+          Codex cannot add actions on locks, alarms, garage doors, cameras or
+          messages to people. Asking you before a change is Codex's rule only:
+          nothing outside the model can enforce it for the ChatGPT app.
+        </p>
         <div class="settings-actions">
           <button id="remote-control-start">Turn on</button
           ><button id="remote-control-pair" class="subtle">New pairing code</button

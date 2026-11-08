@@ -1,0 +1,12 @@
+# Managed requirements for Codex in this app (/etc/codex/requirements.toml, read-only in the image).
+# They hold for every client, the chat page and the ChatGPT app's remote control alike, and no
+# file under /config or CODEX_HOME can loosen them.
+#
+# - No full-access sandbox, whatever a client asks for.
+# - Only the hooks named in /etc/codex/managed_config.toml run, so a hook planted in /config or
+#   CODEX_HOME cannot replace the command check.
+#
+# Key names are from the Codex CLI 0.166.0 binary and are to be confirmed on a test machine
+# before a release that allows remote control.
+allowed_sandbox_modes = ["read-only", "workspace-write"]
+allow_managed_hooks_only = true

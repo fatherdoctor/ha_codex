@@ -1,0 +1,564 @@
+{
+ "about": "Tool-call inputs for the remote-control command check. The input shape is provisional until the lab captures Codex 0.166's hook format.",
+ "cases": [
+  {
+   "name": "permission request while on",
+   "remote_control_on": true,
+   "input": {
+    "hook_event_name": "PermissionRequest",
+    "tool_name": "shell",
+    "tool_input": {
+     "command": [
+      "curl",
+      "http://homeassistant.local:8123/api/states"
+     ]
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "permission request while off",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PermissionRequest",
+    "tool_name": "shell",
+    "tool_input": {
+     "command": [
+      "curl",
+      "https://example.com"
+     ]
+    }
+   },
+   "expect": "allow"
+  },
+  {
+   "name": "escalated shell while on",
+   "remote_control_on": true,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "shell",
+    "tool_input": {
+     "command": [
+      "bash",
+      "-lc",
+      "curl -s $HA_URL/api/"
+     ],
+     "sandbox_permissions": "require_escalated",
+     "justification": "check the API"
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "escalated shell flag while on",
+   "remote_control_on": true,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "shell",
+    "tool_input": {
+     "command": [
+      "ls",
+      "/root"
+     ],
+     "with_escalated_permissions": true
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "escalated shell while off",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "shell",
+    "tool_input": {
+     "command": [
+      "ls",
+      "/root"
+     ],
+     "sandbox_permissions": "require_escalated"
+    }
+   },
+   "expect": "allow"
+  },
+  {
+   "name": "sandboxed shell while on",
+   "remote_control_on": true,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "shell",
+    "tool_input": {
+     "command": [
+      "ls",
+      "-la",
+      "/config"
+     ]
+    }
+   },
+   "expect": "allow"
+  },
+  {
+   "name": "proc environ",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "shell",
+    "tool_input": {
+     "command": [
+      "cat",
+      "/proc/1/environ"
+     ]
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "proc environ glob",
+   "remote_control_on": true,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "shell",
+    "tool_input": {
+     "command": [
+      "bash",
+      "-lc",
+      "tr '\\0' '\\n' < /proc/*/environ"
+     ]
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "proc self environ",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "shell",
+    "tool_input": {
+     "command": [
+      "bash",
+      "-lc",
+      "cat /proc/self/environ"
+     ]
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "supervisor token variable",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "shell",
+    "tool_input": {
+     "command": [
+      "bash",
+      "-lc",
+      "echo $SUPERVISOR_TOKEN"
+     ]
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "supervisor api",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "shell",
+    "tool_input": {
+     "command": [
+      "curl",
+      "http://supervisor/core/api/states"
+     ]
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "s6 saved environment",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "shell",
+    "tool_input": {
+     "command": [
+      "cat",
+      "/run/s6/container_environment/SUPERVISOR_TOKEN"
+     ]
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "bashio",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "shell",
+    "tool_input": {
+     "command": [
+      "bash",
+      "-lc",
+      "bashio::config 'HA_TOKEN'"
+     ]
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "auth store",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "shell",
+    "tool_input": {
+     "command": [
+      "cat",
+      "/config/.storage/auth"
+     ]
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "auth provider store",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "shell",
+    "tool_input": {
+     "command": [
+      "cat",
+      "/config/.storage/auth_provider.homeassistant"
+     ]
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "secrets file",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "shell",
+    "tool_input": {
+     "command": [
+      "grep",
+      "-n",
+      "token",
+      "/config/secrets.yaml"
+     ]
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "word supervisor in prose",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "shell",
+    "tool_input": {
+     "command": [
+      "grep",
+      "-rn",
+      "Supervisor add-on",
+      "/config/README.md"
+     ]
+    }
+   },
+   "expect": "allow"
+  },
+  {
+   "name": "patch adds lock action",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "apply_patch",
+    "tool_input": {
+     "input": "*** Begin Patch\n*** Update File: automations.yaml\n@@\n+  actions:\n+    - action: lock.unlock\n+      target:\n+        entity_id: lock.front_door\n*** End Patch\n"
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "patch adds legacy service on alarm",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "apply_patch",
+    "tool_input": {
+     "input": "*** Begin Patch\n*** Update File: automations.yaml\n@@\n+    - service: alarm_control_panel.alarm_disarm\n*** End Patch\n"
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "patch adds notify",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "apply_patch",
+    "tool_input": {
+     "input": "*** Begin Patch\n*** Add File: packages/away.yaml\n+script:\n+  tell:\n+    sequence:\n+      - action: notify.mobile_app_phone\n+        data:\n+          message: hi\n*** End Patch\n"
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "patch adds tts",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "apply_patch",
+    "tool_input": {
+     "input": "*** Begin Patch\n*** Update File: scripts.yaml\n@@\n+    - action: tts.speak\n*** End Patch\n"
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "patch adds camera",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "apply_patch",
+    "tool_input": {
+     "input": "*** Begin Patch\n*** Update File: scripts.yaml\n@@\n+    - action: camera.turn_off\n*** End Patch\n"
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "patch adds alarmo",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "apply_patch",
+    "tool_input": {
+     "input": "*** Begin Patch\n*** Update File: scripts.yaml\n@@\n+    - action: alarmo.arm\n*** End Patch\n"
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "patch adds shell_command",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "apply_patch",
+    "tool_input": {
+     "input": "*** Begin Patch\n*** Update File: scripts.yaml\n@@\n+    - action: shell_command.anything\n*** End Patch\n"
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "patch adds rest_command",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "apply_patch",
+    "tool_input": {
+     "input": "*** Begin Patch\n*** Update File: scripts.yaml\n@@\n+    - action: rest_command.post_it\n*** End Patch\n"
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "patch opens garage",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "apply_patch",
+    "tool_input": {
+     "input": "*** Begin Patch\n*** Update File: automations.yaml\n@@\n+    - action: cover.open_cover\n+      target:\n+        entity_id: cover.garage_door\n*** End Patch\n"
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "patch opens blinds",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "apply_patch",
+    "tool_input": {
+     "input": "*** Begin Patch\n*** Update File: automations.yaml\n@@\n+    - action: cover.open_cover\n+      target:\n+        entity_id: cover.living_room_blinds\n*** End Patch\n"
+    }
+   },
+   "expect": "allow"
+  },
+  {
+   "name": "patch templated action",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "apply_patch",
+    "tool_input": {
+     "input": "*** Begin Patch\n*** Update File: automations.yaml\n@@\n+    - action: \"{{ states('input_text.next') }}\"\n*** End Patch\n"
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "patch templated entity",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "apply_patch",
+    "tool_input": {
+     "input": "*** Begin Patch\n*** Update File: automations.yaml\n@@\n+    - action: light.turn_on\n+      target:\n+        entity_id: \"{{ trigger.entity_id }}\"\n*** End Patch\n"
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "patch device action unlock",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "apply_patch",
+    "tool_input": {
+     "input": "*** Begin Patch\n*** Update File: automations.yaml\n@@\n+    - device_id: abc123\n+      domain: lock\n+      entity_id: 0f1e\n+      type: unlock\n*** End Patch\n"
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "patch device trigger locked",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "apply_patch",
+    "tool_input": {
+     "input": "*** Begin Patch\n*** Update File: automations.yaml\n@@\n+    - trigger: device\n+      device_id: abc123\n+      domain: lock\n+      entity_id: 0f1e\n+      type: locked\n*** End Patch\n"
+    }
+   },
+   "expect": "allow"
+  },
+  {
+   "name": "patch adds light",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "apply_patch",
+    "tool_input": {
+     "input": "*** Begin Patch\n*** Update File: automations.yaml\n@@\n+    - action: light.turn_on\n+      target:\n+        entity_id: light.kitchen\n*** End Patch\n"
+    }
+   },
+   "expect": "allow"
+  },
+  {
+   "name": "patch lock in a condition",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "apply_patch",
+    "tool_input": {
+     "input": "*** Begin Patch\n*** Update File: automations.yaml\n@@\n+    - condition: state\n+      entity_id: lock.front_door\n+      state: locked\n*** End Patch\n"
+    }
+   },
+   "expect": "allow"
+  },
+  {
+   "name": "patch removes lock action",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "apply_patch",
+    "tool_input": {
+     "input": "*** Begin Patch\n*** Update File: automations.yaml\n@@\n-    - action: lock.unlock\n*** End Patch\n"
+    }
+   },
+   "expect": "allow"
+  },
+  {
+   "name": "patch lock in markdown",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "apply_patch",
+    "tool_input": {
+     "input": "*** Begin Patch\n*** Update File: notes.md\n@@\n+    - action: lock.unlock\n*** End Patch\n"
+    }
+   },
+   "expect": "allow"
+  },
+  {
+   "name": "patch secrets",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "apply_patch",
+    "tool_input": {
+     "input": "*** Begin Patch\n*** Update File: secrets.yaml\n@@\n+api_key: x\n*** End Patch\n"
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "patch auth store",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "apply_patch",
+    "tool_input": {
+     "input": "*** Begin Patch\n*** Add File: .storage/auth\n+{}\n*** End Patch\n"
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "patch move to secrets",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "apply_patch",
+    "tool_input": {
+     "input": "*** Begin Patch\n*** Update File: notes.yaml\n*** Move to: secrets.yaml\n@@\n+a: b\n*** End Patch\n"
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "patch through shell heredoc",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "shell",
+    "tool_input": {
+     "command": [
+      "bash",
+      "-lc",
+      "apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: scripts.yaml\n@@\n+    - action: lock.lock\n*** End Patch\nEOF"
+     ]
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "not json",
+   "remote_control_on": false,
+   "input": "this is not json",
+   "expect": "deny"
+  },
+  {
+   "name": "command beside a harmless patch",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "shell",
+    "tool_input": {
+     "command": [
+      "bash",
+      "-lc",
+      "cat /proc/1/environ; apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: notes.md\n@@\n+hello\n*** End Patch\nEOF"
+     ]
+    }
+   },
+   "expect": "deny"
+  }
+ ]
+}

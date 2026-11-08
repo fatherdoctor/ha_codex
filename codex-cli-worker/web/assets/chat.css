@@ -1888,3 +1888,12 @@ dialog label {
   white-space: pre-wrap;
   font-size: 0.8rem;
 }
+
+.remote-control-warning {
+  font-weight: 600;
+}
+#remote-control-findings-list {
+  margin: 0.25rem 0 0.5rem;
+  padding-left: 1.25rem;
+  overflow-wrap: anywhere;
+}

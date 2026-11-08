@@ -1,0 +1,12 @@
+{
+  "about": "Home Assistant actions that Codex may never add or run without a person: locks, alarms, garage doors, cameras and messages to people. Shared by the remote-control command check and the category denials. Edit only in a release.",
+  "refused_domains": ["lock", "alarm_control_panel", "alarmo", "camera", "notify", "tts"],
+  "reaches_anything": ["shell_command", "rest_command", "python_script", "pyscript", "hassio"],
+  "garage_cover_words": ["garage"],
+  "device_actions": {
+    "lock": ["lock", "unlock", "open"],
+    "alarm_control_panel": ["arm_away", "arm_home", "arm_night", "arm_vacation", "arm_custom_bypass", "disarm", "trigger"],
+    "camera": ["turn_on", "turn_off"],
+    "mobile_app": ["notify"]
+  }
+}
