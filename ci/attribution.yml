@@ -1,0 +1,44 @@
+# ATTR-CHECK (sonnet, 2026-11-07). Fails a PR whose body or commit messages carry a claude.ai session link or a
+# Claude-Session: trailer; on a push to main it only reports (main is never rewritten). Same file in every repo.
+# Actions pinned to a full commit SHA; pin = actions/checkout v4.2.2.
+# COORDINATOR: move ci/attribution.yml to .github/workflows/ on each repo (the cloud token has no workflow scope).
+name: attribution
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  session-link:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - name: Look for session links
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -u
+          PATTERN='claude\.ai/code/session|^[[:space:]]*Claude-Session:'
+          bad=0
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            range="${BASE_SHA}..${HEAD_SHA}"
+            if printf '%s\n' "${PR_BODY:-}" | grep -n -i -E "$PATTERN"; then
+              echo "::error::PR body carries a claude.ai session link (see CLAUDE.md, Attribution)"; bad=1
+            fi
+          else
+            range="${PUSH_BEFORE}..${PUSH_AFTER}"
+            case "${PUSH_BEFORE}" in 0000000*) range="-1 ${PUSH_AFTER}" ;; esac
+          fi
+          if git log ${range} --format='%H%n%B%n--' | grep -n -i -E "$PATTERN"; then
+            echo "::error::a commit message carries a claude.ai session link or Claude-Session: line (see CLAUDE.md, Attribution)"; bad=1
+          fi
+          exit "$bad"
