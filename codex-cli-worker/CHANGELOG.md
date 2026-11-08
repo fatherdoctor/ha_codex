@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Text size** for the chat page: Normal, Larger (115 %) or Largest (130 %), from the **Aa** button above the chat or under **Settings**. It scales the messages, code, buttons, sign-in text and the list of steps together, is remembered on each device, and still fits a phone screen at Largest.
+
 ## 0.1.81.1
 
 First release of the fatherdoctor fork (`fatherdoctor/ha_codex`), built on upstream 0.1.81 (`63269cc6`). Versions are upstream's plus one number: `0.1.81.1` is the first fork build on 0.1.81.
