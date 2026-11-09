@@ -108,8 +108,14 @@ def check_release_files(version: str, rev: str, root: Path = ROOT) -> None:
         raise ReleaseError(
             f"at {rev[:12]} the app says {config} and the integration says {manifest}, not {version}"
         )
-    for heading, lines in changelog_sections(show(rev, CHANGELOG, root)):
+    text = show(rev, CHANGELOG, root)
+    for heading, lines in changelog_sections(text):
         if heading == version:
+            if re.search(rf"^## {re.escape(version)} \(unreleased\)\s*$", text, re.MULTILINE):
+                raise ReleaseError(
+                    f"{CHANGELOG} still marks {version} as (unreleased) at {rev[:12]}; "
+                    "remove the mark, merge, and run the lab pass on that commit"
+                )
             if not "\n".join(lines).strip():
                 raise ReleaseError(f"{CHANGELOG} has a heading for {version} but no notes")
             return
