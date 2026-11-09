@@ -201,7 +201,7 @@ class ConfigWatchTests(unittest.TestCase):
             "- triggers:\n    - trigger: time\n      at: '03:00'\n  actions:\n    - action: lock.lock\n",
             encoding="utf-8")
         found = self.watch.new_findings()
-        self.assertEqual([(f["line"], f["reason"]) for f in found], [(1, rc.BLOCK_CHANGED)])
+        self.assertEqual([(f["line"], f["reason"]) for f in found], [(1, gate_rules.BLOCK_CHANGED)])
 
     def test_a_new_line_in_a_block_is_reported_once(self) -> None:
         self.watch.take_baseline()

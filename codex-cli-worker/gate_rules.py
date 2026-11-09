@@ -12,6 +12,9 @@ app's Allow and Deny buttons. The check below holds outside the model:
 - ``find_refused`` is the scan both sides use on YAML text. The worker runs it
   over ``/config`` to catch edits the hook cannot see (a shell command that
   writes a file) and raises a Home Assistant repair for them.
+- ``refused_blocks`` hashes each top-level YAML block that holds a refused
+  line, so a changed trigger or condition of such a block is seen even though
+  its refused line stays as it was.
 
 The refused domains live in one file, ``policy/refused-domains.json``
 (``/usr/share/ha_codex/refused-domains.json`` in the image). When that file is
@@ -24,6 +27,7 @@ are refused outright while remote control is on.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass
@@ -229,6 +233,31 @@ def find_refused(text: str, rules: dict[str, Any], refused_scripts: frozenset[st
                                             "refused_script"))
                     break
     return findings
+
+
+BLOCK_CHANGED = "a change to a block that holds a refused action"
+
+
+def refused_blocks(text: str, rules: dict[str, Any], scripts: set[str] | frozenset[str] = frozenset()) -> dict[str, tuple[int, int, str]]:
+    """Return {hash: (first line number, last line number, first line)} for each top-level block of this YAML text that holds a refused line.
+
+    A block starts at a line that begins in the first column (``- id: ...`` in
+    automations.yaml, ``goodnight:`` in scripts.yaml, ``automation:`` in a
+    package). Changing a trigger or a condition of an automation that already
+    holds a refused action leaves the action line as it was, so the line
+    findings see nothing new; the block's hash changes.
+    """
+    out: dict[str, tuple[int, int, str]] = {}
+    block: list[str] = []
+    start = 1
+    for number, line in enumerate(text.splitlines() + ["__end__"], start=1):
+        if line[:1] and not line[:1].isspace() and not line.startswith("#") and block:
+            body = "\n".join(item.rstrip() for item in block).strip()
+            if body and find_refused(body, rules, scripts):
+                out[hashlib.sha256(body.encode("utf-8")).hexdigest()] = (start, number - 1, block[0])
+            block, start = [], number
+        block.append(line)
+    return out
 
 
 def parse_patch(text: str) -> list[tuple[str, str]]:

@@ -23,7 +23,6 @@ set to the chosen name. A name the kernel or ``hostname`` refuses falls back to
 from __future__ import annotations
 
 import base64
-import hashlib
 import io
 import json
 import os
@@ -227,29 +226,6 @@ WATCH_MAX_BYTES = 2 * 1024 * 1024
 WATCH_INTERVAL = 30.0
 WATCH_SHOWN = 20
 SCRIPT_KEY_RE = re.compile(r"^([a-z0-9_]+)\s*:\s*(?:#.*)?$")
-BLOCK_CHANGED = "a change to a block that holds a refused action"
-
-
-def refused_blocks(text: str, rules: dict[str, Any], scripts: set[str]) -> dict[str, tuple[int, int, str]]:
-    """Return {hash: (first line number, last line number, first line)} for each top-level block of this YAML text that holds a refused line.
-
-    A block starts at a line that begins in the first column (``- id: ...`` in
-    automations.yaml, ``goodnight:`` in scripts.yaml, ``automation:`` in a
-    package). Changing a trigger or a condition of an automation that already
-    holds a refused action leaves the action line as it was, so the line
-    findings see nothing new; the block's hash changes.
-    """
-    out: dict[str, tuple[int, int, str]] = {}
-    block: list[str] = []
-    start = 1
-    for number, line in enumerate(text.splitlines() + ["__end__"], start=1):
-        if line[:1] and not line[:1].isspace() and not line.startswith("#") and block:
-            body = "\n".join(item.rstrip() for item in block).strip()
-            if body and gate_rules.find_refused(body, rules, scripts):
-                out[hashlib.sha256(body.encode("utf-8")).hexdigest()] = (start, number - 1, block[0])
-            block, start = [], number
-        block.append(line)
-    return out
 
 
 class ConfigWatch:
@@ -314,7 +290,7 @@ class ConfigWatch:
         return self._scan()[0]
 
     def _scan(self) -> tuple[dict[str, list[gate_rules.Finding]], dict[str, dict[str, tuple[int, int, str]]]]:
-        """Return the refused lines and the refused blocks (see ``refused_blocks``) of every YAML file."""
+        """Return the refused lines and the refused blocks (see ``gate_rules.refused_blocks``) of every YAML file."""
         rules = self.rules()
         texts: dict[str, str] = {}
         for path in self.files():
@@ -324,7 +300,7 @@ class ConfigWatch:
                 continue
         scripts = self.refused_scripts(texts, rules)
         lines = {rel: found for rel, text in texts.items() if (found := gate_rules.find_refused(text, rules, scripts))}
-        blocks = {rel: found for rel, text in texts.items() if (found := refused_blocks(text, rules, scripts))}
+        blocks = {rel: found for rel, text in texts.items() if (found := gate_rules.refused_blocks(text, rules, scripts))}
         return lines, blocks
 
     def has_baseline(self) -> bool:
@@ -382,7 +358,7 @@ class ConfigWatch:
             for digest, (first, last, text) in sorted(found.items(), key=lambda item: item[1][0]):
                 if digest in known or any(f == rel and first <= n <= last for f, n in new_lines):
                     continue
-                out.append({"file": rel, "line": first, "reason": BLOCK_CHANGED, "text": redact(text.strip())[:200]})
+                out.append({"file": rel, "line": first, "reason": gate_rules.BLOCK_CHANGED, "text": redact(text.strip())[:200]})
         return out
 
 
