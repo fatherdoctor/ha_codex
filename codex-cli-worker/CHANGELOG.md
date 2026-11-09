@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Usage from the account, not the screen.** The 5-hour and weekly usage sensors now come from Codex's own `account/rateLimits/read`, placed by window length. If that read fails, the old `/status` screen read is used and the sensors say the figures are estimated (`source` and `note` attributes).
+
 ## 0.1.81.1
 
 First release of the fatherdoctor fork (`fatherdoctor/ha_codex`), built on upstream 0.1.81 (`63269cc6`). Versions are upstream's plus one number: `0.1.81.1` is the first fork build on 0.1.81.

@@ -319,6 +319,9 @@ usage_state: dict[str, Any] = {
     "context_percent": "",
     "raw_excerpt": "",
     "error": "",
+    "source": "",
+    "note": "",
+    "rate_limits_error": "",
     "_updated_monotonic": 0.0,
     "_refreshing": False,
     "_default_model": "",
@@ -1184,6 +1187,127 @@ def fetch_codex_usage_status() -> dict[str, Any]:
             terminate_and_reap_process(proc, terminate_timeout=3, kill_timeout=2)
 
 
+RATE_LIMITS_TIMEOUT_SECONDS = 20
+# A window this long or shorter is the 5-hour one; one of a week or longer is the weekly one.
+FIVE_HOUR_WINDOW_MAX_MINUTES = 24 * 60
+WEEKLY_WINDOW_MIN_MINUTES = 7 * 24 * 60
+ESTIMATED_NOTE = "Estimated: read from the Codex status screen because the account's usage read failed."
+
+
+def _read_app_server_reply(proc: subprocess.Popen[str], request_id: int, deadline: float) -> dict[str, Any]:
+    """Return the result of one app-server request, skipping notices; raise on an error, a timeout or EOF."""
+    assert proc.stdout is not None
+    while time.monotonic() < deadline:
+        readable, _, _ = select.select([proc.stdout], [], [], max(0.0, min(0.5, deadline - time.monotonic())))
+        if not readable:
+            continue
+        line = proc.stdout.readline()
+        if not line:
+            raise RuntimeError("Codex closed the usage connection")
+        message = json.loads(line)
+        if message.get("id") != request_id:
+            continue
+        if "error" in message:
+            raise RuntimeError(str((message["error"] or {}).get("message") or "usage read failed"))
+        return message.get("result") or {}
+    raise TimeoutError("Codex did not answer the usage read in time")
+
+
+def read_codex_rate_limits(codex: str) -> dict[str, Any]:
+    """Ask `codex app-server` for the account's rate limits (`account/rateLimits/read`) and return its result."""
+    proc = subprocess.Popen(
+        [codex, "app-server", "--config", "check_for_update_on_startup=false"],
+        cwd="/config", env=codex_env(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL, text=True, bufsize=1,
+    )
+    try:
+        assert proc.stdin is not None
+        deadline = time.monotonic() + RATE_LIMITS_TIMEOUT_SECONDS
+
+        def send(message: dict[str, Any]) -> None:
+            proc.stdin.write(json.dumps(message) + "\n")
+            proc.stdin.flush()
+
+        send({"id": 1, "method": "initialize", "params": {"clientInfo": {
+            "name": "home_assistant_worker", "title": "Home Assistant", "version": "1"}}})
+        _read_app_server_reply(proc, 1, deadline)
+        send({"method": "initialized"})
+        send({"id": 2, "method": "account/rateLimits/read", "params": {}})
+        return _read_app_server_reply(proc, 2, deadline)
+    finally:
+        terminate_and_reap_process(proc, terminate_timeout=3, kill_timeout=2)
+
+
+def _window_reset(resets_at: Any, weekly: bool, now: datetime) -> tuple[str, str]:
+    """Return a reset time as the status screen writes it ("17:22", "13:31 on 15 Nov") and as an ISO time."""
+    try:
+        when = datetime.fromtimestamp(int(resets_at), tz=now.tzinfo)
+    except (TypeError, ValueError, OverflowError, OSError):
+        return "", ""
+    text = f"{when:%H:%M} on {when.day} {when:%b}" if weekly else f"{when:%H:%M}"
+    return text, when.isoformat()
+
+
+def usage_from_rate_limits(result: dict[str, Any], now: datetime | None = None) -> dict[str, str]:
+    """Map an `account/rateLimits/read` result onto the usage fields the sensors read.
+
+    Each window is placed by its length, not by its slot: a plan with one weekly window sends it as
+    `primary` with no `secondary`. Percentages are what is left, as the status screen shows them.
+    The context figures belong to a conversation, not the account, so they stay empty here.
+    """
+    now = now or datetime.now().astimezone()
+    limits = result.get("rateLimits") if isinstance(result.get("rateLimits"), dict) else {}
+    usage = {key: "" for key in ("five_hour_limit", "five_hour_percent", "five_hour_reset", "five_hour_reset_at",
+                                 "weekly_limit", "weekly_percent", "weekly_reset", "weekly_reset_at",
+                                 "context_remaining", "context_percent", "raw_excerpt")}
+    found = []
+    for slot in ("primary", "secondary"):
+        window = limits.get(slot)
+        if not isinstance(window, dict):
+            continue
+        try:
+            minutes = int(window["windowDurationMins"])
+            left = max(0, min(100, 100 - round(float(window["usedPercent"]))))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if minutes <= FIVE_HOUR_WINDOW_MAX_MINUTES:
+            name, label, weekly = "five_hour", "5h", False
+        elif minutes >= WEEKLY_WINDOW_MIN_MINUTES:
+            name, label, weekly = "weekly", "weekly", True
+        else:
+            continue
+        reset, reset_at = _window_reset(window.get("resetsAt"), weekly, now)
+        usage.update({f"{name}_limit": f"{label} {left}%", f"{name}_percent": str(left),
+                      f"{name}_reset": reset, f"{name}_reset_at": reset_at})
+        found.append(f"{label} {left}% left" + (f" (resets {reset})" if reset else ""))
+    usage["raw_excerpt"] = "account/rateLimits/read: " + ("; ".join(found) or "no usage window")
+    return usage
+
+
+def fetch_codex_usage() -> dict[str, Any]:
+    """Return the usage state from the account's own rate-limit read, or the status screen marked estimated.
+
+    While a task runs, or when Codex is missing or signed out, the status-screen path's own
+    deferred or unavailable answer is returned.
+    """
+    if active_task_id():
+        # Deferred: the last values stay, and so do their source and note.
+        return fetch_codex_usage_status()
+    codex = codex_binary_path()
+    if not codex or not codex_login_status().get("status_ok"):
+        return {**fetch_codex_usage_status(), "source": "", "note": "", "rate_limits_error": ""}
+    try:
+        usage = usage_from_rate_limits(read_codex_rate_limits(codex))
+        if usage["five_hour_limit"] or usage["weekly_limit"]:
+            return {"status": "ok", "error": "", **usage, "source": "rate_limits", "note": "", "rate_limits_error": ""}
+        failure = "the usage read named no 5-hour or weekly window"
+    except Exception as exc:  # noqa: BLE001 - any failure falls back to the status screen
+        failure = str(exc) or type(exc).__name__
+    fallback = fetch_codex_usage_status()
+    note = ESTIMATED_NOTE if fallback.get("status") == "ok" else ""
+    return {**fallback, "source": "status_screen", "note": note, "rate_limits_error": failure}
+
+
 def _refresh_usage_worker(force: bool = False) -> None:
     """Fetch and store the usage status, unless a refresh is running or, when not forced, the last one is recent."""
     with usage_lock:
@@ -1196,7 +1320,7 @@ def _refresh_usage_worker(force: bool = False) -> None:
         usage_state["_refreshing"] = True
 
     try:
-        result = fetch_codex_usage_status()
+        result = fetch_codex_usage()
         _update_usage_state(**result)
     finally:
         with usage_lock:
