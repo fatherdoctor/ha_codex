@@ -39,6 +39,7 @@ from flask import Flask, Response, jsonify, request, send_file
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from verification import DEFAULT_BROWSER_MEMORY_LIMIT_MIB, Verification, public_check
 from approvals import APPROVAL_GONE, AppServerSession
+import policy as protected_policy
 from ha_data import HomeAssistantData
 
 
@@ -660,20 +661,15 @@ def _bubblewrap_probe(
 
 def sandbox_readiness() -> dict[str, Any]:
     """Report whether the configured Codex sandbox can run on this host."""
-    mode = str(read_options().get("codex_sandbox") or DEFAULT_OPTIONS["codex_sandbox"])
-    required = mode != "danger-full-access"
+    options = read_options()
+    mode = str(options.get("codex_sandbox") or DEFAULT_OPTIONS["codex_sandbox"])
+    # The sandbox is always required: the protected policy allows no mode without it.
+    required = True
     binary = shutil.which("bwrap") or ""
-    if not required:
-        namespace_probe = {
-            "ok": False,
-            "skipped": True,
-            "error": "Namespace probe is not required in danger-full-access mode.",
-        }
-        proc_probe = {
-            "ok": False,
-            "skipped": True,
-            "error": "Fresh /proc probe is not required in danger-full-access mode.",
-        }
+    problem = protected_policy.policy_problem(options)
+    if problem:
+        namespace_probe = {"ok": False, "skipped": True, "error": problem}
+        proc_probe = {"ok": False, "skipped": True, "error": "Namespace probe was not run."}
     elif not binary:
         namespace_probe = {"ok": False, "error": "Bubblewrap is not installed."}
         proc_probe = {"ok": False, "skipped": True, "error": "Namespace probe was not run."}
@@ -686,23 +682,25 @@ def sandbox_readiness() -> dict[str, Any]:
 
     # A raw namespace success is not sufficient: the optional Codex probe above
     # must also pass. Keep the fresh /proc check as independent diagnostics.
-    bubblewrap_ready = bool(required and namespace_probe["ok"])
-    ready = bubblewrap_ready if required else True
-    if ready and required and proc_probe["ok"]:
+    bubblewrap_ready = bool(not problem and namespace_probe["ok"])
+    ready = bubblewrap_ready
+    if problem:
+        message = problem
+    elif ready and proc_probe["ok"]:
         message = "Codex sandbox execution probe passed."
-    elif ready and required:
+    elif ready:
         message = (
             "Codex sandbox execution probe passed; the standalone fresh /proc "
             "probe failed. This host may require Codex's no-proc fallback."
         )
-    elif not required:
-        message = "The selected danger-full-access mode does not require Bubblewrap."
     else:
         message = f"Codex sandbox preflight failed: {namespace_probe.get('error')}"
     return {
         "mode": mode,
         "required": required,
         "ready": ready,
+        # The page and the integration show this state instead of offering to approve escalations.
+        "state": "ready" if ready else protected_policy.NEEDS_SUPPORT,
         "bubblewrap_ready": bubblewrap_ready,
         "proc_mount_supported": bool(proc_probe["ok"]),
         "bubblewrap_binary": binary,
@@ -773,16 +771,16 @@ def ensure_runtime_files() -> None:
     if not api_token():
         set_api_token(secrets.token_urlsafe(32))
     SCHEMA_PATH.write_text(json.dumps(FINAL_RESPONSE_SCHEMA, indent=2), encoding="utf-8")
+    try:
+        approval = protected_policy.load_policy()["approval_policy"]
+    except protected_policy.PolicyError:
+        approval = protected_policy.STRICT_POLICY["approval_policy"]
     CODEX_CONFIG_PATH.write_text(
         "\n".join(
             [
                 "check_for_update_on_startup = false",
-                'approval_policy = "never"',
-                'sandbox_mode = "workspace-write"',
-                'web_search = "cached"',
-                "",
-                "[profiles.ha_auto_review]",
-                'approval_policy = "never"',
+                f'approval_policy = "{approval}"',
+                'approvals_reviewer = "user"',
                 'sandbox_mode = "workspace-write"',
                 'web_search = "cached"',
                 "",
@@ -790,6 +788,11 @@ def ensure_runtime_files() -> None:
         ),
         encoding="utf-8",
     )
+    # The house rules from the image replace any copy a task edited.
+    try:
+        protected_policy.install_instructions(CODEX_HOME)
+    except OSError as exc:
+        print(f"Could not install the protected house rules: {exc}", flush=True)
 
 
 def save_task_index() -> None:
@@ -3718,6 +3721,9 @@ def data_mcp_args() -> list[str]:
 def build_codex_args(task_id: str, prompt_file: Path, final_file: Path, session_id: str | None) -> list[str]:
     """Return the `codex exec` command line for the task's latest turn, resuming the session when one is given.
 
+    Kept from upstream: `codex exec` has no live permission requests, and
+    run_task refuses every mode that would choose it before this is called.
+
     It carries the turn's model and reasoning level, the sandbox, the output
     files, the verification tool, and the attached images; the prompt itself
     is read from stdin.
@@ -3803,6 +3809,28 @@ def reader_thread(task_id: str, stream_name: str, handle, session_holder: dict[s
                 pass
 
 
+PROMPT_KINDS = ("command", "command_input", "file_change", "other")
+
+
+def count_new_prompts(counts: Any, records: list[dict[str, Any]], previous: dict[str, Any]) -> dict[str, int]:
+    """Add each newly announced permission request to the conversation's prompt counts by kind.
+
+    The counts belong to the whole conversation (every exchange of the task),
+    so CX-TEST can read how many prompts one scripted session raised.
+    """
+    totals = {kind: 0 for kind in PROMPT_KINDS}
+    if isinstance(counts, dict):
+        for kind in PROMPT_KINDS:
+            value = counts.get(kind)
+            totals[kind] = value if isinstance(value, int) and value >= 0 else 0
+    for item in records:
+        if item["approval_id"] not in previous:
+            kind = item.get("prompt_kind") if item.get("prompt_kind") in PROMPT_KINDS else "other"
+            totals[kind] += 1
+    totals["total"] = sum(totals[kind] for kind in PROMPT_KINDS)
+    return totals
+
+
 def build_app_server_args() -> list[str]:
     """Start the bidirectional CLI transport with approvals routed to the user."""
     return [CODEX_BINARY, "app-server", "--config", 'approval_policy="on-request"',
@@ -3810,8 +3838,12 @@ def build_app_server_args() -> list[str]:
 
 
 def uses_user_approvals(options: dict[str, Any]) -> bool:
-    """Use live permission requests for sandboxed modes; full access needs no escape."""
-    return (options.get("codex_sandbox") or "workspace-write") != "danger-full-access"
+    """Every allowed mode is sandboxed and routes its permission requests to the user.
+
+    A mode the protected policy refuses never reaches Codex: run_task stops it
+    first, so the exec path without live approvals is not used for one.
+    """
+    return not protected_policy.policy_problem(options)
 
 
 def create_approval_session(
@@ -3868,13 +3900,15 @@ def create_approval_session(
         if str(task.get("current_turn_id") or "") != turn_id:
             return
         previous = {item["approval_id"]: item for item in task.get("approvals") or []}
+        counts = count_new_prompts(task.get("approval_counts"), records, previous)
         for item in records:
             older = previous.get(item["approval_id"], {})
             item["turn_id"] = turn_id
             item["requested_at"] = older.get("requested_at") or utc_now()
             if item["status"] != "pending":
                 item["resolved_at"] = older.get("resolved_at") or utc_now()
-        if not update_task(task_id, approvals=records, **({"status": "cancelled"} if task.get("cancellation_requested") else {})):
+        if not update_task(task_id, approvals=records, approval_counts=counts,
+                           **({"status": "cancelled"} if task.get("cancellation_requested") else {})):
             return
         # The task now waits for the user, who may not have the chat open.
         for item in records:
@@ -4233,6 +4267,18 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     """Run one exchange: record the configuration, launch Codex, then check and report what it changed."""
     if task_cancellation_requested(task_id):
         return
+    # A mode the protected policy refuses stops here, before the task is marked running or any
+    # baseline, snapshot or backup work is done for it.
+    policy_problem = protected_policy.policy_problem(read_options())
+    if policy_problem:
+        fail_task_launch(
+            task_id,
+            RuntimeError(policy_problem),
+            session_id=session_id,
+            summary="Codex needs support: the sandbox it must run in is not available, so this task was not started.",
+            detail_prefix="Codex sandbox preflight failed",
+        )
+        return
     task_dir = get_run_dir(task_id)
     task_dir.mkdir(parents=True, exist_ok=True)
     final_file = task_dir / ("final-resume.json" if reply else "final.json")
@@ -4310,6 +4356,8 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
         )
         return
     interactive_approvals = uses_user_approvals(options)
+    # Upstream's `codex exec` path has no live permission requests; the policy check at the top of run_task
+    # refuses every mode that would choose it, so it is reached only by the tests that drive it directly.
     args = build_app_server_args() if interactive_approvals else build_codex_args(task_id, prompt_file, final_file, session_id)
     write_task_log(task_id, "worker", "Starting Codex: " + " ".join(args))
 
@@ -4322,7 +4370,7 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
             task_id,
             RuntimeError(str(readiness["message"])),
             session_id=session_id,
-            summary="The configured Codex sandbox is not available.",
+            summary="Codex needs support: the sandbox it must run in is not available, so this task was not started.",
             detail_prefix="Codex sandbox preflight failed",
         )
         return
@@ -5539,13 +5587,88 @@ def cancel_task(task_id: str) -> Response:
     return jsonify({"ok": True, "task_id": task_id, "status": "cancelled"})
 
 
+ADMIN_CACHE_SECONDS = 60
+# Home Assistant user IDs confirmed as active administrators, with when, on the monotonic clock.
+admin_cache: dict[str, tuple[float, dict[str, str]]] = {}
+admin_cache_lock = threading.Lock()
+
+
+def lookup_ha_users() -> list[dict[str, Any]]:
+    """Return Home Assistant's user list over its WebSocket API (config/auth/list); raise RuntimeError when it fails."""
+    token = ha_token()
+    if not token:
+        raise RuntimeError("no Home Assistant credential")
+    ws = None
+    try:
+        ws = websocket.create_connection(ha_ws_url(), timeout=10, header=[f"Authorization: Bearer {token}"])
+        first = json.loads(ws.recv())
+        if first.get("type") == "auth_required":
+            ws.send(json.dumps({"type": "auth", "access_token": token}))
+            if json.loads(ws.recv()).get("type") != "auth_ok":
+                raise RuntimeError("Home Assistant refused the credential")
+        ws.send(json.dumps({"id": 1, "type": "config/auth/list"}))
+        while True:
+            response = json.loads(ws.recv())
+            if response.get("id") != 1:
+                continue
+            if not response.get("success") or not isinstance(response.get("result"), list):
+                raise RuntimeError("Home Assistant did not return its user list")
+            return response["result"]
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        raise RuntimeError(str(exc)) from None
+    finally:
+        if ws is not None:
+            try:
+                ws.close()
+            except Exception:
+                pass
+
+
+def ingress_admin() -> tuple[dict[str, str] | None, str]:
+    """Return the Home Assistant administrator behind this Ingress request, or None and the reason it is refused.
+
+    Ingress names the signed-in user in X-Remote-User-Id; the worker then asks
+    Home Assistant whether that user is an active administrator. The worker API
+    token names nobody, so it can never answer a permission request. Any lookup
+    failure refuses: nothing is allowed on an identity the worker could not check.
+    """
+    if not is_ingress_request():
+        return None, "Permission requests can only be answered by a Home Assistant administrator on the Codex page."
+    user_id = request.headers.get("X-Remote-User-Id", "").strip()
+    if not user_id:
+        return None, "Home Assistant did not say who is signed in, so this answer was not accepted."
+    now = time.monotonic()
+    with admin_cache_lock:
+        cached = admin_cache.get(user_id)
+        if cached and now - cached[0] < ADMIN_CACHE_SECONDS:
+            return dict(cached[1]), ""
+    try:
+        users = lookup_ha_users()
+    except RuntimeError as exc:
+        print(f"Could not check the Home Assistant user for a permission answer: {exc}", flush=True)
+        return None, "Could not confirm that you are a Home Assistant administrator. Try again."
+    user = next((item for item in users if isinstance(item, dict) and item.get("id") == user_id), None)
+    if (not user or not user.get("is_active") or user.get("system_generated")
+            or "system-admin" not in (user.get("group_ids") or [])):
+        return None, "Only a Home Assistant administrator can answer permission requests."
+    identity = {"user_id": user_id, "name": str(user.get("name") or request.headers.get("X-Remote-User-Display-Name") or "")}
+    with admin_cache_lock:
+        admin_cache[user_id] = (now, identity)
+    return dict(identity), ""
+
+
 @app.post("/tasks/<task_id>/approvals/<approval_id>")
 @require_auth
 def decide_approval(task_id: str, approval_id: str) -> Response:
-    """Answer a native permission request for the current exchange, once only."""
+    """Answer a native permission request for the current exchange, once only, as a Home Assistant administrator."""
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict) or not isinstance(payload.get("decision"), str) or payload["decision"] not in {"allow", "deny"}:
         return jsonify({"ok": False, "error": "decision must be allow or deny"}), 400
+    admin, refusal = ingress_admin()
+    if admin is None:
+        return jsonify({"ok": False, "error": refusal}), 403
     with lock:
         task = tasks.get(task_id)
         if task is None:
@@ -5554,7 +5677,7 @@ def decide_approval(task_id: str, approval_id: str) -> Response:
         if not session or payload.get("turn_id") != task.get("current_turn_id"):
             return jsonify({"ok": False, "error": APPROVAL_GONE}), 409
         try:
-            session.decide(approval_id, payload["decision"])
+            session.decide(approval_id, payload["decision"], decided_by=admin)
         except LookupError:
             return jsonify({"ok": False, "error": APPROVAL_GONE}), 409
         except ValueError as exc:
@@ -5782,7 +5905,16 @@ def delete_queued_message(queue_id: str) -> Response:
 
 
 def main() -> None:
-    """Prepare the worker's files, start its background threads, and serve the API."""
+    """Prepare the worker's files, start its background threads, and serve the API.
+
+    Stops at once, before serving anything, when the options break the
+    protected policy (for example a full-access mode carried over from an
+    older version, or approvals that would never ask).
+    """
+    problem = protected_policy.policy_problem(read_options())
+    if problem:
+        print(f"Codex CLI Worker will not start: {problem}", flush=True)
+        sys.exit(1)
     ensure_runtime_files()
     version = codex_version_status()
     sandbox = sandbox_readiness()

@@ -67,6 +67,8 @@ def main():
         server.fire_ha_event = lambda *args: (True, "")
         server.notify = lambda *args, **kwargs: None
         server.refresh_usage_status_async = lambda **kwargs: None
+        server.lookup_ha_users = lambda: [{"id": "preview-admin", "name": "Preview", "is_active": True,
+                                           "system_generated": False, "group_ids": ["system-admin"]}]
         from browser_permissions import describe, scope
 
         permission_scope = scope({"installation_id": "a" * 32, "url": "http://fixture:8123"})
@@ -381,6 +383,8 @@ def main():
             """Mark every request as if it arrived through Home Assistant Ingress."""
             environ["HTTP_X_INGRESS_PATH"] = "/preview"
             environ["REMOTE_ADDR"] = server.INGRESS_PROXY_IP
+            # Supervisor names the signed-in user; the preview's user is an administrator.
+            environ["HTTP_X_REMOTE_USER_ID"] = "preview-admin"
             return mounted(environ, start_response)
 
         run_simple("127.0.0.1", 9137, ingress, threaded=True, use_reloader=False)

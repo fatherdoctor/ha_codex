@@ -1,6 +1,6 @@
 name: Codex CLI Worker
 description: Run Codex CLI tasks against the Home Assistant config folder.
-version: "0.1.81.1"
+version: "0.1.81.2"
 slug: codex_cli_worker
 url: https://github.com/fatherdoctor/ha_codex
 image: ghcr.io/fatherdoctor/codex-cli-worker
@@ -47,7 +47,7 @@ schema:
   model_pin: str?
   model_reasoning_effort: list(minimal|low|medium|high|xhigh)
   reasoning_summary: list(concise|detailed|none)
-  codex_sandbox: list(workspace-write|danger-full-access|read-only)
+  codex_sandbox: list(workspace-write|read-only)
   task_root: str
   notify_service: str?
   task_timeout_seconds: int

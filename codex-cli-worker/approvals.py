@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import copy
 import json
+import posixpath
+import re
 import threading
 import uuid
 from typing import Any, Callable, TextIO
@@ -18,6 +20,36 @@ APPROVAL_GONE = "This permission request is no longer waiting for an answer."
 DISPLAY_LIMIT = 32000
 REQUEST_LIMIT = 50
 COMMAND_APPROVAL = "item/commandExecution/requestApproval"
+# The app's permission policy, its house rules and Codex's own configuration: a change there is never allowed here.
+PROTECTED_PREFIXES = ("/usr/share/ha_codex", "/data/codex-home/AGENTS.md", "/data/codex-home/config.toml",
+                      "/data/options.json", "/data/worker_api_token")
+
+
+def touches_protected_path(path: str) -> bool:
+    """Return whether a file change path is, or lies inside, a protected policy location."""
+    normalized = posixpath.normpath(posixpath.join("/config", str(path)))
+    return any(normalized == prefix or normalized.startswith(prefix + "/") for prefix in PROTECTED_PREFIXES)
+
+
+# The same places as a command spells them: quotes, backslashes and doubled slashes are removed first, and the
+# names are matched loosely (a glob such as /usr/share/ha_c* still names the image folder). Best effort on the
+# text, like the file-path check: it cannot see a path a command builds at run time.
+PROTECTED_COMMAND_RES = (
+    re.compile(r"/share/+ha_", re.IGNORECASE),
+    re.compile(r"ha_codex/+(policy|agents|house)", re.IGNORECASE),
+    re.compile(r"codex-home/+[^\s/]*[*?\[]", re.IGNORECASE),
+    re.compile(r"codex-home.*(agents\.md|config\.toml)|(agents\.md|config\.toml).*codex-home", re.IGNORECASE | re.DOTALL),
+    re.compile(r"/data/+options\.json|worker_api_token", re.IGNORECASE),
+)
+
+
+def command_names_protected_path(command: str) -> bool:
+    """Return whether a command's text names a protected policy location by any plain spelling."""
+    text = re.sub(r"[\'\"\\]", "", str(command or ""))
+    text = re.sub(r"/{2,}", "/", text)
+    return any(pattern.search(text) for pattern in PROTECTED_COMMAND_RES)
+
+
 FILE_APPROVAL = "item/fileChange/requestApproval"
 
 
@@ -156,6 +188,9 @@ class AppServerSession:
         record: dict[str, Any] = {
             "approval_id": uuid.uuid4().hex, "status": "pending", "reason": reason,
             "kind": "command" if method == COMMAND_APPROVAL else "file_change",
+            # The counter's kind: a new command, input to a running one, another command request, or a file change.
+            "prompt_kind": ("file_change" if method != COMMAND_APPROVAL else "command" if request_kind == "command"
+                            else "command_input" if request_kind == "writeStdin" else "other"),
             "can_allow": True, "command": "", "cwd": "", "changes": [],
         }
         if method == COMMAND_APPROVAL:
@@ -179,9 +214,18 @@ class AppServerSession:
                 change.get("path") and change.get("diff") and change.get("kind") in {"add", "update", "delete"}
                 for change in record["changes"])
             clipped |= any(change.get("truncated") or change.get("redacted") for change in record["changes"])
-        if clipped:
+        if method == COMMAND_APPROVAL:
+            # A command allowed once runs outside the sandbox, so it is held to the same protected places.
+            protected = command_names_protected_path(params.get("command") or "")
+        else:
+            protected = any(
+                touches_protected_path(change.get("path") or "") or touches_protected_path(change.get("move_path") or "")
+                for change in record["changes"])
+        if clipped or protected:
             record["can_allow"] = False
-        if request_kind == "writeStdin":
+        if protected:
+            record["note"] = "This request touches the app's permission policy or settings, which Codex may not edit. Deny it."
+        elif request_kind == "writeStdin":
             record["note"] = "Input to a running command cannot be allowed here. Deny it and ask for the whole action as one command."
         elif request_kind not in ("", "command"):
             record["note"] = "This kind of request cannot be allowed here. Deny it and ask for a single command or file change."
@@ -196,7 +240,7 @@ class AppServerSession:
         # Persist the reviewable request before it can receive a decision.
         self.on_approvals(copy.deepcopy(self._records))
 
-    def decide(self, approval_id: str, decision: str) -> None:
+    def decide(self, approval_id: str, decision: str, decided_by: dict[str, str] | None = None) -> None:
         """Apply exactly one allow/deny response to a still-live request.
 
         Persistence precedes the write to Codex. If either fails, the connection
@@ -214,6 +258,8 @@ class AppServerSession:
             request_id = self._pending.pop(approval_id)
             self._pending_files.pop(approval_id, None)
             record["status"] = "allowed" if decision == "allow" else "denied"
+            if decided_by:
+                record["decided_by"] = dict(decided_by)
             try:
                 self.on_approvals(copy.deepcopy(self._records))
                 self._write({"id": request_id, "result": {"decision": "accept" if decision == "allow" else "decline"}})

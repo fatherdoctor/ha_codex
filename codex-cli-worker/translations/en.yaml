@@ -13,7 +13,7 @@ configuration:
     description: How much of its thinking Codex reports while it works. concise shows short headlines in the chat activity list, detailed asks for fuller summaries, and none hides reasoning from the list. Commands, file edits, searches, and progress notes are shown regardless.
   codex_sandbox:
     name: Codex sandbox
-    description: danger-full-access is my recommended mode for working freely in Home Assistant, with backups, checks, and verification still available. workspace-write is the default and allows edits in /config; read-only allows inspection. In both sandboxed modes, commands or file changes needing extra access ask for Allow once or Deny in the chat.
+    description: workspace-write is the default and allows edits in /config; read-only allows inspection. Commands or file changes needing extra access ask a Home Assistant administrator for Allow once or Deny in the chat. There is no full-access mode in this fork.
   task_root:
     name: Task root
     description: Folder where prompts, logs, backups, status files, and change lists are saved. Keep it inside /config so Codex can save a copy of each file before changing it.
