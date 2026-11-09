@@ -388,7 +388,7 @@
      "input": "*** Begin Patch\n*** Update File: automations.yaml\n@@\n+    - action: cover.open_cover\n+      target:\n+        entity_id: cover.living_room_blinds\n*** End Patch\n"
     }
    },
-   "expect": "allow"
+   "expect": "deny"
   },
   {
    "name": "patch templated action",
@@ -556,6 +556,78 @@
       "-lc",
       "cat /proc/1/environ; apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: notes.md\n@@\n+hello\n*** End Patch\nEOF"
      ]
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "patch scene unlocks",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "apply_patch",
+    "tool_input": {
+     "input": "*** Begin Patch\n*** Update File: scenes.yaml\n@@\n+- name: Leaving\n+  entities:\n+    lock.front_door:\n+      state: unlocked\n*** End Patch\n"
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "patch command_line sensor",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "apply_patch",
+    "tool_input": {
+     "input": "*** Begin Patch\n*** Update File: configuration.yaml\n@@\n+sensor:\n+  - platform: command_line\n+    command: cat /config/secrets.yaml\n*** End Patch\n"
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "patch shell_command definition",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "apply_patch",
+    "tool_input": {
+     "input": "*** Begin Patch\n*** Update File: packages/tools.yaml\n@@\n+shell_command:\n+  ping: ping -c1 example.com\n*** End Patch\n"
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "patch rest sensor",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "apply_patch",
+    "tool_input": {
+     "input": "*** Begin Patch\n*** Update File: configuration.yaml\n@@\n+rest:\n+  - resource: http://supervisor/info\n*** End Patch\n"
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "patch cover device action",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "apply_patch",
+    "tool_input": {
+     "input": "*** Begin Patch\n*** Update File: automations.yaml\n@@\n+    - device_id: abc123\n+      domain: cover\n+      entity_id: 0123abcd\n+      type: open\n*** End Patch\n"
+    }
+   },
+   "expect": "deny"
+  },
+  {
+   "name": "patch message script",
+   "remote_control_on": false,
+   "input": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "apply_patch",
+    "tool_input": {
+     "input": "*** Begin Patch\n*** Update File: automations.yaml\n@@\n+    - action: script.notify_family\n*** End Patch\n"
     }
    },
    "expect": "deny"

@@ -1,12 +1,16 @@
 {
-  "about": "Home Assistant actions that Codex may never add or run without a person: locks, alarms, garage doors, cameras and messages to people. Shared by the remote-control command check and the category denials. Edit only in a release.",
-  "refused_domains": ["lock", "alarm_control_panel", "alarmo", "camera", "notify", "tts"],
-  "reaches_anything": ["shell_command", "rest_command", "python_script", "pyscript", "hassio"],
+  "about": "Home Assistant actions that Codex may never add or run without a person: locks, alarms, covers (garage doors, gates, blinds), cameras and messages to people, plus the commands that can reach anything. One list for the remote-control command check, the config watch, the chat page's category denials and its end-of-exchange scan. Edit only in a release.",
+  "refused_domains": ["alarm_control_panel", "alarmo", "camera", "cover", "lock", "notify", "tts"],
+  "reaches_anything": ["hassio", "pyscript", "python_script", "rest_command", "shell_command"],
   "garage_cover_words": ["garage"],
+  "message_script_words": ["alert", "announce", "call", "message", "notification", "notify", "sms", "text"],
+  "runs_on_load_platforms": ["command_line", "rest", "scrape"],
+  "runs_on_load_keys": ["command_line", "rest", "rest_command", "scrape", "shell_command"],
   "device_actions": {
-    "lock": ["lock", "unlock", "open"],
-    "alarm_control_panel": ["arm_away", "arm_home", "arm_night", "arm_vacation", "arm_custom_bypass", "disarm", "trigger"],
-    "camera": ["turn_on", "turn_off"],
+    "alarm_control_panel": ["arm_away", "arm_custom_bypass", "arm_home", "arm_night", "arm_vacation", "disarm", "trigger"],
+    "camera": ["turn_off", "turn_on"],
+    "cover": ["close", "close_tilt", "open", "open_tilt", "set_position", "set_tilt_position", "stop", "stop_tilt"],
+    "lock": ["lock", "open", "unlock"],
     "mobile_app": ["notify"]
   }
 }

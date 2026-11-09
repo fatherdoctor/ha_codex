@@ -23,6 +23,7 @@ set to the chosen name. A name the kernel or ``hostname`` refuses falls back to
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import json
 import os
@@ -49,11 +50,11 @@ MAX_NAME_BYTES = 63
 GATE_MARKER = Path("/usr/share/ha_codex/remote-control-gate.json")
 GATE_MISSING = (
     "Remote control cannot be turned on in this version. Commands from the ChatGPT app skip this app's "
-    "approval buttons, and the check that refuses locks, alarms, garage doors, cameras and messages to people "
+    "approval buttons, and the check that refuses locks, alarms, covers, cameras and messages to people "
     "for those commands is not installed yet. The chat page works as usual."
 )
 GATE_BROKEN = (
-    "Remote control cannot be turned on: the check that refuses locks, alarms, garage doors, cameras and "
+    "Remote control cannot be turned on: the check that refuses locks, alarms, covers, cameras and "
     "messages to people for commands from the ChatGPT app is installed but does not hold: "
 )
 # Seconds to wait before restarting a process that exited on its own, doubling up to the cap.
@@ -226,6 +227,29 @@ WATCH_MAX_BYTES = 2 * 1024 * 1024
 WATCH_INTERVAL = 30.0
 WATCH_SHOWN = 20
 SCRIPT_KEY_RE = re.compile(r"^([a-z0-9_]+)\s*:\s*(?:#.*)?$")
+BLOCK_CHANGED = "a change to a block that holds a refused action"
+
+
+def refused_blocks(text: str, rules: dict[str, Any], scripts: set[str]) -> dict[str, tuple[int, int, str]]:
+    """Return {hash: (first line number, last line number, first line)} for each top-level block of this YAML text that holds a refused line.
+
+    A block starts at a line that begins in the first column (``- id: ...`` in
+    automations.yaml, ``goodnight:`` in scripts.yaml, ``automation:`` in a
+    package). Changing a trigger or a condition of an automation that already
+    holds a refused action leaves the action line as it was, so the line
+    findings see nothing new; the block's hash changes.
+    """
+    out: dict[str, tuple[int, int, str]] = {}
+    block: list[str] = []
+    start = 1
+    for number, line in enumerate(text.splitlines() + ["__end__"], start=1):
+        if line[:1] and not line[:1].isspace() and not line.startswith("#") and block:
+            body = "\n".join(item.rstrip() for item in block).strip()
+            if body and gate_rules.find_refused(body, rules, scripts):
+                out[hashlib.sha256(body.encode("utf-8")).hexdigest()] = (start, number - 1, block[0])
+            block, start = [], number
+        block.append(line)
+    return out
 
 
 class ConfigWatch:
@@ -287,6 +311,10 @@ class ConfigWatch:
 
     def scan(self) -> dict[str, list[gate_rules.Finding]]:
         """Return the refused actions in every YAML file, by path relative to the config folder."""
+        return self._scan()[0]
+
+    def _scan(self) -> tuple[dict[str, list[gate_rules.Finding]], dict[str, dict[str, tuple[int, int, str]]]]:
+        """Return the refused lines and the refused blocks (see ``refused_blocks``) of every YAML file."""
         rules = self.rules()
         texts: dict[str, str] = {}
         for path in self.files():
@@ -295,7 +323,9 @@ class ConfigWatch:
             except OSError:
                 continue
         scripts = self.refused_scripts(texts, rules)
-        return {rel: found for rel, text in texts.items() if (found := gate_rules.find_refused(text, rules, scripts))}
+        lines = {rel: found for rel, text in texts.items() if (found := gate_rules.find_refused(text, rules, scripts))}
+        blocks = {rel: found for rel, text in texts.items() if (found := refused_blocks(text, rules, scripts))}
+        return lines, blocks
 
     def has_baseline(self) -> bool:
         """Return whether a baseline is saved, that is, remote control was on and its changes are not reviewed."""
@@ -303,10 +333,12 @@ class ConfigWatch:
 
     def take_baseline(self) -> None:
         """Save what is in the config folder now as the baseline later scans compare with."""
-        data = {rel: [list(f.key()) for f in found] for rel, found in self.scan().items()}
+        lines, blocks = self._scan()
+        data = {rel: [list(f.key()) for f in found] for rel, found in lines.items()}
+        hashes = {rel: sorted(found) for rel, found in blocks.items()}
         self.baseline_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.baseline_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"taken": time.time(), "files": data}), encoding="utf-8")
+        tmp.write_text(json.dumps({"taken": time.time(), "files": data, "blocks": hashes}), encoding="utf-8")
         os.replace(tmp, self.baseline_path)
 
     def clear(self) -> None:
@@ -320,15 +352,21 @@ class ConfigWatch:
         """Return the refused actions that are in the config folder now and were not in the baseline.
 
         Findings are matched by reason and line text, so an action that only
-        moved is not new; a second copy of an existing line is. An unreadable
-        baseline counts as empty, so everything refused is reported.
+        moved is not new; a second copy of an existing line is. A block (an
+        automation, a script) that holds a refused line and changed anywhere,
+        a trigger or a condition included, is reported once by its first line
+        when none of its own lines is new. An unreadable baseline counts as
+        empty, so everything refused is reported.
         """
         try:
-            base = json.loads(self.baseline_path.read_text(encoding="utf-8")).get("files") or {}
+            saved = json.loads(self.baseline_path.read_text(encoding="utf-8"))
+            base = saved.get("files") or {}
+            base_blocks = saved.get("blocks") or {}
         except (OSError, ValueError, AttributeError):
-            base = {}
+            base, base_blocks = {}, {}
+        lines, blocks = self._scan()
         out: list[dict[str, Any]] = []
-        for rel, found in sorted(self.scan().items()):
+        for rel, found in sorted(lines.items()):
             left: dict[tuple[str, str], int] = {}
             for reason, text in base.get(rel, []):
                 left[(reason, text)] = left.get((reason, text), 0) + 1
@@ -338,6 +376,13 @@ class ConfigWatch:
                     continue
                 out.append({"file": rel, "line": finding.line, "reason": finding.reason,
                             "text": redact(finding.text.strip())[:200]})
+        new_lines = [(item["file"], item["line"]) for item in out]
+        for rel, found in sorted(blocks.items()):
+            known = set(base_blocks.get(rel, []))
+            for digest, (first, last, text) in sorted(found.items(), key=lambda item: item[1][0]):
+                if digest in known or any(f == rel and first <= n <= last for f, n in new_lines):
+                    continue
+                out.append({"file": rel, "line": first, "reason": BLOCK_CHANGED, "text": redact(text.strip())[:200]})
         return out
 
 

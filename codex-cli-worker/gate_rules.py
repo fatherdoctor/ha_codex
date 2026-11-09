@@ -34,20 +34,24 @@ IMAGE_DIR = Path("/usr/share/ha_codex")
 SOURCE_DIR = Path(__file__).resolve().parent / "policy"
 
 STRICT_RULES: dict[str, Any] = {
-    "refused_domains": ["lock", "alarm_control_panel", "alarmo", "camera", "notify", "tts"],
-    "reaches_anything": ["shell_command", "rest_command", "python_script", "pyscript", "hassio"],
-    "garage_cover_words": ["garage"],
+    "refused_domains": ["alarm_control_panel", "alarmo", "camera", "cover", "lock", "notify", "tts"],
+    "reaches_anything": ["hassio", "pyscript", "python_script", "rest_command", "shell_command"],
+    "message_script_words": ["alert", "announce", "call", "message", "notification", "notify", "sms", "text"],
+    "runs_on_load_platforms": ["command_line", "rest", "scrape"],
+    "runs_on_load_keys": ["command_line", "rest", "rest_command", "scrape", "shell_command"],
     "device_actions": {
-        "lock": ["lock", "unlock", "open"],
-        "alarm_control_panel": ["arm_away", "arm_home", "arm_night", "arm_vacation", "arm_custom_bypass",
+        "alarm_control_panel": ["arm_away", "arm_custom_bypass", "arm_home", "arm_night", "arm_vacation",
                                 "disarm", "trigger"],
-        "camera": ["turn_on", "turn_off"],
+        "camera": ["turn_off", "turn_on"],
+        "cover": ["close", "close_tilt", "open", "open_tilt", "set_position", "set_tilt_position", "stop",
+                  "stop_tilt"],
+        "lock": ["lock", "open", "unlock"],
         "mobile_app": ["notify"],
     },
 }
+LIST_KEYS = ("refused_domains", "reaches_anything", "message_script_words",
+             "runs_on_load_platforms", "runs_on_load_keys")
 
-# Lines after a cover action that are searched for a garage door entity.
-COVER_WINDOW = 10
 # Lines around a device action's `domain:` that are searched for its `type:`.
 DEVICE_WINDOW = 4
 
@@ -56,6 +60,11 @@ TEMPLATE_ACTION_RE = re.compile(r"""^\s*-?\s*(?:(?:service|action)\s*:.*(?:\{\{|
 TEMPLATE_TARGET_RE = re.compile(r"""^\s*-?\s*(?:entity_id|device_id|area_id)\s*:.*(?:\{\{|\{%)""")
 DEVICE_DOMAIN_RE = re.compile(r"""^\s*-?\s*domain\s*:\s*["']?([a-z0-9_]+)["']?\s*$""")
 DEVICE_TYPE_RE = re.compile(r"""^\s*-?\s*type\s*:\s*["']?([a-z0-9_]+)["']?\s*$""")
+# A scene's (or scene.apply's) entity state: `lock.front_door:` as a key under `entities:`.
+STATE_KEY_RE = re.compile(r"""^\s*-?\s*["']?([a-z0-9_]+)\.[a-z0-9_]+["']?\s*:""")
+PLATFORM_RE = re.compile(r"""^\s*-?\s*platform\s*:\s*["']?([a-z0-9_]+)["']?\s*(?:#.*)?$""")
+# A definition key whose value is a block or an include: `shell_command:`, `  rest: !include rest.yaml`.
+DEFINITION_KEY_RE = re.compile(r"""^\s*-?\s*([a-z0-9_]+)\s*:\s*(?:!include\S*\s+\S+\s*)?(?:#.*)?$""")
 SCRIPT_REF_RE = re.compile(r"""\bscript\.([a-z0-9_]+)\b""")
 # The script domain's own services are not scripts.
 SCRIPT_SERVICES = {"turn_on", "turn_off", "toggle", "reload"}
@@ -117,7 +126,7 @@ def load_rules(path: Path | None = None) -> dict[str, Any]:
         return rules
     if not isinstance(data, dict):
         return rules
-    for key in ("refused_domains", "reaches_anything", "garage_cover_words"):
+    for key in LIST_KEYS:
         extra = data.get(key)
         if isinstance(extra, list):
             rules[key] = sorted(set(rules[key]) | {str(item) for item in extra})
@@ -130,24 +139,35 @@ def load_rules(path: Path | None = None) -> dict[str, Any]:
     return rules
 
 
-def _garage_re(rules: dict[str, Any]) -> re.Pattern[str]:
-    words = "|".join(re.escape(word) for word in rules["garage_cover_words"]) or "garage"
-    return re.compile(r"\bcover\.[a-z0-9_]*(?:" + words + r")[a-z0-9_]*")
+def _message_script_re(rules: dict[str, Any]) -> re.Pattern[str]:
+    words = "|".join(re.escape(word) for word in rules["message_script_words"]) or "notify"
+    return re.compile(r"^[a-z0-9_]*(?:" + words + r")[a-z0-9_]*$")
 
 
 def find_refused(text: str, rules: dict[str, Any], refused_scripts: frozenset[str] | set[str] = frozenset()) -> list[Finding]:
-    """Return every action in this YAML text that the check refuses.
+    """Return every line of this YAML text that the check refuses.
 
-    Refused: an action or service call on a refused domain or on a domain that
-    can reach anything (shell, REST, Python, add-on input); a cover action
-    followed by a garage door entity; a device action on a refused domain; a
-    call to a script in ``refused_scripts``; and any templated action, entity,
-    device or area in an action.
+    The scan reads lines, not parsed YAML. Refused:
+
+    - an action or service call on a refused domain (locks, alarms, every
+      cover, cameras, notifications, spoken announcements) or on a domain
+      that can reach anything (shell, REST, Python, add-on input);
+    - a call to a script whose name says it sends a message, or to a script in
+      ``refused_scripts`` (one whose own steps are refused);
+    - a state for an entity on a refused domain written as a key, which is how
+      a scene (or ``scene.apply``) sets a lock, an alarm or a cover;
+    - a ``command_line``, ``rest`` or ``scrape`` platform, and a
+      ``shell_command``, ``rest_command``, ``command_line``, ``rest`` or
+      ``scrape`` definition, which run on their own once loaded;
+    - a device action on a refused domain;
+    - any templated action, entity, device or area.
     """
     lines = text.splitlines()
     refused = set(rules["refused_domains"])
     anything = set(rules["reaches_anything"])
-    garage = _garage_re(rules)
+    platforms = set(rules["runs_on_load_platforms"])
+    definitions = set(rules["runs_on_load_keys"])
+    messages = _message_script_re(rules)
     devices = rules["device_actions"]
     findings: list[Finding] = []
     for index, line in enumerate(lines):
@@ -159,10 +179,20 @@ def find_refused(text: str, rules: dict[str, Any], refused_scripts: frozenset[st
                 findings.append(Finding(number, f"an action on {domain}", line))
             elif domain in anything:
                 findings.append(Finding(number, f"an action on {domain}, which can reach anything", line))
-            elif domain == "cover" and any(garage.search(after) for after in lines[index:index + COVER_WINDOW]):
-                findings.append(Finding(number, "a cover action on a garage door", line))
+            elif domain == "script" and service not in SCRIPT_SERVICES and messages.match(service):
+                findings.append(Finding(number, f"a call to script.{service}, whose name says it sends a message", line))
             elif domain == "script" and service not in SCRIPT_SERVICES and service in refused_scripts:
                 findings.append(Finding(number, f"a call to script.{service}, which itself acts on a refused domain", line))
+        else:
+            state = STATE_KEY_RE.match(line)
+            if state and state.group(1) in refused:
+                findings.append(Finding(number, f"a state for {state.group(1)}, which a scene can set", line))
+            platform = PLATFORM_RE.match(line)
+            if platform and platform.group(1) in platforms:
+                findings.append(Finding(number, f"a {platform.group(1)} platform, which runs on its own once loaded", line))
+            definition = DEFINITION_KEY_RE.match(line)
+            if definition and definition.group(1) in definitions:
+                findings.append(Finding(number, f"a {definition.group(1)} definition, which runs on its own once loaded", line))
         if TEMPLATE_ACTION_RE.match(line):
             findings.append(Finding(number, "a templated action", line))
         elif TEMPLATE_TARGET_RE.match(line):
@@ -175,9 +205,14 @@ def find_refused(text: str, rules: dict[str, Any], refused_scripts: frozenset[st
                 if kind and kind.group(1) in allowed:
                     findings.append(Finding(number, f"a device action on {device.group(1)} ({kind.group(1)})", line))
                     break
-        if refused_scripts and not match:
+        if not match:
             for ref in SCRIPT_REF_RE.findall(line):
-                if ref in refused_scripts and ref not in SCRIPT_SERVICES and re.match(r"^\s*-?\s*(?:entity_id\s*:\s*)?[\"']?script\.", line):
+                if ref in SCRIPT_SERVICES or not re.match(r"^\s*-?\s*(?:entity_id\s*:\s*)?[\"']?script\.", line):
+                    continue
+                if messages.match(ref):
+                    findings.append(Finding(number, f"a call to script.{ref}, whose name says it sends a message", line))
+                    break
+                if ref in refused_scripts:
                     findings.append(Finding(number, f"a call to script.{ref}, which itself acts on a refused domain", line))
                     break
     return findings
@@ -262,8 +297,8 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
                     if found:
                         first = found[0]
                         return (f"This edit to {path} adds {first.reason} ({first.text.strip()}). "
-                                "Locks, alarms, garage doors, cameras, messages to people and templated actions "
-                                "are added by a person, not by Codex.")
+                                "Locks, alarms, covers, cameras, messages to people, shell and REST commands "
+                                "and templated actions are added by a person, not by Codex.")
             # The rest of a command that carries a patch (a heredoc) is still a command.
             text = PATCH_BLOCK_RE.sub(" ", text)
         for pattern, why in PROTECTED_COMMAND_RES:

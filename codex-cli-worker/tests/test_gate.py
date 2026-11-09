@@ -107,7 +107,7 @@ class RulesTests(unittest.TestCase):
 
     def test_file_is_never_looser_than_the_built_in_list(self) -> None:
         data = json.loads((ROOT / "policy" / "refused-domains.json").read_text(encoding="utf-8"))
-        for key in ("refused_domains", "reaches_anything", "garage_cover_words"):
+        for key in gate_rules.LIST_KEYS:
             self.assertLessEqual(set(gate_rules.STRICT_RULES[key]), set(data[key]), key)
         for domain, kinds in gate_rules.STRICT_RULES["device_actions"].items():
             self.assertLessEqual(set(kinds), set(data["device_actions"][domain]), domain)
@@ -133,6 +133,27 @@ class RulesTests(unittest.TestCase):
         self.assertEqual(gate_rules.find_refused(text, RULES), [])
         found = gate_rules.find_refused(text, RULES, {"leave_home"})
         self.assertEqual([f.line for f in found], [1, 4])
+
+    def test_scenes_platforms_definitions_and_device_covers(self) -> None:
+        cases = {
+            "  entities:\n    lock.front_door:\n      state: unlocked\n": "a state for lock, which a scene can set",
+            "  - platform: command_line\n    command: id\n": "a command_line platform, which runs on its own once loaded",
+            "sensor:\n  - platform: scrape\n": "a scrape platform, which runs on its own once loaded",
+            "rest_command:\n  x:\n    url: http://example.com\n": "a rest_command definition, which runs on its own once loaded",
+            "  shell_command: !include shell.yaml\n": "a shell_command definition, which runs on its own once loaded",
+            "    - domain: cover\n      type: open\n": "a device action on cover (open)",
+            "    - action: cover.open_cover\n": "an action on cover",
+            "    - action: script.announce_dinner\n": "a call to script.announce_dinner, whose name says it sends a message",
+        }
+        for text, reason in cases.items():
+            with self.subTest(text):
+                self.assertEqual([f.reason for f in gate_rules.find_refused(text, RULES)], [reason])
+
+    def test_ordinary_lines_are_not_refused(self) -> None:
+        text = ("- alias: lights\n  triggers:\n    - platform: state\n      entity_id: lock.front_door\n"
+                "  actions:\n    - action: light.turn_on\n    - action: scene.turn_on\n      target:\n"
+                "        entity_id: scene.evening\n    - action: script.lights_off\n")
+        self.assertEqual(gate_rules.find_refused(text, RULES), [])
 
     def test_parse_patch_keeps_added_lines_per_file(self) -> None:
         patch = ("*** Begin Patch\n*** Update File: a.yaml\n@@\n-old\n+new\n*** Add File: b.yaml\n+x\n+y\n"
@@ -168,11 +189,25 @@ class ConfigWatchTests(unittest.TestCase):
     def test_added_action_is_found_and_a_move_is_not(self) -> None:
         self.watch.take_baseline()
         (self.config / "automations.yaml").write_text(
-            "- alias: moved\n  actions:\n    - action: lock.lock\n- actions:\n    - action: notify.phone\n",
+            "- alias: added\n  actions:\n    - action: notify.phone\n- actions:\n    - action: lock.lock\n",
             encoding="utf-8")
         found = self.watch.new_findings()
         self.assertEqual([(f["file"], f["line"], f["reason"]) for f in found],
-                         [("automations.yaml", 5, "an action on notify")])
+                         [("automations.yaml", 3, "an action on notify")])
+
+    def test_trigger_edit_on_a_block_that_locks_is_found(self) -> None:
+        self.watch.take_baseline()
+        (self.config / "automations.yaml").write_text(
+            "- triggers:\n    - trigger: time\n      at: '03:00'\n  actions:\n    - action: lock.lock\n",
+            encoding="utf-8")
+        found = self.watch.new_findings()
+        self.assertEqual([(f["line"], f["reason"]) for f in found], [(1, rc.BLOCK_CHANGED)])
+
+    def test_a_new_line_in_a_block_is_reported_once(self) -> None:
+        self.watch.take_baseline()
+        (self.config / "automations.yaml").write_text(
+            "- actions:\n    - action: lock.lock\n    - action: lock.unlock\n", encoding="utf-8")
+        self.assertEqual([f["reason"] for f in self.watch.new_findings()], ["an action on lock"])
 
     def test_written_by_a_shell_command_into_a_package(self) -> None:
         self.watch.take_baseline()
