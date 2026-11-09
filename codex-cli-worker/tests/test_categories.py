@@ -322,6 +322,101 @@ class PlantedEditTests(ConfigFolderTest):
     def test_a_moved_line_is_not_new(self) -> None:
         self.assertEqual(categories.new_refused_lines(self.earlier, "# moved\n" + self.earlier), [])
 
+    def test_a_new_trigger_on_a_lock_automation_is_undone(self) -> None:
+        """The unlock line stays as it was; its automation's block changed, so the edit is refused (F12)."""
+        earlier = ("- id: '1'\n  triggers:\n    - trigger: state\n      entity_id: person.owner\n      to: home\n"
+                   "  actions:\n    - action: lock.unlock\n")
+        before = self.before("automations.yaml", earlier)
+        path = self.write("automations.yaml", earlier.replace(
+            "    - trigger: state\n      entity_id: person.owner\n      to: home\n", "    - trigger: time\n      at: '03:00:00'\n"))
+        results = server.refuse_planted_edits(self.run_dir, {"changed": ["automations.yaml"]}, before)
+        self.assertEqual([(r["undone"], [(f["line"], f["reason"]) for f in r["findings"]]) for r in results],
+                         [("restored", [(1, gate_rules.BLOCK_CHANGED)])])
+        self.assertEqual(path.read_text(encoding="utf-8"), earlier)
+
+    def test_an_unchanged_lock_automation_beside_a_light_edit_passes(self) -> None:
+        before = self.before("automations.yaml", self.earlier)
+        self.write("automations.yaml", "- id: '0'\n  actions:\n    - action: light.turn_on\n" + self.earlier)
+        self.assertEqual(server.refuse_planted_edits(self.run_dir, {"changed": ["automations.yaml"]}, before), [])
+
+    def test_a_new_refused_line_is_reported_once(self) -> None:
+        found = categories.new_refused_lines("", self.earlier)
+        self.assertEqual(categories.new_refused_blocks("", self.earlier, found=found), [])
+        self.assertEqual(len(categories.new_refused_blocks("", self.earlier)), 1)
+
+
+class YamlCopyTests(PlantedEditTests):
+    """The YAML files are saved before every exchange, so a checked earlier copy always exists (F13)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        patcher = patch.object(server, "get_run_dir", return_value=self.run_dir)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def manifest(self, *rels: str) -> dict:
+        return {rel: {"sha256": hashlib.sha256((self.config / rel).read_bytes()).hexdigest()} for rel in rels}
+
+    def test_a_light_automation_in_a_house_with_a_lock_automation_passes(self) -> None:
+        self.write("automations.yaml", self.earlier)
+        self.write(".storage/core.entity_registry", "{}")
+        self.write("secrets.yaml", "key: value\n")
+        before = self.manifest("automations.yaml", ".storage/core.entity_registry", "secrets.yaml")
+        self.assertEqual(server.copy_config_yaml("task", before), 1)
+        self.write("automations.yaml", self.earlier + "- id: '2'\n  actions:\n    - action: light.turn_on\n")
+        self.assertEqual(server.refuse_planted_edits(self.run_dir, {"changed": ["automations.yaml"]}, before), [])
+        self.assertFalse(self.store.exists())
+
+    def test_a_planted_edit_is_restored_from_the_copy(self) -> None:
+        path = self.write("automations.yaml", self.earlier)
+        before = self.manifest("automations.yaml")
+        server.copy_config_yaml("task", before)
+        self.write("automations.yaml", self.earlier + "- id: '2'\n  actions:\n    - action: lock.unlock\n")
+        results = server.refuse_planted_edits(self.run_dir, {"changed": ["automations.yaml"]}, before)
+        self.assertEqual(results[0]["undone"], "restored")
+        self.assertEqual(path.read_text(encoding="utf-8"), self.earlier)
+        self.assertFalse(self.store.exists())
+
+    def test_a_file_that_changed_after_the_manifest_is_not_copied(self) -> None:
+        self.write("automations.yaml", self.earlier)
+        before = self.manifest("automations.yaml")
+        self.write("automations.yaml", self.earlier + "# later\n")
+        self.assertEqual(server.copy_config_yaml("task", before), 0)
+
+
+class ReviewRefusedEditsTests(PlantedEditTests):
+    """An administrator can say that standing refused lines are a person's own, which allows reloads again."""
+
+    def stand(self) -> None:
+        before = self.before("automations.yaml", self.earlier, copy=False)
+        self.write("automations.yaml", self.earlier + "- id: '2'\n  actions:\n    - action: lock.unlock\n")
+        results = server.refuse_planted_edits(self.run_dir, {"changed": ["automations.yaml"]}, before)
+        self.assertIn("Mark reviewed", server.refused_edits_details(results))
+        self.assertEqual(categories.refused_categories("command", command=f"{HA}/automation/reload"), ["planted"])
+
+    def test_mark_reviewed_allows_reloads(self) -> None:
+        self.stand()
+        self.assertEqual(len(categories.mark_refused_edits_reviewed()), 2)
+        self.assertEqual(categories.refused_categories("command", command=f"{HA}/automation/reload"), [])
+
+    def test_only_an_ingress_administrator_can_mark_them_reviewed(self) -> None:
+        self.stand()
+        client = server.app.test_client()
+        with (patch.object(server, "api_token", return_value="worker-secret"),
+              patch.object(server, "lookup_ha_users", return_value=test_approvals.HA_USERS),
+              patch.object(server, "admin_cache", {})):
+            listed = client.get("/refused-edits", headers={"Authorization": "Bearer worker-secret"})
+            self.assertEqual(len(listed.get_json()["edits"]), 2)
+            token_only = client.post("/refused-edits/review", json={}, headers={"Authorization": "Bearer worker-secret"})
+            self.assertEqual(token_only.status_code, 403)
+            guest = client.post("/refused-edits/review", json={}, **test_approvals.ingress_as("u" * 32))
+            self.assertEqual(guest.status_code, 403)
+            self.assertIn("administrator", guest.get_json()["error"])
+            self.assertEqual(len(categories.standing_refused_edits()), 2)
+            owner = client.post("/refused-edits/review", json={}, **test_approvals.ingress_as())
+        self.assertEqual((owner.status_code, owner.get_json()["reviewed"]), (200, 2))
+        self.assertEqual(categories.standing_refused_edits(), [])
+
 
 # The inherited ApprovalTests cases already run in test_approvals; run only the new ones here.
 for _name in [name for name in dir(test_approvals.ApprovalTests) if name.startswith("test_")]:

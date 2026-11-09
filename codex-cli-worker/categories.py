@@ -270,6 +270,25 @@ def new_refused_lines(earlier: str, after: str, scripts: set[str] | frozenset[st
     return out
 
 
+def new_refused_blocks(earlier: str, after: str, scripts: set[str] | frozenset[str] = frozenset(),
+                       found: list[gate_rules.Finding] | None = None) -> list[gate_rules.Finding]:
+    """Return one finding for each block of ``after`` that holds a refused line and is not in ``earlier`` as it was.
+
+    A block whose refused line is already among ``found`` is left out, so a new
+    refused line is reported once. What is left is a block whose refused line
+    stayed while something around it changed, such as an automation that
+    already unlocks a door getting a new trigger.
+    """
+    known = gate_rules.refused_blocks(earlier, _RULES, scripts)
+    lines = {finding.line for finding in found or []}
+    out: list[gate_rules.Finding] = []
+    for digest, (start, end, first) in gate_rules.refused_blocks(after, _RULES, scripts).items():
+        if digest in known or any(start <= line <= end for line in lines):
+            continue
+        out.append(gate_rules.Finding(start, gate_rules.BLOCK_CHANGED, first, "block"))
+    return sorted(out, key=lambda finding: finding.line)
+
+
 def _read_refused_edits() -> list[dict[str, Any]]:
     try:
         data = json.loads(REFUSED_EDITS_PATH.read_text(encoding="utf-8"))
@@ -296,6 +315,18 @@ def record_refused_edits(items: list[dict[str, Any]]) -> None:
     known = {(item.get("file"), item.get("text")) for item in _read_refused_edits()}
     merged = _read_refused_edits() + [item for item in items if (item.get("file"), item.get("text")) not in known]
     _write_refused_edits(merged)
+
+
+def mark_refused_edits_reviewed() -> list[dict[str, Any]]:
+    """Forget every remembered refused line, as an administrator who has checked them asked; return what was forgotten.
+
+    The lines stay in their files: reviewing them says a person keeps them, so
+    reloads and restarts are allowed again. A later exchange that adds another
+    refused line is caught as before.
+    """
+    items = _read_refused_edits()
+    _write_refused_edits([])
+    return items
 
 
 def standing_refused_edits(config_root: Path | None = None) -> list[dict[str, Any]]:

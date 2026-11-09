@@ -418,7 +418,7 @@ class RunTests(unittest.TestCase):
             return [(step["kind"], step["text"], step["status"]) for step in server.task_activity[self.task_id]["steps"]]
 
     def test_per_file_copies_are_reviewed_without_a_snapshot(self):
-        """By default no archive is made and Codex's copies are checked and reported."""
+        """By default no full archive is made: Codex's copies are checked, and the YAML copy fills in the rest."""
         with self.codex(keep_copy=True):
             server.run_task(self.task_id, "Rename the automation")
         task = server.tasks[self.task_id]
@@ -428,13 +428,13 @@ class RunTests(unittest.TestCase):
         saved = self.run_dir / "backups" / "automations.yaml"
         expected = [
             {"path": "automations.yaml", "status": "saved", "copy": str(saved.resolve())},
-            {"path": "scripts.yaml", "status": "missing", "copy": ""},
+            {"path": "scripts.yaml", "status": "saved", "copy": str((self.run_dir / "backups" / "scripts.yaml").resolve())},
         ]
         self.assertEqual(task["backups"], expected)
         self.assertEqual(task["turns"][0]["backups"], expected)
         self.assertEqual(self.events[-1]["backups"], expected)
-        self.assertEqual(task["details"], "Notes\n\nNo copy of the previous version was saved for: `scripts.yaml`. "
-                                          "Use a Home Assistant backup to restore such a file.")
+        self.assertEqual((self.run_dir / "backups" / "scripts.yaml").read_text(encoding="utf-8"), "a: 1\n")
+        self.assertEqual(task["details"], "Notes")
         self.assertFalse((self.run_dir / server.SNAPSHOT_FILE).exists())
         self.assertNotIn("snapshot", task)
         self.assertFalse((self.run_dir / "manifest-after.json").exists())
@@ -463,11 +463,12 @@ class RunTests(unittest.TestCase):
         self.assertIn(("phase", "Saving a full snapshot of your configuration", "done"), self.steps())
 
     def test_read_only_runs_get_no_backup_folder(self):
-        """A read-only run is given no backup folder and no instruction."""
+        """A read-only run is given no backup folder and no instruction; the worker's own YAML copies still go there."""
         self.options["codex_sandbox"] = "read-only"
         with self.codex(keep_copy=False):
             server.run_task(self.task_id, "Rename the automation")
-        self.assertFalse((self.run_dir / "backups").exists())
+        saved = sorted(path.name for path in (self.run_dir / "backups").iterdir())
+        self.assertEqual(saved, ["automations.yaml", "scripts.yaml"])
         self.assertNotIn("copy it to", (self.run_dir / "prompt.txt").read_text(encoding="utf-8"))
 
     def test_a_snapshot_that_fails_is_not_shown_as_done(self):

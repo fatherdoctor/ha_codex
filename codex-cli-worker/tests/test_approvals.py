@@ -202,8 +202,8 @@ class ApprovalTests(unittest.TestCase):
             with self.assertRaises(LookupError):
                 self.session.decide(approval_id, "allow")
 
-    def test_command_naming_the_protected_policy_can_only_be_denied(self):
-        """A command allowed once runs outside the sandbox, so one that names the policy or rules has no Allow."""
+    def test_command_naming_the_protected_policy_is_refused(self):
+        """A command allowed once runs outside the sandbox, so one that names the policy or rules is refused."""
         for index, command in enumerate([
             "sed -i 's/never/x/' /usr/share/ha_codex/AGENTS.md",
             "chmod u+w '/usr/share/ha_codex'/policy.json",
@@ -213,10 +213,11 @@ class ApprovalTests(unittest.TestCase):
         ]):
             approval_id = self.request(request_id=index, command=command)
             self.assertFalse(self.records[-1]["can_allow"], command)
+            self.assertEqual(self.records[-1]["status"], "refused", command)
             self.assertIn("permission policy", self.records[-1]["note"])
-            with self.assertRaises(ValueError):
+            self.assertEqual(self.writer.messages()[-1], {"id": index, "result": {"decision": "decline"}})
+            with self.assertRaises(LookupError):
                 self.session.decide(approval_id, "allow")
-            self.session.decide(approval_id, "deny")
 
     def test_masked_file_diff_or_path_cannot_be_allowed(self):
         """A masked diff or path cannot hide an edit behind an Allow button."""

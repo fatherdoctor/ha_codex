@@ -1164,6 +1164,28 @@ async function loadBrowserPermissions() {
     }
   }
 }
+/** List the refused lines left in place; the section shows only while there are some. */
+async function loadRefusedEdits() {
+  const { edits } = await api("refused-edits");
+  const area = $("refused-edits");
+  area.replaceChildren();
+  for (const edit of edits)
+    area.append(textNode("p", `${edit.file}, line ${edit.line}: ${edit.text} (${edit.reason})`));
+  $("refused-edits-section").hidden = !edits.length;
+}
+$("review-refused-edits").onclick = async () => {
+  const button = $("review-refused-edits");
+  button.disabled = true;
+  try {
+    await api("refused-edits/review", {});
+    await loadRefusedEdits();
+    $("settings-result").textContent = "Refused edits marked reviewed. Reloads are allowed again.";
+  } catch (error) {
+    settingsError(error);
+  } finally {
+    button.disabled = false;
+  }
+};
 /** Keep the original Markdown of the answer's visible text, including code indentation. */
 function responseMarkdown(turn) {
   return [
@@ -2702,6 +2724,7 @@ $("settings-button").onclick = async () => {
   const results = await Promise.allSettled([
     loadLogin(),
     loadBrowserPermissions(),
+    loadRefusedEdits(),
     api("agents").then((data) => {
       $("agents").value = data.content || "";
       $("agents").disabled = false;

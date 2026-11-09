@@ -7,6 +7,7 @@ import base64
 import binascii
 import copy
 import hashlib
+import io
 import hmac
 import json
 import os
@@ -2298,6 +2299,37 @@ def create_snapshot(task_id: str, manifest: dict[str, dict[str, Any]] | None = N
     return {"path": str(snapshot_path), "file_count": file_count, "created_at": utc_now()}
 
 
+def copy_config_yaml(task_id: str, manifest: dict[str, dict[str, Any]]) -> int:
+    """Archive the YAML files under /config before an exchange; return how many were saved.
+
+    Home Assistant's storage folder, credential files, links and files over 2 MB are left out. Only the
+    files whose content still matches the manifest are saved, so the archive holds the earlier versions.
+    """
+    copy_path = get_run_dir(task_id) / YAML_COPY_FILE
+    file_count = 0
+    with tarfile.open(copy_path, "w:gz") as tar:
+        for rel in sorted(manifest):
+            if (rel.startswith(".storage/") or snapshot_secret_path(rel) or not safe_relative_path(rel)
+                    or Path(rel).suffix.lower() not in CONFIG_CHECK_SUFFIXES):
+                continue
+            path = CONFIG_ROOT / rel
+            try:
+                if path.is_symlink() or not path.is_file() or path.stat().st_size > YAML_COPY_MAX_BYTES:
+                    continue
+                data = path.read_bytes()
+            except OSError:
+                continue
+            if hashlib.sha256(data).hexdigest() != manifest[rel].get("sha256"):
+                continue
+            info = tarfile.TarInfo(rel)
+            info.size = len(data)
+            info.mode = 0o600
+            tar.addfile(info, io.BytesIO(data))
+            file_count += 1
+    copy_path.chmod(0o600)
+    return file_count
+
+
 def snapshot_secret_path(relative: str) -> bool:
     """Keep credential files in change detection, but out of recovery archives."""
     path = Path(relative)
@@ -2373,6 +2405,10 @@ CONFIG_CHECK_SUFFIXES = {".yaml", ".yml"}
 CONFIG_CHECK_TEXT_MAX = 4000
 BASELINE_FILE = "manifest-before.json"
 SNAPSHOT_FILE = "snapshot-before.tar.gz"
+# The YAML files under /config, saved before every exchange whatever `full_snapshot` says, so a configuration
+# edit always has a checked earlier version to compare with and to restore.
+YAML_COPY_FILE = "yaml-before.tar.gz"
+YAML_COPY_MAX_BYTES = 2 * 1024 * 1024
 # Copies of files as they were before an exchange changed them: made by Codex
 # before each edit, or taken from the full snapshot when that option is on.
 BACKUP_DIR = "backups"
@@ -2512,12 +2548,17 @@ def saved_copy(run_dir: Path, rel: str, before: dict[str, Any]) -> dict[str, str
 
 
 def fill_from_snapshot(run_dir: Path, entries: list[dict[str, str]]) -> None:
-    """With a full snapshot, take every previous version Codex did not save out of the archive."""
+    """Take every previous version Codex did not save out of the full snapshot, then out of the YAML copy."""
+    for name in (SNAPSHOT_FILE, YAML_COPY_FILE):
+        _fill_from_archive(run_dir, run_dir / name, entries)
+
+
+def _fill_from_archive(run_dir: Path, snapshot_path: Path, entries: list[dict[str, str]]) -> None:
+    """Take every previous version still missing out of one archive made before the exchange."""
     wanted = {
         entry["path"]: entry for entry in entries
         if entry["status"] in {"missing", "unverified"} and safe_relative_path(entry["path"])
     }
-    snapshot_path = run_dir / SNAPSHOT_FILE
     if not wanted or not snapshot_path.is_file() or (run_dir / BACKUP_DIR).is_symlink():
         return
     root = (run_dir / BACKUP_DIR).resolve()
@@ -2541,7 +2582,7 @@ def previous_versions(run_dir: Path, paths: list[str], before: dict[str, Any]) -
     try:
         fill_from_snapshot(run_dir, entries)
     except (OSError, tarfile.TarError) as exc:
-        print(f"Could not read {run_dir / SNAPSHOT_FILE}: {redact(str(exc))}", flush=True)
+        print(f"Could not read the copies saved before the exchange in {run_dir}: {redact(str(exc))}", flush=True)
     return entries
 
 
@@ -2604,6 +2645,9 @@ def refuse_planted_edits(run_dir: Path, changes: dict[str, list[str]], before: d
             except OSError:
                 earlier = None
         found = categories.new_refused_lines(earlier or "", after, scripts)
+        # A refused line that stayed while its block changed (a new trigger on an automation that already
+        # unlocks a door) counts too; without a checked earlier copy every refused line already counts.
+        found += categories.new_refused_blocks(earlier or "", after, scripts, found)
         if not found:
             continue
         undone = ""
@@ -2645,7 +2689,9 @@ def refused_edits_details(results: list[dict[str, Any]]) -> str:
         else:
             parts.append(f"{item['path']} could not be put back, because no checked copy of its earlier version was "
                          f"saved, so every such line in it counts. Found {shown}. This app refuses to reload or "
-                         "restart Home Assistant while those lines are in place.")
+                         "restart Home Assistant while those lines are in place. If a person wrote them, a Home "
+                         "Assistant administrator can choose Mark reviewed under Refused edits in this page's "
+                         "settings, and reloads are allowed again.")
     return "\n\n".join(parts)
 
 
@@ -4292,6 +4338,7 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
                 start_phase(task_id, "snapshot", "Saving a full snapshot of your configuration")
                 update_task(task_id, snapshot=create_snapshot(task_id, manifest))
                 finish_phase(task_id, "snapshot")
+            copy_config_yaml(task_id, manifest)
         except Exception as exc:
             # Otherwise the step would be closed as done when the exchange ends well.
             finish_phase(task_id, "baseline", "snapshot", failed=True)
@@ -4650,7 +4697,7 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
 TURN_ID_RE = re.compile(r"[0-9a-f]{32}")
 # Only needed while an exchange runs; exchanges from before 0.1.63 left them behind.
 WORKING_FILES = (BASELINE_FILE, "manifest-after.json")
-BACKUP_ARTIFACTS = (SNAPSHOT_FILE, BACKUP_DIR, RECOVERY_DIR)
+BACKUP_ARTIFACTS = (SNAPSHOT_FILE, YAML_COPY_FILE, BACKUP_DIR, RECOVERY_DIR)
 BACKUP_CLEANUP_INTERVAL_SECONDS = 3600
 backup_cleanup_lock = threading.Lock()
 
@@ -5598,6 +5645,27 @@ def decide_approval(task_id: str, approval_id: str) -> Response:
         except OSError:
             return jsonify({"ok": False, "error": "Could not deliver the decision. The exchange was stopped."}), 503
     return jsonify({"ok": True, "approval_id": approval_id, "decision": payload["decision"]})
+
+
+@app.get("/refused-edits")
+@require_auth
+def get_refused_edits() -> Response:
+    """Return the refused lines an exchange left in place that are still in their files."""
+    return jsonify({"ok": True, "edits": categories.standing_refused_edits()})
+
+
+@app.post("/refused-edits/review")
+@require_auth
+def review_refused_edits() -> Response | tuple[Response, int]:
+    """Forget the standing refused lines, as a Home Assistant administrator on the Codex page who checked them."""
+    admin, refusal = ingress_admin()
+    if admin is None:
+        if not refusal.startswith("Could not"):
+            refusal = "Only a Home Assistant administrator on the Codex page can mark refused edits reviewed."
+        return jsonify({"ok": False, "error": refusal}), 403
+    forgotten = categories.mark_refused_edits_reviewed()
+    print(f"Refused edits marked reviewed by {admin.get('name') or admin['user_id']}: {len(forgotten)} line(s)", flush=True)
+    return jsonify({"ok": True, "edits": [], "reviewed": len(forgotten)})
 
 
 def require_ingress(func):
