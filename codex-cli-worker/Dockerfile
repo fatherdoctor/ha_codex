@@ -83,12 +83,13 @@ WORKDIR /data
 
 COPY run.sh /
 COPY server.py /
-COPY approvals.py categories.py policy.py verification.py verification_mcp.py browser_permissions.py browser_permission_policy.json ha_data.py ha_data_mcp.py browser.cjs browser_resources.cjs browser_permissions.cjs /
+COPY approvals.py categories.py gate_rules.py policy.py verification.py verification_mcp.py browser_permissions.py browser_permission_policy.json ha_data.py ha_data_mcp.py browser.cjs browser_resources.cjs browser_permissions.cjs /
 COPY web /web
 # The protected permission policy and house rules: read-only, outside /config and every sandbox's writable roots.
 COPY policy/policy.json /usr/share/ha_codex/policy.json
 COPY policy/house-rules.md /usr/share/ha_codex/AGENTS.md
-RUN chmod 0444 /usr/share/ha_codex/policy.json /usr/share/ha_codex/AGENTS.md
+COPY policy/refused-domains.json /usr/share/ha_codex/refused-domains.json
+RUN chmod 0444 /usr/share/ha_codex/policy.json /usr/share/ha_codex/AGENTS.md /usr/share/ha_codex/refused-domains.json
 
 RUN chmod a+x /run.sh /server.py
 

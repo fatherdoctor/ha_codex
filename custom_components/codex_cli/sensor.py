@@ -18,6 +18,8 @@ from .coordinator import CodexCliCoordinator
 PARALLEL_UPDATES = 0
 # The worker's prompt kinds; keep in step with PROMPT_KINDS in codex-cli-worker/server.py.
 PROMPT_KINDS = ("command", "command_input", "file_change", "other")
+# Requests the app's rules refused at once: an attribute of their own, not part of the total.
+REFUSED_KIND = "refused"
 
 
 async def async_setup_entry(
@@ -151,7 +153,7 @@ class CodexPromptCountSensor(_CodexSensor):
         counts = self._counts()
         return {
             "task_id": latest.get("task_id"),
-            **{kind: int(counts.get(kind) or 0) for kind in PROMPT_KINDS},
+            **{kind: int(counts.get(kind) or 0) for kind in PROMPT_KINDS + (REFUSED_KIND,)},
         }
 
 

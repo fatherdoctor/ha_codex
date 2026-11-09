@@ -268,7 +268,7 @@ class LastTaskSensorTests(unittest.TestCase):
 
         self.assertEqual(prompts.native_value, 3)
         self.assertEqual(prompts.extra_state_attributes,
-                         {"task_id": "chat", "command": 2, "command_input": 0, "file_change": 1, "other": 0})
+                         {"task_id": "chat", "command": 2, "command_input": 0, "file_change": 1, "other": 0, "refused": 0})
         # A conversation that raised none, or a worker too old to count, reads 0.
         coordinator.data = {"latest_task": {"task_id": "older"}}
         self.assertEqual(prompts.native_value, 0)

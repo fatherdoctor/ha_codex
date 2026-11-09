@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 import categories
+import gate_rules
 import test_approvals
 from approvals import COMMAND_APPROVAL, FILE_APPROVAL
+from test_server import server
 
 HA = "curl -s -X POST -H 'Authorization: Bearer $HA_TOKEN' $HA_URL/api/services"
 
@@ -151,6 +157,9 @@ class RefusedRequestTests(test_approvals.ApprovalTests):
         self.assertIn("never controls locks", record["confirmation"]["effect"])
         self.assertEqual(self.writer.messages()[-1], {"id": 7, "result": {"decision": "decline"}})
         self.assertIn("Refused by this app's rules", self.events[-1]["message"])
+        # Counted as a refused attempt, not as a prompt to the person.
+        counts = server.count_new_prompts({}, self.records, {})
+        self.assertEqual((counts["refused"], counts["total"]), (1, 0))
         for decision in ("allow", "deny"):
             with self.assertRaises(LookupError):
                 self.session.decide(approval_id, decision)
@@ -175,6 +184,143 @@ class RefusedRequestTests(test_approvals.ApprovalTests):
         self.assertEqual(record["confirmation"]["effect"], "This turns on light.kitchen.")
         self.session.decide(approval_id, "allow")
         self.assertEqual(self.writer.messages()[-1], {"id": 9, "result": {"decision": "accept"}})
+
+
+class ConfigFolderTest(unittest.TestCase):
+    """A temporary /config and /data for the tests that read Home Assistant's files."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.config = Path(self.tmp.name) / "config"
+        self.config.mkdir()
+        self.store = Path(self.tmp.name) / "data" / "refused-edits.json"
+        for target, name, value in ((categories, "CONFIG_ROOT", self.config),
+                                    (categories, "REFUSED_EDITS_PATH", self.store), (server, "CONFIG_ROOT", self.config)):
+            patcher = patch.object(target, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.addCleanup(self.tmp.cleanup)
+
+    def write(self, rel: str, text: str) -> Path:
+        path = self.config / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        return path
+
+
+class SharedListTests(unittest.TestCase):
+    """One refused list and one scan for this check and the remote-control check (F10)."""
+
+    def test_every_shared_domain_has_a_category(self) -> None:
+        rules = gate_rules.load_rules()
+        for domain in rules["refused_domains"] + rules["reaches_anything"]:
+            self.assertIn(domain, categories._DOMAIN_TO_CATEGORY, domain)
+
+    def test_configuration_findings_map_to_categories(self) -> None:
+        cases = {"+  - action: shell_command.wipe": "commands",
+                 "+sensor:\n+  - platform: command_line\n+    command: id": "commands",
+                 "+  entities:\n+    lock.front_door:\n+      state: unlocked": "locks",
+                 "+    - domain: mobile_app\n+      type: notify": "messages",
+                 "+  - action: \"{{ x }}\"": "commands"}
+        for diff, category in cases.items():
+            with self.subTest(diff=diff):
+                self.assertIn(category, categories.refused_categories(
+                    "file_change", changes=[{"path": "configuration.yaml", "kind": "update", "diff": diff}]))
+
+    def test_commands_on_reach_anything_domains(self) -> None:
+        self.assertEqual(categories.refused_categories("command", command=f"{HA}/shell_command/wipe"), ["commands"])
+
+
+class IndirectTests(ConfigFolderTest):
+    """A script, scene or automation acts under its own name; its definition decides (F11)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.write("scripts.yaml", "night_routine:\n  sequence:\n    - action: lock.lock\n"
+                                   "wrapper:\n  sequence:\n    - action: script.night_routine\n"
+                                   "lights_off:\n  sequence:\n    - action: light.turn_off\n")
+        self.write("scenes.yaml", "- id: '1700000000'\n  name: Leaving\n  entities:\n    lock.front_door:\n"
+                                  "      state: unlocked\n- id: '1700000001'\n  name: Movie night\n  entities:\n"
+                                  "    light.tv: 'off'\n")
+        self.write("automations.yaml", "- id: '1'\n  alias: Away mode\n  actions:\n    - action: alarm_control_panel.alarm_arm_away\n")
+
+    def test_definitions_are_resolved(self) -> None:
+        refused = categories.refused_definitions()
+        self.assertEqual(sorted(refused), ["automation.1", "automation.away_mode", "scene.1700000000", "scene.leaving",
+                                           "script.night_routine", "script.wrapper"])
+
+    def test_commands_that_run_them_are_refused(self) -> None:
+        for command in (f"{HA}/script/turn_on -d '{{\"entity_id\": \"script.night_routine\"}}'",
+                        f"{HA}/script/wrapper", f"{HA}/scene/turn_on -d 'scene.leaving'",
+                        f"{HA}/automation/trigger -d 'automation.away_mode'"):
+            with self.subTest(command=command):
+                self.assertEqual(categories.refused_categories("command", command=command), ["indirect"])
+        for command in (f"{HA}/script/lights_off", f"{HA}/scene/turn_on -d 'scene.movie_night'"):
+            with self.subTest(command=command):
+                self.assertEqual(categories.refused_categories("command", command=command), [])
+
+    def test_changes_that_call_them_are_refused(self) -> None:
+        for diff in ("+    - action: script.night_routine", "+    - action: scene.turn_on\n+      target:\n"
+                     "+        entity_id: scene.leaving"):
+            with self.subTest(diff=diff):
+                self.assertIn("indirect", categories.refused_categories(
+                    "file_change", changes=[{"path": "automations.yaml", "kind": "update", "diff": diff}]))
+
+
+class PlantedEditTests(ConfigFolderTest):
+    """An edit inside the sandbox needs no approval, so the end of the exchange checks it (F9)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.run_dir = self.config / ".codex_runs" / "task"
+        (self.run_dir / server.BACKUP_DIR).mkdir(parents=True)
+        self.earlier = "- id: '1'\n  actions:\n    - action: lock.lock\n"
+
+    def before(self, rel: str, text: str, copy: bool = True) -> dict:
+        if copy:
+            backup = self.run_dir / server.BACKUP_DIR / rel
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            backup.write_text(text, encoding="utf-8")
+        return {rel: {"sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()}}
+
+    def test_added_lock_action_is_undone_and_an_old_one_is_not_new(self) -> None:
+        before = self.before("automations.yaml", self.earlier)
+        path = self.write("automations.yaml", self.earlier + "- id: '2'\n  actions:\n    - action: lock.unlock\n")
+        results = server.refuse_planted_edits(self.run_dir, {"changed": ["automations.yaml"]}, before)
+        self.assertEqual([(r["path"], r["undone"], [f["line"] for f in r["findings"]]) for r in results],
+                         [("automations.yaml", "restored", [6])])
+        self.assertEqual(path.read_text(encoding="utf-8"), self.earlier)
+        self.assertEqual(categories.standing_refused_edits(), [])
+        self.assertIn("earlier version back", server.refused_edits_details(results))
+
+    def test_a_new_file_is_removed(self) -> None:
+        path = self.write("packages/new.yaml", "shell_command:\n  wipe: rm -rf /config\n")
+        results = server.refuse_planted_edits(self.run_dir, {"added": ["packages/new.yaml"]}, {})
+        self.assertEqual(results[0]["undone"], "removed")
+        self.assertFalse(path.exists())
+
+    def test_light_edits_pass(self) -> None:
+        before = self.before("automations.yaml", self.earlier)
+        self.write("automations.yaml", self.earlier + "- id: '2'\n  actions:\n    - action: light.turn_on\n")
+        self.assertEqual(server.refuse_planted_edits(self.run_dir, {"changed": ["automations.yaml"]}, before), [])
+
+    def test_without_a_checked_copy_the_lines_stand_and_reloads_are_refused(self) -> None:
+        before = self.before("automations.yaml", self.earlier, copy=False)
+        planted = self.earlier + "- id: '2'\n  actions:\n    - action: lock.unlock\n"
+        self.write("automations.yaml", planted)
+        results = server.refuse_planted_edits(self.run_dir, {"changed": ["automations.yaml"]}, before)
+        self.assertEqual(results[0]["undone"], "")
+        self.assertIn("could not be put back", server.refused_edits_details(results))
+        self.assertEqual(categories.refused_categories("command", command=f"{HA}/automation/reload"), ["planted"])
+        self.assertEqual(categories.refused_categories("command", command="ha core restart"), ["planted"])
+        self.assertEqual(categories.refused_categories("command", command=f"{HA}/light/turn_on"), [])
+        # Once the lines are gone, reloads are allowed again.
+        self.write("automations.yaml", "- id: '1'\n  actions:\n    - action: light.turn_on\n")
+        self.assertEqual(categories.refused_categories("command", command=f"{HA}/automation/reload"), [])
+        self.assertFalse(self.store.exists())
+
+    def test_a_moved_line_is_not_new(self) -> None:
+        self.assertEqual(categories.new_refused_lines(self.earlier, "# moved\n" + self.earlier), [])
 
 
 # The inherited ApprovalTests cases already run in test_approvals; run only the new ones here.

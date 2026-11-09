@@ -414,13 +414,13 @@ class ApprovalApiTests(unittest.TestCase):
     def test_prompts_are_counted_by_kind_for_the_conversation(self):
         """Each new request adds one to its kind; a decision or a re-save does not count it again."""
         self.assertEqual(server.tasks["task"]["approval_counts"],
-                         {"command": 1, "command_input": 0, "file_change": 0, "other": 0, "total": 1})
+                         {"command": 1, "command_input": 0, "file_change": 0, "other": 0, "refused": 0, "total": 1})
         self.assertEqual(self.answer().status_code, 200)
         self.session.receive({"id": 11, "method": COMMAND_APPROVAL, "params": {
             "threadId": "thread", "turnId": "turn", "itemId": "second", "command": "cat", "cwd": "/config",
             "kind": "writeStdin"}})
         self.assertEqual(server.tasks["task"]["approval_counts"],
-                         {"command": 1, "command_input": 1, "file_change": 0, "other": 0, "total": 2})
+                         {"command": 1, "command_input": 1, "file_change": 0, "other": 0, "refused": 0, "total": 2})
 
     def test_authentication_turn_binding_and_single_use(self):
         """Unauthenticated, stale, and repeated decisions do not reach the child process."""

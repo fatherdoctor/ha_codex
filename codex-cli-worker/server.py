@@ -39,6 +39,7 @@ from flask import Flask, Response, jsonify, request, send_file
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from verification import DEFAULT_BROWSER_MEMORY_LIMIT_MIB, Verification, public_check
 from approvals import APPROVAL_GONE, AppServerSession
+import categories
 import policy as protected_policy
 from ha_data import HomeAssistantData
 
@@ -2562,6 +2563,92 @@ def review_backups(run_dir: Path, before: dict[str, Any], changes: dict[str, lis
     return previous_versions(run_dir, reviewed, before)
 
 
+def refuse_planted_edits(run_dir: Path, changes: dict[str, list[str]], before: dict[str, Any]) -> list[dict[str, Any]]:
+    """Undo configuration edits of this exchange that add a refused action, and say what was found.
+
+    In the workspace-write sandbox Codex edits /config without asking, so the
+    approval check never sees such an edit. At the end of every exchange each
+    added or changed YAML file is compared with its earlier version (a copy
+    checked against the hash taken before the exchange, or the snapshot); a
+    refused line that was not there before is undone: an added file is
+    removed and a changed file gets its earlier version back. Without a checked
+    earlier version every refused line in the file counts and the file cannot
+    be put back; those lines are remembered, and a reload or restart is refused
+    while they are in place (``categories.standing_refused_edits``).
+    """
+    added = set(changes.get("added", []))
+    paths = [
+        rel for rel in sorted(added | set(changes.get("changed", [])))
+        if safe_relative_path(rel) and not rel.startswith(".storage/") and Path(rel).suffix.lower() in CONFIG_CHECK_SUFFIXES
+    ]
+    if not paths:
+        return []
+    saved = {entry["path"]: entry for entry in previous_versions(run_dir, [rel for rel in paths if rel not in added], before)}
+    definitions = categories.refused_definitions(CONFIG_ROOT)
+    scripts = {entity.split(".", 1)[1] for entity in definitions if entity.startswith("script.")}
+    results: list[dict[str, Any]] = []
+    left: list[dict[str, Any]] = []
+    for rel in paths:
+        target = CONFIG_ROOT / rel
+        try:
+            if target.is_symlink():
+                continue
+            after = target.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        entry = saved.get(rel) or {}
+        earlier: str | None = "" if rel in added else None
+        if rel not in added and entry.get("status") == "saved" and entry.get("copy"):
+            try:
+                earlier = Path(entry["copy"]).read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                earlier = None
+        found = categories.new_refused_lines(earlier or "", after, scripts)
+        if not found:
+            continue
+        undone = ""
+        try:
+            if rel in added:
+                target.unlink()
+                undone = "removed"
+            elif earlier is not None:
+                tmp = target.with_name(target.name + ".codex-restore")
+                tmp.write_text(earlier, encoding="utf-8")
+                os.replace(tmp, target)
+                undone = "restored"
+        except OSError as exc:
+            print(f"Could not undo {rel}: {redact(str(exc))}", flush=True)
+        lines = [{"file": rel, "line": item.line, "reason": item.reason, "text": redact(item.text.strip())[:200]}
+                 for item in found]
+        results.append({"path": rel, "undone": undone, "findings": lines})
+        if not undone:
+            left.extend(lines)
+    if left:
+        categories.record_refused_edits(left)
+    return results
+
+
+def refused_edits_details(results: list[dict[str, Any]]) -> str:
+    """The plain words the chat shows for refused configuration edits."""
+    parts = ["Not allowed: this exchange added actions this app never adds. Locks, alarms, covers, cameras, messages "
+             "to people, shell and REST commands and templated actions are added by a person, not by Codex."]
+    for item in results:
+        if item["path"] == "(configuration)":
+            parts[0] = ("Not allowed: the check of this exchange's configuration edits could not run, so they are "
+                        "not trusted. Review the changed files before you reload or restart Home Assistant.")
+            continue
+        shown = "; ".join(f"line {f['line']}: {f['text']} ({f['reason']})" for f in item["findings"][:5])
+        if item["undone"] == "removed":
+            parts.append(f"{item['path']} was new and has been removed. Found {shown}.")
+        elif item["undone"] == "restored":
+            parts.append(f"{item['path']} has its earlier version back. Found {shown}.")
+        else:
+            parts.append(f"{item['path']} could not be put back, because no checked copy of its earlier version was "
+                         f"saved, so every such line in it counts. Found {shown}. This app refuses to reload or "
+                         "restart Home Assistant while those lines are in place.")
+    return "\n\n".join(parts)
+
+
 def recovery_copies(run_dir: Path, changes: dict[str, list[str]], affected: list[str], before: dict[str, Any]) -> list[dict[str, str]]:
     """Point to the pre-change version of each file that failed validation.
 
@@ -3702,6 +3789,9 @@ def reader_thread(task_id: str, stream_name: str, handle, session_holder: dict[s
 
 
 PROMPT_KINDS = ("command", "command_input", "file_change", "other")
+# Requests this app's rules refused at once. They never reached the person, so they are not in the total, but
+# they are counted: each is Codex reaching for something forbidden.
+REFUSED_KIND = "refused"
 
 
 def count_new_prompts(counts: Any, records: list[dict[str, Any]], previous: dict[str, Any]) -> dict[str, int]:
@@ -3710,16 +3800,19 @@ def count_new_prompts(counts: Any, records: list[dict[str, Any]], previous: dict
     The counts belong to the whole conversation (every exchange of the task),
     so CX-TEST can read how many prompts one scripted session raised.
     """
-    totals = {kind: 0 for kind in PROMPT_KINDS}
+    totals = {kind: 0 for kind in PROMPT_KINDS + (REFUSED_KIND,)}
     if isinstance(counts, dict):
-        for kind in PROMPT_KINDS:
+        for kind in PROMPT_KINDS + (REFUSED_KIND,):
             value = counts.get(kind)
             totals[kind] = value if isinstance(value, int) and value >= 0 else 0
     for item in records:
-        # A request refused by the app's rules never reached the person, so it is not a prompt.
-        if item["approval_id"] not in previous and item.get("status") != "refused":
-            kind = item.get("prompt_kind") if item.get("prompt_kind") in PROMPT_KINDS else "other"
-            totals[kind] += 1
+        if item["approval_id"] in previous:
+            continue
+        if item.get("status") == "refused":
+            totals[REFUSED_KIND] += 1
+            continue
+        kind = item.get("prompt_kind") if item.get("prompt_kind") in PROMPT_KINDS else "other"
+        totals[kind] += 1
     totals["total"] = sum(totals[kind] for kind in PROMPT_KINDS)
     return totals
 
@@ -4383,6 +4476,16 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     except Exception as exc:
         backups = []
         write_task_log(task_id, "worker", f"Could not review the saved copies: {exc}")
+    try:
+        refused_edits = refuse_planted_edits(task_dir, changes, before_manifest)
+    except Exception as exc:
+        # The check failing must not let the edit stand unchecked: count the exchange as refused.
+        refused_edits = [{"path": "(configuration)", "undone": "", "findings": [
+            {"file": "", "line": 0, "reason": "the check could not run", "text": redact(str(exc))[:200]}]}]
+        write_task_log(task_id, "worker", f"Could not check the configuration edits: {exc}")
+    if refused_edits:
+        write_task_log(task_id, "worker", "Refused configuration edits: "
+                       + ", ".join(f"{item['path']} ({item['undone'] or 'left in place'})" for item in refused_edits))
     assessment = assess_changes(task_id, task_dir, changes, before_manifest)
     if task_cancellation_requested(task_id):
         return
@@ -4414,6 +4517,15 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
         final["status"] = "failed"
         reason = f"Codex exited with {returncode}."
         final["details"] = f"{reason} {final.get('details', '')}".strip()
+
+    if refused_edits:
+        # Refused whatever else happened: a timed-out or failed exchange may still have left the edit behind.
+        earlier_details = str(final.get("details") or "").strip() if final.get("status") == "failed" else ""
+        final["status"] = "failed"
+        final["summary"] = "Not allowed."
+        final["question"] = ""
+        final["details"] = "\n\n".join(part for part in (refused_edits_details(refused_edits), earlier_details) if part)
+        reason = "Not allowed: a configuration edit added a refused action."
 
     status = str(final.get("status") or "failed")
     # Files the validation details already report as having no saved copy.
