@@ -5629,8 +5629,30 @@ def delete_queued_message(queue_id: str) -> Response:
 
 
 
+PR_SET_DUMPABLE = 4
+
+
+def make_worker_undumpable() -> bool:
+    """Mark the worker not dumpable, so a sandboxed command cannot read its /proc environ, memory or maps.
+
+    The worker's environment holds the Supervisor token. A process that is not dumpable can only
+    be read by one with CAP_SYS_PTRACE in the worker's user namespace, which a sandboxed command
+    never has. Children are not affected: the flag is reset when a program starts. Returns whether
+    the flag was set; it only fails off Linux.
+    """
+    try:
+        import ctypes
+
+        libc = ctypes.CDLL(None, use_errno=True)
+        return libc.prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) == 0
+    except (OSError, AttributeError):
+        return False
+
+
 def main() -> None:
     """Prepare the worker's files, start its background threads, and serve the API."""
+    if not make_worker_undumpable():
+        print("Could not mark the worker process not dumpable; its environment stays readable to root.", flush=True)
     ensure_runtime_files()
     version = codex_version_status()
     sandbox = sandbox_readiness()
