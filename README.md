@@ -12,7 +12,7 @@ sign-in and recovery changes listed under [Versions](#versions) are still being 
 ## Features
 
 - A chat page inside Home Assistant (Ingress), with saved conversations and a task queue.
-- Codex edits the configuration folder in a sandbox, keeping a copy of each file it changes.
+- Codex edits the configuration folder in a sandbox, keeps a copy of each file it changes, and runs a config check after YAML edits.
 - Answers Codex offers are shown as buttons, in the chat and on mobile app notifications.
 - Sign-in with a ChatGPT account by device code, shown as a QR code in a Home Assistant notification.
 - Dashboards inspected in a real browser, at desktop and mobile sizes.
