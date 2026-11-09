@@ -120,20 +120,18 @@ class ProtectedPolicyTests(unittest.TestCase):
             patch.object(server, "get_run_dir", return_value=self.root / "run"),
             patch.object(server, "save_task_index"),
             patch.object(server, "write_task_log"),
-            patch.object(server, "record_baseline", return_value={}),
+            patch.object(server, "record_baseline", return_value={}) as baseline,
             patch.object(server, "prepare_ha_docs"),
             patch.object(server, "build_prompt", return_value="prompt"),
             patch.object(server, "publish_task_outcome", create=True),
             patch.object(server, "notify", create=True),
             patch.object(server.subprocess, "Popen") as popen,
         ):
-            try:
-                server.run_task("task", "Turn the lamp on")
-            except Exception:
-                pass
+            server.run_task("task", "Turn the lamp on")
             status = server.tasks["task"].get("status")
             summary = server.tasks["task"].get("summary", "")
         popen.assert_not_called()
+        baseline.assert_not_called()
         self.assertEqual(status, "failed")
         self.assertIn("needs support", summary)
 
@@ -150,6 +148,19 @@ class ProtectedPathTests(unittest.TestCase):
         for path in ("/config/automations.yaml", "AGENTS.md", "/config/AGENTS.md", "/data/codex-home/sessions/x"):
             with self.subTest(path=path):
                 self.assertFalse(approvals.touches_protected_path(path))
+
+
+    def test_protected_paths_in_a_command(self) -> None:
+        """A command's text is checked for the same places, quoted, globbed or with doubled slashes."""
+        for command in ("sed -i x /usr/share/ha_codex/AGENTS.md", 'cp a "/usr/share/ha_codex/policy.json"',
+                        "cat /usr/share/ha_c*", "ls /usr//share//ha_codex", "cat /data/options.json",
+                        "cat /data/worker_api_token", "cd /data/codex-home; vi config.toml", "rm /data/codex-home/*"):
+            with self.subTest(command=command):
+                self.assertTrue(approvals.command_names_protected_path(command))
+        for command in ("ls /config", "cat /config/AGENTS.md", "ls /data/codex-home/sessions",
+                        "ha core check", "grep -r light. /config/automations.yaml"):
+            with self.subTest(command=command):
+                self.assertFalse(approvals.command_names_protected_path(command))
 
 
 if __name__ == "__main__":

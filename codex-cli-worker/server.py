@@ -3631,6 +3631,9 @@ def data_mcp_args() -> list[str]:
 def build_codex_args(task_id: str, prompt_file: Path, final_file: Path, session_id: str | None) -> list[str]:
     """Return the `codex exec` command line for the task's latest turn, resuming the session when one is given.
 
+    Kept from upstream for reference only: `codex exec` has no live permission
+    requests, so run_task never uses it (every exchange runs through app-server).
+
     It carries the turn's model and reasoning level, the sandbox, the output
     files, the verification tool, and the attached images; the prompt itself
     is read from stdin.
@@ -4159,6 +4162,18 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     """Run one exchange: record the configuration, launch Codex, then check and report what it changed."""
     if task_cancellation_requested(task_id):
         return
+    # A mode the protected policy refuses stops here, before the task is marked running or any
+    # baseline, snapshot or backup work is done for it.
+    policy_problem = protected_policy.policy_problem(read_options())
+    if policy_problem:
+        fail_task_launch(
+            task_id,
+            RuntimeError(policy_problem),
+            session_id=session_id,
+            summary="Codex needs support: the sandbox it must run in is not available, so this task was not started.",
+            detail_prefix="Codex sandbox preflight failed",
+        )
+        return
     task_dir = get_run_dir(task_id)
     task_dir.mkdir(parents=True, exist_ok=True)
     final_file = task_dir / ("final-resume.json" if reply else "final.json")
@@ -4225,7 +4240,17 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     if task_cancellation_requested(task_id):
         return
     interactive_approvals = uses_user_approvals(options)
-    args = build_app_server_args() if interactive_approvals else build_codex_args(task_id, prompt_file, final_file, session_id)
+    if not interactive_approvals:
+        # Never fall back to the approval-free `codex exec` path, even if the options changed since the check above.
+        fail_task_launch(
+            task_id,
+            RuntimeError("The app's permission policy does not allow this sandbox setting."),
+            session_id=session_id,
+            summary="Codex needs support: the sandbox it must run in is not available, so this task was not started.",
+            detail_prefix="Codex sandbox preflight failed",
+        )
+        return
+    args = build_app_server_args()
     write_task_log(task_id, "worker", "Starting Codex: " + " ".join(args))
 
     start_phase(task_id, "launch", "Starting Codex")
