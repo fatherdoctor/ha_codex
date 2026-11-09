@@ -9,34 +9,15 @@ This is a fork of [moryoav/home-assistant-codex](https://github.com/moryoav/home
 release **0.1.81**. **Status: pre-release.** Nothing from this fork is installed anywhere yet; the permission,
 sign-in and recovery changes listed under [Versions](#versions) are still being built and reviewed.
 
-## Table of contents
-
-- [Features](#features)
-- [Preview](#preview)
-- [Installation](#installation)
-- [Updating](#updating)
-- [Uninstalling](#uninstalling)
-- [Usage](#usage)
-- [Versions](#versions)
-- [Making contributions](#making-contributions)
-- [License](#license)
-
 ## Features
 
 - A chat page inside Home Assistant (Ingress), with saved conversations and a task queue.
-- Codex works on the Home Assistant configuration folder inside its sandbox, saves a copy of each file before
-  changing it, and asks Home Assistant to check the configuration after YAML edits.
+- Codex edits the configuration folder in a sandbox, keeping a copy of each file it changes.
 - Answers Codex offers are shown as buttons, in the chat and on mobile app notifications.
 - Sign-in with a ChatGPT account by device code, shown as a QR code in a Home Assistant notification.
 - Dashboards inspected in a real browser, at desktop and mobile sizes.
 - A local copy of the Home Assistant documentation, so lookups need no web search.
-- **In this fork:** the Codex CLI is pinned (the packaged 0.166.0 build, checked by SHA-256) and cannot update
-  itself; the base image is pinned by digest. A CLI or base image move is a release of this fork.
-
-## Preview
-
-Screenshots of this fork are not taken yet (see [screenshots/NEEDED.md](screenshots/NEEDED.md)). Upstream's chat
-screens are in [examples/chat-ui](examples/chat-ui).
+- **In this fork:** the Codex CLI and the base image are pinned and cannot update themselves (see [Versions](#versions)).
 
 ## Installation
 
@@ -78,9 +59,8 @@ the task output format and the Assist example are documented upstream and still 
 
 ## Versions
 
-A fork version is upstream's plus one number: `0.1.81.1` is the first build of this fork on upstream 0.1.81. The
-daily upstream watch ([ci/upstream-watch.yml](ci/upstream-watch.yml), moved to `.github/workflows/` on the default
-branch) opens one issue when upstream releases something newer.
+A fork version is upstream's plus one number: `0.1.81.1` is the first build of this fork on upstream 0.1.81. A
+daily workflow opens one issue when upstream releases something newer.
 
 | Version | Changes |
 |---|---|
