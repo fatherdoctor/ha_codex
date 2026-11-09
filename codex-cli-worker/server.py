@@ -117,6 +117,7 @@ DEFAULT_OPTIONS = {
     "browser_verification": True,
     "browser_memory_limit_mib": DEFAULT_BROWSER_MEMORY_LIMIT_MIB,
     "local_docs": True,
+    "refuse_categories": False,
     "ha_url": CORE_URL,
     "HA_TOKEN": "",
 }
@@ -2616,7 +2617,11 @@ def refuse_planted_edits(run_dir: Path, changes: dict[str, list[str]], before: d
     earlier version every refused line in the file counts and the file cannot
     be put back; those lines are remembered, and a reload or restart is refused
     while they are in place (``categories.standing_refused_edits``).
+    Only with the ``refuse_categories`` option on; off, nothing is checked.
     """
+    if not categories.enforced():
+        # The refuse_categories option is off (the default): the category list is a house rule, not checked here.
+        return []
     added = set(changes.get("added", []))
     paths = [
         rel for rel in sorted(added | set(changes.get("changed", [])))

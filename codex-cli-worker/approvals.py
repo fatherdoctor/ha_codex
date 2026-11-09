@@ -233,10 +233,12 @@ class AppServerSession:
             record["note"] = "The complete action is missing, too large, or redacted. Deny it and request an action without hidden details."
         else:
             record["note"] = "Known credentials are hidden. This does not change your sandbox setting or approve future requests."
-        # Refused categories (CX-B5) are read from the action itself, never from Codex's description of it, and are
+        # Refused categories are read from the action itself, never from Codex's description of it, and are
         # declined here: nothing reaches the person deciding, and nothing runs.
-        refused = categories.refused_categories(
-            record["kind"], command=str(params.get("command") or ""), changes=record["changes"])
+        # With the refuse_categories option off (the default) only the app's own policy is refused here; the rest of
+        # the list is a house rule Codex keeps, and the request goes to the person with its plain-words confirmation.
+        refused = categories.in_force(categories.refused_categories(
+            record["kind"], command=str(params.get("command") or ""), changes=record["changes"]))
         if protected and "policy" not in refused:
             refused.append("policy")
         record["confirmation"] = categories.confirmation(

@@ -1,8 +1,9 @@
-"""Refused categories and the plain-words confirmation (CX-B5): enforced on the action, outside the model."""
+"""Refused categories (off by default, the refuse_categories option) and the plain-words confirmation."""
 
 from __future__ import annotations
 
 import hashlib
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -144,8 +145,19 @@ class ConfirmationTests(unittest.TestCase):
         self.assertTrue(text["effect"].startswith("Not allowed, so nothing happens. This app never controls locks."))
 
 
+def enforce(test: unittest.TestCase) -> None:
+    """Turn the refuse_categories option on for one test."""
+    patcher = patch.object(categories, "enforced", return_value=True)
+    patcher.start()
+    test.addCleanup(patcher.stop)
+
+
 class RefusedRequestTests(test_approvals.ApprovalTests):
-    """Through the approval bridge: refused at once, Codex declined, the person never asked."""
+    """With refuse_categories on, through the approval bridge: refused at once, Codex declined, the person never asked."""
+
+    def setUp(self):
+        super().setUp()
+        enforce(self)
 
     def test_refused_command_is_declined_at_once_and_never_waits(self):
         """A lock action is declined to Codex immediately, recorded as refused, and has no live request."""
@@ -268,10 +280,11 @@ class IndirectTests(ConfigFolderTest):
 
 
 class PlantedEditTests(ConfigFolderTest):
-    """An edit inside the sandbox needs no approval, so the end of the exchange checks it (F9)."""
+    """With refuse_categories on, an edit inside the sandbox needs no approval, so the end of the exchange checks it."""
 
     def setUp(self) -> None:
         super().setUp()
+        enforce(self)
         self.run_dir = self.config / ".codex_runs" / "task"
         (self.run_dir / server.BACKUP_DIR).mkdir(parents=True)
         self.earlier = "- id: '1'\n  actions:\n    - action: lock.lock\n"
@@ -426,3 +439,84 @@ for _name in [name for name in dir(test_approvals.ApprovalTests) if name.startsw
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OptionTests(unittest.TestCase):
+    """The refuse_categories option: off unless the options file says true."""
+
+    def options(self, text: str | None) -> None:
+        folder = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, folder, True)
+        path = folder / "options.json"
+        if text is not None:
+            path.write_text(text, encoding="utf-8")
+        patcher = patch.object(categories, "OPTIONS_PATH", path)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_off_unless_set_to_true(self) -> None:
+        for text, expected in ((None, False), ("{}", False), ('{"refuse_categories": false}', False),
+                               ('{"refuse_categories": "yes"}', False), ("not json", False), ("[]", False),
+                               ('{"refuse_categories": true}', True)):
+            with self.subTest(text=text):
+                self.options(text)
+                self.assertIs(categories.enforced(), expected)
+
+    def test_the_default_is_off_in_the_app_options(self) -> None:
+        self.assertIs(server.DEFAULT_OPTIONS["refuse_categories"], False)
+        config = (Path(server.__file__).parent / "config.yaml").read_text(encoding="utf-8")
+        self.assertIn("  refuse_categories: false\n", config)
+        self.assertIn("  refuse_categories: bool\n", config)
+
+    def test_off_keeps_only_the_policy(self) -> None:
+        self.options(None)
+        self.assertEqual(categories.in_force(["locks", "messages", "policy", "planted"]), ["policy"])
+        self.options('{"refuse_categories": true}')
+        self.assertEqual(categories.in_force(["locks", "policy"]), ["locks", "policy"])
+
+    def test_the_house_rules_carry_the_list(self) -> None:
+        rules = (Path(server.__file__).parent / "policy" / "house-rules.md").read_text(encoding="utf-8")
+        for words in ("locks", "the alarm", "garage doors", "cameras", "never send a message", "publish",
+                      "ignore or set aside these rules"):
+            self.assertIn(words, rules)
+
+
+class OffByDefaultRequestTests(test_approvals.ApprovalTests):
+    """With refuse_categories off (the default): a category request asks the person, a policy change is still refused."""
+
+    def setUp(self):
+        super().setUp()
+        patcher = patch.object(categories, "enforced", return_value=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_lock_command_asks_with_its_plain_words(self):
+        approval_id = self.request(request_id=11, command=f"{HA}/lock/unlock -d 'lock.front_door'")
+        record = self.records[-1]
+        self.assertEqual((record["status"], record["can_allow"]), ("pending", True))
+        self.assertNotIn("refused", record)
+        self.assertTrue(record["confirmation"]["effect"])
+        self.session.decide(approval_id, "deny")
+        self.assertEqual(self.writer.messages()[-1], {"id": 11, "result": {"decision": "decline"}})
+
+    def test_a_policy_command_is_still_refused(self):
+        self.request(request_id=12, command="cat /usr/share/ha_codex/policy.json > /tmp/x")
+        record = self.records[-1]
+        self.assertEqual((record["status"], record["refused"]), ("refused", ["policy"]))
+        self.assertEqual(self.writer.messages()[-1], {"id": 12, "result": {"decision": "decline"}})
+
+
+class OffByDefaultPlantedEditTests(ConfigFolderTest):
+    """With refuse_categories off, the end-of-exchange scan does not run and nothing is undone."""
+
+    def test_an_added_lock_action_stays(self) -> None:
+        patcher = patch.object(categories, "enforced", return_value=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        run_dir = self.config / ".codex_runs" / "task"
+        run_dir.mkdir(parents=True)
+        text = "- id: '2'\n  actions:\n    - action: lock.unlock\n"
+        path = self.write("automations.yaml", text)
+        self.assertEqual(server.refuse_planted_edits(run_dir, {"added": ["automations.yaml"]}, {}), [])
+        self.assertEqual(path.read_text(encoding="utf-8"), text)
+        self.assertEqual(categories.standing_refused_edits(), [])

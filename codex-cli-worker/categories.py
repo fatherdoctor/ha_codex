@@ -16,7 +16,13 @@ The refused domains and the configuration scan are shared with the
 remote-control check: ``gate_rules.find_refused`` over
 ``policy/refused-domains.json``.
 
-A request in one of them is refused at once: Codex gets "decline", nothing runs,
+These refusals are off unless the app's ``refuse_categories`` option is on.
+By default the list is a house rule Codex keeps (the shipped AGENTS.md), and
+only "policy" is refused here, always: Codex never changes this app's settings,
+permission policy or house rules (``ALWAYS_REFUSED``). The plain-words
+confirmation is shown on every request either way.
+
+With the option on, a request in one of them is refused at once: Codex gets "decline", nothing runs,
 and the chat shows one plain sentence saying why. Lights, switches and scenes are
 the device actions this app is for. The check reads text, so it errs toward
 refusing: a lock named in a command that only reads it is refused too, and Codex
@@ -39,6 +45,11 @@ from typing import Any
 import gate_rules
 
 CONFIG_ROOT = Path("/config")
+OPTIONS_PATH = Path("/data/options.json")
+# The app option that turns the category refusals on. Off by default: the categories are rules in AGENTS.md.
+ENFORCE_OPTION = "refuse_categories"
+# Refused whatever the option says: changes to this app's own settings, permission policy and house rules.
+ALWAYS_REFUSED = ("policy",)
 # Refused lines an exchange left in the configuration that the worker could not undo (see record_refused_edits).
 REFUSED_EDITS_PATH = Path("/data/refused-edits.json")
 
@@ -349,6 +360,22 @@ def standing_refused_edits(config_root: Path | None = None) -> list[dict[str, An
     if len(standing) != len(items):
         _write_refused_edits(standing)
     return standing
+
+
+def enforced() -> bool:
+    """Return whether the category refusals are on (the ``refuse_categories`` option); off when unset or unreadable."""
+    try:
+        options = json.loads(OPTIONS_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(options, dict) and options.get(ENFORCE_OPTION) is True
+
+
+def in_force(found: list[str]) -> list[str]:
+    """Return the refused categories that apply: all of them with the option on, else only ``ALWAYS_REFUSED``."""
+    if enforced():
+        return list(found)
+    return [category for category in found if category in ALWAYS_REFUSED]
 
 
 def refused_categories(kind: str, *, command: str = "", changes: list[dict[str, Any]] | None = None) -> list[str]:

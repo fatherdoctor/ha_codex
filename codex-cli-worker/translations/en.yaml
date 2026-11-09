@@ -44,6 +44,9 @@ configuration:
   local_docs:
     name: Local Home Assistant documentation
     description: Download the official Home Assistant documentation from GitHub into private app storage, about 25 MB, so Codex can search it directly instead of searching the web for documentation. The copy is fetched in the background when the app first starts and again after each Home Assistant update. Turn this off to stop the downloads; Codex then uses web search as before.
+  refuse_categories:
+    name: Refuse actions by category
+    description: Off by default. The house rules (AGENTS.md) tell Codex never to act on locks, the alarm, garage doors and other covers or cameras, never to message anyone and never to publish anything; with this off, Codex keeps those rules itself and every other request still asks first. Turn this on to have the worker also refuse those requests at once and undo configuration edits that add them. Changes to this app's own settings, permission policy and house rules are refused either way.
   HA_TOKEN:
     name: HA_TOKEN
     description: Optional Home Assistant token exposed to Codex subprocesses as the HA_TOKEN environment variable, together with HA_URL, the address above. Codex can then call Home Assistant's API with the rights of the token's user, for example to reload automations or restart Home Assistant.
