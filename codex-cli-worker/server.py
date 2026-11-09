@@ -27,7 +27,7 @@ from datetime import datetime, timedelta, timezone
 from functools import wraps
 from http.cookiejar import LWPCookieJar, LoadError
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, TextIO
 from urllib.parse import urlparse, urlunparse
 
 import requests
@@ -1194,15 +1194,32 @@ WEEKLY_WINDOW_MIN_MINUTES = 7 * 24 * 60
 ESTIMATED_NOTE = "Estimated: read from the Codex status screen because the account's usage read failed."
 
 
-def _read_app_server_reply(proc: subprocess.Popen[str], request_id: int, deadline: float) -> dict[str, Any]:
-    """Return the result of one app-server request, skipping notices; raise on an error, a timeout or EOF."""
-    assert proc.stdout is not None
-    while time.monotonic() < deadline:
-        readable, _, _ = select.select([proc.stdout], [], [], max(0.0, min(0.5, deadline - time.monotonic())))
-        if not readable:
-            continue
-        line = proc.stdout.readline()
-        if not line:
+def _queue_app_server_lines(stream: TextIO, lines: queue.Queue[str | None]) -> None:
+    """Put each line the app-server writes on the queue, then None at end of output."""
+    try:
+        for line in stream:
+            lines.put(line)
+    except (OSError, ValueError):
+        pass
+    finally:
+        lines.put(None)
+
+
+def _read_app_server_reply(lines: queue.Queue[str | None], request_id: int, deadline: float) -> dict[str, Any]:
+    """Return the result of one app-server request, skipping notices; raise on an error, a timeout or EOF.
+
+    The lines come from a reader thread, so several messages that arrive in one chunk are each seen
+    at once (a select on the pipe would not see the ones already buffered by the text reader).
+    """
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            line = lines.get(timeout=remaining)
+        except queue.Empty:
+            break
+        if line is None:
             raise RuntimeError("Codex closed the usage connection")
         message = json.loads(line)
         if message.get("id") != request_id:
@@ -1221,8 +1238,10 @@ def read_codex_rate_limits(codex: str) -> dict[str, Any]:
         stderr=subprocess.DEVNULL, text=True, bufsize=1,
     )
     try:
-        assert proc.stdin is not None
+        assert proc.stdin is not None and proc.stdout is not None
         deadline = time.monotonic() + RATE_LIMITS_TIMEOUT_SECONDS
+        lines: queue.Queue[str | None] = queue.Queue()
+        threading.Thread(target=_queue_app_server_lines, args=(proc.stdout, lines), daemon=True).start()
 
         def send(message: dict[str, Any]) -> None:
             proc.stdin.write(json.dumps(message) + "\n")
@@ -1230,10 +1249,10 @@ def read_codex_rate_limits(codex: str) -> dict[str, Any]:
 
         send({"id": 1, "method": "initialize", "params": {"clientInfo": {
             "name": "home_assistant_worker", "title": "Home Assistant", "version": "1"}}})
-        _read_app_server_reply(proc, 1, deadline)
+        _read_app_server_reply(lines, 1, deadline)
         send({"method": "initialized"})
         send({"id": 2, "method": "account/rateLimits/read", "params": {}})
-        return _read_app_server_reply(proc, 2, deadline)
+        return _read_app_server_reply(lines, 2, deadline)
     finally:
         terminate_and_reap_process(proc, terminate_timeout=3, kill_timeout=2)
 

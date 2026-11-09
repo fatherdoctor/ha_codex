@@ -7,6 +7,7 @@ import os
 import stat
 import sys
 import tempfile
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -96,6 +97,15 @@ class ReadRateLimitsTests(unittest.TestCase):
         """The read skips notices and returns the result of request 2."""
         result = self.read('print(json.dumps({"id": message["id"], "result": reply["result"]}), flush=True)')
         self.assertEqual(result["rateLimits"]["primary"]["windowDurationMins"], 10080)
+
+    def test_a_notice_and_the_result_in_one_write_are_both_read(self) -> None:
+        """Messages that arrive in one chunk are read at once, not left in a buffer until the deadline."""
+        started = time.monotonic()
+        result = self.read(
+            'sys.stdout.write(json.dumps({"method": "account/updated", "params": {}}) + "\\n"'
+            ' + json.dumps({"id": message["id"], "result": reply["result"]}) + "\\n"); sys.stdout.flush()')
+        self.assertEqual(result["rateLimits"]["primary"]["windowDurationMins"], 10080)
+        self.assertLess(time.monotonic() - started, 4)
 
     def test_error_or_silence_raises(self) -> None:
         """An error reply raises with its message; a stand-in that never answers times out."""
