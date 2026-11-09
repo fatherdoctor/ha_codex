@@ -8,8 +8,9 @@ responses never install command rules or grant access for a session.
 from __future__ import annotations
 
 import copy
-import posixpath
 import json
+import posixpath
+import re
 import threading
 import uuid
 from typing import Any, Callable, TextIO
@@ -30,6 +31,27 @@ def touches_protected_path(path: str) -> bool:
     """Return whether a file change path is, or lies inside, a protected policy location."""
     normalized = posixpath.normpath(posixpath.join("/config", str(path)))
     return any(normalized == prefix or normalized.startswith(prefix + "/") for prefix in PROTECTED_PREFIXES)
+
+
+# The same places as a command spells them: quotes, backslashes and doubled slashes are removed first, and the
+# names are matched loosely (a glob such as /usr/share/ha_c* still names the image folder). Best effort on the
+# text, like the file-path check: it cannot see a path a command builds at run time.
+PROTECTED_COMMAND_RES = (
+    re.compile(r"/share/+ha_", re.IGNORECASE),
+    re.compile(r"ha_codex/+(policy|agents|house)", re.IGNORECASE),
+    re.compile(r"codex-home/+[^\s/]*[*?\[]", re.IGNORECASE),
+    re.compile(r"codex-home.*(agents\.md|config\.toml)|(agents\.md|config\.toml).*codex-home", re.IGNORECASE | re.DOTALL),
+    re.compile(r"/data/+options\.json|worker_api_token", re.IGNORECASE),
+)
+
+
+def command_names_protected_path(command: str) -> bool:
+    """Return whether a command's text names a protected policy location by any plain spelling."""
+    text = re.sub(r"[\'\"\\]", "", str(command or ""))
+    text = re.sub(r"/{2,}", "/", text)
+    return any(pattern.search(text) for pattern in PROTECTED_COMMAND_RES)
+
+
 FILE_APPROVAL = "item/fileChange/requestApproval"
 
 
@@ -194,9 +216,13 @@ class AppServerSession:
                 change.get("path") and change.get("diff") and change.get("kind") in {"add", "update", "delete"}
                 for change in record["changes"])
             clipped |= any(change.get("truncated") or change.get("redacted") for change in record["changes"])
-        protected = method != COMMAND_APPROVAL and any(
-            touches_protected_path(change.get("path") or "") or touches_protected_path(change.get("move_path") or "")
-            for change in record["changes"])
+        if method == COMMAND_APPROVAL:
+            # A command allowed once runs outside the sandbox, so it is held to the same protected places.
+            protected = command_names_protected_path(params.get("command") or "")
+        else:
+            protected = any(
+                touches_protected_path(change.get("path") or "") or touches_protected_path(change.get("move_path") or "")
+                for change in record["changes"])
         if clipped:
             record["can_allow"] = False
         if request_kind == "writeStdin":
