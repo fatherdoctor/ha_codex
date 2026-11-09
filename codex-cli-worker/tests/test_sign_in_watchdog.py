@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import threading
 import unittest
@@ -132,6 +133,65 @@ class SignInStateTests(unittest.TestCase):
                 "[t] stderr: ERROR workspace routing discovery unauthorized (401)\n", encoding="utf-8")
             self.assertTrue(server.task_failed_on_sign_in("t1", "Codex finished without a final answer."))
         self.assertEqual(server.sign_in_server_state()["result"], "rejected")
+
+    def test_command_output_in_the_task_log_is_not_a_sign_in_failure(self) -> None:
+        """A 401 that a command printed reaches the log as a stdout event, not as Codex's own error."""
+        tasks = tempfile.TemporaryDirectory()
+        self.addCleanup(tasks.cleanup)
+        event = {"type": "item.completed", "item": {"type": "commandExecution",
+                                                     "aggregated_output": "401: Unauthorized"}}
+        (Path(tasks.name) / "codex.log").write_text(
+            f"[t] stdout: {json.dumps(event)}\n"
+            "[t] worker: No activity from Codex for 600 seconds; stopping the task.\n", encoding="utf-8")
+        with patch.object(server, "get_task_dir", return_value=Path(tasks.name)):
+            self.assertFalse(server.task_failed_on_sign_in("t1", "Codex stopped: no activity."))
+        self.assertEqual(server.sign_in_server_state()["result"], "unchecked")
+
+    def test_task_log_keeps_continuation_lines_of_stderr(self) -> None:
+        tasks = tempfile.TemporaryDirectory()
+        self.addCleanup(tasks.cleanup)
+        (Path(tasks.name) / "codex.log").write_text(
+            "[t] stdout: {}\n[t] stderr: request failed\n  workspace routing discovery unauthorized (401)\n",
+            encoding="utf-8")
+        with patch.object(server, "get_task_dir", return_value=Path(tasks.name)):
+            self.assertTrue(server.task_failed_on_sign_in("t1"))
+        self.assertEqual(server.sign_in_server_state()["result"], "rejected")
+
+    def test_task_refusal_after_a_new_sign_in_is_dropped(self) -> None:
+        """A task started with the old sign-in fails after the user signed in again: the new one stands."""
+        tasks = tempfile.TemporaryDirectory()
+        self.addCleanup(tasks.cleanup)
+        (Path(tasks.name) / "codex.log").write_text(
+            "[t] stderr: ERROR workspace routing discovery unauthorized (401)\n", encoding="utf-8")
+        with patch.object(server, "get_task_dir", return_value=Path(tasks.name)):
+            server.note_task_sign_in("t1")
+            (self.home / "auth.json").write_text('{"tokens": "a newer placeholder"}', encoding="utf-8")
+            self.assertTrue(server.task_failed_on_sign_in("t1"))
+        self.assertEqual(server.sign_in_server_state()["result"], "unchecked")
+        self.assertTrue(server.codex_login_status()["status_ok"])
+
+    def test_task_refusal_for_the_same_sign_in_is_kept(self) -> None:
+        tasks = tempfile.TemporaryDirectory()
+        self.addCleanup(tasks.cleanup)
+        (Path(tasks.name) / "codex.log").write_text(
+            "[t] stderr: ERROR workspace routing discovery unauthorized (401)\n", encoding="utf-8")
+        with patch.object(server, "get_task_dir", return_value=Path(tasks.name)):
+            server.note_task_sign_in("t1")
+            self.assertTrue(server.task_failed_on_sign_in("t1"))
+        self.assertEqual(server.sign_in_server_state()["result"], "rejected")
+
+    def test_usage_answer_after_a_new_sign_in_is_dropped(self) -> None:
+        def read(_codex):
+            (self.home / "auth.json").write_text('{"tokens": "a newer placeholder"}', encoding="utf-8")
+            raise RuntimeError("unexpected status 401 Unauthorized")
+
+        with (patch.object(server, "active_task_id", return_value=None),
+              patch.object(server, "codex_binary_path", return_value=server.CODEX_BINARY),
+              patch.object(server, "read_codex_rate_limits", side_effect=read),
+              patch.object(server, "fetch_codex_usage_status", return_value={"status": "ok", "error": ""})):
+            usage = server.fetch_codex_usage()
+        self.assertEqual(server.sign_in_server_state()["result"], "unchecked")
+        self.assertEqual(usage["source"], "status_screen")
 
     def test_auth_status_page_says_expired(self) -> None:
         server.record_sign_in_check("rejected")

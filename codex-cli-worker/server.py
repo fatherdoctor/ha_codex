@@ -1316,17 +1316,18 @@ def fetch_codex_usage() -> dict[str, Any]:
     codex = codex_binary_path()
     if not codex or not codex_login_status().get("status_ok"):
         return {**fetch_codex_usage_status(), "source": "", "note": "", "rate_limits_error": ""}
+    # The sign-in the read is made with; an answer is dropped if auth.json changes before it comes.
+    signature = _auth_signature()
     try:
         usage = usage_from_rate_limits(read_codex_rate_limits(codex))
         # OpenAI answered with this sign-in, so it is still accepted.
-        record_sign_in_check("ok")
+        record_sign_in_check("ok", signature)
         if usage["five_hour_limit"] or usage["weekly_limit"]:
             return {"status": "ok", "error": "", **usage, "source": "rate_limits", "note": "", "rate_limits_error": ""}
         failure = "the usage read named no 5-hour or weekly window"
     except Exception as exc:  # noqa: BLE001 - any failure falls back to the status screen
         failure = str(exc) or type(exc).__name__
-        if sign_in_rejected(failure):
-            record_sign_in_check("rejected")
+        if sign_in_rejected(failure) and record_sign_in_check("rejected", signature):
             return {**fetch_codex_usage_status(), "source": "", "note": "", "rate_limits_error": redact(failure)}
     fallback = fetch_codex_usage_status()
     note = ESTIMATED_NOTE if fallback.get("status") == "ok" else ""
@@ -3141,10 +3142,22 @@ def _auth_signature() -> tuple[int, int] | None:
     return (info.st_size, info.st_mtime_ns)
 
 
-def record_sign_in_check(result: str) -> None:
-    """Remember what OpenAI said about the current sign-in: "ok" or "rejected"."""
+_SIGNATURE_NOW = object()
+
+
+def record_sign_in_check(result: str, signature: Any = _SIGNATURE_NOW) -> bool:
+    """Remember what OpenAI said about a sign-in: "ok" or "rejected".
+
+    `signature` is the auth.json signature taken when the request that got the answer started.
+    When the file has changed since (the user signed in again or out while it ran), the answer
+    was about the old sign-in and is dropped. Returns whether the answer was kept.
+    """
     with sign_in_check_lock:
-        sign_in_check.update(result=result, auth_signature=_auth_signature(), checked_at=utc_now())
+        current = _auth_signature()
+        if signature is not _SIGNATURE_NOW and signature != current:
+            return False
+        sign_in_check.update(result=result, auth_signature=current, checked_at=utc_now())
+        return True
 
 
 def sign_in_server_state() -> dict[str, str]:
@@ -4225,18 +4238,50 @@ def publish_cancelled_task_outcome(task_id: str, returncode: int | None = None) 
     return True
 
 
-def task_failed_on_sign_in(task_id: str, *texts: Any) -> bool:
-    """Return True, and mark the sign-in refused, when a task failed because OpenAI refused the sign-in.
+# The auth.json signature each task's current exchange started with (see note_task_sign_in).
+task_sign_in_signatures: dict[str, Any] = {}
+TASK_LOG_LINE_RE = re.compile(r"^\[[^\]\n]*\] (\w+): ")
+# Streams in codex.log that can say why Codex failed. `stdout` is left out: it carries Codex's
+# events, including the output of the commands it ran, and a command that printed an HTTP 401
+# from some other service says nothing about the ChatGPT sign-in.
+SIGN_IN_LOG_STREAMS = frozenset({"stderr", "worker"})
 
-    Looks at the failure texts and the end of the task's log, where Codex's stderr lands.
-    """
+
+def note_task_sign_in(task_id: str) -> None:
+    """Note the sign-in a task's exchange starts with, so a later refusal is tied to that sign-in."""
+    with sign_in_check_lock:
+        task_sign_in_signatures[task_id] = _auth_signature()
+
+
+def task_log_error_text(task_id: str) -> str:
+    """Return the stderr and worker lines from the end of the task's log, without Codex's events."""
     try:
         log = (get_task_dir(task_id) / "codex.log").read_text(encoding="utf-8", errors="replace")[-20000:]
     except (OSError, ValueError):
-        log = ""
-    if not any(sign_in_rejected(text) for text in (*texts, log)):
+        return ""
+    kept: list[str] = []
+    stream = ""
+    for line in log.splitlines():
+        match = TASK_LOG_LINE_RE.match(line)
+        if match:
+            stream = match.group(1)
+        # A line without the prefix continues the entry above it (or is cut at the start of the tail).
+        if stream in SIGN_IN_LOG_STREAMS:
+            kept.append(line)
+    return "\n".join(kept)
+
+
+def task_failed_on_sign_in(task_id: str, *texts: Any) -> bool:
+    """Return True, and mark the sign-in refused, when a task failed because OpenAI refused the sign-in.
+
+    Looks at the failure texts and at Codex's stderr and the worker's own lines at the end of the
+    task's log. The refusal is recorded only for the sign-in the exchange started with.
+    """
+    if not any(sign_in_rejected(text) for text in (*texts, task_log_error_text(task_id))):
         return False
-    record_sign_in_check("rejected")
+    with sign_in_check_lock:
+        signature = task_sign_in_signatures.pop(task_id, _SIGNATURE_NOW)
+    record_sign_in_check("rejected", signature)
     return True
 
 
@@ -4396,6 +4441,7 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     before_manifest_path = task_dir / BASELINE_FILE
 
     update_task(task_id, status="running", started_at=utc_now(), error="")
+    note_task_sign_in(task_id)
     verification_capability = verification.begin(task_id)
     data_capability = ha_data.begin(task_id)
     with lock:
