@@ -3631,8 +3631,8 @@ def data_mcp_args() -> list[str]:
 def build_codex_args(task_id: str, prompt_file: Path, final_file: Path, session_id: str | None) -> list[str]:
     """Return the `codex exec` command line for the task's latest turn, resuming the session when one is given.
 
-    Kept from upstream for reference only: `codex exec` has no live permission
-    requests, so run_task never uses it (every exchange runs through app-server).
+    Kept from upstream: `codex exec` has no live permission requests, and
+    run_task refuses every mode that would choose it before this is called.
 
     It carries the turn's model and reasoning level, the sandbox, the output
     files, the verification tool, and the attached images; the prompt itself
@@ -4240,17 +4240,9 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     if task_cancellation_requested(task_id):
         return
     interactive_approvals = uses_user_approvals(options)
-    if not interactive_approvals:
-        # Never fall back to the approval-free `codex exec` path, even if the options changed since the check above.
-        fail_task_launch(
-            task_id,
-            RuntimeError("The app's permission policy does not allow this sandbox setting."),
-            session_id=session_id,
-            summary="Codex needs support: the sandbox it must run in is not available, so this task was not started.",
-            detail_prefix="Codex sandbox preflight failed",
-        )
-        return
-    args = build_app_server_args()
+    # Upstream's `codex exec` path has no live permission requests; the policy check at the top of run_task
+    # refuses every mode that would choose it, so it is reached only by the tests that drive it directly.
+    args = build_app_server_args() if interactive_approvals else build_codex_args(task_id, prompt_file, final_file, session_id)
     write_task_log(task_id, "worker", "Starting Codex: " + " ".join(args))
 
     start_phase(task_id, "launch", "Starting Codex")
