@@ -96,11 +96,17 @@ ESCALATION_VALUES = {"require_escalated", "escalated", "true", "danger-full-acce
 
 @dataclass(frozen=True)
 class Finding:
-    """One refused reference in a text: the 1-based line, why it is refused, and the line as written."""
+    """One refused reference in a text: the 1-based line, why it is refused, and the line as written.
+
+    ``kind`` says what was found, for callers that group findings: the refused
+    domain (``lock``, ``cover``, ``shell_command``, ``mobile_app`` ...),
+    ``message_script``, ``refused_script``, ``runs_on_load`` or ``template``.
+    """
 
     line: int
     reason: str
     text: str
+    kind: str = ""
 
     def key(self) -> tuple[str, str]:
         """Return what identifies the finding regardless of where it moved in the file."""
@@ -176,44 +182,51 @@ def find_refused(text: str, rules: dict[str, Any], refused_scripts: frozenset[st
         if match:
             domain, service = match.groups()
             if domain in refused:
-                findings.append(Finding(number, f"an action on {domain}", line))
+                findings.append(Finding(number, f"an action on {domain}", line, domain))
             elif domain in anything:
-                findings.append(Finding(number, f"an action on {domain}, which can reach anything", line))
+                findings.append(Finding(number, f"an action on {domain}, which can reach anything", line, domain))
             elif domain == "script" and service not in SCRIPT_SERVICES and messages.match(service):
-                findings.append(Finding(number, f"a call to script.{service}, whose name says it sends a message", line))
+                findings.append(Finding(number, f"a call to script.{service}, whose name says it sends a message", line,
+                                        "message_script"))
             elif domain == "script" and service not in SCRIPT_SERVICES and service in refused_scripts:
-                findings.append(Finding(number, f"a call to script.{service}, which itself acts on a refused domain", line))
+                findings.append(Finding(number, f"a call to script.{service}, which itself acts on a refused domain", line,
+                                        "refused_script"))
         else:
             state = STATE_KEY_RE.match(line)
             if state and state.group(1) in refused:
-                findings.append(Finding(number, f"a state for {state.group(1)}, which a scene can set", line))
+                findings.append(Finding(number, f"a state for {state.group(1)}, which a scene can set", line, state.group(1)))
             platform = PLATFORM_RE.match(line)
             if platform and platform.group(1) in platforms:
-                findings.append(Finding(number, f"a {platform.group(1)} platform, which runs on its own once loaded", line))
+                findings.append(Finding(number, f"a {platform.group(1)} platform, which runs on its own once loaded", line,
+                                        "runs_on_load"))
             definition = DEFINITION_KEY_RE.match(line)
             if definition and definition.group(1) in definitions:
-                findings.append(Finding(number, f"a {definition.group(1)} definition, which runs on its own once loaded", line))
+                findings.append(Finding(number, f"a {definition.group(1)} definition, which runs on its own once loaded", line,
+                                        "runs_on_load"))
         if TEMPLATE_ACTION_RE.match(line):
-            findings.append(Finding(number, "a templated action", line))
+            findings.append(Finding(number, "a templated action", line, "template"))
         elif TEMPLATE_TARGET_RE.match(line):
-            findings.append(Finding(number, "a templated entity, device or area", line))
+            findings.append(Finding(number, "a templated entity, device or area", line, "template"))
         device = DEVICE_DOMAIN_RE.match(line)
         if device and device.group(1) in devices:
             allowed = set(devices[device.group(1)])
             for near in lines[max(0, index - DEVICE_WINDOW):index + DEVICE_WINDOW + 1]:
                 kind = DEVICE_TYPE_RE.match(near)
                 if kind and kind.group(1) in allowed:
-                    findings.append(Finding(number, f"a device action on {device.group(1)} ({kind.group(1)})", line))
+                    findings.append(Finding(number, f"a device action on {device.group(1)} ({kind.group(1)})", line,
+                                            device.group(1)))
                     break
         if not match:
             for ref in SCRIPT_REF_RE.findall(line):
                 if ref in SCRIPT_SERVICES or not re.match(r"^\s*-?\s*(?:entity_id\s*:\s*)?[\"']?script\.", line):
                     continue
                 if messages.match(ref):
-                    findings.append(Finding(number, f"a call to script.{ref}, whose name says it sends a message", line))
+                    findings.append(Finding(number, f"a call to script.{ref}, whose name says it sends a message", line,
+                                            "message_script"))
                     break
                 if ref in refused_scripts:
-                    findings.append(Finding(number, f"a call to script.{ref}, which itself acts on a refused domain", line))
+                    findings.append(Finding(number, f"a call to script.{ref}, which itself acts on a refused domain", line,
+                                            "refused_script"))
                     break
     return findings
 
