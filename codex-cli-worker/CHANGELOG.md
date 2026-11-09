@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Sign-in without a terminal: a banner above the chat while the app is not signed in; the one-time code in large letters that stays unchanged until the sign-in ends or is canceled, in a font that tells 0 from O; the QR code served by the app (it no longer depends on `/local/`); a **Cancel** button; a second **Sign in** keeps the running sign-in.
+- Sign-in without a terminal: a banner above the chat while the app is not signed in; the one-time code in large letters that stays unchanged until the sign-in ends or is canceled, in a font that tells 0 from O; the QR code served by the app (it no longer depends on `/local/`); a **Cancel** button; a second **Sign in** keeps the running sign-in. When the worker learns that OpenAI refused the saved sign-in (expired or revoked), the banner says so.
 - New **Signed in** binary sensor in the integration, and a clearer repair when the sign-in has expired or was revoked.
 - New `model_pin` option (default `gpt-6.1-sol`): every run names the pinned model, and a request for any other model is stopped with an error instead of running on it. `none` turns it off.
 - **Pause the assistant** in Settings: new messages are refused and queued ones wait until it is resumed; kept across restarts.

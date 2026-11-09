@@ -24,13 +24,10 @@ SPEC.loader.exec_module(server)
 
 # The format `codex login --device-auth` prints, as the worker's own parser expects it.
 # Replace with the lab capture once it is committed.
-LOGIN_OUTPUT = [
-    "Welcome to Codex\n",
-    "1. Open this link in your browser and sign in to your account\n",
-    "   https://auth.openai.com/codex/device\n",
-    "2. Enter this one-time code (expires in 15 minutes)\n",
-    "   ABCD-EFGH2\n",
-]
+# The real `codex login --device-auth` output of Codex 0.166.0 (ANSI colors kept), with a test code in place of the
+# captured one.
+LOGIN_OUTPUT = (Path(__file__).resolve().parent / "fixtures" / "codex-login-device-auth.txt").read_text(
+    encoding="utf-8").splitlines(keepends=True)
 PIN = "gpt-6.1-sol"
 
 
@@ -74,6 +71,7 @@ class SignInTests(_Worker):
         server.auth_state.update({"login_id": "L1", "status": "starting"})
         server.auth_reader_thread(io.StringIO("".join(lines)))
 
+    @unittest.skipIf(importlib.util.find_spec("qrcode") is None, "the qrcode package is installed in the app image only")
     def test_code_and_link_are_parsed_and_the_qr_is_served_inline(self):
         self.read_login(LOGIN_OUTPUT)
         auth = self.client.get("/auth/status", headers=self.headers).get_json()["auth"]

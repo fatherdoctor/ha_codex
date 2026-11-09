@@ -2717,13 +2717,22 @@ async function loadLogin() {
 function renderLogin(auth) {
   const signedIn = Boolean(auth.codex_login?.status_ok);
   const pending = Boolean(auth.pending);
+  // The worker reports "rejected" when OpenAI refused the saved sign-in (expired or revoked),
+  // although the local sign-in file is still there.
+  const lapsed = !signedIn && auth.codex_login?.server_check === "rejected";
   $("login-status").textContent = signedIn
     ? auth.codex_login.message || "Signed in to ChatGPT."
     : pending
       ? "Signing in. Enter the code below on the ChatGPT sign-in page."
-      : "Not signed in to ChatGPT.";
+      : lapsed
+        ? "The ChatGPT sign-in expired or was revoked. Sign in again."
+        : "Not signed in to ChatGPT.";
+  $("signin-banner-text").textContent = lapsed
+    ? "The assistant's ChatGPT sign-in expired or was revoked. Sign in again."
+    : "The assistant is not signed in to ChatGPT.";
   const key = JSON.stringify([
     signedIn,
+    lapsed,
     pending,
     auth.login_id,
     auth.user_code,
