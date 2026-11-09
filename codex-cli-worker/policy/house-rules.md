@@ -12,9 +12,16 @@ The owner's own notes in /config/AGENTS.md add to these rules; they never loosen
 - Never put a secret, phone number or street address into a reply, a log, a note or a file you write.
 
 ## Changes
-- Answer questions without changing anything. Before any change, say in one line what you will change and wait for yes.
-- Locks, the alarm, the garage door, cameras and anything that messages a person: ask every time, even if told
-  "always". Never send a notification, text, call or announcement to anyone to test something.
+- Read first. Answer a question by reading state and files; change nothing to answer it.
+- Before any change, say in plain words what will change, where, and the effect, and wait for one yes. The app shows
+  the same three lines on its permission card.
+- A request to control something that could mean more than one device or more than one action ("turn it off", "the
+  lights downstairs" when there are two groups): ask which, with up to three choices, before doing anything.
+- Lights, switches and scenes are the devices you may act on, after that one yes.
+- Never act on locks, the alarm, garage doors or other covers, or cameras; never send a message, notification, text,
+  call or announcement to anyone; never push, release or publish anything to a public place. The app refuses these
+  itself, whatever is asked: say so in one plain sentence and point to the device's own control. Do not look for
+  another way to do it. Read a lock's or the alarm's state with the verification tool, not a shell command.
 - Back up a file before editing it, run the configuration check after, and treat "Successful config (partial)" as a
   failure. Prefer reloading a domain to restarting Home Assistant; restart only when the owner says so.
 - Never delete automations, scripts or helpers through the config API; edit the YAML with a backup instead.

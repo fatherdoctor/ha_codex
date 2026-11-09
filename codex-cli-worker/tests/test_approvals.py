@@ -186,19 +186,21 @@ class ApprovalTests(unittest.TestCase):
         self.session.decide(approval_id, "allow")
         self.assertEqual(self.writer.messages()[-1]["result"], {"decision": "accept"})
 
-    def test_change_to_the_protected_policy_can_only_be_denied(self):
-        """A file change to the app's policy, its rules or its settings has no Allow, even when fully shown."""
+    def test_change_to_the_protected_policy_is_refused(self):
+        """A file change to the app's policy, its rules or its settings is refused, even when fully shown."""
         for index, path in enumerate(["/usr/share/ha_codex/policy.json", "/data/codex-home/AGENTS.md", "/data/options.json"]):
             self.session.receive({"method": "item/started", "params": {
                 "threadId": "thread", "turnId": "turn", "item": {"id": "item", "type": "fileChange",
                     "changes": [{"path": path, "kind": {"type": "update"}, "diff": "-old\n+new"}]}}})
             approval_id = self.request(method=FILE_APPROVAL, request_id=index)
             self.assertFalse(self.records[-1]["can_allow"])
+            self.assertEqual(self.records[-1]["status"], "refused")
             self.assertIn("permission policy", self.records[-1]["note"])
             self.assertEqual(self.records[-1]["prompt_kind"], "file_change")
-            with self.assertRaises(ValueError):
+            # Refused at once: Codex already has its decline, and no button can answer it.
+            self.assertEqual(self.writer.messages()[-1], {"id": index, "result": {"decision": "decline"}})
+            with self.assertRaises(LookupError):
                 self.session.decide(approval_id, "allow")
-            self.session.decide(approval_id, "deny")
 
     def test_masked_file_diff_or_path_cannot_be_allowed(self):
         """A masked diff or path cannot hide an edit behind an Allow button."""

@@ -3716,7 +3716,8 @@ def count_new_prompts(counts: Any, records: list[dict[str, Any]], previous: dict
             value = counts.get(kind)
             totals[kind] = value if isinstance(value, int) and value >= 0 else 0
     for item in records:
-        if item["approval_id"] not in previous:
+        # A request refused by the app's rules never reached the person, so it is not a prompt.
+        if item["approval_id"] not in previous and item.get("status") != "refused":
             kind = item.get("prompt_kind") if item.get("prompt_kind") in PROMPT_KINDS else "other"
             totals[kind] += 1
     totals["total"] = sum(totals[kind] for kind in PROMPT_KINDS)

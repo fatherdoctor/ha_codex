@@ -14,6 +14,8 @@ import threading
 import uuid
 from typing import Any, Callable, TextIO
 
+import categories
+
 
 APPROVAL_GONE = "This permission request is no longer waiting for an answer."
 DISPLAY_LIMIT = 32000
@@ -195,11 +197,9 @@ class AppServerSession:
         protected = method != COMMAND_APPROVAL and any(
             touches_protected_path(change.get("path") or "") or touches_protected_path(change.get("move_path") or "")
             for change in record["changes"])
-        if clipped or protected:
+        if clipped:
             record["can_allow"] = False
-        if protected:
-            record["note"] = "This change touches the app's permission policy or settings, which Codex may not edit. Deny it."
-        elif request_kind == "writeStdin":
+        if request_kind == "writeStdin":
             record["note"] = "Input to a running command cannot be allowed here. Deny it and ask for the whole action as one command."
         elif request_kind not in ("", "command"):
             record["note"] = "This kind of request cannot be allowed here. Deny it and ask for a single command or file change."
@@ -207,6 +207,23 @@ class AppServerSession:
             record["note"] = "The complete action is missing, too large, or redacted. Deny it and request an action without hidden details."
         else:
             record["note"] = "Known credentials are hidden. This does not change your sandbox setting or approve future requests."
+        # Refused categories (CX-B5) are read from the action itself, never from Codex's description of it, and are
+        # declined here: nothing reaches the person deciding, and nothing runs.
+        refused = categories.refused_categories(
+            record["kind"], command=str(params.get("command") or ""), changes=record["changes"])
+        if protected and "policy" not in refused:
+            refused.append("policy")
+        record["confirmation"] = categories.confirmation(
+            record["kind"], command=record["command"], cwd=record["cwd"], network=record.get("network", ""),
+            changes=record["changes"], refused=refused)
+        if refused:
+            record.update(status="refused", can_allow=False, refused=refused, note=categories.refusal_text(refused),
+                          decided_by={"policy": "refused categories"})
+            self._records.append(record)
+            self.on_approvals(copy.deepcopy(self._records))
+            self._write({"id": request_id, "result": {"decision": "decline"}})
+            self.on_event({"type": "error", "message": "Refused by this app's rules: " + record["note"]})
+            return
         self._records.append(record)
         self._pending[record["approval_id"]] = request_id
         if method == FILE_APPROVAL:

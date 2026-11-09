@@ -1392,8 +1392,12 @@ function renderApproval(approval, taskId, turnId, active) {
   const pending = active && approval.status === "pending";
   const card = textNode("section", "", "permission-card");
   card.setAttribute("aria-label", "Permission request");
-  const statuses = { allowed: "Allowed once", denied: "Denied", expired: "Expired" };
+  const statuses = { allowed: "Allowed once", denied: "Denied", expired: "Expired", refused: "Not allowed" };
   card.append(textNode("strong", pending ? "Permission needed" : statuses[approval.status] || "Expired"));
+  const plain = approval.confirmation || {};
+  for (const [key, label] of [["what", "What changes"], ["where", "Where"], ["effect", "The effect"]]) {
+    if (plain[key]) card.append(textNode("p", `${label}: ${plain[key]}`, "permission-plain"));
+  }
   if (approval.reason) card.append(textNode("p", approval.reason));
   card.append(textNode("p", approval.scope || "", "permission-scope"));
   if (approval.cwd) card.append(textNode("p", `Working folder: ${approval.cwd}`, "permission-folder"));

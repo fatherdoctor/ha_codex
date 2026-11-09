@@ -8,6 +8,9 @@ Permissions that ask, and only an administrator can answer.
 - **A policy Codex cannot edit.** The policy and the house rules (`AGENTS.md`) live in the image, outside `/config`. The rules are copied into Codex's home folder at every start, replacing any edited copy. A file change that touches the policy, the rules or the app's settings can only be denied.
 - **Approvals need a Home Assistant administrator.** Allow once and Deny are taken only on the Codex page, from the user Home Assistant names for the page, after the worker confirms that user is an active administrator. The integration's API token can no longer answer permission requests. Who answered is recorded on the request.
 - **The integration's actions check the caller.** Every `codex_cli` action refuses a signed-in user who is not an administrator; calls with no user, such as automations, still run. A choice tapped on a notification is taken only from an administrator's phone.
+- **Refused actions.** The worker refuses, without asking anyone, any command or file change that reaches locks, the alarm, garage doors and other covers, cameras, a message to a person, publishing to a public place, or the app's own settings and policy. Codex gets a decline and the chat shows **Not allowed** with a plain reason. Refused requests are not counted as prompts.
+- **Plain words on every request.** Each permission card says what changes, where, and the effect before the command or diff.
+- **House rules.** Read first; one yes after a plain-words summary; ask which device when a request could mean more than one; lights, switches and scenes are the devices Codex acts on.
 - **Prompt counts.** Each conversation counts its permission requests by kind, and the new **Permission prompts** sensor shows the latest conversation's counts.
 
 ## 0.1.81.1

@@ -708,6 +708,9 @@ h1 {
 .permission-scope {
   font-weight: 500;
 }
+.permission-plain {
+  margin: 2px 0;
+}
 .permission-folder,
 .permission-note {
   font-size: 12px;
