@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **A revoked sign-in reads as signed out.** `codex login status` only checks the local file, so a sign-in OpenAI had revoked still showed as signed in while every task failed with a 401. The worker now remembers OpenAI's own answer from the usage read and from task errors: a refused sign-in shows as signed out (with `server_check: rejected`), the sign-in page offers a new sign-in, and the task says the sign-in expired instead of showing a transport error. A new sign-in clears it.
+- **Stall watchdog.** A task now stops with a plain message when Codex sends nothing for 10 minutes (`task_stall_seconds`, 0 turns it off) while no permission request is waiting. After a network drop a turn could otherwise hang with no error until the full task timeout.
+- **Starts at boot.** The app now uses `boot: auto`, so it comes back after a reboot, and with it remote control when it was left on.
+
 - **Usage from the account, not the screen.** The 5-hour and weekly usage sensors now come from Codex's own `account/rateLimits/read`, placed by window length. If that read fails, the old `/status` screen read is used and the sensors say the figures are estimated (`source` and `note` attributes).
 
 ## 0.1.81.1

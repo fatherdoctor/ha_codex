@@ -20,6 +20,9 @@ configuration:
   task_timeout_seconds:
     name: Task timeout
     description: Maximum run time for one Codex task before the worker stops it.
+  task_stall_seconds:
+    name: Stall limit
+    description: Stop a task when Codex sends nothing for this many seconds while no permission request is waiting, for example after a network drop. 0 turns the check off.
   auto_save_lovelace:
     name: Auto-save Lovelace dashboards
     description: After Codex edits storage-mode Lovelace files, save changed dashboards through the Home Assistant WebSocket API so the UI updates in memory.
