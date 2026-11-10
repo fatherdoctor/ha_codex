@@ -318,9 +318,10 @@ let activityTimer = null;
 let usageTimer;
 let usageLoading = false;
 /**
- * Show the quota left for the five-hour and weekly limits as a figure and a
- * bar, with the reset time as a tooltip. A limit without a valid percentage
- * reads Unavailable, and a note says when the quota is stale or missing.
+ * Show the quota used and left for the five-hour and weekly limits as a
+ * figure and a bar of the quota left, with the reset time (weekday, date and
+ * time) as a tooltip. A limit without a valid percentage reads Unavailable,
+ * and a note says when the quota is stale or missing.
  */
 function renderUsage(usage) {
   // An account can lack either limit, and the worker may have no quota data at all.
@@ -336,14 +337,15 @@ function renderUsage(usage) {
         ? Number(raw)
         : NaN;
     const valid = Number.isFinite(percent) && percent >= 0 && percent <= 100;
-    $(id).textContent = valid ? `${percent}% left` : "Unavailable";
+    $(id).textContent = valid
+      ? `${100 - percent}% used, ${percent}% left`
+      : "Unavailable";
     // The bar is as long as the quota left, turns red below 5%, and is an outline without a value.
     const bar = $(`${id}-bar`);
     bar.style.width = valid ? `${percent}%` : "0";
     bar.parentElement.classList.toggle("low", valid && percent < 5);
     bar.parentElement.classList.toggle("unknown", !valid);
-    const reset =
-      dateLabel(usage[`${key}_reset_at`], true) || usage[`${key}_reset`];
+    const reset = resetLabel(usage[`${key}_reset_at`]) || usage[`${key}_reset`];
     $(id).title = bar.parentElement.title =
       valid && reset ? `Resets ${reset}` : "";
   }
@@ -465,6 +467,18 @@ function showError(error) {
  * Format a timestamp in the browser's locale as a day and month, or as a full
  * date and time when full is set. Returns "" for a value that is not a date.
  */
+/** Return a reset time as weekday, date and time in the browser's time zone, or "" when it is not a time. */
+function resetLabel(value) {
+  const date = new Date(value);
+  if (!value || Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString([], {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
 function dateLabel(value, full = false) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";

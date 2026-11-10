@@ -34,7 +34,7 @@ There is no worker URL or API token to enter.
 
 All entities are diagnostic entities on the Codex device.
 
-Reset sensors are `unknown` when no reset time is available. Usage sensors keep the original reset description in `reset_text` and expose a parsed ISO datetime in `reset` when available.
+The 5-hour and weekly limit sensors also give the percentage used in a `used_percent` attribute (`null` when the window is not reported). Reset sensors are `unknown` when no reset time is available. Usage sensors keep the original reset description in `reset_text` and expose a parsed ISO datetime in `reset` when available.
 
 ## Actions
 

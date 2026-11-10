@@ -58,6 +58,11 @@ the task output format and the Assist example are documented upstream and still 
 [docs/upstream-README.md](docs/upstream-README.md) and the
 [integration README](custom_components/codex_cli/README.md).
 
+Codex knows the account's usage limits. Each message tells it the percent used and left in the 5-hour and weekly
+windows, when each resets (date and time in Home Assistant's time zone) and how old that reading is, so you can ask
+"how much Codex quota is left?" in the chat. A reading the worker could not get, or one older than 30 minutes, is
+given to Codex as unknown or stale; it never estimates. The sidebar and the two limit sensors show the same figures.
+
 ## Versions
 
 A fork version is upstream's plus one number: `0.1.81.1` is the first build of this fork on upstream 0.1.81. A
@@ -65,7 +70,7 @@ daily workflow opens one issue when upstream releases something newer.
 
 | Version | Changes |
 |---|---|
-| 0.1.81.2 (unreleased) | No full-access mode; a protected permission policy and house rules in the image; permission answers and the integration's actions only from Home Assistant administrators; a permission-prompt sensor. |
+| 0.1.81.2 (unreleased) | No full-access mode; a protected permission policy and house rules in the image; permission answers and the integration's actions only from Home Assistant administrators; a permission-prompt sensor; Codex told its own usage and reset times. |
 | 0.1.81.1 (unreleased) | Packaged Codex CLI 0.166.0 pinned by checksum, no self-update, base image by digest, links and maintainer for the fork. Details in the [changelog](codex-cli-worker/CHANGELOG.md). |
 
 Planned for the fork's v1, not in this release: category denials (locks, alarm, garage, cameras, messages to people) enforced outside the model, a page for sign-in
