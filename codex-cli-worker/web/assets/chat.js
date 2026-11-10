@@ -463,10 +463,6 @@ function showError(error) {
   $("error").textContent = error ? String(error.message || error) : "";
   $("error").hidden = !error;
 }
-/**
- * Format a timestamp in the browser's locale as a day and month, or as a full
- * date and time when full is set. Returns "" for a value that is not a date.
- */
 /** Return a reset time as weekday, date and time in the browser's time zone, or "" when it is not a time. */
 function resetLabel(value) {
   const date = new Date(value);
@@ -479,6 +475,10 @@ function resetLabel(value) {
     minute: "2-digit",
   });
 }
+/**
+ * Format a timestamp in the browser's locale as a day and month, or as a full
+ * date and time when full is set. Returns "" for a value that is not a date.
+ */
 function dateLabel(value, full = false) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";

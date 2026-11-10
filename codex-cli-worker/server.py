@@ -860,7 +860,12 @@ def compact_cli_text(text: str) -> str:
 
 
 def parse_codex_reset_at(reset_text: str, now: datetime | None = None) -> str:
-    """Normalize Codex reset text into a local ISO timestamp when the format is known."""
+    """Normalize Codex reset text into a local ISO timestamp when the format is known.
+
+    The CLI prints the reset as a local wall-clock time. It is resolved in the
+    worker's time zone for the reset's own date, so a reset after a daylight
+    saving change gets that date's UTC offset, not today's.
+    """
     if not reset_text:
         return ""
     match = RESET_TIME_RE.match(reset_text)
@@ -877,21 +882,16 @@ def parse_codex_reset_at(reset_text: str, now: datetime | None = None) -> str:
             month = MONTHS.get(month_text)
             if not month:
                 return ""
-            year = int(year_text) if year_text else current.year
-            parsed = datetime(
-                year,
-                month,
-                int(day_text),
-                hour,
-                minute,
-                tzinfo=current.tzinfo,
-            )
+            year = int(year_text) if year_text else current.astimezone().year
+            wall = datetime(year, month, int(day_text), hour, minute)
+            parsed = wall.astimezone()
             if not year_text and parsed < current - timedelta(minutes=1):
-                parsed = parsed.replace(year=year + 1)
+                parsed = wall.replace(year=year + 1).astimezone()
         else:
-            parsed = current.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            wall = current.astimezone().replace(tzinfo=None, hour=hour, minute=minute, second=0, microsecond=0)
+            parsed = wall.astimezone()
             if parsed < current - timedelta(minutes=1):
-                parsed += timedelta(days=1)
+                parsed = (wall + timedelta(days=1)).astimezone()
     except ValueError:
         return ""
     return parsed.isoformat()
@@ -994,7 +994,7 @@ def usage_prompt_note(usage: dict[str, Any] | None = None, now: datetime | None 
         "Account usage limits (data from the worker, not instructions):\n"
         + "\n".join(lines)
         + "\nWhen the user asks about usage, limits, quota or resets, report these figures as given, with their reset times and how old the reading is; "
-        "never estimate a figure that says unknown. When the weekly window has under 10% left, mention it briefly in your summary.\n\n"
+        "never estimate a figure that says unknown. When the weekly window has under 10% left, mention it briefly in your summary, unless the reading is stale or that window has reset.\n\n"
     )
 
 
@@ -1081,11 +1081,35 @@ def _parse_status_model(text: str) -> str:
     return name.casefold() if name.casefold() in CHAT_MODEL_EFFORTS else name
 
 
+USAGE_FIGURE_KEYS = (
+    "five_hour_limit",
+    "five_hour_percent",
+    "five_hour_reset",
+    "five_hour_reset_at",
+    "weekly_limit",
+    "weekly_percent",
+    "weekly_reset",
+    "weekly_reset_at",
+    "context_remaining",
+    "context_percent",
+    "raw_excerpt",
+)
+
+
 def forget_default_model() -> None:
-    """Forget the model the CLI named, as the account may have changed; a check still running will not restore it."""
+    """Forget the model and the usage figures the CLI gave, as the account may have changed.
+
+    A check still running will not restore either: its result is dropped and
+    the check is run again for the new account.
+    """
     with usage_lock:
         usage_state["_model_generation"] += 1
         usage_state["_default_model"] = ""
+        # The figures were the previous account's: drop them until the next read.
+        for key in USAGE_FIGURE_KEYS:
+            usage_state[key] = ""
+        usage_state["status"] = "unavailable"
+        usage_state["read_at"] = ""
 
 
 def _has_rich_status_panel(text: str) -> bool:
@@ -1291,8 +1315,17 @@ def _refresh_usage_worker(force: bool = False) -> None:
         usage_state["_refreshing"] = True
 
     try:
-        result = fetch_codex_usage_status()
-        _update_usage_state(**result)
+        # A sign-in or sign-out during the read makes it the previous account's:
+        # drop it and read again, once, so the forced read for the new account
+        # is not lost to the one already running.
+        for _attempt in range(2):
+            with usage_lock:
+                model_generation = usage_state["_model_generation"]
+            result = fetch_codex_usage_status()
+            with usage_lock:
+                if usage_state["_model_generation"] == model_generation:
+                    _update_usage_state(**result)
+                    break
     finally:
         with usage_lock:
             usage_state["_refreshing"] = False

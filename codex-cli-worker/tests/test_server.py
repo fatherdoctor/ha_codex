@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import types
 import unittest
 from datetime import datetime, timezone
@@ -1363,10 +1364,6 @@ class WorkerNoteTests(unittest.TestCase):
         )
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class UsagePromptTests(unittest.TestCase):
     """The account's usage limits as Codex reads them in its instructions."""
 
@@ -1454,3 +1451,78 @@ class UsagePromptTests(unittest.TestCase):
             self.assertEqual(server.usage_state["read_at"], "2026-11-10T01:00:00+00:00")
             server._update_usage_state(status="error", five_hour_percent="")
             self.assertEqual(server.usage_state["read_at"], "")
+
+    def test_read_after_an_account_change_is_not_the_previous_accounts(self) -> None:
+        """A sign-in or sign-out clears the figures, and a read that was running across it is dropped and run again."""
+        calls: list[int] = []
+
+        def fetch() -> dict[str, Any]:
+            calls.append(1)
+            if len(calls) == 1:
+                server.forget_default_model()  # the account changes while the first read runs
+                return {"status": "ok", "error": "", "weekly_percent": "11"}
+            return {"status": "ok", "error": "", "weekly_percent": "77"}
+
+        with patch.dict(server.usage_state, status="ok", read_at="2026-11-10T01:00:00+00:00", weekly_percent="11"):
+            server.forget_default_model()
+            self.assertEqual(server.usage_state["weekly_percent"], "")
+            self.assertEqual(server.usage_state["read_at"], "")
+            self.assertIn("Usage figures: unknown", server.usage_prompt_note(now=self.NOW, tz=self.CHICAGO))
+            with patch.object(server, "fetch_codex_usage_status", fetch):
+                server._refresh_usage_worker(force=True)
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(server.usage_state["weekly_percent"], "77")
+            self.assertFalse(server.usage_state["_refreshing"])
+
+    def test_low_weekly_note_is_not_asked_for_a_stale_or_reset_window(self) -> None:
+        """The instruction to mention a low weekly window leaves out a stale reading and a window that has reset."""
+        self.assertIn("unless the reading is stale or that window has reset", self.note(weekly_percent="5"))
+
+
+class ResetTimeZoneTests(unittest.TestCase):
+    """Reset times the CLI prints, resolved in the worker's own zone for the reset's date."""
+
+    def setUp(self) -> None:
+        old = os.environ.get("TZ")
+
+        def restore() -> None:
+            if old is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = old
+            time.tzset()
+
+        self.addCleanup(restore)
+        os.environ["TZ"] = "America/Chicago"
+        time.tzset()
+
+    def check(self, now: str, printed: str, stored: str, said: str) -> None:
+        """Parse a reset printed at now, then check the stored time and what Codex is told."""
+        current = datetime.fromisoformat(now)
+        key = "weekly" if " on " in printed else "five_hour"
+        reset_at = server.parse_codex_reset_at(printed, current)
+        self.assertEqual(reset_at, stored)
+        note = server.usage_prompt_note(
+            {"status": "ok", "read_at": current.isoformat(), f"{key}_percent": "50", f"{key}_reset_at": reset_at},
+            now=current,
+        )
+        self.assertIn(f"resets {said}.", note)
+
+    def test_weekly_reset_after_daylight_saving_ends(self) -> None:
+        """Read in October in daylight time, a reset printed for November is standard time at the same clock time."""
+        self.check("2026-10-30T10:00:00-05:00", "12:00 on 4 Nov", "2026-11-04T12:00:00-06:00",
+                   "Wednesday 2026-11-04 12:00 CST (UTC-06:00)")
+
+    def test_weekly_reset_after_daylight_saving_starts(self) -> None:
+        """Read in March in standard time, a reset printed for after the change is daylight time at the same clock time."""
+        self.check("2026-03-06T10:00:00-06:00", "12:00 on 11 Mar", "2026-03-11T12:00:00-05:00",
+                   "Wednesday 2026-03-11 12:00 CDT (UTC-05:00)")
+
+    def test_time_only_reset_past_the_change_that_night(self) -> None:
+        """A time-only reset that falls the next day, after the clocks go back, keeps the printed clock time."""
+        self.check("2026-10-31T23:30:00-05:00", "03:30", "2026-11-01T03:30:00-06:00",
+                   "Sunday 2026-11-01 03:30 CST (UTC-06:00)")
+
+
+if __name__ == "__main__":
+    unittest.main()
