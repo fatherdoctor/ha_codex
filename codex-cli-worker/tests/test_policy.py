@@ -118,6 +118,7 @@ class ProtectedPolicyTests(unittest.TestCase):
             patch.object(server, "tasks", {"task": {"task_id": "task", "status": "queued", "turns": []}}),
             patch.object(server, "running_processes", {}),
             patch.object(server, "get_run_dir", return_value=self.root / "run"),
+            patch.object(server, "get_task_dir", side_effect=lambda task_id: self.root / "tasks" / task_id),
             patch.object(server, "save_task_index"),
             patch.object(server, "write_task_log"),
             patch.object(server, "record_baseline", return_value={}) as baseline,
