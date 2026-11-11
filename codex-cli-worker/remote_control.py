@@ -1,8 +1,8 @@
 """OpenAI's remote control for Codex, run by the app as one supervised foreground process.
 
 The ChatGPT app can drive Codex on this machine through OpenAI's relay
-(``codex remote-control``). The app runs it in the foreground
-(``--no-daemon``), restarts it when it exits, and shows its state, its machine
+(``codex app-server --remote-control``). The app runs it in the foreground
+with its own private Unix control socket, restarts it when it exits, and shows its state, its machine
 name and its pairing code on the app page. Nothing starts until the owner turns
 it on, and the choice survives restarts.
 
@@ -31,6 +31,7 @@ import json
 import os
 import re
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -43,7 +44,9 @@ from pathlib import Path
 from typing import Any
 
 import gate_rules
+import websocket
 
+CONTROL_FOLDER = "remote_control_control"
 DEFAULT_NAME = "Home Assistant"
 FALLBACK_NAME = "Home-Assistant"
 MAX_NAME_BYTES = 63
@@ -65,7 +68,6 @@ BACKOFF_CAP = 300.0
 # A process that ran this long before exiting counts as healthy: the next restart starts the backoff again.
 HEALTHY_RUN = 600.0
 STOP_GRACE = 10.0
-PAIR_TIMEOUT = 60.0
 LOG_LINES = 40
 # Keep the chat path's explicitly configured Core API pair. Supervisor tokens
 # and per-turn MCP capabilities never belong to a relay process.
@@ -588,6 +590,85 @@ class ConfigWatch:
 
 
 
+class ControlError(Exception):
+    """An unavailable or unsupported control operation; never include a raw relay response."""
+
+
+class ControlClient:
+    """Codex 0.166 JSON-RPC over WebSocket on this process's private Unix socket.
+
+    Upstream rust-v0.166.0: app-server-daemon/src/client.rs:63-140 and
+    remote_control_client.rs:60-140. Initialize experimentalApi, then use the
+    same ephemeral enable and manual-code request as the supported CLI client.
+    """
+
+    def __init__(self, path: Path, connector: Callable[..., Any] | None = None) -> None:
+        self.path = path
+        self.connector = connector or self._connect
+
+    @staticmethod
+    def _connect(path: Path) -> Any:
+        raw = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        raw.settimeout(1.0)
+        try:
+            raw.connect(str(path))
+            return websocket.create_connection("ws://localhost/", socket=raw, timeout=1.0,
+                                               suppress_origin=True)
+        except Exception:
+            raw.close()
+            raise
+
+    def _request(self, method: str, params: dict[str, Any], timeout: float,
+                 cancelled: Callable[[], bool]) -> dict[str, Any]:
+        transport = None
+        deadline = time.monotonic() + timeout
+        try:
+            if cancelled():
+                raise ControlError("Remote control stopped during this request.")
+            transport = self.connector(self.path)
+            transport.settimeout(1.0)
+
+            def request(identifier: int, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+                transport.send(json.dumps({"id": identifier, "method": name, "params": arguments}))
+                while time.monotonic() < deadline and not cancelled():
+                    try:
+                        frame = transport.recv()
+                    except (TimeoutError, websocket.WebSocketTimeoutException):
+                        continue
+                    if not frame or len(frame) > 1024 * 1024:
+                        raise ControlError("The Codex control connection closed or returned an oversized response.")
+                    message = json.loads(frame)
+                    if not isinstance(message, dict) or message.get("id") != identifier:
+                        continue  # Status notifications are not replies to this request.
+                    if "error" in message or not isinstance(message.get("result"), dict):
+                        raise ControlError("This Codex control request was refused or is unsupported.")
+                    return message["result"]
+                raise ControlError("The Codex control request timed out or remote control stopped.")
+
+            request(1, "initialize", {"clientInfo": {"name": "ha_codex", "version": "0.166.0"},
+                                      "capabilities": {"experimentalApi": True}})
+            transport.send(json.dumps({"method": "initialized"}))
+            return request(2, method, params)
+        except ControlError:
+            raise
+        except Exception:
+            raise ControlError("Could not reach this process's Codex control socket.") from None
+        finally:
+            if transport is not None:
+                transport.close(timeout=0)
+
+    def enable(self, cancelled: Callable[[], bool] = lambda: False) -> dict[str, Any]:
+        return self._request("remoteControl/enable", {"ephemeral": True}, 5.0, cancelled)
+
+    def status(self, cancelled: Callable[[], bool] = lambda: False) -> dict[str, Any]:
+        return self._request("remoteControl/status/read", {}, 5.0, cancelled)
+
+    def pair(self, cancelled: Callable[[], bool] = lambda: False) -> dict[str, Any]:
+        reply = self._request("remoteControl/pairing/start", {"manualCode": True}, 35.0, cancelled)
+        # The opaque pairingCode is for QR clients, not a code a person can type.
+        return {"manualPairingCode": reply.get("manualPairingCode")}
+
+
 class Supervisor:
     """Own the one remote-control process: start, stop, restart with backoff, and report its state."""
 
@@ -603,7 +684,10 @@ class Supervisor:
         clock: Callable[[], float] = time.monotonic,
         watch: ConfigWatch | None = None,
         watch_interval: float = WATCH_INTERVAL,
+        control_factory: Callable[[Path], Any] = ControlClient,
     ) -> None:
+        self.control_factory = control_factory
+        self.control_socket: Path | None = None
         self.codex_binary = codex_binary
         self.state_path = state_path
         self.env_factory = env_factory
@@ -738,23 +822,28 @@ class Supervisor:
     def pair(self) -> tuple[bool, dict[str, Any]]:
         """Ask Codex for a new pairing code, for when the ChatGPT app has lost this machine."""
         with self.lock:
-            running = self.proc is not None and self.proc.poll() is None
-        if not running:
+            proc, path = self.proc, self.control_socket
+            self.status["pairing_code"] = ""
+        if not self.enabled():
             return False, {**self.snapshot(), "error": "Turn remote control on first."}
-        name = machine_name(self.name_factory())
+        if proc is None or proc.poll() is not None or path is None:
+            return False, {**self.snapshot(), "error": "Remote control is still starting or reconnecting. Wait for the connected state, then try again."}
+        cancelled = lambda: self.wake.is_set() or proc.poll() is not None or not self.enabled()
         try:
-            result = self.run(self._command("remote-control", "pair"),
-                              env=remote_env(self.env_factory()), cwd="/config", capture_output=True, text=True,
-                              timeout=PAIR_TIMEOUT, check=False)
-        except (OSError, subprocess.SubprocessError) as exc:
-            return False, {**self.snapshot(), "error": f"Codex could not start pairing: {exc}"}
-        output = f"{result.stdout or ''}\n{result.stderr or ''}"
-        code = ""
-        for line in output.splitlines():
-            code = self._parse(line) or code
-        if not code:
-            return False, {**self.snapshot(), "error": "Codex gave no pairing code. Its last lines are in the log below."}
-        return True, self.snapshot()
+            reply = self.control_factory(path).pair(cancelled=cancelled)
+            code = reply.get("manualPairingCode")
+            if not isinstance(code, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{3,63}", code):
+                raise ControlError("Codex returned no code that can be typed in the ChatGPT app.")
+            with self.lock:
+                if self.proc is not proc or self.control_socket != path or cancelled():
+                    raise ControlError("Remote control restarted or stopped while pairing.")
+                self.status["pairing_code"] = code
+                self.log.append("A new pairing code is ready on this page.")
+            return True, self.snapshot()
+        except Exception:
+            # Never echo a raw RPC error: it may contain a code or relay credential.
+            return False, {**self.snapshot(), "error": "Codex could not provide a new pairing code. "
+                           "Check that remote control is connected, then try again."}
 
     # Process ------------------------------------------------------------------------------------
 
@@ -808,20 +897,37 @@ class Supervisor:
                 self.log.append("Managed policy: a disallowed relay full-access request may be downgraded to read-only; "
                                 "the relay does not expose every thread warning here.")
             started = self.clock()
+            private = None
+            done = threading.Event()
+            monitor = None
             try:
-                proc = self.popen(self._command("remote-control", "--no-daemon"),
-                                  env=remote_env(self.env_factory()), cwd="/config", stdin=subprocess.DEVNULL,
-                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                                  start_new_session=True)
+                # The fixed parent is masked in every real Codex sandbox by codex-bwrap.
+                control_parent = self.state_path.parent / CONTROL_FOLDER
+                control_parent.mkdir(mode=0o700, exist_ok=True)
+                info = control_parent.lstat()
+                if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
+                        or stat.S_IMODE(info.st_mode) != 0o700):
+                    raise OSError("The private control folder must be owned by the worker with mode 0700.")
+                private = tempfile.TemporaryDirectory(prefix="rc-", dir=control_parent)
+                path = Path(private.name) / "rc.sock"
+                with self.lock:
+                    proc = self.popen(self._command("app-server", "--listen", f"unix://{path}", "--remote-control"),
+                                      env=remote_env(self.env_factory()), cwd="/config", stdin=subprocess.DEVNULL,
+                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                      start_new_session=True)
+                    self.proc = proc
+                    self.control_socket = path
+                    self.status["pairing_code"] = ""
             except OSError as exc:
                 self.set_status("error", f"Remote control could not start: {exc}")
                 proc = None
             if proc is not None:
-                with self.lock:
-                    self.proc = proc
                 self.set_status("connecting", (f"Connecting as “{name}”…" if self._name_supported else
                                                "Connecting without a custom machine name…"),
                                 machine_name=name if self._name_supported else "")
+                monitor = threading.Thread(target=self._monitor_control, args=(proc, path, done),
+                                           name="remote-control-status", daemon=True)
+                monitor.start()
                 namespace_error = False
                 for line in iter(proc.stdout.readline, ""):
                     if line.lstrip().startswith("bwrap:") and re.search(
@@ -829,14 +935,21 @@ class Supervisor:
                         namespace_error = True
                     self._parse(line)
                 code = proc.wait()
+                done.set()
+                monitor.join(timeout=3.0)
                 with self.lock:
                     self.proc = None
+                    self.control_socket = None
+                    self.status["pairing_code"] = ""
+                private.cleanup()
                 if self.wake.is_set() or not self.enabled():
                     return
                 if namespace_error and self._name_supported:
                     self._name_failed()
                     continue  # One plain launch; no namespace exit-1/backoff loop.
                 self.set_status("error", f"Remote control stopped (exit code {code}); restarting.")
+            if proc is None and private is not None:
+                private.cleanup()
             if self.clock() - started >= HEALTHY_RUN:
                 backoff = BACKOFF_START
             with self.lock:
@@ -844,6 +957,33 @@ class Supervisor:
             if self.wake.wait(backoff):
                 return
             backoff = min(backoff * 2, BACKOFF_CAP)
+
+    def _monitor_control(self, proc: Any, path: Path, done: threading.Event) -> None:
+        """Read readiness from the owned server, not human-oriented stdout or a daemon socket."""
+        cancelled = lambda: done.is_set() or self.wake.is_set() or proc.poll() is not None or not self.enabled()
+        enabled = False
+        while not cancelled():
+            try:
+                client = self.control_factory(path)
+                reply = client.status(cancelled=cancelled) if enabled else client.enable(cancelled=cancelled)
+                enabled = True
+                with self.lock:
+                    if cancelled() or self.proc is not proc:
+                        return
+                    state = reply.get("status")
+                    if state == "connected":
+                        name = machine_name(reply.get("serverName") or self.name_factory())
+                        self.set_status("ready", f"Available in the ChatGPT app as “{name}”.", machine_name=name)
+                    elif state == "connecting":
+                        self.set_status("connecting", "Connecting remote control…")
+                    else:
+                        enabled = False
+                        self.set_status("error", "Codex remote control is not connected. Check sign-in and try again.")
+            except Exception:
+                if not cancelled():
+                    self.set_status("connecting", "Waiting for this process's Codex control socket…")
+            if done.wait(1.0 if not enabled else 5.0):
+                return
 
     def _terminate(self, proc: Any) -> None:
         """End the process group: Ctrl-C first, then terminate, then kill."""
@@ -888,7 +1028,7 @@ class Supervisor:
         code_match = PAIRING_RE.search(line)
         code = code_match.group(1) if code_match else ""
         with self.lock:
-            self.log.append(redact(line, keep=code))
+            self.log.append("A pairing code is ready on this page." if code else redact(line))
         if code:
             self.set_status("pairing", "Enter this pairing code in the ChatGPT app.", pairing_code=code)
             return code

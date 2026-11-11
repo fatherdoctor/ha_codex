@@ -183,7 +183,7 @@ class FurtherRegressions(unittest.TestCase):
             self.assertEqual(sup.snapshot()['name_state'], 'private-uts')
 
     def test_real_launch_namespace_failure_does_not_restart_in_name_loop(self):
-        from test_remote_control import FakeProc, wait_for
+        from test_remote_control import FakeControl, FakeProc, wait_for
         with tempfile.TemporaryDirectory() as tmp:
             commands = []; procs = []
             def popen(cmd, **kw):
@@ -193,11 +193,12 @@ class FurtherRegressions(unittest.TestCase):
                     proc.exit(1)
                 return proc
             sup = rc.Supervisor('codex', Path(tmp)/'state', dict, lambda:'Home Assistant', gate=lambda:'',
-                popen=popen, run=lambda cmd, **kw:subprocess.CompletedProcess(cmd, 0, '', ''))
+                popen=popen, control_factory=FakeControl, run=lambda cmd, **kw:subprocess.CompletedProcess(cmd, 0, '', ''))
             try:
                 sup.start()
                 self.assertTrue(wait_for(lambda:len(commands) == 2))
-                self.assertEqual(commands[1], ['codex','remote-control','--no-daemon'])
+                self.assertEqual(commands[1][:3], ['codex','app-server','--listen'])
+                self.assertEqual(commands[1][-1], '--remote-control')
                 self.assertEqual(sup.snapshot()['restarts'], 0)
                 self.assertEqual(sup.snapshot()['name_state'], 'namespace-unavailable')
             finally:
