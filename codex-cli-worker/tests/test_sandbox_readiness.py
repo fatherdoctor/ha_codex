@@ -142,11 +142,13 @@ class CodexSandboxReadinessTests(unittest.TestCase):
         self.assertTrue(result["proc_probe"]["skipped"])
         self.assertIn("namespace denied", result["message"])
 
-    def test_danger_mode_does_not_run_any_probe(self) -> None:
-        """In danger-full-access mode the sandbox is not required and no probe runs."""
+    def test_danger_mode_needs_support_and_runs_no_probe(self) -> None:
+        """danger-full-access is refused by the protected policy: not ready, "needs support", and no probe runs."""
         result = self.readiness([], "danger-full-access")
-        self.assertTrue(result["ready"])
-        self.assertFalse(result["required"])
+        self.assertFalse(result["ready"])
+        self.assertTrue(result["required"])
+        self.assertEqual(result["state"], "needs_support")
+        self.assertIn("not allowed", result["message"])
 
 
 if __name__ == "__main__":
