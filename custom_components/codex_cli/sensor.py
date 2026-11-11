@@ -190,6 +190,14 @@ class CodexAuthSensor(_CodexSensor):
         }
 
 
+def _used_percent(left: Any) -> int | None:
+    """Return the percentage used for a percentage left of 0 to 100, or None for anything else."""
+    text = str(left if left is not None else "").strip()
+    if not text.isdigit() or int(text) > 100:
+        return None
+    return 100 - int(text)
+
+
 class CodexFiveHourLimitSensor(_CodexSensor):
     """Show Codex 5-hour usage line from interactive status."""
 
@@ -213,11 +221,12 @@ class CodexFiveHourLimitSensor(_CodexSensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the usage refresh state, the 5-hour, weekly and context figures, and the raw usage excerpt."""
+        """Return the usage refresh state, the 5-hour percentage used, the 5-hour, weekly and context figures, and the raw usage excerpt."""
         usage = (self.coordinator.data or {}).get("codex_usage") or {}
         return {
             "usage_status": usage.get("status"),
             "reported": bool(usage.get("five_hour_percent")),
+            "used_percent": _used_percent(usage.get("five_hour_percent")),
             "updated_at": usage.get("updated_at"),
             "error": usage.get("error"),
             "limit": usage.get("five_hour_limit"),
@@ -309,11 +318,12 @@ class CodexWeeklyLimitSensor(_CodexSensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the usage refresh state, the weekly, 5-hour and context figures, and the raw usage excerpt."""
+        """Return the usage refresh state, the weekly percentage used, the weekly, 5-hour and context figures, and the raw usage excerpt."""
         usage = (self.coordinator.data or {}).get("codex_usage") or {}
         return {
             "usage_status": usage.get("status"),
             "reported": bool(usage.get("weekly_percent")),
+            "used_percent": _used_percent(usage.get("weekly_percent")),
             "updated_at": usage.get("updated_at"),
             "error": usage.get("error"),
             "limit": usage.get("weekly_limit"),

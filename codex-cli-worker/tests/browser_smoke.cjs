@@ -69,7 +69,7 @@ function pngBuffer(width = 8, height = 6) {
     );
     // The quota left is a bar next to its figure: green, and red below 5%.
     await page.waitForFunction(
-      () => document.querySelector("#usage-weekly").textContent === "3% left",
+      () => document.querySelector("#usage-weekly").textContent === "97% used, 3% left",
     );
     assert.deepEqual(
       await page.evaluate(() =>
@@ -85,9 +85,9 @@ function pngBuffer(width = 8, height = 6) {
         }),
       ),
       [
-        ["64% left", "64%", "usage-bar", "rgb(12, 163, 12)", "Resets 19:20"],
+        ["36% used, 64% left", "64%", "usage-bar", "rgb(12, 163, 12)", "Resets 19:20"],
         [
-          "3% left",
+          "97% used, 3% left",
           "3%",
           "usage-bar low",
           "rgb(208, 59, 59)",
@@ -116,12 +116,25 @@ function pngBuffer(width = 8, height = 6) {
     const missing = ["Unavailable", "0px", "usage-bar unknown"];
     assert.deepEqual(await quotaRows({ status: "ok", weekly_percent: "87" }), [
       missing,
-      ["87% left", "87%", "usage-bar"],
+      ["13% used, 87% left", "87%", "usage-bar"],
     ]);
     assert.equal(await page.locator("#usage-note").isHidden(), true);
     assert.deepEqual(
       await quotaRows({ status: "ok", five_hour_percent: "2", weekly_percent: "" }),
-      [["2% left", "2%", "usage-bar low"], missing],
+      [["98% used, 2% left", "2%", "usage-bar low"], missing],
+    );
+    // A reset the worker turned into a time is shown with its weekday.
+    assert.match(
+      await page.evaluate(() => {
+        renderUsage({
+          status: "ok",
+          weekly_percent: "40",
+          weekly_reset: "12:00 on 14 Nov",
+          weekly_reset_at: "2026-11-14T12:00:00Z",
+        });
+        return document.getElementById("usage-weekly").title;
+      }),
+      /^Resets Sat, Nov 1[45], \d{1,2}:00\s?[AP]M$/,
     );
     // Neither limit, values that are not percentages, and no quota data at all.
     for (const usage of [
@@ -138,7 +151,7 @@ function pngBuffer(width = 8, height = 6) {
     }
     await page.evaluate(() => loadUsage());
     await page.waitForFunction(
-      () => document.querySelector("#usage-weekly").textContent === "3% left",
+      () => document.querySelector("#usage-weekly").textContent === "97% used, 3% left",
     );
     // The line about the Codex integration is hidden while the integration is
     // connected, and says in one sentence what to do in every other state.

@@ -225,6 +225,16 @@ class UsageSensorTests(unittest.TestCase):
         )
         self.assertIs(weekly_reset.extra_state_attributes["reported"], True)
 
+    def test_limit_sensors_give_the_percentage_used(self) -> None:
+        """Each limit sensor gives the percentage used beside the percentage left, and None when the left figure is not 0 to 100."""
+        five_hour_limit, _, weekly_limit, _ = _usage_sensors({"status": "ok", "five_hour_percent": "64", "weekly_percent": "0"})
+        self.assertEqual(five_hour_limit.extra_state_attributes["used_percent"], 36)
+        self.assertEqual(weekly_limit.extra_state_attributes["used_percent"], 100)
+        for left in ("", None, "n/a", "140", "-1", "7.5"):
+            five_hour_limit, _, weekly_limit, _ = _usage_sensors({"five_hour_percent": left, "weekly_percent": left})
+            self.assertIsNone(five_hour_limit.extra_state_attributes["used_percent"], left)
+            self.assertIsNone(weekly_limit.extra_state_attributes["used_percent"], left)
+
 
 class LastTaskSensorTests(unittest.TestCase):
     """State and attributes of the last-task sensor."""

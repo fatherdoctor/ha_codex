@@ -398,6 +398,8 @@ The worker disables Codex update checks at startup. Codex CLI is installed and v
 
 A missing window has an `unknown` sensor state and a `reported: false` attribute. The existing 5-hour entities and worker fields remain in place so upgrades do not break automations on accounts that still report or reference them. Diagnostic excerpts remove account, email, and session identifiers before being exposed.
 
+From **0.1.81.2**, Codex is told the same figures at the start of each message: the percent used and left in each window, each reset as a weekday, date and time in Home Assistant's time zone, and when the figures were read. The payload's `read_at` is the time of the last successful reading; a check deferred by a running task keeps it. A failed reading or a missing window reaches Codex as unknown, and a reading older than 30 minutes as stale, so it does not guess. The raw excerpt is not passed to Codex. The worker reads the quota every few minutes while idle and again when each task ends; it cannot read it while a task runs, because the check starts a second Codex session.
+
 ## Notifications
 
 Leave `notify_service` unset or empty to use Home Assistant persistent notifications for task completion, failures, questions, and permission requests. If you want push notifications, set it to a Home Assistant notify service such as `notify.mobile_app_your_phone`.
@@ -428,7 +430,7 @@ API: `POST /tasks/<task_id>/reply` and `POST /tasks/<task_id>/continue` accept `
 
 The web UI lists recent chats in a resizable sidebar and opens their messages on the right. On mobile, the sidebar becomes a drawer. Select a saved chat and send a message to continue, or choose **New chat** for a fresh session. Settings contains account controls and workspace instructions.
 
-Below **Home Assistant workspace**, the sidebar shows how much of the account's 5-hour and 7-day quota is left. From **0.1.67**, each has a bar next to the percentage. The filled part is the quota left: green, and red when less than 5% is left. Hover over a bar to see when the quota resets. The worker checks the quota every few minutes, and not while a task is running. Until it has a value, the bar is an empty outline.
+Below **Home Assistant workspace**, the sidebar shows how much of the account's 5-hour and 7-day quota is used and left (from **0.1.81.2** both, for example "36% used, 64% left"). From **0.1.67**, each has a bar next to the percentage. The filled part is the quota left: green, and red when less than 5% is left. Hover over a bar to see when the quota resets. The worker checks the quota every few minutes, and not while a task is running. Until it has a value, the bar is an empty outline.
 
 From **0.1.54**, the web UI reopens the chat you left open the next time it loads, for example after the Home Assistant app on a phone reloads the panel. Choosing **New chat** is remembered as well. The chat id is kept in the browser's local storage under the Home Assistant origin, so it applies to that browser only. Opening the chat requests it from the worker as usual, but the worker does not record which chat you had open. If the remembered chat was deleted from another tab or device, the UI starts with a new chat instead.
 
