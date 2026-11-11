@@ -50,3 +50,6 @@ configuration:
   HA_TOKEN:
     name: HA_TOKEN
     description: Optional Home Assistant token exposed to Codex subprocesses as the HA_TOKEN environment variable, together with HA_URL, the address above. Codex can then call Home Assistant's API with the rights of the token's user, for example to reload automations or restart Home Assistant.
+  remote_control_name:
+    name: Remote control machine name
+    description: The name this Home Assistant shows in the ChatGPT app when remote control is on. The default is Home Assistant. Letters, digits, spaces, dots, dashes and underscores are kept, up to 63 characters; if the name cannot be used as written, Home-Assistant is used instead. Remote control itself is turned on and off in the app's Settings page, not here. Change the name while remote control is off.

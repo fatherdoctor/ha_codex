@@ -32,7 +32,8 @@ RUN apk add --no-cache \
     python3 \
     py3-pip \
     rsync \
-    tar
+    tar \
+    util-linux-misc
 
 RUN install -D -m 0755 /usr/bin/bwrap /opt/codex-sandbox/bwrap.real
 
@@ -83,7 +84,7 @@ WORKDIR /data
 
 COPY run.sh /
 COPY server.py /
-COPY approvals.py policy.py verification.py verification_mcp.py browser_permissions.py browser_permission_policy.json ha_data.py ha_data_mcp.py browser.cjs browser_resources.cjs browser_permissions.cjs /
+COPY approvals.py policy.py remote_control.py verification.py verification_mcp.py browser_permissions.py browser_permission_policy.json ha_data.py ha_data_mcp.py browser.cjs browser_resources.cjs browser_permissions.cjs /
 COPY web /web
 # The protected permission policy and house rules: read-only, outside /config and every sandbox's writable roots.
 COPY policy/policy.json /usr/share/ha_codex/policy.json

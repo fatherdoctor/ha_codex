@@ -1865,6 +1865,29 @@ dialog label {
 .verification-result.is-failed, .verification-result.is-issues { border-color: #d18a48; }
 .verification-note { font-size: 12px; opacity: .7; }
 
+/* Remote-control pairing code: large, steady, and in a font that tells 0 from O. */
+.pairing-code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  margin: 0.25rem 0 0.75rem;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.pairing-qr {
+  display: block;
+  width: min(220px, 100%);
+  height: auto;
+  background: #fff;
+  border-radius: 8px;
+}
+#remote-control-log {
+  max-height: 12rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 0.8rem;
+}
 /* Sign-in: a code that reads the same on every screen, with 0 and O told apart. */
 .page-banner {
   margin: 0 1rem 0.75rem;

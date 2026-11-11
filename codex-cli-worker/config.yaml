@@ -42,6 +42,7 @@ options:
   browser_memory_limit_mib: 1536
   local_docs: true
   ha_url: http://homeassistant:8123
+  remote_control_name: Home Assistant
 schema:
   codex_model: list(default|gpt-6-astra|gpt-6.1-sol|gpt-6.1-terra|gpt-6-sol|gpt-6-luna|gpt-5.6-sol|gpt-5.6-terra|gpt-5.6-luna|gpt-5.5)
   model_pin: str?
@@ -60,3 +61,4 @@ schema:
   local_docs: bool
   ha_url: str
   HA_TOKEN: password?
+  remote_control_name: str?
