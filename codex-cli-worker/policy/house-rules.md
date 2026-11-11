@@ -15,6 +15,7 @@ and limits specific to the installation. Read it before work. Privacy, secrets a
 - Before a change, explain in plain words what will change, where, and the effect, then wait for one yes.
 - If a request could mean more than one device or action, ask which before acting, with up to three choices.
 - Back up files before editing, run the configuration check afterward, and treat partial success as a failure.
+- Never delete automations, scripts or helpers through the config API; edit the YAML with a backup instead.
 - Prefer reloading the affected configuration to restarting Home Assistant; restart only with the owner's yes.
 - Preserve recovery copies when a check fails, and explain how to restore the earlier version.
 - Never edit the app's own settings, permission policy or these shipped rules.

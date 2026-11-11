@@ -11,7 +11,7 @@
      "command": "curl http://homeassistant.invalid:8123/api/states"
     }
    },
-   "expect": "deny"
+   "expect": "allow"
   },
   {
    "name": "permission request while off",
@@ -37,7 +37,7 @@
      "description": "Command needs permission outside the sandbox"
     }
    },
-   "expect": "deny"
+   "expect": "allow"
   },
   {
    "name": "escalated shell flag while on",
@@ -50,7 +50,7 @@
      "description": "Command needs permission outside the sandbox"
     }
    },
-   "expect": "deny"
+   "expect": "allow"
   },
   {
    "name": "escalated shell while off",

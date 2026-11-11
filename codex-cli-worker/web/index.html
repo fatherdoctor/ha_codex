@@ -401,12 +401,12 @@
           <button id="remote-control-review" class="subtle">Mark reviewed</button>
         </div>
         <p id="remote-control-note" class="muted" hidden>
-          While remote control is on, commands that need more than the sandbox
-          are refused, from the ChatGPT app and from this page alike, and
-          credential access, planted commands and templated actions remain
-          blocked. Put limits specific to your installation in /config/AGENTS.md.
-          Asking you before a change is Codex's rule:
-          the ChatGPT app skips this page's approval buttons. Codex may downgrade
+          Normal remote requests follow Codex's own approval flow on the phone;
+          this page's buttons do not answer them. Review what will change,
+          where and the effect before allowing a request. Credential access,
+          full-access requests, changes to this app's settings, policy or rules,
+          and planted command definitions and templated actions remain refused.
+          Put limits specific to your installation in /config/AGENTS.md. Codex may downgrade
           a disallowed full-access relay request to read-only. Not every relay
           thread warning reaches this page; a missing warning does not prove
           the requested permissions were granted.

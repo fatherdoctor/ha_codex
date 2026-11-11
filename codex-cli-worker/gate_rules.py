@@ -4,9 +4,9 @@ Commands from the ChatGPT app reach Codex through OpenAI's relay and skip this
 app's Allow and Deny buttons. The check below holds outside the model:
 
 - ``check_tool_call`` is what the managed Codex hook (``gate/gate_hook.py``)
-  runs for every tool call and every permission request. It refuses, and never
-  asks, any command that needs more than the sandbox while remote control is
-  on, and always refuses reads of process environments, the Supervisor token,
+  runs for every tool call and every permission request. It refuses named
+  security restrictions and otherwise says nothing, preserving Codex's
+  normal approval flow. It always refuses reads of process environments, the Supervisor token,
   Home Assistant's sign-in store and ``secrets.yaml``, and file edits that add
   a command that can reach anything or a templated action.
 - ``find_refused`` is the scan both sides use on YAML text. The worker runs it
@@ -20,8 +20,8 @@ The refused domains live in one file, ``policy/refused-domains.json``
 missing the built-in list below is used; it is never looser than the file.
 
 The scan reads lines, not parsed YAML, so it also works on half an edit. It
-can miss an obfuscated reference; that is why commands that leave the sandbox
-are refused outright while remote control is on.
+can miss an obfuscated reference; the native sandbox, managed policy and
+configuration watch remain separate defenses.
 """
 
 from __future__ import annotations
@@ -53,8 +53,8 @@ LIST_KEYS = ("reaches_anything", "runs_on_load_platforms", "runs_on_load_keys")
 ACTION_RE = re.compile(r"""^\s*-?\s*(?:service|action)\s*:\s*["']?([a-z0-9_]+)\.([a-z0-9_]+)""")
 TEMPLATE_ACTION_RE = re.compile(r"""^\s*-?\s*(?:(?:service|action)\s*:.*(?:\{\{|\{%)|service_template\s*:)""")
 PLATFORM_RE = re.compile(r"""^\s*-?\s*platform\s*:\s*["']?([a-z0-9_]+)["']?\s*(?:#.*)?$""")
-# A definition key whose value is a block or an include: `shell_command:`, `  rest: !include rest.yaml`.
-DEFINITION_KEY_RE = re.compile(r"""^\s*-?\s*([a-z0-9_]+)\s*:\s*(?:!include\S*\s+\S+\s*)?(?:#.*)?$""")
+# A definition key can hold a block, include or inline value: all run on load.
+DEFINITION_KEY_RE = re.compile(r"""^\s*-?\s*([a-z0-9_]+)\s*:""")
 SCRIPT_REF_RE = re.compile(r"""\bscript\.([a-z0-9_]+)\b""")
 SCRIPT_TARGET_RE = re.compile(r"""^\s*-?\s*(?:["']?script\.|entity_id\s*:|target\s*:\s*\{\s*entity_id\s*:)""")
 # The script domain's own services are not scripts.
@@ -80,8 +80,8 @@ PATCH_FILE_RE = re.compile(r"^\*\*\* (Add File|Update File|Delete File|Move to):
 YAML_SUFFIXES = (".yaml", ".yml")
 PATCH_BLOCK_RE = re.compile(r"\*\*\* Begin Patch.*?(?:\*\*\* End Patch|\Z)", re.DOTALL)
 
-# Defense for older tool payloads. Codex 0.166 PreToolUse omits these keys;
-# PermissionRequest is the authoritative escalation event in the lab capture.
+# Older payloads can explicitly request sandbox permission. That request
+# alone follows native approval; only a named forbidden capability is denied.
 ESCALATION_KEYS = ("sandbox_permissions", "with_escalated_permissions", "escalated", "require_escalated")
 ESCALATION_VALUES = {"require_escalated", "escalated", "true", "danger-full-access"}
 
@@ -512,6 +512,35 @@ def asks_for_escalation(tool_input: Any) -> bool:
     return False
 
 
+# These are security restrictions, independent of any retired device category option.
+REMOTE_DEFINITIONS = ("shell_command", "rest_command", "command_line", "python_script", "pyscript", "template")
+FULL_ACCESS_RE = re.compile(r"danger[-_]?full[-_]?access|dangerFullAccess|--dangerously-bypass-approvals-and-sandbox|--yolo\b", re.IGNORECASE)
+
+
+def _policy_restriction(text: str) -> str:
+    """Name protected app settings/rules/policy in either a patch path or command text.
+
+    Like the approval adapter, this is a conservative literal-path check, not
+    a shell interpreter. Computed/obfuscated paths still require the sandbox.
+    """
+    plain = re.sub(r"[\\'\"]", "", text)
+    plain = re.sub(r"/{2,}", "/", plain)
+    if re.search(r"/data/options\.json", plain, re.IGNORECASE):
+        return "changes the add-on's settings"
+    if re.search(r"worker_api_token", plain, re.IGNORECASE):
+        return "accesses the add-on's private credential"
+    if re.search(r"codex-home/.*(?:AGENTS\.md|house-rules)|ha_codex/.*(?:AGENTS\.md|house-rules)", plain, re.IGNORECASE):
+        return "changes the add-on's rules"
+    if re.search(r"/share/ha_|ha_codex/(?:policy|agents|house)|codex-home/.*(?:config\.toml|[?*\[])|/etc/codex/(?:requirements|managed_config)", plain, re.IGNORECASE):
+        return "changes the add-on's permission policy"
+    return ""
+
+
+def _python_definition(path: str) -> str:
+    match = re.search(r"(?:^|[/\s'\"])(python_scripts|pyscript)/", path)
+    return ("python_script" if match[1] == "python_scripts" else "pyscript") if match else ""
+
+
 def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, Any]) -> str:
     """Return why the hook refuses this tool call or permission request, or an empty string to let it through.
 
@@ -522,12 +551,14 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
     data = payload if isinstance(payload, dict) else {}
     event = str(data.get("hook_event_name") or event or "")
     tool_input = data.get("tool_input", data.get("input", data))
-    if remote_on and event == "PermissionRequest":
-        return ("Remote control is on, so commands that need more than the sandbox are refused. "
-                "Turn remote control off in the app's Settings to approve this from the chat page.")
-    if remote_on and asks_for_escalation(tool_input):
-        return ("Remote control is on, so commands that need more than the sandbox are refused, "
-                "from the ChatGPT app and from the chat page alike.")
+    if remote_on and (event == "PermissionRequest" or asks_for_escalation(tool_input)):
+        if not isinstance(tool_input, dict) or not any(
+                tool_input.get(key) for key in ("command", "patch", "path", "file_path", "changes")):
+            return "This permission request does not name an action the command check can review; it is refused."
+    # An ordinary PermissionRequest is not an escalation to full access. The
+    # unchanged hook returns exit 0 with no output, never an allow decision.
+    if remote_on:
+        rules = {**rules, "runs_on_load_keys": sorted(set(rules["runs_on_load_keys"]) | {"template"})}
     deadline = time.monotonic() + 2.0
     texts = _strings(tool_input)
     if len(texts) > 128 or sum(len(text) for text in texts) > 1024 * 1024:
@@ -535,6 +566,15 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
     for text in texts:
         if time.monotonic() > deadline:
             return "This tool input exceeds the command check's time budget; it is refused."
+        if remote_on:
+            if FULL_ACCESS_RE.search(text):
+                return "This request enables full access, which is never allowed."
+            restriction = _policy_restriction(text)
+            if restriction:
+                return f"This request {restriction}, which is never allowed."
+            definition = _python_definition(text)
+            if definition:
+                return f"This request names a {definition} definition file, which Codex may not write or edit."
         if PATCH_BEGIN in text:
             if len(text.encode("utf-8")) > PATCH_MAX_BYTES:
                 return "This patch exceeds the command check's size budget; it is refused."
@@ -558,11 +598,19 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
                         if time.monotonic() > deadline:
                             raise ValueError("command check time budget exceeded")
                         if found:
-                            return f"This edit to {path} makes {found[0].reason}. A person must add this change outside Codex."
+                            reason = found[0].reason
+                            if reason == BLOCK_CHANGED:
+                                body = find_refused(after, rules, scripts)
+                                reason = next((item.reason for item in body if item.kind in {"runs_on_load", "template"}), reason)
+                            return f"This edit to {path} makes {reason}. A person must add this change outside Codex."
             except (OSError, ValueError, UnicodeError):
                 return "This edit cannot be checked safely against the complete configuration file; it is refused."
             # The rest of a command that carries a patch (a heredoc) is still a command.
             text = PATCH_BLOCK_RE.sub(" ", text)
+        if remote_on:
+            definition = re.search(r"\b(" + "|".join(REMOTE_DEFINITIONS) + r")\s*:", text)
+            if definition:
+                return f"This command names a {definition[1]} definition, which Codex may not write or edit."
         for pattern, why in PROTECTED_COMMAND_RES:
             if pattern.search(text):
                 return f"This command {why}, which is never allowed."
