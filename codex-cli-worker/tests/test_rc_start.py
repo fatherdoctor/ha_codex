@@ -150,12 +150,10 @@ class WatchRegressions(unittest.TestCase):
         self.assertEqual((other/'x.yaml').read_text(), 'name: unchanged\n')
         self.assertEqual(self.watch.baseline_path.stat().st_mode & 0o777, 0o600)
 
-    def test_category_only_edit_is_reported_without_always_on_undo(self):
-        with patch.object(rules, 'category_refusals_enabled', return_value=True):
-            self.path.write_text('- action: camera.turn_off\n')
-            found = self.watch.new_findings(remote_on=True)
-            self.assertTrue(found); self.assertTrue(self.path.exists())
-            self.assertEqual(self.path.read_text(), '- action: camera.turn_off\n')
+    def test_device_edit_is_neither_reported_nor_undone(self):
+        self.path.write_text('- action: camera.turn_off\n')
+        self.assertEqual(self.watch.new_findings(remote_on=True), [])
+        self.assertEqual(self.path.read_text(), '- action: camera.turn_off\n')
 
 class FurtherRegressions(unittest.TestCase):
     def test_captured_fixture_shapes_and_existing_definition_cases(self):

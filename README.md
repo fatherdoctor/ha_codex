@@ -3,6 +3,8 @@
 A Home Assistant app and integration that let one household member ask OpenAI's Codex, in plain words and from the
 Home Assistant app, to explain the house or make a configuration change, with one confirmation per change.
 
+The assistant can act on any device the owner confirms. Put limits specific to your installation in `/config/AGENTS.md`. Shipped practice covers privacy and secrets, reading first, confirmation, backups, configuration checks and honest reporting.
+
 [![License][license-badge]][license-url]
 
 This is a fork of [moryoav/home-assistant-codex](https://github.com/moryoav/home-assistant-codex) (MIT), built on its

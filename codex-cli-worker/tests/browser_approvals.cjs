@@ -16,6 +16,11 @@ async function testApprovals(browser, output, errors) {
   await approvalPage.locator("#message").fill("Request permission to read sensor history");
   await approvalPage.getByRole("button", {name: "Send message", exact: true}).click();
   await approvalPage.getByRole("button", {name: "Allow once", exact: true}).waitFor();
+  const plain = approvalPage.locator(".permission-plain");
+  assert.equal(await plain.count(), 3);
+  assert.match(await plain.nth(0).textContent(), /^What changes:/);
+  assert.match(await plain.nth(1).textContent(), /^Where:/);
+  assert.match(await plain.nth(2).textContent(), /^The effect:/);
   const permissionTask = await approvalPage.evaluate(() => localStorage.getItem("codex-last-chat"));
   const permissionRecord = (await (await approvalPage.request.get(`http://127.0.0.1:9137/preview/tasks/${permissionTask}`)).json()).task.approvals[0];
   assert.equal(await approvalPage.locator(".permission-card img").count(), 0);
