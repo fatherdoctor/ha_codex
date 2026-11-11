@@ -54,6 +54,18 @@ def command_names_protected_path(command: str) -> bool:
 FILE_APPROVAL = "item/fileChange/requestApproval"
 
 
+def require_supported_policy(params: dict[str, Any]) -> None:
+    """Integration-owned requests must refuse full access instead of relying on Codex's fallback."""
+    config = params.get("config") or {}
+    policy = params.get("sandboxPolicy") or {}
+    modes = [params.get("sandbox"), config.get("sandbox_mode") if isinstance(config, dict) else None,
+             policy.get("type") if isinstance(policy, dict) else policy]
+    if any(mode in ("danger-full-access", "dangerFullAccess") for mode in modes):
+        raise ValueError("Full-access requests are refused by this integration; use workspace-write or read-only.")
+    if params.get("approvalPolicy") == "never" or (isinstance(config, dict) and config.get("approval_policy") == "never"):
+        raise ValueError("The never approval policy is refused by this integration; use on-request.")
+
+
 class AppServerSession:
     """Run one app-server turn and correlate each user decision with its request.
 
@@ -103,6 +115,8 @@ class AppServerSession:
 
     def _request(self, method: str, params: dict[str, Any]) -> None:
         """Send a client request with a namespace distinct from server request IDs."""
+        if method in {"thread/start", "thread/resume", "turn/start"}:
+            require_supported_policy(params)
         self._next_id += 1
         request_id = f"worker-{self._next_id}"
         self._requests[request_id] = method
@@ -114,6 +128,8 @@ class AppServerSession:
             if self._closed or not self.is_active():
                 self.close()
                 return
+            require_supported_policy(self.thread_params)
+            require_supported_policy(self.turn_params)
             self._request("initialize", {"clientInfo": {
                 "name": "home_assistant_worker", "title": "Home Assistant", "version": "1",
             }})
@@ -349,6 +365,7 @@ class AppServerSession:
         elif method in {"thread/start", "thread/resume"}:
             if result.get("approvalPolicy") != "on-request" or result.get("approvalsReviewer") != "user":
                 raise ValueError("Codex did not enable user approval requests")
+            require_supported_policy(result)
             self.thread_id = result["thread"]["id"]
             expected = self.thread_params.get("threadId")
             if expected and self.thread_id != expected:
