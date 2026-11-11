@@ -66,6 +66,30 @@ class AskHookTests(unittest.TestCase):
                 self.assertEqual(code,2);self.assertIn(expected,err)
                 self.assertEqual(json.loads(out)['hookSpecificOutput']['decision']['behavior'],'deny')
 
+    def test_ha_cli_supervisor_families_are_named_refused(self):
+        cases = {
+            'addons': 'ha addons restart self',
+            'add-ons': 'ha add-ons options self',
+            'host': 'ha host shutdown',
+            'os': 'ha os info',
+            'core': 'ha core restart',
+            'hardware': 'ha hardware info',
+            'network': 'ha network update',
+            'backups': 'ha backups new',
+        }
+        for family, command in cases.items():
+            for event in ('PreToolUse', 'PermissionRequest'):
+                with self.subTest(family=family, event=event):
+                    code, out, err = self.hook(command, event)
+                    self.assertEqual(code, 2)
+                    self.assertIn('Supervisor', err)
+                    self.assertTrue(out)
+
+    def test_ha_cli_unrelated_commands_keep_native_approval(self):
+        for command in ('ha states list', 'ha hostname', 'echo perhaps'):
+            with self.subTest(command=command):
+                self.assertEqual(self.hook(command), (0, '', ''))
+
     def test_literal_shell_definition_writer_is_refused(self):
         code,out,err=self.hook("printf 'shell_command:\\n  sample: value' > /config/sample.yaml")
         self.assertEqual(code,2);self.assertIn('shell_command',err)

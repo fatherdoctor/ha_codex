@@ -41,6 +41,7 @@ PROTECTED_COMMAND_RES = (
     re.compile(r"codex-home/+[^\s/]*[*?\[]", re.IGNORECASE),
     re.compile(r"codex-home.*(agents\.md|config\.toml)|(agents\.md|config\.toml).*codex-home", re.IGNORECASE | re.DOTALL),
     re.compile(r"/data/+options\.json|worker_api_token", re.IGNORECASE),
+    re.compile(r"/etc/codex/requirements\.toml(?![\w./-])", re.IGNORECASE),
 )
 
 

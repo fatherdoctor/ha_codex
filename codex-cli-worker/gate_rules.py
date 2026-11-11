@@ -96,7 +96,7 @@ PROTECTED_COMMAND_RES = (
     (re.compile(r"/proc/\S*environ"), "reads a process environment, which can hold the Supervisor token"),
     (re.compile(r"\b(?:SUPERVISOR_TOKEN|HASSIO_TOKEN)\b"), "uses the Supervisor token"),
     (re.compile(r"/run/s6/container_environment"), "reads the app's saved environment, which holds the Supervisor token"),
-    (re.compile(r"https?://supervisor\b|\bsupervisor/|\bha\s+(?:supervisor|su)\b|\bbashio::", re.IGNORECASE),
+    (re.compile(r"https?://supervisor\b|\bsupervisor/|\bha\s+(?:supervisor|su|add-?ons?|host|os|core|hardware|network|backups?)\b|\bbashio::", re.IGNORECASE),
      "talks to the Home Assistant Supervisor"),
     (re.compile(r"\.storage/+auth"), "reads Home Assistant's sign-in store"),
     (re.compile(r"secrets\.ya?ml"), "reads secrets.yaml"),
