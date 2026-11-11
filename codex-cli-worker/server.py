@@ -144,6 +144,12 @@ CLI_DEFAULT_MODEL = "gpt-6.1-sol"
 # does not start an app whose saved option is missing from the list.
 RETIRED_MODELS = {"gpt-5.5": "gpt-5.6-sol"}
 DEFAULT_CHAT_SETTINGS = {"model": None, "reasoning_effort": None}
+# The one model this build runs when the `model_pin` option is left as shipped.
+# A chat, a saved turn or the `codex_model` option naming any other model is
+# refused instead of running on it; the option set to "none" turns the pin off.
+DEFAULT_MODEL_PIN = "gpt-6.1-sol"
+# Present while the assistant is paused: new messages are refused and queued ones wait.
+PAUSE_FILE = DATA_ROOT / "paused.json"
 
 AGENTS_MAX_BYTES = 256 * 1024
 SNAPSHOT_MAX_BYTES = 8 * 1024 * 1024
@@ -433,6 +439,33 @@ def default_model(options: dict[str, Any]) -> str:
     return model
 
 
+def model_pin(options: dict[str, Any]) -> str:
+    """Return the model every run must use, or an empty string when the pin is off."""
+    # The Supervisor writes the shipped default (DEFAULT_MODEL_PIN, in config.yaml) into
+    # options.json and fills a cleared option back in, so "none" is how a user turns
+    # the pin off; a missing key only happens outside the add-on, as in tests.
+    value = options.get("model_pin", "")
+    value = value.strip() if isinstance(value, str) else ""
+    return "" if value.lower() in {"", "none", "off"} else value
+
+
+def model_pin_message(model: str, pin: str) -> str:
+    """Return the error shown when a run asks for a model other than the pinned one."""
+    return (
+        f"This assistant is set up to run only on {pin}, and this request asked for {model}. "
+        f"Nothing was run. Choose {pin} for the chat, or change the add-on's model_pin option."
+    )
+
+
+def model_pin_error(execution: dict[str, Any], options: dict[str, Any]) -> str:
+    """Return why a run's resolved settings break the model pin, or an empty string when they keep it."""
+    pin = model_pin(options)
+    model = str((execution or {}).get("model") or "default")
+    if not pin or model == pin:
+        return ""
+    return model_pin_message(model, pin)
+
+
 def current_chat_settings(settings: dict[str, Any]) -> dict[str, Any]:
     """Return chat selections with a model that is no longer offered replaced by the next one up."""
     settings = copy.deepcopy(settings)
@@ -451,6 +484,13 @@ def resolve_chat_settings(settings: dict[str, Any], options: dict[str, Any]) -> 
     model = settings.get("model") or current_model(str(options.get("codex_model") or "default"))
     if model == "gpt-5.3-codex":
         model = "default"
+    pin = model_pin(options)
+    if pin:
+        if model == "default":
+            # Name the pinned model, so the CLI cannot pick another one for this run.
+            model = pin
+        elif model != pin:
+            raise ValueError(model_pin_message(model, pin))
     # A run on default names no model; its levels are those of the model the CLI picks.
     efforts = CHAT_MODEL_EFFORTS.get(
         default_model(options) if model == "default" else model, ("low", "medium", "high", "xhigh")
@@ -3003,8 +3043,50 @@ def auth_status_payload() -> dict[str, Any]:
             state["verification_url"] = parsed["url"]
         if parsed["code"] and not state.get("user_code"):
             state["user_code"] = parsed["code"]
+    state["qr_path"] = (
+        f"auth/qr.svg?login={state.get('login_id') or ''}" if state.get("verification_url") else ""
+    )
+    state["pending"] = bool(state["process_running"]) and state.get("status") in SIGN_IN_PENDING
     state["codex_login"] = codex_login_status()
     return state
+
+
+# Sign-in states during which the page keeps the code on screen and offers Cancel.
+SIGN_IN_PENDING = {"queued", "starting", "waiting_for_user"}
+
+
+def login_qr_svg(url: str) -> bytes:
+    """Return a QR code of the sign-in URL as SVG bytes with a white background, for the page to show inline."""
+    from qrcode import QRCode
+    from qrcode.image.svg import SvgPathImage
+
+    qr = QRCode(border=2)
+    qr.add_data(url)
+    qr.make(fit=True)
+    image = qr.make_image(image_factory=SvgPathImage)
+    root = image.get_image()
+    namespace = root.tag.removesuffix("svg")
+    root.insert(0, ET.Element(f"{namespace}rect", {"width": "100%", "height": "100%", "fill": "#fff"}))
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def cancel_codex_login() -> dict[str, Any]:
+    """Stop a running sign-in, clear its code and link, and return the sign-in state."""
+    global auth_process
+    with auth_lock:
+        proc = auth_process if auth_process is not None and auth_process.poll() is None else None
+        auth_process = None
+    if proc is not None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+    dismiss_persistent_notification(AUTH_NOTIFY_ID)
+    update_auth_state(
+        status="canceled", completed_at=utc_now(), verification_url="", user_code="", qr_url="", output="", error="",
+    )
+    return auth_status_payload()
 
 
 def parse_login_output(text: str) -> dict[str, str]:
@@ -3076,7 +3158,6 @@ def auth_reader_thread(handle) -> None:
     buffer = ""
     notified = False
     notified_code = ""
-    notified_url = ""
     for line in iter(handle.readline, ""):
         if not line:
             break
@@ -3084,7 +3165,7 @@ def auth_reader_thread(handle) -> None:
         buffer += cleaned
         write_task_log("auth", "codex-login", cleaned)
         parsed = parse_login_output(buffer)
-        if parsed["url"] and (not notified or (parsed["code"] and parsed["code"] != notified_code)):
+        if parsed["url"] and (not notified or (parsed["code"] and not notified_code)):
             with auth_lock:
                 login_id = str(auth_state.get("login_id") or uuid.uuid4().hex[:8])
             qr_url = notify_codex_login_ready(login_id, parsed["url"], parsed["code"])
@@ -3097,13 +3178,17 @@ def auth_reader_thread(handle) -> None:
                 output=redact(buffer)[-4000:],
             )
             notified = True
-            notified_url = parsed["url"]
             notified_code = parsed["code"]
         else:
             updates: dict[str, Any] = {"output": redact(buffer)[-4000:]}
-            if parsed["url"] and parsed["url"] != notified_url:
+            # The code and link shown for a sign-in stay as first shown until it
+            # ends or is canceled; only a missing one is filled in.
+            with auth_lock:
+                shown_url = str(auth_state.get("verification_url") or "")
+                shown_code = str(auth_state.get("user_code") or "")
+            if parsed["url"] and not shown_url:
                 updates["verification_url"] = parsed["url"]
-            if parsed["code"] and parsed["code"] != notified_code:
+            if parsed["code"] and not shown_code:
                 updates["user_code"] = parsed["code"]
             update_auth_state(**updates)
 
@@ -3155,6 +3240,11 @@ def run_codex_device_login(login_id: str) -> None:
         notify("Codex sign-in complete", "Codex CLI is now authenticated for the Home Assistant worker.")
         refresh_usage_status_async(force=True)
     else:
+        with auth_lock:
+            canceled = auth_state.get("status") == "canceled" and auth_state.get("login_id") == login_id
+        if canceled:
+            # The user pressed Cancel; that is not a failure to report.
+            return
         update_auth_state(status="failed", completed_at=utc_now(), returncode=returncode)
         notify("Codex sign-in failed", f"Device login exited with code {returncode}.")
 
@@ -3683,6 +3773,21 @@ def build_codex_args(task_id: str, prompt_file: Path, final_file: Path, session_
     else:
         args.append("-")
     return args
+
+
+def latest_execution(task_id: str, options: dict[str, Any]) -> dict[str, Any]:
+    """Return the model and level the task's latest turn runs with, as build_codex_args resolves them."""
+    with lock:
+        task = copy.deepcopy(tasks.get(task_id, {}))
+    turns = task.get("turns") or []
+    execution = turns[-1].get("execution_settings") if turns else None
+    if execution:
+        return execution
+    try:
+        return resolve_chat_settings(task.get("chat_settings", DEFAULT_CHAT_SETTINGS), options)
+    except ValueError:
+        # The chat's saved model is not the pinned one; report it as it is.
+        return {"model": current_model((task.get("chat_settings") or {}).get("model")) or "default"}
 
 
 def reader_thread(task_id: str, stream_name: str, handle, session_holder: dict[str, str]) -> None:
@@ -4238,6 +4343,17 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
         )
         return
     if task_cancellation_requested(task_id):
+        return
+    pin_error = model_pin_error(latest_execution(task_id, options), options)
+    if pin_error:
+        # Stop before Codex starts: a run on another model is an error, never a quiet fallback.
+        fail_task_launch(
+            task_id,
+            ValueError(pin_error),
+            session_id=session_id,
+            summary="Stopped: this run asked for a model the assistant is not set up to use.",
+            detail_prefix="Model pin",
+        )
         return
     interactive_approvals = uses_user_approvals(options)
     # Upstream's `codex exec` path has no live permission requests; the policy check at the top of run_task
@@ -4906,6 +5022,37 @@ def start_queued_message(entry: dict[str, Any]) -> Exception | None:
     return None
 
 
+def assistant_paused() -> bool:
+    """Return whether the user has paused the assistant from its page."""
+    return PAUSE_FILE.exists()
+
+
+def pause_payload() -> dict[str, Any]:
+    """Return the pause state for the API: whether it is paused, since when, and the reason the page shows."""
+    if not assistant_paused():
+        return {"paused": False}
+    try:
+        saved = json.loads(PAUSE_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        saved = {}
+    return {"paused": True, "since": str(saved.get("since") or ""), "message": PAUSED_MESSAGE}
+
+
+PAUSED_MESSAGE = "The assistant is paused. Resume it on its page to send messages again."
+
+
+def set_assistant_paused(paused: bool) -> dict[str, Any]:
+    """Pause or resume the assistant; on resume, start the oldest queued message if nothing is running."""
+    if paused:
+        if not assistant_paused():
+            PAUSE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            PAUSE_FILE.write_text(json.dumps({"since": utc_now()}), encoding="utf-8")
+    else:
+        PAUSE_FILE.unlink(missing_ok=True)
+        start_next_queued()
+    return pause_payload()
+
+
 def start_next_queued(release: str | None = None) -> None:
     """Start the oldest queued message once no task is active.
 
@@ -4919,7 +5066,7 @@ def start_next_queued(release: str | None = None) -> None:
             if release is not None:
                 active_task_runners.discard(release)
                 release = None
-            if not message_queue or _active_task_ids_locked():
+            if not message_queue or _active_task_ids_locked() or assistant_paused():
                 return
             entry = message_queue.pop(0)
             failure = start_queued_message(entry)
@@ -4980,6 +5127,8 @@ def status() -> Response:
             "latest_task": latest,
             "codex_login": codex_login_status(),
             "auth_flow": auth_status_payload(),
+            "pause": pause_payload(),
+            "model_pin": model_pin(read_options()),
             "codex_usage": usage_status_payload(),
             "integration": integration_status(),
         }
@@ -5035,6 +5184,43 @@ def get_auth_status() -> Response:
     return jsonify({"ok": True, "auth": auth_status_payload()})
 
 
+@app.post("/auth/cancel")
+@require_auth
+def cancel_auth() -> Response:
+    """Stop a running sign-in and clear its code."""
+    return jsonify({"ok": True, "auth": cancel_codex_login()})
+
+
+@app.get("/auth/qr.svg")
+@require_auth
+def auth_qr() -> Response:
+    """Return the QR code of the current sign-in link, or 404 when no sign-in is waiting."""
+    with auth_lock:
+        url = str(auth_state.get("verification_url") or "")
+    if not url.startswith("https://"):
+        return jsonify({"ok": False, "error": "no sign-in is waiting"}), 404
+    response = Response(login_qr_svg(url), mimetype="image/svg+xml")
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/pause")
+@require_auth
+def get_pause() -> Response:
+    """Return whether the assistant is paused."""
+    return jsonify({"ok": True, **pause_payload()})
+
+
+@app.post("/pause")
+@require_auth
+def post_pause() -> Response:
+    """Pause the assistant with {"paused": true}, or resume it with {"paused": false}."""
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or not isinstance(payload.get("paused"), bool):
+        return jsonify({"ok": False, "error": "paused must be true or false"}), 400
+    return jsonify({"ok": True, **set_assistant_paused(payload["paused"])})
+
+
 @app.post("/auth/logout")
 @require_auth
 def logout_auth() -> Response:
@@ -5086,14 +5272,26 @@ def list_tasks() -> Response:
 def chat_options() -> Response:
     """Return the models, defaults, and settings the web UI needs."""
     options = read_options()
-    default = resolve_chat_settings(DEFAULT_CHAT_SETTINGS, options)
-    default_id = default_model(options)
+    pin = model_pin(options)
+    try:
+        default = resolve_chat_settings(DEFAULT_CHAT_SETTINGS, options)
+        model_error = ""
+    except ValueError as exc:
+        # The add-on's codex_model option names another model than the pin; say so on the page.
+        default = {"model": pin, "reasoning_effort": "medium"}
+        model_error = str(exc)
+    default_id = pin or default_model(options)
+    models = [{"id": model, "label": label, "efforts": efforts} for model, label, efforts in CHAT_MODELS]
+    if pin:
+        models = [entry for entry in models if entry["id"] == pin]
     return jsonify({
         "ok": True,
+        "model_pin": pin,
+        "model_error": model_error,
         "defaults": default,
         # The defaults' model by name, also when the add-on leaves the choice to the CLI.
         "default_model": default_id,
-        "models": [{"id": model, "label": label, "efforts": efforts} for model, label, efforts in CHAT_MODELS],
+        "models": models,
         "default_efforts": CHAT_MODEL_EFFORTS.get(default_id, ("low", "medium", "high", "xhigh")),
         "backup_retention_days": backup_retention_days(options),
     })
@@ -5202,6 +5400,8 @@ def create_task() -> Response:
     prompt = payload["prompt"].strip()
     if not prompt:
         return jsonify({"ok": False, "error": "prompt is required"}), 400
+    if assistant_paused():
+        return jsonify({"ok": False, "error": PAUSED_MESSAGE, "paused": True}), 409
     try:
         settings = parse_chat_settings(payload)
         execution = resolve_chat_settings(settings, read_options())
@@ -5584,6 +5784,8 @@ def continue_task_request(task_id: str, field: str, *, waiting_only: bool = Fals
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
         return jsonify({"ok": False, "error": f"{field} must be non-empty text"}), 400
+    if assistant_paused():
+        return jsonify({"ok": False, "error": PAUSED_MESSAGE, "paused": True}), 409
     choice = payload.get("choice")
     turn_id = payload.get("turn_id")
     if choice is None and (not isinstance(payload.get(field), str) or not payload[field].strip()):

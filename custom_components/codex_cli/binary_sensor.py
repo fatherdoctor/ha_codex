@@ -22,7 +22,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up Codex CLI binary sensors."""
     coordinator: CodexCliCoordinator = entry.runtime_data.coordinator
-    async_add_entities([CodexRunningBinarySensor(coordinator, entry)])
+    async_add_entities([CodexRunningBinarySensor(coordinator, entry), CodexSignedInBinarySensor(coordinator, entry)])
 
 
 class CodexRunningBinarySensor(CoordinatorEntity[CodexCliCoordinator], BinarySensorEntity):
@@ -49,3 +49,28 @@ class CodexRunningBinarySensor(CoordinatorEntity[CodexCliCoordinator], BinarySen
     def is_on(self) -> bool:
         """Return true if the worker status names an active task."""
         return bool((self.coordinator.data or {}).get("active_task_id"))
+
+
+class CodexSignedInBinarySensor(CoordinatorEntity[CodexCliCoordinator], BinarySensorEntity):
+    """Show whether Codex is signed in to ChatGPT, so an expired sign-in can drive an alert or a card."""
+
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_translation_key = "signed_in"
+
+    def __init__(self, coordinator: CodexCliCoordinator, entry: ConfigEntry) -> None:
+        """Set the unique ID and attach the sensor to the Codex device of the config entry."""
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_signed_in"
+        self._attr_device_info = {"identifiers": {(DOMAIN, entry.entry_id)}}
+
+    @property
+    def is_on(self) -> bool:
+        """Return true when the worker reports a working Codex sign-in."""
+        return bool(((self.coordinator.data or {}).get("codex_login") or {}).get("status_ok"))
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        """Return whether a sign-in is waiting for its code to be entered."""
+        flow = (self.coordinator.data or {}).get("auth_flow") or {}
+        return {"sign_in_waiting": bool(flow.get("pending"))}
