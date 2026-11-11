@@ -21,22 +21,13 @@ HOOK = ROOT / "gate" / "gate_hook.py"
 RULES = gate_rules.load_rules(ROOT / "policy" / "refused-domains.json")
 
 
-def run_hook(payload, remote_on: bool, tmp: str, event: str = "", categories: bool = True) -> subprocess.CompletedProcess:
-    """Run the hook script as Codex would: python -I, the event on stdin, the saved choice in a file."""
+def run_hook(payload, remote_on: bool, tmp: str, event: str = "") -> subprocess.CompletedProcess:
+    """Run the unchanged managed hook as Codex does, with only isolated saved state."""
     state = Path(tmp) / "state.json"
     state.write_text(json.dumps({"enabled": remote_on}), encoding="utf-8")
     text = payload if isinstance(payload, str) else json.dumps(payload)
-    options = Path(tmp) / "options.json"
-    options.write_text(json.dumps({"refuse_categories": categories}))
-    # Run the unchanged managed hook with an isolated options path, never the executor's /data.
-    bootstrap = ("import sys,runpy; from pathlib import Path; "
-                 "sys.path.insert(0,sys.argv[1]); import gate_rules; "
-                 "gate_rules.OPTIONS_PATH=Path(sys.argv[2]); sys.argv=sys.argv[3:]; "
-                 "runpy.run_path(sys.argv[0],run_name='__main__')")
-    return subprocess.run([sys.executable, "-I", "-c", bootstrap, str(ROOT), str(options), str(HOOK),
-                           "--event", event or "PreToolUse", "--state", str(state)],
+    return subprocess.run([sys.executable, "-I", str(HOOK), "--event", event or "PreToolUse", "--state", str(state)],
                           input=text, capture_output=True, text=True, timeout=30, check=False)
-
 
 
 class HookFixtureTests(unittest.TestCase):
@@ -44,11 +35,10 @@ class HookFixtureTests(unittest.TestCase):
 
     def test_fixture_cases(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            for case in [dict(item, categories=flag, expect=item["expect"] if flag else item.get("expect_categories_off", item["expect"]))
-                         for item in FIXTURE["cases"] for flag in (False, True)]:
-                with self.subTest(case["name"], categories=case["categories"]):
+            for case in FIXTURE["cases"]:
+                with self.subTest(case["name"]):
                     event = case["input"].get("hook_event_name", "") if isinstance(case["input"], dict) else ""
-                    result = run_hook(case["input"], case["remote_control_on"], tmp, event, case["categories"])
+                    result = run_hook(case["input"], case["remote_control_on"], tmp, event)
                     if case["expect"] == "deny":
                         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
                         self.assertTrue(result.stderr.strip())
@@ -119,24 +109,21 @@ class RulesTests(unittest.TestCase):
         data = json.loads((ROOT / "policy" / "refused-domains.json").read_text(encoding="utf-8"))
         for key in gate_rules.LIST_KEYS:
             self.assertLessEqual(set(gate_rules.STRICT_RULES[key]), set(data[key]), key)
-        for domain, kinds in gate_rules.STRICT_RULES["device_actions"].items():
-            self.assertLessEqual(set(kinds), set(data["device_actions"][domain]), domain)
 
     def test_missing_or_shrunk_file_keeps_the_strict_list(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            self.assertEqual(gate_rules.load_rules(Path(tmp) / "none.json")["refused_domains"],
-                             gate_rules.STRICT_RULES["refused_domains"])
+            self.assertEqual(gate_rules.load_rules(Path(tmp) / "none.json")["reaches_anything"],
+                             gate_rules.STRICT_RULES["reaches_anything"])
             small = Path(tmp) / "small.json"
-            small.write_text(json.dumps({"refused_domains": ["siren"], "device_actions": {"lock": []}}), encoding="utf-8")
+            small.write_text(json.dumps({"reaches_anything": ["sample_escape"]}), encoding="utf-8")
             rules = gate_rules.load_rules(small)
-            self.assertIn("lock", rules["refused_domains"])
-            self.assertIn("siren", rules["refused_domains"])
-            self.assertIn("unlock", rules["device_actions"]["lock"])
+            self.assertIn("shell_command", rules["reaches_anything"])
+            self.assertIn("sample_escape", rules["reaches_anything"])
 
     def test_scan_reports_line_numbers_and_reasons(self) -> None:
-        text = "- alias: x\n  actions:\n    - action: light.turn_on\n    - action: lock.unlock\n"
+        text = "- alias: x\n  actions:\n    - action: light.turn_on\n    - action: shell_command.sample\n"
         found = gate_rules.find_refused(text, RULES)
-        self.assertEqual([(f.line, f.reason) for f in found], [(4, "an action on lock")])
+        self.assertEqual([(f.line, f.reason) for f in found], [(4, "an action on shell_command, which can reach anything")])
 
     def test_script_calls_resolve_to_refused_scripts(self) -> None:
         text = "    - action: script.leave_home\n    - action: script.turn_on\n      target:\n        entity_id: script.leave_home\n"
@@ -144,16 +131,12 @@ class RulesTests(unittest.TestCase):
         found = gate_rules.find_refused(text, RULES, {"leave_home"})
         self.assertEqual([f.line for f in found], [1, 4])
 
-    def test_scenes_platforms_definitions_and_device_covers(self) -> None:
+    def test_security_platforms_and_definitions(self) -> None:
         cases = {
-            "  entities:\n    lock.front_door:\n      state: unlocked\n": "a state for lock, which a scene can set",
             "  - platform: command_line\n    command: id\n": "a command_line platform, which runs on its own once loaded",
             "sensor:\n  - platform: scrape\n": "a scrape platform, which runs on its own once loaded",
-            "rest_command:\n  x:\n    url: http://example.com\n": "a rest_command definition, which runs on its own once loaded",
+            "rest_command:\n  sample:\n    url: /sample\n": "a rest_command definition, which runs on its own once loaded",
             "  shell_command: !include shell.yaml\n": "a shell_command definition, which runs on its own once loaded",
-            "    - domain: cover\n      type: open\n": "a device action on cover (open)",
-            "    - action: cover.open_cover\n": "an action on cover",
-            "    - action: script.announce_dinner\n": "a call to script.announce_dinner, whose name says it sends a message",
         }
         for text, reason in cases.items():
             with self.subTest(text):
@@ -178,19 +161,13 @@ class ConfigWatchTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.config = Path(self.tmp.name) / "config"
         self.config.mkdir()
-        (self.config / "automations.yaml").write_text("- actions:\n    - action: lock.lock\n", encoding="utf-8")
+        (self.config / "automations.yaml").write_text("- actions:\n    - action: rest_command.sample\n", encoding="utf-8")
         (self.config / "scripts.yaml").write_text(
-            "goodnight:\n  sequence:\n    - action: lock.lock\nlights:\n  sequence:\n    - action: light.turn_off\n",
+            "goodnight:\n  sequence:\n    - action: rest_command.sample\nlights:\n  sequence:\n    - action: light.turn_off\n",
             encoding="utf-8")
         (self.config / ".storage").mkdir()
-        (self.config / ".storage" / "x.yaml").write_text("- action: lock.unlock\n", encoding="utf-8")
-        (self.config / "secrets.yaml").write_text("- action: lock.unlock\n", encoding="utf-8")
-        options = Path(self.tmp.name) / "options.json"
-        options.write_text('{"refuse_categories": true}')
-        from unittest.mock import patch
-        option_patch = patch.object(gate_rules, "OPTIONS_PATH", options)
-        option_patch.start()
-        self.addCleanup(option_patch.stop)
+        (self.config / ".storage" / "x.yaml").write_text("- action: rest_command.other\n", encoding="utf-8")
+        (self.config / "secrets.yaml").write_text("- action: rest_command.other\n", encoding="utf-8")
         self.watch = rc.ConfigWatch(self.config, Path(self.tmp.name) / "data" / "baseline.json",
                                     rules=lambda: RULES)
 
@@ -205,25 +182,18 @@ class ConfigWatchTests(unittest.TestCase):
     def test_added_action_is_found_and_a_move_is_not(self) -> None:
         self.watch.take_baseline()
         (self.config / "automations.yaml").write_text(
-            "- alias: added\n  actions:\n    - action: notify.phone\n- actions:\n    - action: lock.lock\n",
+            "- alias: added\n  actions:\n    - action: shell_command.sample\n- actions:\n    - action: rest_command.sample\n",
             encoding="utf-8")
         found = self.watch.new_findings()
         self.assertEqual([(f["file"], f["line"], f["reason"]) for f in found],
-                         [("automations.yaml", 3, "an action on notify")])
+                         [("automations.yaml", 3, "an action on shell_command, which can reach anything")])
 
-    def test_trigger_edit_on_a_block_that_locks_is_found(self) -> None:
-        self.watch.take_baseline()
-        (self.config / "automations.yaml").write_text(
-            "- triggers:\n    - trigger: time\n      at: '03:00'\n  actions:\n    - action: lock.lock\n",
-            encoding="utf-8")
-        found = self.watch.new_findings()
-        self.assertEqual([(f["line"], f["reason"]) for f in found], [(1, gate_rules.BLOCK_CHANGED)])
 
     def test_a_new_line_in_a_block_is_reported_once(self) -> None:
         self.watch.take_baseline()
         (self.config / "automations.yaml").write_text(
-            "- actions:\n    - action: lock.lock\n    - action: lock.unlock\n", encoding="utf-8")
-        self.assertEqual([f["reason"] for f in self.watch.new_findings()], ["an action on lock"])
+            "- actions:\n    - action: rest_command.sample\n    - action: rest_command.other\n", encoding="utf-8")
+        self.assertEqual([f["reason"] for f in self.watch.new_findings()], ["an action on rest_command, which can reach anything"])
 
     def test_written_by_a_shell_command_into_a_package(self) -> None:
         self.watch.take_baseline()
@@ -232,10 +202,10 @@ class ConfigWatchTests(unittest.TestCase):
             "automation:\n  - actions:\n      - action: \"{{ 'lock' }}.unlock\"\n", encoding="utf-8")
         self.assertEqual([f["reason"] for f in self.watch.new_findings()], ["a templated action"])
 
-    def test_new_call_to_a_script_that_locks(self) -> None:
+    def test_new_call_to_a_security_script(self) -> None:
         self.watch.take_baseline()
         (self.config / "automations.yaml").write_text(
-            "- actions:\n    - action: lock.lock\n- actions:\n    - action: script.goodnight\n    - action: script.lights\n",
+            "- actions:\n    - action: rest_command.sample\n- actions:\n    - action: script.goodnight\n    - action: script.lights\n",
             encoding="utf-8")
         found = self.watch.new_findings()
         self.assertEqual([f["line"] for f in found], [4])
@@ -246,7 +216,7 @@ class ConfigWatchTests(unittest.TestCase):
 
     def test_restart_keeps_the_baseline(self) -> None:
         self.watch.take_baseline()
-        (self.config / "automations.yaml").write_text("- actions:\n    - action: lock.lock\n    - action: tts.speak\n",
+        (self.config / "automations.yaml").write_text("- actions:\n    - action: rest_command.sample\n    - action: shell_command.other\n",
                                                      encoding="utf-8")
         again = rc.ConfigWatch(self.config, self.watch.baseline_path, rules=lambda: RULES)
         self.assertEqual(len(again.new_findings()), 1)
@@ -263,12 +233,6 @@ class SupervisorWatchTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         base = Path(self.tmp.name)
-        options = base / "options.json"
-        options.write_text('{"refuse_categories": true}')
-        from unittest.mock import patch
-        option_patch = patch.object(gate_rules, "OPTIONS_PATH", options)
-        option_patch.start()
-        self.addCleanup(option_patch.stop)
         self.config = base / "config"
         self.config.mkdir()
         (self.config / "automations.yaml").write_text("- actions:\n    - action: light.turn_on\n", encoding="utf-8")
@@ -297,7 +261,7 @@ class SupervisorWatchTests(unittest.TestCase):
         ok, _ = self.sup.start()
         self.assertTrue(ok)
         self.assertTrue(self.watch.has_baseline())
-        (self.config / "automations.yaml").write_text("- actions:\n    - action: camera.turn_off\n", encoding="utf-8")
+        (self.config / "automations.yaml").write_text("- actions:\n    - action: shell_command.sample\n", encoding="utf-8")
         snap = self.wait_for(1)
         self.assertEqual(snap["config_findings"][0]["file"], "automations.yaml")
         self.sup.stop()
@@ -314,7 +278,7 @@ class SupervisorWatchTests(unittest.TestCase):
 
     def test_review_while_on_rebaselines(self) -> None:
         self.sup.start()
-        (self.config / "automations.yaml").write_text("- actions:\n    - action: camera.turn_off\n", encoding="utf-8")
+        (self.config / "automations.yaml").write_text("- actions:\n    - action: shell_command.sample\n", encoding="utf-8")
         self.wait_for(1)
         self.sup.review()
         self.assertTrue(self.watch.has_baseline())

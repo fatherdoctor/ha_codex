@@ -268,28 +268,26 @@ class ConfigWatch:
                     return found
         return found
 
-    def refused_scripts(self, texts: dict[str, str], rules: dict[str, Any],
-                        categories: bool | None = None) -> set[str]:
+    def refused_scripts(self, texts: dict[str, str], rules: dict[str, Any]) -> set[str]:
         """Resolve script calls using the same active kinds as the line scan."""
-        return gate_rules.refused_scripts(texts, rules, categories)
+        return gate_rules.refused_scripts(texts, rules)
 
     def scan(self) -> dict[str, list[gate_rules.Finding]]:
         """Return the refused actions in every YAML file, by path relative to the config folder."""
         return self._scan()[0]
 
-    def _scan(self, categories: bool | None = None) -> tuple[dict[str, list[gate_rules.Finding]], dict[str, dict[str, tuple[int, int, str]]]]:
+    def _scan(self) -> tuple[dict[str, list[gate_rules.Finding]], dict[str, dict[str, tuple[int, int, str]]]]:
         """Return the refused lines and the refused blocks (see ``gate_rules.refused_blocks``) of every YAML file."""
         rules = self.rules()
-        enabled = gate_rules.category_refusals_enabled() if categories is None else categories
         texts: dict[str, str] = {}
         for path in self.files():
             try:
                 texts[path.relative_to(self.root).as_posix()] = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
-        scripts = self.refused_scripts(texts, rules, enabled)
-        lines = {rel: found for rel, text in texts.items() if (found := gate_rules.active_findings(text, rules, scripts, enabled))}
-        blocks = {rel: found for rel, text in texts.items() if (found := gate_rules.refused_blocks(text, rules, scripts, enabled))}
+        scripts = self.refused_scripts(texts, rules)
+        lines = {rel: found for rel, text in texts.items() if (found := gate_rules.find_refused(text, rules, scripts))}
+        blocks = {rel: found for rel, text in texts.items() if (found := gate_rules.refused_blocks(text, rules, scripts))}
         return lines, blocks
 
     def has_baseline(self) -> bool:
@@ -298,7 +296,7 @@ class ConfigWatch:
 
     def take_baseline(self) -> None:
         """Save what is in the config folder now as the baseline later scans compare with."""
-        lines, blocks = self._scan(categories=True)
+        lines, blocks = self._scan()
         data = {rel: [list(f.key()) for f in found] for rel, found in lines.items()}
         hashes = {rel: sorted(found) for rel, found in blocks.items()}
         self.baseline_path.parent.mkdir(parents=True, exist_ok=True)
@@ -314,15 +312,12 @@ class ConfigWatch:
             pass
 
     def new_findings(self) -> list[dict[str, Any]]:
-        """Return the refused actions that are in the config folder now and were not in the baseline.
+        """Report new security findings relative to the saved baseline.
 
-        Findings are matched by reason and line text, so an action that only
-        moved is not new; a second copy of an existing line is. A block (an
-        automation, a script) that holds a refused line and changed anywhere
-        is also reported when category refusals are on, even if none of its
-        own lines is new. With categories off, an unchanged always-on call
-        does not make a trigger or condition edit a new finding. An unreadable baseline counts as
-        empty, so everything refused is reported.
+        Calls are counted by reason and text, so moving one is not an addition.
+        Definition, platform and templated-action blocks are hashed to catch
+        changes to their bodies. Ordinary calls and templated targets do not
+        cause a block finding. An unreadable baseline is treated as empty.
         """
         try:
             saved = json.loads(self.baseline_path.read_text(encoding="utf-8"))

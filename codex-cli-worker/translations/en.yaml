@@ -14,9 +14,6 @@ configuration:
   codex_sandbox:
     name: Codex sandbox
     description: workspace-write is the default and allows edits in /config; read-only allows inspection. Commands or file changes needing extra access ask a Home Assistant administrator for Allow once or Deny in the chat. There is no full-access mode in this fork.
-  refuse_categories:
-    name: Refuse actions by category
-    description: Off by default. Turn on to also refuse configuration edits involving device and message categories. The assistant keeps its house rules either way. Credential, sandbox escalation and planted-command checks stay on.
   task_root:
     name: Task root
     description: Folder where prompts, logs, backups, status files, and change lists are saved. Keep it inside /config so Codex can save a copy of each file before changing it.

@@ -108,7 +108,6 @@ DEFAULT_OPTIONS = {
     "model_reasoning_effort": "medium",
     "reasoning_summary": "concise",
     "codex_sandbox": "workspace-write",
-    "refuse_categories": False,
     "task_root": "/config/codex_tasks",
     "notify_service": "",
     "task_timeout_seconds": 3600,
@@ -2739,12 +2738,11 @@ def previous_versions(run_dir: Path, paths: list[str], before: dict[str, Any]) -
 
 
 def refuse_planted_edits(run_dir: Path, changes: dict[str, list[str]], before: dict[str, Any]) -> list[dict[str, Any]]:
-    """Undo new Core escape paths in every exchange; categories are checked only when opted in.
+    """Undo new Core escape paths in every exchange.
 
     Restores use only hash-verified earlier bytes. An edit without a verified
     copy is reported as unchecked; existing lines are never presumed new.
     """
-    enabled = gate_rules.category_refusals_enabled()
     rules = gate_rules.load_rules()
     added = set(changes.get("added", []))
     paths = sorted(added | set(changes.get("changed", [])))
@@ -2754,7 +2752,7 @@ def refuse_planted_edits(run_dir: Path, changes: dict[str, list[str]], before: d
     watch = remote_control.ConfigWatch(CONFIG_ROOT, run_dir / "unused-baseline.json")
     texts = {path.relative_to(CONFIG_ROOT).as_posix(): path.read_text(encoding="utf-8", errors="replace")
              for path in watch.files() if should_include_file(path)}
-    scripts = watch.refused_scripts(texts, rules, enabled)
+    scripts = watch.refused_scripts(texts, rules)
     results = []
     root = CONFIG_ROOT.resolve()
     for rel in paths:
@@ -2774,7 +2772,7 @@ def refuse_planted_edits(run_dir: Path, changes: dict[str, list[str]], before: d
             results.append({"path": rel, "checked": False, "undone": "", "findings": []})
             continue
         earlier = earlier_bytes.decode("utf-8", errors="replace")
-        found = gate_rules.new_refused(earlier, after, rules, scripts, enabled)
+        found = gate_rules.new_refused(earlier, after, rules, scripts)
         if not found:
             continue
         undone = ""

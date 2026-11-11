@@ -287,13 +287,24 @@ Authenticated API clients can answer a live request using `POST /tasks/<task_id>
 
 ### Category rules and planted commands
 
-**Refuse actions by category** (`refuse_categories`) is off by default. Codex still keeps the shipped rules: no actions on locks, alarms, covers or cameras, no messages to people, and no publishing. It must refuse even a request to ignore those rules. The existing plain-word confirmation and administrator approval flow remains in place.
+Codex may act on any device the owner confirms. The shipped rules cover privacy and secrets, reading first,
+plain-language confirmation before a change, backups, the configuration check and honest reporting. Put any limits
+specific to the installation in `/config/AGENTS.md`; the assistant reads those alongside the shipped practice.
+Permission cards show what changes, where, and the possible effect before the administrator's Allow once or Deny.
+If a request is ambiguous, Codex asks which device or action the owner means before acting.
 
-An unreadable or invalid options file leaves this opt-in off; an unreadable remote-control state counts as on, preserving its escalation check. Turn the option on to also enforce the existing device and message checks on configuration edits and the remote-control configuration watch. With it off, those categories and calls to scripts containing them are rules for Codex to keep. The option never enables full access or disables checks on process environments, the Supervisor token, private sign-in files, or sandbox escalation while remote control is on.
+Credential and permission-policy protections remain always on, including the Supervisor token, process environments,
+private sign-in files, secrets and the app's own settings. Remote control still refuses sandbox escalation.
+Planted shell, REST and Python commands, command/platform definitions and templated action or service names stay
+checked in the hook, configuration watch and end-of-exchange check. An unchanged call or templated target follows
+normal approval; it is not a reason to hash or undo an otherwise ordinary change.
 
-Planted shell, REST and Python commands, platforms that run when loaded, and templated actions or targets are a separate security check. They are refused in patch calls and checked after every local exchange too, including a failed or cancelled exchange. A new unsafe file is removed; a changed one is restored only from a hash-verified earlier copy. The task records any refused edits. Without a verified copy the check reports "could not check" in the task details and leaves the file alone; it does not treat existing lines as new or fail the exchange for them. Review these files before any reload or restart. Per-file copies depend on Codex following its backup instructions; `full_snapshot` saves a complete earlier copy. With category refusals off, changing a trigger or condition around an unchanged always-on call follows the normal approval flow; new calls and changes inside definition, platform or template blocks remain checked. With categories on, changed blocks containing refused actions are also checked. The task's `refused_edits` field records confirmed findings, while `unchecked_edits` lists paths without verified copies; the chat shows the summary and details, not a separate findings table.
+A new unsafe file is removed; a changed file is restored only from a hash-verified earlier copy. Without one, the
+check reports “could not check” without failing the exchange; review those files before any reload or restart.
+Per-file copies depend on the assistant's backup instructions; `full_snapshot` saves a complete earlier copy.
+Confirmed findings stay in `refused_edits`; `unchecked_edits` lists paths with no verified copy. The chat shows
+summary and details. Marking the watch reviewed acknowledges findings; it does not relax the always-on checks.
 
-The configuration watch uses the same distinction while remote control is on. Its baseline retains all categories, so changing the option does not make unchanged earlier actions appear new. Marking the watch reviewed acknowledges its current findings; it does not relax the always-on security checks or the shipped rules.
 
 ## Remote control from the ChatGPT app
 
@@ -306,12 +317,12 @@ OpenAI's remote control (`codex remote-control`) lets the ChatGPT app on a phone
 - **No Home Assistant credentials.** The remote-control process gets no Home Assistant token and no Supervisor token, even when the `HA_TOKEN` option is set for the chat page.
 - **The command check.** Commands from the ChatGPT app do not pass through this app's Allow and Deny buttons, so the app ships a check that holds outside the model, for every client:
   - Codex's managed requirements (`/etc/codex/requirements.toml`, read-only) rule out the full-access sandbox and any hook other than the app's own.
-  - A managed hook refuses sandbox escalation while remote control is on, and credential access at all times. Planted commands and templated actions remain blocked with either category setting. Existing device and message patch refusals are enabled only by **Refuse actions by category**.
-  - A config watch compares YAML with the baseline from when remote control was turned on. It reports planted commands and templates with either category setting, and device and message findings only with the option on. Review its findings in Settings before reloading or restarting.
-  - **What the scan reads.** The hook, exchange check and config watch share the line-based scan in `gate_rules.py` and `refused-domains.json`. Shell, REST and Python actions, `hassio` and `pyscript`, command/platform definitions and templated actions or targets stay checked, including indirect calls to scripts containing those kinds. With category refusals on it also checks device actions, scene states, message scripts and calls to scripts containing refused actions. It can read an incomplete edit but may miss an obfuscated reference; this does not replace the sandbox or house rules.
+  - A managed hook refuses sandbox escalation while remote control is on, and credential access at all times. Planted commands and templated action names remain blocked; target templates follow normal approval.
+  - A config watch compares YAML with the baseline from when remote control was turned on. It reports new always-on command and templated-action findings. Review its findings in Settings before reloading or restarting.
+  - **What the scan reads.** The hook, exchange check and config watch share the line-based scan in `gate_rules.py` and `refused-domains.json`. Shell, REST and Python actions, `hassio` and `pyscript`, command/platform definitions and templated actions stay checked, including indirect calls to scripts containing those kinds. Ordinary actions and templated targets follow the owner's normal confirmation flow. It can read an incomplete edit but may miss an obfuscated reference; this does not replace the sandbox or house rules.
   - Asking you before a change is Codex's own rule only; nothing outside the model can enforce it for the ChatGPT app.
 - **Why Turn on can be unavailable.** Missing command-check files or a failed self-test disable **Turn on** with a reason; the chat page remains available.
-- **Command checks.** Remote control requires the installed gate and its self-test. Sandbox escalation while it is on and credential access are refused. Planted commands and templates stay checked with either category setting; the optional category checks are described above. The configuration watch reports unreviewed changes before a reload or restart.
+- **Command checks.** Remote control requires the installed gate and its self-test. Sandbox escalation while it is on and credential access are refused. Planted commands and templated action names stay checked; installation-specific limits belong in `/config/AGENTS.md`. The configuration watch reports unreviewed changes before a reload or restart.
 - Remote control is experimental upstream. If it breaks, the chat page is not affected.
 
 ## Codex Sign-In
