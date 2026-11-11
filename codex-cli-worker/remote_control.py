@@ -22,6 +22,7 @@ setup fails, Codex starts without the custom name and the page explains why.
 from __future__ import annotations
 
 import base64
+import fcntl
 import io
 import hashlib
 import stat
@@ -135,7 +136,9 @@ def requirements_problem(path: Path) -> str:
 SELF_TEST_CASES = (
     ("PermissionRequest", True, {"hook_event_name": "PermissionRequest", "tool_name": "Bash",
                                  "tool_input": {"command": "curl https://example.invalid/",
-                                                "description": "Command needs permission"}}, True),
+                                                "description": "Read the public status page; no home state changes."}}, False),
+    ("PermissionRequest", True, {"hook_event_name": "PermissionRequest", "tool_name": "Bash",
+                                 "tool_input": {"command": "cat /proc/1/environ"}}, True),
     ("PreToolUse", False, {"hook_event_name": "PreToolUse", "tool_name": "Bash",
                            "tool_input": {"command": "cat /proc/1/environ"}}, True),
     ("PreToolUse", False, {"hook_event_name": "PreToolUse", "tool_name": "Bash",
@@ -229,6 +232,13 @@ WATCH_MAX_FILES = 3000
 WATCH_MAX_BYTES = 2 * 1024 * 1024
 WATCH_INTERVAL = 30.0
 WATCH_SHOWN = 20
+UNDO_MAX_FILES = 128
+UNDO_MAX_BYTES = 64 * 1024 * 1024
+
+
+class RecoveryStoreFull(ValueError):
+    """A new recovery copy would exceed the private store's count or byte limit."""
+
 SCRIPT_KEY_RE = re.compile(r"^([a-z0-9_]+)\s*:\s*(?:#.*)?$")
 
 
@@ -360,28 +370,74 @@ class ConfigWatch:
             finally:
                 tmp.unlink(missing_ok=True)
 
+    def _recovery_usage(self, folder: int, depth: int = 0) -> tuple[int, int]:
+        """Count legacy nested copies too, without following links or opening their contents."""
+        if depth > 32:
+            raise ValueError("recovery directory nesting exceeds limit")
+        count = total = 0
+        with os.scandir(folder) as entries:
+            for entry in entries:
+                info = entry.stat(follow_symlinks=False)
+                if stat.S_ISREG(info.st_mode):
+                    count += 1
+                    total += info.st_size
+                elif stat.S_ISDIR(info.st_mode):
+                    child = os.open(entry.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=folder)
+                    try:
+                        child_count, child_bytes = self._recovery_usage(child, depth + 1)
+                        count += child_count
+                        total += child_bytes
+                    finally:
+                        os.close(child)
+                else:
+                    raise ValueError("recovery store contains a link or non-ordinary file")
+                if count > UNDO_MAX_FILES or total > UNDO_MAX_BYTES:
+                    raise RecoveryStoreFull()
+        return count, total
+
     def _save_replaced(self, rel: str, current: bytes) -> str:
-        """Save replaced bytes privately before any removal/restore; links must not redirect the copy."""
+        """Reuse a verified SHA-256 copy, or save one within the bounded private store."""
         parts = Path(rel).parts
         if not parts or Path(rel).is_absolute() or any(part.startswith(".") for part in parts):
             raise ValueError("unsafe recovery path")
         folder = os.open(self.baseline_path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         try:
-            for part in ("remote_control_undo", *parts[:-1]):
-                try:
-                    os.mkdir(part, 0o700, dir_fd=folder)
-                except FileExistsError:
-                    pass
-                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=folder)
-                os.close(folder)
-                folder = child
-            name = f"{parts[-1]}.{time.time_ns()}-{uuid.uuid4().hex[:12]}"
+            try:
+                os.mkdir("remote_control_undo", 0o700, dir_fd=folder)
+            except FileExistsError:
+                pass
+            child = os.open("remote_control_undo", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=folder)
+            os.close(folder)
+            folder = child
+            # Serialize reuse/accounting/creation; contention reports instead of stalling the watch.
+            fcntl.flock(folder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            name = hashlib.sha256(current).hexdigest() + ".yaml"
+            target = str(self.baseline_path.parent / "remote_control_undo" / name)
+            try:
+                fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=folder)
+            except FileNotFoundError:
+                pass
+            else:
+                with os.fdopen(fd, "rb") as existing:
+                    info = os.fstat(existing.fileno())
+                    if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                            or info.st_size != len(current) or info.st_mode & 0o777 != 0o600
+                            or existing.read(WATCH_MAX_BYTES + 1) != current):
+                        raise ValueError("existing recovery copy could not be verified")
+                return target
+            count, total = self._recovery_usage(folder)
+            if count >= UNDO_MAX_FILES or total + len(current) > UNDO_MAX_BYTES:
+                raise RecoveryStoreFull()
             fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=folder)
-            with os.fdopen(fd, "wb") as copy:
-                copy.write(current)
-                copy.flush()
-                os.fsync(copy.fileno())
-            return str(self.baseline_path.parent / "remote_control_undo" / Path(rel).parent / name)
+            try:
+                with os.fdopen(fd, "wb") as copy:
+                    copy.write(current)
+                    copy.flush()
+                    os.fsync(copy.fileno())
+            except BaseException:
+                os.unlink(name, dir_fd=folder)  # Only this failed creation; never an older owner copy.
+                raise
+            return target
         finally:
             os.close(folder)
 
@@ -509,11 +565,14 @@ class ConfigWatch:
                                                      current.decode("utf-8", errors="replace"), rules, scripts, False)
                     if not security:
                         continue  # Category-only findings are not always-on undo.
-                    if Path(rel).name in {"automations.yaml", "scripts.yaml", "scenes.yaml"}:
+                    if rel in {"automations.yaml", "scripts.yaml", "scenes.yaml"}:
                         undo_note = "Home Assistant manages this file; review this finding without automatic undo."
                     else:
                         recovery_copy = self._save_replaced(rel, current)
                         result = self._undo(rel, current, earlier)
+                except RecoveryStoreFull:
+                    result = ""
+                    undo_note = "Undo recovery store is full; review saved copies before another automatic undo."
                 except (OSError, ValueError, KeyError, TypeError):
                     result = ""
                 for item in out:
