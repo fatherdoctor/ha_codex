@@ -108,6 +108,7 @@ DEFAULT_OPTIONS = {
     "model_reasoning_effort": "medium",
     "reasoning_summary": "concise",
     "codex_sandbox": "workspace-write",
+    "refuse_categories": False,
     "task_root": "/config/codex_tasks",
     "notify_service": "",
     "task_timeout_seconds": 3600,
@@ -115,7 +116,6 @@ DEFAULT_OPTIONS = {
     "auto_save_lovelace": True,
     "config_check": True,
     "full_snapshot": False,
-    "refuse_categories": False,
     "backup_retention_days": 7,
     "browser_verification": True,
     "browser_memory_limit_mib": DEFAULT_BROWSER_MEMORY_LIMIT_MIB,
@@ -2742,8 +2742,7 @@ def refuse_planted_edits(run_dir: Path, changes: dict[str, list[str]], before: d
     """Undo new Core escape paths in every exchange; categories are checked only when opted in.
 
     Restores use only hash-verified earlier bytes. An edit without a verified
-    copy is reported as unrestored and fails the exchange; it is never silently
-    accepted or replaced by an unverified backup.
+    copy is reported as unchecked; existing lines are never presumed new.
     """
     enabled = gate_rules.category_refusals_enabled()
     rules = gate_rules.load_rules()
@@ -2752,12 +2751,10 @@ def refuse_planted_edits(run_dir: Path, changes: dict[str, list[str]], before: d
     paths = [rel for rel in paths if safe_relative_path(rel) and not snapshot_secret_path(rel)
              and Path(rel).suffix.lower() in gate_rules.YAML_SUFFIXES]
     saved = {entry["path"]: entry for entry in previous_versions(run_dir, [p for p in paths if p not in added], before)}
-    scripts = set()
-    if enabled:
-        watch = remote_control.ConfigWatch(CONFIG_ROOT, run_dir / "unused-baseline.json")
-        texts = {path.relative_to(CONFIG_ROOT).as_posix(): path.read_text(encoding="utf-8", errors="replace")
-                 for path in watch.files() if should_include_file(path)}
-        scripts = watch.refused_scripts(texts, rules)
+    watch = remote_control.ConfigWatch(CONFIG_ROOT, run_dir / "unused-baseline.json")
+    texts = {path.relative_to(CONFIG_ROOT).as_posix(): path.read_text(encoding="utf-8", errors="replace")
+             for path in watch.files() if should_include_file(path)}
+    scripts = watch.refused_scripts(texts, rules, enabled)
     results = []
     root = CONFIG_ROOT.resolve()
     for rel in paths:
@@ -2773,7 +2770,10 @@ def refuse_planted_edits(run_dir: Path, changes: dict[str, list[str]], before: d
             candidate = Path(entry["copy"]).read_bytes()
             if hashlib.sha256(candidate).hexdigest() == (before.get(rel) or {}).get("sha256"):
                 earlier_bytes = candidate
-        earlier = earlier_bytes.decode("utf-8", errors="replace") if earlier_bytes is not None else ""
+        if earlier_bytes is None:
+            results.append({"path": rel, "checked": False, "undone": "", "findings": []})
+            continue
+        earlier = earlier_bytes.decode("utf-8", errors="replace")
         found = gate_rules.new_refused(earlier, after, rules, scripts, enabled)
         if not found:
             continue
@@ -4863,6 +4863,7 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     # This runs before cancellation/transport-failure returns too: a stopped
     # exchange may already have planted a command that Core would execute later.
     planted_edits = []
+    unchecked_edits = []
     planted_error = ""
     reviewed_manifest = None
     try:
@@ -4875,9 +4876,11 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
             before = {}
             # Without a baseline, existing files must never be mistaken for new files and removed.
             changed = {"changed": sorted(after), "added": []}
-        planted_edits = refuse_planted_edits(task_dir, changed, before)
-        if planted_edits:
-            fields = {"refused_edits": planted_edits}
+        edit_checks = refuse_planted_edits(task_dir, changed, before)
+        unchecked_edits = [item["path"] for item in edit_checks if item.get("checked") is False]
+        planted_edits = [item for item in edit_checks if item.get("checked") is not False]
+        if planted_edits or unchecked_edits:
+            fields = {"refused_edits": planted_edits, "unchecked_edits": unchecked_edits}
             if any(not item["undone"] for item in planted_edits):
                 fields["error"] = "Configuration edits could not be restored; review them before a reload or restart."
             if not update_task(task_id, **fields) and task_cancellation_requested(task_id):
@@ -4962,6 +4965,9 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     if final.get("status") == "failed" and task_failed_on_sign_in(
             task_id, reason, final.get("summary"), final.get("details"), lifecycle_error):
         final["summary"] = SIGN_IN_EXPIRED_SUMMARY
+    if unchecked_edits:
+        note = "The configuration edit check could not check these files without a verified earlier copy: " + ", ".join(unchecked_edits)
+        final["details"] = "\n\n".join(part for part in (str(final.get("details") or "").strip(), note) if part)
     if planted_edits or planted_error:
         unrestored = [item["path"] for item in planted_edits if not item["undone"]]
         note = planted_error or "Configuration edits that add refused actions were undone."

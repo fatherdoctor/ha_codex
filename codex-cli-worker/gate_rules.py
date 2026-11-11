@@ -12,9 +12,9 @@ app's Allow and Deny buttons. The check below holds outside the model:
 - ``find_refused`` is the scan both sides use on YAML text. The worker runs it
   over ``/config`` to catch edits the hook cannot see (a shell command that
   writes a file) and raises a Home Assistant repair for them.
-- ``refused_blocks`` hashes each top-level YAML block that holds a refused
-  line, so a changed trigger or condition of such a block is seen even though
-  its refused line stays as it was.
+- ``refused_blocks`` hashes top-level YAML blocks for the opt-in category
+  check. With categories off, an unchanged always-on call does not make a
+  changed trigger or condition a newly planted call.
 
 The refused domains live in one file, ``policy/refused-domains.json``
 (``/usr/share/ha_codex/refused-domains.json`` in the image). When that file is
@@ -38,6 +38,7 @@ from typing import Any
 IMAGE_DIR = Path("/usr/share/ha_codex")
 SOURCE_DIR = Path(__file__).resolve().parent / "policy"
 OPTIONS_PATH = Path("/data/options.json")
+CONFIG_ROOT = Path("/config")
 
 
 def category_refusals_enabled(path: Path | None = None) -> bool:
@@ -200,12 +201,12 @@ def find_refused(text: str, rules: dict[str, Any], refused_scripts: frozenset[st
                 findings.append(Finding(number, f"an action on {domain}", line, domain))
             elif domain in anything:
                 findings.append(Finding(number, f"an action on {domain}, which can reach anything", line, domain))
-            elif domain == "script" and service not in SCRIPT_SERVICES and messages.match(service):
-                findings.append(Finding(number, f"a call to script.{service}, whose name says it sends a message", line,
-                                        "message_script"))
             elif domain == "script" and service not in SCRIPT_SERVICES and service in refused_scripts:
                 findings.append(Finding(number, f"a call to script.{service}, which itself acts on a refused domain", line,
                                         "refused_script"))
+            elif domain == "script" and service not in SCRIPT_SERVICES and messages.match(service):
+                findings.append(Finding(number, f"a call to script.{service}, whose name says it sends a message", line,
+                                        "message_script"))
         else:
             state = STATE_KEY_RE.match(line)
             if state and state.group(1) in refused:
@@ -235,13 +236,13 @@ def find_refused(text: str, rules: dict[str, Any], refused_scripts: frozenset[st
             for ref in SCRIPT_REF_RE.findall(line):
                 if ref in SCRIPT_SERVICES or not re.match(r"^\s*-?\s*(?:entity_id\s*:\s*)?[\"']?script\.", line):
                     continue
-                if messages.match(ref):
-                    findings.append(Finding(number, f"a call to script.{ref}, whose name says it sends a message", line,
-                                            "message_script"))
-                    break
                 if ref in refused_scripts:
                     findings.append(Finding(number, f"a call to script.{ref}, which itself acts on a refused domain", line,
                                             "refused_script"))
+                    break
+                if messages.match(ref):
+                    findings.append(Finding(number, f"a call to script.{ref}, whose name says it sends a message", line,
+                                            "message_script"))
                     break
     return findings
 
@@ -251,15 +252,15 @@ BLOCK_CHANGED = "a change to a block that holds a refused action"
 
 def active_findings(text: str, rules: dict[str, Any], scripts: set[str] | frozenset[str] = frozenset(),
                     categories: bool | None = None) -> list[Finding]:
-    """Always keep Core escape paths; device, message and indirect categories are opt-in."""
+    """Keep Core escape paths and calls to scripts resolved under the same active rules."""
     enabled = category_refusals_enabled() if categories is None else categories
     found = find_refused(text, rules, scripts)
-    security = set(rules["reaches_anything"]) | {"runs_on_load", "template"}
+    security = set(rules["reaches_anything"]) | {"runs_on_load", "template", "refused_script"}
     return found if enabled else [finding for finding in found if finding.kind in security]
 
 
 def refused_blocks(text: str, rules: dict[str, Any], scripts: set[str] | frozenset[str] = frozenset(),
-                   categories: bool = True) -> dict[str, tuple[int, int, str]]:
+                   categories: bool | None = None) -> dict[str, tuple[int, int, str]]:
     """Return {hash: (first line number, last line number, first line)} for each top-level block of this YAML text that holds a refused line.
 
     A block starts at a line that begins in the first column (``- id: ...`` in
@@ -292,12 +293,59 @@ def new_refused(before: str, after: str, rules: dict[str, Any], scripts: set[str
             counts[item.key()] -= 1
         else:
             found.append(item)
-    previous = refused_blocks(before, rules, scripts, enabled)
-    for digest, (first, last, text) in refused_blocks(after, rules, scripts, enabled).items():
+    # With categories off, an unchanged security call follows normal approval;
+    # changing its trigger or condition does not create a new call.
+    previous = refused_blocks(before, rules, scripts, enabled) if enabled else {}
+    for digest, (first, last, text) in (refused_blocks(after, rules, scripts, enabled) if enabled else {}).items():
         if digest not in previous and not any(first <= item.line <= last for item in found):
             found.append(Finding(first, BLOCK_CHANGED, text))
     return found
 
+
+
+def refused_scripts(texts: dict[str, str], rules: dict[str, Any], categories: bool | None = None) -> set[str]:
+    """Resolve scripts transitively using only the active kinds, including security-only mode."""
+    blocks: dict[str, str] = {}
+    for rel, text in texts.items():
+        if rel != "scripts.yaml" and not rel.startswith("scripts/"):
+            continue
+        current, block = "", []
+        for line in text.splitlines() + ["__end__:"]:
+            key = re.match(r"^([a-z0-9_]+)\s*:\s*(?:#.*)?$", line)
+            if key:
+                if current:
+                    blocks[current] = "\n".join(block)
+                current, block = key.group(1), []
+            else:
+                block.append(line)
+    refused: set[str] = set()
+    while True:
+        found = {name for name, text in blocks.items() if active_findings(text, rules, refused, categories)}
+        if found <= refused:
+            return refused
+        refused |= found
+
+
+def config_refused_scripts(rules: dict[str, Any], categories: bool | None = None) -> set[str]:
+    """Read only bounded, ordinary script YAML for patch-hook indirect-call checks."""
+    root = CONFIG_ROOT.resolve()
+    candidates = [CONFIG_ROOT / "scripts.yaml"]
+    folder = CONFIG_ROOT / "scripts"
+    if folder.is_dir() and not folder.is_symlink():
+        candidates.extend(folder.rglob("*.yaml"))
+        candidates.extend(folder.rglob("*.yml"))
+    texts = {}
+    for path in sorted(candidates)[:3000]:
+        try:
+            rel = path.relative_to(CONFIG_ROOT).as_posix()
+            if (path.name == "secrets.yaml" or any(part.startswith(".") for part in Path(rel).parts)
+                    or path.is_symlink() or not path.resolve().is_relative_to(root)
+                    or path.stat().st_size > 2 * 1024 * 1024):
+                continue
+            texts[rel] = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+    return refused_scripts(texts, rules, categories)
 
 def parse_patch(text: str) -> list[tuple[str, str]]:
     """Return (path, added lines) for each file in an apply_patch body; moved files count under their new path."""
@@ -374,7 +422,7 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
                     if pattern.search(path):
                         return f"This edit {why}, which is never allowed."
                 if path.lower().endswith(YAML_SUFFIXES):
-                    found = active_findings(added, rules)
+                    found = active_findings(added, rules, config_refused_scripts(rules))
                     if found:
                         first = found[0]
                         return (f"This edit to {path} adds {first.reason} ({first.text.strip()}). "

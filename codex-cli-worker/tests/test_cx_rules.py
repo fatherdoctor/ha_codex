@@ -2,6 +2,7 @@
 import io
 import json
 import subprocess
+import shutil
 from pathlib import Path
 import sys
 import tempfile
@@ -80,7 +81,8 @@ class RulesTests(unittest.TestCase):
 
     def test_indirect_device_categories_are_off(self):
         self.enable(False)
-        self.assertEqual(gate_rules.active_findings('- action: script.sample', self.rules, {'sample'}), [])
+        scripts = gate_rules.refused_scripts({'scripts.yaml': 'sample:\n  sequence:\n    - action: lock.lock\n'}, self.rules)
+        self.assertEqual(gate_rules.active_findings('- action: script.sample', self.rules, scripts), [])
         self.enable(True)
         self.assertTrue(gate_rules.active_findings('- action: script.sample', self.rules, {'sample'}))
 
@@ -110,7 +112,7 @@ class RulesTests(unittest.TestCase):
             self.assertEqual(server.refuse_planted_edits(run, {'added': ['sample.yaml']}, {}), [])
             self.assertTrue(target.exists())
 
-    def test_verified_copy_restores_changed_security_block_in_both_modes(self):
+    def test_verified_copy_restores_new_security_call_in_both_modes(self):
         for enabled in [False, True]:
             with self.subTest(enabled=enabled):
                 self.enable(enabled)
@@ -121,7 +123,7 @@ class RulesTests(unittest.TestCase):
                 target.write_text(original)
                 backup = run / server.BACKUP_DIR / 'sample.yaml'; backup.parent.mkdir(); backup.write_text(original)
                 before = {'sample.yaml': {'sha256': server.file_hash(target)}}
-                target.write_text(original.replace('original', 'changed'))
+                target.write_text(original.replace('shell_command.sample', 'shell_command.other'))
                 with patch.object(server, 'CONFIG_ROOT', config):
                     result = server.refuse_planted_edits(run, {'changed': ['sample.yaml']}, before)
                 self.assertEqual(result[0]['undone'], 'restored')
@@ -139,6 +141,7 @@ class RulesTests(unittest.TestCase):
         self.assertFalse(result[0]['undone'])
         self.assertNotEqual(target.read_text(), 'unverified')
 
+    @unittest.skipUnless(shutil.which('node'), 'node is not installed')
     def test_merged_chat_script_parses(self):
         result = subprocess.run(['node', '--check', str(ROOT / 'web/assets/chat.js')], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -187,7 +190,7 @@ class ExchangeRulesTests(unittest.TestCase):
                 self.assertEqual(target.read_text(), original)
             else:
                 self.assertIn('shell_command', target.read_text())
-                self.assertIn('review', worker.tasks['task']['error'])
+                self.assertIn('sample.yaml', worker.tasks['task']['unchecked_edits'])
             self.assertEqual(worker.tasks['task']['status'], 'cancelled' if cancelled else 'failed')
         finally:
             fixture.doCleanups()
