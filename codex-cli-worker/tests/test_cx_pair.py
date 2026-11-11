@@ -75,7 +75,7 @@ class PairingTests(unittest.TestCase):
     def test_nonpage_state_read_cannot_retrieve_code_or_qr(self):
         server=base.server;client=server.app.test_client()
         state={'state':'ready','pairing_code':FIXTURE_CODE,'pairing_qr':'data:image/svg+xml;base64,fixture'}
-        with patch.object(server,'api_token',return_value='fixture'),patch.object(server.remote_control_supervisor,'snapshot',return_value=state):
+        with patch.object(server,'api_token',return_value='fixture'),patch.object(server,'ingress_admin',return_value=({'user_id':'fixture-admin'},'')),patch.object(server.remote_control_supervisor,'snapshot',return_value=state):
             token=client.get('/remote-control',headers={'Authorization':'Bearer fixture'})
             page=client.get('/remote-control',headers={'X-Ingress-Path':'/api/hassio_ingress/test'},environ_overrides={'REMOTE_ADDR':server.INGRESS_PROXY_IP})
         self.assertNotIn('pairing_code',token.get_json()['remote_control'])

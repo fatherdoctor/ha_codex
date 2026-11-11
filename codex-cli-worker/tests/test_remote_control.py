@@ -277,6 +277,9 @@ class RouteTests(unittest.TestCase):
         patcher = patch.object(server, "api_token", return_value="tok")
         patcher.start()
         self.addCleanup(patcher.stop)
+        admin = patch.object(server, "ingress_admin", return_value=({"user_id": "fixture-admin"}, ""))
+        admin.start()
+        self.addCleanup(admin.stop)
 
     def test_token_reads_state(self) -> None:
         with patch.object(server.remote_control_supervisor, "snapshot", return_value={"state": "off"}):

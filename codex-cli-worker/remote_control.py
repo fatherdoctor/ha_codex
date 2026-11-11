@@ -45,6 +45,7 @@ from typing import Any
 import gate_rules
 import websocket
 
+CONTROL_FOLDER = "remote_control_control"
 DEFAULT_NAME = "Home Assistant"
 FALLBACK_NAME = "Home-Assistant"
 MAX_NAME_BYTES = 63
@@ -603,7 +604,7 @@ class ControlClient:
                 transport.close(timeout=0)
 
     def enable(self, cancelled: Callable[[], bool] = lambda: False) -> dict[str, Any]:
-        return self._request("remoteControl/enable", {"ephemeral": True}, 12.0, cancelled)
+        return self._request("remoteControl/enable", {"ephemeral": True}, 5.0, cancelled)
 
     def status(self, cancelled: Callable[[], bool] = lambda: False) -> dict[str, Any]:
         return self._request("remoteControl/status/read", {}, 5.0, cancelled)
@@ -769,8 +770,10 @@ class Supervisor:
         with self.lock:
             proc, path = self.proc, self.control_socket
             self.status["pairing_code"] = ""
-        if proc is None or proc.poll() is not None or path is None or not self.enabled():
+        if not self.enabled():
             return False, {**self.snapshot(), "error": "Turn remote control on first."}
+        if proc is None or proc.poll() is not None or path is None:
+            return False, {**self.snapshot(), "error": "Remote control is still starting or reconnecting. Wait for the connected state, then try again."}
         cancelled = lambda: self.wake.is_set() or proc.poll() is not None or not self.enabled()
         try:
             reply = self.control_factory(path).pair(cancelled=cancelled)
@@ -840,23 +843,31 @@ class Supervisor:
                 self.log.append("Managed policy: a disallowed relay full-access request may be downgraded to read-only; "
                                 "the relay does not expose every thread warning here.")
             started = self.clock()
-            private = tempfile.TemporaryDirectory(prefix="rc-", dir=self.state_path.parent)
-            path = Path(private.name) / "rc.sock"
+            private = None
             done = threading.Event()
             monitor = None
             try:
-                proc = self.popen(self._command("app-server", "--listen", f"unix://{path}", "--remote-control"),
-                                  env=remote_env(self.env_factory()), stdin=subprocess.DEVNULL,
-                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                                  start_new_session=True)
+                # The fixed parent is masked in every real Codex sandbox by codex-bwrap.
+                control_parent = self.state_path.parent / CONTROL_FOLDER
+                control_parent.mkdir(mode=0o700, exist_ok=True)
+                info = control_parent.lstat()
+                if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
+                        or stat.S_IMODE(info.st_mode) != 0o700):
+                    raise OSError("The private control folder must be owned by the worker with mode 0700.")
+                private = tempfile.TemporaryDirectory(prefix="rc-", dir=control_parent)
+                path = Path(private.name) / "rc.sock"
+                with self.lock:
+                    proc = self.popen(self._command("app-server", "--listen", f"unix://{path}", "--remote-control"),
+                                      env=remote_env(self.env_factory()), stdin=subprocess.DEVNULL,
+                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                      start_new_session=True)
+                    self.proc = proc
+                    self.control_socket = path
+                    self.status["pairing_code"] = ""
             except OSError as exc:
                 self.set_status("error", f"Remote control could not start: {exc}")
                 proc = None
             if proc is not None:
-                with self.lock:
-                    self.proc = proc
-                    self.control_socket = path
-                    self.status["pairing_code"] = ""
                 self.set_status("connecting", (f"Connecting as “{name}”…" if self._name_supported else
                                                "Connecting without a custom machine name…"),
                                 machine_name=name if self._name_supported else "")
@@ -883,7 +894,7 @@ class Supervisor:
                     self._name_failed()
                     continue  # One plain launch; no namespace exit-1/backoff loop.
                 self.set_status("error", f"Remote control stopped (exit code {code}); restarting.")
-            if proc is None:
+            if proc is None and private is not None:
                 private.cleanup()
             if self.clock() - started >= HEALTHY_RUN:
                 backoff = BACKOFF_START

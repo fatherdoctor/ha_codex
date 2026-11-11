@@ -306,6 +306,8 @@ profile gains no capabilities. This follows Bubblewrap's
 in the HAOS lab. A short namespace-only probe runs before Codex; if the probe or the actual namespace setup
 fails, the page and log show **Machine-name namespace unavailable** and Codex starts without a custom name.
 It does not repeatedly restart the failed `unshare -Ur -u` command. The supervised app-server uses the same selected launch path.
+Its control socket is for the add-on only, under `/data/remote_control_control/`; the sandbox wrapper
+covers that fixed parent with an empty tmpfs, so task commands cannot connect to it.
 The nested sandbox wrapper is permitted in the existing Bubblewrap child profile. HAOS end-to-end pairing
 and nested-sandbox confirmation still belong to the lead's lab; the outside lane uses disposable fixtures only.
 
@@ -314,7 +316,9 @@ and nested-sandbox confirmation still belong to the lead's lab; the outside lane
 `remoteControl/pairing/start` with `manualCode: true` on the running process's own Unix WebSocket.
 It uses `manualPairingCode`, not the opaque QR pairing token. A missing, unsupported or failed response
 shows an error and clears an earlier code. Turning off or restarting clears the page's code. Codes
-are kept only in page state; recent logs and integration-token state reads omit them.
+are kept only in administrator page state; recent logs, non-administrator Ingress reads,
+the integration and `/status` omit them. Start, stop, review and new-code requests all require
+an active Home Assistant administrator verified through the same check as task approvals.
 
 This follows the pinned upstream sources at `rust-v0.166.0`:
 

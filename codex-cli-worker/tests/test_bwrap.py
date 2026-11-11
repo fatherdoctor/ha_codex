@@ -61,7 +61,8 @@ class BubblewrapCompatibilityTests(unittest.TestCase):
         self.wrapper.write_text(
             (WORKER / "codex-bwrap").read_text(encoding="utf-8")
             .replace("REAL_BWRAP=/opt/codex-sandbox/bwrap.real", f"REAL_BWRAP={self.real}")
-            .replace('HIDDEN_DIRS="/run/s6"', f'HIDDEN_DIRS="{root}/run/s6"')
+            .replace('/run/s6 /data/remote_control_control',
+                     f'{root}/run/s6 {root}/data/remote_control_control')
             .replace('HIDDEN_FILES="/config/secrets.yaml /config/.storage/auth',
                      f'HIDDEN_FILES="{root}/config/secrets.yaml {root}/config/.storage/auth')
             .replace("/usr/bin/python3 /opt/codex-sandbox/codex-bwrap-probe.py",

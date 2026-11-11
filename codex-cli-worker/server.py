@@ -6154,7 +6154,7 @@ def remote_control_summary() -> dict[str, Any]:
 def get_remote_control() -> Response:
     """Return the remote-control state: on or off, connected or not, machine name, pairing code, recent log."""
     state = dict(remote_control_supervisor.snapshot())
-    if not is_ingress_request():
+    if not is_ingress_request() or ingress_admin()[0] is None:
         state.pop("pairing_code", None)
         state.pop("pairing_qr", None)
     return jsonify({"ok": True, "remote_control": state})
@@ -6166,8 +6166,11 @@ def get_remote_control() -> Response:
 def change_remote_control(action: str) -> Response | tuple[Response, int]:
     """Turn remote control on or off, ask for a new pairing code, or mark config changes reviewed.
 
-    Only from the app page, never with the API token.
+    Only from an administrator on the app page, never with the API token.
     """
+    admin, refusal = ingress_admin()
+    if admin is None:
+        return jsonify({"ok": False, "error": refusal}), 403
     if action == "start":
         ok, state = remote_control_supervisor.start()
         if not ok:

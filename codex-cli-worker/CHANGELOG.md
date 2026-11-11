@@ -2,9 +2,10 @@
 
 ## 0.1.81.2 (unreleased)
 
-- **First remote-control pairing (CX-PAIR).** Ask the supervised app-server for a manual pairing code over its own private control socket. Clear old codes on failure or restart, keep them off logs and integration-token state reads, and report an unavailable code honestly.
-
 Permissions that ask, and only an administrator can answer. Sign-in without a terminal, a pause switch and a model pin.
+
+- **Pairing isolation and administrator access (CX-PAIR.f).** Mask the fixed control-socket parent inside every sandbox. Require a verified administrator for remote-control actions and for code/QR reads; shorten readiness checks and explain a still-starting process honestly.
+- **First remote-control pairing (CX-PAIR).** Ask the supervised app-server for a manual pairing code over its own private control socket. Clear old codes on failure or restart, keep them off logs and the integration and `/status`, and report an unavailable code honestly.
 
 - **Remote-control review fixes (CX-RC-START.f).** Check move destinations for planted YAML; recognize the actual Codex 0.166 downgrade wording. Save and report replaced bytes before watch undo, and report UI-owned YAML without whole-file rollback. Cap hook-checked files at 512 KiB and wait for the watch report in the timing-sensitive test. The container smoke accepts only requirements refusal or a proven restricted fallback.
 
