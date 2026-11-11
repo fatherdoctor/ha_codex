@@ -346,8 +346,8 @@ contact Home Assistant, or change Codex's approval policy.
 call may run after the timeout. The hook checks bounded inputs and refuses an uncertain, oversized or
 ambiguous YAML patch. Hook-checked source and script files are capped at 512 KiB; larger files are refused before scanning. While remote control is on it reconstructs the whole proposed YAML file, so edits
 beneath an existing `shell_command`, `rest_command` or `command_line` key are also checked. The checked-in
-fixtures use the captured Bash/apply_patch command-string inputs; escalation is checked at PermissionRequest,
-not inferred from a field missing from the captured PreToolUse input. In the outside executor, 30 isolated
+fixtures use the captured Bash/apply_patch command-string inputs. PermissionRequest is checked for named security
+restrictions; needing network or other ordinary sandbox permission is not itself a refusal. In the outside executor, 30 isolated
 hook-process measurements took at most 0.412 seconds against the configured 10-second timeout, including
 a repetitive 450 KiB YAML file (Codex 0.166 shapes, Python 3.12). Reproduce with
 `python codex-cli-worker/tests/measure_gate.py` in the worker's test environment; this timing is not an HAOS
@@ -357,9 +357,13 @@ The config watch runs every 30 seconds over at most 3,000 ordinary YAML files, e
 platform or template block causes the **whole affected file** to be restored from its hash-verified earlier
 bytes; a newly created file can be removed only with a complete earlier absence manifest. Before either change,
 the replaced bytes are saved with mode 0600 under the app's private data folder, in
-`remote_control_undo/<relative-file>.<timestamp>-<suffix>`. Each finding names its recovery copy. If the copy cannot
-be saved safely, no undo takes place. Home Assistant's UI-owned `automations.yaml`, `scripts.yaml` and `scenes.yaml`
-are reported without automatic undo, preventing whole-file rollback of the owner's UI work. Earlier ordinary
+`remote_control_undo/<sha256>.yaml`. Identical bytes reuse one verified copy, including across files and restarts.
+A new copy must fit within 128 copies and 64 MiB, counting earlier nested copies too. When it will not fit,
+the watch reports that the store is full and leaves the file unchanged; it does not delete older owner copies.
+Each finding names its recovery copy. If the copy cannot
+be saved safely, no undo takes place. Home Assistant's root UI-owned `automations.yaml`, `scripts.yaml` and `scenes.yaml`
+are reported without automatic undo, preventing whole-file rollback of the owner's UI work. Those basenames
+in subfolders are checked normally. Earlier ordinary
 YAML copies stay in the app's private storage with mode 0600, capped at 16 MiB; credential files and stores,
 symlinks and hardlinks are excluded. Missing, old, corrupt or incomplete baselines never justify a guessed
 restore: the page reports that the change could not be undone safely. Successful undo remains visible until
@@ -378,12 +382,12 @@ undo reduce exposure; neither removes the upstream timeout risk.
 - **No Home Assistant credentials.** The remote-control process gets no Home Assistant token and no Supervisor token, even when the `HA_TOKEN` option is set for the chat page.
 - **The command check.** Commands from the ChatGPT app do not pass through this app's Allow and Deny buttons, so the app ships a check that holds outside the model, for every client:
   - Codex's managed requirements (`/etc/codex/requirements.toml`, read-only) rule out the full-access sandbox and any hook other than the app's own.
-  - A managed hook refuses sandbox escalation while remote control is on, and credential access at all times. Planted commands and templated actions remain blocked with either category setting. Existing device and message patch refusals are enabled only by **Refuse actions by category**.
+  - With remote control on, the managed hook leaves normal light, lock, network and checked-file requests to Codex's native approval flow. It says nothing (exit 0), never auto-approves. The legacy category option cannot make this hook refuse a device action. Credential access, explicit full access, the app's own settings/policy/rules and planted command or template definitions remain refused with a named reason. The watch's separate category behavior remains pending CX-PARITY.
   - A config watch compares YAML with the baseline from when remote control was turned on. While remote control is on, it undoes planted commands and templates using verified copies with either category setting, and reports device and message findings only with the option on. Review its findings in Settings before reloading or restarting.
   - **What the scan reads.** The hook, exchange check and config watch share the line-based scan in `gate_rules.py` and `refused-domains.json`. Shell, REST and Python actions, `hassio` and `pyscript`, command/platform definitions and templated actions or targets stay checked, including indirect calls to scripts containing those kinds. With category refusals on it also checks device actions, scene states, message scripts and calls to scripts containing refused actions. It can read an incomplete edit but may miss an obfuscated reference; this does not replace the sandbox or house rules.
-  - Asking you before a change is Codex's own rule only; nothing outside the model can enforce it for the ChatGPT app.
+  - The phone uses Codex's own approval card, not this page's buttons: review what will change, where and the effect, then allow or deny that request. A hook no-opinion result leaves the native request waiting; it never grants permission. This hook change proves that route only. The shipped model-level device rules are changed separately by CX-PARITY (#22); actual phone presentation still needs the owner's phone test.
 - **Why Turn on can be unavailable.** Missing command-check files or a failed self-test disable **Turn on** with a reason; the chat page remains available.
-- **Command checks.** Remote control requires the installed gate and its self-test. Sandbox escalation while it is on and credential access are refused. Planted commands and templates stay checked with either category setting; the optional category checks are described above. The configuration watch retains undo results and unreviewed changes for review before a reload or restart.
+- **Command checks.** Remote control requires the installed gate and its self-test. The self-test checks both a normal PermissionRequest with no hook decision and a credential request that must be refused. Explicit full access and credential access remain refused. Planted commands and templates stay checked with either category setting; the optional category checks are described above. The configuration watch retains undo results and unreviewed changes for review before a reload or restart.
 - Remote control is experimental upstream. If it breaks, the chat page is not affected.
 
 ## Codex Sign-In
