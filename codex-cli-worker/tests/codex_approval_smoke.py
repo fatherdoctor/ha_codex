@@ -4,6 +4,7 @@ import argparse
 from contextlib import ExitStack, contextmanager
 import json
 import os
+import re
 from pathlib import Path
 import shlex
 import subprocess
@@ -17,6 +18,47 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from approvals import AppServerSession
 import server
 from server import FINAL_RESPONSE_SCHEMA
+
+
+def assert_restricted_full_access(result):
+    """Accept a requirements refusal or prove the CLI reported a restricted fallback.
+
+    With Codex 0.166, excluding Never can replace a hard error with an
+    OnRequest + managed read-only fallback. Exit zero alone proves nothing.
+    Only typed CLI error events count as configuration warnings, never model
+    text, and both warnings must identify the image's requirements file.
+    """
+    requirements = "/etc/codex/requirements.toml"
+    assert requirements in result.stdout + result.stderr, "No managed requirements diagnostic"
+    if result.returncode != 0:
+        return "refused"
+    warnings = []
+    for line in result.stdout.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        item = event.get("item") or {}
+        if event.get("type") == "item.completed" and isinstance(item, dict) and item.get("type") == "error":
+            message = item.get("message")
+            if isinstance(message, str) and requirements in message:
+                warnings.append(message)
+    def fallback(field):
+        for message in warnings:
+            if f"Configured value for `{field}` is disallowed by requirements;" in message:
+                match = re.search(r"falling back to required value (.+?)\. Details:", message)
+                if match:
+                    return match.group(1)
+        return ""
+    assert fallback("approval_policy") == "OnRequest", "Missing managed OnRequest fallback warning"
+    profile = fallback("permission_profile")
+    assert (profile.startswith("Managed {") and "file_system: Restricted" in profile
+            and "network: Restricted" in profile
+            and not re.search(r"unrestricted|full.?access", profile, re.IGNORECASE)), (
+                "Full-access request succeeded without a reported restricted profile")
+    return "restricted fallback"
 
 
 @contextmanager
@@ -180,13 +222,14 @@ def main():
             # Start in the old transport to prove existing saved chats can resume.
             final_only = True
             # The app image's /etc/codex/requirements.toml forbids full access for every client, so the
-            # old transport is exercised in workspace-write, and the refusal itself is checked here.
+            # old transport is exercised in workspace-write; a full-access request must either fail
+            # or report both requirements warnings and a restricted effective fallback.
             if Path("/etc/codex/requirements.toml").is_file():
                 refused = subprocess.run([binary, "exec", "--sandbox", "danger-full-access", "--skip-git-repo-check",
                                           "--json", "--model", "gpt-5.1-codex", *config_args, "Say fixture finished"],
                                          cwd=workspace, env=environment, capture_output=True, text=True, timeout=30)
-                assert refused.returncode != 0, ("full access was not refused", refused.stdout, refused.stderr)
-                assert "requirements" in refused.stdout + refused.stderr, (refused.stdout, refused.stderr)
+                outcome = assert_restricted_full_access(refused)
+                print(f"Managed full-access request: {outcome}; source /etc/codex/requirements.toml.")
             legacy = subprocess.run([binary, "exec", "--sandbox", "workspace-write", "--skip-git-repo-check", "--json",
                                      "--model", "gpt-5.1-codex", *config_args, "Say fixture finished"],
                                     cwd=workspace, env=environment, capture_output=True, text=True, timeout=30)
