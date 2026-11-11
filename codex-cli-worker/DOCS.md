@@ -305,9 +305,28 @@ profile gains no capabilities. This follows Bubblewrap's
 [documented hostname option](https://github.com/containers/bubblewrap/blob/main/bwrap.xml), which succeeded
 in the HAOS lab. A short namespace-only probe runs before Codex; if the probe or the actual namespace setup
 fails, the page and log show **Machine-name namespace unavailable** and Codex starts without a custom name.
-It does not repeatedly restart the failed `unshare -Ur -u` command. Pairing uses the same selected launch path.
+It does not repeatedly restart the failed `unshare -Ur -u` command. The supervised app-server uses the same selected launch path.
 The nested sandbox wrapper is permitted in the existing Bubblewrap child profile. HAOS end-to-end pairing
 and nested-sandbox confirmation still belong to the lead's lab; the outside lane uses disposable fixtures only.
+
+**First pairing (Codex 0.166).** Turn remote control on, wait for the connected state, then choose
+**New pairing code** and type the displayed code into the ChatGPT app. The button calls
+`remoteControl/pairing/start` with `manualCode: true` on the running process's own Unix WebSocket.
+It uses `manualPairingCode`, not the opaque QR pairing token. A missing, unsupported or failed response
+shows an error and clears an earlier code. Turning off or restarting clears the page's code. Codes
+are kept only in page state; recent logs and integration-token state reads omit them.
+
+This follows the pinned upstream sources at `rust-v0.166.0`:
+
+- [cli/src/remote_control_cmd.rs:187-204](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/cli/src/remote_control_cmd.rs#L187):
+  foreground mode creates a private socket; the separate CLI `pair` command selects the daemon socket.
+- [cli/src/main.rs:591-606 and 1298-1314](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/cli/src/main.rs#L591):
+  `app-server --listen unix://PATH --remote-control` selects ephemeral remote control on this process.
+- [app-server-daemon/src/client.rs:63-140](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/app-server-daemon/src/client.rs#L63)
+  and [remote_control_client.rs:60-140](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/app-server-daemon/src/remote_control_client.rs#L60):
+  Unix WebSocket, experimental initialization, ephemeral enable, status and manual-code request.
+- [app-server-protocol/src/protocol/v2/remote_control.rs:70-83](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/app-server-protocol/src/protocol/v2/remote_control.rs#L70):
+  manual-code request and response fields. No second daemon or terminal pairing step is needed.
 
 **Managed policy and read-only fallback (Codex 0.166).** The requirements allow only `read-only` and
 `workspace-write`, only `on-request` approvals (never `never`), and only managed hooks. Integration-owned
@@ -350,7 +369,7 @@ prevent a reload before the scan, or guarantee capture of an obfuscated referenc
 undo reduce exposure; neither removes the upstream timeout risk.
 
 - **Off until you turn it on.** Open the app page, then **Settings**, then **Remote control from the ChatGPT app**. The choice is saved and holds across app restarts.
-- **One supervised process.** The app runs `codex remote-control --no-daemon` in the foreground and starts it again, with a growing delay, if it exits. **Turn off** stops it.
+- **One supervised process.** The app runs `codex app-server --listen unix://<private socket> --remote-control` in the foreground and starts it again, with a growing delay, if it exits. **Turn off** stops it.
 - **Machine name.** The ChatGPT app lists this machine as **Home Assistant** unless you change the **Remote control machine name** option. Codex has no name setting, so the app starts it with that name as its host name inside a private namespace. If the private name namespace is unavailable, the page explains that Codex is using its existing host name.
 - **Pairing.** The pairing code is shown as large text and as a QR code. Pairing is kept in the app's private storage with the Codex sign-in, so a restart does not ask for it again. **New pairing code** asks Codex for a fresh one when the ChatGPT app has lost this machine.
 - **No Home Assistant credentials.** The remote-control process gets no Home Assistant token and no Supervisor token, even when the `HA_TOKEN` option is set for the chat page.

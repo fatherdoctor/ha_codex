@@ -6153,7 +6153,11 @@ def remote_control_summary() -> dict[str, Any]:
 @require_auth
 def get_remote_control() -> Response:
     """Return the remote-control state: on or off, connected or not, machine name, pairing code, recent log."""
-    return jsonify({"ok": True, "remote_control": remote_control_supervisor.snapshot()})
+    state = dict(remote_control_supervisor.snapshot())
+    if not is_ingress_request():
+        state.pop("pairing_code", None)
+        state.pop("pairing_qr", None)
+    return jsonify({"ok": True, "remote_control": state})
 
 
 @app.post("/remote-control/<action>")
