@@ -18,10 +18,6 @@ codex_tasks/
 .env.*
 secrets.yaml
 
-# Local agent notes
-AGENTS.md
-agents.md
-
 # Local working files
 /TODO.md
 /.codex-remote-attachments/
