@@ -66,7 +66,6 @@ BACKOFF_CAP = 300.0
 # A process that ran this long before exiting counts as healthy: the next restart starts the backoff again.
 HEALTHY_RUN = 600.0
 STOP_GRACE = 10.0
-PAIR_TIMEOUT = 60.0
 LOG_LINES = 40
 # Credentials the remote-control process must never see: commands from the ChatGPT app get no
 # Home Assistant token and no Supervisor token, whatever the chat path is given.
@@ -601,7 +600,7 @@ class ControlClient:
             raise ControlError("Could not reach this process's Codex control socket.") from None
         finally:
             if transport is not None:
-                transport.close()
+                transport.close(timeout=0)
 
     def enable(self, cancelled: Callable[[], bool] = lambda: False) -> dict[str, Any]:
         return self._request("remoteControl/enable", {"ephemeral": True}, 12.0, cancelled)

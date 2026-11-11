@@ -94,7 +94,7 @@ class Transport:
         if method=='remoteControl/pairing/start':result={'manualPairingCode':None if self.no_code else FIXTURE_CODE,'expiresAt':123}
         self.pending.append(json.dumps({'id':message['id'],'error':{'code':-32601,'message':'unsupported'}} if self.fail else {'id':message['id'],'result':result}))
     def recv(self):return self.pending.pop(0)
-    def close(self):self.closed=True
+    def close(self, **kwargs):self.closed=True
 
 
 class ProtocolTests(unittest.TestCase):
@@ -109,3 +109,39 @@ class ProtocolTests(unittest.TestCase):
         transport=Transport(fail=True);client=rc.ControlClient(Path('/not-a-real-socket'),connector=lambda *_:transport)
         with self.assertRaises(rc.ControlError) as caught:client.pair()
         self.assertFalse(FIXTURE_CODE in str(caught.exception));self.assertTrue(transport.closed)
+
+
+class LifecycleTests(unittest.TestCase):
+    def test_rpc_cancellation_closes_connection_without_waiting_for_reply(self):
+        class SilentTransport(Transport):
+            def recv(self):
+                raise rc.websocket.WebSocketTimeoutException("timeout")
+        transport = SilentTransport()
+        attempts = []
+        def cancelled():
+            attempts.append(1)
+            return len(attempts) > 3
+        with self.assertRaises(rc.ControlError):
+            rc.ControlClient(Path('/fixture'), connector=lambda *_: transport).pair(cancelled=cancelled)
+        self.assertTrue(transport.closed)
+
+    def test_stop_during_pair_discards_reply_and_closes_owned_socket(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            procs=[];entered=threading.Event();release=threading.Event()
+            class DelayedControl(base.FakeControl):
+                def pair(self, cancelled=lambda:False):
+                    entered.set();release.wait(timeout=2)
+                    return {"manualPairingCode": FIXTURE_CODE}
+            def popen(*args, **kwargs):
+                proc=base.FakeProc();procs.append(proc);return proc
+            sup=rc.Supervisor('codex',Path(tmp)/'state',dict,lambda:'',gate=lambda:'',popen=popen,control_factory=DelayedControl)
+            self.addCleanup(sup.stop);sup.start()
+            self.assertTrue(base.wait_for(lambda:sup.snapshot()['state']=='ready'))
+            private=sup.control_socket.parent;self.assertEqual(private.stat().st_mode & 0o777,0o700)
+            results=[];worker=threading.Thread(target=lambda:results.append(sup.pair()));worker.start()
+            try:
+                self.assertTrue(entered.wait(timeout=1));sup.stop();release.set();worker.join(timeout=2)
+                self.assertFalse(worker.is_alive());self.assertFalse(results[0][0]);self.assertFalse(results[0][1]['pairing_code'])
+                self.assertFalse(private.exists())
+            finally:
+                release.set();worker.join(timeout=2)
