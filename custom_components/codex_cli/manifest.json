@@ -15,5 +15,5 @@
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/fatherdoctor/ha_codex/issues",
   "single_config_entry": true,
-  "version": "0.1.81.1"
+  "version": "0.1.81.2"
 }

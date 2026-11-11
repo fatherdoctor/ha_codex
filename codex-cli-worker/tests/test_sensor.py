@@ -259,6 +259,21 @@ class LastTaskSensorTests(unittest.TestCase):
         coordinator.data = {"latest_task": {"task_id": "chat", "status": "completed"}}
         self.assertEqual(sensor.CodexLastTaskSensor(coordinator, entry).extra_state_attributes["choices"], [])
 
+    def test_prompt_counts_follow_the_latest_conversation(self) -> None:
+        """The permission-prompt sensor shows the latest conversation's total and its counts by kind."""
+        counts = {"command": 2, "command_input": 0, "file_change": 1, "other": 0, "total": 3}
+        coordinator = SimpleNamespace(data={"latest_task": {"task_id": "chat", "approval_counts": counts}})
+        entry = SimpleNamespace(entry_id="test-entry", data={"base_url": "http://codex-worker.test"})
+        prompts = sensor.CodexPromptCountSensor(coordinator, entry)
+
+        self.assertEqual(prompts.native_value, 3)
+        self.assertEqual(prompts.extra_state_attributes,
+                         {"task_id": "chat", "command": 2, "command_input": 0, "file_change": 1, "other": 0})
+        # A conversation that raised none, or a worker too old to count, reads 0.
+        coordinator.data = {"latest_task": {"task_id": "older"}}
+        self.assertEqual(prompts.native_value, 0)
+        self.assertEqual(prompts.extra_state_attributes["file_change"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

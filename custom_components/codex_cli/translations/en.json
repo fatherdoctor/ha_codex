@@ -34,6 +34,9 @@
       "active_tasks": {
         "name": "Active tasks"
       },
+      "permission_prompts": {
+        "name": "Permission prompts"
+      },
       "auth_status": {
         "name": "Auth status"
       },
@@ -53,17 +56,16 @@
     "binary_sensor": {
       "task_running": {
         "name": "Task running"
+      },
+      "signed_in": {
+        "name": "Signed in"
       }
     }
   },
   "issues": {
     "codex_not_signed_in": {
       "title": "Codex is not signed in",
-      "description": "The Codex worker is reachable, but Codex CLI is not signed in. Start the Codex sign-in flow from the add-on web UI or by running the `codex_cli.start_login` action."
-    },
-    "remote_control_config_change": {
-      "title": "Review a change made while remote control was on",
-      "description": "{count} change(s) to your configuration since remote control from the ChatGPT app was turned on add actions that Codex may not add on its own. The first is {what} in {where}: `{text}`. Review it before you reload or restart Home Assistant. Then open the Codex app page, Settings, Remote control, and choose Mark reviewed."
+      "description": "The Codex worker is reachable, but it is not signed in to ChatGPT, or its sign-in has expired or been revoked. Open the Codex panel in the sidebar and press Sign in: the page shows a code and a QR code for the ChatGPT sign-in page. You can also start the sign-in with the `codex_cli.start_login` action. This repair clears itself once the sign-in works."
     }
   },
   "services": {
