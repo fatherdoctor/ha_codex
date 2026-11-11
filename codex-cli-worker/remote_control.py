@@ -293,9 +293,15 @@ class ConfigWatch:
                     self.root, path.relative_to(self.root).as_posix()).decode("utf-8", errors="replace")
             except (OSError, ValueError):
                 continue
+        texts = gate_rules.extend_include_texts(texts, self.root, rules, max_bytes=WATCH_MAX_BYTES)
         scripts = self.refused_scripts(texts, rules, enabled)
         lines = {rel: found for rel, text in texts.items() if (found := gate_rules.active_findings(text, rules, scripts, enabled))}
         blocks = {rel: found for rel, text in texts.items() if (found := gate_rules.refused_blocks(text, rules, scripts, enabled))}
+        for rel, kinds in gate_rules.included_definitions(texts, rules).items():
+            if rel in texts:
+                lines.setdefault(rel, []).append(gate_rules.included_finding(rel, kinds, texts[rel]))
+                blocks.setdefault(rel, {})['include:' + hashlib.sha256(texts[rel].encode()).hexdigest()] = (
+                    1, max(1, len(texts[rel].splitlines())), texts[rel].splitlines()[0] if texts[rel].splitlines() else '')
         return lines, blocks
 
     def has_baseline(self) -> bool:
@@ -309,7 +315,7 @@ class ConfigWatch:
             dirs[:] = sorted(d for d in dirs if d not in WATCH_SKIP_DIRS and not d.startswith(".")
                              and not (Path(folder)/d).is_symlink())
             for name in sorted(names):
-                if name.lower().endswith((".yaml", ".yml")) and name not in {"secrets.yaml", "secrets.yml"}:
+                if not name.startswith(".") and name.lower() not in {"secrets.yaml", "secrets.yml"}:
                     present.append((Path(folder)/name).relative_to(self.root).as_posix())
                     if len(present) >= WATCH_MAX_FILES:
                         return present, False
@@ -339,10 +345,23 @@ class ConfigWatch:
             texts = {rel: base64.b64decode(entry["data"]).decode("utf-8", errors="replace")
                      for rel, entry in copies.items()}
             rules = self.rules()
+            expanded = gate_rules.extend_include_texts(texts, self.root, rules, max_bytes=WATCH_MAX_BYTES)
+            for rel in expanded.keys() - texts.keys():
+                raw = gate_rules.read_config_bytes(self.root, rel)
+                total += len(raw)
+                if total > 8 * WATCH_MAX_BYTES:
+                    complete = False
+                    break
+                copies[rel] = {'sha256': hashlib.sha256(raw).hexdigest(), 'data': base64.b64encode(raw).decode('ascii')}
+            texts = {rel: base64.b64decode(entry['data']).decode('utf-8', errors='replace') for rel, entry in copies.items()}
             scripts = self.refused_scripts(texts, rules, True)
             data = {rel: [list(f.key()) for f in gate_rules.active_findings(text, rules, scripts, True)]
                     for rel, text in texts.items()}
             hashes = {rel: sorted(gate_rules.refused_blocks(text, rules, scripts, True)) for rel, text in texts.items()}
+            for rel, kinds in gate_rules.included_definitions(texts, rules).items():
+                if rel in texts:
+                    data.setdefault(rel, []).append(list(gate_rules.included_finding(rel, kinds, texts[rel]).key()))
+                    hashes.setdefault(rel, []).append('include:' + hashlib.sha256(texts[rel].encode()).hexdigest())
             self._save_baseline({"taken": time.time(), "files": data, "blocks": hashes,
                                  "copies": copies, "present": present, "complete": complete, "undo_events": []})
 
@@ -486,6 +505,8 @@ class ConfigWatch:
                 except (OSError, ValueError):
                     continue
             scripts = self.refused_scripts(texts, rules, categories=False)
+            texts = gate_rules.extend_include_texts(texts, self.root, rules, max_bytes=WATCH_MAX_BYTES)
+            definitions = gate_rules.included_definitions(texts, rules)
             copies = saved.get("copies") or {}
             for rel in sorted({item["file"] for item in out}):
                 result = ""
@@ -505,6 +526,8 @@ class ConfigWatch:
                         raise ValueError("no verified earlier copy or absence manifest")
                     security = gate_rules.new_refused((earlier or b"").decode("utf-8", errors="replace"),
                                                      current.decode("utf-8", errors="replace"), rules, scripts, False)
+                    if rel in definitions and (earlier or b'') != current:
+                        security.append(gate_rules.included_finding(rel, definitions[rel], current.decode('utf-8', errors='replace')))
                     if not security:
                         continue  # Category-only findings are not always-on undo.
                     if Path(rel).name in {"automations.yaml", "scripts.yaml", "scenes.yaml"}:

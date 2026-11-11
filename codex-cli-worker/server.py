@@ -2748,13 +2748,15 @@ def refuse_planted_edits(run_dir: Path, changes: dict[str, list[str]], before: d
     rules = gate_rules.load_rules()
     added = set(changes.get("added", []))
     paths = sorted(added | set(changes.get("changed", [])))
-    paths = [rel for rel in paths if safe_relative_path(rel) and not snapshot_secret_path(rel)
-             and Path(rel).suffix.lower() in gate_rules.YAML_SUFFIXES]
-    saved = {entry["path"]: entry for entry in previous_versions(run_dir, [p for p in paths if p not in added], before)}
     watch = remote_control.ConfigWatch(CONFIG_ROOT, run_dir / "unused-baseline.json")
     texts = {path.relative_to(CONFIG_ROOT).as_posix(): path.read_text(encoding="utf-8", errors="replace")
              for path in watch.files() if should_include_file(path)}
+    texts = gate_rules.extend_include_texts(texts, CONFIG_ROOT, rules, max_bytes=gate_rules.CONFIG_MAX_BYTES)
     scripts = watch.refused_scripts(texts, rules, enabled)
+    definitions = gate_rules.included_definitions(texts, rules)
+    paths = [rel for rel in paths if safe_relative_path(rel) and not snapshot_secret_path(rel)
+             and (Path(rel).suffix.lower() in gate_rules.YAML_SUFFIXES or rel in definitions)]
+    saved = {entry['path']: entry for entry in previous_versions(run_dir, [p for p in paths if p not in added], before)}
     results = []
     root = CONFIG_ROOT.resolve()
     for rel in paths:
@@ -2775,6 +2777,8 @@ def refuse_planted_edits(run_dir: Path, changes: dict[str, list[str]], before: d
             continue
         earlier = earlier_bytes.decode("utf-8", errors="replace")
         found = gate_rules.new_refused(earlier, after, rules, scripts, enabled)
+        if rel in definitions and earlier != after:
+            found.append(gate_rules.included_finding(rel, definitions[rel], after))
         if not found:
             continue
         undone = ""

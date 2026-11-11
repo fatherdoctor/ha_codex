@@ -2,6 +2,8 @@
 
 ## 0.1.81.2 (unreleased)
 
+- **Parsed YAML command checks (CX-YAML).** Recognize flow and quoted keys, action/service mappings, script targets and per-file script includes alongside the line rules. Track included command definitions as whole files across the hook, exchange check and config watch; safe tags remain opaque and include paths cannot reach credential files or links.
+
 Permissions that ask, and only an administrator can answer. Sign-in without a terminal, a pause switch and a model pin.
 
 - **Remote-control review fixes (CX-RC-START.f).** Check move destinations for planted YAML; recognize the actual Codex 0.166 downgrade wording. Save and report replaced bytes before watch undo, and report UI-owned YAML without whole-file rollback. Cap hook-checked files at 512 KiB and wait for the watch report in the timing-sensitive test. The container smoke accepts only requirements refusal or a proven restricted fallback.

@@ -320,6 +320,28 @@ explain the possible downgrade. When Codex emits the warning on the supervised o
 that the request was downgraded. Not every relay thread warning is exposed there: absence of that message
 is not evidence that the requested permissions were granted.
 
+**Parsed YAML and include checks.** The command check retains the line rules for incomplete edits and
+adds a safe composed-node pass for quoted keys, flow mappings, action/service values, script targets,
+anchors and YAML merges. Home Assistant tags remain nodes: `!secret` is never resolved or read.
+The parser constructs no Python objects. Alias visits (20,000), nesting (64), input bytes (2 MiB)
+and per-document parsing (0.25 seconds) are bounded; a parsed-check budget failure is a finding,
+not permission to run unchecked.
+
+A definition such as `shell_command: !include commands.yaml` protects the entire included file,
+including a filename with a non-YAML suffix. Definition directories and nested includes are tracked,
+and scripts under `!include_dir_named` use the filename as the script name. Script references resolve
+transitively under the same active security rules. The hook reconstructs proposed file contents and
+checks include paths from both the existing and proposed configuration. The watch hashes each included
+definition whole and uses its verified saved bytes for undo; the exchange check keeps its verified-copy
+requirement. An earlier file is never presumed absent merely because it had a different suffix.
+
+Include reads stay under the configuration root through no-follow file descriptors. Hidden paths,
+credential-named includes, symlinks and hardlinks are excluded or refused. The hook inventory is bounded
+at 3,000 files/8 MiB, include reads at 16 MiB and 64 passes, with a shared 0.75-second graph/read budget.
+A missing, unsafe or over-budget dependency cannot grant a hook approval. Watch findings still require
+review before reload; this does not reverse a command that already ran. These checks do not execute YAML,
+contact Home Assistant, or change Codex's approval policy.
+
 **Hook timeout and undo limits.** A synchronous hook that times out can fail open in Codex 0.166: the tool
 call may run after the timeout. The hook checks bounded inputs and refuses an uncertain, oversized or
 ambiguous YAML patch. Hook-checked source and script files are capped at 512 KiB; larger files are refused before scanning. While remote control is on it reconstructs the whole proposed YAML file, so edits

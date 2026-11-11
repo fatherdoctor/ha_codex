@@ -21,7 +21,8 @@ The refused domains live in one file, ``policy/refused-domains.json``
 (``/usr/share/ha_codex/refused-domains.json`` in the image). When that file is
 missing the built-in list below is used; it is never looser than the file.
 
-The scan reads lines, not parsed YAML, so it also works on half an edit. It
+A bounded safe-node second pass reads flow/quoted YAML and include dependencies;
+the original line scan also works on half an edit. It
 can miss an obfuscated reference; that is why commands that leave the sandbox
 are refused outright while remote control is on.
 """
@@ -34,6 +35,9 @@ import re
 import os
 import stat
 import time
+import posixpath
+from functools import lru_cache
+import yaml
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -172,10 +176,148 @@ def _message_script_re(rules: dict[str, Any]) -> re.Pattern[str]:
     return re.compile(r"^[a-z0-9_]*(?:" + words + r")[a-z0-9_]*$")
 
 
+class YamlBudgetError(ValueError):
+    """The parsed second pass cannot finish within its fixed work budget."""
+
+
+@lru_cache(maxsize=8)
+def yaml_node(text: str) -> Any:
+    """Compose safe nodes, retaining !include/!secret tags without constructing objects.
+
+    Alias visits, nesting, input bytes and elapsed parsing are bounded. Invalid
+    partial YAML falls back to the existing line rules, not a permissive loader.
+    """
+    if len(text.encode("utf-8")) > 2 * 1024 * 1024:
+        raise YamlBudgetError("YAML byte budget exceeded")
+    class Loader(yaml.SafeLoader):
+        def __init__(self, stream):
+            super().__init__(stream)
+            self.visits, self.depth = 0, 0
+            self.deadline = time.monotonic() + 0.25
+
+        def compose_node(self, parent, index):
+            self.visits += 1
+            self.depth += 1
+            try:
+                if self.visits > 20000 or self.depth > 64 or time.monotonic() > self.deadline:
+                    raise YamlBudgetError("YAML parse budget exceeded")
+                return super().compose_node(parent, index)
+            finally:
+                self.depth -= 1
+    loader = Loader(text)
+    try:
+        return loader.get_single_node()
+    except yaml.YAMLError:
+        return None
+    finally:
+        loader.dispose()
+
+
+def yaml_mappings(node: Any):
+    """Walk shared/cyclic aliases once, including merge-key mappings."""
+    seen, todo = set(), [node]
+    while todo:
+        item = todo.pop()
+        if item is None or id(item) in seen:
+            continue
+        seen.add(id(item))
+        if isinstance(item, yaml.MappingNode):
+            yield item
+            for key, value in item.value:
+                todo.extend((key, value))
+        elif isinstance(item, yaml.SequenceNode):
+            todo.extend(item.value)
+
+
+def yaml_digest(node: Any) -> str:
+    """Hash resolved node content once per node; cyclic aliases never expand."""
+    memo, visiting = {}, set()
+    def digest(item):
+        identity = id(item)
+        if identity in memo:
+            return memo[identity]
+        if identity in visiting:
+            return "cycle"
+        visiting.add(identity)
+        if isinstance(item, yaml.MappingNode):
+            value = [(digest(k), digest(v)) for k, v in item.value]
+        elif isinstance(item, yaml.SequenceNode):
+            value = [digest(v) for v in item.value]
+        else:
+            value = item.value
+        result = hashlib.sha256(json.dumps([item.tag, value], ensure_ascii=True).encode()).hexdigest()
+        visiting.remove(identity)
+        memo[identity] = result
+        return result
+    return digest(node)
+
+
+def parsed_findings(text: str, rules: dict[str, Any], scripts: set[str] | frozenset[str]) -> list[Finding]:
+    """Find semantic keys/values in flow, quoted and alias/merge spellings."""
+    findings, lines = [], text.splitlines()
+    for mapping in yaml_mappings(yaml_node(text)):
+        for key, value in mapping.value:
+            if not isinstance(key, yaml.ScalarNode):
+                continue
+            name = key.value
+            scalar = value.value if isinstance(value, yaml.ScalarNode) and value.tag.startswith('tag:yaml.org,2002:') else ''
+            number = key.start_mark.line + 1
+            source = lines[number - 1] if number <= len(lines) else ''
+            def add(reason, kind):
+                findings.append(Finding(number, reason, source, kind))
+            if name in rules['runs_on_load_keys'] and (isinstance(value, (yaml.MappingNode, yaml.SequenceNode)) or value.tag == 'tag:yaml.org,2002:null' or value.tag.startswith('!')):
+                add(f"a {name} definition, which runs on its own once loaded", 'runs_on_load')
+            if name == 'platform' and scalar in rules['runs_on_load_platforms']:
+                add(f"a {scalar} platform, which runs on its own once loaded", 'runs_on_load')
+            if name in ('action', 'service', 'service_template'):
+                if '{{' in scalar or '{%' in scalar or name == 'service_template':
+                    add('a templated action', 'template')
+                match = re.fullmatch(r'([a-z0-9_]+)\.([a-z0-9_]+)', scalar)
+                if match:
+                    domain, service = match.groups()
+                    if domain in rules.get('refused_domains', []):
+                        add(f"an action on {domain}", domain)
+                    elif domain in rules['reaches_anything']:
+                        add(f"an action on {domain}, which can reach anything", domain)
+                    elif domain == 'script' and service not in SCRIPT_SERVICES:
+                        if service in scripts:
+                            add(f"a call to script.{service}, which itself acts on a refused domain", 'refused_script')
+                        elif _message_script_re(rules).match(service):
+                            add(f"a call to script.{service}, whose name says it sends a message", 'message_script')
+            if name == 'entity_id':
+                values = value.value if isinstance(value, yaml.SequenceNode) else [value]
+                for target in values:
+                    if isinstance(target, yaml.ScalarNode) and target.value.startswith('script.'):
+                        service = target.value[7:]
+                        if service in scripts:
+                            add(f"a call to script.{service}, which itself acts on a refused domain", 'refused_script')
+    return findings
+
+
+def parsed_blocks(text: str, rules: dict[str, Any]) -> dict[str, tuple[int, int, str]]:
+    """Definition hashes include resolved aliases, even when anchors live elsewhere."""
+    lines, blocks = text.splitlines(), {}
+    for mapping in yaml_mappings(yaml_node(text)):
+        for key, value in mapping.value:
+            if not isinstance(key, yaml.ScalarNode):
+                continue
+            scalar = value.value if isinstance(value, yaml.ScalarNode) else ''
+            definition = key.value in rules['runs_on_load_keys'] and (isinstance(value, (yaml.MappingNode, yaml.SequenceNode)) or value.tag == 'tag:yaml.org,2002:null' or value.tag.startswith('!'))
+            security = definition or (
+                key.value == 'platform' and scalar in rules['runs_on_load_platforms']) or (
+                key.value in ('action', 'service', 'service_template') and isinstance(scalar, str)
+                and ('{{' in scalar or '{%' in scalar or key.value == 'service_template'))
+            if security:
+                line = key.start_mark.line + 1
+                blocks['yaml:' + key.value + ':' + yaml_digest(value if definition else mapping)] = (
+                    line, max(line, value.end_mark.line + 1), lines[line - 1])
+    return blocks
+
+
 def find_refused(text: str, rules: dict[str, Any], refused_scripts: frozenset[str] | set[str] = frozenset()) -> list[Finding]:
     """Return every line of this YAML text that the check refuses.
 
-    The scan reads lines, not parsed YAML. Refused:
+    The line scan is supplemented by safe composed nodes. Refused:
 
     - an action or service call on a refused domain (locks, alarms, every
       cover, cameras, notifications, spoken announcements) or on a domain
@@ -250,6 +392,12 @@ def find_refused(text: str, rules: dict[str, Any], refused_scripts: frozenset[st
                     findings.append(Finding(number, f"a call to script.{ref}, whose name says it sends a message", line,
                                             "message_script"))
                     break
+    try:
+        additions = parsed_findings(text, rules, refused_scripts)
+    except YamlBudgetError:
+        additions = [Finding(1, "YAML exceeds the bounded parsed check; review this file manually", "", "runs_on_load")]
+    seen = {(f.line, f.reason, f.kind) for f in findings}
+    findings.extend(f for f in additions if (f.line, f.reason, f.kind) not in seen)
     return findings
 
 
@@ -289,6 +437,10 @@ def refused_blocks(text: str, rules: dict[str, Any], scripts: set[str] | frozens
                 out[hashlib.sha256(body.encode("utf-8")).hexdigest()] = (start, number - 1, block[0])
             block, start = [], number
         block.append(line)
+    try:
+        out.update(parsed_blocks(text, rules))
+    except YamlBudgetError:
+        out[hashlib.sha256(text.encode()).hexdigest()] = (1, max(1, len(text.splitlines())), "YAML parsed-check budget exceeded")
     return out
 
 
@@ -317,20 +469,49 @@ def refused_scripts(texts: dict[str, str], rules: dict[str, Any], categories: bo
                     deadline: float | None = None) -> set[str]:
     """Resolve scripts transitively using only the active kinds, including security-only mode."""
     blocks: dict[str, str] = {}
+    sources = {rel: 'auto' for rel in texts if rel == 'scripts.yaml' or rel.startswith('scripts/')}
+    for source, text in texts.items():
+        for mapping in yaml_mappings(yaml_node(text)):
+            for key, value in mapping.value:
+                if not isinstance(key, yaml.ScalarNode) or key.value != 'script':
+                    continue
+                if isinstance(value, yaml.MappingNode):
+                    for name, body in value.value:
+                        if isinstance(name, yaml.ScalarNode):
+                            blocks[name.value] = yaml.serialize(body)
+                elif isinstance(value, yaml.ScalarNode) and value.tag.startswith('!include'):
+                    target = include_path(source, value.value)
+                    if value.tag == '!include':
+                        sources[target] = 'map'
+                    elif value.tag in ('!include_dir_named', '!include_dir_merge_named'):
+                        for rel in texts:
+                            if rel.startswith(target + '/') and rel.lower().endswith(YAML_SUFFIXES):
+                                sources[rel] = 'file' if value.tag == '!include_dir_named' else 'map'
     for rel, text in texts.items():
         if deadline is not None and time.monotonic() > deadline:
             raise ValueError("script scan time budget exceeded")
-        if rel != "scripts.yaml" and not rel.startswith("scripts/"):
+        if rel not in sources:
             continue
-        current, block = "", []
-        for line in text.splitlines() + ["__end__:"]:
-            key = re.match(r"^([a-z0-9_]+)\s*:\s*(?:#.*)?$", line)
-            if key:
-                if current:
-                    blocks[current] = "\n".join(block)
-                current, block = key.group(1), []
+        node = yaml_node(text)
+        if isinstance(node, yaml.MappingNode):
+            keys = {key.value for key, _ in node.value if isinstance(key, yaml.ScalarNode)}
+            if sources[rel] == 'file' or (sources[rel] == 'auto' and rel.startswith('scripts/') and 'sequence' in keys):
+                blocks[Path(rel).stem] = text
             else:
-                block.append(line)
+                for key, value in node.value:
+                    if isinstance(key, yaml.ScalarNode):
+                        blocks[key.value] = yaml.serialize(value)
+        else:
+            # Preserve the line pass for partially edited script maps.
+            current, block = '', []
+            for line in text.splitlines() + ['__end__:']:
+                key = re.match(r'^([a-z0-9_]+)\s*:\s*(?:#.*)?$', line)
+                if key:
+                    if current:
+                        blocks[current] = '\n'.join(block)
+                    current, block = key.group(1), []
+                else:
+                    block.append(line)
     refused: set[str] = set()
     while True:
         found = set()
@@ -344,34 +525,139 @@ def refused_scripts(texts: dict[str, str], rules: dict[str, Any], categories: bo
         refused |= found
 
 
-def config_refused_scripts(rules: dict[str, Any], categories: bool | None = None) -> set[str]:
-    """Read only bounded, ordinary script YAML for patch-hook indirect-call checks."""
-    texts: dict[str, str] = {}
-    deadline = time.monotonic() + 0.5
-    total = 0
-    candidates = [CONFIG_ROOT / "scripts.yaml"]
-    folder = CONFIG_ROOT / "scripts"
-    if folder.is_dir() and not folder.is_symlink():
-        for parent, dirs, names in os.walk(folder):
-            dirs[:] = [d for d in dirs if not d.startswith(".") and not (Path(parent)/d).is_symlink()]
-            if time.monotonic() > deadline:
-                raise ValueError("script scan time budget exceeded")
-            candidates.extend(Path(parent)/name for name in names if name.endswith(YAML_SUFFIXES))
-            if len(candidates) > 3000:
-                raise ValueError("script scan file budget exceeded")
-    for path in candidates:
+def include_path(source: str, value: str) -> str:
+    """Resolve only ordinary in-root includes, without ever opening credentials."""
+    if value.startswith('/'):
+        raise ValueError('absolute include path is not checked')
+    rel = posixpath.normpath(posixpath.join(posixpath.dirname(source), value.rstrip('/')))
+    if rel.startswith('../') or rel == '..' or any(part.startswith('.') for part in Path(rel).parts):
+        raise ValueError('include path leaves ordinary configuration')
+    if any(re.search(r'secret|credential|password|^auth\.json$|^tokens?\.', part, re.I) for part in Path(rel).parts):
+        raise ValueError('credential includes are never read')
+    return rel
+
+
+def included_definitions(texts: dict[str, str], rules: dict[str, Any], strict: bool = False, deadline: float | None = None) -> dict[str, set[str]]:
+    """Resolve include chains and definition directories; every member is hashed whole."""
+    definitions: dict[str, set[str]] = {}
+    deadline = time.monotonic() + 0.75 if deadline is None else deadline
+    roots = {}
+    for rel, text in texts.items():
         if time.monotonic() > deadline:
-            raise ValueError("script scan time budget exceeded")
-        try:
-            rel = path.relative_to(CONFIG_ROOT).as_posix()
-            data = read_config_bytes(CONFIG_ROOT, rel, HOOK_MAX_BYTES)
-            total += len(data)
-            if total > 8 * 1024 * 1024:
-                raise ValueError("script scan byte budget exceeded")
-            texts[rel] = data.decode("utf-8", errors="replace")
-        except FileNotFoundError:
+            raise YamlBudgetError('include parse deadline exceeded')
+        roots[rel] = yaml_node(text)
+    todo = [(rel, node, frozenset()) for rel, node in roots.items()]
+    seen = set()
+    while todo:
+        source, node, kinds = todo.pop()
+        if time.monotonic() > deadline:
+            raise YamlBudgetError('include graph deadline exceeded')
+        if node is None or (source, id(node), kinds) in seen:
             continue
-    return refused_scripts(texts, rules, categories, deadline)
+        seen.add((source, id(node), kinds))
+        if len(seen) > 40000:
+            raise YamlBudgetError('include graph budget exceeded')
+        if isinstance(node, yaml.ScalarNode) and node.tag.startswith('!include'):
+            try:
+                target = include_path(source, node.value)
+            except ValueError:
+                if strict:
+                    raise
+                continue
+            if node.tag == '!include':
+                targets = [target]
+            elif node.tag in ('!include_dir_named', '!include_dir_merge_named', '!include_dir_list', '!include_dir_merge_list'):
+                targets = [rel for rel in texts if rel.startswith(target + '/') and rel.lower().endswith(YAML_SUFFIXES)]
+            else:
+                if strict:
+                    raise ValueError('unsupported include tag')
+                continue
+            for rel in targets:
+                if kinds:
+                    definitions.setdefault(rel, set()).update(kinds)
+                if rel in roots:
+                    todo.append((rel, roots[rel], kinds))
+        elif isinstance(node, yaml.MappingNode):
+            platform_kinds = {v.value for k, v in node.value if isinstance(k, yaml.ScalarNode) and k.value == 'platform' and isinstance(v, yaml.ScalarNode) and v.value in rules['runs_on_load_platforms']}
+            kinds = kinds | frozenset(platform_kinds)
+            for key, value in node.value:
+                extra = {key.value} if isinstance(key, yaml.ScalarNode) and key.value in rules['runs_on_load_keys'] else set()
+                todo.append((source, value, kinds | frozenset(extra)))
+        elif isinstance(node, yaml.SequenceNode):
+            todo.extend((source, child, kinds) for child in node.value)
+    return definitions
+
+
+def included_finding(rel: str, kinds: set[str], text: str) -> Finding:
+    return Finding(1, 'an included ' + '/'.join(sorted(kinds)) + ' definition',
+                   text.splitlines()[0] if text.splitlines() else '', 'runs_on_load')
+
+
+def config_yaml_texts(root: Path, max_bytes: int = 512 * 1024) -> dict[str, str]:
+    """Read a bounded ordinary configuration inventory, never links or secret tags."""
+    texts = {}
+    total = 0
+    deadline = time.monotonic() + 0.5
+    for parent, dirs, names in os.walk(root):
+        dirs[:] = sorted(d for d in dirs if not d.startswith('.') and d not in ('backups', 'node_modules', '__pycache__')
+                         and not (Path(parent)/d).is_symlink())
+        for name in sorted(names):
+            if not name.lower().endswith(YAML_SUFFIXES) or name.lower() in ('secrets.yaml', 'secrets.yml'):
+                continue
+            if time.monotonic() > deadline or len(texts) >= 3000:
+                raise ValueError('configuration inventory budget exceeded')
+            rel = (Path(parent)/name).relative_to(root).as_posix()
+            if (Path(parent)/name).is_symlink():
+                continue
+            try:
+                include_path('', rel)
+            except ValueError:
+                continue  # Credential-named inventories are never opened.
+            raw = read_config_bytes(root, rel, max_bytes)
+            total += len(raw)
+            if total > 8 * 1024 * 1024:
+                raise ValueError('configuration inventory byte budget exceeded')
+            texts[rel] = raw.decode('utf-8', errors='replace')
+    return texts
+
+
+def extend_include_texts(texts: dict[str, str], root: Path, rules: dict[str, Any],
+                         strict: bool = False, max_bytes: int = 512 * 1024) -> dict[str, str]:
+    """Load ordinary referenced definitions even when their suffix is not YAML."""
+    texts = dict(texts)
+    loaded, total = set(texts), sum(len(text.encode()) for text in texts.values())
+    deadline = time.monotonic() + 0.75
+    for _ in range(64):
+        added = False
+        for rel in included_definitions(texts, rules, strict, deadline):
+            if time.monotonic() > deadline:
+                raise YamlBudgetError('include read deadline exceeded')
+            if rel in loaded:
+                continue
+            loaded.add(rel)
+            if len(loaded) > 3000:
+                raise ValueError('include file budget exceeded')
+            try:
+                raw = read_config_bytes(root, rel, max_bytes)
+            except FileNotFoundError:
+                continue
+            except (OSError, ValueError):
+                if strict:
+                    raise ValueError('included definition is not an ordinary bounded file') from None
+                continue
+            total += len(raw)
+            if total > 16 * 1024 * 1024:
+                raise ValueError('include byte budget exceeded')
+            texts[rel] = raw.decode('utf-8', errors='replace')
+            added = True
+        if not added:
+            return texts
+    raise ValueError('include depth budget exceeded')
+
+
+def config_refused_scripts(rules: dict[str, Any]) -> set[str]:
+    texts = config_yaml_texts(CONFIG_ROOT)
+    return refused_scripts(texts, rules, deadline=time.monotonic() + 0.5)
 
 
 PATCH_MAX_BYTES = 256 * 1024
@@ -407,7 +693,7 @@ def read_config_bytes(root: Path, rel: str, max_bytes: int = CONFIG_MAX_BYTES) -
         os.close(folder)
 
 
-def patch_versions(text: str, cwd: str = "") -> list[tuple[str, str, str]]:
+def patch_versions(text: str, cwd: str = "", extra_paths: set[str] | frozenset[str] = frozenset()) -> list[tuple[str, str, str]]:
     """Reconstruct YAML before/after in memory; an uncertain patch is refused, never executed.
 
     This accepts apply_patch's context hunks, add/delete and move forms. Each
@@ -456,7 +742,8 @@ def patch_versions(text: str, cwd: str = "") -> list[tuple[str, str, str]]:
         if time.monotonic() > deadline:
             raise ValueError("patch time budget exceeded")
         moved = next((line.split(": ", 1)[1] for line in body if line.startswith("*** Move to: ")), name)
-        if not (name.lower().endswith(YAML_SUFFIXES) or moved.lower().endswith(YAML_SUFFIXES)):
+        if not (name.lower().endswith(YAML_SUFFIXES) or moved.lower().endswith(YAML_SUFFIXES)
+                or (extra_paths and (relative(name) in extra_paths or relative(moved) in extra_paths))):
             continue
         source, destination = relative(name), relative(moved)
         if source in seen or destination in seen:
@@ -649,7 +936,19 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
                         if found:
                             return f"This edit adds {found[0].reason}. A person must add this change outside Codex."
                 if remote_on:
-                    for path, before, after in patch_versions(text, str(data.get("cwd") or "")):
+                    versions = patch_versions(text, str(data.get("cwd") or ""))
+                    inventory = extend_include_texts(config_yaml_texts(CONFIG_ROOT), CONFIG_ROOT, rules, strict=True)
+                    original = dict(inventory)
+                    inventory.update({path: after for path, before, after in versions})
+                    definitions = included_definitions(original, rules, strict=True)
+                    for path, kinds in included_definitions(inventory, rules, strict=True).items():
+                        definitions.setdefault(path, set()).update(kinds)
+                    # Known includes are checked regardless of filename suffix, including
+                    # newly proposed include paths and move destinations.
+                    versions = patch_versions(text, str(data.get("cwd") or ""), set(definitions))
+                    for path, before, after in versions:
+                        if path in definitions and before != after:
+                            return f"This edit changes {included_finding(path, definitions[path], after).reason}. A person must add it outside Codex."
                         if time.monotonic() > deadline:
                             raise ValueError("command check time budget exceeded")
                         found = new_refused(before, after, rules, scripts)
