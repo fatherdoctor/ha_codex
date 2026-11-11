@@ -773,6 +773,7 @@ def ensure_runtime_files() -> None:
     """Create the worker's folders, make an API token if there is none, and write Codex's output schema and config."""
     CODEX_HOME.mkdir(parents=True, exist_ok=True)
     DATA_ROOT.mkdir(parents=True, exist_ok=True)
+    remote_control.prepare_control_parent(DATA_ROOT)
     task_root().mkdir(parents=True, exist_ok=True)
     AUTH_QR_DIR.mkdir(parents=True, exist_ok=True)
     if not api_token():
@@ -793,7 +794,6 @@ def ensure_runtime_files() -> None:
                 # Enrollment is in Codex's SQLite state, not in the image or
                 # the transient local control socket. Pin it to durable data.
                 f'sqlite_home = {json.dumps(str(CODEX_HOME))}',
-                'developer_instructions = ' + json.dumps(remote_control_instructions(read_options())),
                 "",
             ]
         ),
@@ -6159,6 +6159,7 @@ remote_control_supervisor = remote_control.Supervisor(
     state_path=DATA_ROOT / "remote_control.json",
     env_factory=lambda: codex_env(),
     name_factory=lambda: read_options().get("remote_control_name"),
+    instructions_factory=lambda: remote_control_instructions(read_options()),
     watch=remote_control.ConfigWatch(CONFIG_ROOT, DATA_ROOT / "remote_control_baseline.json"),
 )
 

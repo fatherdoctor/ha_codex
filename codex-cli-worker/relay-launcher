@@ -1,0 +1,71 @@
+#!/usr/bin/python3
+"""Immutable AppArmor transition point for the relay, separate from tool sandboxes.
+
+The namespace path delegates privilege removal to Bubblewrap's --cap-drop ALL.
+The plain fallback has no such setup stage and must remove every capability here.
+"""
+import ctypes
+import errno
+import os
+import sys
+from pathlib import Path
+
+
+def drop_capabilities() -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+
+    def prctl(option, *arguments):
+        if libc.prctl(ctypes.c_int(option), *(ctypes.c_ulong(x) for x in arguments)) < 0:
+            code = ctypes.get_errno()
+            raise OSError(code, os.strerror(code))
+
+    # Keep CAP_SETPCAP until the bounding set has been cleared. Skip already
+    # absent bits: an unprivileged process can safely start with an empty set.
+    for capability in range(64):
+        present = libc.prctl(23, capability, 0, 0, 0)  # PR_CAPBSET_READ
+        if present < 0:
+            if ctypes.get_errno() == errno.EINVAL:
+                break
+            raise OSError(ctypes.get_errno(), 'Could not read the capability bounding set')
+        if present:
+            prctl(24, capability, 0, 0, 0)  # PR_CAPBSET_DROP; fail closed without SETPCAP
+    prctl(47, 4, 0, 0, 0)  # PR_CAP_AMBIENT, PR_CAP_AMBIENT_CLEAR_ALL
+
+    class Header(ctypes.Structure):
+        _fields_ = [('version', ctypes.c_uint32), ('pid', ctypes.c_int)]
+
+    class Data(ctypes.Structure):
+        _fields_ = [('effective', ctypes.c_uint32), ('permitted', ctypes.c_uint32),
+                    ('inheritable', ctypes.c_uint32)]
+
+    header, data = Header(0x20080522, 0), (Data * 2)()
+    if libc.capset(ctypes.byref(header), ctypes.byref(data)) != 0:
+        raise OSError(ctypes.get_errno(), 'Could not clear capabilities')
+    prctl(38, 1, 0, 0, 0)  # PR_SET_NO_NEW_PRIVS
+    fields = dict(line.split(':', 1) for line in Path('/proc/self/status').read_text().splitlines()
+                  if ':' in line)
+    if any(int(fields[key].strip(), 16) for key in ('CapInh', 'CapPrm', 'CapEff', 'CapBnd', 'CapAmb')):
+        raise OSError('Relay fallback retained capabilities')
+    if fields['NoNewPrivs'].strip() != '1':
+        raise OSError('Relay fallback could gain privileges')
+
+
+def main() -> None:
+    command = sys.argv[1:]
+    if command[:1] == ['--plain']:
+        drop_capabilities()
+        command = command[1:]
+    elif not command or command[0] != '/opt/codex-sandbox/relay-bwrap':
+        raise ValueError('Expected the installed relay namespace helper or --plain')
+    if not command:
+        raise ValueError('No relay command')
+    os.execv(command[0], command)
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (OSError, ValueError):
+        # Never echo command arguments, environment or exception details.
+        print('Relay launch failed closed before starting Codex.', file=sys.stderr)
+        sys.exit(1)

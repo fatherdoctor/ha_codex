@@ -38,21 +38,51 @@ These tests do not prove HAOS/AppArmor compatibility or filesystem isolation on 
 
 ### Remote-control profile regression
 
-The private-UTS relay inherits the Bubblewrap child AppArmor profile. The normal worker readiness
-probe does not test that outer process tree. On a disposable worker image with the shipped
-`codex_cli_worker` profile loaded and `aa-exec` available, run:
+The relay has its own nested AppArmor label; tool sandboxes enter a further nested label.
+No `aa-exec` or source tests are needed in the image. From the lead's SSH add-on shell, select the
+candidate worker container (not a host-wide profile change) and run:
 
 ```sh
-HA_CODEX_PROFILE_EXEC_TEST=1 python3 -m unittest discover -s codex-cli-worker/tests -p test_rc_exec.py -v
+docker exec <worker-container> python3 /relay_diagnostics.py --profile local_codex_cli_worker
+docker exec <worker-container> python3 /relay_diagnostics.py --profile local_codex_cli_worker --plain
 ```
 
-This opt-in test runs the production private-name launch prefix under that profile, then uses the
-installed Codex package to execute a shell in each sandbox mode and a plain shell on the parent route.
-It uses a disposable Codex home and no relay, sign-in or Home Assistant request. An ordinary test run
-skips this check explicitly if it has not been enabled; enabling it makes a missing tool or denied exec
-a failure. It does not prove native approval delivery on the phone. The lead must additionally deny
-a remote escalation, allow a fresh one once, verify the ordinary sandboxed read, and repeat after an
-add-on image update: the app should reconnect with the same enrollment and no new pairing code.
+Use the actual Supervisor profile name if it differs from `local_codex_cli_worker`. The probe
+requires that actual enforcing parent label, checks the post-setup relay label and all-zero
+capability sets, then exercises the pinned app-server's `command/exec` pipe and PTY paths in both
+sandbox modes. It checks the actual child label and attempts only synthetic reads through the
+fixed control parent and the relay's `/proc/<pid>/root`, `cwd` and `environ`, plus a synthetic
+write through `cwd`. It fails if any is accessible. Errno 2 means the PID/path is hidden; errno
+13/1 means denied, and errno 30 means read-only. Capture those results and the host's AppArmor
+DENIED records to distinguish namespace hiding from an enforced cross-label denial. In particular,
+repeat on the affected HAOS no-proc fallback where outer PIDs are visible. A pass on a fresh proc
+mount alone does not prove that fallback. Do not attach credential paths or audit data containing
+private arguments to the public PR.
+
+The probe ships in the worker image, uses a temporary synthetic Codex home and passive app-server,
+and never enables remote control, signs in, requests a pairing code or calls Home Assistant. The
+control-mask parent must already exist at startup while remote control is off; the probe does not
+create it. The normal launch path and `--plain` fallback must both pass. A fallback that cannot
+drop its bounding set fails closed. Do not relax AppArmor or give the worker new privileges to
+make it pass.
+
+For an account-free Linux regression with the pinned CLI installed separately, run:
+
+```sh
+HA_TEST_RELAY_NAMESPACE=1 HA_TEST_CODEX=/path/to/pinned/codex python3 -m unittest discover -s codex-cli-worker/tests -p test_rc_exec_f.py -v
+```
+
+This native test uses the production outer mount flags, with a local Bubblewrap path, and no loaded
+HAOS profile. Its negative removes only `--dev-bind /dev /dev`: `command/exec` must fail. The positive
+covers pipes and PTYs in read-only, workspace-write and a disposable unmanaged outside-sandbox
+fixture. The latter is not a native approval or a managed-policy bypass. Local syscall tracing
+identified `EACCES` opening `/dev/null` and `/dev/ptmx`; the old inherited-exec rule was a no-op.
+
+The lead must additionally use the real phone relay to deny an escalation, allow a fresh one once,
+verify the ordinary sandboxed read and Core API call using configured variables, and repeat after
+an add-on image update: the app should reconnect with the same enrollment and no new pairing code.
+The key is relay URL + account + stable initialize client name `ha_codex`, not the display/UTS name.
+No synthetic fixture is evidence of a real enrolled reconnect.
 
 ## HAOS verification before release
 

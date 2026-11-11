@@ -18,21 +18,6 @@ from test_server import server
 
 
 class RelayExecutionTests(unittest.TestCase):
-    def test_installed_package_exec_is_inherited_in_both_profiles(self):
-        parent, child = (ROOT / 'apparmor.txt').read_text().split(
-            '  profile /opt/codex-sandbox/bwrap.real', 1)
-        for profile in (parent, child):
-            self.assertIn('/opt/codex/*/bin/** rix,', profile)
-        self.assertNotIn('capability sys_admin,', parent)
-        self.assertNotIn('/data/** rix', child)
-
-    def test_named_wrapper_keeps_capability_drop_and_api_transport(self):
-        cmd = rc.build_command('/usr/local/bin/codex', rc.DEFAULT_NAME, 'remote-control', '--no-daemon')
-        self.assertEqual(cmd[cmd.index('--cap-drop') + 1], 'ALL')
-        child = (ROOT / 'apparmor.txt').read_text().split(
-            '  profile /opt/codex-sandbox/bwrap.real', 1)[1]
-        self.assertIn('    network,', child)
-
     def test_relay_retains_only_the_same_configured_api_pair_as_chat(self):
         env = rc.remote_env({'HA_TOKEN': 'synthetic', 'HA_URL': 'synthetic-origin',
                              'SUPERVISOR_TOKEN': 'synthetic-supervisor', 'HASSIO_TOKEN': 'synthetic-supervisor',
@@ -63,68 +48,61 @@ class RelayExecutionTests(unittest.TestCase):
             finally:
                 sup.stop()
 
-    def test_startup_keeps_enrollment_and_publishes_api_instructions(self):
+    def test_startup_preserves_real_enrollment_key_and_database(self):
+        # Pinned rust-v0.166.0 state/src/runtime/remote_control.rs:39-48,84.
+        # Actual columns: state/migrations/0024_remote_control_enrollments.sql
+        # plus 0037_remote_control_enrollments_enabled.sql.
+        # Durable lookup is URL + account + initialize clientInfo.name; a
+        # server/display name and random socket are not part of that key.
+        from test_cx_pair import Transport
         with tempfile.TemporaryDirectory() as tmp:
             data = Path(tmp) / 'data'
             home = data / 'codex-home'
             home.mkdir(parents=True)
             db = home / 'state_5.sqlite'
             with sqlite3.connect(db) as conn:
-                conn.execute('CREATE TABLE remote_control_enrollments (server_id TEXT, server_name TEXT)')
-                conn.execute('INSERT INTO remote_control_enrollments VALUES (?, ?)', ('synthetic-id', rc.DEFAULT_NAME))
+                conn.execute('CREATE TABLE remote_control_enrollments ('
+                             'websocket_url TEXT NOT NULL, account_id TEXT NOT NULL, '
+                             'app_server_client_name TEXT NOT NULL, server_id TEXT NOT NULL, '
+                             'environment_id TEXT NOT NULL, server_name TEXT NOT NULL, '
+                             'updated_at INTEGER NOT NULL, remote_control_enabled INTEGER, '
+                             'PRIMARY KEY (websocket_url, account_id, app_server_client_name))')
+                conn.execute('INSERT INTO remote_control_enrollments VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                             ('wss://relay.invalid', 'synthetic-account', 'ha_codex', 'synthetic-id',
+                              'synthetic-environment', 'First room', 1, 1))
             before = db.read_bytes()
             patches = {'CODEX_HOME': home, 'DATA_ROOT': data, 'CODEX_CONFIG_PATH': home / 'config.toml',
                        'SCHEMA_PATH': data / 'schema.json', 'AUTH_QR_DIR': data / 'qr'}
-            with patch.multiple(server, **patches), patch.object(server, 'api_token', return_value='synthetic'), \
-                    patch.object(server, 'task_root', return_value=data / 'tasks'), \
-                    patch.object(server, 'read_options', return_value={'HA_TOKEN': 'synthetic'}), \
-                    patch.object(server.protected_policy, 'install_instructions'):
-                for _image in ('old', 'updated'):
+            keys = []
+            for name, socket in [('First room', 'one.sock'), ('Other room', 'two.sock')]:
+                with patch.multiple(server, **patches), patch.object(server, 'api_token', return_value='synthetic'), \
+                        patch.object(server, 'task_root', return_value=data / 'tasks'), \
+                        patch.object(server.protected_policy, 'install_instructions'):
                     server.ensure_runtime_files()
-                    config = tomllib.loads((home / 'config.toml').read_text())
-                    self.assertEqual(config['sqlite_home'], str(home))
-                    self.assertIn('HA_URL and HA_TOKEN', config['developer_instructions'])
-                    self.assertIn('/config/AGENTS.md', config['developer_instructions'])
-                    self.assertNotIn('synthetic', config['developer_instructions'])
-                    self.assertEqual(db.read_bytes(), before)
-            env = rc.remote_env({'CODEX_HOME': str(home), 'HOME': str(data)})
-            first = rc.Supervisor('codex', data / 'remote_control.json', lambda: env, lambda: '', gate=lambda: '')
+                config = tomllib.loads((home / 'config.toml').read_text())
+                self.assertEqual(config['sqlite_home'], str(home))
+                self.assertNotIn('developer_instructions', config)
+                sup = rc.Supervisor('codex', data / 'remote_control.json', dict, lambda: name,
+                                    run=lambda *a, **k: subprocess.CompletedProcess(a, 0))
+                command = sup._command('app-server')
+                self.assertEqual(command[command.index('--hostname') + 1], name)
+                transport = Transport()
+                client = rc.ControlClient(data / socket, connector=lambda *_: transport)
+                client.status()
+                actual_name = transport.messages[0]['params']['clientInfo']['name']
+                keys.append(('wss://relay.invalid', 'synthetic-account', actual_name))
+                with sqlite3.connect(db) as conn:
+                    row = conn.execute('SELECT server_id FROM remote_control_enrollments '
+                                       'WHERE websocket_url=? AND account_id=? AND app_server_client_name=?',
+                                       keys[-1]).fetchone()
+                    self.assertEqual(row, ('synthetic-id',))
+                self.assertEqual(db.read_bytes(), before)
+            self.assertEqual(keys[0], keys[1])
+            self.assertEqual(keys[0][-1], 'ha_codex')
+            first = rc.Supervisor('codex', data / 'remote_control.json', dict, lambda: 'First room', gate=lambda: '')
             first.save_enabled(True)
-            second = rc.Supervisor('codex', data / 'remote_control.json', lambda: env, lambda: '', gate=lambda: '')
+            second = rc.Supervisor('codex', data / 'remote_control.json', dict, lambda: 'Other room', gate=lambda: '')
             self.assertTrue(second.enabled())
-            self.assertEqual(rc.machine_name(first.name_factory()), rc.machine_name(second.name_factory()))
-            self.assertEqual(second.env_factory()['CODEX_HOME'], str(home))
-            self.assertEqual(db.read_bytes(), before)
-
-
-@unittest.skipUnless(os.environ.get('HA_CODEX_PROFILE_EXEC_TEST') == '1',
-                     'requires the installed worker image and its loaded AppArmor profile; lead lab check')
-class ShippedProfileExecutionTests(unittest.TestCase):
-    def test_named_remote_child_executes_sandbox_and_parent_commands(self):
-        """No relay/auth/HA access: exercise the exact private-name process tree."""
-        self.assertIsNotNone(shutil.which('aa-exec'), 'run on the host with the shipped profile loaded')
-        home = tempfile.TemporaryDirectory(prefix='rc-exec-proof-', dir='/data')
-        self.addCleanup(home.cleanup)
-        env = {k: v for k, v in os.environ.items()
-               if not k.startswith(('HA_', 'HASS_', 'CODEX_', 'OPENAI_'))
-               and k not in ('SUPERVISOR_TOKEN', 'HASSIO_TOKEN')}
-        env.update(CODEX_HOME=home.name, HOME=home.name)
-        for mode in ('read-only', 'workspace-write'):
-            command = rc.build_command('/usr/local/bin/codex', rc.DEFAULT_NAME,
-                                      'sandbox', '--config', 'sandbox_mode=' + json.dumps(mode),
-                                      '--', '/bin/sh', '-c', 'printf profile-sandbox-ok')
-            result = subprocess.run(['aa-exec', '-p', 'codex_cli_worker', '--', *command],
-                                    cwd='/config', env=env,
-                                    capture_output=True, text=True, timeout=30)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn('profile-sandbox-ok', result.stdout)
-        # Represents execution after approval, not an automatic approval.
-        command = rc.build_command('/bin/sh', rc.DEFAULT_NAME, '-c', 'printf profile-parent-ok')
-        result = subprocess.run(['aa-exec', '-p', 'codex_cli_worker', '--', *command],
-                                cwd='/config', env=env,
-                                capture_output=True, text=True, timeout=30)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('profile-parent-ok', result.stdout)
 
 
 if __name__ == '__main__':

@@ -106,7 +106,7 @@ class CommandTests(unittest.TestCase):
 
     def test_name_is_an_argument_never_part_of_the_script(self) -> None:
         cmd = rc.build_command("/usr/local/bin/codex", "Home Assistant", "remote-control", "--no-daemon")
-        self.assertEqual(cmd[0], "/opt/codex-sandbox/bwrap.real")
+        self.assertEqual(cmd[:2], [rc.RELAY_LAUNCHER, rc.RELAY_BWRAP])
         self.assertEqual(cmd[cmd.index("--hostname") + 1], "Home Assistant")
         self.assertEqual(cmd[-3:], ["/usr/local/bin/codex", "remote-control", "--no-daemon"])
         self.assertNotIn("sh", cmd)

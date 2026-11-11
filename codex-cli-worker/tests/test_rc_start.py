@@ -20,7 +20,7 @@ import remote_control as rc
 class StartRegressions(unittest.TestCase):
     def test_name_uses_child_profile_without_parent_capabilities(self):
         command = rc.build_command('codex', 'Home Assistant', 'remote-control', '--no-daemon')
-        self.assertEqual(command[0], '/opt/codex-sandbox/bwrap.real')
+        self.assertEqual(command[:2], [rc.RELAY_LAUNCHER, rc.RELAY_BWRAP])
         self.assertIn('--unshare-uts', command)
         self.assertEqual(command[command.index('--hostname') + 1], 'Home Assistant')
         self.assertIn('--cap-drop', command)
@@ -33,10 +33,10 @@ class StartRegressions(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             sup = rc.Supervisor('codex', Path(tmp)/'state', dict, lambda: 'Home Assistant', gate=lambda: '',
                                 run=lambda *a, **k: subprocess.CompletedProcess(a, 1, '', 'namespace denied'))
-            self.assertEqual(sup._command('remote-control', '--no-daemon'), ['codex', 'remote-control', '--no-daemon'])
+            self.assertEqual(sup._command('remote-control', '--no-daemon'), [rc.RELAY_LAUNCHER, '--plain', 'codex', 'remote-control', '--no-daemon'])
             self.assertEqual(sup.snapshot()['name_state'], 'namespace-unavailable')
             self.assertIn('without', sup.snapshot()['name_warning'])
-            self.assertEqual(sup._command('remote-control', 'pair'), ['codex', 'remote-control', 'pair'])
+            self.assertEqual(sup._command('remote-control', 'pair'), [rc.RELAY_LAUNCHER, '--plain', 'codex', 'remote-control', 'pair'])
 
     def test_requirements_exclude_never_and_self_test_checks_it(self):
         import tomllib
@@ -197,7 +197,7 @@ class FurtherRegressions(unittest.TestCase):
             try:
                 sup.start()
                 self.assertTrue(wait_for(lambda:len(commands) == 2))
-                self.assertEqual(commands[1][:3], ['codex','app-server','--listen'])
+                self.assertEqual(commands[1][:5], [rc.RELAY_LAUNCHER,'--plain','codex','app-server','--listen'])
                 self.assertEqual(commands[1][-1], '--remote-control')
                 self.assertEqual(sup.snapshot()['restarts'], 0)
                 self.assertEqual(sup.snapshot()['name_state'], 'namespace-unavailable')

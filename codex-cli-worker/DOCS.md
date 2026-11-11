@@ -310,36 +310,42 @@ summary and details. Marking the watch reviewed acknowledges findings; it does n
 
 OpenAI's remote control (`codex remote-control`) lets the ChatGPT app on a phone or tablet work on this Home Assistant through OpenAI's relay. The app runs it for you; there is no terminal step.
 
-**Startup on Home Assistant OS.** The app uses the existing Bubblewrap child profile to set a private
-UTS host name (`bwrap.real --unshare-user --unshare-uts --hostname "Home Assistant"`). The outer AppArmor
-profile gains no capabilities. This follows Bubblewrap's
-[documented hostname option](https://github.com/containers/bubblewrap/blob/main/bwrap.xml), which succeeded
-in the HAOS lab. A short namespace-only probe runs before Codex; if the probe or the actual namespace setup
-fails, the page and log show **Machine-name namespace unavailable** and Codex starts without a custom name.
-It does not repeatedly restart the failed `unshare -Ur -u` command. The supervised app-server uses the same selected launch path.
-Its control socket is for the add-on only, under `/data/remote_control_control/`; the sandbox wrapper
-covers that fixed parent with an empty tmpfs, so task commands cannot connect to it.
-The nested sandbox wrapper is permitted in the existing Bubblewrap child profile. HAOS end-to-end pairing
-and nested-sandbox confirmation still belong to the lead's lab; the outside lane uses disposable fixtures only.
+**Startup on Home Assistant OS.** An immutable launcher enters a dedicated relay AppArmor label.
+Its separate Bubblewrap binary sets a private UTS host name (`--unshare-user --unshare-uts --hostname
+"Home Assistant"`) and drops all capabilities before Codex starts. The root worker profile gains no
+capabilities. A namespace-only probe selects this route; if setup fails, the page and log show
+**Machine-name namespace unavailable**. The plain fallback still enters the relay label and clears
+all capability sets before starting Codex, failing closed if it cannot do so.
 
-**Relay execution (CX-RC-EXEC).** The private-name process keeps the Bubblewrap child AppArmor profile
-after setup. Both profiles permit inherited execution of the immutable `/opt/codex/*/bin/` package,
-including Codex's sandbox helper target and unified exec server. The child has the parent's network
-transport access so a granted native request can reach Core. The outer profile gains no capabilities;
-the wrapper still drops all capabilities before Codex starts, and Codex's network namespace and native
-approvals still confine unapproved commands. No writable data directory receives a new execute rule.
-The relay starts in `/config`, so its project instructions and writable workspace match the chat page.
+The worker creates `/data/remote_control_control/` at startup, including with remote control off.
+The sandbox wrapper masks that fixed parent, so an earlier chat sandbox cannot see a later control
+socket through its ordinary path. The relay and each tool sandbox use different AppArmor labels;
+this prevents the base abstraction's same-label ptrace-read rule from granting a sandbox access to
+the relay's `/proc/<pid>/root`, `cwd` or `environ` in the no-proc fallback. Loaded-label and proc-view
+isolation still require the lead's HAOS acceptance check described in
+[SANDBOX_TESTING.md](SANDBOX_TESTING.md#remote-control-profile-regression).
+
+**Relay execution (CX-RC-EXEC.f).** The reproduced unified-exec failure was a `nodev` root bind, not
+a missing executable rule. Under the previous outer `--bind / /`, opening `/dev/null` and
+`/dev/ptmx` failed with `EACCES`; pipe commands and PTY commands both failed before exec. The
+outer relay now applies `--dev-bind /dev /dev` after the root bind, preserving only the existing
+container devices. Removing that bind reproduces the native regression. The former `/opt` rules
+were redundant with `file,` and have been removed. Tool sandbox labels retain their narrower
+`network netlink raw,` rule; the relay alone keeps its parent transport access. Native approvals,
+managed requirements and the command check remain in effect. The relay starts in `/config`.
 
 When the owner configures `HA_TOKEN`, relay commands receive the same `HA_URL`/`HA_TOKEN` pair as chat
-commands. Generated Codex instructions explain that API route using variable names only. Supervisor
+commands. Relay-only launch arguments explain that API route using variable names only. They are regenerated
+from current options on each launch and are not written into the shared chat configuration. Supervisor
 tokens and individual chat-turn MCP capabilities remain stripped. The chat page's verification/history
 MCP tools are not attached to relay threads; shell network access can still require native approval.
 With no configured Core token, the instructions say so instead of suggesting credential-store access.
 
 **Updates keep the enrollment.** Startup sets `CODEX_HOME=/data/codex-home` and pins `sqlite_home` to
 that same persistent directory. It refreshes configuration/instructions without replacing Codex's state
-database or the saved enabled choice. The configured machine name stays stable across image updates;
-do not choose a different name or request a new code merely because the image changed. The pinned
+database or the saved enabled choice. The initialize request retains the client name `ha_codex` across image versions and nonempty display
+name changes. Display/UTS names are not enrollment keys; do not request a new code merely because
+the image changed. The pinned
 [enrollment implementation](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/app-server-transport/src/transport/remote_control/enroll.rs#L293)
 loads enrollment from the state database, keyed by relay target, account and stable app-server client
 name. This is separate from a transient control socket and the replaceable image. An update preserves

@@ -101,10 +101,26 @@ def fallback_name(name: str) -> str:
     return text[:MAX_NAME_BYTES].rstrip("-") or FALLBACK_NAME
 
 
+RELAY_LAUNCHER = "/opt/codex-sandbox/relay-launcher"
+RELAY_BWRAP = "/opt/codex-sandbox/relay-bwrap"
+
+
 def build_command(codex_binary: str, name: str, *args: str) -> list[str]:
-    """Return the command that sets the host name in a private namespace and then runs Codex with these arguments."""
-    return ["/opt/codex-sandbox/bwrap.real", "--unshare-user", "--unshare-uts",
-            "--hostname", name, "--bind", "/", "/", "--cap-drop", "ALL", "--", codex_binary, *args]
+    """Enter the relay label, preserve device nodes, then drop namespace setup caps."""
+    return [RELAY_LAUNCHER, RELAY_BWRAP, "--unshare-user", "--unshare-uts",
+            "--hostname", name, "--bind", "/", "/", "--dev-bind", "/dev", "/dev",
+            "--cap-drop", "ALL", "--", codex_binary, *args]
+
+
+def prepare_control_parent(data_root: Path) -> Path:
+    """Create the fixed mask anchor before any task can start, including with RC off."""
+    parent = data_root / CONTROL_FOLDER
+    parent.mkdir(mode=0o700, exist_ok=True)
+    info = parent.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
+            or stat.S_IMODE(info.st_mode) != 0o700):
+        raise OSError("The private control folder must be owned by the worker with mode 0700.")
+    return parent
 
 
 def remote_env(base: dict[str, str]) -> dict[str, str]:
@@ -685,8 +701,10 @@ class Supervisor:
         watch: ConfigWatch | None = None,
         watch_interval: float = WATCH_INTERVAL,
         control_factory: Callable[[Path], Any] = ControlClient,
+        instructions_factory: Callable[[], str] = lambda: "",
     ) -> None:
         self.control_factory = control_factory
+        self.instructions_factory = instructions_factory
         self.control_socket: Path | None = None
         self.codex_binary = codex_binary
         self.state_path = state_path
@@ -871,7 +889,11 @@ class Supervisor:
                     self.status.update(name_state="private-uts", name_warning="")
             else:
                 self._name_failed()
-        return build_command(self.codex_binary, name, *args) if self._name_supported else [self.codex_binary, *args]
+        instructions = self.instructions_factory()
+        config = ("-c", "developer_instructions=" + json.dumps(instructions)) if instructions else ()
+        arguments = (*config, *args)
+        return (build_command(self.codex_binary, name, *arguments) if self._name_supported
+                else [RELAY_LAUNCHER, "--plain", self.codex_binary, *arguments])
 
     def _launch(self) -> dict[str, Any]:
         """Start the supervising thread unless one is already running."""
@@ -902,12 +924,7 @@ class Supervisor:
             monitor = None
             try:
                 # The fixed parent is masked in every real Codex sandbox by codex-bwrap.
-                control_parent = self.state_path.parent / CONTROL_FOLDER
-                control_parent.mkdir(mode=0o700, exist_ok=True)
-                info = control_parent.lstat()
-                if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
-                        or stat.S_IMODE(info.st_mode) != 0o700):
-                    raise OSError("The private control folder must be owned by the worker with mode 0700.")
+                control_parent = prepare_control_parent(self.state_path.parent)
                 private = tempfile.TemporaryDirectory(prefix="rc-", dir=control_parent)
                 path = Path(private.name) / "rc.sock"
                 with self.lock:
