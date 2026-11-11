@@ -10,7 +10,9 @@ Pre-release: nothing is tagged or published from this fork yet, and no change he
 
 - Test, everything: `pytest` - green is `N passed` (a few skipped is normal). Needs Linux, Python 3.14 and
   `pip install pytest-homeassistant-custom-component==0.13.374 flask pyyaml requests websocket-client`
-  (the newest pair in `.github/workflows/verification.yaml`; that plugin pins Home Assistant Core).
+  (the newest pair in `.github/workflows/verification.yaml`; that plugin pins Home Assistant Core). The workflow
+  also runs `python codex-cli-worker/tests/install_frontend_test_deps.py` (requirements of the Home Assistant
+  components the tests load); run it if a test fails on a missing module.
 - Test, worker only: `python -m unittest discover -s codex-cli-worker/tests -v` - green ends `OK`. Python 3.12 or
   later with `pip install aiohttp flask pyyaml requests websocket-client`; no Home Assistant needed.
 - Check versions and build the HACS ZIP: `python scripts/build_hacs_release.py v<version> <output folder>`, with
@@ -23,8 +25,6 @@ Pre-release: nothing is tagged or published from this fork yet, and no change he
 - Run: only inside Home Assistant OS or Supervised, by a person; `python codex-cli-worker/tests/web_fixture.py`
   serves the chat page alone on port 9137 with temporary data, without Home Assistant or Codex.
 - Before a push: the full `pytest` run, or the worker-only run when 3.14 is not at hand (say which in the PR).
-
-The first four were run as written from a fresh clone on 2026-11-11 (512 passed, 2 skipped; 478 tests OK).
 
 ## Layout
 
@@ -72,7 +72,7 @@ first release is planned. When one is:
    version is upstream's version plus one more number, counted from 1 for each upstream release.
 2. The version passes on a Home Assistant OS test machine, and its lab-pass record is committed.
 3. The commit that removes `(unreleased)` from the changelog heading is the one tagged, by the maintainer, with
-   `python scripts/fork_release.py tag <version>`; the release workflow then builds the images and the HACS ZIP.
+   `python scripts/fork_release.py tag <version> --push`; the release workflow then builds the images and the HACS ZIP.
 4. A bad release is undone with `fork_release.py rollback`, never by deleting a tag.
 
 `.github/workflows/upstream-watch.yml` opens one issue when upstream releases something newer.
