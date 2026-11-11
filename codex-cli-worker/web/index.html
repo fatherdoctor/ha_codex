@@ -102,6 +102,18 @@
           <button id="cancel" class="subtle" hidden>Stop task</button>
         </header>
         <p id="integration-notice" role="status" hidden></p>
+        <section id="signin-banner" class="page-banner" role="status" hidden>
+          <p><strong id="signin-banner-text">The assistant is not signed in to ChatGPT.</strong></p>
+          <div id="signin-banner-card"></div>
+          <div class="settings-actions">
+            <button id="banner-login">Sign in</button
+            ><button id="banner-cancel" class="subtle" hidden>Cancel</button>
+          </div>
+        </section>
+        <section id="paused-banner" class="page-banner" role="status" hidden>
+          <p><strong>The assistant is paused.</strong> New messages are refused until you resume it.</p>
+          <div class="settings-actions"><button id="resume">Resume the assistant</button></div>
+        </section>
         <div
           id="messages"
           class="messages"
@@ -364,9 +376,17 @@
         <p id="login-status" class="muted">Loading account status…</p>
         <div class="settings-actions">
           <button id="login">Sign in</button
+          ><button id="login-cancel" class="subtle" hidden>Cancel</button
           ><button id="logout" class="subtle">Sign out</button>
         </div>
         <div id="login-card"></div>
+      </section>
+      <section>
+        <h3>Assistant</h3>
+        <p id="pause-status" class="muted">Loading…</p>
+        <div class="settings-actions">
+          <button id="pause">Pause the assistant</button>
+        </div>
       </section>
       <section>
         <h3>Browser permissions</h3>

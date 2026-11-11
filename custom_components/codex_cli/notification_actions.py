@@ -41,6 +41,16 @@ def async_listen_for_choices(
         if parsed is None:
             return
         task_id, turn_id, choice = parsed
+        # Only an administrator's tap answers Codex; a tap with no user is not taken either.
+        user = await hass.auth.async_get_user(event.context.user_id) if event.context.user_id else None
+        if user is None or not user.is_active or not user.is_admin:
+            persistent_notification.async_create(
+                hass,
+                "Codex did not take that answer: only a Home Assistant administrator can answer Codex.",
+                title="Codex",
+                notification_id=NOTIFICATION_ID,
+            )
+            return
         try:
             await client.reply_choice(task_id, turn_id, choice)
         except CodexCliApiError as exc:

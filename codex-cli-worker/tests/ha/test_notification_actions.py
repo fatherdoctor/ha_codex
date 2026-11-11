@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 from homeassistant.components import persistent_notification
+from homeassistant.core import Context
 from homeassistant.setup import async_setup_component
 
 ROOT = Path(__file__).resolve().parents[3] / "custom_components" / "codex_cli"
@@ -45,8 +46,9 @@ def test_only_codex_choice_actions_are_parsed():
         assert actions.parse_choice_action(other) is None
 
 
-async def test_tapped_choice_is_sent_to_the_worker(hass):
+async def test_tapped_choice_is_sent_to_the_worker(hass, hass_admin_user):
     """Tapping a choice replies to that turn's question and refreshes the sensors; other buttons are ignored."""
+    admin = Context(user_id=hass_admin_user.id)
     client = AsyncMock()
     coordinator = AsyncMock()
     stop = actions.async_listen_for_choices(hass, client, coordinator)
@@ -54,19 +56,36 @@ async def test_tapped_choice_is_sent_to_the_worker(hass):
     await hass.async_block_till_done()
     client.reply_choice.assert_not_called()
 
-    hass.bus.async_fire("mobile_app_notification_action", {"action": f"CODEX_CLI_CHOICE_1_{TURN_ID}_{TASK_ID}"})
+    hass.bus.async_fire("mobile_app_notification_action", {"action": f"CODEX_CLI_CHOICE_1_{TURN_ID}_{TASK_ID}"},
+                        context=admin)
     await hass.async_block_till_done()
     client.reply_choice.assert_awaited_once_with(TASK_ID, TURN_ID, 1)
     coordinator.async_request_refresh.assert_awaited_once()
 
     # After unloading, a tap is no longer handled.
     stop()
-    hass.bus.async_fire("mobile_app_notification_action", {"action": f"CODEX_CLI_CHOICE_0_{TURN_ID}_{TASK_ID}"})
+    hass.bus.async_fire("mobile_app_notification_action", {"action": f"CODEX_CLI_CHOICE_0_{TURN_ID}_{TASK_ID}"},
+                        context=admin)
     await hass.async_block_till_done()
     assert client.reply_choice.await_count == 1
 
 
-async def test_refused_choice_is_reported_in_a_notification(hass):
+async def test_only_an_administrator_tap_is_taken(hass, hass_read_only_user):
+    """A tap from a phone whose user is not an administrator, or with no user, is not sent to the worker."""
+    assert await async_setup_component(hass, "persistent_notification", {})
+    shown = {}
+    persistent_notification.async_register_callback(hass, lambda _update, notifications: shown.update(notifications))
+    client = AsyncMock()
+    actions.async_listen_for_choices(hass, client, AsyncMock())
+    for context in (Context(user_id=hass_read_only_user.id), None):
+        hass.bus.async_fire("mobile_app_notification_action", {"action": f"CODEX_CLI_CHOICE_0_{TURN_ID}_{TASK_ID}"},
+                            context=context)
+        await hass.async_block_till_done()
+    client.reply_choice.assert_not_called()
+    assert "only a Home Assistant administrator" in shown[actions.NOTIFICATION_ID]["message"]
+
+
+async def test_refused_choice_is_reported_in_a_notification(hass, hass_admin_user):
     """When the worker does not take the answer, for example because the question was answered, the user is told why."""
     assert await async_setup_component(hass, "persistent_notification", {})
     shown = {}
@@ -75,7 +94,8 @@ async def test_refused_choice_is_reported_in_a_notification(hass):
     client.reply_choice.side_effect = api.CodexCliApiError("This question is no longer waiting for an answer.", status=409)
     coordinator = AsyncMock()
     actions.async_listen_for_choices(hass, client, coordinator)
-    hass.bus.async_fire("mobile_app_notification_action", {"action": f"CODEX_CLI_CHOICE_0_{TURN_ID}_{TASK_ID}"})
+    hass.bus.async_fire("mobile_app_notification_action", {"action": f"CODEX_CLI_CHOICE_0_{TURN_ID}_{TASK_ID}"},
+                        context=Context(user_id=hass_admin_user.id))
     await hass.async_block_till_done()
 
     assert shown[actions.NOTIFICATION_ID]["title"] == "Codex"
