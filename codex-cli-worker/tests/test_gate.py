@@ -21,19 +21,30 @@ HOOK = ROOT / "gate" / "gate_hook.py"
 RULES = gate_rules.load_rules(ROOT / "policy" / "refused-domains.json")
 
 
-def run_hook(payload, remote_on: bool, tmp: str, event: str = "", categories: bool = True) -> subprocess.CompletedProcess:
+def run_hook(payload, remote_on: bool, tmp: str, event: str = "", categories: bool = True, files: dict | None = None) -> subprocess.CompletedProcess:
     """Run the hook script as Codex would: python -I, the event on stdin, the saved choice in a file."""
     state = Path(tmp) / "state.json"
     state.write_text(json.dumps({"enabled": remote_on}), encoding="utf-8")
+    config = Path(tmp) / "config"
+    config.mkdir(exist_ok=True)
+    for old in config.rglob("*"):
+        if old.is_file():
+            old.unlink()
+    for rel, body in (files or {}).items():
+        target = config / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body)
+    if isinstance(payload, dict):
+        payload = {**payload, "cwd": str(config)}
     text = payload if isinstance(payload, str) else json.dumps(payload)
     options = Path(tmp) / "options.json"
     options.write_text(json.dumps({"refuse_categories": categories}))
     # Run the unchanged managed hook with an isolated options path, never the executor's /data.
     bootstrap = ("import sys,runpy; from pathlib import Path; "
                  "sys.path.insert(0,sys.argv[1]); import gate_rules; "
-                 "gate_rules.OPTIONS_PATH=Path(sys.argv[2]); sys.argv=sys.argv[3:]; "
+                 "gate_rules.OPTIONS_PATH=Path(sys.argv[2]); gate_rules.CONFIG_ROOT=Path(sys.argv[3]); sys.argv=sys.argv[4:]; "
                  "runpy.run_path(sys.argv[0],run_name='__main__')")
-    return subprocess.run([sys.executable, "-I", "-c", bootstrap, str(ROOT), str(options), str(HOOK),
+    return subprocess.run([sys.executable, "-I", "-c", bootstrap, str(ROOT), str(options), str(config), str(HOOK),
                            "--event", event or "PreToolUse", "--state", str(state)],
                           input=text, capture_output=True, text=True, timeout=30, check=False)
 
@@ -48,7 +59,7 @@ class HookFixtureTests(unittest.TestCase):
                          for item in FIXTURE["cases"] for flag in (False, True)]:
                 with self.subTest(case["name"], categories=case["categories"]):
                     event = case["input"].get("hook_event_name", "") if isinstance(case["input"], dict) else ""
-                    result = run_hook(case["input"], case["remote_control_on"], tmp, event, case["categories"])
+                    result = run_hook(case["input"], case["remote_control_on"], tmp, event, case["categories"], case.get("files"))
                     if case["expect"] == "deny":
                         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
                         self.assertTrue(result.stderr.strip())

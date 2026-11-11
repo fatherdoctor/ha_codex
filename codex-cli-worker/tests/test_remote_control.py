@@ -93,10 +93,10 @@ class CommandTests(unittest.TestCase):
 
     def test_name_is_an_argument_never_part_of_the_script(self) -> None:
         cmd = rc.build_command("/usr/local/bin/codex", "Home Assistant", "remote-control", "--no-daemon")
-        self.assertEqual(cmd[:4], ["unshare", "-Ur", "-u", "sh"])
-        self.assertNotIn("Home Assistant", cmd[5])
-        self.assertEqual(cmd[7:], ["Home Assistant", "Home-Assistant", "/usr/local/bin/codex",
-                                   "remote-control", "--no-daemon"])
+        self.assertEqual(cmd[0], "/opt/codex-sandbox/bwrap.real")
+        self.assertEqual(cmd[cmd.index("--hostname") + 1], "Home Assistant")
+        self.assertEqual(cmd[-3:], ["/usr/local/bin/codex", "remote-control", "--no-daemon"])
+        self.assertNotIn("sh", cmd)
 
     def test_environment_has_no_credentials(self) -> None:
         env = rc.remote_env({"SUPERVISOR_TOKEN": "s", "HASSIO_TOKEN": "h", "HA_TOKEN": "t", "HA_URL": "u",

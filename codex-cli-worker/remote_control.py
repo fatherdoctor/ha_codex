@@ -14,16 +14,18 @@ with a plain reason and the chat page works as before. ``ConfigWatch`` is the
 gate's detective layer: it reports refused actions that appear in ``/config``
 YAML while remote control is on and that the hook could not see.
 
-Codex 0.166 has no machine-name setting and uses the host name, so the process
-starts in its own user and UTS namespace (``unshare -Ur -u``) with the host name
-set to the chosen name. A name the kernel or ``hostname`` refuses falls back to
-``Home-Assistant``.
+Codex 0.166 uses the host name. Bubblewrap sets it inside a private UTS
+namespace through the existing capability-bearing child profile. If that
+setup fails, Codex starts without the custom name and the page explains why.
 """
 
 from __future__ import annotations
 
 import base64
 import io
+import hashlib
+import stat
+import uuid
 import json
 import os
 import re
@@ -98,9 +100,8 @@ def fallback_name(name: str) -> str:
 
 def build_command(codex_binary: str, name: str, *args: str) -> list[str]:
     """Return the command that sets the host name in a private namespace and then runs Codex with these arguments."""
-    script = 'hostname "$1" 2>/dev/null || hostname "$2" || exit 97; shift 2; exec "$@"'
-    return ["unshare", "-Ur", "-u", "sh", "-c", script, "remote-control",
-            name, fallback_name(name), codex_binary, *args]
+    return ["/opt/codex-sandbox/bwrap.real", "--unshare-user", "--unshare-uts",
+            "--hostname", name, "--bind", "/", "/", "--cap-drop", "ALL", "--", codex_binary, *args]
 
 
 def remote_env(base: dict[str, str]) -> dict[str, str]:
@@ -120,6 +121,9 @@ def requirements_problem(path: Path) -> str:
     modes = data.get("allowed_sandbox_modes")
     if not isinstance(modes, list) or not modes or "danger-full-access" in modes:
         return "the managed requirements do not rule out the full-access sandbox"
+    approvals = data.get("allowed_approval_policies")
+    if not isinstance(approvals, list) or not approvals or "never" in approvals:
+        return "the managed requirements do not rule out the never approval policy"
     if data.get("allow_managed_hooks_only") is not True:
         return "the managed requirements do not keep hooks to the managed ones"
     return ""
@@ -127,15 +131,13 @@ def requirements_problem(path: Path) -> str:
 
 # What the hook must refuse, and let through, before remote control may start: (event, remote on, input, refused).
 SELF_TEST_CASES = (
-    ("PermissionRequest", True, {"hook_event_name": "PermissionRequest", "tool_name": "shell",
-                                 "tool_input": {"command": ["curl", "http://homeassistant.invalid:8123/api/"]}}, True),
-    ("PreToolUse", True, {"hook_event_name": "PreToolUse", "tool_name": "shell",
-                          "tool_input": {"command": ["curl", "-s", "http://homeassistant.invalid/"],
-                                         "sandbox_permissions": "require_escalated"}}, True),
-    ("PreToolUse", False, {"hook_event_name": "PreToolUse", "tool_name": "shell",
-                           "tool_input": {"command": ["cat", "/proc/1/environ"]}}, True),
-    ("PreToolUse", False, {"hook_event_name": "PreToolUse", "tool_name": "shell",
-                           "tool_input": {"command": ["ls", "/config"]}}, False),
+    ("PermissionRequest", True, {"hook_event_name": "PermissionRequest", "tool_name": "Bash",
+                                 "tool_input": {"command": "curl https://example.invalid/",
+                                                "description": "Command needs permission"}}, True),
+    ("PreToolUse", False, {"hook_event_name": "PreToolUse", "tool_name": "Bash",
+                           "tool_input": {"command": "cat /proc/1/environ"}}, True),
+    ("PreToolUse", False, {"hook_event_name": "PreToolUse", "tool_name": "Bash",
+                           "tool_input": {"command": "ls /config"}}, False),
 )
 _self_test_cache: dict[tuple[str, float], str] = {}
 
@@ -236,8 +238,10 @@ class ConfigWatch:
     compares every YAML file under the config folder with a baseline taken when
     the owner turned remote control on. What it finds is shown on the app page
     and raised as a Home Assistant repair until the owner marks it reviewed.
-    It detects; it does not prevent. Remote control cannot reload or restart
-    Home Assistant, so the person who next reloads sees the repair first.
+    While remote control is on, always-on planted-command and template edits
+    are undone using verified earlier bytes (or a complete absence manifest
+    for newly created files). Category-only edits remain findings. This cannot
+    reverse commands that ran before the next scan.
 
     The baseline is saved in the app's private storage, so a restart of the app
     compares with the same baseline and does not absorb a change.
@@ -248,6 +252,7 @@ class ConfigWatch:
         self.root = root
         self.baseline_path = baseline_path
         self.rules = rules
+        self.lock = threading.RLock()
 
     def files(self) -> list[Path]:
         """Return the YAML files the watch reads, sorted, skipping stores, code, caches and very large files."""
@@ -284,8 +289,9 @@ class ConfigWatch:
         texts: dict[str, str] = {}
         for path in self.files():
             try:
-                texts[path.relative_to(self.root).as_posix()] = path.read_text(encoding="utf-8", errors="replace")
-            except OSError:
+                texts[path.relative_to(self.root).as_posix()] = gate_rules.read_config_bytes(
+                    self.root, path.relative_to(self.root).as_posix()).decode("utf-8", errors="replace")
+            except (OSError, ValueError):
                 continue
         scripts = self.refused_scripts(texts, rules, enabled)
         lines = {rel: found for rel, text in texts.items() if (found := gate_rules.active_findings(text, rules, scripts, enabled))}
@@ -296,24 +302,117 @@ class ConfigWatch:
         """Return whether a baseline is saved, that is, remote control was on and its changes are not reviewed."""
         return self.baseline_path.is_file()
 
+    def file_manifest(self) -> tuple[list[str], bool]:
+        """Record presence even for oversized or unreadable YAML; absence must never be guessed."""
+        present: list[str] = []
+        for folder, dirs, names in os.walk(self.root):
+            dirs[:] = sorted(d for d in dirs if d not in WATCH_SKIP_DIRS and not d.startswith(".")
+                             and not (Path(folder)/d).is_symlink())
+            for name in sorted(names):
+                if name.lower().endswith((".yaml", ".yml")) and name not in {"secrets.yaml", "secrets.yml"}:
+                    present.append((Path(folder)/name).relative_to(self.root).as_posix())
+                    if len(present) >= WATCH_MAX_FILES:
+                        return present, False
+        return present, True
+
     def take_baseline(self) -> None:
         """Save what is in the config folder now as the baseline later scans compare with."""
-        lines, blocks = self._scan(categories=True)
-        data = {rel: [list(f.key()) for f in found] for rel, found in lines.items()}
-        hashes = {rel: sorted(found) for rel, found in blocks.items()}
+        with self.lock:
+            copies: dict[str, Any] = {}
+            total = 0
+            complete = True
+            for path in self.files():
+                rel = path.relative_to(self.root).as_posix()
+                try:
+                    raw = gate_rules.read_config_bytes(self.root, rel)
+                    total += len(raw)
+                    if total > 8 * WATCH_MAX_BYTES:
+                        complete = False
+                        break
+                    copies[rel] = {"sha256": hashlib.sha256(raw).hexdigest(),
+                                   "data": base64.b64encode(raw).decode("ascii")}
+                except (OSError, ValueError):
+                    complete = False
+            # A capped listing is not proof that every other path was absent.
+            present, listed_all = self.file_manifest()
+            complete = complete and listed_all
+            texts = {rel: base64.b64decode(entry["data"]).decode("utf-8", errors="replace")
+                     for rel, entry in copies.items()}
+            rules = self.rules()
+            scripts = self.refused_scripts(texts, rules, True)
+            data = {rel: [list(f.key()) for f in gate_rules.active_findings(text, rules, scripts, True)]
+                    for rel, text in texts.items()}
+            hashes = {rel: sorted(gate_rules.refused_blocks(text, rules, scripts, True)) for rel, text in texts.items()}
+            self._save_baseline({"taken": time.time(), "files": data, "blocks": hashes,
+                                 "copies": copies, "present": present, "complete": complete, "undo_events": []})
+
+    def _save_baseline(self, saved: dict[str, Any]) -> None:
         self.baseline_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.baseline_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"taken": time.time(), "files": data, "blocks": hashes}), encoding="utf-8")
-        os.replace(tmp, self.baseline_path)
+        with tempfile.NamedTemporaryFile(dir=self.baseline_path.parent, delete=False) as handle:
+            tmp = Path(handle.name)
+            try:
+                handle.write(json.dumps(saved).encode("utf-8"))
+                handle.flush()
+                os.fchmod(handle.fileno(), 0o600)
+                os.replace(tmp, self.baseline_path)
+            finally:
+                tmp.unlink(missing_ok=True)
+
+    def _undo(self, rel: str, current: bytes, earlier: bytes | None) -> str:
+        """Restore through pinned no-follow directory handles; never follow a swapped link."""
+        parts = Path(rel).parts
+        if not parts or Path(rel).is_absolute() or any(part.startswith(".") for part in parts):
+            raise ValueError("unsafe restore path")
+        folder = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        tmp = ".codex-restore-" + uuid.uuid4().hex
+        try:
+            for part in parts[:-1]:
+                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=folder)
+                os.close(folder)
+                folder = child
+            fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=folder)
+            try:
+                info = os.fstat(fd)
+                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                    raise ValueError("not an ordinary restore target")
+                with os.fdopen(fd, "rb", closefd=False) as source:
+                    if source.read(WATCH_MAX_BYTES + 1) != current:
+                        raise ValueError("configuration changed during the scan")
+            finally:
+                os.close(fd)
+            if earlier is None:
+                os.unlink(parts[-1], dir_fd=folder)
+                return "removed"
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=folder)
+            with os.fdopen(fd, "wb") as target:
+                target.write(earlier)
+                target.flush()
+                os.fchmod(target.fileno(), info.st_mode & 0o777)
+            os.replace(tmp, parts[-1], src_dir_fd=folder, dst_dir_fd=folder)
+            return "restored"
+        finally:
+            try:
+                os.unlink(tmp, dir_fd=folder)
+            except FileNotFoundError:
+                pass
+            os.close(folder)
+
 
     def clear(self) -> None:
         """Forget the baseline; the watch stops until remote control is turned on again."""
-        try:
-            self.baseline_path.unlink()
-        except FileNotFoundError:
-            pass
+        with self.lock:
+            try:
+                self.baseline_path.unlink()
+            except FileNotFoundError:
+                pass
 
-    def new_findings(self) -> list[dict[str, Any]]:
+    def new_findings(self, remote_on: bool = False) -> list[dict[str, Any]]:
+        with self.lock:
+            if not self.has_baseline():
+                return []
+            return self._new_findings(remote_on)
+
+    def _new_findings(self, remote_on: bool) -> list[dict[str, Any]]:
         """Return the refused actions that are in the config folder now and were not in the baseline.
 
         Findings are matched by reason and line text, so an action that only
@@ -329,7 +428,7 @@ class ConfigWatch:
             base = saved.get("files") or {}
             base_blocks = saved.get("blocks") or {}
         except (OSError, ValueError, AttributeError):
-            base, base_blocks = {}, {}
+            saved, base, base_blocks = {}, {}, {}
         lines, blocks = self._scan()
         out: list[dict[str, Any]] = []
         for rel, found in sorted(lines.items()):
@@ -349,7 +448,57 @@ class ConfigWatch:
                 if digest in known or any(f == rel and first <= n <= last for f, n in new_lines):
                     continue
                 out.append({"file": rel, "line": first, "reason": gate_rules.BLOCK_CHANGED, "text": redact(text.strip())[:200]})
-        return out
+        events = list(saved.get("undo_events", [])) if isinstance(saved, dict) and isinstance(saved.get("undo_events", []), list) else []
+        if not isinstance(events, list):
+            events = []
+        if remote_on and out:
+            rules = self.rules()
+            texts = {}
+            for path in self.files():
+                try:
+                    rel = path.relative_to(self.root).as_posix()
+                    texts[rel] = gate_rules.read_config_bytes(self.root, rel).decode("utf-8", errors="replace")
+                except (OSError, ValueError):
+                    continue
+            scripts = self.refused_scripts(texts, rules, categories=False)
+            copies = saved.get("copies") or {}
+            for rel in sorted({item["file"] for item in out}):
+                result = ""
+                current = None
+                try:
+                    current = gate_rules.read_config_bytes(self.root, rel)
+                    entry = copies.get(rel)
+                    if entry:
+                        earlier = base64.b64decode(entry["data"], validate=True)
+                        if hashlib.sha256(earlier).hexdigest() != entry.get("sha256"):
+                            raise ValueError("earlier copy could not be verified")
+                    elif saved.get("complete") is True and rel not in saved.get("present", []):
+                        earlier = None
+                    else:
+                        raise ValueError("no verified earlier copy or absence manifest")
+                    security = gate_rules.new_refused((earlier or b"").decode("utf-8", errors="replace"),
+                                                     current.decode("utf-8", errors="replace"), rules, scripts, False)
+                    if not security:
+                        continue  # Category-only findings are not always-on undo.
+                    result = self._undo(rel, current, earlier)
+                except (OSError, ValueError, KeyError, TypeError):
+                    result = ""
+                for item in out:
+                    if item["file"] == rel:
+                        item["undone"] = result
+                        if not result:
+                            item["undo_note"] = "Could not undo safely; review this file before reloading."
+                        # Do not persist configuration contents in the undo report.
+                        event = {key: value for key, value in item.items() if key != "text"}
+                        if event not in events:
+                            events.append(event)
+            if events != saved.get("undo_events", []):
+                saved["undo_events"] = events[-100:]
+                self._save_baseline(saved)
+        # Keep the repair visible after a successful undo and across restarts.
+        return out + [event for event in events if not any(
+            item["file"] == event.get("file") and item["line"] == event.get("line") for item in out)]
+
 
 
 class Supervisor:
@@ -387,7 +536,10 @@ class Supervisor:
         self.thread: threading.Thread | None = None
         self.log: deque[str] = deque(maxlen=LOG_LINES)
         self.status: dict[str, Any] = {"state": "off", "message": "Remote control is off.", "pairing_code": "",
-                                       "machine_name": "", "restarts": 0, "since": None}
+                                       "machine_name": "", "restarts": 0, "since": None,
+                                       "name_state": "unchecked", "name_warning": "", "policy_warning": ""}
+        self._name_supported: bool | None = None
+        self._checked_name = ""
 
     # Saved choice -------------------------------------------------------------------------------
 
@@ -435,6 +587,7 @@ class Supervisor:
             self.watch.take_baseline()
             with self.lock:
                 self.findings = []
+        self._name_supported = None
         self.save_enabled(True)
         self._start_watch()
         return True, self._launch()
@@ -487,7 +640,7 @@ class Supervisor:
         """Scan the config folder against the baseline until the baseline is gone (reviewed after Turn off)."""
         while self.watch is not None and self.watch.has_baseline():
             try:
-                findings = self.watch.new_findings()
+                findings = self.watch.new_findings(remote_on=self.enabled())
             except Exception as exc:  # noqa: BLE001 - a scan error is shown, the watch keeps going
                 findings = [{"file": "", "line": 0, "reason": f"the config watch could not scan: {exc}", "text": ""}]
             with self.lock:
@@ -503,7 +656,7 @@ class Supervisor:
             return False, {**self.snapshot(), "error": "Turn remote control on first."}
         name = machine_name(self.name_factory())
         try:
-            result = self.run(build_command(self.codex_binary, name, "remote-control", "pair"),
+            result = self.run(self._command("remote-control", "pair"),
                               env=remote_env(self.env_factory()), capture_output=True, text=True,
                               timeout=PAIR_TIMEOUT, check=False)
         except (OSError, subprocess.SubprocessError) as exc:
@@ -517,6 +670,32 @@ class Supervisor:
         return True, self.snapshot()
 
     # Process ------------------------------------------------------------------------------------
+
+    def _name_failed(self) -> None:
+        self._name_supported = False
+        warning = "Machine-name namespace unavailable; starting without a custom machine name."
+        with self.lock:
+            if self.status.get("name_warning") != warning:
+                self.log.append(warning)
+            self.status.update(name_state="namespace-unavailable", name_warning=warning, machine_name="")
+
+    def _command(self, *args: str) -> list[str]:
+        """Probe only the namespace setup, once per chosen name; never treat a Codex exit as the probe."""
+        name = machine_name(self.name_factory())
+        if self._name_supported is None or self._checked_name != name:
+            self._checked_name = name
+            try:
+                probe = self.run(build_command("/bin/true", name), env=remote_env(self.env_factory()),
+                                 capture_output=True, text=True, timeout=10, check=False)
+                self._name_supported = probe.returncode == 0
+            except (OSError, subprocess.SubprocessError):
+                self._name_supported = False
+            if self._name_supported:
+                with self.lock:
+                    self.status.update(name_state="private-uts", name_warning="")
+            else:
+                self._name_failed()
+        return build_command(self.codex_binary, name, *args) if self._name_supported else [self.codex_binary, *args]
 
     def _launch(self) -> dict[str, Any]:
         """Start the supervising thread unless one is already running."""
@@ -538,9 +717,12 @@ class Supervisor:
                 self.set_status("blocked", problem)
                 return
             name = machine_name(self.name_factory())
+            with self.lock:
+                self.log.append("Managed policy: a disallowed relay full-access request may be downgraded to read-only; "
+                                "the relay does not expose every thread warning here.")
             started = self.clock()
             try:
-                proc = self.popen(build_command(self.codex_binary, name, "remote-control", "--no-daemon"),
+                proc = self.popen(self._command("remote-control", "--no-daemon"),
                                   env=remote_env(self.env_factory()), stdin=subprocess.DEVNULL,
                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                   start_new_session=True)
@@ -550,18 +732,24 @@ class Supervisor:
             if proc is not None:
                 with self.lock:
                     self.proc = proc
-                self.set_status("connecting", f"Connecting as “{name}”…", machine_name=name)
+                self.set_status("connecting", (f"Connecting as “{name}”…" if self._name_supported else
+                                               "Connecting without a custom machine name…"),
+                                machine_name=name if self._name_supported else "")
+                namespace_error = False
                 for line in iter(proc.stdout.readline, ""):
+                    if line.lstrip().startswith("bwrap:") and re.search(
+                            r"namespace|hostname|Operation not permitted|Permission denied", line, re.IGNORECASE):
+                        namespace_error = True
                     self._parse(line)
                 code = proc.wait()
                 with self.lock:
                     self.proc = None
                 if self.wake.is_set() or not self.enabled():
                     return
-                if code == 97:
-                    self.set_status("error", "The machine name could not be set, not even as Home-Assistant.")
-                else:
-                    self.set_status("error", f"Remote control stopped (exit code {code}); restarting.")
+                if namespace_error and self._name_supported:
+                    self._name_failed()
+                    continue  # One plain launch; no namespace exit-1/backoff loop.
+                self.set_status("error", f"Remote control stopped (exit code {code}); restarting.")
             if self.clock() - started >= HEALTHY_RUN:
                 backoff = BACKOFF_START
             with self.lock:
@@ -590,6 +778,14 @@ class Supervisor:
 
     def _parse(self, line: str) -> str:
         """Record one output line and update the state from it; return a pairing code found in it."""
+        lower = line.lower()
+        if ("configwarning" in lower or "warning" in lower) and (
+                "read-only" in lower or "readonly" in lower) and (
+                "fall" in lower or "downgrad" in lower or "not allowed" in lower):
+            warning = "Codex reported that a request was downgraded to read-only by the managed policy."
+            with self.lock:
+                self.status["policy_warning"] = warning
+                self.log.append(warning)
         code_match = PAIRING_RE.search(line)
         code = code_match.group(1) if code_match else ""
         with self.lock:

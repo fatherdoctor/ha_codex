@@ -299,38 +299,65 @@ The configuration watch uses the same distinction while remote control is on. It
 
 OpenAI's remote control (`codex remote-control`) lets the ChatGPT app on a phone or tablet work on this Home Assistant through OpenAI's relay. The app runs it for you; there is no terminal step.
 
-**Known startup and enforcement limits (Codex 0.166).** The shipped `unshare -Ur -u` name step failed under the
-HAOS add-on's enforced AppArmor parent profile in the lab. The Bubblewrap name path is a supported alternative:
-[`--hostname` requires `--unshare-uts`](https://github.com/containers/bubblewrap/blob/main/bwrap.xml), and that
-combination succeeded in the lab's child profile. This documents the proposed route; the start/nested-sandbox/pairing
-fix has not been delivered or validated here. The parent profile must not be broadened to make it work.
+**Startup on Home Assistant OS.** The app uses the existing Bubblewrap child profile to set a private
+UTS host name (`bwrap.real --unshare-user --unshare-uts --hostname "Home Assistant"`). The outer AppArmor
+profile gains no capabilities. This follows Bubblewrap's
+[documented hostname option](https://github.com/containers/bubblewrap/blob/main/bwrap.xml), which succeeded
+in the HAOS lab. A short namespace-only probe runs before Codex; if the probe or the actual namespace setup
+fails, the page and log show **Machine-name namespace unavailable** and Codex starts without a custom name.
+It does not repeatedly restart the failed `unshare -Ur -u` command. Pairing uses the same selected launch path.
+The nested sandbox wrapper is permitted in the existing Bubblewrap child profile. HAOS end-to-end pairing
+and nested-sandbox confirmation still belong to the lead's lab; the outside lane uses disposable fixtures only.
 
-Codex's managed sandbox requirements prevent full access, but a disallowed `thread/start` setting can still produce a
-permitted fallback and a configuration warning instead of an RPC error. The pinned
+**Managed policy and read-only fallback (Codex 0.166).** The requirements allow only `read-only` and
+`workspace-write`, only `on-request` approvals (never `never`), and only managed hooks. Integration-owned
+thread/resume/turn requests for full access fail with a clear error before dispatch. Relay-created threads
+skip that Python adapter: a disallowed full-access request can be downgraded to read-only by Codex with a
+configuration warning. The pinned
 [0.166 configuration loader](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/core/src/config/mod.rs#L2358)
-uses that fallback for both approval policy and permission profile. Restricting `allowed_approval_policies` is useful,
-but it does not by itself change a remote thread's fallback into a hard rejection. The integration's Python approval
-adapter does not mediate relay-created threads. The strict-error acceptance criterion needs a supported upstream
-mechanism or an explicit scope ruling before it can be claimed complete.
+uses this permitted fallback; the requirements do not turn it into an RPC error. Settings and the launch log
+explain the possible downgrade. When Codex emits the warning on the supervised output, the page and log say
+that the request was downgraded. Not every relay thread warning is exposed there: absence of that message
+is not evidence that the requested permissions were granted.
 
-A synchronous hook that times out can fail open in Codex 0.166: the tool call may run after the timeout. A fast hook
-reduces exposure but cannot eliminate this upstream behavior. The existing configuration watch detects changes
-afterward and reports them; it does not currently undo them. Even a future verified-copy restore cannot reverse
-commands that already ran. Remote-control undo and its limits still require implementation and validation.
+**Hook timeout and undo limits.** A synchronous hook that times out can fail open in Codex 0.166: the tool
+call may run after the timeout. The hook checks bounded inputs and refuses an uncertain, oversized or
+ambiguous YAML patch. While remote control is on it reconstructs the whole proposed YAML file, so edits
+beneath an existing `shell_command`, `rest_command` or `command_line` key are also checked. The checked-in
+fixtures use the captured Bash/apply_patch command-string inputs; escalation is checked at PermissionRequest,
+not inferred from a field missing from the captured PreToolUse input. In the outside executor, 30 isolated
+hook-process measurements took at most 0.772 seconds against the configured 10-second timeout, including
+a repetitive 900 KiB YAML file (Codex 0.166 shapes, Python 3.12). Reproduce with
+`python codex-cli-worker/tests/measure_gate.py` in the worker's test environment; this timing is not an HAOS
+latency guarantee.
+
+The config watch runs every 30 seconds over at most 3,000 ordinary YAML files, each at most 2 MiB. While remote control is on, a new or changed always-on command,
+platform or template block causes the **whole affected file** to be restored from its hash-verified earlier
+bytes; a newly created file can be removed only with a complete earlier absence manifest. Earlier ordinary
+YAML copies stay in the app's private storage with mode 0600, capped at 16 MiB; credential files and stores,
+symlinks and hardlinks are excluded. Missing, old, corrupt or incomplete baselines never justify a guessed
+restore: the page reports that the change could not be undone safely. Successful undo remains visible until
+reviewed and across app restarts. Device/message-only findings remain reports under the optional category
+setting. With remote control off the watch reports remaining findings without changing files.
+
+Undo can discard other edits made to the same file since Turn on. Review starts a new baseline; it does not
+relax the always-on checks. A watch scan or verified restore cannot reverse a command that already ran,
+prevent a reload before the scan, or guarantee capture of an obfuscated reference. Fast hooks and delayed
+undo reduce exposure; neither removes the upstream timeout risk.
 
 - **Off until you turn it on.** Open the app page, then **Settings**, then **Remote control from the ChatGPT app**. The choice is saved and holds across app restarts.
 - **One supervised process.** The app runs `codex remote-control --no-daemon` in the foreground and starts it again, with a growing delay, if it exits. **Turn off** stops it.
-- **Machine name.** The ChatGPT app lists this machine as **Home Assistant** unless you change the **Remote control machine name** option. Codex has no name setting, so the app starts it with that name as its host name inside a private namespace. A name that cannot be used as written becomes `Home-Assistant`.
+- **Machine name.** The ChatGPT app lists this machine as **Home Assistant** unless you change the **Remote control machine name** option. Codex has no name setting, so the app starts it with that name as its host name inside a private namespace. If the private name namespace is unavailable, the page explains that Codex is using its existing host name.
 - **Pairing.** The pairing code is shown as large text and as a QR code. Pairing is kept in the app's private storage with the Codex sign-in, so a restart does not ask for it again. **New pairing code** asks Codex for a fresh one when the ChatGPT app has lost this machine.
 - **No Home Assistant credentials.** The remote-control process gets no Home Assistant token and no Supervisor token, even when the `HA_TOKEN` option is set for the chat page.
 - **The command check.** Commands from the ChatGPT app do not pass through this app's Allow and Deny buttons, so the app ships a check that holds outside the model, for every client:
   - Codex's managed requirements (`/etc/codex/requirements.toml`, read-only) rule out the full-access sandbox and any hook other than the app's own.
   - A managed hook refuses sandbox escalation while remote control is on, and credential access at all times. Planted commands and templated actions remain blocked with either category setting. Existing device and message patch refusals are enabled only by **Refuse actions by category**.
-  - A config watch compares YAML with the baseline from when remote control was turned on. It reports planted commands and templates with either category setting, and device and message findings only with the option on. Review its findings in Settings before reloading or restarting.
+  - A config watch compares YAML with the baseline from when remote control was turned on. While remote control is on, it undoes planted commands and templates using verified copies with either category setting, and reports device and message findings only with the option on. Review its findings in Settings before reloading or restarting.
   - **What the scan reads.** The hook, exchange check and config watch share the line-based scan in `gate_rules.py` and `refused-domains.json`. Shell, REST and Python actions, `hassio` and `pyscript`, command/platform definitions and templated actions or targets stay checked, including indirect calls to scripts containing those kinds. With category refusals on it also checks device actions, scene states, message scripts and calls to scripts containing refused actions. It can read an incomplete edit but may miss an obfuscated reference; this does not replace the sandbox or house rules.
   - Asking you before a change is Codex's own rule only; nothing outside the model can enforce it for the ChatGPT app.
 - **Why Turn on can be unavailable.** Missing command-check files or a failed self-test disable **Turn on** with a reason; the chat page remains available.
-- **Command checks.** Remote control requires the installed gate and its self-test. Sandbox escalation while it is on and credential access are refused. Planted commands and templates stay checked with either category setting; the optional category checks are described above. The configuration watch reports unreviewed changes before a reload or restart.
+- **Command checks.** Remote control requires the installed gate and its self-test. Sandbox escalation while it is on and credential access are refused. Planted commands and templates stay checked with either category setting; the optional category checks are described above. The configuration watch retains undo results and unreviewed changes for review before a reload or restart.
 - Remote control is experimental upstream. If it breaks, the chat page is not affected.
 
 ## Codex Sign-In
