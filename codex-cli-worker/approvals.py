@@ -12,6 +12,7 @@ import json
 import posixpath
 import re
 import threading
+import time
 import uuid
 from typing import Any, Callable, TextIO
 
@@ -81,6 +82,8 @@ class AppServerSession:
         self.is_active = is_active
         self.redact = redact
         self.finished = threading.Event()
+        # When Codex last sent anything, or the user last answered; the worker's stall watchdog reads it.
+        self.last_activity = time.monotonic()
         self.error = ""
         self.returncode = 1
         self.thread_id = ""
@@ -259,6 +262,11 @@ class AppServerSession:
         # Persist the reviewable request before it can receive a decision.
         self.on_approvals(copy.deepcopy(self._records))
 
+    def waiting_for_user(self) -> bool:
+        """Return True while a permission request waits for the user, when silence from Codex is expected."""
+        with self.lock:
+            return bool(self._pending) and not self._closed
+
     def decide(self, approval_id: str, decision: str, decided_by: dict[str, str] | None = None) -> None:
         """Apply exactly one allow/deny response to a still-live request.
 
@@ -276,6 +284,8 @@ class AppServerSession:
                 raise ValueError(record["note"])
             request_id = self._pending.pop(approval_id)
             self._pending_files.pop(approval_id, None)
+            # The stall clock starts again from the answer, not from when the request arrived.
+            self.last_activity = time.monotonic()
             record["status"] = "allowed" if decision == "allow" else "denied"
             if decided_by:
                 record["decided_by"] = dict(decided_by)
@@ -290,6 +300,7 @@ class AppServerSession:
     def receive(self, message: dict[str, Any]) -> None:
         """Dispatch a server message without treating model prose as permission."""
         with self.lock:
+            self.last_activity = time.monotonic()
             if self._closed:
                 return
             if not isinstance(message, dict):

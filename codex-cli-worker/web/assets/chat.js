@@ -2676,40 +2676,182 @@ window.addEventListener("resize", () => {
   if (innerWidth > 700) setWidth($("divider").getAttribute("aria-valuenow"));
 });
 let loginTimer;
+// What the sign-in card shows now; the card is rebuilt only when this changes,
+// so a code being read or a QR being scanned never jumps under the user's thumb.
+let shownLogin = null;
 /**
- * Show the ChatGPT sign-in status in the settings dialog, with the sign-in
- * code, link, and QR code when the worker provides them. Checks again every
- * three seconds as long as the dialog is open and the sign-in is pending.
+ * Build the sign-in card: the code in large letters that stay put until the
+ * sign-in ends or is canceled, the QR code of the sign-in page served by the
+ * worker, and the link to the same page.
  */
-async function loadLogin() {
-  clearTimeout(loginTimer);
-  const { auth } = await api("auth/status");
-  $("login-status").textContent =
-    auth.message || auth.status || "Not signed in";
-  $("login-card").replaceChildren();
-  if (auth.user_code)
-    $("login-card").append(textNode("p", `Sign-in code: ${auth.user_code}`));
+function signInCard(auth) {
+  const card = document.createElement("div");
+  card.className = "signin-card";
+  if (auth.user_code) {
+    card.append(
+      textNode("p", "Enter this code on the ChatGPT sign-in page:", "muted"),
+    );
+    const code = textNode("p", auth.user_code, "signin-code");
+    code.setAttribute(
+      "aria-label",
+      `Sign-in code ${auth.user_code.split("").join(" ")}`,
+    );
+    card.append(code);
+  } else {
+    card.append(textNode("p", "Waiting for the sign-in code…", "muted"));
+  }
+  if (auth.qr_path) {
+    const img = document.createElement("img");
+    img.src = auth.qr_path;
+    img.alt = "QR code that opens the ChatGPT sign-in page";
+    img.className = "signin-qr";
+    img.width = img.height = 220;
+    card.append(img);
+  }
   if (auth.verification_url) {
     const url = new URL(auth.verification_url, location.href);
     if (url.protocol === "https:") {
-      const link = textNode("a", "Open ChatGPT sign-in");
+      const link = textNode("a", "Open the ChatGPT sign-in page");
       link.href = url.href;
       link.target = "_blank";
       link.rel = "noreferrer";
-      $("login-card").append(link);
+      card.append(link);
     }
   }
-  if (auth.qr_url && auth.qr_url.startsWith("/local/")) {
-    const img = document.createElement("img");
-    img.src = auth.qr_url;
-    img.alt = "ChatGPT sign-in QR code";
-    $("login-card").append(document.createElement("br"), img);
+  return card;
+}
+/**
+ * Show the ChatGPT sign-in state in the settings dialog and, while the
+ * assistant is not signed in, in the banner above the chat. Checks again
+ * every three seconds while a sign-in waits, every 30 seconds while signed
+ * out, and every five minutes while signed in, so an expired sign-in shows.
+ */
+async function loadLogin() {
+  clearTimeout(loginTimer);
+  let auth;
+  try {
+    ({ auth } = await api("auth/status"));
+  } finally {
+    loginTimer = setTimeout(
+      () => loadLogin().catch(() => {}),
+      auth?.pending ? 3000 : auth && !auth.codex_login?.status_ok ? 30000 : 300000,
+    );
   }
-  if (
-    $("settings").open &&
-    ["waiting_for_user", "starting", "queued"].includes(auth.status)
-  )
-    loginTimer = setTimeout(() => loadLogin().catch(settingsError), 3000);
+  renderLogin(auth);
+}
+/** Put the sign-in state on the page; see loadLogin. */
+function renderLogin(auth) {
+  const signedIn = Boolean(auth.codex_login?.status_ok);
+  const pending = Boolean(auth.pending);
+  // The worker reports "rejected" when OpenAI refused the saved sign-in (expired or revoked),
+  // although the local sign-in file is still there.
+  const lapsed = !signedIn && auth.codex_login?.server_check === "rejected";
+  $("login-status").textContent = signedIn
+    ? auth.codex_login.message || "Signed in to ChatGPT."
+    : pending
+      ? "Signing in. Enter the code below on the ChatGPT sign-in page."
+      : lapsed
+        ? "The ChatGPT sign-in expired or was revoked. Sign in again."
+        : "Not signed in to ChatGPT.";
+  $("signin-banner-text").textContent = lapsed
+    ? "The assistant's ChatGPT sign-in expired or was revoked. Sign in again."
+    : "The assistant is not signed in to ChatGPT.";
+  const key = JSON.stringify([
+    signedIn,
+    lapsed,
+    pending,
+    auth.login_id,
+    auth.user_code,
+    auth.verification_url,
+  ]);
+  if (key !== shownLogin) {
+    shownLogin = key;
+    $("login-card").replaceChildren(...(pending ? [signInCard(auth)] : []));
+    $("signin-banner-card").replaceChildren(
+      ...(pending ? [signInCard(auth)] : []),
+    );
+  }
+  for (const id of ["login", "banner-login"]) $(id).hidden = pending;
+  for (const id of ["login-cancel", "banner-cancel"]) $(id).hidden = !pending;
+  $("signin-banner").hidden = signedIn;
+}
+/** Show whether the assistant is paused, in the settings dialog and above the chat. */
+function renderPause(pause) {
+  const paused = Boolean(pause?.paused);
+  $("pause-status").textContent = paused
+    ? "Paused. New messages are refused and queued ones wait."
+    : "Running.";
+  $("pause").textContent = paused ? "Resume the assistant" : "Pause the assistant";
+  $("pause").dataset.paused = paused ? "1" : "";
+  $("paused-banner").hidden = !paused;
+}
+/** Read the pause state from the worker and show it. */
+async function loadPause() {
+  renderPause(await api("pause"));
+}
+let remoteTimer;
+/**
+ * Show the remote-control state in the settings dialog: on or off, the
+ * machine name, the pairing code as large text and a QR code, and the recent
+ * messages. Checks again every five seconds while the dialog is open.
+ */
+async function loadRemoteControl() {
+  clearTimeout(remoteTimer);
+  const { remote_control: rc } = await api("remote-control");
+  renderRemoteControl(rc);
+  if ($("settings").open)
+    remoteTimer = setTimeout(
+      () => loadRemoteControl().catch(settingsError),
+      rc.enabled ? 5000 : 15000,
+    );
+}
+/** Draw one remote-control state; the buttons follow what can be done now. */
+function renderRemoteControl(rc) {
+  const name = rc.machine_name || rc.configured_name;
+  let status = rc.message || rc.state || "Unknown";
+  if (!rc.available) status = rc.blocked_reason;
+  else if (!rc.enabled) status = `Off. When on, this Home Assistant shows in the ChatGPT app as “${rc.configured_name}”.`;
+  $("remote-control-status").textContent = status;
+  const card = $("remote-control-card");
+  card.replaceChildren();
+  if (rc.enabled && rc.pairing_code) {
+    card.append(
+      textNode("p", `Pairing code for “${name}”:`),
+      textNode("p", rc.pairing_code, "pairing-code"),
+    );
+    if (rc.pairing_qr && rc.pairing_qr.startsWith("data:image/svg+xml;base64,")) {
+      const img = document.createElement("img");
+      img.src = rc.pairing_qr;
+      img.alt = `QR code for pairing code ${rc.pairing_code}`;
+      img.className = "pairing-qr";
+      card.append(img);
+    }
+  }
+  $("remote-control-start").hidden = rc.enabled;
+  $("remote-control-start").disabled = !rc.available;
+  $("remote-control-stop").hidden = !rc.enabled;
+  $("remote-control-pair").hidden = !rc.enabled;
+  $("remote-control-log").textContent = (rc.log || []).join("\n");
+  $("remote-control-log-box").hidden = !(rc.log || []).length;
+}
+for (const [id, action] of [
+  ["remote-control-start", "start"],
+  ["remote-control-stop", "stop"],
+  ["remote-control-pair", "pair"],
+]) {
+  $(id).onclick = async () => {
+    $(id).disabled = true;
+    try {
+      const data = await api(`remote-control/${action}`, {});
+      renderRemoteControl(data.remote_control);
+      $("settings-result").textContent = "";
+    } catch (error) {
+      settingsError(error);
+    } finally {
+      $(id).disabled = false;
+      loadRemoteControl().catch(settingsError);
+    }
+  };
 }
 /** Show an error in the result line of the settings dialog. */
 function settingsError(error) {
@@ -2723,6 +2865,8 @@ $("settings-button").onclick = async () => {
   $("save-agents").disabled = true;
   const results = await Promise.allSettled([
     loadLogin(),
+    loadRemoteControl(),
+    loadPause(),
     loadBrowserPermissions(),
     loadRefusedEdits(),
     api("agents").then((data) => {
@@ -2735,9 +2879,12 @@ $("settings-button").onclick = async () => {
     if (result.status === "rejected") settingsError(result.reason);
 };
 $("close-settings").onclick = () => $("settings").close();
-$("settings").addEventListener("close", () => clearTimeout(loginTimer));
+$("settings").addEventListener("close", () => clearTimeout(remoteTimer));
 for (const [id, path] of [
   ["login", "auth/start"],
+  ["banner-login", "auth/start"],
+  ["login-cancel", "auth/cancel"],
+  ["banner-cancel", "auth/cancel"],
   ["logout", "auth/logout"],
 ]) {
   $(id).onclick = async () => {
@@ -2747,7 +2894,22 @@ for (const [id, path] of [
       await loadLogin();
       $("settings-result").textContent = "";
     } catch (error) {
-      settingsError(error);
+      if ($("settings").open) settingsError(error);
+      else showError(error);
+    } finally {
+      $(id).disabled = false;
+    }
+  };
+}
+for (const id of ["pause", "resume"]) {
+  $(id).onclick = async () => {
+    $(id).disabled = true;
+    try {
+      const paused = id === "pause" && !$("pause").dataset.paused;
+      renderPause(await api("pause", { paused }));
+    } catch (error) {
+      if ($("settings").open) settingsError(error);
+      else showError(error);
     } finally {
       $(id).disabled = false;
     }
@@ -2785,4 +2947,6 @@ controls();
 restore = reopenLastChat();
 refresh();
 loadUsage();
+loadLogin().catch(() => {});
+loadPause().catch(() => {});
 setInterval(tickElapsed, 1000);
