@@ -310,7 +310,7 @@ class ConfigWatch:
         for rel, kinds in gate_rules.included_definitions(texts, rules).items():
             if rel in texts:
                 lines.setdefault(rel, []).append(gate_rules.included_finding(rel, kinds, texts[rel]))
-                blocks.setdefault(rel, {})['include:' + hashlib.sha256(texts[rel].encode()).hexdigest()] = (
+                blocks.setdefault(rel, {})['include:' + hashlib.sha256(gate_rules.read_config_bytes(self.root, rel)).hexdigest()] = (
                     1, max(1, len(texts[rel].splitlines())), texts[rel].splitlines()[0] if texts[rel].splitlines() else '')
         return lines, blocks
 
@@ -371,7 +371,7 @@ class ConfigWatch:
             for rel, kinds in gate_rules.included_definitions(texts, rules).items():
                 if rel in texts:
                     data.setdefault(rel, []).append(list(gate_rules.included_finding(rel, kinds, texts[rel]).key()))
-                    hashes.setdefault(rel, []).append('include:' + hashlib.sha256(texts[rel].encode()).hexdigest())
+                    hashes.setdefault(rel, []).append('include:' + copies[rel]['sha256'])
             self._save_baseline({"taken": time.time(), "files": data, "blocks": hashes,
                                  "copies": copies, "present": present, "complete": complete, "undo_events": []})
 

@@ -657,9 +657,9 @@ def extend_include_texts(texts: dict[str, str], root: Path, rules: dict[str, Any
     raise ValueError('include depth budget exceeded')
 
 
-def config_refused_scripts(rules: dict[str, Any]) -> set[str]:
+def config_refused_scripts(rules: dict[str, Any], categories: bool | None = None) -> set[str]:
     texts = config_yaml_texts(CONFIG_ROOT)
-    return refused_scripts(texts, rules, deadline=time.monotonic() + 0.5)
+    return refused_scripts(texts, rules, categories, deadline=time.monotonic() + 0.5)
 
 
 PATCH_MAX_BYTES = 256 * 1024

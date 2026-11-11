@@ -2765,7 +2765,8 @@ def refuse_planted_edits(run_dir: Path, changes: dict[str, list[str]], before: d
             continue
         if snapshot_secret_path(target.resolve().relative_to(root).as_posix()) or not should_include_file(target):
             continue
-        after = target.read_text(encoding="utf-8", errors="replace")
+        after_bytes = gate_rules.read_config_bytes(CONFIG_ROOT, rel)
+        after = after_bytes.decode("utf-8", errors="replace")
         earlier_bytes = b"" if rel in added else None
         entry = saved.get(rel) or {}
         if entry.get("status") == "saved" and entry.get("copy"):
@@ -2777,7 +2778,7 @@ def refuse_planted_edits(run_dir: Path, changes: dict[str, list[str]], before: d
             continue
         earlier = earlier_bytes.decode("utf-8", errors="replace")
         found = gate_rules.new_refused(earlier, after, rules, scripts, enabled)
-        if rel in definitions and earlier != after:
+        if rel in definitions and earlier_bytes != after_bytes:
             found.append(gate_rules.included_finding(rel, definitions[rel], after))
         if not found:
             continue
