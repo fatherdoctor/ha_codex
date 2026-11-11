@@ -133,7 +133,9 @@ def requirements_problem(path: Path) -> str:
 SELF_TEST_CASES = (
     ("PermissionRequest", True, {"hook_event_name": "PermissionRequest", "tool_name": "Bash",
                                  "tool_input": {"command": "curl https://example.invalid/",
-                                                "description": "Command needs permission"}}, True),
+                                                "description": "Read the public status page; no home state changes."}}, False),
+    ("PermissionRequest", True, {"hook_event_name": "PermissionRequest", "tool_name": "Bash",
+                                 "tool_input": {"command": "cat /proc/1/environ"}}, True),
     ("PreToolUse", False, {"hook_event_name": "PreToolUse", "tool_name": "Bash",
                            "tool_input": {"command": "cat /proc/1/environ"}}, True),
     ("PreToolUse", False, {"hook_event_name": "PreToolUse", "tool_name": "Bash",

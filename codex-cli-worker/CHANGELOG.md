@@ -2,6 +2,8 @@
 
 ## 0.1.81.2 (unreleased)
 
+- **Remote requests keep native approvals (CX-RC-ASK.f).** Normal light, lock, network and checked-file PermissionRequests receive no hook decision, so Codex can ask on the phone; the hook never auto-approves. Keep named refusals for credentials/process environments, full access, app settings/policy/rules and planted command/template definitions. The startup self-test checks normal ASK and security denial. Model-level category rules remain CX-PARITY's separate change.
+
 Permissions that ask, and only an administrator can answer. Sign-in without a terminal, a pause switch and a model pin.
 
 - **Remote-control review fixes (CX-RC-START.f).** Check move destinations for planted YAML; recognize the actual Codex 0.166 downgrade wording. Save and report replaced bytes before watch undo, and report UI-owned YAML without whole-file rollback. Cap hook-checked files at 512 KiB and wait for the watch report in the timing-sensitive test. The container smoke accepts only requirements refusal or a proven restricted fallback.
