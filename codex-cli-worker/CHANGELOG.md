@@ -13,6 +13,7 @@ Permissions that ask, and only an administrator can answer. Sign-in without a te
 - New **Signed in** binary sensor in the integration, and a clearer repair when the sign-in has expired or was revoked.
 - New `model_pin` option (default `gpt-6.1-sol`): every run names the pinned model, and a request for any other model is stopped with an error instead of running on it. `none` turns it off.
 - **Pause the assistant** in Settings: new messages are refused and queued ones wait until it is resumed; kept across restarts.
+- **Usage from the account, not the screen.** The 5-hour and weekly usage sensors now come from Codex's own `account/rateLimits/read`, placed by window length. If that read fails, the old `/status` screen read is used and the sensors say the figures are estimated (`source` and `note` attributes).
 
 ## 0.1.81.1
 
