@@ -6,7 +6,7 @@ url: https://github.com/fatherdoctor/ha_codex
 image: ghcr.io/fatherdoctor/codex-cli-worker
 init: false
 startup: services
-boot: manual
+boot: auto
 stdin: true
 ingress: true
 ingress_port: 9123
@@ -34,6 +34,7 @@ options:
   codex_sandbox: workspace-write
   task_root: /config/codex_tasks
   task_timeout_seconds: 3600
+  task_stall_seconds: 600
   auto_save_lovelace: true
   config_check: true
   full_snapshot: false
@@ -52,6 +53,7 @@ schema:
   task_root: str
   notify_service: str?
   task_timeout_seconds: int
+  task_stall_seconds: int(0,86400)
   auto_save_lovelace: bool
   config_check: bool
   full_snapshot: bool

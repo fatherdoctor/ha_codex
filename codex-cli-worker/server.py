@@ -109,6 +109,7 @@ DEFAULT_OPTIONS = {
     "task_root": "/config/codex_tasks",
     "notify_service": "",
     "task_timeout_seconds": 3600,
+    "task_stall_seconds": 600,
     "auto_save_lovelace": True,
     "config_check": True,
     "full_snapshot": False,
@@ -1359,13 +1360,19 @@ def fetch_codex_usage() -> dict[str, Any]:
     codex = codex_binary_path()
     if not codex or not codex_login_status().get("status_ok"):
         return {**fetch_codex_usage_status(), "source": "", "note": "", "rate_limits_error": ""}
+    # The sign-in the read is made with; an answer is dropped if auth.json changes before it comes.
+    signature = _auth_signature()
     try:
         usage = usage_from_rate_limits(read_codex_rate_limits(codex))
+        # OpenAI answered with this sign-in, so it is still accepted.
+        record_sign_in_check("ok", signature)
         if usage["five_hour_limit"] or usage["weekly_limit"]:
             return {"status": "ok", "error": "", **usage, "source": "rate_limits", "note": "", "rate_limits_error": ""}
         failure = "the usage read named no 5-hour or weekly window"
     except Exception as exc:  # noqa: BLE001 - any failure falls back to the status screen
         failure = str(exc) or type(exc).__name__
+        if sign_in_rejected(failure) and record_sign_in_check("rejected", signature):
+            return {**fetch_codex_usage_status(), "source": "", "note": "", "rate_limits_error": redact(failure)}
     fallback = fetch_codex_usage_status()
     note = ESTIMATED_NOTE if fallback.get("status") == "ok" else ""
     return {**fallback, "source": "status_screen", "note": note, "rate_limits_error": failure}
@@ -3148,7 +3155,81 @@ def save_lovelace_dashboard(ref: dict[str, str]) -> tuple[bool, str]:
                 pass
 
 
+# `codex login status` only reads the local auth.json, so a sign-in that OpenAI has revoked
+# still reads as signed in. These markers come from a real revoked sign-in (the worker log said
+# `token_revoked`, "Encountered invalidated oauth token for user", and the task failed with
+# "workspace routing discovery unauthorized (401)") and from Codex's refresh-token error codes.
+SIGN_IN_REJECTED_RE = re.compile(
+    r"token_revoked|invalidated oauth token|refresh_token_(?:expired|reused|invalidated)"
+    r"|\b401\b[^\n]{0,80}unauthori[sz]ed|unauthori[sz]ed[^\n]{0,80}\b401\b",
+    re.IGNORECASE,
+)
+SIGN_IN_EXPIRED_SUMMARY = "Your ChatGPT sign-in has expired or was revoked. Sign in again from the worker page."
+SIGN_IN_EXPIRED_MESSAGE = "Signed out: OpenAI no longer accepts this sign-in (it expired or was revoked). Sign in again."
+sign_in_check_lock = threading.Lock()
+# What OpenAI last said about the sign-in in auth.json, tied to that file's size and change time:
+# a new sign-in or a sign-out writes the file, which makes the old answer stale.
+sign_in_check: dict[str, Any] = {"result": "", "auth_signature": None, "checked_at": ""}
+
+
+def sign_in_rejected(text: Any) -> bool:
+    """Return True when an error text says OpenAI refused the sign-in (revoked or expired), not a network fault."""
+    return bool(SIGN_IN_REJECTED_RE.search(str(text or "")))
+
+
+def _auth_signature() -> tuple[int, int] | None:
+    """Return the size and change time of auth.json, or None when it does not exist."""
+    try:
+        info = (CODEX_HOME / "auth.json").stat()
+    except OSError:
+        return None
+    return (info.st_size, info.st_mtime_ns)
+
+
+_SIGNATURE_NOW = object()
+
+
+def record_sign_in_check(result: str, signature: Any = _SIGNATURE_NOW) -> bool:
+    """Remember what OpenAI said about a sign-in: "ok" or "rejected".
+
+    `signature` is the auth.json signature taken when the request that got the answer started.
+    When the file has changed since (the user signed in again or out while it ran), the answer
+    was about the old sign-in and is dropped. Returns whether the answer was kept.
+    """
+    with sign_in_check_lock:
+        current = _auth_signature()
+        if signature is not _SIGNATURE_NOW and signature != current:
+            return False
+        sign_in_check.update(result=result, auth_signature=current, checked_at=utc_now())
+        return True
+
+
+def sign_in_server_state() -> dict[str, str]:
+    """Return OpenAI's last answer for the current auth.json ("ok", "rejected" or "unchecked") and when it came."""
+    with sign_in_check_lock:
+        current = sign_in_check["auth_signature"] is not None and sign_in_check["auth_signature"] == _auth_signature()
+        if not current or not sign_in_check["result"]:
+            return {"result": "unchecked", "checked_at": ""}
+        return {"result": str(sign_in_check["result"]), "checked_at": str(sign_in_check["checked_at"])}
+
+
 def codex_login_status() -> dict[str, Any]:
+    """Return whether Codex is signed in: the CLI's local check, overruled when OpenAI last refused this sign-in.
+
+    `server_check` says what OpenAI last answered for the current auth.json: "ok", "rejected" or
+    "unchecked". The answer comes from the usage read and from task errors, so this never calls out.
+    """
+    result = codex_local_login_status()
+    server = sign_in_server_state()
+    result["server_check"] = server["result"]
+    result["server_checked_at"] = server["checked_at"]
+    if result["status_ok"] and server["result"] == "rejected":
+        result["status_ok"] = False
+        result["message"] = SIGN_IN_EXPIRED_MESSAGE
+    return result
+
+
+def codex_local_login_status() -> dict[str, Any]:
     """Ask the Codex CLI whether it is logged in; return that, whether auth.json exists, and the CLI's message."""
     auth_file = CODEX_HOME / "auth.json"
     result = {"has_auth_file": auth_file.exists(), "status_ok": False, "message": ""}
@@ -3192,6 +3273,9 @@ def auth_status_payload() -> dict[str, Any]:
     )
     state["pending"] = bool(state["process_running"]) and state.get("status") in SIGN_IN_PENDING
     state["codex_login"] = codex_login_status()
+    if state["codex_login"].get("server_check") == "rejected" and not state["process_running"]:
+        state["status"] = "expired"
+        state["message"] = SIGN_IN_EXPIRED_MESSAGE
     return state
 
 
@@ -4294,6 +4378,53 @@ def publish_cancelled_task_outcome(task_id: str, returncode: int | None = None) 
     return True
 
 
+# The auth.json signature each task's current exchange started with (see note_task_sign_in).
+task_sign_in_signatures: dict[str, Any] = {}
+TASK_LOG_LINE_RE = re.compile(r"^\[[^\]\n]*\] (\w+): ")
+# Streams in codex.log that can say why Codex failed. `stdout` is left out: it carries Codex's
+# events, including the output of the commands it ran, and a command that printed an HTTP 401
+# from some other service says nothing about the ChatGPT sign-in.
+SIGN_IN_LOG_STREAMS = frozenset({"stderr", "worker"})
+
+
+def note_task_sign_in(task_id: str) -> None:
+    """Note the sign-in a task's exchange starts with, so a later refusal is tied to that sign-in."""
+    with sign_in_check_lock:
+        task_sign_in_signatures[task_id] = _auth_signature()
+
+
+def task_log_error_text(task_id: str) -> str:
+    """Return the stderr and worker lines from the end of the task's log, without Codex's events."""
+    try:
+        log = (get_task_dir(task_id) / "codex.log").read_text(encoding="utf-8", errors="replace")[-20000:]
+    except (OSError, ValueError):
+        return ""
+    kept: list[str] = []
+    stream = ""
+    for line in log.splitlines():
+        match = TASK_LOG_LINE_RE.match(line)
+        if match:
+            stream = match.group(1)
+        # A line without the prefix continues the entry above it (or is cut at the start of the tail).
+        if stream in SIGN_IN_LOG_STREAMS:
+            kept.append(line)
+    return "\n".join(kept)
+
+
+def task_failed_on_sign_in(task_id: str, *texts: Any) -> bool:
+    """Return True, and mark the sign-in refused, when a task failed because OpenAI refused the sign-in.
+
+    Looks at the failure texts and at Codex's stderr and the worker's own lines at the end of the
+    task's log. The refusal is recorded only for the sign-in the exchange started with.
+    """
+    if not any(sign_in_rejected(text) for text in (*texts, task_log_error_text(task_id))):
+        return False
+    with sign_in_check_lock:
+        signature = task_sign_in_signatures.pop(task_id, _SIGNATURE_NOW)
+    record_sign_in_check("rejected", signature)
+    return True
+
+
 def fail_task_launch(
     task_id: str,
     exc: Exception,
@@ -4308,6 +4439,8 @@ def fail_task_launch(
     completed_at = utc_now()
     prefix = detail_prefix or f"Could not start {CODEX_BINARY}"
     details = redact(f"{prefix}: {exc}")
+    if task_failed_on_sign_in(task_id, details):
+        summary = SIGN_IN_EXPIRED_SUMMARY
     with lock:
         existing_session_id = str(tasks.get(task_id, {}).get("session_id") or "")
     resolved_session_id = str(session_id or existing_session_id)
@@ -4407,6 +4540,36 @@ def record_background_start_failure(task_id: str, exc: Exception) -> None:
         )
 
 
+def wait_for_exchange(
+    session: Any, timeout: float, stall_seconds: float, *, poll: float = 5.0,
+    clock: Callable[[], float] = time.monotonic,
+) -> str:
+    """Wait for an app-server exchange; return "finished", "timeout", or "stalled".
+
+    "stalled" means Codex sent nothing for `stall_seconds` while no permission request was
+    waiting for the user. A turn can hang this way after the network drops: the app-server
+    never reports an error, so without this the task would sit until the full timeout.
+    A stall limit of 0 turns the check off.
+    """
+    started = clock()
+    while True:
+        remaining = timeout - (clock() - started)
+        if remaining <= 0:
+            return "timeout"
+        if session.finished.wait(timeout=min(poll, remaining)):
+            return "finished"
+        if stall_seconds > 0 and not session.waiting_for_user() and clock() - session.last_activity >= stall_seconds:
+            return "stalled"
+
+
+def stall_summary(stall_seconds: int) -> str:
+    """Return the plain words for a task the stall watchdog stopped."""
+    minutes = max(1, round(stall_seconds / 60))
+    unit = "minute" if minutes == 1 else "minutes"
+    return (f"Codex stopped responding for {minutes} {unit}, so the task was stopped. "
+            "The network may have dropped. Send the request again, or continue the conversation.")
+
+
 def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: str | None = None) -> None:
     """Run one exchange: record the configuration, launch Codex, then check and report what it changed."""
     if task_cancellation_requested(task_id):
@@ -4430,6 +4593,7 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     before_manifest_path = task_dir / BASELINE_FILE
 
     update_task(task_id, status="running", started_at=utc_now(), error="")
+    note_task_sign_in(task_id)
     verification_capability = verification.begin(task_id)
     data_capability = ha_data.begin(task_id)
     with lock:
@@ -4520,6 +4684,7 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
         return
 
     timeout = int(read_options().get("task_timeout_seconds") or 3600)
+    stall_seconds = max(0, int(read_options().get("task_stall_seconds", 600) or 0))
     session_holder: dict[str, str] = {}
     # Images recorded before this run belong to earlier exchanges of the session.
     known_image_ids = {item["id"] for item in image_generation_items(session_id or "")}
@@ -4571,6 +4736,7 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     stderr_thread.start()
 
     timed_out = False
+    stalled = False
     lifecycle_error: Exception | None = None
     stdin_closed = False
     returncode = -1
@@ -4589,8 +4755,11 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
         if lifecycle_error is None:
             try:
                 if approval_session:
-                    if not approval_session.finished.wait(timeout=timeout):
-                        timed_out = True
+                    outcome = wait_for_exchange(approval_session, timeout, stall_seconds)
+                    timed_out = outcome == "timeout"
+                    stalled = outcome == "stalled"
+                    if stalled:
+                        write_task_log(task_id, "worker", f"No activity from Codex for {stall_seconds} seconds; stopping the task.")
                     approval_session.close()
                     returncode = approval_session.returncode
                     if approval_session.error:
@@ -4680,6 +4849,12 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
             "summary": f"Codex timed out after {timeout} seconds.",
             "details": final.get("summary", ""),
         }
+    elif stalled:
+        final = {
+            "status": "failed",
+            "summary": stall_summary(stall_seconds),
+            "details": final.get("summary", ""),
+        }
     elif lifecycle_error is not None:
         reason = redact(str(lifecycle_error))
         final["status"] = "failed"
@@ -4691,6 +4866,9 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
         reason = f"Codex exited with {returncode}."
         final["details"] = f"{reason} {final.get('details', '')}".strip()
 
+    if final.get("status") == "failed" and task_failed_on_sign_in(
+            task_id, reason, final.get("summary"), final.get("details"), lifecycle_error):
+        final["summary"] = SIGN_IN_EXPIRED_SUMMARY
     status = str(final.get("status") or "failed")
     # Files the validation details already report as having no saved copy.
     named: set[str] = set()
