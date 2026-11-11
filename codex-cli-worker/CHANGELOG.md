@@ -13,6 +13,7 @@ Permissions that ask, and only an administrator can answer. Sign-in without a te
 - New **Signed in** binary sensor in the integration, and a clearer repair when the sign-in has expired or was revoked.
 - New `model_pin` option (default `gpt-6.1-sol`): every run names the pinned model, and a request for any other model is stopped with an error instead of running on it. `none` turns it off.
 - **Pause the assistant** in Settings: new messages are refused and queued ones wait until it is resumed; kept across restarts.
+- **Usage from the account, not the screen.** The 5-hour and weekly usage sensors now come from Codex's own `account/rateLimits/read`, placed by window length. If that read fails, the old `/status` screen read is used and the sensors say the figures are estimated (`source` and `note` attributes).
 - Remote control from the ChatGPT app can be managed from the app's Settings page: turn on and off, status, machine name (default **Home Assistant**), pairing code as text and QR code, a new pairing code, and recent messages. The app runs `codex remote-control --no-daemon` as one supervised process with restart backoff, without any Home Assistant or Supervisor token. It stays off until turned on, and **Turn on** is refused until a command check outside the model is shipped with the app; this version does not ship it yet.
 - New option **Remote control machine name**.
 
