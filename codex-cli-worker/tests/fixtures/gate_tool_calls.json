@@ -280,7 +280,7 @@
      "input": "*** Begin Patch\n*** Update File: automations.yaml\n@@\n+  actions:\n+    - action: lock.unlock\n+      target:\n+        entity_id: lock.front_door\n*** End Patch\n"
     }
    },
-   "expect": "deny"
+   "expect": "deny", "expect_categories_off": "allow"
   },
   {
    "name": "patch adds legacy service on alarm",
@@ -292,7 +292,7 @@
      "input": "*** Begin Patch\n*** Update File: automations.yaml\n@@\n+    - service: alarm_control_panel.alarm_disarm\n*** End Patch\n"
     }
    },
-   "expect": "deny"
+   "expect": "deny", "expect_categories_off": "allow"
   },
   {
    "name": "patch adds notify",
@@ -304,7 +304,7 @@
      "input": "*** Begin Patch\n*** Add File: packages/away.yaml\n+script:\n+  tell:\n+    sequence:\n+      - action: notify.mobile_app_phone\n+        data:\n+          message: hi\n*** End Patch\n"
     }
    },
-   "expect": "deny"
+   "expect": "deny", "expect_categories_off": "allow"
   },
   {
    "name": "patch adds tts",
@@ -316,7 +316,7 @@
      "input": "*** Begin Patch\n*** Update File: scripts.yaml\n@@\n+    - action: tts.speak\n*** End Patch\n"
     }
    },
-   "expect": "deny"
+   "expect": "deny", "expect_categories_off": "allow"
   },
   {
    "name": "patch adds camera",
@@ -328,7 +328,7 @@
      "input": "*** Begin Patch\n*** Update File: scripts.yaml\n@@\n+    - action: camera.turn_off\n*** End Patch\n"
     }
    },
-   "expect": "deny"
+   "expect": "deny", "expect_categories_off": "allow"
   },
   {
    "name": "patch adds alarmo",
@@ -340,7 +340,7 @@
      "input": "*** Begin Patch\n*** Update File: scripts.yaml\n@@\n+    - action: alarmo.arm\n*** End Patch\n"
     }
    },
-   "expect": "deny"
+   "expect": "deny", "expect_categories_off": "allow"
   },
   {
    "name": "patch adds shell_command",
@@ -376,7 +376,7 @@
      "input": "*** Begin Patch\n*** Update File: automations.yaml\n@@\n+    - action: cover.open_cover\n+      target:\n+        entity_id: cover.garage_door\n*** End Patch\n"
     }
    },
-   "expect": "deny"
+   "expect": "deny", "expect_categories_off": "allow"
   },
   {
    "name": "patch opens blinds",
@@ -388,7 +388,7 @@
      "input": "*** Begin Patch\n*** Update File: automations.yaml\n@@\n+    - action: cover.open_cover\n+      target:\n+        entity_id: cover.living_room_blinds\n*** End Patch\n"
     }
    },
-   "expect": "deny"
+   "expect": "deny", "expect_categories_off": "allow"
   },
   {
    "name": "patch templated action",
@@ -424,7 +424,7 @@
      "input": "*** Begin Patch\n*** Update File: automations.yaml\n@@\n+    - device_id: abc123\n+      domain: lock\n+      entity_id: 0f1e\n+      type: unlock\n*** End Patch\n"
     }
    },
-   "expect": "deny"
+   "expect": "deny", "expect_categories_off": "allow"
   },
   {
    "name": "patch device trigger locked",
@@ -536,7 +536,7 @@
      ]
     }
    },
-   "expect": "deny"
+   "expect": "deny", "expect_categories_off": "allow"
   },
   {
    "name": "not json",
@@ -570,7 +570,7 @@
      "input": "*** Begin Patch\n*** Update File: scenes.yaml\n@@\n+- name: Leaving\n+  entities:\n+    lock.front_door:\n+      state: unlocked\n*** End Patch\n"
     }
    },
-   "expect": "deny"
+   "expect": "deny", "expect_categories_off": "allow"
   },
   {
    "name": "patch command_line sensor",
@@ -618,7 +618,7 @@
      "input": "*** Begin Patch\n*** Update File: automations.yaml\n@@\n+    - device_id: abc123\n+      domain: cover\n+      entity_id: 0123abcd\n+      type: open\n*** End Patch\n"
     }
    },
-   "expect": "deny"
+   "expect": "deny", "expect_categories_off": "allow"
   },
   {
    "name": "patch message script",
@@ -630,7 +630,7 @@
      "input": "*** Begin Patch\n*** Update File: automations.yaml\n@@\n+    - action: script.notify_family\n*** End Patch\n"
     }
    },
-   "expect": "deny"
+   "expect": "deny", "expect_categories_off": "allow"
   }
  ]
 }

@@ -30,12 +30,23 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 IMAGE_DIR = Path("/usr/share/ha_codex")
 SOURCE_DIR = Path(__file__).resolve().parent / "policy"
+OPTIONS_PATH = Path("/data/options.json")
+
+
+def category_refusals_enabled(path: Path | None = None) -> bool:
+    """Only an explicit JSON true opts into category refusals; security checks are separate."""
+    try:
+        data = json.loads((path or OPTIONS_PATH).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(data, dict) and data.get("refuse_categories") is True
 
 STRICT_RULES: dict[str, Any] = {
     "refused_domains": ["alarm_control_panel", "alarmo", "camera", "cover", "lock", "notify", "tts"],
@@ -238,7 +249,17 @@ def find_refused(text: str, rules: dict[str, Any], refused_scripts: frozenset[st
 BLOCK_CHANGED = "a change to a block that holds a refused action"
 
 
-def refused_blocks(text: str, rules: dict[str, Any], scripts: set[str] | frozenset[str] = frozenset()) -> dict[str, tuple[int, int, str]]:
+def active_findings(text: str, rules: dict[str, Any], scripts: set[str] | frozenset[str] = frozenset(),
+                    categories: bool | None = None) -> list[Finding]:
+    """Always keep Core escape paths; device, message and indirect categories are opt-in."""
+    enabled = category_refusals_enabled() if categories is None else categories
+    found = find_refused(text, rules, scripts)
+    security = set(rules["reaches_anything"]) | {"runs_on_load", "template"}
+    return found if enabled else [finding for finding in found if finding.kind in security]
+
+
+def refused_blocks(text: str, rules: dict[str, Any], scripts: set[str] | frozenset[str] = frozenset(),
+                   categories: bool = True) -> dict[str, tuple[int, int, str]]:
     """Return {hash: (first line number, last line number, first line)} for each top-level block of this YAML text that holds a refused line.
 
     A block starts at a line that begins in the first column (``- id: ...`` in
@@ -253,11 +274,29 @@ def refused_blocks(text: str, rules: dict[str, Any], scripts: set[str] | frozens
     for number, line in enumerate(text.splitlines() + ["__end__"], start=1):
         if line[:1] and not line[:1].isspace() and not line.startswith("#") and block:
             body = "\n".join(item.rstrip() for item in block).strip()
-            if body and find_refused(body, rules, scripts):
+            if body and active_findings(body, rules, scripts, categories):
                 out[hashlib.sha256(body.encode("utf-8")).hexdigest()] = (start, number - 1, block[0])
             block, start = [], number
         block.append(line)
     return out
+
+
+def new_refused(before: str, after: str, rules: dict[str, Any], scripts: set[str] | frozenset[str] = frozenset(),
+                categories: bool | None = None) -> list[Finding]:
+    """Find newly added refused lines and changed blocks, without treating moved lines as new."""
+    enabled = category_refusals_enabled() if categories is None else categories
+    counts = Counter(item.key() for item in active_findings(before, rules, scripts, enabled))
+    found = []
+    for item in active_findings(after, rules, scripts, enabled):
+        if counts[item.key()]:
+            counts[item.key()] -= 1
+        else:
+            found.append(item)
+    previous = refused_blocks(before, rules, scripts, enabled)
+    for digest, (first, last, text) in refused_blocks(after, rules, scripts, enabled).items():
+        if digest not in previous and not any(first <= item.line <= last for item in found):
+            found.append(Finding(first, BLOCK_CHANGED, text))
+    return found
 
 
 def parse_patch(text: str) -> list[tuple[str, str]]:
@@ -335,12 +374,11 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
                     if pattern.search(path):
                         return f"This edit {why}, which is never allowed."
                 if path.lower().endswith(YAML_SUFFIXES):
-                    found = find_refused(added, rules)
+                    found = active_findings(added, rules)
                     if found:
                         first = found[0]
                         return (f"This edit to {path} adds {first.reason} ({first.text.strip()}). "
-                                "Locks, alarms, covers, cameras, messages to people, shell and REST commands "
-                                "and templated actions are added by a person, not by Codex.")
+                                "A person must add this change outside Codex.")
             # The rest of a command that carries a patch (a heredoc) is still a command.
             text = PATCH_BLOCK_RE.sub(" ", text)
         for pattern, why in PROTECTED_COMMAND_RES:

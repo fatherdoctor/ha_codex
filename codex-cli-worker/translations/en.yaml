@@ -1,4 +1,7 @@
 configuration:
+  refuse_categories:
+    name: Refuse actions by category
+    description: Off by default. Turn on to also refuse configuration edits involving device and message categories. The assistant keeps its house rules either way. Credential, sandbox escalation and planted-command checks stay on.
   codex_model:
     name: Codex model
     description: Model passed to Codex CLI. Use default to let Codex CLI choose its recommended model, or select GPT-6 Astra, GPT-6.1 Sol, GPT-6.1 Terra, GPT-6 Sol, or GPT-6 Luna, or the older GPT-5.6 Sol, Terra, or Luna. gpt-5.5 is deprecated, do not select it. It is listed only so that existing setups keep starting, and it runs GPT-5.6 Sol. Model availability depends on your account. Legacy GPT-5.3-Codex selections are treated as default for upgrade compatibility.
