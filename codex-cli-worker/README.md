@@ -1,4 +1,4 @@
-# Codex CLI Worker App
+# Codex for Home Assistant
 
 Use Codex CLI to inspect and edit your configuration through a chat in Home Assistant.
 

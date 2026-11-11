@@ -1,4 +1,4 @@
-# Codex for Home Assistant (fatherdoctor fork)
+# Codex for Home Assistant
 
 A Home Assistant app and integration that let one household member ask OpenAI's Codex, in plain words and from the
 Home Assistant app, to explain the house or make a configuration change, with one confirmation per change.
@@ -29,7 +29,7 @@ with Codex. Before signing in, turn on **Enable device code authorization for Co
 
 1. **Add the app repository.** **Settings** > **Apps** > **Install app** > menu (top right) > **Repositories**, then
    add `https://github.com/fatherdoctor/ha_codex`.
-2. **Install and start the app.** Install **Codex CLI Worker**, review its options, start it.
+2. **Install and start the app.** Install **Codex for Home Assistant**, review its options, start it.
 3. **Install the integration.** In HACS, add `https://github.com/fatherdoctor/ha_codex` as a custom repository
    (type **Integration**), download **Codex**, and restart Home Assistant. Manual: copy `custom_components/codex_cli`
    to `/config/custom_components/codex_cli` and restart.
@@ -50,7 +50,7 @@ How releases are tested and how a bad one is rolled back: [docs/updates-and-roll
 
 1. **Settings** > **Devices & services** > **Codex** > delete the integration entry.
 2. Remove **Codex** in HACS (or delete `/config/custom_components/codex_cli`) and restart Home Assistant.
-3. Uninstall **Codex CLI Worker** under **Settings** > **Apps**. Task logs stay in `/config/codex_tasks` until you
+3. Uninstall **Codex for Home Assistant** under **Settings** > **Apps**. Task logs stay in `/config/codex_tasks` until you
    delete that folder.
 
 ## Usage
@@ -80,7 +80,7 @@ see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-MIT, as upstream: [LICENSE](LICENSE) (copyright Yoav Mor). Fork changes by David Allison, under the same license.
+MIT, as upstream: [LICENSE](LICENSE) (copyright Yoav Mor). Fork changes copyright The Backshop, under the same license.
 
 [license-badge]: https://img.shields.io/github/license/fatherdoctor/ha_codex
 [license-url]: LICENSE

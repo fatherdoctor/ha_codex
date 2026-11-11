@@ -1,4 +1,4 @@
-# Codex CLI Worker
+# Codex for Home Assistant
 
 This app runs Codex CLI tasks against the Home Assistant config folder mounted at `/config`.
 
