@@ -2790,6 +2790,13 @@ function renderRemoteControl(rc) {
   if (!rc.available) status = rc.blocked_reason;
   else if (!rc.enabled) status = `Off. When on, this Home Assistant shows in the ChatGPT app as “${rc.configured_name}”.`;
   $("remote-control-status").textContent = status;
+  for (const [id, text] of [
+    ["remote-control-name-warning", rc.name_warning],
+    ["remote-control-policy-warning", rc.policy_warning],
+  ]) {
+    $(id).textContent = text || "";
+    $(id).hidden = !text;
+  }
   const card = $("remote-control-card");
   card.replaceChildren();
   if (rc.enabled && rc.pairing_code) {
@@ -2814,7 +2821,7 @@ function renderRemoteControl(rc) {
   const list = $("remote-control-findings-list");
   list.replaceChildren(
     ...findings.map((item) =>
-      textNode("li", `${item.file || "config"}${item.line ? `, line ${item.line}` : ""}: ${item.reason}${item.text ? ` (${item.text})` : ""}`),
+      textNode("li", `${item.file || "config"}${item.line ? `, line ${item.line}` : ""}: ${item.reason}${item.undone ? ` — ${item.undone}` : item.undo_note ? ` — ${item.undo_note}` : ""}${item.recovery_copy ? ` — replaced version saved at ${item.recovery_copy}` : ""}${item.text ? ` (${item.text})` : ""}`),
     ),
   );
   if ((rc.config_findings_count || 0) > findings.length) {

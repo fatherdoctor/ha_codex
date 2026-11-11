@@ -29,6 +29,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import os
+import stat
+import time
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -77,7 +80,8 @@ PATCH_FILE_RE = re.compile(r"^\*\*\* (Add File|Update File|Delete File|Move to):
 YAML_SUFFIXES = (".yaml", ".yml")
 PATCH_BLOCK_RE = re.compile(r"\*\*\* Begin Patch.*?(?:\*\*\* End Patch|\Z)", re.DOTALL)
 
-# Keys a tool call may use to ask for more than the sandbox (provisional until the lab captures 0.166's format).
+# Defense for older tool payloads. Codex 0.166 PreToolUse omits these keys;
+# PermissionRequest is the authoritative escalation event in the lab capture.
 ESCALATION_KEYS = ("sandbox_permissions", "with_escalated_permissions", "escalated", "require_escalated")
 ESCALATION_VALUES = {"require_escalated", "escalated", "true", "danger-full-access"}
 
@@ -211,10 +215,13 @@ def new_refused(before: str, after: str, rules: dict[str, Any], scripts: set[str
     return found
 
 
-def refused_scripts(texts: dict[str, str], rules: dict[str, Any]) -> set[str]:
-    """Resolve scripts transitively using the always-on security kinds."""
+
+def refused_scripts(texts: dict[str, str], rules: dict[str, Any], deadline: float | None = None) -> set[str]:
+    """Resolve scripts transitively using always-on security kinds within the time budget."""
     blocks: dict[str, str] = {}
     for rel, text in texts.items():
+        if deadline is not None and time.monotonic() > deadline:
+            raise ValueError("script scan time budget exceeded")
         if rel != "scripts.yaml" and not rel.startswith("scripts/"):
             continue
         current, block = "", []
@@ -228,7 +235,12 @@ def refused_scripts(texts: dict[str, str], rules: dict[str, Any]) -> set[str]:
                 block.append(line)
     refused: set[str] = set()
     while True:
-        found = {name for name, text in blocks.items() if find_refused(text, rules, refused)}
+        found = set()
+        for name, text in blocks.items():
+            if deadline is not None and time.monotonic() > deadline:
+                raise ValueError("script scan time budget exceeded")
+            if find_refused(text, rules, refused):
+                found.add(name)
         if found <= refused:
             return refused
         refused |= found
@@ -236,24 +248,218 @@ def refused_scripts(texts: dict[str, str], rules: dict[str, Any]) -> set[str]:
 
 def config_refused_scripts(rules: dict[str, Any]) -> set[str]:
     """Read only bounded, ordinary script YAML for patch-hook indirect-call checks."""
-    root = CONFIG_ROOT.resolve()
+    texts: dict[str, str] = {}
+    deadline = time.monotonic() + 0.5
+    total = 0
     candidates = [CONFIG_ROOT / "scripts.yaml"]
     folder = CONFIG_ROOT / "scripts"
     if folder.is_dir() and not folder.is_symlink():
-        candidates.extend(folder.rglob("*.yaml"))
-        candidates.extend(folder.rglob("*.yml"))
-    texts = {}
-    for path in sorted(candidates)[:3000]:
+        for parent, dirs, names in os.walk(folder):
+            dirs[:] = [d for d in dirs if not d.startswith(".") and not (Path(parent)/d).is_symlink()]
+            if time.monotonic() > deadline:
+                raise ValueError("script scan time budget exceeded")
+            candidates.extend(Path(parent)/name for name in names if name.endswith(YAML_SUFFIXES))
+            if len(candidates) > 3000:
+                raise ValueError("script scan file budget exceeded")
+    for path in candidates:
+        if time.monotonic() > deadline:
+            raise ValueError("script scan time budget exceeded")
         try:
             rel = path.relative_to(CONFIG_ROOT).as_posix()
-            if (path.name == "secrets.yaml" or any(part.startswith(".") for part in Path(rel).parts)
-                    or path.is_symlink() or not path.resolve().is_relative_to(root)
-                    or path.stat().st_size > 2 * 1024 * 1024):
-                continue
-            texts[rel] = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
+            data = read_config_bytes(CONFIG_ROOT, rel, HOOK_MAX_BYTES)
+            total += len(data)
+            if total > 8 * 1024 * 1024:
+                raise ValueError("script scan byte budget exceeded")
+            texts[rel] = data.decode("utf-8", errors="replace")
+        except FileNotFoundError:
             continue
-    return refused_scripts(texts, rules)
+    return refused_scripts(texts, rules, deadline=deadline)
+
+
+PATCH_MAX_BYTES = 256 * 1024
+CONFIG_MAX_BYTES = 2 * 1024 * 1024
+HOOK_MAX_BYTES = 512 * 1024
+
+
+def read_config_bytes(root: Path, rel: str, max_bytes: int = CONFIG_MAX_BYTES) -> bytes:
+    """Read a bounded ordinary file through no-follow directory descriptors, never credentials."""
+    parts = Path(rel).parts
+    if (not parts or Path(rel).is_absolute() or any(p.startswith(".") for p in parts)
+            or any(p.lower() in {"secrets.yaml", "secrets.yml"} for p in parts)):
+        raise ValueError("not an ordinary configuration path")
+    folder = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for part in parts[:-1]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=folder)
+            os.close(folder)
+            folder = child
+        fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=folder)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_size > max_bytes or info.st_nlink != 1:
+                raise ValueError("not a bounded ordinary configuration file")
+            with os.fdopen(fd, "rb", closefd=False) as source:
+                data = source.read(max_bytes + 1)
+            if len(data) > max_bytes:
+                raise ValueError("configuration file exceeds size limit")
+            return data
+        finally:
+            os.close(fd)
+    finally:
+        os.close(folder)
+
+
+def patch_versions(text: str, cwd: str = "") -> list[tuple[str, str, str]]:
+    """Reconstruct YAML before/after in memory; an uncertain patch is refused, never executed.
+
+    This accepts apply_patch's context hunks, add/delete and move forms. Each
+    context must identify exactly one span after the preceding hunk. A move
+    checks both locations and reads only its original, ordinary /config file.
+    """
+    if len(text.encode("utf-8")) > PATCH_MAX_BYTES:
+        raise ValueError("patch exceeds size limit")
+    match = PATCH_BLOCK_RE.search(text)
+    if not match or not match.group().rstrip().endswith("*** End Patch"):
+        raise ValueError("incomplete patch")
+    if len(PATCH_BLOCK_RE.findall(text)) != 1:
+        raise ValueError("multiple patch bodies are not checked as one edit")
+    deadline = time.monotonic() + 0.75
+    lines = match.group().splitlines()[1:-1]
+    records: list[tuple[str, str, list[str]]] = []
+    for line in lines:
+        header = PATCH_FILE_RE.match(line)
+        if header and header[1] != "Move to":
+            records.append((header[1], header[2], []))
+        elif records:
+            records[-1][2].append(line)
+        elif line.strip():
+            raise ValueError("patch has no file header")
+    out = []
+    root = CONFIG_ROOT.absolute()
+    def relative(name: str) -> str:
+        candidate = Path(name)
+        if not candidate.is_absolute():
+            candidate = Path(cwd or root) / candidate
+        # Do not normalize away traversal or follow any link, even inside /config.
+        if ".." in candidate.parts:
+            raise ValueError("patch path traverses directories")
+        rel = candidate.relative_to(root).as_posix()
+        if any(part.startswith(".") for part in Path(rel).parts):
+            raise ValueError("patch path is not ordinary configuration")
+        for pattern, _ in PROTECTED_PATH_RES:
+            if pattern.search(rel):
+                raise ValueError("patch names a protected path")
+        return rel
+    total = 0
+    seen: set[str] = set()
+    if len(records) > 64:
+        raise ValueError("patch file budget exceeded")
+    for kind, name, body in records:
+        if time.monotonic() > deadline:
+            raise ValueError("patch time budget exceeded")
+        moved = next((line.split(": ", 1)[1] for line in body if line.startswith("*** Move to: ")), name)
+        if not (name.lower().endswith(YAML_SUFFIXES) or moved.lower().endswith(YAML_SUFFIXES)):
+            continue
+        source, destination = relative(name), relative(moved)
+        if source in seen or destination in seen:
+            raise ValueError("repeated file operations cannot be checked independently")
+        seen.update((source, destination))
+        if kind == "Add File":
+            # Add File must not overwrite a real file or a symlink.
+            try:
+                read_config_bytes(root, source, HOOK_MAX_BYTES)
+            except FileNotFoundError:
+                pass
+            else:
+                raise ValueError("added file already exists")
+            before = ""
+        else:
+            before = read_config_bytes(root, source, HOOK_MAX_BYTES).decode("utf-8")
+        destination_before = before
+        if source != destination:
+            if kind != "Update File":
+                raise ValueError("only an update may move a file")
+            try:
+                destination_before = read_config_bytes(root, destination, HOOK_MAX_BYTES).decode("utf-8")
+            except FileNotFoundError:
+                destination_before = ""
+        total += len(before.encode("utf-8"))
+        if total > 8 * CONFIG_MAX_BYTES:
+            raise ValueError("patch source budget exceeded")
+        if kind == "Delete File":
+            out.append((destination, before, ""))
+            continue
+        if kind == "Add File":
+            if any(not line.startswith("+") for line in body):
+                raise ValueError("invalid added-file body")
+            out.append((destination, "", "\n".join(line[1:] for line in body) + "\n"))
+            continue
+        original = before.splitlines()
+        updated: list[str] = []
+        cursor = 0
+        hunks: list[list[str]] = []
+        for line in body:
+            if line.startswith("*** Move to:"):
+                continue
+            if line.startswith("@@"):
+                hunks.append([])
+            elif line == "*** End of File":
+                if not hunks:
+                    raise ValueError("invalid end marker")
+                hunks[-1].append(line)
+            elif hunks and line[:1] in {" ", "+", "-"}:
+                hunks[-1].append(line)
+            else:
+                raise ValueError("invalid patch hunk")
+        for hunk in hunks:
+            at_end = "*** End of File" in hunk
+            hunk = [line for line in hunk if line != "*** End of File"]
+            old = [line[1:] for line in hunk if line[0] in " -"]
+            new = [line[1:] for line in hunk if line[0] in " +"]
+            # Linear KMP matching avoids quadratic context scans that could hit
+            # Codex's fail-open hook timeout on a large, repetitive YAML file.
+            positions = []
+            if not old:
+                positions = [len(original)] if at_end or not original else []
+            else:
+                prefix = [0] * len(old)
+                length = 0
+                for n in range(1, len(old)):
+                    while length and old[n] != old[length]:
+                        length = prefix[length - 1]
+                    if old[n] == old[length]:
+                        length += 1
+                    prefix[n] = length
+                length = 0
+                for n in range(cursor, len(original)):
+                    if n % 1024 == 0 and time.monotonic() > deadline:
+                        raise ValueError("patch time budget exceeded")
+                    while length and original[n] != old[length]:
+                        length = prefix[length - 1]
+                    if original[n] == old[length]:
+                        length += 1
+                    if length == len(old):
+                        if not at_end or n + 1 == len(original):
+                            positions.append(n + 1 - length)
+                            if len(positions) > 1:
+                                break
+                        length = prefix[length - 1]
+            if len(positions) != 1:
+                raise ValueError("patch context is missing or ambiguous")
+            index = positions[0]
+            updated.extend(original[cursor:index]); updated.extend(new)
+            cursor = index + len(old)
+        if not hunks and source == destination:
+            raise ValueError("empty update")
+        updated.extend(original[cursor:])
+        after = "\n".join(updated) + ("\n" if before.endswith("\n") else "")
+        out.append((destination, before, after))
+        if source != destination:
+            # A harmless edit to a text file may plant its unchanged body in YAML.
+            # Judge what is new at the destination too, including absent files.
+            out.append((destination, destination_before, after))
+    return out
+
 
 def parse_patch(text: str) -> list[tuple[str, str]]:
     """Return (path, added lines) for each file in an apply_patch body; moved files count under their new path."""
@@ -322,19 +528,39 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
     if remote_on and asks_for_escalation(tool_input):
         return ("Remote control is on, so commands that need more than the sandbox are refused, "
                 "from the ChatGPT app and from the chat page alike.")
+    deadline = time.monotonic() + 2.0
     texts = _strings(tool_input)
+    if len(texts) > 128 or sum(len(text) for text in texts) > 1024 * 1024:
+        return "This tool input exceeds the command check's size budget; it is refused."
     for text in texts:
+        if time.monotonic() > deadline:
+            return "This tool input exceeds the command check's time budget; it is refused."
         if PATCH_BEGIN in text:
-            for path, added in parse_patch(text):
-                for pattern, why in PROTECTED_PATH_RES:
-                    if pattern.search(path):
-                        return f"This edit {why}, which is never allowed."
-                if path.lower().endswith(YAML_SUFFIXES):
-                    found = find_refused(added, rules, config_refused_scripts(rules))
-                    if found:
-                        first = found[0]
-                        return (f"This edit to {path} adds {first.reason} ({first.text.strip()}). "
-                                "A person must add this change outside Codex.")
+            if len(text.encode("utf-8")) > PATCH_MAX_BYTES:
+                return "This patch exceeds the command check's size budget; it is refused."
+            try:
+                scripts = config_refused_scripts(rules)
+                for path, added in parse_patch(text):
+                    if time.monotonic() > deadline:
+                        raise ValueError("command check time budget exceeded")
+                    for pattern, why in PROTECTED_PATH_RES:
+                        if pattern.search(path):
+                            return f"This edit {why}, which is never allowed."
+                    if path.lower().endswith(YAML_SUFFIXES):
+                        found = find_refused(added, rules, scripts)
+                        if found:
+                            return f"This edit adds {found[0].reason}. A person must add this change outside Codex."
+                if remote_on:
+                    for path, before, after in patch_versions(text, str(data.get("cwd") or "")):
+                        if time.monotonic() > deadline:
+                            raise ValueError("command check time budget exceeded")
+                        found = new_refused(before, after, rules, scripts)
+                        if time.monotonic() > deadline:
+                            raise ValueError("command check time budget exceeded")
+                        if found:
+                            return f"This edit to {path} makes {found[0].reason}. A person must add this change outside Codex."
+            except (OSError, ValueError, UnicodeError):
+                return "This edit cannot be checked safely against the complete configuration file; it is refused."
             # The rest of a command that carries a patch (a heredoc) is still a command.
             text = PATCH_BLOCK_RE.sub(" ", text)
         for pattern, why in PROTECTED_COMMAND_RES:

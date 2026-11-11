@@ -389,6 +389,8 @@
         </p>
         <p id="remote-control-status" class="muted" role="status">Loading…</p>
         <div id="remote-control-card"></div>
+        <p id="remote-control-name-warning" class="remote-control-warning" hidden></p>
+        <p id="remote-control-policy-warning" class="remote-control-warning" hidden></p>
         <div id="remote-control-findings" hidden>
           <p class="remote-control-warning" role="alert">
             Changes to your configuration since remote control was turned on
@@ -404,7 +406,10 @@
           credential access, planted commands and templated actions remain
           blocked. Put limits specific to your installation in /config/AGENTS.md.
           Asking you before a change is Codex's rule:
-          the ChatGPT app skips this page's approval buttons.
+          the ChatGPT app skips this page's approval buttons. Codex may downgrade
+          a disallowed full-access relay request to read-only. Not every relay
+          thread warning reaches this page; a missing warning does not prove
+          the requested permissions were granted.
         </p>
         <div class="settings-actions">
           <button id="remote-control-start">Turn on</button
