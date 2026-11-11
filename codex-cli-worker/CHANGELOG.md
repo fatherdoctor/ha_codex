@@ -1,11 +1,21 @@
 # Changelog
 
-## Unreleased
+## 0.1.81.2 (unreleased)
 
+Permissions that ask, and only an administrator can answer. Sign-in without a terminal, a pause switch and a model pin.
+
+- **No full-access mode.** `danger-full-access` is gone from the app's options. A protected policy inside the image (`/usr/share/ha_codex/policy.json`) lists the allowed sandbox modes and keeps the approval policy at `on-request`; an option it does not allow stops the app at startup, and each task is refused with a "needs support" message instead of asking anyone to approve an escalation. Codex's own configuration no longer says `approval_policy = "never"`.
+- **A policy Codex cannot edit.** The policy and the house rules (`AGENTS.md`) live in the image, outside `/config`. The rules are copied into Codex's home folder at every start, replacing any edited copy. A file change that touches the policy, the rules or the app's settings can only be denied, and so can a command whose text names one of them. A task under a refused sandbox mode now stops before any baseline or backup work.
+- **Approvals need a Home Assistant administrator.** Allow once and Deny are taken only on the Codex page, from the user Home Assistant names for the page, after the worker confirms that user is an active administrator. The integration's API token can no longer answer permission requests. Who answered is recorded on the request.
+- **The integration's actions check the caller.** Every `codex_cli` action refuses a signed-in user who is not an administrator; calls with no user, such as automations, still run. A choice tapped on a notification is taken only from an administrator's phone.
+- **Prompt counts.** Each conversation counts its permission requests by kind, and the new **Permission prompts** sensor shows the latest conversation's counts.
+- Sign-in without a terminal: a banner above the chat while the app is not signed in; the one-time code in large letters that stays unchanged until the sign-in ends or is canceled, in a font that tells 0 from O; the QR code served by the app (it no longer depends on `/local/`); a **Cancel** button; a second **Sign in** keeps the running sign-in. When the worker learns that OpenAI refused the saved sign-in (expired or revoked), the banner says so.
+- New **Signed in** binary sensor in the integration, and a clearer repair when the sign-in has expired or was revoked.
+- New `model_pin` option (default `gpt-6.1-sol`): every run names the pinned model, and a request for any other model is stopped with an error instead of running on it. `none` turns it off.
+- **Pause the assistant** in Settings: new messages are refused and queued ones wait until it is resumed; kept across restarts.
 - **A revoked sign-in reads as signed out.** `codex login status` only checks the local file, so a sign-in OpenAI had revoked still showed as signed in while every task failed with a 401. The worker now remembers OpenAI's own answer from the usage read and from task errors: a refused sign-in shows as signed out (with `server_check: rejected`), the sign-in page offers a new sign-in, and the task says the sign-in expired instead of showing a transport error. A new sign-in clears it.
 - **Stall watchdog.** A task now stops with a plain message when Codex sends nothing for 10 minutes (`task_stall_seconds`, 0 turns it off) while no permission request is waiting. After a network drop a turn could otherwise hang with no error until the full task timeout.
 - **Starts at boot.** The app now uses `boot: auto`, so it comes back after a reboot, and with it remote control when it was left on.
-
 - **Usage from the account, not the screen.** The 5-hour and weekly usage sensors now come from Codex's own `account/rateLimits/read`, placed by window length. If that read fails, the old `/status` screen read is used and the sensors say the figures are estimated (`source` and `note` attributes).
 
 ## 0.1.81.1

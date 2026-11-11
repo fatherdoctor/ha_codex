@@ -1,9 +1,16 @@
-"""Check a release tag and build a reproducible HACS integration ZIP."""
+"""Check a release tag and build a reproducible HACS integration ZIP.
+
+The version may move on main before it is released: its changelog heading then reads
+"## <version> (unreleased)". That heading is accepted when validating a branch or a pull request, and refused for
+a release: when --release is given, or when GitHub Actions runs for a tag (GITHUB_REF_TYPE=tag). So a tag whose
+changelog still says "(unreleased)" builds nothing.
+"""
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -17,7 +24,7 @@ ASSET_NAME = "codex_cli.zip"
 CHANGELOG = ROOT / "codex-cli-worker" / "CHANGELOG.md"
 
 
-def build(tag: str, output_dir: Path) -> Path:
+def build(tag: str, output_dir: Path, allow_unreleased: bool = False) -> Path:
     """Validate release metadata and write the integration ZIP and release notes."""
     if TAG_PATTERN.fullmatch(tag) is None:
         raise ValueError(f"Expected a vX.Y.Z or vX.Y.Z.N tag, got {tag!r}")
@@ -37,9 +44,18 @@ def build(tag: str, output_dir: Path) -> Path:
 
     lines = CHANGELOG.read_text(encoding="utf-8").splitlines()
     heading = re.compile(rf"^## {re.escape(version)}(?:\s+-\s+.*)?$")
+    unreleased = re.compile(rf"^## {re.escape(version)} \(unreleased\)$")
     start = next((index + 1 for index, line in enumerate(lines) if heading.fullmatch(line)), None)
     if start is None:
-        raise ValueError(f"{CHANGELOG.relative_to(ROOT)} has no heading for {tag}")
+        marked = next((index + 1 for index, line in enumerate(lines) if unreleased.fullmatch(line)), None)
+        if marked is None:
+            raise ValueError(f"{CHANGELOG.relative_to(ROOT)} has no heading for {tag}")
+        if not allow_unreleased:
+            raise ValueError(
+                f"{CHANGELOG.relative_to(ROOT)} still marks {version} as (unreleased); "
+                "remove the mark before tagging"
+            )
+        start = marked
     end = next((index for index in range(start, len(lines)) if lines[index].startswith("## ")), len(lines))
     notes = "\n".join(lines[start:end]).strip()
     if not notes:
@@ -97,9 +113,15 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("tag", help="vX.Y.Z release tag")
     parser.add_argument("output_dir", type=Path, help="Directory outside the repository for the ZIP")
+    parser.add_argument(
+        "--release",
+        action="store_true",
+        help='refuse a changelog heading "## <version> (unreleased)" (implied when Actions runs for a tag)',
+    )
     args = parser.parse_args()
+    release = args.release or os.environ.get("GITHUB_REF_TYPE") == "tag"
     try:
-        print(build(args.tag, args.output_dir))
+        print(build(args.tag, args.output_dir, allow_unreleased=not release))
     except (OSError, ValueError, subprocess.CalledProcessError, zipfile.BadZipFile) as exc:
         print(f"HACS release build failed: {exc}", file=sys.stderr)
         return 1
