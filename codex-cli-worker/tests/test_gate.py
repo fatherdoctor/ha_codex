@@ -138,6 +138,12 @@ class RulesTests(unittest.TestCase):
         found = gate_rules.find_refused(text, RULES)
         self.assertEqual([(f.line, f.reason) for f in found], [(4, "an action on lock")])
 
+    def test_python_script_definition_reason_describes_called_scripts(self) -> None:
+        found = gate_rules.find_refused("python_script:\n", RULES)
+        self.assertEqual([(f.kind, f.reason) for f in found], [
+            ("runs_on_load", "a python_script definition, which enables scripts that run when called"),
+        ])
+
     def test_script_calls_resolve_to_refused_scripts(self) -> None:
         text = "    - action: script.leave_home\n    - action: script.turn_on\n      target:\n        entity_id: script.leave_home\n"
         self.assertEqual(gate_rules.find_refused(text, RULES), [])

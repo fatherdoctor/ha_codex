@@ -4,6 +4,7 @@
 
 Permissions that ask, and only an administrator can answer. Sign-in without a terminal, a pause switch and a model pin.
 
+- The always-on definition checks include `python_script:` and `pyscript:`; the `python_script:` finding now explains that its scripts run when called.
 - Fix closure findings: keep definition, platform and template bodies checked when category refusals are off; recognize flow-style script targets; tell the owner to review unchecked edits before any reload or restart.
 - Fix command-check review findings: compare changed files only with verified earlier bytes, restore the remote-control repair text, check indirect script routes to always-on kinds, and allow changed triggers with unchanged always-on calls through normal approval.
 - **No full-access mode.** `danger-full-access` is gone from the app's options. A protected policy inside the image (`/usr/share/ha_codex/policy.json`) lists the allowed sandbox modes and keeps the approval policy at `on-request`; an option it does not allow stops the app at startup, and each task is refused with a "needs support" message instead of asking anyone to approve an escalation. Codex's own configuration no longer says `approval_policy = "never"`.

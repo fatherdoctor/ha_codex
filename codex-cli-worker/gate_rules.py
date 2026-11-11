@@ -181,8 +181,9 @@ def find_refused(text: str, rules: dict[str, Any], refused_scripts: frozenset[st
     - a state for an entity on a refused domain written as a key, which is how
       a scene (or ``scene.apply``) sets a lock, an alarm or a cover;
     - a ``command_line``, ``rest`` or ``scrape`` platform, and a
-      ``shell_command``, ``rest_command``, ``command_line``, ``rest`` or
-      ``scrape`` definition, which run on their own once loaded;
+      ``shell_command``, ``rest_command``, ``command_line``, ``rest``,
+      ``scrape``, ``python_script`` or ``pyscript`` definition. Python scripts
+      are enabled by the definition and run when called;
     - a device action on a refused domain;
     - any templated action, entity, device or area.
     """
@@ -219,8 +220,10 @@ def find_refused(text: str, rules: dict[str, Any], refused_scripts: frozenset[st
                                         "runs_on_load"))
             definition = DEFINITION_KEY_RE.match(line)
             if definition and definition.group(1) in definitions:
-                findings.append(Finding(number, f"a {definition.group(1)} definition, which runs on its own once loaded", line,
-                                        "runs_on_load"))
+                key = definition.group(1)
+                detail = ("enables scripts that run when called" if key == "python_script"
+                          else "runs on its own once loaded")
+                findings.append(Finding(number, f"a {key} definition, which {detail}", line, "runs_on_load"))
         if TEMPLATE_ACTION_RE.match(line):
             findings.append(Finding(number, "a templated action", line, "template"))
         elif TEMPLATE_TARGET_RE.match(line):
