@@ -1888,6 +1888,16 @@ dialog label {
   white-space: pre-wrap;
   font-size: 0.8rem;
 }
+
+.remote-control-warning {
+  font-weight: 600;
+}
+#remote-control-findings-list {
+  margin: 0.25rem 0 0.5rem;
+  padding-left: 1.25rem;
+  overflow-wrap: anywhere;
+}
+
 /* Sign-in: a code that reads the same on every screen, with 0 and O told apart. */
 .page-banner {
   margin: 0 1rem 0.75rem;

@@ -84,7 +84,16 @@ WORKDIR /data
 
 COPY run.sh /
 COPY server.py /
-COPY approvals.py policy.py remote_control.py verification.py verification_mcp.py browser_permissions.py browser_permission_policy.json ha_data.py ha_data_mcp.py browser.cjs browser_resources.cjs browser_permissions.cjs /
+# The remote-control command check (CX-B6b): managed Codex requirements and hook, read-only, outside
+# /config and outside every sandbox's writable roots. The marker goes last: remote control can be
+# turned on only when it and every file it lists are present and the hook passes its self-test.
+COPY gate/requirements.toml gate/managed_config.toml /etc/codex/
+COPY gate/gate_hook.py gate_rules.py policy/refused-domains.json /usr/share/ha_codex/
+COPY gate/remote-control-gate.json /usr/share/ha_codex/remote-control-gate.json
+RUN chmod 0644 /etc/codex/requirements.toml /etc/codex/managed_config.toml /usr/share/ha_codex/* \
+    && chown -R root:root /etc/codex /usr/share/ha_codex
+
+COPY approvals.py policy.py gate_rules.py remote_control.py verification.py verification_mcp.py browser_permissions.py browser_permission_policy.json ha_data.py ha_data_mcp.py browser.cjs browser_resources.cjs browser_permissions.cjs /
 COPY web /web
 # The protected permission policy and house rules: read-only, outside /config and every sandbox's writable roots.
 COPY policy/policy.json /usr/share/ha_codex/policy.json

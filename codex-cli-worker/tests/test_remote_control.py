@@ -124,13 +124,14 @@ class GateTests(unittest.TestCase):
                 marker.write_text(text, encoding="utf-8")
                 self.assertEqual(rc.gate_problem(marker), rc.GATE_MISSING)
 
-    def test_marker_with_every_file_present_allows(self) -> None:
+    def test_marker_without_hook_and_requirements_blocks(self) -> None:
+        # Files alone are not enough: the marker must name the hook and requirements it checks (test_gate.py).
         with tempfile.TemporaryDirectory() as tmp:
             hook = Path(tmp) / "hook"
             hook.write_text("x", encoding="utf-8")
             marker = Path(tmp) / "gate.json"
             marker.write_text(json.dumps({"files": [str(hook)]}), encoding="utf-8")
-            self.assertEqual(rc.gate_problem(marker), "")
+            self.assertEqual(rc.gate_problem(marker), rc.GATE_MISSING)
 
     def test_redact_keeps_the_pairing_code_only(self) -> None:
         token = "A" * 40

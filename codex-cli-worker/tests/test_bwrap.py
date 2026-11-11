@@ -61,6 +61,9 @@ class BubblewrapCompatibilityTests(unittest.TestCase):
         self.wrapper.write_text(
             (WORKER / "codex-bwrap").read_text(encoding="utf-8")
             .replace("REAL_BWRAP=/opt/codex-sandbox/bwrap.real", f"REAL_BWRAP={self.real}")
+            .replace('HIDDEN_DIRS="/run/s6"', f'HIDDEN_DIRS="{root}/run/s6"')
+            .replace('HIDDEN_FILES="/config/secrets.yaml /config/.storage/auth',
+                     f'HIDDEN_FILES="{root}/config/secrets.yaml {root}/config/.storage/auth')
             .replace("/usr/bin/python3 /opt/codex-sandbox/codex-bwrap-probe.py",
                      f"{sys.executable} {helper}"),
             encoding="utf-8",
@@ -137,6 +140,21 @@ class BubblewrapCompatibilityTests(unittest.TestCase):
                 self.assertEqual(result.stderr, PROC_ERROR)
                 self.assertEqual(result.returncode, 19)
                 self.assertEqual(record["args"], ["--cap-drop", "ALL", *args])
+
+    def test_secrets_and_the_container_environment_are_hidden_in_every_sandbox(self) -> None:
+        """Existing secret files get /dev/null and the s6 folder a tmpfs, just before the first separator."""
+        root = Path(self.directory.name)
+        (root / "run" / "s6" / "container_environment").mkdir(parents=True)
+        (root / "config" / ".storage").mkdir(parents=True)
+        (root / "config" / "secrets.yaml").write_text("token: x\n", encoding="utf-8")
+        (root / "config" / ".storage" / "auth").write_text("{}", encoding="utf-8")
+        args = ["--ro-bind", "/", "/", "--bind", str(root / "config"), str(root / "config"), "--",
+                "/usr/local/bin/codex", "--apply-seccomp-then-exec", "--", "/bin/sh", "-c", "cat secrets.yaml"]
+        _, record = self.run_wrapper(args, stderr=b"", exit_code=0)
+        masks = ["--tmpfs", str(root / "run" / "s6"),
+                 "--ro-bind", "/dev/null", str(root / "config" / "secrets.yaml"),
+                 "--ro-bind", "/dev/null", str(root / "config" / ".storage" / "auth")]
+        self.assertEqual(record["args"], ["--cap-drop", "ALL", *args[:6], *masks, *args[6:]])
 
     def test_version_and_help_remain_usable(self) -> None:
         """The --version and --help options still reach Bubblewrap and return its output."""

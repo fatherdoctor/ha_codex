@@ -179,8 +179,15 @@ def main():
         try:
             # Start in the old transport to prove existing saved chats can resume.
             final_only = True
-            legacy_mode = "danger-full-access" if args.ssh else "workspace-write"
-            legacy = subprocess.run([binary, "exec", "--sandbox", legacy_mode, "--skip-git-repo-check", "--json",
+            # The app image's /etc/codex/requirements.toml forbids full access for every client, so the
+            # old transport is exercised in workspace-write, and the refusal itself is checked here.
+            if Path("/etc/codex/requirements.toml").is_file():
+                refused = subprocess.run([binary, "exec", "--sandbox", "danger-full-access", "--skip-git-repo-check",
+                                          "--json", "--model", "gpt-5.1-codex", *config_args, "Say fixture finished"],
+                                         cwd=workspace, env=environment, capture_output=True, text=True, timeout=30)
+                assert refused.returncode != 0, ("full access was not refused", refused.stdout, refused.stderr)
+                assert "requirements" in refused.stdout + refused.stderr, (refused.stdout, refused.stderr)
+            legacy = subprocess.run([binary, "exec", "--sandbox", "workspace-write", "--skip-git-repo-check", "--json",
                                      "--model", "gpt-5.1-codex", *config_args, "Say fixture finished"],
                                     cwd=workspace, env=environment, capture_output=True, text=True, timeout=30)
             assert legacy.returncode == 0, (legacy.stdout, legacy.stderr)

@@ -2,6 +2,11 @@
 set -eu
 
 REAL_BWRAP=/opt/codex-sandbox/bwrap.real
+# Never shown to a sandboxed command: the container environment s6 keeps (it holds the Supervisor
+# token), Home Assistant's secrets and sign-in store, and the app's own options and API token.
+# Codex never needs them; `!secret` values resolve inside Home Assistant.
+HIDDEN_DIRS="/run/s6"
+HIDDEN_FILES="/config/secrets.yaml /config/.storage/auth /config/.storage/auth_provider.homeassistant /data/options.json /data/worker_api_token"
 
 if [ "${1:-}" = "--version" ]; then
   exec "$REAL_BWRAP" "$@"
@@ -47,5 +52,23 @@ is_codex_proc_probe() (
 if is_codex_proc_probe "$@"; then
   exec /usr/bin/python3 /opt/codex-sandbox/codex-bwrap-probe.py "$@"
 fi
+
+# Hide those paths in every real sandbox. The masks go just before the first `--`, after Codex's
+# own binds, so a later bind of / or /config cannot uncover them. Only paths that exist are masked,
+# so no empty file is ever created in their place.
+masked=0
+for arg do
+  shift
+  if [ "$masked" = 0 ] && [ "$arg" = "--" ]; then
+    for hidden in $HIDDEN_DIRS; do
+      if [ -d "$hidden" ]; then set -- "$@" --tmpfs "$hidden"; fi
+    done
+    for hidden in $HIDDEN_FILES; do
+      if [ -f "$hidden" ]; then set -- "$@" --ro-bind /dev/null "$hidden"; fi
+    done
+    masked=1
+  fi
+  set -- "$@" "$arg"
+done
 
 exec "$REAL_BWRAP" --cap-drop ALL "$@"
