@@ -19,6 +19,8 @@ Permissions that ask, and only an administrator can answer. Sign-in without a te
 - **Usage from the account, not the screen.** The 5-hour and weekly usage sensors now come from Codex's own `account/rateLimits/read`, placed by window length. If that read fails, the old `/status` screen read is used and the sensors say the figures are estimated (`source` and `note` attributes).
 - Remote control from the ChatGPT app can be managed from the app's Settings page: turn on and off, status, machine name (default **Home Assistant**), pairing code as text and QR code, a new pairing code, and recent messages. The app runs `codex remote-control --no-daemon` as one supervised process with restart backoff, without any Home Assistant or Supervisor token. It stays off until turned on, and **Turn on** is refused until a command check outside the model is shipped with the app; this version does not ship it yet.
 - New option **Remote control machine name**.
+- **Text size** for the chat page: Normal, Larger (115 %) or Largest (130 %), from the **Aa** button above the chat or under **Settings**. It scales the messages, code, buttons, sign-in text and the list of steps together, is remembered on each device, and still fits a phone screen at Largest.
+- **Slash commands** in the message box: typing `/` lists `/new`, `/stop`, `/model`, `/reasoning`, `/rename`, `/usage` (or `/status`), `/size`, `/settings` and `/help` with a line on each, filtered as you type and picked by a tap or with the arrow keys and Enter. Only the commands the page can run at that moment are listed. The page runs them itself; they are never sent to Codex. **Settings** > **Commands** lists them.
 
 ## 0.1.81.1
 

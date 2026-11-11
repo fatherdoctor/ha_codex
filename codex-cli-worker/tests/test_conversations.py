@@ -582,8 +582,8 @@ class ConversationTests(unittest.TestCase):
         self.assertIn(b'assets/chat.js', response.data)
         # The Markdown parser is bundled, so the chat never loads a script from another server.
         scripts = re.findall(rb'<script src="([^"]+)"', response.data)
-        self.assertEqual(scripts, [b"assets/vendor/marked.umd.js", b"assets/markdown.js", b"assets/chat.js"])
-        for name in ("chat.js", "chat.css", "markdown.js", "vendor/marked.umd.js", "vendor/marked.LICENSE.md"):
+        self.assertEqual(scripts, [b"assets/text-size.js", b"assets/vendor/marked.umd.js", b"assets/markdown.js", b"assets/chat.js"])
+        for name in ("text-size.js", "chat.js", "chat.css", "markdown.js", "vendor/marked.umd.js", "vendor/marked.LICENSE.md"):
             with self.client.get("/assets/" + name) as asset:
                 self.assertEqual(asset.status_code, 200)
 

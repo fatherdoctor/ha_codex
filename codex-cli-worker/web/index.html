@@ -9,6 +9,7 @@
     <meta name="color-scheme" content="light dark" />
     <title>Codex · Home Assistant</title>
     <link rel="stylesheet" href="assets/chat.css" />
+    <script src="assets/text-size.js"></script>
     <script src="assets/vendor/marked.umd.js" defer></script>
     <script src="assets/markdown.js" defer></script>
     <script src="assets/chat.js" defer></script>
@@ -99,6 +100,46 @@
             <h1 id="chat-title">New chat</h1>
             <p id="chat-status">Your Home Assistant, with a little help.</p>
           </div>
+          <div id="text-size-picker" class="text-size-picker">
+            <button
+              id="text-size-button"
+              class="icon"
+              type="button"
+              aria-label="Text size"
+              title="Text size"
+              aria-expanded="false"
+              aria-controls="text-size-popover"
+            >
+              <span aria-hidden="true">Aa</span>
+            </button>
+            <div
+              id="text-size-popover"
+              class="text-size-popover"
+              role="dialog"
+              aria-label="Text size"
+              hidden
+            >
+              <fieldset class="text-size-options">
+                <legend class="picker-heading">Text size</legend>
+              <label class="text-size-option"
+                ><input type="radio" name="text-size-quick" value="normal" data-text-size-choice /><span
+                  >Normal</span
+                ></label
+              >
+              <label class="text-size-option"
+                ><input type="radio" name="text-size-quick" value="larger" data-text-size-choice /><span
+                  >Larger</span
+                ><small>115 %</small></label
+              >
+              <label class="text-size-option"
+                ><input type="radio" name="text-size-quick" value="largest" data-text-size-choice /><span
+                  >Largest</span
+                ><small>130 %</small></label
+              >
+              </fieldset>
+              <p class="text-size-note">Saved on this device.</p>
+            </div>
+          </div>
           <button id="cancel" class="subtle" hidden>Stop task</button>
         </header>
         <p id="integration-notice" role="status" hidden></p>
@@ -145,11 +186,21 @@
           <p id="error" role="alert" hidden></p>
           <form id="composer">
             <div id="pending-files" class="pending-files" hidden></div>
+            <div
+              id="slash-popover"
+              class="slash-popover"
+              role="listbox"
+              aria-label="Commands"
+              hidden
+            ></div>
             <label class="sr-only" for="message">Message Codex</label
             ><textarea
               id="message"
               rows="2"
               placeholder="Ask Codex about your Home Assistant…"
+              aria-autocomplete="list"
+              aria-controls="slash-popover"
+              aria-expanded="false"
               required
             ></textarea>
             <div class="compose-bottom">
@@ -371,6 +422,40 @@
           ✕
         </button>
       </div>
+      <section>
+        <h3>Text size</h3>
+        <p class="muted">
+          Makes the messages, buttons, code and lists larger. Saved on this
+          device only.
+        </p>
+        <fieldset class="text-size-options settings-text-size">
+          <legend class="sr-only">Text size</legend>
+              <label class="text-size-option"
+                ><input type="radio" name="text-size-settings" value="normal" data-text-size-choice /><span
+                  >Normal</span
+                ></label
+              >
+              <label class="text-size-option"
+                ><input type="radio" name="text-size-settings" value="larger" data-text-size-choice /><span
+                  >Larger</span
+                ><small>115 %</small></label
+              >
+              <label class="text-size-option"
+                ><input type="radio" name="text-size-settings" value="largest" data-text-size-choice /><span
+                  >Largest</span
+                ><small>130 %</small></label
+              >
+        </fieldset>
+      </section>
+      <section id="settings-commands">
+        <h3>Commands</h3>
+        <p class="muted">
+          Type <kbd>/</kbd> at the start of the message box to see them, then
+          tap one or pick it with the arrow keys and Enter. The page runs them
+          itself; they are not sent to Codex.
+        </p>
+        <dl id="command-list" class="command-list"></dl>
+      </section>
       <section>
         <h3>ChatGPT account</h3>
         <p id="login-status" class="muted">Loading account status…</p>

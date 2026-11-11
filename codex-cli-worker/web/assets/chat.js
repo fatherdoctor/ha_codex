@@ -2276,6 +2276,9 @@ $("delete-confirm").onclick = async () => {
 };
 $("composer").addEventListener("submit", async (event) => {
   event.preventDefault();
+  // A message that is exactly a command the page can run is run here, not sent.
+  const command = !state.files.length && slashCommand($("message").value);
+  if (command) return runSlash(command);
   if ($("send").disabled) return;
   const message = $("message").value.trim();
   const id = state.id;
@@ -2533,9 +2536,11 @@ $("composer").addEventListener("drop", (event) => {
 });
 $("message").addEventListener("input", () => {
   resizeInput();
+  renderSlash();
   controls();
 });
 $("message").addEventListener("keydown", (event) => {
+  if (slashKeydown(event)) return;
   if (
     event.key === "Enter" &&
     !event.shiftKey &&
@@ -2601,6 +2606,58 @@ $("cancel").onclick = async () => {
     controls();
   }
 };
+const TEXT_SIZES = ["normal", "larger", "largest"];
+const TEXT_SIZE_KEY = "codex-text-size";
+/**
+ * Show the page at one of the three text sizes and tick that choice in the
+ * Aa pop-up and in Settings. The stylesheet multiplies every font size by
+ * --text-scale, which the data-text-size attribute on the root sets.
+ * With save, remember the choice on this device for the next visit.
+ */
+function setTextSize(value, save = false) {
+  const size = TEXT_SIZES.includes(value) ? value : "normal";
+  if (size === "normal") delete document.documentElement.dataset.textSize;
+  else document.documentElement.dataset.textSize = size;
+  for (const input of document.querySelectorAll("input[data-text-size-choice]"))
+    input.checked = input.value === size;
+  if (!save) return;
+  try {
+    if (size === "normal") localStorage.removeItem(TEXT_SIZE_KEY);
+    else localStorage.setItem(TEXT_SIZE_KEY, size);
+  } catch (_) {
+    /* Storage may be disabled: the size lasts until the page is reloaded. */
+  }
+}
+/** Open or close the Aa pop-up; closing can return focus to its button. */
+function textSizePopover(open, focus = false) {
+  $("text-size-popover").hidden = !open;
+  $("text-size-button").setAttribute("aria-expanded", String(open));
+  if (open)
+    document.querySelector("#text-size-popover input[data-text-size-choice]:checked")?.focus();
+  else if (focus) $("text-size-button").focus();
+}
+setTextSize(document.documentElement.dataset.textSize);
+for (const input of document.querySelectorAll("input[data-text-size-choice]"))
+  input.addEventListener("change", () => setTextSize(input.value, true));
+$("text-size-button").onclick = () =>
+  textSizePopover($("text-size-popover").hidden);
+document.addEventListener("pointerdown", (event) => {
+  if (
+    !$("text-size-popover").hidden &&
+    !$("text-size-picker").contains(event.target)
+  )
+    textSizePopover(false);
+});
+$("text-size-picker").addEventListener("focusout", (event) => {
+  if (event.relatedTarget && !$("text-size-picker").contains(event.relatedTarget))
+    textSizePopover(false);
+});
+$("text-size-picker").addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !$("text-size-popover").hidden) {
+    event.preventDefault();
+    textSizePopover(false, true);
+  }
+});
 /**
  * Set the sidebar width in pixels, kept between 220 and 440 and leaving 360
  * for the chat when the window allows, and remember it for the next visit.
@@ -2649,6 +2706,215 @@ $("divider").addEventListener("keydown", (event) => {
 window.addEventListener("resize", () => {
   if (innerWidth > 700) setWidth($("divider").getAttribute("aria-valuenow"));
 });
+/**
+ * Slash commands. Messages go to Codex as plain text through `codex exec`,
+ * which does not read the TUI's slash commands, so "/new" sent as a message
+ * would only reach the model as words. The page runs these commands itself
+ * instead: typing "/" at the start of the message box lists them, filtered as
+ * you type, and a tap, or Enter or Tab on the highlighted one, runs it.
+ * A command is listed only while the page can run it (Stop only while a
+ * chat is working, Rename only with a chat open).
+ */
+const SLASH_COMMANDS = [
+  {
+    name: "new",
+    description: "Start a new chat",
+    when: "always",
+    available: () => !$("new-chat").disabled,
+    run: () => selectChat(null),
+  },
+  {
+    name: "stop",
+    description: "Stop the chat that is working",
+    when: "while a chat is working",
+    available: () => !$("cancel").hidden && !$("cancel").disabled,
+    run: () => $("cancel").click(),
+  },
+  {
+    name: "model",
+    description: "Choose the model for this chat",
+    when: "always",
+    available: () => Boolean(state.catalog) && !$("model-button").disabled,
+    run: () => openPicker("model"),
+  },
+  {
+    name: "reasoning",
+    description: "Choose how long Codex thinks before it answers",
+    when: "always",
+    available: () => Boolean(state.catalog) && !$("effort-button").disabled,
+    run: () => openPicker("effort"),
+  },
+  {
+    name: "rename",
+    description: "Rename this chat",
+    when: "with a chat open",
+    available: () => Boolean(state.id && chatById(state.id)),
+    run: () => openRename(state.id),
+  },
+  {
+    name: "usage",
+    aliases: ["status"],
+    description: "Show how much of your ChatGPT plan is used",
+    when: "always",
+    available: () => true,
+    run: () => {
+      loadUsage();
+      if (matchMedia("(max-width:700px)").matches) sidebar(true);
+      $("usage").scrollIntoView({ block: "nearest" });
+    },
+  },
+  {
+    name: "size",
+    description: "Change the text size",
+    when: "always",
+    available: () => true,
+    run: () => textSizePopover(true),
+  },
+  {
+    name: "settings",
+    description: "Open Settings",
+    when: "always",
+    available: () => true,
+    run: () => $("settings-button").click(),
+  },
+  {
+    name: "help",
+    description: "List these commands",
+    when: "always",
+    available: () => true,
+    run: () => {
+      $("settings-button").click();
+      $("settings-commands").scrollIntoView({ block: "start" });
+    },
+  },
+];
+const slash = { matches: [], index: 0, dismissed: null };
+/**
+ * Return the commands to list for a message box value: none unless the
+ * whole value is "/" and one word, else every command the page can run now
+ * whose name or alias starts with that word.
+ */
+function slashMatches(value) {
+  const typed = /^\/(\S*)$/.exec(value);
+  if (!typed) return [];
+  const word = typed[1].toLowerCase();
+  return SLASH_COMMANDS.filter(
+    (command) =>
+      [command.name, ...(command.aliases || [])].some((name) =>
+        name.startsWith(word),
+      ) && command.available(),
+  );
+}
+/** Return the runnable command a whole message names exactly, if any. */
+function slashCommand(value) {
+  const typed = /^\/(\S+)$/.exec(value.trim());
+  if (!typed) return null;
+  const word = typed[1].toLowerCase();
+  return (
+    SLASH_COMMANDS.find(
+      (command) =>
+        [command.name, ...(command.aliases || [])].includes(word) &&
+        command.available(),
+    ) || null
+  );
+}
+/** Show or hide the command list for the message box's current text. */
+function renderSlash() {
+  const value = $("message").value;
+  if (slash.dismissed !== null && slash.dismissed !== value)
+    slash.dismissed = null;
+  const previous = slash.matches[slash.index]?.name;
+  slash.matches = slash.dismissed === null ? slashMatches(value) : [];
+  const keep = slash.matches.findIndex((command) => command.name === previous);
+  slash.index = keep >= 0 ? keep : 0;
+  const list = $("slash-popover");
+  list.replaceChildren();
+  slash.matches.forEach((command, index) => {
+    const option = textNode("div", "", "slash-option");
+    option.id = `slash-${command.name}`;
+    option.setAttribute("role", "option");
+    option.setAttribute("aria-selected", String(index === slash.index));
+    option.append(
+      textNode("span", `/${command.name}`, "slash-name"),
+      textNode("span", command.description, "slash-description"),
+    );
+    // Keep the focus, and the phone keyboard, on the message box.
+    option.addEventListener("pointerdown", (event) => event.preventDefault());
+    option.addEventListener("click", () => runSlash(command));
+    list.append(option);
+  });
+  const open = slash.matches.length > 0;
+  list.hidden = !open;
+  $("message").setAttribute("aria-expanded", String(open));
+  if (open)
+    $("message").setAttribute(
+      "aria-activedescendant",
+      `slash-${slash.matches[slash.index].name}`,
+    );
+  else $("message").removeAttribute("aria-activedescendant");
+}
+/** Clear the message box and run a command, if the page can still run it. */
+function runSlash(command) {
+  $("message").value = "";
+  slash.dismissed = null;
+  resizeInput();
+  renderSlash();
+  controls();
+  if (command.available()) command.run();
+}
+/**
+ * Handle a key in the message box while the command list is open: the
+ * arrows move the highlight, Enter or Tab runs the highlighted command and
+ * Escape closes the list until the text changes. Returns true when it used
+ * the key.
+ */
+function slashKeydown(event) {
+  if ($("slash-popover").hidden || event.isComposing) return false;
+  const count = slash.matches.length;
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    slash.index =
+      (slash.index + (event.key === "ArrowDown" ? 1 : -1) + count) % count;
+  } else if ((event.key === "Enter" && !event.shiftKey) || event.key === "Tab") {
+    event.preventDefault();
+    runSlash(slash.matches[slash.index]);
+    return true;
+  } else if (event.key === "Escape") {
+    slash.dismissed = $("message").value;
+  } else return false;
+  event.preventDefault();
+  event.stopPropagation();
+  renderSlash();
+  $(`slash-${slash.matches[slash.index]?.name}`)?.scrollIntoView({
+    block: "nearest",
+  });
+  return true;
+}
+$("message").addEventListener("blur", () => {
+  if (!$("slash-popover").hidden) {
+    slash.dismissed = $("message").value;
+    renderSlash();
+  }
+});
+$("message").addEventListener("focus", () => {
+  slash.dismissed = null;
+  renderSlash();
+});
+/** Fill the Commands section of Settings from the same list. */
+function renderCommandList() {
+  const list = $("command-list");
+  list.replaceChildren();
+  for (const command of SLASH_COMMANDS) {
+    const names = [command.name, ...(command.aliases || [])]
+      .map((name) => `/${name}`)
+      .join(" or ");
+    const note = command.when === "always" ? "" : ` (${command.when})`;
+    list.append(
+      textNode("dt", names),
+      textNode("dd", command.description + note),
+    );
+  }
+}
+renderCommandList();
 let loginTimer;
 // What the sign-in card shows now; the card is rebuilt only when this changes,
 // so a code being read or a QR being scanned never jumps under the user's thumb.

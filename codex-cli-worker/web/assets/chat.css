@@ -15,6 +15,7 @@
   --notice: #fdf3d6;
   --notice-text: #5f4500;
   --sidebar-width: 280px;
+  --text-scale: 1;
   font-family:
     Inter,
     ui-sans-serif,
@@ -22,7 +23,16 @@
     BlinkMacSystemFont,
     "Segoe UI",
     sans-serif;
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
+}
+/* Text size (Settings > Text size, or the Aa button): every font size in
+   this file is a multiple of --text-scale, so one setting scales the
+   messages, buttons, code, sign-in text and activity list together. */
+:root[data-text-size="larger"] {
+  --text-scale: 1.15;
+}
+:root[data-text-size="largest"] {
+  --text-scale: 1.3;
 }
 * {
   box-sizing: border-box;
@@ -66,7 +76,7 @@ textarea:focus-visible,
 .icon {
   background: transparent;
   color: var(--muted);
-  font-size: 20px;
+  font-size: calc(20px * var(--text-scale));
   padding: 6px 9px;
   line-height: 1.2;
 }
@@ -105,17 +115,17 @@ aside {
   flex-wrap: wrap;
 }
 .brand strong {
-  font-size: 20px;
+  font-size: calc(20px * var(--text-scale));
   letter-spacing: -0.6px;
 }
 .brand-icon {
-  font-size: 24px;
+  font-size: calc(24px * var(--text-scale));
 }
 .tag {
   width: 100%;
   padding-left: 33px;
   letter-spacing: 1.4px;
-  font-size: 9px;
+  font-size: calc(9px * var(--text-scale));
   color: var(--muted);
   margin-top: -5px;
 }
@@ -131,7 +141,7 @@ aside {
   font-weight: 500;
 }
 .new-chat span {
-  font-size: 20px;
+  font-size: calc(20px * var(--text-scale));
 }
 .list-heading {
   display: flex;
@@ -139,7 +149,7 @@ aside {
   justify-content: space-between;
   padding: 25px 10px 7px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 #chat-list {
   overflow-y: auto;
@@ -150,7 +160,7 @@ aside {
 .list-group {
   margin: 8px 0 3px;
   padding: 0 11px;
-  font-size: 10px;
+  font-size: calc(10px * var(--text-scale));
   letter-spacing: 1.2px;
   text-transform: uppercase;
   color: var(--muted);
@@ -193,7 +203,7 @@ aside {
   top: 7px;
   right: 6px;
   padding: 1px 6px 3px;
-  font-size: 18px;
+  font-size: calc(18px * var(--text-scale));
   line-height: 1.1;
   border-radius: 6px;
   color: var(--muted);
@@ -252,7 +262,7 @@ aside {
 .sidebar-error {
   margin: 0 0 6px;
   padding: 0 10px;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   line-height: 1.5;
   color: var(--error);
 }
@@ -271,7 +281,7 @@ aside {
 .chat-menu-title {
   display: none;
   margin: 4px 10px 8px;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   font-weight: 500;
   color: var(--muted);
   white-space: nowrap;
@@ -286,7 +296,7 @@ aside {
   border-radius: 8px;
   background: transparent;
   color: var(--text);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 .chat-menu [role="menuitem"]:hover:not(:disabled),
 .chat-menu [role="menuitem"]:focus-visible {
@@ -322,7 +332,7 @@ aside {
 .chat-menu.sheet [role="menuitem"] {
   min-height: 46px;
   padding: 12px;
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
 }
 .chat-menu.sheet [data-action="close"] {
   display: block;
@@ -336,7 +346,7 @@ aside {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   margin-top: 4px;
   color: var(--muted);
 }
@@ -344,7 +354,7 @@ aside {
   display: flex;
   justify-content: space-between;
   gap: 8px;
-  font-size: 10px;
+  font-size: calc(10px * var(--text-scale));
   color: var(--muted);
   margin-top: 8px;
 }
@@ -353,14 +363,14 @@ aside {
 }
 #list-empty {
   padding: 0 10px;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 .sidebar-footer {
   flex-shrink: 0;
   border-top: 1px solid var(--line);
   padding: 16px 3px 0;
   margin-top: 16px;
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
   color: var(--muted);
 }
 .workspace-label {
@@ -440,11 +450,12 @@ main {
   min-height: 0;
 }
 .chat-header {
-  height: 79px;
+  /* Grows when a larger text size wraps the status line. */
+  height: auto;
   min-height: 79px;
   display: flex;
   align-items: center;
-  padding: 0 32px;
+  padding: 8px 32px;
   gap: 14px;
   border-bottom: 1px solid var(--line);
 }
@@ -453,7 +464,7 @@ main {
   flex: 1;
 }
 h1 {
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
   font-weight: 600;
   margin: 0;
   overflow: hidden;
@@ -461,7 +472,7 @@ h1 {
   text-overflow: ellipsis;
 }
 .chat-heading p {
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
   color: var(--muted);
   margin: 7px 0 0;
 }
@@ -470,7 +481,7 @@ h1 {
   flex: none;
   margin: 0;
   padding: 9px 32px;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   line-height: 1.5;
   color: var(--notice-text);
   background: var(--notice);
@@ -499,7 +510,7 @@ h1 {
   padding: 24px 0 50px;
 }
 .welcome-icon {
-  font-size: 38px;
+  font-size: calc(38px * var(--text-scale));
   border: 1px solid var(--line);
   border-radius: 18px;
   height: 68px;
@@ -511,13 +522,13 @@ h1 {
   background: var(--sidebar);
 }
 .eyebrow {
-  font-size: 10px;
+  font-size: calc(10px * var(--text-scale));
   letter-spacing: 2px;
   color: var(--muted);
   margin: 0 0 14px;
 }
 .welcome h2 {
-  font-size: clamp(23px, 2.5vw, 32px);
+  font-size: calc(clamp(23px, 2.5vw, 32px) * var(--text-scale));
   font-weight: 500;
   letter-spacing: -1px;
   margin: 0 0 10px;
@@ -544,12 +555,12 @@ h1 {
 }
 .suggestions span {
   display: block;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   font-weight: 600;
 }
 .suggestions small {
   display: block;
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
   color: var(--muted);
   margin-top: 7px;
   line-height: 1.5;
@@ -559,7 +570,7 @@ h1 {
 }
 .message {
   line-height: 1.8;
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -593,7 +604,7 @@ h1 {
   align-items: center;
   gap: 6px;
   margin: 0 4px 8px;
-  font-size: 10px;
+  font-size: calc(10px * var(--text-scale));
   letter-spacing: 1.2px;
   text-transform: uppercase;
   color: var(--accent);
@@ -623,14 +634,14 @@ h1 {
 }
 .queued-note {
   margin-right: 4px;
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
   line-height: 1.5;
   color: var(--muted);
   text-align: right;
 }
 .queued-actions button {
   padding: 5px 12px;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   border-radius: 8px;
 }
 .queued-actions .danger {
@@ -648,12 +659,12 @@ h1 {
   align-items: center;
   gap: 9px;
   margin-bottom: 12px;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   font-weight: 600;
 }
 .answer-heading .mark {
   color: var(--accent);
-  font-size: 20px;
+  font-size: calc(20px * var(--text-scale));
 }
 .answer .details {
   margin-top: 12px;
@@ -672,11 +683,11 @@ h1 {
 .copy-response {
   min-height: 44px;
   padding: 8px 12px;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 .copy-status {
   color: var(--accent);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 .copy-buffer {
   position: fixed;
@@ -703,14 +714,14 @@ h1 {
   padding: 12px;
   background: var(--surface);
   border-radius: 6px;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 .permission-scope {
   font-weight: 500;
 }
 .permission-folder,
 .permission-note {
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   color: var(--muted);
 }
 .choices {
@@ -721,7 +732,7 @@ h1 {
 }
 .choice {
   padding: 8px 14px;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   line-height: 1.4;
   text-align: left;
   border-color: var(--accent);
@@ -744,15 +755,15 @@ h1 {
 .markdown h5,
 .markdown h6 {
   margin: 20px 0 8px;
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
   font-weight: 600;
   line-height: 1.4;
 }
 .markdown h3 {
-  font-size: 18px;
+  font-size: calc(18px * var(--text-scale));
 }
 .markdown h4 {
-  font-size: 16px;
+  font-size: calc(16px * var(--text-scale));
 }
 .markdown h6 {
   color: var(--muted);
@@ -804,7 +815,7 @@ h1 {
   border-radius: 5px;
   background: var(--surface);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 .md-code {
   border: 1px solid var(--line);
@@ -815,7 +826,7 @@ h1 {
 .md-lang {
   padding: 7px 14px 0;
   color: var(--muted);
-  font-size: 10px;
+  font-size: calc(10px * var(--text-scale));
   line-height: 1.5;
   letter-spacing: 0.5px;
   user-select: none;
@@ -839,7 +850,7 @@ h1 {
 }
 .markdown table {
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   line-height: 1.6;
   /* Columns keep whole words; a table that is too wide scrolls sideways. */
   overflow-wrap: normal;
@@ -872,7 +883,7 @@ h1 {
   align-items: baseline;
   gap: 7px;
   margin-top: 12px;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   color: var(--muted);
 }
 .check-mark {
@@ -892,7 +903,7 @@ h1 {
   background: var(--surface);
   color: var(--text);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -901,7 +912,7 @@ h1 {
 }
 .turn-meta {
   color: var(--muted);
-  font-size: 10px;
+  font-size: calc(10px * var(--text-scale));
   margin-top: 15px;
   line-height: 1.5;
 }
@@ -922,7 +933,7 @@ h1 {
 }
 .browser-permission-review legend {
   margin-bottom: 10px;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   color: var(--muted);
   overflow-wrap: anywhere;
 }
@@ -953,7 +964,7 @@ h1 {
 }
 .browser-permission-details summary {
   cursor: pointer;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 .browser-permission-details pre {
   white-space: pre-wrap;
@@ -975,7 +986,7 @@ h1 {
 }
 .browser-permission-feedback,
 .browser-permission-progress {
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   line-height: 1.6;
 }
 .saved-browser-permission {
@@ -1027,7 +1038,7 @@ h1 {
   gap: 12px;
   margin-top: 6px;
   padding: 0 4px;
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
   color: var(--muted);
   overflow-wrap: anywhere;
 }
@@ -1055,7 +1066,7 @@ h1 {
   padding: 12px;
   border: 1px dashed var(--line);
   border-radius: 10px;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   color: var(--muted);
 }
 .history-note {
@@ -1063,14 +1074,14 @@ h1 {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 12px;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   color: var(--muted);
   line-height: 1.6;
   margin-bottom: 25px;
 }
 .pending {
   color: var(--muted);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   padding: 16px 0;
 }
 .pending::before {
@@ -1101,7 +1112,7 @@ h1 {
   background: none;
   color: var(--muted);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   cursor: pointer;
 }
 .activity-toggle:hover {
@@ -1150,7 +1161,7 @@ h1 {
   display: flex;
   gap: 10px;
   padding: 5px 0 5px 12px;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   line-height: 1.5;
   color: var(--muted);
 }
@@ -1158,7 +1169,7 @@ h1 {
   flex: 0 0 14px;
   text-align: center;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   line-height: 1.7;
   user-select: none;
 }
@@ -1178,7 +1189,7 @@ h1 {
 }
 .step-command .step-text {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   color: var(--text);
   max-height: 7.5em;
   overflow: hidden;
@@ -1205,7 +1216,7 @@ h1 {
   flex-wrap: wrap;
   gap: 12px;
   margin-top: 2px;
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
   color: var(--muted);
 }
 .step-output-toggle {
@@ -1214,7 +1225,7 @@ h1 {
   background: none;
   color: var(--accent);
   font: inherit;
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
   font-weight: 600;
   cursor: pointer;
 }
@@ -1227,7 +1238,7 @@ h1 {
   border-radius: 8px;
   background: var(--surface);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
   line-height: 1.5;
   color: var(--text);
   white-space: pre-wrap;
@@ -1242,6 +1253,7 @@ h1 {
   margin: 0 auto;
 }
 #composer {
+  position: relative;
   border: 1px solid var(--line);
   border-radius: 19px;
   padding: 14px 15px 10px;
@@ -1263,7 +1275,7 @@ textarea {
   outline: none;
   resize: none;
   max-height: 180px;
-  min-height: 52px;
+  min-height: calc(52px * var(--text-scale));
   padding: 0 3px;
   display: block;
 }
@@ -1281,7 +1293,7 @@ textarea::placeholder {
   margin-top: 7px;
 }
 #compose-hint {
-  font-size: 10px;
+  font-size: calc(10px * var(--text-scale));
   color: var(--muted);
   text-align: center;
   margin: 8px 0 0;
@@ -1341,7 +1353,7 @@ textarea::placeholder {
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--surface);
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
   color: var(--muted);
 }
 .pending-file.preparing {
@@ -1371,7 +1383,7 @@ textarea::placeholder {
   border-radius: 50%;
   background: transparent;
   color: var(--muted);
-  font-size: 16px;
+  font-size: calc(16px * var(--text-scale));
   line-height: 1;
 }
 .pending-remove:hover,
@@ -1390,7 +1402,7 @@ textarea::placeholder {
   background: transparent;
   color: var(--text);
   padding: 7px 4px 7px 12px;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   border-radius: 20px;
   white-space: nowrap;
   min-height: 34px;
@@ -1426,7 +1438,7 @@ textarea::placeholder {
 }
 .picker-heading {
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   margin: 5px 6px 6px;
 }
 .model-option {
@@ -1437,7 +1449,7 @@ textarea::placeholder {
   padding: 8px 7px;
   background: transparent;
   color: var(--text);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   min-height: 34px;
 }
 .model-option:hover,
@@ -1451,7 +1463,7 @@ textarea::placeholder {
   gap: 10px;
 }
 .model-check {
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale));
   line-height: 1;
 }
 .effort-popover {
@@ -1470,12 +1482,12 @@ textarea::placeholder {
 }
 .effort-heading label {
   color: #467ced;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   font-weight: 600;
 }
 #effort-model {
   display: block;
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale));
   color: var(--muted);
   margin-top: 3px;
 }
@@ -1489,7 +1501,7 @@ textarea::placeholder {
   background: transparent;
   color: var(--muted);
   padding: 1px 3px;
-  font-size: 20px;
+  font-size: calc(20px * var(--text-scale));
   width: 24px;
 }
 .effort-track {
@@ -1566,7 +1578,7 @@ textarea::placeholder {
 }
 #effort-description {
   color: var(--muted);
-  font-size: 10px;
+  font-size: calc(10px * var(--text-scale));
   line-height: 1.5;
   margin: 9px 1px 0;
 }
@@ -1577,7 +1589,7 @@ textarea::placeholder {
 }
 @media (max-width: 400px) {
   .picker-pill button {
-    font-size: 11px;
+    font-size: calc(11px * var(--text-scale));
     padding-left: 9px;
   }
   .picker-pill #effort-button {
@@ -1586,7 +1598,7 @@ textarea::placeholder {
   }
 }
 #send {
-  font-size: 22px;
+  font-size: calc(22px * var(--text-scale));
   width: 35px;
   height: 35px;
   border-radius: 50%;
@@ -1602,13 +1614,13 @@ textarea::placeholder {
 .footnote {
   text-align: center;
   color: var(--muted);
-  font-size: 10px;
+  font-size: calc(10px * var(--text-scale));
   margin: 10px 0 0;
   line-height: 1.5;
 }
 #notice,
 #error {
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   line-height: 1.6;
   margin: 0 0 10px;
 }
@@ -1649,7 +1661,7 @@ dialog::backdrop {
 }
 .small-dialog h2 {
   margin: 0 0 14px;
-  font-size: 18px;
+  font-size: calc(18px * var(--text-scale));
   font-weight: 500;
 }
 .small-dialog p {
@@ -1665,7 +1677,7 @@ dialog::backdrop {
   max-height: 45dvh;
   white-space: pre;
   font-family: ui-monospace, monospace;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 #rename-input {
   width: 100%;
@@ -1699,7 +1711,7 @@ dialog::backdrop {
 }
 .dialog-header h2 {
   margin: 0;
-  font-size: 21px;
+  font-size: calc(21px * var(--text-scale));
   font-weight: 500;
 }
 dialog section {
@@ -1708,19 +1720,19 @@ dialog section {
   padding-top: 8px;
 }
 dialog h3 {
-  font-size: 14px;
+  font-size: calc(14px * var(--text-scale));
 }
 dialog p {
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 dialog label {
   display: block;
   margin: 12px 0 8px;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
 }
 #agents {
   font-family: ui-monospace, monospace;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale));
   margin-bottom: 10px;
 }
 .settings-actions {
@@ -1793,9 +1805,9 @@ dialog label {
     top: 0;
   }
   .chat-header {
-    height: 65px;
+    height: auto;
     min-height: 65px;
-    padding: 0 14px;
+    padding: 8px 14px;
     gap: 9px;
   }
   #integration-notice {
@@ -1811,7 +1823,7 @@ dialog label {
     padding: 20px 0;
   }
   .welcome h2 {
-    font-size: 25px;
+    font-size: calc(25px * var(--text-scale));
   }
   .suggestions {
     gap: 9px;
@@ -1821,7 +1833,7 @@ dialog label {
     padding: 13px;
   }
   .suggestions small {
-    font-size: 10px;
+    font-size: calc(10px * var(--text-scale));
   }
   .message.user,
   .queued-edit,
@@ -1832,22 +1844,22 @@ dialog label {
     line-height: 1.5;
   }
   .footnote {
-    font-size: 9px;
+    font-size: calc(9px * var(--text-scale));
   }
   .chat-header #cancel {
-    font-size: 11px;
+    font-size: calc(11px * var(--text-scale));
     padding: 8px;
   }
   .welcome-icon {
     margin-bottom: 20px;
   }
   .row-title {
-    font-size: 14px;
+    font-size: calc(14px * var(--text-scale));
   }
   #message,
   #rename-input,
   .queued-edit {
-    font-size: 16px;
+    font-size: calc(16px * var(--text-scale));
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -1858,13 +1870,140 @@ dialog label {
 }
 /* Keep verification evidence readable in narrow Ingress panels. */
 .verification { margin: 18px 0; min-width: 0; }
-.verification h3 { font-size: 14px; margin-bottom: 8px; }
+.verification h3 { font-size: calc(14px * var(--text-scale)); margin-bottom: 8px; }
 .verification-result { border: 1px solid var(--border, #8885); border-radius: 8px; margin: 6px 0; padding: 10px; overflow-wrap: anywhere; }
-.verification-result summary { cursor: pointer; font-size: 13px; }
-.verification-result pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; max-height: 260px; overflow: auto; }
+.verification-result summary { cursor: pointer; font-size: calc(13px * var(--text-scale)); }
+.verification-result pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: calc(12px * var(--text-scale)); max-height: 260px; overflow: auto; }
 .verification-result.is-failed, .verification-result.is-issues { border-color: #d18a48; }
-.verification-note { font-size: 12px; opacity: .7; }
+.verification-note { font-size: calc(12px * var(--text-scale)); opacity: .7; }
+.text-size-picker {
+  position: relative;
+  flex: none;
+}
+#text-size-button {
+  font-size: calc(15px * var(--text-scale));
+  font-weight: 600;
+  padding: 6px 8px;
+}
+.text-size-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: min(220px, calc(100vw - 28px));
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow:
+    0 5px 22px #00000012,
+    0 1px 4px #00000008;
+  padding: 6px;
+  z-index: 20;
+}
+.text-size-options {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.text-size-options legend.picker-heading {
+  padding: 0;
+}
+.text-size-option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 40px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: calc(13px * var(--text-scale));
+}
+.text-size-option:hover {
+  background: var(--hover);
+}
+.text-size-option input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+.text-size-option span {
+  flex: 1;
+}
+.text-size-option small {
+  color: var(--muted);
+  font-size: calc(11px * var(--text-scale));
+}
+.text-size-note {
+  color: var(--muted);
+  font-size: calc(11px * var(--text-scale));
+  margin: 4px 8px 6px;
+}
+.settings-text-size {
+  max-width: 260px;
+}
 
+/* The list of slash commands that opens above the message box. */
+.slash-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  max-height: min(320px, 45dvh);
+  overflow-y: auto;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow:
+    0 5px 22px #00000012,
+    0 1px 4px #00000008;
+  padding: 6px;
+  z-index: 15;
+}
+.slash-option {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  border-radius: 11px;
+  padding: 9px 9px;
+  min-height: 44px;
+  cursor: pointer;
+  color: var(--text);
+  font-size: calc(14px * var(--text-scale));
+  user-select: none;
+}
+.slash-option[aria-selected="true"] {
+  background: var(--surface);
+}
+@media (hover: hover) {
+  .slash-option:hover {
+    background: var(--surface);
+  }
+}
+.slash-name {
+  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.slash-description {
+  color: var(--muted);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.command-list {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 14px;
+  font-size: calc(14px * var(--text-scale));
+}
+.command-list dt {
+  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.command-list dd {
+  margin: 0;
+  color: var(--muted);
+  min-width: 0;
+}
 /* Remote-control pairing code: large, steady, and in a font that tells 0 from O. */
 .pairing-code {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
