@@ -358,6 +358,31 @@ class ConfigWatch:
             finally:
                 tmp.unlink(missing_ok=True)
 
+    def _save_replaced(self, rel: str, current: bytes) -> str:
+        """Save replaced bytes privately before any removal/restore; links must not redirect the copy."""
+        parts = Path(rel).parts
+        if not parts or Path(rel).is_absolute() or any(part.startswith(".") for part in parts):
+            raise ValueError("unsafe recovery path")
+        folder = os.open(self.baseline_path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            for part in ("remote_control_undo", *parts[:-1]):
+                try:
+                    os.mkdir(part, 0o700, dir_fd=folder)
+                except FileExistsError:
+                    pass
+                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=folder)
+                os.close(folder)
+                folder = child
+            name = f"{parts[-1]}.{time.time_ns()}-{uuid.uuid4().hex[:12]}"
+            fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=folder)
+            with os.fdopen(fd, "wb") as copy:
+                copy.write(current)
+                copy.flush()
+                os.fsync(copy.fileno())
+            return str(self.baseline_path.parent / "remote_control_undo" / Path(rel).parent / name)
+        finally:
+            os.close(folder)
+
     def _undo(self, rel: str, current: bytes, earlier: bytes | None) -> str:
         """Restore through pinned no-follow directory handles; never follow a swapped link."""
         parts = Path(rel).parts
@@ -464,6 +489,8 @@ class ConfigWatch:
             copies = saved.get("copies") or {}
             for rel in sorted({item["file"] for item in out}):
                 result = ""
+                recovery_copy = ""
+                undo_note = ""
                 current = None
                 try:
                     current = gate_rules.read_config_bytes(self.root, rel)
@@ -480,14 +507,20 @@ class ConfigWatch:
                                                      current.decode("utf-8", errors="replace"), rules, scripts, False)
                     if not security:
                         continue  # Category-only findings are not always-on undo.
-                    result = self._undo(rel, current, earlier)
+                    if Path(rel).name in {"automations.yaml", "scripts.yaml", "scenes.yaml"}:
+                        undo_note = "Home Assistant manages this file; review this finding without automatic undo."
+                    else:
+                        recovery_copy = self._save_replaced(rel, current)
+                        result = self._undo(rel, current, earlier)
                 except (OSError, ValueError, KeyError, TypeError):
                     result = ""
                 for item in out:
                     if item["file"] == rel:
                         item["undone"] = result
+                        if recovery_copy:
+                            item["recovery_copy"] = recovery_copy
                         if not result:
-                            item["undo_note"] = "Could not undo safely; review this file before reloading."
+                            item["undo_note"] = undo_note or "Could not undo safely; review this file before reloading."
                         # Do not persist configuration contents in the undo report.
                         event = {key: value for key, value in item.items() if key != "text"}
                         if event not in events:
@@ -779,13 +812,25 @@ class Supervisor:
     def _parse(self, line: str) -> str:
         """Record one output line and update the state from it; return a pairing code found in it."""
         lower = line.lower()
-        if ("configwarning" in lower or "warning" in lower) and (
+        policy_downgrade = False
+        if "disallowed by requirements" in lower and "falling back to required value" in lower:
+            for setting in ("approval_policy", "permission_profile"):
+                if setting not in lower:
+                    continue
+                target = "the required approval policy" if setting == "approval_policy" else "the managed restricted profile"
+                warning = f"Codex reported that a {setting} request was downgraded to {target}."
+                with self.lock:
+                    self.status["policy_warning"] = warning
+                    self.log.append(warning)
+                policy_downgrade = True
+        elif ("configwarning" in lower or "warning" in lower) and (
                 "read-only" in lower or "readonly" in lower) and (
                 "fall" in lower or "downgrad" in lower or "not allowed" in lower):
             warning = "Codex reported that a request was downgraded to read-only by the managed policy."
             with self.lock:
                 self.status["policy_warning"] = warning
                 self.log.append(warning)
+            policy_downgrade = True
         code_match = PAIRING_RE.search(line)
         code = code_match.group(1) if code_match else ""
         with self.lock:
@@ -797,7 +842,7 @@ class Supervisor:
         if available:
             self.set_status("ready", f"Available in the ChatGPT app as “{available.group(1)}”.",
                             machine_name=available.group(1))
-        elif ERROR_RE.search(line) and self.status.get("state") not in {"ready"}:
+        elif not policy_downgrade and ERROR_RE.search(line) and self.status.get("state") not in {"ready"}:
             self.set_status("error", redact(line))
         return ""
 

@@ -4,6 +4,8 @@
 
 Permissions that ask, and only an administrator can answer. Sign-in without a terminal, a pause switch and a model pin.
 
+- **Remote-control review fixes (CX-RC-START.f).** Check move destinations for planted YAML; recognize the actual Codex 0.166 downgrade wording. Save and report replaced bytes before watch undo, and report UI-owned YAML without whole-file rollback. Cap hook-checked files at 512 KiB and wait for the watch report in the timing-sensitive test. The container smoke accepts only requirements refusal or a proven restricted fallback.
+
 - **Remote control on HAOS (CX-RC-START).** Use the existing Bubblewrap child profile for the private machine name, without widening the parent; a failed namespace setup starts Codex without the custom name and explains that on the page. Pairing follows the same path. Permit the nested sandbox wrapper in the child profile.
 - Check YAML patches against the complete proposed file, including edits beneath existing shell, REST and command-line definitions. Use the captured Codex 0.166 Bash/apply_patch command-string fixtures. Refuse uncertain or over-budget checks; the upstream hook-timeout fail-open behavior remains a documented limitation.
 - Managed requirements exclude the `never` approval policy. Integration-owned full-access requests fail clearly; relay requests can fall back to read-only. Settings and logs explain that fallback and show an observed downgrade warning without claiming visibility into every relay thread.

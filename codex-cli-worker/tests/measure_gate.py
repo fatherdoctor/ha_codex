@@ -14,11 +14,11 @@ with tempfile.TemporaryDirectory() as folder:
     target=config/'configuration.yaml'
     normal='shell_command:\n  example: before\n'
     # Long repetitive context stresses ambiguous-match refusal without quadratic work.
-    stress='name: before\n'+('  value: stable\n'*60000)+'last: old\n'
+    stress='name: before\n'+('  value: stable\n'*30000)+'last: old\n'
     for label,body,payload,expect in [
         ('Bash listing','',{'tool_name':'Bash','tool_input':{'command':'ls /config'}},0),
         ('captured edit below definition',normal,{'tool_name':'apply_patch','tool_input':{'command':'*** Begin Patch\n*** Update File: configuration.yaml\n@@\n-  example: before\n+  example: after\n*** End Patch'}},2),
-        ('large repetitive ordinary YAML',stress,{'tool_name':'apply_patch','tool_input':{'command':'*** Begin Patch\n*** Update File: configuration.yaml\n@@\n-last: old\n+last: new\n*** End Patch'}},0),
+        ('450 KiB repetitive ordinary YAML',stress,{'tool_name':'apply_patch','tool_input':{'command':'*** Begin Patch\n*** Update File: configuration.yaml\n@@\n-last: old\n+last: new\n*** End Patch'}},0),
     ]:
         samples=[];target.write_text(body)
         for _ in range(10):

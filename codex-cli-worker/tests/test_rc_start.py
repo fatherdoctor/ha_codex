@@ -215,8 +215,9 @@ class FurtherRegressions(unittest.TestCase):
             sup._launch = lambda:sup.snapshot()
             try:
                 sup.start(); path.write_text(before.replace('before','after'))
-                self.assertTrue(wait_for(lambda:path.read_text() == before))
-                self.assertTrue(sup.snapshot()['config_findings'][0]['undone'])
+                self.assertTrue(wait_for(lambda:path.read_text() == before and any(
+                    item.get('undone') for item in sup.snapshot()['config_findings'])))
+                self.assertTrue(any(item.get('undone') for item in sup.snapshot()['config_findings']))
                 sup.stop()
                 path.write_text(before.replace('before','after'))
                 sup.watch_wake.set()

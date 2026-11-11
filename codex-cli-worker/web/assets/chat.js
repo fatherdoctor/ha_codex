@@ -2817,7 +2817,7 @@ function renderRemoteControl(rc) {
   const list = $("remote-control-findings-list");
   list.replaceChildren(
     ...findings.map((item) =>
-      textNode("li", `${item.file || "config"}${item.line ? `, line ${item.line}` : ""}: ${item.reason}${item.undone ? ` — ${item.undone}` : item.undo_note ? ` — ${item.undo_note}` : ""}${item.text ? ` (${item.text})` : ""}`),
+      textNode("li", `${item.file || "config"}${item.line ? `, line ${item.line}` : ""}: ${item.reason}${item.undone ? ` — ${item.undone}` : item.undo_note ? ` — ${item.undo_note}` : ""}${item.recovery_copy ? ` — replaced version saved at ${item.recovery_copy}` : ""}${item.text ? ` (${item.text})` : ""}`),
     ),
   );
   if ((rc.config_findings_count || 0) > findings.length) {

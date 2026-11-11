@@ -364,7 +364,7 @@ def config_refused_scripts(rules: dict[str, Any], categories: bool | None = None
             raise ValueError("script scan time budget exceeded")
         try:
             rel = path.relative_to(CONFIG_ROOT).as_posix()
-            data = read_config_bytes(CONFIG_ROOT, rel)
+            data = read_config_bytes(CONFIG_ROOT, rel, HOOK_MAX_BYTES)
             total += len(data)
             if total > 8 * 1024 * 1024:
                 raise ValueError("script scan byte budget exceeded")
@@ -376,9 +376,10 @@ def config_refused_scripts(rules: dict[str, Any], categories: bool | None = None
 
 PATCH_MAX_BYTES = 256 * 1024
 CONFIG_MAX_BYTES = 2 * 1024 * 1024
+HOOK_MAX_BYTES = 512 * 1024
 
 
-def read_config_bytes(root: Path, rel: str) -> bytes:
+def read_config_bytes(root: Path, rel: str, max_bytes: int = CONFIG_MAX_BYTES) -> bytes:
     """Read a bounded ordinary file through no-follow directory descriptors, never credentials."""
     parts = Path(rel).parts
     if (not parts or Path(rel).is_absolute() or any(p.startswith(".") for p in parts)
@@ -393,11 +394,11 @@ def read_config_bytes(root: Path, rel: str) -> bytes:
         fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=folder)
         try:
             info = os.fstat(fd)
-            if not stat.S_ISREG(info.st_mode) or info.st_size > CONFIG_MAX_BYTES or info.st_nlink != 1:
+            if not stat.S_ISREG(info.st_mode) or info.st_size > max_bytes or info.st_nlink != 1:
                 raise ValueError("not a bounded ordinary configuration file")
             with os.fdopen(fd, "rb", closefd=False) as source:
-                data = source.read(CONFIG_MAX_BYTES + 1)
-            if len(data) > CONFIG_MAX_BYTES:
+                data = source.read(max_bytes + 1)
+            if len(data) > max_bytes:
                 raise ValueError("configuration file exceeds size limit")
             return data
         finally:
@@ -464,14 +465,22 @@ def patch_versions(text: str, cwd: str = "") -> list[tuple[str, str, str]]:
         if kind == "Add File":
             # Add File must not overwrite a real file or a symlink.
             try:
-                read_config_bytes(root, source)
+                read_config_bytes(root, source, HOOK_MAX_BYTES)
             except FileNotFoundError:
                 pass
             else:
                 raise ValueError("added file already exists")
             before = ""
         else:
-            before = read_config_bytes(root, source).decode("utf-8")
+            before = read_config_bytes(root, source, HOOK_MAX_BYTES).decode("utf-8")
+        destination_before = before
+        if source != destination:
+            if kind != "Update File":
+                raise ValueError("only an update may move a file")
+            try:
+                destination_before = read_config_bytes(root, destination, HOOK_MAX_BYTES).decode("utf-8")
+            except FileNotFoundError:
+                destination_before = ""
         total += len(before.encode("utf-8"))
         if total > 8 * CONFIG_MAX_BYTES:
             raise ValueError("patch source budget exceeded")
@@ -543,6 +552,10 @@ def patch_versions(text: str, cwd: str = "") -> list[tuple[str, str, str]]:
         updated.extend(original[cursor:])
         after = "\n".join(updated) + ("\n" if before.endswith("\n") else "")
         out.append((destination, before, after))
+        if source != destination:
+            # A harmless edit to a text file may plant its unchanged body in YAML.
+            # Judge what is new at the destination too, including absent files.
+            out.append((destination, destination_before, after))
     return out
 
 
