@@ -4,6 +4,8 @@
 
 Permissions that ask, and only an administrator can answer. Sign-in without a terminal, a pause switch and a model pin.
 
+- **Watch closure fixes (CX-RC-START.f2).** Exempt only the root UI-owned YAML files from automatic undo; matching names in packages or other subfolders remain checked. Reuse verified SHA-256 recovery copies across files and restarts, with a 128-copy/64 MiB store limit. When a new copy will not fit, report without undoing or deleting older recovery copies.
+
 - **Remote-control review fixes (CX-RC-START.f).** Check move destinations for planted YAML; recognize the actual Codex 0.166 downgrade wording. Save and report replaced bytes before watch undo, and report UI-owned YAML without whole-file rollback. Cap hook-checked files at 512 KiB and wait for the watch report in the timing-sensitive test. The container smoke accepts only requirements refusal or a proven restricted fallback.
 
 - **Remote control on HAOS (CX-RC-START).** Use the existing Bubblewrap child profile for the private machine name, without widening the parent; a failed namespace setup starts Codex without the custom name and explains that on the page. Pairing follows the same path. Permit the nested sandbox wrapper in the child profile.

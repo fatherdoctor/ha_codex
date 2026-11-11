@@ -335,9 +335,13 @@ The config watch runs every 30 seconds over at most 3,000 ordinary YAML files, e
 platform or template block causes the **whole affected file** to be restored from its hash-verified earlier
 bytes; a newly created file can be removed only with a complete earlier absence manifest. Before either change,
 the replaced bytes are saved with mode 0600 under the app's private data folder, in
-`remote_control_undo/<relative-file>.<timestamp>-<suffix>`. Each finding names its recovery copy. If the copy cannot
-be saved safely, no undo takes place. Home Assistant's UI-owned `automations.yaml`, `scripts.yaml` and `scenes.yaml`
-are reported without automatic undo, preventing whole-file rollback of the owner's UI work. Earlier ordinary
+`remote_control_undo/<sha256>.yaml`. Identical bytes reuse one verified copy, including across files and restarts.
+A new copy must fit within 128 copies and 64 MiB, counting earlier nested copies too. When it will not fit,
+the watch reports that the store is full and leaves the file unchanged; it does not delete older owner copies.
+Each finding names its recovery copy. If the copy cannot
+be saved safely, no undo takes place. Home Assistant's root UI-owned `automations.yaml`, `scripts.yaml` and `scenes.yaml`
+are reported without automatic undo, preventing whole-file rollback of the owner's UI work. Those basenames
+in subfolders are checked normally. Earlier ordinary
 YAML copies stay in the app's private storage with mode 0600, capped at 16 MiB; credential files and stores,
 symlinks and hardlinks are excluded. Missing, old, corrupt or incomplete baselines never justify a guessed
 restore: the page reports that the change could not be undone safely. Successful undo remains visible until
