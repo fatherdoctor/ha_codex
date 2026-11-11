@@ -239,6 +239,9 @@ class CodexFiveHourLimitSensor(_CodexSensor):
             "context_remaining": usage.get("context_remaining"),
             "context_percent": usage.get("context_percent"),
             "raw_excerpt": usage.get("raw_excerpt"),
+            # rate_limits (the account's own read) or status_screen (estimated; the note says so).
+            "source": usage.get("source"),
+            "note": usage.get("note"),
         }
 
 
@@ -333,6 +336,9 @@ class CodexWeeklyLimitSensor(_CodexSensor):
             "context_remaining": usage.get("context_remaining"),
             "context_percent": usage.get("context_percent"),
             "raw_excerpt": usage.get("raw_excerpt"),
+            # rate_limits (the account's own read) or status_screen (estimated; the note says so).
+            "source": usage.get("source"),
+            "note": usage.get("note"),
         }
 
 

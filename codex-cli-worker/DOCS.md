@@ -198,6 +198,8 @@ API: `GET /status` has `integration` with `state` (`ok`, `starting`, `not_instal
 
 `codex_model` is a dropdown. The default value, `default`, lets the bundled Codex CLI choose a model for your account. Explicit choices are `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6.1-terra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. Availability depends on your account. The app bundles the packaged Codex CLI **0.166.0** (pinned by version and checksum; it never updates itself).
 
+`model_pin` (default `gpt-6.1-sol`) is the only model the app runs. With the pin set, a run on `default` names the pinned model to the CLI, the chat's model picker offers only that model, and a chat, saved conversation or `codex_model` choice that asks for another model is stopped with an error before Codex starts, never run on a different model. Set `model_pin` to `none` to turn the pin off and use `codex_model` as described here.
+
 The worker treats the legacy `gpt-5.3-codex` value as `default`. The retired `gpt-5.5` choice stays in the app's option list for existing installations and runs `gpt-5.6-sol`; it is not offered in the chat's model picker.
 
 `model_reasoning_effort` controls how much reasoning Codex asks supported models to use for each task. The app passes it for each exchange, through the app-server turn. Available values are:
@@ -277,11 +279,23 @@ When a request starts waiting, the worker sends a **Codex needs permission** not
 
 **Allow once** answers only that pending request. It does not change the configured sandbox, create a permanent command rule, or grant access to later requests. An approved command can run outside the sandbox with the app's available file and network access; permission is broader than enabling networking alone. An approved file change applies the displayed edits. Review paths outside `/config` carefully, since the worker's configuration backups and checks do not cover them. In `read-only`, the normal per-file backup instructions are disabled, so consider changing modes for editing work.
 
-**Deny** refuses the action and lets Codex continue, for example by finding another way or explaining the limitation. **Cancel** stops the exchange. Requests expire when the exchange ends, times out, is cancelled, loses its CLI connection, or the worker restarts. If a file diff changes while its request is waiting, the exchange stops and the old request expires. The task timeout includes time spent waiting for permission. An unanswered request keeps the worker busy and later messages in the queue. Decisions from another tab refresh automatically; an old or repeated button cannot grant access.
+**Deny** refuses the action and lets Codex continue, for example by finding another way or explaining the limitation. **Cancel** stops the exchange. Requests expire when the exchange ends, times out, is canceled, loses its CLI connection, or the worker restarts. If a file diff changes while its request is waiting, the exchange stops and the old request expires. The task timeout includes time spent waiting for permission. The stall limit (`task_stall_seconds`, 10 minutes by default) does not count that wait: it stops a task only when Codex sends nothing while no request is waiting, as after a network drop. A command that runs quietly counts as sending nothing: a long build or check that prints no output for the whole limit is stopped too, so raise the limit, or set it to 0, if your tasks run such commands. An unanswered request keeps the worker busy and later messages in the queue. Decisions from another tab refresh automatically; an old or repeated button cannot grant access.
 
 The request and decision remain in the exchange's `approvals` history, with sensitive values redacted. An incomplete, oversized, or redacted action can be denied but cannot be allowed, since hidden text could contain executable instructions. Ask for an action whose command, working folder, paths, and diff can be shown in full. API calls should refer to credentials through environment variables instead of embedding their values in a command. This first version supports individual command and file-change requests; broad turn or session permission grants and permanent policy changes are refused. Input that Codex wants to type into a command already running outside the sandbox is shown and can only be denied; Codex can run the whole action as one command instead. API credentials are separate: an approval does not create a Home Assistant token or expose the Supervisor token to Codex. The built-in verification tool continues to work through the worker without shell network approval.
 
 Authenticated API clients can answer a live request using `POST /tasks/<task_id>/approvals/<approval_id>` with `{"turn_id":"<current_turn_id>","decision":"allow"}` or `"deny"`. Read the redacted `approvals` records from `GET /tasks/<task_id>` first. A stale or already answered request returns HTTP 409. Task summaries include `permission_required` while an exchange is waiting. Permission decisions are made directly on the live exchange and are never queued as chat messages.
+
+## Remote control from the ChatGPT app
+
+OpenAI's remote control (`codex remote-control`) lets the ChatGPT app on a phone or tablet work on this Home Assistant through OpenAI's relay. The app runs it for you; there is no terminal step.
+
+- **Off until you turn it on.** Open the app page, then **Settings**, then **Remote control from the ChatGPT app**. The choice is saved and holds across app restarts.
+- **One supervised process.** The app runs `codex remote-control --no-daemon` in the foreground and starts it again, with a growing delay, if it exits. **Turn off** stops it.
+- **Machine name.** The ChatGPT app lists this machine as **Home Assistant** unless you change the **Remote control machine name** option. Codex has no name setting, so the app starts it with that name as its host name inside a private namespace. A name that cannot be used as written becomes `Home-Assistant`.
+- **Pairing.** The pairing code is shown as large text and as a QR code. Pairing is kept in the app's private storage with the Codex sign-in, so a restart does not ask for it again. **New pairing code** asks Codex for a fresh one when the ChatGPT app has lost this machine.
+- **No Home Assistant credentials.** The remote-control process gets no Home Assistant token and no Supervisor token, even when the `HA_TOKEN` option is set for the chat page.
+- **Why Turn on can be unavailable.** Commands from the ChatGPT app do not pass through this app's Allow and Deny buttons. Remote control can be turned on only in a version that also ships a command check outside the model, which refuses locks, alarms, garage doors, cameras and messages to people for those commands. Until then, the button stays disabled and says why. The chat page works either way.
+- Remote control is experimental upstream. If it breaks, the chat page is not affected.
 
 ## Codex Sign-In
 
@@ -293,6 +307,8 @@ For a managed workspace, an administrator may need to enable device-code login i
 
 The app posts a Home Assistant persistent notification containing a QR code, link, and one-time device code. The QR code opens the OpenAI device page; type the code from the same notification into that page. The app refreshes the notification when the code appears and detects completion automatically. You do not need to run `docker exec`.
 
+While the app is not signed in, a banner above the chat offers **Sign in**. During a sign-in, the banner and **Settings** show the one-time code in large letters, a QR code of the sign-in page served by the app itself, and the link. The code stays on screen, unchanged, until the sign-in completes or you press **Cancel**; pressing **Sign in** again keeps the running sign-in and its code. When a saved sign-in expires or is revoked, the banner returns and the integration raises a Home Assistant repair; the integration's **Signed in** binary sensor turns off.
+
 When opened through Home Assistant Ingress, the app web UI can start the login flow without entering the worker API token because Home Assistant already authenticated the session. Direct HTTP/API calls still require the worker API token.
 
 Use **Settings > Sign out** in the app web UI or the Home Assistant action `codex_cli.logout` to run `codex logout` and remove saved Codex CLI credentials from the worker. Logout is blocked while a Codex task is actively running.
@@ -300,6 +316,10 @@ Use **Settings > Sign out** in the app web UI or the Home Assistant action `code
 The app uses the built-in Supervisor token for Home Assistant notifications and dashboard saves through the Home Assistant Core API proxy. No Home Assistant long-lived access token is required.
 
 Sign-in uses your ChatGPT account and its Codex allowance. Availability and usage limits depend on your plan and workspace permissions. The worker does not provide an OpenAI API-key option for Codex tasks.
+
+## Pausing the assistant
+
+**Settings > Pause the assistant** stops the app from taking new messages: new chats and replies are refused, and queued messages wait. A banner above the chat says so and offers **Resume the assistant**, which also starts the oldest queued message. A running task is not stopped; use **Stop task** for that. The pause is kept across app restarts.
 
 ## AGENTS.md and HA_TOKEN
 
@@ -372,11 +392,11 @@ To remove a connection, revoke its dedicated public key on the remote server, th
 
 ## Usage Status
 
-The worker performs a best-effort interactive probe of Codex CLI usage by starting a pseudo-terminal session and running `/status`. It extracts whichever usage windows Codex reports and exposes them through the worker `/status` payload, which the integration surfaces as sensors. Some accounts report both 5-hour and weekly windows, while others currently report only a weekly window.
+The worker reads usage from Codex's own account read: it starts `codex app-server`, asks `account/rateLimits/read`, and places each window by its length (up to a day is the 5-hour window, a week or more the weekly one), showing the percentage left and the reset time. Some accounts report both windows, while others currently report only a weekly window. If that read fails or names no window, the worker falls back to starting a pseudo-terminal session and reading Codex's `/status` screen; the figures are then marked estimated: the usage sensors' `source` attribute is `status_screen` and their `note` attribute says so (`source` is `rate_limits` otherwise).
 
 The worker disables Codex update checks at startup. Codex CLI is installed and verified as part of the app image, so it must be updated by installing a newer app image rather than from an interactive Codex update prompt.
 
-The worker uses this `/status` probe rather than a dedicated usage API. A missing window has an `unknown` sensor state and a `reported: false` attribute. The existing 5-hour entities and worker fields remain in place so upgrades do not break automations on accounts that still report or reference them. Diagnostic excerpts remove account, email, and session identifiers before being exposed.
+A missing window has an `unknown` sensor state and a `reported: false` attribute. The existing 5-hour entities and worker fields remain in place so upgrades do not break automations on accounts that still report or reference them. Diagnostic excerpts remove account, email, and session identifiers before being exposed.
 
 From **0.1.81.2**, Codex is told the same figures at the start of each message: the percent used and left in each window, each reset as a weekday, date and time in Home Assistant's time zone, and when the figures were read. The payload's `read_at` is the time of the last successful reading; a check deferred by a running task keeps it. A failed reading or a missing window reaches Codex as unknown, and a reading older than 30 minutes as stale, so it does not guess. The raw excerpt is not passed to Codex. The worker reads the quota every few minutes while idle and again when each task ends; it cannot read it while a task runs, because the check starts a second Codex session.
 
