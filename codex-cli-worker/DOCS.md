@@ -61,7 +61,7 @@ prompts you; the next capture uses the new value.
 
 ## Historical data and statistics
 
-The separate **Home Assistant data** MCP server lets Codex read state history and recorder statistics. It is available automatically in `workspace-write`, `read-only`, and `danger-full-access`. It does not ask for shell network approval or require the `HA_TOKEN` option. The worker makes these fixed, read-only API requests with its Supervisor credential, which is never sent to Codex. No extra MCP setup is needed.
+The separate **Home Assistant data** MCP server lets Codex read state history and recorder statistics. It is available automatically in `workspace-write` and `read-only`. It does not ask for shell network approval or require the `HA_TOKEN` option. The worker makes these fixed, read-only API requests with its Supervisor credential, which is never sent to Codex. No extra MCP setup is needed.
 
 Ask, for example: “Compare my kitchen temperature, humidity and extractor fan history yesterday and suggest activation thresholds. Only analyze the measurements.” Codex finds the relevant entity IDs in the configuration, queries the data, and explains its analysis. These tools do not change configuration, call services, or run automations. Verification remains a separate tool.
 
@@ -198,9 +198,11 @@ API: `GET /status` has `integration` with `state` (`ok`, `starting`, `not_instal
 
 `codex_model` is a dropdown. The default value, `default`, lets the bundled Codex CLI choose a model for your account. Explicit choices are `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6.1-terra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. Availability depends on your account. The app bundles the packaged Codex CLI **0.166.0** (pinned by version and checksum; it never updates itself).
 
+`model_pin` (default `gpt-6.1-sol`) is the only model the app runs. With the pin set, a run on `default` names the pinned model to the CLI, the chat's model picker offers only that model, and a chat, saved conversation or `codex_model` choice that asks for another model is stopped with an error before Codex starts, never run on a different model. Set `model_pin` to `none` to turn the pin off and use `codex_model` as described here.
+
 The worker treats the legacy `gpt-5.3-codex` value as `default`. The retired `gpt-5.5` choice stays in the app's option list for existing installations and runs `gpt-5.6-sol`; it is not offered in the chat's model picker.
 
-`model_reasoning_effort` controls how much reasoning Codex asks supported models to use for each task. The app passes it for each exchange, through the app-server turn in sandboxed modes or a `codex exec` configuration override in full access. Available values are:
+`model_reasoning_effort` controls how much reasoning Codex asks supported models to use for each task. The app passes it for each exchange, through the app-server turn. Available values are:
 
 - `minimal`: legacy value, normalized to `medium`.
 - `low`: lighter reasoning.
@@ -210,7 +212,7 @@ The worker treats the legacy `gpt-5.3-codex` value as `default`. The retired `gp
 
 The app configuration offers `low`, `medium`, `high`, and `xhigh` for all listed models. The chat also offers Max and Ultra where supported; see [Per-conversation model and reasoning](#per-conversation-model-and-reasoning). The worker maps `minimal` to `medium`, including when the model is `default`. See the [Codex models guide](https://learn.chatgpt.com/docs/models) for current availability.
 
-`reasoning_summary` controls the reasoning summaries shown in the activity list under your latest message. It is passed with each app-server turn in sandboxed modes, or as `--config model_reasoning_summary="<value>"` in full access. Summaries must be requested for them to appear, so the default is `concise`. This setting changes the reported summaries, not the selected reasoning effort.
+`reasoning_summary` controls the reasoning summaries shown in the activity list under your latest message. It is passed with each app-server turn. Summaries must be requested for them to appear, so the default is `concise`. This setting changes the reported summaries, not the selected reasoning effort.
 
 - `concise`: short headlines such as "Checking the automation". This is the default.
 - `detailed`: asks for fuller summaries; current models still mostly return headlines.
@@ -256,9 +258,16 @@ Codex needs to be able to write to the backup folder. In `workspace-write` mode 
 
 - `read-only`: Codex can inspect files. Writes and shell networking require permission for the specific action.
 - `workspace-write`: Codex can edit the mounted `/config` workspace. Shell networking and writes outside the workspace require permission. This remains the default setting.
-- `danger-full-access`: Codex sandboxing is disabled inside the app container, so tasks can use the files and network available to the app without sandbox approval prompts.
 
-**My recommendation is `danger-full-access`.** The name sounds scary, but this is the mode I use and recommend for working freely in Home Assistant. The app still provides safeguards: instructions to save per-file backups, optional full snapshots, checks of changed YAML and JSON, Home Assistant configuration checks, and built-in verification of states and dashboards. These help catch mistakes and recover changes; they do not guarantee that every action is safe or reversible. A configuration check does not prove automation behavior, and file backups do not undo device actions, service calls, or changes outside the backed-up configuration. Keep normal Home Assistant backups too.
+This fork has no `danger-full-access` mode. The upstream app's full-access mode turned the permission requests off; here the protected policy (below) refuses it, and an older setting that still names it stops the app at startup with a log line saying so.
+
+**Protected policy.** The allowed sandbox modes and the approval policy come from `/usr/share/ha_codex/policy.json` inside the app image, outside `/config` and outside every sandbox's writable folders. Nothing in `/config`, the app options or a chat can loosen it: a mode it does not allow stops the app at startup, and each task is refused with a "needs support" message instead of asking anyone to approve an escalation. A file change Codex proposes to the policy, its house rules or the app's own settings can only be denied, and so can a command whose text names one of those places (the check reads the command as written, so it cannot see a path the command builds while it runs). The house rules (`/usr/share/ha_codex/AGENTS.md`) are copied into Codex's home folder at every start, so an edited copy in Codex's home folder does not survive a restart; the image's own copy is restored when the app is updated or rebuilt, not by a restart. Your own `/config/AGENTS.md` adds to them. A command you allow once runs outside the sandbox and is not limited by this policy, so read each one before you allow it.
+
+**Who can answer.** Only a signed-in Home Assistant administrator can answer **Allow once** or **Deny**, on the Codex page. The worker checks the user Home Assistant names for the page against its user list and records who answered on the request. The integration's API token cannot answer permission requests, and the integration's actions refuse callers who are not administrators. An automation or script that runs on its own may call the actions; one that a user who is not an administrator starts carries that user, and its call is refused too.
+
+**Prompt counts.** Each conversation keeps a count of the permission requests it raised, by kind (`command`, `command_input`, `file_change`, `other`). The integration's **Permission prompts** sensor shows the latest conversation's total, with the counts by kind as attributes.
+
+The app still provides safeguards: instructions to save per-file backups, optional full snapshots, checks of changed YAML and JSON, Home Assistant configuration checks, and built-in verification of states and dashboards. These help catch mistakes and recover changes; they do not guarantee that every action is safe or reversible. Keep normal Home Assistant backups too.
 
 The worker exposes the Codex version and a structured sandbox preflight in its authenticated `/health` response. Sandboxed tasks fail with an actionable error before launch if namespace isolation is unavailable.
 
@@ -270,11 +279,23 @@ When a request starts waiting, the worker sends a **Codex needs permission** not
 
 **Allow once** answers only that pending request. It does not change the configured sandbox, create a permanent command rule, or grant access to later requests. An approved command can run outside the sandbox with the app's available file and network access; permission is broader than enabling networking alone. An approved file change applies the displayed edits. Review paths outside `/config` carefully, since the worker's configuration backups and checks do not cover them. In `read-only`, the normal per-file backup instructions are disabled, so consider changing modes for editing work.
 
-**Deny** refuses the action and lets Codex continue, for example by finding another way or explaining the limitation. **Cancel** stops the exchange. Requests expire when the exchange ends, times out, is cancelled, loses its CLI connection, or the worker restarts. If a file diff changes while its request is waiting, the exchange stops and the old request expires. The task timeout includes time spent waiting for permission. An unanswered request keeps the worker busy and later messages in the queue. Decisions from another tab refresh automatically; an old or repeated button cannot grant access.
+**Deny** refuses the action and lets Codex continue, for example by finding another way or explaining the limitation. **Cancel** stops the exchange. Requests expire when the exchange ends, times out, is canceled, loses its CLI connection, or the worker restarts. If a file diff changes while its request is waiting, the exchange stops and the old request expires. The task timeout includes time spent waiting for permission. The stall limit (`task_stall_seconds`, 10 minutes by default) does not count that wait: it stops a task only when Codex sends nothing while no request is waiting, as after a network drop. A command that runs quietly counts as sending nothing: a long build or check that prints no output for the whole limit is stopped too, so raise the limit, or set it to 0, if your tasks run such commands. An unanswered request keeps the worker busy and later messages in the queue. Decisions from another tab refresh automatically; an old or repeated button cannot grant access.
 
 The request and decision remain in the exchange's `approvals` history, with sensitive values redacted. An incomplete, oversized, or redacted action can be denied but cannot be allowed, since hidden text could contain executable instructions. Ask for an action whose command, working folder, paths, and diff can be shown in full. API calls should refer to credentials through environment variables instead of embedding their values in a command. This first version supports individual command and file-change requests; broad turn or session permission grants and permanent policy changes are refused. Input that Codex wants to type into a command already running outside the sandbox is shown and can only be denied; Codex can run the whole action as one command instead. API credentials are separate: an approval does not create a Home Assistant token or expose the Supervisor token to Codex. The built-in verification tool continues to work through the worker without shell network approval.
 
 Authenticated API clients can answer a live request using `POST /tasks/<task_id>/approvals/<approval_id>` with `{"turn_id":"<current_turn_id>","decision":"allow"}` or `"deny"`. Read the redacted `approvals` records from `GET /tasks/<task_id>` first. A stale or already answered request returns HTTP 409. Task summaries include `permission_required` while an exchange is waiting. Permission decisions are made directly on the live exchange and are never queued as chat messages.
+
+## Remote control from the ChatGPT app
+
+OpenAI's remote control (`codex remote-control`) lets the ChatGPT app on a phone or tablet work on this Home Assistant through OpenAI's relay. The app runs it for you; there is no terminal step.
+
+- **Off until you turn it on.** Open the app page, then **Settings**, then **Remote control from the ChatGPT app**. The choice is saved and holds across app restarts.
+- **One supervised process.** The app runs `codex remote-control --no-daemon` in the foreground and starts it again, with a growing delay, if it exits. **Turn off** stops it.
+- **Machine name.** The ChatGPT app lists this machine as **Home Assistant** unless you change the **Remote control machine name** option. Codex has no name setting, so the app starts it with that name as its host name inside a private namespace. A name that cannot be used as written becomes `Home-Assistant`.
+- **Pairing.** The pairing code is shown as large text and as a QR code. Pairing is kept in the app's private storage with the Codex sign-in, so a restart does not ask for it again. **New pairing code** asks Codex for a fresh one when the ChatGPT app has lost this machine.
+- **No Home Assistant credentials.** The remote-control process gets no Home Assistant token and no Supervisor token, even when the `HA_TOKEN` option is set for the chat page.
+- **Why Turn on can be unavailable.** Commands from the ChatGPT app do not pass through this app's Allow and Deny buttons. Remote control can be turned on only in a version that also ships a command check outside the model, which refuses locks, alarms, garage doors, cameras and messages to people for those commands. Until then, the button stays disabled and says why. The chat page works either way.
+- Remote control is experimental upstream. If it breaks, the chat page is not affected.
 
 ## Codex Sign-In
 
@@ -286,6 +307,8 @@ For a managed workspace, an administrator may need to enable device-code login i
 
 The app posts a Home Assistant persistent notification containing a QR code, link, and one-time device code. The QR code opens the OpenAI device page; type the code from the same notification into that page. The app refreshes the notification when the code appears and detects completion automatically. You do not need to run `docker exec`.
 
+While the app is not signed in, a banner above the chat offers **Sign in**. During a sign-in, the banner and **Settings** show the one-time code in large letters, a QR code of the sign-in page served by the app itself, and the link. The code stays on screen, unchanged, until the sign-in completes or you press **Cancel**; pressing **Sign in** again keeps the running sign-in and its code. When a saved sign-in expires or is revoked, the banner returns and the integration raises a Home Assistant repair; the integration's **Signed in** binary sensor turns off.
+
 When opened through Home Assistant Ingress, the app web UI can start the login flow without entering the worker API token because Home Assistant already authenticated the session. Direct HTTP/API calls still require the worker API token.
 
 Use **Settings > Sign out** in the app web UI or the Home Assistant action `codex_cli.logout` to run `codex logout` and remove saved Codex CLI credentials from the worker. Logout is blocked while a Codex task is actively running.
@@ -293,6 +316,10 @@ Use **Settings > Sign out** in the app web UI or the Home Assistant action `code
 The app uses the built-in Supervisor token for Home Assistant notifications and dashboard saves through the Home Assistant Core API proxy. No Home Assistant long-lived access token is required.
 
 Sign-in uses your ChatGPT account and its Codex allowance. Availability and usage limits depend on your plan and workspace permissions. The worker does not provide an OpenAI API-key option for Codex tasks.
+
+## Pausing the assistant
+
+**Settings > Pause the assistant** stops the app from taking new messages: new chats and replies are refused, and queued messages wait. A banner above the chat says so and offers **Resume the assistant**, which also starts the oldest queued message. A running task is not stopped; use **Stop task** for that. The pause is kept across app restarts.
 
 ## AGENTS.md and HA_TOKEN
 
@@ -302,7 +329,7 @@ The optional `HA_TOKEN` app option is passed to Codex subprocesses as the `HA_TO
 
 From **0.1.68**, a task that has `HA_TOKEN` also gets `HA_URL`, the address those calls go to, and the worker's instructions tell Codex to use the two together. The address is the **Home Assistant API URL** option (`ha_url`), which now defaults to `http://homeassistant:8123`, Home Assistant's own address inside the app network. Change it only if your Home Assistant uses HTTPS or another port. Before, Codex was given the token without an address and tended to use `http://supervisor/core`, the Supervisor's Core proxy, which rejects a Home Assistant token with HTTP 401; a reload or restart it was asked for then failed. An installation that still has `http://supervisor/core` saved in the option gets the new default, so nothing has to be changed after the update. The app's own calls to Home Assistant keep using the Supervisor proxy with the app's own token and do not use this option.
 
-These calls come from Codex's shell. They can run freely in `danger-full-access`; in `workspace-write` and `read-only`, Codex must request permission for the specific command that needs networking. What Codex can do with the token is whatever the token's user may do, including reloading configuration and restarting Home Assistant.
+These calls come from Codex's shell. In `workspace-write` and `read-only`, Codex must request permission for the specific command that needs networking. What Codex can do with the token is whatever the token's user may do, including reloading configuration and restarting Home Assistant.
 
 ## SSH connections
 
@@ -355,7 +382,7 @@ Advanced SSH & Web Terminal 24.2.0 was tested with a restricted key for both `ro
 
 In `workspace-write` and `read-only`, shell networking is disabled until a specific command receives **Allow once** through the existing chat approval flow. Run each remote operation as a separate, short-lived SSH command. The configuration above disables connection sharing and forwarding so later operations do not reuse a connection opened by an earlier approved command. Review the full command: approval permits that command outside the sandbox with the app's available access. Preview and audit commands need network approval too. **Deny** must leave the remote operation unexecuted. See [permission requests](#permission-requests).
 
-`danger-full-access` does not enforce those command approvals. Neither an SSH key nor an instruction to ask first adds a mandatory approval gate in that mode. This feature does not add a per-operation policy engine or a preview transaction: the remote scripts remain responsible for ensuring a later operation uses exactly the contents the user reviewed. A separate unrestricted SSH login or administrator API token retains its own broader access.
+This feature does not add a per-operation policy engine or a preview transaction: the remote scripts remain responsible for ensuring a later operation uses exactly the contents the user reviewed. A separate unrestricted SSH login or administrator API token retains its own broader access.
 
 ### Storage, backups, and removal
 
@@ -365,11 +392,11 @@ To remove a connection, revoke its dedicated public key on the remote server, th
 
 ## Usage Status
 
-The worker performs a best-effort interactive probe of Codex CLI usage by starting a pseudo-terminal session and running `/status`. It extracts whichever usage windows Codex reports and exposes them through the worker `/status` payload, which the integration surfaces as sensors. Some accounts report both 5-hour and weekly windows, while others currently report only a weekly window.
+The worker reads usage from Codex's own account read: it starts `codex app-server`, asks `account/rateLimits/read`, and places each window by its length (up to a day is the 5-hour window, a week or more the weekly one), showing the percentage left and the reset time. Some accounts report both windows, while others currently report only a weekly window. If that read fails or names no window, the worker falls back to starting a pseudo-terminal session and reading Codex's `/status` screen; the figures are then marked estimated: the usage sensors' `source` attribute is `status_screen` and their `note` attribute says so (`source` is `rate_limits` otherwise).
 
 The worker disables Codex update checks at startup. Codex CLI is installed and verified as part of the app image, so it must be updated by installing a newer app image rather than from an interactive Codex update prompt.
 
-The worker uses this `/status` probe rather than a dedicated usage API. A missing window has an `unknown` sensor state and a `reported: false` attribute. The existing 5-hour entities and worker fields remain in place so upgrades do not break automations on accounts that still report or reference them. Diagnostic excerpts remove account, email, and session identifiers before being exposed.
+A missing window has an `unknown` sensor state and a `reported: false` attribute. The existing 5-hour entities and worker fields remain in place so upgrades do not break automations on accounts that still report or reference them. Diagnostic excerpts remove account, email, and session identifiers before being exposed.
 
 ## Notifications
 
@@ -474,7 +501,7 @@ From **0.1.49**, images that Codex generates during a conversation appear in the
 
 Image generation uses Codex's built-in `image_gen` tool with the signed-in ChatGPT account. It needs no separate OpenAI API key. Tool availability and usage limits depend on the account. The app currently bundles Codex CLI 0.165.0.
 
-After each run, the worker reads the session's rollout file under `/data/codex-home/sessions` and looks for completed `image_gen.generation` items that were not already present before the exchange. This works for sandboxed app-server turns and full-access `codex exec` runs, including images absent from the live event stream. Codex saves each result under `/data/codex-home/generated_images/<session_id>/`. The worker copies the file into `<task_root>/<task_id>/turns/<turn_id>/attachments/` and records metadata on that exchange. If the saved file is missing, the worker decodes the inline result from the rollout instead. The original stays where Codex saved it so follow-up edits in the same conversation keep working.
+After each run, the worker reads the session's rollout file under `/data/codex-home/sessions` and looks for completed `image_gen.generation` items that were not already present before the exchange. This works for app-server turns, including images absent from the live event stream. Codex saves each result under `/data/codex-home/generated_images/<session_id>/`. The worker copies the file into `<task_root>/<task_id>/turns/<turn_id>/attachments/` and records metadata on that exchange. If the saved file is missing, the worker decodes the inline result from the rollout instead. The original stays where Codex saved it so follow-up edits in the same conversation keep working.
 
 The task prompt tells Codex that generated images are attached automatically and that it should leave them at the default save location unless the user asks for a file at a specific path, for example under `/config/www` for use on a dashboard.
 
@@ -488,7 +515,7 @@ If an image does not appear, open the task log and look for `Skipped image gener
 
 From **0.1.51**, you can attach images to a message: a screenshot of a dashboard problem, a photo of a device, or a design mockup. Use the paperclip button next to the model pill, paste an image from the clipboard into the message box, or drop image files onto the composer. Pending images appear above the message box with a remove button and go out with the next message, in a new chat or when continuing a saved one. They then appear with your message in the conversation and stay with it across reloads and worker restarts.
 
-Codex receives each image with the message as a `localImage` input in sandboxed app-server turns. In `danger-full-access`, the worker uses `codex exec --image` for a new chat or `codex exec resume --image` for a continued one. The task prompt also names the attached files. Images become part of the saved session and can contribute to the context of later turns, so the UI resizes images whose longest edge exceeds 2048 pixels before uploading.
+Codex receives each image with the message as a `localImage` input in sandboxed app-server turns. The task prompt also names the attached files. Images become part of the saved session and can contribute to the context of later turns, so the UI resizes images whose longest edge exceeds 2048 pixels before uploading.
 
 In the Home Assistant Android app, the paperclip picks one image at a time; use it again to add more. The app's file chooser returns nothing when a multi-select picker is used, so the web UI asks Android WebViews for a single selection. Paste and drag-and-drop still accept several images at once.
 
