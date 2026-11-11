@@ -383,19 +383,19 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
         self.assertIn("no-proc fallback", result["message"])
         self.assertEqual(probe.call_count, 2)
 
-    def test_danger_full_access_does_not_require_bubblewrap(self) -> None:
-        """In danger-full-access mode the sandbox is ready without Bubblewrap, and no probe is run."""
+    def test_danger_full_access_is_refused_without_a_probe(self) -> None:
+        """danger-full-access is never ready: the protected policy refuses it before Bubblewrap is even looked at."""
         with (
             patch.object(server, "read_options", return_value={"codex_sandbox": "danger-full-access"}),
-            patch.object(server.shutil, "which", return_value=None),
+            patch.object(server.shutil, "which", return_value="/usr/bin/bwrap"),
             patch.object(server, "_bubblewrap_probe") as probe,
         ):
             result = server.sandbox_readiness()
 
-        self.assertFalse(result["required"])
-        self.assertTrue(result["ready"])
+        self.assertTrue(result["required"])
+        self.assertFalse(result["ready"])
         self.assertFalse(result["bubblewrap_ready"])
-        self.assertFalse(result["proc_mount_supported"])
+        self.assertEqual(result["state"], "needs_support")
         probe.assert_not_called()
 
 

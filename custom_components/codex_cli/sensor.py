@@ -16,6 +16,8 @@ from .const import CONF_BASE_URL, DOMAIN
 from .coordinator import CodexCliCoordinator
 
 PARALLEL_UPDATES = 0
+# The worker's prompt kinds; keep in step with PROMPT_KINDS in codex-cli-worker/server.py.
+PROMPT_KINDS = ("command", "command_input", "file_change", "other")
 
 
 async def async_setup_entry(
@@ -29,6 +31,7 @@ async def async_setup_entry(
         [
             CodexLastTaskSensor(coordinator, entry),
             CodexTaskCountSensor(coordinator, entry),
+            CodexPromptCountSensor(coordinator, entry),
             CodexAuthSensor(coordinator, entry),
             CodexFiveHourLimitSensor(coordinator, entry),
             CodexFiveHourResetSensor(coordinator, entry),
@@ -118,6 +121,40 @@ class CodexTaskCountSensor(_CodexSensor):
         }
 
 
+class CodexPromptCountSensor(_CodexSensor):
+    """Show how many permission requests the latest conversation raised, with the counts by kind."""
+
+    _attr_icon = "mdi:hand-back-right-outline"
+    _attr_translation_key = "permission_prompts"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: CodexCliCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the sensor with the unique ID key "permission_prompts"."""
+        super().__init__(coordinator, entry, "permission_prompts")
+
+    def _counts(self) -> dict[str, Any]:
+        """Return the latest conversation's prompt counts from the worker, or an empty dict."""
+        latest = (self.coordinator.data or {}).get("latest_task") or {}
+        counts = latest.get("approval_counts")
+        return counts if isinstance(counts, dict) else {}
+
+    @property
+    def native_value(self) -> int:
+        """Return the latest conversation's total number of permission requests, 0 when it raised none."""
+        total = self._counts().get("total")
+        return total if isinstance(total, int) else 0
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the conversation the counts belong to and its counts by kind."""
+        latest = (self.coordinator.data or {}).get("latest_task") or {}
+        counts = self._counts()
+        return {
+            "task_id": latest.get("task_id"),
+            **{kind: int(counts.get(kind) or 0) for kind in PROMPT_KINDS},
+        }
+
+
 class CodexAuthSensor(_CodexSensor):
     """Show Codex login status."""
 
@@ -193,6 +230,9 @@ class CodexFiveHourLimitSensor(_CodexSensor):
             "context_remaining": usage.get("context_remaining"),
             "context_percent": usage.get("context_percent"),
             "raw_excerpt": usage.get("raw_excerpt"),
+            # rate_limits (the account's own read) or status_screen (estimated; the note says so).
+            "source": usage.get("source"),
+            "note": usage.get("note"),
         }
 
 
@@ -286,6 +326,9 @@ class CodexWeeklyLimitSensor(_CodexSensor):
             "context_remaining": usage.get("context_remaining"),
             "context_percent": usage.get("context_percent"),
             "raw_excerpt": usage.get("raw_excerpt"),
+            # rate_limits (the account's own read) or status_screen (estimated; the note says so).
+            "source": usage.get("source"),
+            "note": usage.get("note"),
         }
 
 

@@ -143,6 +143,18 @@
           <button id="cancel" class="subtle" hidden>Stop task</button>
         </header>
         <p id="integration-notice" role="status" hidden></p>
+        <section id="signin-banner" class="page-banner" role="status" hidden>
+          <p><strong id="signin-banner-text">The assistant is not signed in to ChatGPT.</strong></p>
+          <div id="signin-banner-card"></div>
+          <div class="settings-actions">
+            <button id="banner-login">Sign in</button
+            ><button id="banner-cancel" class="subtle" hidden>Cancel</button>
+          </div>
+        </section>
+        <section id="paused-banner" class="page-banner" role="status" hidden>
+          <p><strong>The assistant is paused.</strong> New messages are refused until you resume it.</p>
+          <div class="settings-actions"><button id="resume">Resume the assistant</button></div>
+        </section>
         <div
           id="messages"
           class="messages"
@@ -449,9 +461,35 @@
         <p id="login-status" class="muted">Loading account status…</p>
         <div class="settings-actions">
           <button id="login">Sign in</button
+          ><button id="login-cancel" class="subtle" hidden>Cancel</button
           ><button id="logout" class="subtle">Sign out</button>
         </div>
         <div id="login-card"></div>
+      </section>
+      <section id="remote-control-section">
+        <h3>Remote control from the ChatGPT app</h3>
+        <p class="muted">
+          Lets the ChatGPT app on your phone or iPad work on this Home
+          Assistant. It stays off until you turn it on here.
+        </p>
+        <p id="remote-control-status" class="muted" role="status">Loading…</p>
+        <div id="remote-control-card"></div>
+        <div class="settings-actions">
+          <button id="remote-control-start">Turn on</button
+          ><button id="remote-control-pair" class="subtle">New pairing code</button
+          ><button id="remote-control-stop" class="subtle">Turn off</button>
+        </div>
+        <details id="remote-control-log-box">
+          <summary>Recent remote-control messages</summary>
+          <pre id="remote-control-log"></pre>
+        </details>
+      </section>
+      <section>
+        <h3>Assistant</h3>
+        <p id="pause-status" class="muted">Loading…</p>
+        <div class="settings-actions">
+          <button id="pause">Pause the assistant</button>
+        </div>
       </section>
       <section>
         <h3>Browser permissions</h3>

@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from functools import wraps
 from typing import Any
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError, ServiceValidationError
+from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError, ServiceValidationError, Unauthorized
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
@@ -146,6 +148,28 @@ def _first_runtime(hass: HomeAssistant) -> CodexCliRuntimeData:
     raise ServiceValidationError("Codex integration is not configured or is not loaded")
 
 
+def _admin_only(hass: HomeAssistant, handler: Callable[[ServiceCall], Awaitable[Any]]) -> Callable[[ServiceCall], Awaitable[Any]]:
+    """Run a Codex action only for a Home Assistant administrator.
+
+    A call that names a user (the UI, the API, a script started by a person)
+    must come from an active administrator. A call with no user, such as an
+    automation an administrator wrote, is allowed, as Home Assistant's own admin
+    services do.
+    """
+
+    @wraps(handler)
+    async def checked(call: ServiceCall) -> Any:
+        """Refuse a caller who is not an administrator, then run the action."""
+        user_id = call.context.user_id
+        if user_id is not None:
+            user = await hass.auth.async_get_user(user_id)
+            if user is None or not user.is_active or not user.is_admin:
+                raise Unauthorized(context=call.context, permission="admin")
+        return await handler(call)
+
+    return checked
+
+
 def _async_register_services(hass: HomeAssistant) -> None:
     """Register integration services once."""
     if hass.services.has_service(DOMAIN, SERVICE_START_TASK):
@@ -249,60 +273,60 @@ def _async_register_services(hass: HomeAssistant) -> None:
         return result
 
     hass.services.async_register(
-        DOMAIN, SERVICE_CONTINUE_TASK, handle_continue_task,
+        DOMAIN, SERVICE_CONTINUE_TASK, _admin_only(hass, handle_continue_task),
         schema=CONTINUE_TASK_SCHEMA, **register_kwargs,
     )
     hass.services.async_register(
         DOMAIN,
         SERVICE_START_TASK,
-        handle_start_task,
+        _admin_only(hass, handle_start_task),
         schema=START_TASK_SCHEMA,
         **register_kwargs,
     )
     hass.services.async_register(
         DOMAIN,
         SERVICE_START_LOGIN,
-        handle_start_login,
+        _admin_only(hass, handle_start_login),
         schema=START_LOGIN_SCHEMA,
         **register_kwargs,
     )
     hass.services.async_register(
         DOMAIN,
         SERVICE_GET_LOGIN_STATUS,
-        handle_get_login_status,
+        _admin_only(hass, handle_get_login_status),
         **register_kwargs,
     )
     hass.services.async_register(
         DOMAIN,
         SERVICE_LOGOUT,
-        handle_logout,
+        _admin_only(hass, handle_logout),
         **register_kwargs,
     )
     hass.services.async_register(
         DOMAIN,
         SERVICE_GET_TASK,
-        handle_get_task,
+        _admin_only(hass, handle_get_task),
         schema=TASK_ID_SCHEMA,
         **register_kwargs,
     )
     hass.services.async_register(
         DOMAIN,
         SERVICE_LIST_TASKS,
-        handle_list_tasks,
+        _admin_only(hass, handle_list_tasks),
         schema=LIST_TASKS_SCHEMA,
         **register_kwargs,
     )
     hass.services.async_register(
         DOMAIN,
         SERVICE_CANCEL_TASK,
-        handle_cancel_task,
+        _admin_only(hass, handle_cancel_task),
         schema=TASK_ID_SCHEMA,
         **register_kwargs,
     )
     hass.services.async_register(
         DOMAIN,
         SERVICE_REPLY_TASK,
-        handle_reply_task,
+        _admin_only(hass, handle_reply_task),
         schema=REPLY_TASK_SCHEMA,
         **register_kwargs,
     )
