@@ -39,6 +39,7 @@ from flask import Flask, Response, jsonify, request, send_file
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from verification import DEFAULT_BROWSER_MEMORY_LIMIT_MIB, Verification, public_check
 from approvals import APPROVAL_GONE, AppServerSession
+import policy as protected_policy
 from ha_data import HomeAssistantData
 import remote_control
 
@@ -144,6 +145,12 @@ CLI_DEFAULT_MODEL = "gpt-6.1-sol"
 # does not start an app whose saved option is missing from the list.
 RETIRED_MODELS = {"gpt-5.5": "gpt-5.6-sol"}
 DEFAULT_CHAT_SETTINGS = {"model": None, "reasoning_effort": None}
+# The one model this build runs when the `model_pin` option is left as shipped.
+# A chat, a saved turn or the `codex_model` option naming any other model is
+# refused instead of running on it; the option set to "none" turns the pin off.
+DEFAULT_MODEL_PIN = "gpt-6.1-sol"
+# Present while the assistant is paused: new messages are refused and queued ones wait.
+PAUSE_FILE = DATA_ROOT / "paused.json"
 
 AGENTS_MAX_BYTES = 256 * 1024
 SNAPSHOT_MAX_BYTES = 8 * 1024 * 1024
@@ -433,6 +440,33 @@ def default_model(options: dict[str, Any]) -> str:
     return model
 
 
+def model_pin(options: dict[str, Any]) -> str:
+    """Return the model every run must use, or an empty string when the pin is off."""
+    # The Supervisor writes the shipped default (DEFAULT_MODEL_PIN, in config.yaml) into
+    # options.json and fills a cleared option back in, so "none" is how a user turns
+    # the pin off; a missing key only happens outside the add-on, as in tests.
+    value = options.get("model_pin", "")
+    value = value.strip() if isinstance(value, str) else ""
+    return "" if value.lower() in {"", "none", "off"} else value
+
+
+def model_pin_message(model: str, pin: str) -> str:
+    """Return the error shown when a run asks for a model other than the pinned one."""
+    return (
+        f"This assistant is set up to run only on {pin}, and this request asked for {model}. "
+        f"Nothing was run. Choose {pin} for the chat, or change the add-on's model_pin option."
+    )
+
+
+def model_pin_error(execution: dict[str, Any], options: dict[str, Any]) -> str:
+    """Return why a run's resolved settings break the model pin, or an empty string when they keep it."""
+    pin = model_pin(options)
+    model = str((execution or {}).get("model") or "default")
+    if not pin or model == pin:
+        return ""
+    return model_pin_message(model, pin)
+
+
 def current_chat_settings(settings: dict[str, Any]) -> dict[str, Any]:
     """Return chat selections with a model that is no longer offered replaced by the next one up."""
     settings = copy.deepcopy(settings)
@@ -451,6 +485,13 @@ def resolve_chat_settings(settings: dict[str, Any], options: dict[str, Any]) -> 
     model = settings.get("model") or current_model(str(options.get("codex_model") or "default"))
     if model == "gpt-5.3-codex":
         model = "default"
+    pin = model_pin(options)
+    if pin:
+        if model == "default":
+            # Name the pinned model, so the CLI cannot pick another one for this run.
+            model = pin
+        elif model != pin:
+            raise ValueError(model_pin_message(model, pin))
     # A run on default names no model; its levels are those of the model the CLI picks.
     efforts = CHAT_MODEL_EFFORTS.get(
         default_model(options) if model == "default" else model, ("low", "medium", "high", "xhigh")
@@ -621,20 +662,15 @@ def _bubblewrap_probe(
 
 def sandbox_readiness() -> dict[str, Any]:
     """Report whether the configured Codex sandbox can run on this host."""
-    mode = str(read_options().get("codex_sandbox") or DEFAULT_OPTIONS["codex_sandbox"])
-    required = mode != "danger-full-access"
+    options = read_options()
+    mode = str(options.get("codex_sandbox") or DEFAULT_OPTIONS["codex_sandbox"])
+    # The sandbox is always required: the protected policy allows no mode without it.
+    required = True
     binary = shutil.which("bwrap") or ""
-    if not required:
-        namespace_probe = {
-            "ok": False,
-            "skipped": True,
-            "error": "Namespace probe is not required in danger-full-access mode.",
-        }
-        proc_probe = {
-            "ok": False,
-            "skipped": True,
-            "error": "Fresh /proc probe is not required in danger-full-access mode.",
-        }
+    problem = protected_policy.policy_problem(options)
+    if problem:
+        namespace_probe = {"ok": False, "skipped": True, "error": problem}
+        proc_probe = {"ok": False, "skipped": True, "error": "Namespace probe was not run."}
     elif not binary:
         namespace_probe = {"ok": False, "error": "Bubblewrap is not installed."}
         proc_probe = {"ok": False, "skipped": True, "error": "Namespace probe was not run."}
@@ -647,23 +683,25 @@ def sandbox_readiness() -> dict[str, Any]:
 
     # A raw namespace success is not sufficient: the optional Codex probe above
     # must also pass. Keep the fresh /proc check as independent diagnostics.
-    bubblewrap_ready = bool(required and namespace_probe["ok"])
-    ready = bubblewrap_ready if required else True
-    if ready and required and proc_probe["ok"]:
+    bubblewrap_ready = bool(not problem and namespace_probe["ok"])
+    ready = bubblewrap_ready
+    if problem:
+        message = problem
+    elif ready and proc_probe["ok"]:
         message = "Codex sandbox execution probe passed."
-    elif ready and required:
+    elif ready:
         message = (
             "Codex sandbox execution probe passed; the standalone fresh /proc "
             "probe failed. This host may require Codex's no-proc fallback."
         )
-    elif not required:
-        message = "The selected danger-full-access mode does not require Bubblewrap."
     else:
         message = f"Codex sandbox preflight failed: {namespace_probe.get('error')}"
     return {
         "mode": mode,
         "required": required,
         "ready": ready,
+        # The page and the integration show this state instead of offering to approve escalations.
+        "state": "ready" if ready else protected_policy.NEEDS_SUPPORT,
         "bubblewrap_ready": bubblewrap_ready,
         "proc_mount_supported": bool(proc_probe["ok"]),
         "bubblewrap_binary": binary,
@@ -734,16 +772,16 @@ def ensure_runtime_files() -> None:
     if not api_token():
         set_api_token(secrets.token_urlsafe(32))
     SCHEMA_PATH.write_text(json.dumps(FINAL_RESPONSE_SCHEMA, indent=2), encoding="utf-8")
+    try:
+        approval = protected_policy.load_policy()["approval_policy"]
+    except protected_policy.PolicyError:
+        approval = protected_policy.STRICT_POLICY["approval_policy"]
     CODEX_CONFIG_PATH.write_text(
         "\n".join(
             [
                 "check_for_update_on_startup = false",
-                'approval_policy = "never"',
-                'sandbox_mode = "workspace-write"',
-                'web_search = "cached"',
-                "",
-                "[profiles.ha_auto_review]",
-                'approval_policy = "never"',
+                f'approval_policy = "{approval}"',
+                'approvals_reviewer = "user"',
                 'sandbox_mode = "workspace-write"',
                 'web_search = "cached"',
                 "",
@@ -751,6 +789,11 @@ def ensure_runtime_files() -> None:
         ),
         encoding="utf-8",
     )
+    # The house rules from the image replace any copy a task edited.
+    try:
+        protected_policy.install_instructions(CODEX_HOME)
+    except OSError as exc:
+        print(f"Could not install the protected house rules: {exc}", flush=True)
 
 
 def save_task_index() -> None:
@@ -3001,8 +3044,50 @@ def auth_status_payload() -> dict[str, Any]:
             state["verification_url"] = parsed["url"]
         if parsed["code"] and not state.get("user_code"):
             state["user_code"] = parsed["code"]
+    state["qr_path"] = (
+        f"auth/qr.svg?login={state.get('login_id') or ''}" if state.get("verification_url") else ""
+    )
+    state["pending"] = bool(state["process_running"]) and state.get("status") in SIGN_IN_PENDING
     state["codex_login"] = codex_login_status()
     return state
+
+
+# Sign-in states during which the page keeps the code on screen and offers Cancel.
+SIGN_IN_PENDING = {"queued", "starting", "waiting_for_user"}
+
+
+def login_qr_svg(url: str) -> bytes:
+    """Return a QR code of the sign-in URL as SVG bytes with a white background, for the page to show inline."""
+    from qrcode import QRCode
+    from qrcode.image.svg import SvgPathImage
+
+    qr = QRCode(border=2)
+    qr.add_data(url)
+    qr.make(fit=True)
+    image = qr.make_image(image_factory=SvgPathImage)
+    root = image.get_image()
+    namespace = root.tag.removesuffix("svg")
+    root.insert(0, ET.Element(f"{namespace}rect", {"width": "100%", "height": "100%", "fill": "#fff"}))
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def cancel_codex_login() -> dict[str, Any]:
+    """Stop a running sign-in, clear its code and link, and return the sign-in state."""
+    global auth_process
+    with auth_lock:
+        proc = auth_process if auth_process is not None and auth_process.poll() is None else None
+        auth_process = None
+    if proc is not None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+    dismiss_persistent_notification(AUTH_NOTIFY_ID)
+    update_auth_state(
+        status="canceled", completed_at=utc_now(), verification_url="", user_code="", qr_url="", output="", error="",
+    )
+    return auth_status_payload()
 
 
 def parse_login_output(text: str) -> dict[str, str]:
@@ -3074,7 +3159,6 @@ def auth_reader_thread(handle) -> None:
     buffer = ""
     notified = False
     notified_code = ""
-    notified_url = ""
     for line in iter(handle.readline, ""):
         if not line:
             break
@@ -3082,7 +3166,7 @@ def auth_reader_thread(handle) -> None:
         buffer += cleaned
         write_task_log("auth", "codex-login", cleaned)
         parsed = parse_login_output(buffer)
-        if parsed["url"] and (not notified or (parsed["code"] and parsed["code"] != notified_code)):
+        if parsed["url"] and (not notified or (parsed["code"] and not notified_code)):
             with auth_lock:
                 login_id = str(auth_state.get("login_id") or uuid.uuid4().hex[:8])
             qr_url = notify_codex_login_ready(login_id, parsed["url"], parsed["code"])
@@ -3095,13 +3179,17 @@ def auth_reader_thread(handle) -> None:
                 output=redact(buffer)[-4000:],
             )
             notified = True
-            notified_url = parsed["url"]
             notified_code = parsed["code"]
         else:
             updates: dict[str, Any] = {"output": redact(buffer)[-4000:]}
-            if parsed["url"] and parsed["url"] != notified_url:
+            # The code and link shown for a sign-in stay as first shown until it
+            # ends or is canceled; only a missing one is filled in.
+            with auth_lock:
+                shown_url = str(auth_state.get("verification_url") or "")
+                shown_code = str(auth_state.get("user_code") or "")
+            if parsed["url"] and not shown_url:
                 updates["verification_url"] = parsed["url"]
-            if parsed["code"] and parsed["code"] != notified_code:
+            if parsed["code"] and not shown_code:
                 updates["user_code"] = parsed["code"]
             update_auth_state(**updates)
 
@@ -3153,6 +3241,11 @@ def run_codex_device_login(login_id: str) -> None:
         notify("Codex sign-in complete", "Codex CLI is now authenticated for the Home Assistant worker.")
         refresh_usage_status_async(force=True)
     else:
+        with auth_lock:
+            canceled = auth_state.get("status") == "canceled" and auth_state.get("login_id") == login_id
+        if canceled:
+            # The user pressed Cancel; that is not a failure to report.
+            return
         update_auth_state(status="failed", completed_at=utc_now(), returncode=returncode)
         notify("Codex sign-in failed", f"Device login exited with code {returncode}.")
 
@@ -3629,6 +3722,9 @@ def data_mcp_args() -> list[str]:
 def build_codex_args(task_id: str, prompt_file: Path, final_file: Path, session_id: str | None) -> list[str]:
     """Return the `codex exec` command line for the task's latest turn, resuming the session when one is given.
 
+    Kept from upstream: `codex exec` has no live permission requests, and
+    run_task refuses every mode that would choose it before this is called.
+
     It carries the turn's model and reasoning level, the sandbox, the output
     files, the verification tool, and the attached images; the prompt itself
     is read from stdin.
@@ -3680,6 +3776,21 @@ def build_codex_args(task_id: str, prompt_file: Path, final_file: Path, session_
     return args
 
 
+def latest_execution(task_id: str, options: dict[str, Any]) -> dict[str, Any]:
+    """Return the model and level the task's latest turn runs with, as build_codex_args resolves them."""
+    with lock:
+        task = copy.deepcopy(tasks.get(task_id, {}))
+    turns = task.get("turns") or []
+    execution = turns[-1].get("execution_settings") if turns else None
+    if execution:
+        return execution
+    try:
+        return resolve_chat_settings(task.get("chat_settings", DEFAULT_CHAT_SETTINGS), options)
+    except ValueError:
+        # The chat's saved model is not the pinned one; report it as it is.
+        return {"model": current_model((task.get("chat_settings") or {}).get("model")) or "default"}
+
+
 def reader_thread(task_id: str, stream_name: str, handle, session_holder: dict[str, str]) -> None:
     """Copy one Codex output stream to the task log; from stdout also record the steps and the session id."""
     for line in iter(handle.readline, ""):
@@ -3699,6 +3810,28 @@ def reader_thread(task_id: str, stream_name: str, handle, session_holder: dict[s
                 pass
 
 
+PROMPT_KINDS = ("command", "command_input", "file_change", "other")
+
+
+def count_new_prompts(counts: Any, records: list[dict[str, Any]], previous: dict[str, Any]) -> dict[str, int]:
+    """Add each newly announced permission request to the conversation's prompt counts by kind.
+
+    The counts belong to the whole conversation (every exchange of the task),
+    so CX-TEST can read how many prompts one scripted session raised.
+    """
+    totals = {kind: 0 for kind in PROMPT_KINDS}
+    if isinstance(counts, dict):
+        for kind in PROMPT_KINDS:
+            value = counts.get(kind)
+            totals[kind] = value if isinstance(value, int) and value >= 0 else 0
+    for item in records:
+        if item["approval_id"] not in previous:
+            kind = item.get("prompt_kind") if item.get("prompt_kind") in PROMPT_KINDS else "other"
+            totals[kind] += 1
+    totals["total"] = sum(totals[kind] for kind in PROMPT_KINDS)
+    return totals
+
+
 def build_app_server_args() -> list[str]:
     """Start the bidirectional CLI transport with approvals routed to the user."""
     return [CODEX_BINARY, "app-server", "--config", 'approval_policy="on-request"',
@@ -3706,8 +3839,12 @@ def build_app_server_args() -> list[str]:
 
 
 def uses_user_approvals(options: dict[str, Any]) -> bool:
-    """Use live permission requests for sandboxed modes; full access needs no escape."""
-    return (options.get("codex_sandbox") or "workspace-write") != "danger-full-access"
+    """Every allowed mode is sandboxed and routes its permission requests to the user.
+
+    A mode the protected policy refuses never reaches Codex: run_task stops it
+    first, so the exec path without live approvals is not used for one.
+    """
+    return not protected_policy.policy_problem(options)
 
 
 def create_approval_session(
@@ -3764,13 +3901,15 @@ def create_approval_session(
         if str(task.get("current_turn_id") or "") != turn_id:
             return
         previous = {item["approval_id"]: item for item in task.get("approvals") or []}
+        counts = count_new_prompts(task.get("approval_counts"), records, previous)
         for item in records:
             older = previous.get(item["approval_id"], {})
             item["turn_id"] = turn_id
             item["requested_at"] = older.get("requested_at") or utc_now()
             if item["status"] != "pending":
                 item["resolved_at"] = older.get("resolved_at") or utc_now()
-        if not update_task(task_id, approvals=records, **({"status": "cancelled"} if task.get("cancellation_requested") else {})):
+        if not update_task(task_id, approvals=records, approval_counts=counts,
+                           **({"status": "cancelled"} if task.get("cancellation_requested") else {})):
             return
         # The task now waits for the user, who may not have the chat open.
         for item in records:
@@ -4129,6 +4268,18 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     """Run one exchange: record the configuration, launch Codex, then check and report what it changed."""
     if task_cancellation_requested(task_id):
         return
+    # A mode the protected policy refuses stops here, before the task is marked running or any
+    # baseline, snapshot or backup work is done for it.
+    policy_problem = protected_policy.policy_problem(read_options())
+    if policy_problem:
+        fail_task_launch(
+            task_id,
+            RuntimeError(policy_problem),
+            session_id=session_id,
+            summary="Codex needs support: the sandbox it must run in is not available, so this task was not started.",
+            detail_prefix="Codex sandbox preflight failed",
+        )
+        return
     task_dir = get_run_dir(task_id)
     task_dir.mkdir(parents=True, exist_ok=True)
     final_file = task_dir / ("final-resume.json" if reply else "final.json")
@@ -4194,7 +4345,20 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
         return
     if task_cancellation_requested(task_id):
         return
+    pin_error = model_pin_error(latest_execution(task_id, options), options)
+    if pin_error:
+        # Stop before Codex starts: a run on another model is an error, never a quiet fallback.
+        fail_task_launch(
+            task_id,
+            ValueError(pin_error),
+            session_id=session_id,
+            summary="Stopped: this run asked for a model the assistant is not set up to use.",
+            detail_prefix="Model pin",
+        )
+        return
     interactive_approvals = uses_user_approvals(options)
+    # Upstream's `codex exec` path has no live permission requests; the policy check at the top of run_task
+    # refuses every mode that would choose it, so it is reached only by the tests that drive it directly.
     args = build_app_server_args() if interactive_approvals else build_codex_args(task_id, prompt_file, final_file, session_id)
     write_task_log(task_id, "worker", "Starting Codex: " + " ".join(args))
 
@@ -4207,7 +4371,7 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
             task_id,
             RuntimeError(str(readiness["message"])),
             session_id=session_id,
-            summary="The configured Codex sandbox is not available.",
+            summary="Codex needs support: the sandbox it must run in is not available, so this task was not started.",
             detail_prefix="Codex sandbox preflight failed",
         )
         return
@@ -4859,6 +5023,37 @@ def start_queued_message(entry: dict[str, Any]) -> Exception | None:
     return None
 
 
+def assistant_paused() -> bool:
+    """Return whether the user has paused the assistant from its page."""
+    return PAUSE_FILE.exists()
+
+
+def pause_payload() -> dict[str, Any]:
+    """Return the pause state for the API: whether it is paused, since when, and the reason the page shows."""
+    if not assistant_paused():
+        return {"paused": False}
+    try:
+        saved = json.loads(PAUSE_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        saved = {}
+    return {"paused": True, "since": str(saved.get("since") or ""), "message": PAUSED_MESSAGE}
+
+
+PAUSED_MESSAGE = "The assistant is paused. Resume it on its page to send messages again."
+
+
+def set_assistant_paused(paused: bool) -> dict[str, Any]:
+    """Pause or resume the assistant; on resume, start the oldest queued message if nothing is running."""
+    if paused:
+        if not assistant_paused():
+            PAUSE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            PAUSE_FILE.write_text(json.dumps({"since": utc_now()}), encoding="utf-8")
+    else:
+        PAUSE_FILE.unlink(missing_ok=True)
+        start_next_queued()
+    return pause_payload()
+
+
 def start_next_queued(release: str | None = None) -> None:
     """Start the oldest queued message once no task is active.
 
@@ -4872,7 +5067,7 @@ def start_next_queued(release: str | None = None) -> None:
             if release is not None:
                 active_task_runners.discard(release)
                 release = None
-            if not message_queue or _active_task_ids_locked():
+            if not message_queue or _active_task_ids_locked() or assistant_paused():
                 return
             entry = message_queue.pop(0)
             failure = start_queued_message(entry)
@@ -4933,6 +5128,8 @@ def status() -> Response:
             "latest_task": latest,
             "codex_login": codex_login_status(),
             "auth_flow": auth_status_payload(),
+            "pause": pause_payload(),
+            "model_pin": model_pin(read_options()),
             "codex_usage": usage_status_payload(),
             "integration": integration_status(),
         }
@@ -4988,6 +5185,43 @@ def get_auth_status() -> Response:
     return jsonify({"ok": True, "auth": auth_status_payload()})
 
 
+@app.post("/auth/cancel")
+@require_auth
+def cancel_auth() -> Response:
+    """Stop a running sign-in and clear its code."""
+    return jsonify({"ok": True, "auth": cancel_codex_login()})
+
+
+@app.get("/auth/qr.svg")
+@require_auth
+def auth_qr() -> Response:
+    """Return the QR code of the current sign-in link, or 404 when no sign-in is waiting."""
+    with auth_lock:
+        url = str(auth_state.get("verification_url") or "")
+    if not url.startswith("https://"):
+        return jsonify({"ok": False, "error": "no sign-in is waiting"}), 404
+    response = Response(login_qr_svg(url), mimetype="image/svg+xml")
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/pause")
+@require_auth
+def get_pause() -> Response:
+    """Return whether the assistant is paused."""
+    return jsonify({"ok": True, **pause_payload()})
+
+
+@app.post("/pause")
+@require_auth
+def post_pause() -> Response:
+    """Pause the assistant with {"paused": true}, or resume it with {"paused": false}."""
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or not isinstance(payload.get("paused"), bool):
+        return jsonify({"ok": False, "error": "paused must be true or false"}), 400
+    return jsonify({"ok": True, **set_assistant_paused(payload["paused"])})
+
+
 @app.post("/auth/logout")
 @require_auth
 def logout_auth() -> Response:
@@ -5039,14 +5273,26 @@ def list_tasks() -> Response:
 def chat_options() -> Response:
     """Return the models, defaults, and settings the web UI needs."""
     options = read_options()
-    default = resolve_chat_settings(DEFAULT_CHAT_SETTINGS, options)
-    default_id = default_model(options)
+    pin = model_pin(options)
+    try:
+        default = resolve_chat_settings(DEFAULT_CHAT_SETTINGS, options)
+        model_error = ""
+    except ValueError as exc:
+        # The add-on's codex_model option names another model than the pin; say so on the page.
+        default = {"model": pin, "reasoning_effort": "medium"}
+        model_error = str(exc)
+    default_id = pin or default_model(options)
+    models = [{"id": model, "label": label, "efforts": efforts} for model, label, efforts in CHAT_MODELS]
+    if pin:
+        models = [entry for entry in models if entry["id"] == pin]
     return jsonify({
         "ok": True,
+        "model_pin": pin,
+        "model_error": model_error,
         "defaults": default,
         # The defaults' model by name, also when the add-on leaves the choice to the CLI.
         "default_model": default_id,
-        "models": [{"id": model, "label": label, "efforts": efforts} for model, label, efforts in CHAT_MODELS],
+        "models": models,
         "default_efforts": CHAT_MODEL_EFFORTS.get(default_id, ("low", "medium", "high", "xhigh")),
         "backup_retention_days": backup_retention_days(options),
     })
@@ -5155,6 +5401,8 @@ def create_task() -> Response:
     prompt = payload["prompt"].strip()
     if not prompt:
         return jsonify({"ok": False, "error": "prompt is required"}), 400
+    if assistant_paused():
+        return jsonify({"ok": False, "error": PAUSED_MESSAGE, "paused": True}), 409
     try:
         settings = parse_chat_settings(payload)
         execution = resolve_chat_settings(settings, read_options())
@@ -5340,13 +5588,88 @@ def cancel_task(task_id: str) -> Response:
     return jsonify({"ok": True, "task_id": task_id, "status": "cancelled"})
 
 
+ADMIN_CACHE_SECONDS = 60
+# Home Assistant user IDs confirmed as active administrators, with when, on the monotonic clock.
+admin_cache: dict[str, tuple[float, dict[str, str]]] = {}
+admin_cache_lock = threading.Lock()
+
+
+def lookup_ha_users() -> list[dict[str, Any]]:
+    """Return Home Assistant's user list over its WebSocket API (config/auth/list); raise RuntimeError when it fails."""
+    token = ha_token()
+    if not token:
+        raise RuntimeError("no Home Assistant credential")
+    ws = None
+    try:
+        ws = websocket.create_connection(ha_ws_url(), timeout=10, header=[f"Authorization: Bearer {token}"])
+        first = json.loads(ws.recv())
+        if first.get("type") == "auth_required":
+            ws.send(json.dumps({"type": "auth", "access_token": token}))
+            if json.loads(ws.recv()).get("type") != "auth_ok":
+                raise RuntimeError("Home Assistant refused the credential")
+        ws.send(json.dumps({"id": 1, "type": "config/auth/list"}))
+        while True:
+            response = json.loads(ws.recv())
+            if response.get("id") != 1:
+                continue
+            if not response.get("success") or not isinstance(response.get("result"), list):
+                raise RuntimeError("Home Assistant did not return its user list")
+            return response["result"]
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        raise RuntimeError(str(exc)) from None
+    finally:
+        if ws is not None:
+            try:
+                ws.close()
+            except Exception:
+                pass
+
+
+def ingress_admin() -> tuple[dict[str, str] | None, str]:
+    """Return the Home Assistant administrator behind this Ingress request, or None and the reason it is refused.
+
+    Ingress names the signed-in user in X-Remote-User-Id; the worker then asks
+    Home Assistant whether that user is an active administrator. The worker API
+    token names nobody, so it can never answer a permission request. Any lookup
+    failure refuses: nothing is allowed on an identity the worker could not check.
+    """
+    if not is_ingress_request():
+        return None, "Permission requests can only be answered by a Home Assistant administrator on the Codex page."
+    user_id = request.headers.get("X-Remote-User-Id", "").strip()
+    if not user_id:
+        return None, "Home Assistant did not say who is signed in, so this answer was not accepted."
+    now = time.monotonic()
+    with admin_cache_lock:
+        cached = admin_cache.get(user_id)
+        if cached and now - cached[0] < ADMIN_CACHE_SECONDS:
+            return dict(cached[1]), ""
+    try:
+        users = lookup_ha_users()
+    except RuntimeError as exc:
+        print(f"Could not check the Home Assistant user for a permission answer: {exc}", flush=True)
+        return None, "Could not confirm that you are a Home Assistant administrator. Try again."
+    user = next((item for item in users if isinstance(item, dict) and item.get("id") == user_id), None)
+    if (not user or not user.get("is_active") or user.get("system_generated")
+            or "system-admin" not in (user.get("group_ids") or [])):
+        return None, "Only a Home Assistant administrator can answer permission requests."
+    identity = {"user_id": user_id, "name": str(user.get("name") or request.headers.get("X-Remote-User-Display-Name") or "")}
+    with admin_cache_lock:
+        admin_cache[user_id] = (now, identity)
+    return dict(identity), ""
+
+
 @app.post("/tasks/<task_id>/approvals/<approval_id>")
 @require_auth
 def decide_approval(task_id: str, approval_id: str) -> Response:
-    """Answer a native permission request for the current exchange, once only."""
+    """Answer a native permission request for the current exchange, once only, as a Home Assistant administrator."""
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict) or not isinstance(payload.get("decision"), str) or payload["decision"] not in {"allow", "deny"}:
         return jsonify({"ok": False, "error": "decision must be allow or deny"}), 400
+    admin, refusal = ingress_admin()
+    if admin is None:
+        return jsonify({"ok": False, "error": refusal}), 403
     with lock:
         task = tasks.get(task_id)
         if task is None:
@@ -5355,7 +5678,7 @@ def decide_approval(task_id: str, approval_id: str) -> Response:
         if not session or payload.get("turn_id") != task.get("current_turn_id"):
             return jsonify({"ok": False, "error": APPROVAL_GONE}), 409
         try:
-            session.decide(approval_id, payload["decision"])
+            session.decide(approval_id, payload["decision"], decided_by=admin)
         except LookupError:
             return jsonify({"ok": False, "error": APPROVAL_GONE}), 409
         except ValueError as exc:
@@ -5498,6 +5821,8 @@ def continue_task_request(task_id: str, field: str, *, waiting_only: bool = Fals
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
         return jsonify({"ok": False, "error": f"{field} must be non-empty text"}), 400
+    if assistant_paused():
+        return jsonify({"ok": False, "error": PAUSED_MESSAGE, "paused": True}), 409
     choice = payload.get("choice")
     turn_id = payload.get("turn_id")
     if choice is None and (not isinstance(payload.get(field), str) or not payload[field].strip()):
@@ -5617,7 +5942,16 @@ def delete_queued_message(queue_id: str) -> Response:
 
 
 def main() -> None:
-    """Prepare the worker's files, start its background threads, and serve the API."""
+    """Prepare the worker's files, start its background threads, and serve the API.
+
+    Stops at once, before serving anything, when the options break the
+    protected policy (for example a full-access mode carried over from an
+    older version, or approvals that would never ask).
+    """
+    problem = protected_policy.policy_problem(read_options())
+    if problem:
+        print(f"Codex CLI Worker will not start: {problem}", flush=True)
+        sys.exit(1)
     ensure_runtime_files()
     version = codex_version_status()
     sandbox = sandbox_readiness()

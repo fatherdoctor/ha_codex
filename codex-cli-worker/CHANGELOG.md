@@ -1,7 +1,18 @@
 # Changelog
 
-## Unreleased
+## 0.1.81.2 (unreleased)
 
+Permissions that ask, and only an administrator can answer. Sign-in without a terminal, a pause switch and a model pin.
+
+- **No full-access mode.** `danger-full-access` is gone from the app's options. A protected policy inside the image (`/usr/share/ha_codex/policy.json`) lists the allowed sandbox modes and keeps the approval policy at `on-request`; an option it does not allow stops the app at startup, and each task is refused with a "needs support" message instead of asking anyone to approve an escalation. Codex's own configuration no longer says `approval_policy = "never"`.
+- **A policy Codex cannot edit.** The policy and the house rules (`AGENTS.md`) live in the image, outside `/config`. The rules are copied into Codex's home folder at every start, replacing any edited copy. A file change that touches the policy, the rules or the app's settings can only be denied, and so can a command whose text names one of them. A task under a refused sandbox mode now stops before any baseline or backup work.
+- **Approvals need a Home Assistant administrator.** Allow once and Deny are taken only on the Codex page, from the user Home Assistant names for the page, after the worker confirms that user is an active administrator. The integration's API token can no longer answer permission requests. Who answered is recorded on the request.
+- **The integration's actions check the caller.** Every `codex_cli` action refuses a signed-in user who is not an administrator; calls with no user, such as automations, still run. A choice tapped on a notification is taken only from an administrator's phone.
+- **Prompt counts.** Each conversation counts its permission requests by kind, and the new **Permission prompts** sensor shows the latest conversation's counts.
+- Sign-in without a terminal: a banner above the chat while the app is not signed in; the one-time code in large letters that stays unchanged until the sign-in ends or is canceled, in a font that tells 0 from O; the QR code served by the app (it no longer depends on `/local/`); a **Cancel** button; a second **Sign in** keeps the running sign-in. When the worker learns that OpenAI refused the saved sign-in (expired or revoked), the banner says so.
+- New **Signed in** binary sensor in the integration, and a clearer repair when the sign-in has expired or was revoked.
+- New `model_pin` option (default `gpt-6.1-sol`): every run names the pinned model, and a request for any other model is stopped with an error instead of running on it. `none` turns it off.
+- **Pause the assistant** in Settings: new messages are refused and queued ones wait until it is resumed; kept across restarts.
 - Remote control from the ChatGPT app can be managed from the app's Settings page: turn on and off, status, machine name (default **Home Assistant**), pairing code as text and QR code, a new pairing code, and recent messages. The app runs `codex remote-control --no-daemon` as one supervised process with restart backoff, without any Home Assistant or Supervisor token. It stays off until turned on, and **Turn on** is refused until a command check outside the model is shipped with the app; this version does not ship it yet.
 - New option **Remote control machine name**.
 

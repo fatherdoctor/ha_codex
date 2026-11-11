@@ -1888,3 +1888,32 @@ dialog label {
   white-space: pre-wrap;
   font-size: 0.8rem;
 }
+/* Sign-in: a code that reads the same on every screen, with 0 and O told apart. */
+.page-banner {
+  margin: 0 1rem 0.75rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.signin-card {
+  display: grid;
+  justify-items: start;
+  gap: 0.5rem;
+}
+.signin-code {
+  margin: 0;
+  font-family: "DejaVu Sans Mono", "Cascadia Mono", Consolas, ui-monospace, monospace;
+  font-variant-numeric: slashed-zero;
+  font-feature-settings: "zero" 1;
+  font-size: clamp(1.75rem, 8vw, 2.75rem);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.signin-qr {
+  width: min(220px, 60vw);
+  height: auto;
+  background: #fff;
+  border-radius: 4px;
+}
