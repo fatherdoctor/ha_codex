@@ -299,6 +299,25 @@ The configuration watch uses the same distinction while remote control is on. It
 
 OpenAI's remote control (`codex remote-control`) lets the ChatGPT app on a phone or tablet work on this Home Assistant through OpenAI's relay. The app runs it for you; there is no terminal step.
 
+**Known startup and enforcement limits (Codex 0.166).** The shipped `unshare -Ur -u` name step failed under the
+HAOS add-on's enforced AppArmor parent profile in the lab. The Bubblewrap name path is a supported alternative:
+[`--hostname` requires `--unshare-uts`](https://github.com/containers/bubblewrap/blob/main/bwrap.xml), and that
+combination succeeded in the lab's child profile. This documents the proposed route; the start/nested-sandbox/pairing
+fix has not been delivered or validated here. The parent profile must not be broadened to make it work.
+
+Codex's managed sandbox requirements prevent full access, but a disallowed `thread/start` setting can still produce a
+permitted fallback and a configuration warning instead of an RPC error. The pinned
+[0.166 configuration loader](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/core/src/config/mod.rs#L2358)
+uses that fallback for both approval policy and permission profile. Restricting `allowed_approval_policies` is useful,
+but it does not by itself change a remote thread's fallback into a hard rejection. The integration's Python approval
+adapter does not mediate relay-created threads. The strict-error acceptance criterion needs a supported upstream
+mechanism or an explicit scope ruling before it can be claimed complete.
+
+A synchronous hook that times out can fail open in Codex 0.166: the tool call may run after the timeout. A fast hook
+reduces exposure but cannot eliminate this upstream behavior. The existing configuration watch detects changes
+afterward and reports them; it does not currently undo them. Even a future verified-copy restore cannot reverse
+commands that already ran. Remote-control undo and its limits still require implementation and validation.
+
 - **Off until you turn it on.** Open the app page, then **Settings**, then **Remote control from the ChatGPT app**. The choice is saved and holds across app restarts.
 - **One supervised process.** The app runs `codex remote-control --no-daemon` in the foreground and starts it again, with a growing delay, if it exits. **Turn off** stops it.
 - **Machine name.** The ChatGPT app lists this machine as **Home Assistant** unless you change the **Remote control machine name** option. Codex has no name setting, so the app starts it with that name as its host name inside a private namespace. A name that cannot be used as written becomes `Home-Assistant`.
