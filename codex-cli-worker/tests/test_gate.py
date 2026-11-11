@@ -21,13 +21,22 @@ HOOK = ROOT / "gate" / "gate_hook.py"
 RULES = gate_rules.load_rules(ROOT / "policy" / "refused-domains.json")
 
 
-def run_hook(payload, remote_on: bool, tmp: str, event: str = "") -> subprocess.CompletedProcess:
+def run_hook(payload, remote_on: bool, tmp: str, event: str = "", categories: bool = True) -> subprocess.CompletedProcess:
     """Run the hook script as Codex would: python -I, the event on stdin, the saved choice in a file."""
     state = Path(tmp) / "state.json"
     state.write_text(json.dumps({"enabled": remote_on}), encoding="utf-8")
     text = payload if isinstance(payload, str) else json.dumps(payload)
-    return subprocess.run([sys.executable, "-I", str(HOOK), "--event", event or "PreToolUse", "--state", str(state)],
+    options = Path(tmp) / "options.json"
+    options.write_text(json.dumps({"refuse_categories": categories}))
+    # Run the unchanged managed hook with an isolated options path, never the executor's /data.
+    bootstrap = ("import sys,runpy; from pathlib import Path; "
+                 "sys.path.insert(0,sys.argv[1]); import gate_rules; "
+                 "gate_rules.OPTIONS_PATH=Path(sys.argv[2]); sys.argv=sys.argv[3:]; "
+                 "runpy.run_path(sys.argv[0],run_name='__main__')")
+    return subprocess.run([sys.executable, "-I", "-c", bootstrap, str(ROOT), str(options), str(HOOK),
+                           "--event", event or "PreToolUse", "--state", str(state)],
                           input=text, capture_output=True, text=True, timeout=30, check=False)
+
 
 
 class HookFixtureTests(unittest.TestCase):
@@ -35,10 +44,11 @@ class HookFixtureTests(unittest.TestCase):
 
     def test_fixture_cases(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            for case in FIXTURE["cases"]:
-                with self.subTest(case["name"]):
+            for case in [dict(item, categories=flag, expect=item["expect"] if flag else item.get("expect_categories_off", item["expect"]))
+                         for item in FIXTURE["cases"] for flag in (False, True)]:
+                with self.subTest(case["name"], categories=case["categories"]):
                     event = case["input"].get("hook_event_name", "") if isinstance(case["input"], dict) else ""
-                    result = run_hook(case["input"], case["remote_control_on"], tmp, event)
+                    result = run_hook(case["input"], case["remote_control_on"], tmp, event, case["categories"])
                     if case["expect"] == "deny":
                         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
                         self.assertTrue(result.stderr.strip())
@@ -175,6 +185,12 @@ class ConfigWatchTests(unittest.TestCase):
         (self.config / ".storage").mkdir()
         (self.config / ".storage" / "x.yaml").write_text("- action: lock.unlock\n", encoding="utf-8")
         (self.config / "secrets.yaml").write_text("- action: lock.unlock\n", encoding="utf-8")
+        options = Path(self.tmp.name) / "options.json"
+        options.write_text('{"refuse_categories": true}')
+        from unittest.mock import patch
+        option_patch = patch.object(gate_rules, "OPTIONS_PATH", options)
+        option_patch.start()
+        self.addCleanup(option_patch.stop)
         self.watch = rc.ConfigWatch(self.config, Path(self.tmp.name) / "data" / "baseline.json",
                                     rules=lambda: RULES)
 
@@ -247,6 +263,12 @@ class SupervisorWatchTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         base = Path(self.tmp.name)
+        options = base / "options.json"
+        options.write_text('{"refuse_categories": true}')
+        from unittest.mock import patch
+        option_patch = patch.object(gate_rules, "OPTIONS_PATH", options)
+        option_patch.start()
+        self.addCleanup(option_patch.stop)
         self.config = base / "config"
         self.config.mkdir()
         (self.config / "automations.yaml").write_text("- actions:\n    - action: light.turn_on\n", encoding="utf-8")

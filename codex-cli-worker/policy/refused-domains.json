@@ -5,7 +5,7 @@
   "garage_cover_words": ["garage"],
   "message_script_words": ["alert", "announce", "call", "message", "notification", "notify", "sms", "text"],
   "runs_on_load_platforms": ["command_line", "rest", "scrape"],
-  "runs_on_load_keys": ["command_line", "rest", "rest_command", "scrape", "shell_command"],
+  "runs_on_load_keys": ["command_line", "rest", "rest_command", "scrape", "shell_command", "python_script", "pyscript"],
   "device_actions": {
     "alarm_control_panel": ["arm_away", "arm_custom_bypass", "arm_home", "arm_night", "arm_vacation", "disarm", "trigger"],
     "camera": ["turn_off", "turn_on"],

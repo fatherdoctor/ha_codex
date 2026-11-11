@@ -49,12 +49,12 @@ MAX_NAME_BYTES = 63
 GATE_MARKER = Path("/usr/share/ha_codex/remote-control-gate.json")
 GATE_MISSING = (
     "Remote control cannot be turned on in this version. Commands from the ChatGPT app skip this app's "
-    "approval buttons, and the check that refuses locks, alarms, covers, cameras and messages to people "
+    "approval buttons, and the security check for sandbox escalation and credential access "
     "for those commands is not installed yet. The chat page works as usual."
 )
 GATE_BROKEN = (
-    "Remote control cannot be turned on: the check that refuses locks, alarms, covers, cameras and "
-    "messages to people for commands from the ChatGPT app is installed but does not hold: "
+    "Remote control cannot be turned on: the security check for sandbox escalation and "
+    "credential access for commands from the ChatGPT app is installed but does not hold: "
 )
 # Seconds to wait before restarting a process that exited on its own, doubling up to the cap.
 BACKOFF_START = 5.0
@@ -268,39 +268,28 @@ class ConfigWatch:
                     return found
         return found
 
-    def refused_scripts(self, texts: dict[str, str], rules: dict[str, Any]) -> set[str]:
-        """Return the ids of scripts whose own steps act on a refused domain (scripts.yaml and scripts/)."""
-        refused: set[str] = set()
-        for rel, text in texts.items():
-            if rel != "scripts.yaml" and not rel.startswith("scripts/"):
-                continue
-            current, block = "", []
-            for line in text.splitlines() + ["__end__:"]:
-                key = SCRIPT_KEY_RE.match(line)
-                if key:
-                    if current and gate_rules.find_refused("\n".join(block), rules):
-                        refused.add(current)
-                    current, block = key.group(1), []
-                else:
-                    block.append(line)
-        return refused
+    def refused_scripts(self, texts: dict[str, str], rules: dict[str, Any],
+                        categories: bool | None = None) -> set[str]:
+        """Resolve script calls using the same active kinds as the line scan."""
+        return gate_rules.refused_scripts(texts, rules, categories)
 
     def scan(self) -> dict[str, list[gate_rules.Finding]]:
         """Return the refused actions in every YAML file, by path relative to the config folder."""
         return self._scan()[0]
 
-    def _scan(self) -> tuple[dict[str, list[gate_rules.Finding]], dict[str, dict[str, tuple[int, int, str]]]]:
+    def _scan(self, categories: bool | None = None) -> tuple[dict[str, list[gate_rules.Finding]], dict[str, dict[str, tuple[int, int, str]]]]:
         """Return the refused lines and the refused blocks (see ``gate_rules.refused_blocks``) of every YAML file."""
         rules = self.rules()
+        enabled = gate_rules.category_refusals_enabled() if categories is None else categories
         texts: dict[str, str] = {}
         for path in self.files():
             try:
                 texts[path.relative_to(self.root).as_posix()] = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
-        scripts = self.refused_scripts(texts, rules)
-        lines = {rel: found for rel, text in texts.items() if (found := gate_rules.find_refused(text, rules, scripts))}
-        blocks = {rel: found for rel, text in texts.items() if (found := gate_rules.refused_blocks(text, rules, scripts))}
+        scripts = self.refused_scripts(texts, rules, enabled)
+        lines = {rel: found for rel, text in texts.items() if (found := gate_rules.active_findings(text, rules, scripts, enabled))}
+        blocks = {rel: found for rel, text in texts.items() if (found := gate_rules.refused_blocks(text, rules, scripts, enabled))}
         return lines, blocks
 
     def has_baseline(self) -> bool:
@@ -309,7 +298,7 @@ class ConfigWatch:
 
     def take_baseline(self) -> None:
         """Save what is in the config folder now as the baseline later scans compare with."""
-        lines, blocks = self._scan()
+        lines, blocks = self._scan(categories=True)
         data = {rel: [list(f.key()) for f in found] for rel, found in lines.items()}
         hashes = {rel: sorted(found) for rel, found in blocks.items()}
         self.baseline_path.parent.mkdir(parents=True, exist_ok=True)
@@ -329,9 +318,10 @@ class ConfigWatch:
 
         Findings are matched by reason and line text, so an action that only
         moved is not new; a second copy of an existing line is. A block (an
-        automation, a script) that holds a refused line and changed anywhere,
-        a trigger or a condition included, is reported once by its first line
-        when none of its own lines is new. An unreadable baseline counts as
+        automation, a script) that holds a refused line and changed anywhere
+        is also reported when category refusals are on, even if none of its
+        own lines is new. With categories off, an unchanged always-on call
+        does not make a trigger or condition edit a new finding. An unreadable baseline counts as
         empty, so everything refused is reported.
         """
         try:

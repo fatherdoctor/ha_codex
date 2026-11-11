@@ -4,7 +4,7 @@ Use Codex CLI to inspect and edit your configuration through a chat in Home Assi
 
 The app provides a responsive chat UI with saved conversations, a resizable desktop sidebar, and a mobile chat drawer. It also provides a token-protected local API for the Codex integration, device-code sign-in, backup tracking, task logs, and notifications when work completes or needs input.
 
-I recommend `danger-full-access` for working freely in Home Assistant. The name sounds scary, but the app still offers backups, configuration checks, and verification. `workspace-write` remains the default. In sandboxed modes, the chat asks you to **Allow once** or **Deny** commands and file changes that need extra access. See [sandbox modes, safeguards, and permission requests](https://github.com/fatherdoctor/ha_codex/blob/main/codex-cli-worker/DOCS.md#sandbox).
+Codex always runs in a sandbox: `workspace-write` (the default) or `read-only`. This fork has no full-access mode. Commands and file changes that need extra access ask a Home Assistant administrator to **Allow once** or **Deny** in the chat. See [sandbox modes, safeguards, and permission requests](https://github.com/fatherdoctor/ha_codex/blob/main/codex-cli-worker/DOCS.md#sandbox).
 
 ## Dashboard browser verification
 
@@ -30,7 +30,7 @@ The app keeps a local copy of the official Home Assistant documentation, refresh
 
 The image includes the OpenSSH client for optional connections to existing SSH servers. Ask Codex to create a dedicated key and connection configuration under `/data/.ssh`, then install the public key on the remote server. Use `ssh -F /data/.ssh/config <connection> <command>` so the client selects the persistent configuration explicitly. No Home Assistant token is needed.
 
-Use `workspace-write` or `read-only` when commands need the existing **Allow once / Deny** approval flow. `danger-full-access` runs SSH without sandbox approval prompts. Remote permissions are controlled by the SSH server and account. The `.ssh` directory is excluded from app backups and must be set up again after a restore. See [setup, restricted keys, and limits](DOCS.md#ssh-connections).
+Each SSH command goes through the **Allow once / Deny** approval flow. Remote permissions are controlled by the SSH server and account. The `.ssh` directory is excluded from app backups and must be set up again after a restore. See [setup, restricted keys, and limits](DOCS.md#ssh-connections).
 
 ## Conversations
 
