@@ -98,10 +98,10 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(cmd[-3:], ["/usr/local/bin/codex", "remote-control", "--no-daemon"])
         self.assertNotIn("sh", cmd)
 
-    def test_environment_has_no_credentials(self) -> None:
+    def test_environment_keeps_core_pair_without_supervisor_credentials(self) -> None:
         env = rc.remote_env({"SUPERVISOR_TOKEN": "s", "HASSIO_TOKEN": "h", "HA_TOKEN": "t", "HA_URL": "u",
                              "HA_DATA_SOCKET": "d", "CODEX_HOME": "/data/codex-home", "PATH": "/bin"})
-        self.assertEqual(env, {"CODEX_HOME": "/data/codex-home", "PATH": "/bin"})
+        self.assertEqual(env, {"HA_TOKEN": "t", "HA_URL": "u", "CODEX_HOME": "/data/codex-home", "PATH": "/bin"})
 
 
 class GateTests(unittest.TestCase):
@@ -193,7 +193,7 @@ class SupervisorTests(unittest.TestCase):
         self.assertTrue(self.sup.enabled())
         self.assertTrue(wait_for(lambda: self.procs))
         self.assertEqual(self.commands[0][-2:], ["remote-control", "--no-daemon"])
-        self.assertNotIn("HA_TOKEN", self.envs[0])
+        self.assertEqual(self.envs[0]["HA_TOKEN"], "secret")
         proc = self.procs[0]
         proc.stdout.lines.put("Pairing code: ABCD-1234\n")
         self.assertTrue(wait_for(lambda: self.sup.snapshot()["pairing_code"] == "ABCD-1234"))
@@ -248,7 +248,7 @@ class SupervisorTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(state["pairing_code"], "WXYZ-9876")
         self.assertEqual(calls[0][0][-2:], ["remote-control", "pair"])
-        self.assertNotIn("HA_TOKEN", calls[0][1])
+        self.assertEqual(calls[0][1]["HA_TOKEN"], "secret")
 
 
 SERVER_PATH = ROOT / "server.py"

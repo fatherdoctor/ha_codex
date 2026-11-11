@@ -67,10 +67,10 @@ HEALTHY_RUN = 600.0
 STOP_GRACE = 10.0
 PAIR_TIMEOUT = 60.0
 LOG_LINES = 40
-# Credentials the remote-control process must never see: commands from the ChatGPT app get no
-# Home Assistant token and no Supervisor token, whatever the chat path is given.
+# Keep the chat path's explicitly configured Core API pair. Supervisor tokens
+# and per-turn MCP capabilities never belong to a relay process.
 STRIPPED_ENV = (
-    "SUPERVISOR_TOKEN", "HASSIO_TOKEN", "HA_TOKEN", "HA_URL",
+    "SUPERVISOR_TOKEN", "HASSIO_TOKEN",
     "HA_VERIFICATION_CAPABILITY", "HA_DATA_CAPABILITY", "HA_DATA_SOCKET",
 )
 
@@ -106,7 +106,7 @@ def build_command(codex_binary: str, name: str, *args: str) -> list[str]:
 
 
 def remote_env(base: dict[str, str]) -> dict[str, str]:
-    """Return the environment for the remote-control process: the chat path's, without any credential."""
+    """Keep the configured Core API pair, stripping Supervisor and per-turn credentials."""
     env = dict(base)
     for key in STRIPPED_ENV:
         env.pop(key, None)
@@ -744,7 +744,7 @@ class Supervisor:
         name = machine_name(self.name_factory())
         try:
             result = self.run(self._command("remote-control", "pair"),
-                              env=remote_env(self.env_factory()), capture_output=True, text=True,
+                              env=remote_env(self.env_factory()), cwd="/config", capture_output=True, text=True,
                               timeout=PAIR_TIMEOUT, check=False)
         except (OSError, subprocess.SubprocessError) as exc:
             return False, {**self.snapshot(), "error": f"Codex could not start pairing: {exc}"}
@@ -772,7 +772,7 @@ class Supervisor:
         if self._name_supported is None or self._checked_name != name:
             self._checked_name = name
             try:
-                probe = self.run(build_command("/bin/true", name), env=remote_env(self.env_factory()),
+                probe = self.run(build_command("/bin/true", name), env=remote_env(self.env_factory()), cwd="/config",
                                  capture_output=True, text=True, timeout=10, check=False)
                 self._name_supported = probe.returncode == 0
             except (OSError, subprocess.SubprocessError):
@@ -810,7 +810,7 @@ class Supervisor:
             started = self.clock()
             try:
                 proc = self.popen(self._command("remote-control", "--no-daemon"),
-                                  env=remote_env(self.env_factory()), stdin=subprocess.DEVNULL,
+                                  env=remote_env(self.env_factory()), cwd="/config", stdin=subprocess.DEVNULL,
                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                   start_new_session=True)
             except OSError as exc:

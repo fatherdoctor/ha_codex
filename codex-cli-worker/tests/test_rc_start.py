@@ -179,7 +179,7 @@ class FurtherRegressions(unittest.TestCase):
             pair = sup._command('remote-control', 'pair')
             self.assertEqual(command[:-2], pair[:-2]); self.assertEqual(len(calls), 1)
             self.assertEqual(calls[0][0][-1], '/bin/true')
-            self.assertNotIn('HA_TOKEN', calls[0][1]['env'])
+            self.assertEqual(calls[0][1]['env']['HA_TOKEN'], 'synthetic')
             self.assertEqual(sup.snapshot()['name_state'], 'private-uts')
 
     def test_real_launch_namespace_failure_does_not_restart_in_name_loop(self):

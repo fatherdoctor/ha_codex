@@ -17,10 +17,16 @@ profile codex_cli_worker flags=(attach_disconnected,mediate_deleted) {
   /usr/bin/** rix,
   /usr/sbin/** rix,
   /usr/local/bin/** rix,
+  # The packaged CLI and unified exec server are immutable image files.
+  # AppArmor checks the resolved target of /usr/local/bin/codex and the
+  # codex-linux-sandbox alias, not just their symlink spellings.
+  /opt/codex/*/bin/** rix,
 
   # The wrapper forces capability removal before a sandboxed command starts.
   # Only the trusted Bubblewrap setup binary enters the capability-bearing
-  # child profile; the worker and Codex processes remain in this parent profile.
+  # child profile. A private-UTS relay also inherits that profile after the
+  # setup binary drops all capabilities, so its exec/transport rules must work
+  # for the same immutable Codex package and approved commands as the parent.
   /opt/codex-sandbox/bwrap rix,
   /opt/codex-sandbox/bwrap.real cx,
 
@@ -54,7 +60,9 @@ profile codex_cli_worker flags=(attach_disconnected,mediate_deleted) {
     #include <abstractions/base>
 
     file,
-    network netlink raw,
+    # Match the parent's transport access. Codex's own network namespace still
+    # confines unapproved commands; native approval does not bypass the gate.
+    network,
     capability net_admin,
     capability sys_admin,
     capability sys_chroot,
@@ -70,6 +78,7 @@ profile codex_cli_worker flags=(attach_disconnected,mediate_deleted) {
     /usr/bin/** rix,
     /usr/sbin/** rix,
     /usr/local/bin/** rix,
+    /opt/codex/*/bin/** rix,
     /opt/codex-sandbox/bwrap rix,
     /opt/codex-sandbox/bwrap.real rix,
     /config/** rix,

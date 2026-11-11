@@ -790,6 +790,10 @@ def ensure_runtime_files() -> None:
                 'approvals_reviewer = "user"',
                 'sandbox_mode = "workspace-write"',
                 'web_search = "cached"',
+                # Enrollment is in Codex's SQLite state, not in the image or
+                # the transient local control socket. Pin it to durable data.
+                f'sqlite_home = {json.dumps(str(CODEX_HOME))}',
+                'developer_instructions = ' + json.dumps(remote_control_instructions(read_options())),
                 "",
             ]
         ),
@@ -3930,6 +3934,24 @@ def home_assistant_api_instructions(options: dict[str, Any]) -> str:
         "HA_URL and HA_TOKEN environment variables: send the request to $HA_URL, for example "
         '$HA_URL/api/services/automation/reload, with the header "Authorization: Bearer $HA_TOKEN". '
         "Do not use http://supervisor/core, which does not accept this token, and never print the token.\n\n"
+    )
+
+
+def remote_control_instructions(options: dict[str, Any]) -> str:
+    """Give relay-created threads the same Core API path as chat tasks.
+
+    These instructions contain variable names only, never option values.
+    MCP capabilities from an individual chat turn are not reusable by a relay.
+    """
+    return (
+        "You are running in the Home Assistant add-on. Workspace: /config. Follow /config/AGENTS.md. "
+        "Keep API credentials private. A sandboxed command that needs network or file access outside its "
+        "sandbox must request native approval for that specific action. Never bypass a denial or request "
+        "permanent permission rules. Native approval does not supply credentials. "
+        "The chat page's per-turn verification and history MCP tools are not attached to relay threads. "
+        + (home_assistant_api_instructions(options) or
+           "No Core API token is configured for direct commands. Ask the owner to configure the app's "
+           "HA_TOKEN option; do not obtain credentials from stores or process environments.")
     )
 
 

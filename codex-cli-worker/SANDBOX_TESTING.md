@@ -36,6 +36,24 @@ The fake-Bubblewrap tests cover both true-command paths, recognized error reason
 
 These tests do not prove HAOS/AppArmor compatibility or filesystem isolation on the affected host.
 
+### Remote-control profile regression
+
+The private-UTS relay inherits the Bubblewrap child AppArmor profile. The normal worker readiness
+probe does not test that outer process tree. On a disposable worker image with the shipped
+`codex_cli_worker` profile loaded and `aa-exec` available, run:
+
+```sh
+HA_CODEX_PROFILE_EXEC_TEST=1 python3 -m unittest discover -s codex-cli-worker/tests -p test_rc_exec.py -v
+```
+
+This opt-in test runs the production private-name launch prefix under that profile, then uses the
+installed Codex package to execute a shell in each sandbox mode and a plain shell on the parent route.
+It uses a disposable Codex home and no relay, sign-in or Home Assistant request. An ordinary test run
+skips this check explicitly if it has not been enabled; enabling it makes a missing tool or denied exec
+a failure. It does not prove native approval delivery on the phone. The lead must additionally deny
+a remote escalation, allow a fresh one once, verify the ordinary sandboxed read, and repeat after an
+add-on image update: the app should reconnect with the same enrollment and no new pairing code.
+
 ## HAOS verification before release
 
 For changes to the wrapper or pinned CLI, build and install a candidate worker image in a test environment, keeping the existing protection and AppArmor settings. On the affected HAOS installation, verify both `read-only` and `workspace-write`; a successful `danger-full-access` run does not test the sandbox.
