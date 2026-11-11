@@ -5,6 +5,7 @@ Run inside the installed worker using the lead's SSH add-on/docker exec. This
 uses synthetic state, not CODEX_HOME, options, auth.json or a pairing session.
 """
 import argparse
+import base64
 import json
 import os
 from pathlib import Path
@@ -29,6 +30,53 @@ def clean_env(home: Path, runtime: Path) -> dict[str, str]:
     return env
 
 
+def verify_tool_state(observed: dict, relay_label: str, paths) -> None:
+    expected = {relay_label, relay_label + '///opt/codex-sandbox/bwrap.real'}
+    actual = observed['label']
+    if not actual.endswith(' (enforce)') or set(actual.removesuffix(' (enforce)').split('//&')) != expected:
+        raise AssertionError('Tool must retain the relay component and add its distinct enforcing tool component')
+    if observed.get('nnp') != '1':
+        raise AssertionError('Tool command did not retain NoNewPrivs=1')
+    if any(observed[key] not in (2, 13, 1, 30) for key in (*paths, 'proc_write')):
+        raise AssertionError('Sandbox could read or write a protected synthetic relay path')
+
+
+def exec_probe_command(socket: Path, params: dict) -> dict:
+    # Pinned 0.166 streams PTY bytes only in outputDelta notifications; the
+    # final response deliberately contains no duplicated stdout. Collect only
+    # this synthetic process's bounded stdout before its final response.
+    chunks = bytearray()
+
+    class OutputCapture:
+        def __init__(self, transport):
+            self.transport = transport
+
+        def __getattr__(self, name):
+            return getattr(self.transport, name)
+
+        def recv(self):
+            frame = self.transport.recv()
+            if frame and len(frame) <= 1024 * 1024:
+                message = json.loads(frame)
+                data = message.get('params', {})
+                if (message.get('method') == 'command/exec/outputDelta'
+                        and data.get('processId') == params.get('processId')
+                        and data.get('stream') == 'stdout'):
+                    encoded = data.get('deltaBase64', '')
+                    if data.get('capReached') or len(encoded) > 32768:
+                        raise ValueError('Synthetic probe output exceeded its bound')
+                    chunks.extend(base64.b64decode(encoded, validate=True))
+                    if len(chunks) > 16384:
+                        raise ValueError('Synthetic probe output exceeded its bound')
+            return frame
+
+    client = rc.ControlClient(socket, connector=lambda path: OutputCapture(rc.ControlClient._connect(path)))
+    result = client._request('command/exec', {**params, 'outputBytesCap': 16384}, 15, lambda: False)
+    if chunks:
+        result = {**result, 'stdout': chunks.decode('utf-8')}
+    return result
+
+
 def probe(binary: str, command_factory, root: Path, profile: str | None = None) -> list[dict]:
     home, runtime, work = (root / part for part in ('home', 'runtime', 'workspace'))
     for folder in (home, runtime, work):
@@ -40,6 +88,7 @@ def probe(binary: str, command_factory, root: Path, profile: str | None = None) 
     boot = ('import os,json;from pathlib import Path;import sys;'
             'Path(sys.argv[1]).write_text(json.dumps({"pid":os.getpid(),'
             '"label":Path("/proc/self/attr/current").read_text().strip(),'
+            '"nnp":dict(line.split(":",1) for line in Path("/proc/self/status").read_text().splitlines() if ":" in line)["NoNewPrivs"].strip(),'
             '"caps":{k:v.strip() for k,v in (line.split(":",1) for line in '
             'Path("/proc/self/status").read_text().splitlines() if line.startswith("Cap"))}}));'
             'os.execv(sys.argv[2],sys.argv[2:])')
@@ -66,6 +115,8 @@ def probe(binary: str, command_factory, root: Path, profile: str | None = None) 
         identity = json.loads(metadata.read_text())
         relay_label = identity['label']
         expected = profile + '///opt/codex-sandbox/relay-launcher' if profile else None
+        if identity['nnp'] != '1':
+            raise AssertionError('Relay did not enter NoNewPrivs=1 before tool launch')
         if any(int(value, 16) for value in identity['caps'].values()):
             raise AssertionError('Relay retained setup capabilities')
         if expected and relay_label.removesuffix(' (enforce)') != expected:
@@ -86,7 +137,7 @@ def probe(binary: str, command_factory, root: Path, profile: str | None = None) 
                 policy['writableRoots'] = [str(work)]
             # Read real labels and attempts only: no private bytes are returned.
             script = ('import json,os;from pathlib import Path;'
-                      'd={"label":Path("/proc/self/attr/current").read_text().strip()};'
+                      'd={"label":Path("/proc/self/attr/current").read_text().strip(),"nnp":dict(line.split(":",1) for line in Path("/proc/self/status").read_text().splitlines() if ":" in line)["NoNewPrivs"].strip()};'
                       'paths=json.loads(os.environ["PROBE_PATHS"]);'
                       '\nfor key,path in paths.items():\n'
                       ' try:\n'
@@ -110,23 +161,22 @@ def probe(binary: str, command_factory, root: Path, profile: str | None = None) 
                       'sandboxPolicy': policy, 'env': {'PROBE_PATHS': json.dumps(paths),
                       'PROBE_WRITE': f'/proc/{identity["pid"]}/cwd/probe-write' if expected else ''},
                       'timeoutMs': 10000}
-            result = rc.ControlClient(socket)._request('command/exec', params, 15, lambda: False)
+            result = exec_probe_command(socket, params)
             if result.get('exitCode') != 0:
                 raise AssertionError('Pipe command/exec failed')
             observed = json.loads(result['stdout'])
             if expected:
-                child_label = expected + '///opt/codex-sandbox/bwrap.real'
-                if observed['label'].removesuffix(' (enforce)') != child_label:
-                    raise AssertionError('Actual tool label differs from the relay and expected sandbox label')
-                if any(observed[key] not in (2, 13, 1, 30) for key in (*paths, 'proc_write')):
-                    raise AssertionError('Sandbox could read a protected synthetic relay path')
+                verify_tool_state(observed, expected, paths)
             results.append({'mode': mode, 'tty': False, 'exit': 0, **observed})
-            result = rc.ControlClient(socket)._request('command/exec', {
-                **params, 'command': ['/bin/sh', '-c', 'printf synthetic-pty-ok'],
-                'tty': True, 'processId': 'probe-' + mode}, 15, lambda: False)
+            result = exec_probe_command(socket, {
+                **params, 'command': [sys.executable, '-c', script],
+                'tty': True, 'processId': 'probe-' + mode})
             if result.get('exitCode') != 0:
                 raise AssertionError('PTY command/exec failed')
-            results.append({'mode': mode, 'tty': True, 'exit': 0})
+            observed = json.loads(result['stdout'])
+            if expected:
+                verify_tool_state(observed, expected, paths)
+            results.append({'mode': mode, 'tty': True, 'exit': 0, **observed})
         # Only the unmanaged native fixture exercises this standalone route.
         # The installed worker's managed policy must keep refusing full access.
         if profile is None:
@@ -135,7 +185,7 @@ def probe(binary: str, command_factory, root: Path, profile: str | None = None) 
                           'sandboxPolicy': {'type': 'dangerFullAccess'}, 'timeoutMs': 10000}
                 if tty:
                     params.update(tty=True, processId='probe-outside')
-                result = rc.ControlClient(socket)._request('command/exec', params, 15, lambda: False)
+                result = exec_probe_command(socket, params)
                 if result.get('exitCode') != 0:
                     raise AssertionError('Outside-sandbox execution failed')
                 results.append({'mode': 'outside-synthetic', 'tty': tty, 'exit': 0,

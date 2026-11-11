@@ -6,7 +6,7 @@ This worker includes a temporary workaround for [upstream Codex issue #44329](ht
 
 The `codex-bwrap` wrapper recognizes Codex's internal, harmless `/bin/true` or `/usr/bin/true` proc-mount probe by its namespace flags and exact command after `--`. Only that probe uses `codex-bwrap-probe.py`. On failure, the helper changes complete, recognized `Can't mount proc on /proc` diagnostic lines to `Can't mount proc on /newroot/proc`, preserving the original failure status. This lets Codex select its own no-proc fallback.
 
-No Bubblewrap arguments are removed, permissions are not expanded, and normal task commands continue through the original direct `exec` path with `--cap-drop ALL`. The CLI version, model choices, integration, AppArmor policy, and sandbox defaults are unchanged. There is no automatic downgrade to `danger-full-access`.
+No Bubblewrap arguments are removed, permissions are not expanded, and normal task commands continue through the original direct `exec` path with `--cap-drop ALL`. That proc-mount workaround does not change the CLI version, model choices, integration or sandbox defaults. The separate relay profile design is described below. There is no automatic downgrade to `danger-full-access`.
 
 The no-proc fallback is not identical to mounting a fresh `/proc`: it retains the other sandbox restrictions but can expose some process metadata from the app container. This workaround does not add host PID access.
 
@@ -38,19 +38,41 @@ These tests do not prove HAOS/AppArmor compatibility or filesystem isolation on 
 
 ### Remote-control profile regression
 
-The relay has its own nested AppArmor label; tool sandboxes enter a further nested label.
+The relay has its own nested AppArmor label. Relay tools retain that component and add the
+further nested tool component as a stack while `NoNewPrivs=1` is already set. An immutable
+`bwrap.real` guard performs the narrow `AA_CHANGE_STACK` operation, checks the actual label
+and NNP, then execs the fixed native `bwrap.exec`. A refused or missing stack fails closed;
+it never starts native Bubblewrap under only the relay label. The chat tool path retains
+its existing profile. The public mask/proc wrapper is unchanged.
+
+**Install a version update before testing an AppArmor change.** On the lab's Supervisor,
+`ha apps rebuild` does not reload the profile. A same-version rebuild does not reload it. The release/lead must use a bumped candidate
+version and an add-on version update, then confirm the os-agent profile-load record. Do not
+count a rebuild against a stale loaded profile as a test of this policy. This card changes
+no version itself. The HAOS worker container is `app_local_codex_cli_worker`, not an `addon_`
+prefix. If the existing SSH add-on has no Docker CLI/socket, stop that step and report
+not run; do not disable its protection or add an unreviewed endpoint to get around it.
 No `aa-exec` or source tests are needed in the image. From the lead's SSH add-on shell, select the
 candidate worker container (not a host-wide profile change) and run:
 
 ```sh
-docker exec <worker-container> python3 /relay_diagnostics.py --profile local_codex_cli_worker
-docker exec <worker-container> python3 /relay_diagnostics.py --profile local_codex_cli_worker --plain
+docker exec app_local_codex_cli_worker python3 /relay_diagnostics.py --profile local_codex_cli_worker
+docker exec app_local_codex_cli_worker python3 /relay_diagnostics.py --profile local_codex_cli_worker --plain
 ```
 
 Use the actual Supervisor profile name if it differs from `local_codex_cli_worker`. The probe
 requires that actual enforcing parent label, checks the post-setup relay label and all-zero
 capability sets, then exercises the pinned app-server's `command/exec` pipe and PTY paths in both
-sandbox modes. It checks the actual child label and attempts only synthetic reads through the
+sandbox modes. Both pipe and PTY commands must report `nnp: "1"` and an enforcing label with exactly these
+two components (their printed order may differ):
+
+- `local_codex_cli_worker///opt/codex-sandbox/relay-launcher`
+- `local_codex_cli_worker///opt/codex-sandbox/relay-launcher///opt/codex-sandbox/bwrap.real`
+
+The separator is `//&`. A singleton relay label, singleton tool label, missing NNP or any
+readable/writable protected probe is a failure. The two modes produce four JSON lines,
+including labels/NNP/errnos for PTY as well as pipes. These are actual command results,
+not labels inferred from the profile text. The probe attempts only synthetic reads through the
 fixed control parent and the relay's `/proc/<pid>/root`, `cwd` and `environ`, plus a synthetic
 write through `cwd`. It fails if any is accessible. Errno 2 means the PID/path is hidden; errno
 13/1 means denied, and errno 30 means read-only. Capture those results and the host's AppArmor
@@ -73,10 +95,25 @@ HA_TEST_RELAY_NAMESPACE=1 HA_TEST_CODEX=/path/to/pinned/codex python3 -m unittes
 ```
 
 This native test uses the production outer mount flags, with a local Bubblewrap path, and no loaded
-HAOS profile. Its negative removes only `--dev-bind /dev /dev`: `command/exec` must fail. The positive
+HAOS profile. Its negative removes only the fresh `--dev /dev` and shared-memory bind: `command/exec` must fail. The positive
 covers pipes and PTYs in read-only, workspace-write and a disposable unmanaged outside-sandbox
 fixture. The latter is not a native approval or a managed-policy bypass. Local syscall tracing
 identified `EACCES` opening `/dev/null` and `/dev/ptmx`; the old inherited-exec rule was a no-op.
+The outer relay now uses upstream's minimal `--dev /dev` plus
+`--bind-try /dev/shm /dev/shm`, rather than exposing all container devices.
+
+Launcher failures name only a fixed setup stage: relay AppArmor label entry, capability
+removal/verification, relay-tool stack transition/verification or fixed binary exec. No
+argument, environment value, raw exception or caller-supplied label is printed. A missing
+relay label after an update should first be checked against the actual profile-load record.
+
+Kernel references for the NNP invariant and stack operation:
+[exec NNP subset check](https://github.com/torvalds/linux/blob/v6.18/security/apparmor/domain.c#L978),
+[stack proc attribute](https://github.com/torvalds/linux/blob/v6.18/security/apparmor/lsm.c), and
+[HA Supervisor profile-name adjustment](https://github.com/home-assistant/supervisor/blob/main/supervisor/utils/apparmor.py).
+Supervisor rewrites the root declaration only. The stack target is computed from the
+kernel's current relay label; the permission pattern uses AppArmor's `profile_name` expansion.
+The image does not use a hard-coded local/repository prefix or an unconfined transition.
 
 The lead must additionally use the real phone relay to deny an escalation, allow a fresh one once,
 verify the ordinary sandboxed read and Core API call using configured variables, and repeat after

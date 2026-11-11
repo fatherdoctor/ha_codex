@@ -35,14 +35,15 @@ RUN apk add --no-cache \
     tar \
     util-linux-misc
 
-RUN install -D -m 0755 /usr/bin/bwrap /opt/codex-sandbox/bwrap.real \
+RUN install -D -m 0755 /usr/bin/bwrap /opt/codex-sandbox/bwrap.exec \
     && install -m 0755 /usr/bin/bwrap /opt/codex-sandbox/relay-bwrap
 
 COPY relay-launcher /opt/codex-sandbox/relay-launcher
+COPY relay-tool-launcher /opt/codex-sandbox/bwrap.real
 COPY codex-bwrap /opt/codex-sandbox/bwrap
 COPY codex-bwrap-probe.py /opt/codex-sandbox/codex-bwrap-probe.py
 
-RUN chmod 0755 /opt/codex-sandbox/bwrap /opt/codex-sandbox/relay-launcher
+RUN chmod 0555 /opt/codex-sandbox/bwrap /opt/codex-sandbox/relay-launcher /opt/codex-sandbox/bwrap.real /opt/codex-sandbox/bwrap.exec /opt/codex-sandbox/relay-bwrap
 
 ENV PATH="/opt/codex-sandbox:${PATH}"
 

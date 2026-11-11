@@ -89,7 +89,12 @@ profile codex_cli_worker flags=(attach_disconnected,mediate_deleted) {
     pivot_root,
     signal,
     /opt/codex-sandbox/relay-bwrap rix,
-    /opt/codex-sandbox/bwrap.real cx,
+    # bwrap.real is an immutable Python guard, not the native binary. It must
+    # add the nested tool component and verify NNP before exec'ing bwrap.exec.
+    # change_profile's label pattern expands profile_name; named exec targets
+    # do not, and Supervisor rewrites only the root profile declaration.
+    /opt/codex-sandbox/bwrap.real rix,
+    change_profile -> &@{profile_name}///opt/codex-sandbox/bwrap.real,
 
     profile /opt/codex-sandbox/bwrap.real flags=(attach_disconnected,mediate_deleted) {
       #include <abstractions/base>

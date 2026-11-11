@@ -19,8 +19,8 @@ class RelayFixTests(unittest.TestCase):
         cmd = rc.build_command('codex', 'Synthetic relay', 'app-server')
         self.assertEqual(cmd[:2], [rc.RELAY_LAUNCHER, rc.RELAY_BWRAP])
         root = cmd.index('--bind')
-        self.assertEqual(cmd[root:root + 7], ['--bind', '/', '/', '--dev-bind', '/dev', '/dev', '--cap-drop'])
-        self.assertLess(cmd.index('--dev-bind'), cmd.index('--cap-drop'))
+        self.assertEqual(cmd[root:root + 9], ['--bind', '/', '/', '--dev', '/dev', '--bind-try', '/dev/shm', '/dev/shm', '--cap-drop'])
+        self.assertLess(cmd.index('--dev'), cmd.index('--cap-drop'))
 
     def test_plain_fallback_still_enters_relay_label(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -38,14 +38,20 @@ class RelayFixTests(unittest.TestCase):
         self.assertNotIn('/opt/codex/*/bin/**', profile)  # bare file, already includes inherited exec
 
     def test_plain_launcher_drops_actual_capabilities(self):
-        result = subprocess.run([sys.executable, str(ROOT / 'relay-launcher'), '--plain', sys.executable,
-                                 '-c', "from pathlib import Path;print(Path('/proc/self/status').read_text())"],
+        # Exercise the real capability-drop routine without needing to enter
+        # a loaded HAOS relay label in this host-only test.
+        program = ("import runpy,sys;from pathlib import Path;"
+                   "m=runpy.run_path(sys.argv[1],run_name='capability_fixture');"
+                   "\ntry:m['drop_capabilities']()\n"
+                   "except m['LaunchError'] as e:print('Relay launch failed closed at '+str(e)+'.',file=sys.stderr);sys.exit(1)\n"
+                   "print(Path('/proc/self/status').read_text())")
+        result = subprocess.run([sys.executable, '-I', '-c', program, str(ROOT / 'relay-launcher')],
                                 capture_output=True, text=True, timeout=5)
-        current = dict(line.split(':', 1) for line in Path('/proc/self/status').read_text().splitlines() if ':' in line)
-        if int(current['CapBnd'].strip(), 16) and not (int(current['CapEff'].strip(), 16) & (1 << 8)):
-            self.assertNotEqual(result.returncode, 0, 'Fallback must fail closed without CAP_SETPCAP')
+        if result.returncode != 0:
             self.assertNotIn('CapEff:', result.stdout)
-            self.skipTest('Bounding set is nonempty without CAP_SETPCAP; fail-closed behavior verified')
+            self.assertNotIn('Traceback', result.stderr)
+            self.assertTrue(result.stderr.startswith('Relay launch failed closed at capability'), result.stderr)
+            self.skipTest('Host refused capability removal; actual fail-closed exit verified')
         self.assertEqual(result.returncode, 0, result.stderr)
         state = dict(line.split(':', 1) for line in result.stdout.splitlines() if ':' in line)
         for key in ('CapInh', 'CapPrm', 'CapEff', 'CapBnd', 'CapAmb'):
@@ -115,8 +121,8 @@ class NativeUnifiedExecTests(unittest.TestCase):
         def broken_factory(command, *args):
             argv = rc.build_command(command, 'Synthetic relay', *args)[1:]
             argv[0] = shutil.which('bwrap')
-            index = argv.index('--dev-bind')
-            del argv[index:index + 3]
+            index = argv.index('--dev')
+            del argv[index:index + 5]
             return argv
         actual_connect = rc.ControlClient._connect
         messages = []

@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/python3 -I
 """Immutable AppArmor transition point for the relay, separate from tool sandboxes.
 
 The namespace path delegates privilege removal to Bubblewrap's --cap-drop ALL.
@@ -11,25 +11,26 @@ import sys
 from pathlib import Path
 
 
+class LaunchError(ValueError):
+    """A fixed, noncredential failure stage."""
+
+
 def drop_capabilities() -> None:
     libc = ctypes.CDLL(None, use_errno=True)
 
-    def prctl(option, *arguments):
+    def prctl(option, *arguments, stage):
         if libc.prctl(ctypes.c_int(option), *(ctypes.c_ulong(x) for x in arguments)) < 0:
-            code = ctypes.get_errno()
-            raise OSError(code, os.strerror(code))
+            raise LaunchError(stage)
 
-    # Keep CAP_SETPCAP until the bounding set has been cleared. Skip already
-    # absent bits: an unprivileged process can safely start with an empty set.
     for capability in range(64):
         present = libc.prctl(23, capability, 0, 0, 0)  # PR_CAPBSET_READ
         if present < 0:
             if ctypes.get_errno() == errno.EINVAL:
                 break
-            raise OSError(ctypes.get_errno(), 'Could not read the capability bounding set')
+            raise LaunchError('capability bounding-set read')
         if present:
-            prctl(24, capability, 0, 0, 0)  # PR_CAPBSET_DROP; fail closed without SETPCAP
-    prctl(47, 4, 0, 0, 0)  # PR_CAP_AMBIENT, PR_CAP_AMBIENT_CLEAR_ALL
+            prctl(24, capability, 0, 0, 0, stage='capability bounding-set drop')
+    prctl(47, 4, 0, 0, 0, stage='ambient capability clear')
 
     class Header(ctypes.Structure):
         _fields_ = [('version', ctypes.c_uint32), ('pid', ctypes.c_int)]
@@ -40,32 +41,43 @@ def drop_capabilities() -> None:
 
     header, data = Header(0x20080522, 0), (Data * 2)()
     if libc.capset(ctypes.byref(header), ctypes.byref(data)) != 0:
-        raise OSError(ctypes.get_errno(), 'Could not clear capabilities')
-    prctl(38, 1, 0, 0, 0)  # PR_SET_NO_NEW_PRIVS
-    fields = dict(line.split(':', 1) for line in Path('/proc/self/status').read_text().splitlines()
-                  if ':' in line)
-    if any(int(fields[key].strip(), 16) for key in ('CapInh', 'CapPrm', 'CapEff', 'CapBnd', 'CapAmb')):
-        raise OSError('Relay fallback retained capabilities')
-    if fields['NoNewPrivs'].strip() != '1':
-        raise OSError('Relay fallback could gain privileges')
+        raise LaunchError('capability set clear')
+    prctl(38, 1, 0, 0, 0, stage='NoNewPrivs set')
+    try:
+        fields = dict(line.split(':', 1) for line in Path('/proc/self/status').read_text().splitlines()
+                      if ':' in line)
+        if any(int(fields[key].strip(), 16) for key in ('CapInh', 'CapPrm', 'CapEff', 'CapBnd', 'CapAmb')):
+            raise LaunchError('capability-set verification')
+        if fields['NoNewPrivs'].strip() != '1':
+            raise LaunchError('NoNewPrivs verification')
+    except (OSError, KeyError, ValueError) as error:
+        if isinstance(error, LaunchError):
+            raise
+        raise LaunchError('capability/status verification') from None
 
 
 def main() -> None:
+    label = Path('/proc/self/attr/current').read_text().strip()
+    if not label.endswith('///opt/codex-sandbox/relay-launcher (enforce)') or '//&' in label:
+        raise LaunchError('relay AppArmor label entry (reload the updated profile)')
     command = sys.argv[1:]
     if command[:1] == ['--plain']:
         drop_capabilities()
         command = command[1:]
     elif not command or command[0] != '/opt/codex-sandbox/relay-bwrap':
-        raise ValueError('Expected the installed relay namespace helper or --plain')
+        raise LaunchError('relay namespace helper selection')
     if not command:
-        raise ValueError('No relay command')
-    os.execv(command[0], command)
+        raise LaunchError('relay command selection')
+    try:
+        os.execv(command[0], command)
+    except OSError:
+        raise LaunchError('relay namespace helper or Codex exec') from None
 
 
 if __name__ == '__main__':
     try:
         main()
-    except (OSError, ValueError):
-        # Never echo command arguments, environment or exception details.
-        print('Relay launch failed closed before starting Codex.', file=sys.stderr)
+    except (OSError, ValueError, KeyError) as error:
+        stage = str(error) if isinstance(error, LaunchError) else 'relay label/status read'
+        print('Relay launch failed closed at ' + stage + '.', file=sys.stderr)
         sys.exit(1)

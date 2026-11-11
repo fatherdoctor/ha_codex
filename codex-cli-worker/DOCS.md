@@ -315,21 +315,25 @@ Its separate Bubblewrap binary sets a private UTS host name (`--unshare-user --u
 "Home Assistant"`) and drops all capabilities before Codex starts. The root worker profile gains no
 capabilities. A namespace-only probe selects this route; if setup fails, the page and log show
 **Machine-name namespace unavailable**. The plain fallback still enters the relay label and clears
-all capability sets before starting Codex, failing closed if it cannot do so.
+all capability sets before starting Codex, failing closed if it cannot do so. Launcher errors
+identify a fixed label, stack, capability or exec stage without printing arguments or raw exceptions.
 
 The worker creates `/data/remote_control_control/` at startup, including with remote control off.
 The sandbox wrapper masks that fixed parent, so an earlier chat sandbox cannot see a later control
-socket through its ordinary path. The relay and each tool sandbox use different AppArmor labels;
-this prevents the base abstraction's same-label ptrace-read rule from granting a sandbox access to
+socket through its ordinary path. Relay tool commands retain the relay label and add a separate
+restrictive tool component while `NoNewPrivs=1`. An immutable guard verifies the actual stack
+before starting native Bubblewrap; the chat tool label is unchanged.
+This prevents the base abstraction's same-label ptrace-read rule from granting a sandbox access to
 the relay's `/proc/<pid>/root`, `cwd` or `environ` in the no-proc fallback. Loaded-label and proc-view
 isolation still require the lead's HAOS acceptance check described in
 [SANDBOX_TESTING.md](SANDBOX_TESTING.md#remote-control-profile-regression).
 
-**Relay execution (CX-RC-EXEC.f).** The reproduced unified-exec failure was a `nodev` root bind, not
+**Relay execution (CX-RC-EXEC.f2).** The reproduced unified-exec failure was a `nodev` root bind, not
 a missing executable rule. Under the previous outer `--bind / /`, opening `/dev/null` and
 `/dev/ptmx` failed with `EACCES`; pipe commands and PTY commands both failed before exec. The
-outer relay now applies `--dev-bind /dev /dev` after the root bind, preserving only the existing
-container devices. Removing that bind reproduces the native regression. The former `/opt` rules
+outer relay now applies `--dev /dev` after the root bind and preserves shared memory with
+`--bind-try /dev/shm /dev/shm`, exposing standard devices rather than the whole container device
+tree. Removing those device setup flags reproduces the native regression. The former `/opt` rules
 were redundant with `file,` and have been removed. Tool sandbox labels retain their narrower
 `network netlink raw,` rule; the relay alone keeps its parent transport access. Native approvals,
 managed requirements and the command check remain in effect. The relay starts in `/config`.

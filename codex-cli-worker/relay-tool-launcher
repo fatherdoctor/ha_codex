@@ -1,0 +1,83 @@
+#!/usr/bin/python3 -I
+"""Immutable bwrap entry: stack the relay's tool label without dropping its label.
+
+No caller-supplied program is run here. Only the fixed native Bubblewrap binary
+is exec'd, after the actual enforcing label and NNP postconditions are checked.
+Copyright 2026 The Backshop.
+"""
+import os
+from pathlib import Path
+import sys
+
+RELAY_SUFFIX = '///opt/codex-sandbox/relay-launcher'
+TOOL_SUFFIX = '///opt/codex-sandbox/bwrap.real'
+NATIVE_BWRAP = '/opt/codex-sandbox/bwrap.exec'
+
+
+class LaunchError(ValueError):
+    """A fixed, noncredential failure stage."""
+
+
+def read_label() -> str:
+    return Path('/proc/self/attr/current').read_text().strip()
+
+
+def read_nnp() -> str:
+    values = dict(line.split(':', 1) for line in Path('/proc/self/status').read_text().splitlines()
+                  if ':' in line)
+    return values['NoNewPrivs'].strip()
+
+
+def stack_label(target: str) -> None:
+    # AppArmor's AA_CHANGE_STACK operation adds confinement; it never replaces
+    # the relay label. Its permission is limited to this exact nested component.
+    with open('/proc/self/attr/current', 'w') as stream:
+        stream.write('stack ' + target)
+
+
+def prepare_tool_label() -> None:
+    try:
+        raw = read_label()
+        label, _, mode = raw.partition(' (')
+        parts = set(label.split('//&'))
+        relays = [item for item in parts if item.endswith(RELAY_SUFFIX)]
+        if not relays:
+            return  # Normal chat keeps its existing cx-selected tool profile.
+        if len(relays) != 1 or mode != 'enforce)':
+            raise LaunchError('enforcing relay AppArmor label')
+        relay = relays[0]
+        target = relay + TOOL_SUFFIX
+        expected = {relay, target}
+        if parts not in ({relay}, expected) or read_nnp() != '1':
+            raise LaunchError('relay-tool NoNewPrivs precondition')
+        if parts == {relay}:
+            try:
+                stack_label(target)
+            except OSError:
+                raise LaunchError('AppArmor relay-tool stack transition') from None
+        after = read_label()
+        if not after.endswith(' (enforce)') or set(after.removesuffix(' (enforce)').split('//&')) != expected:
+            raise LaunchError('AppArmor relay-tool stack verification')
+        if read_nnp() != '1':
+            raise LaunchError('relay-tool NoNewPrivs verification')
+    except (OSError, KeyError) as error:
+        raise LaunchError('relay-tool label/status read') from None
+
+
+def main() -> None:
+    prepare_tool_label()
+    try:
+        os.execv(NATIVE_BWRAP, [NATIVE_BWRAP, *sys.argv[1:]])
+    except OSError:
+        raise LaunchError('native Bubblewrap exec') from None
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (LaunchError, ValueError, KeyError):
+        # Never echo a label supplied by the environment, arguments or errors.
+        stage = sys.exc_info()[1]
+        message = str(stage) if isinstance(stage, LaunchError) else 'relay-tool setup validation'
+        print('Relay tool launch failed closed at ' + message + '.', file=sys.stderr)
+        sys.exit(1)
