@@ -2,6 +2,8 @@
 
 ## 0.1.81.2 (unreleased)
 
+- **Remote requests keep native approvals (CX-RC-ASK.f).** Normal light, lock, network and checked-file PermissionRequests receive no hook decision, so Codex can ask on the phone; the hook never auto-approves. Keep named refusals for credentials/process environments, full access, app settings/policy/rules and planted command/template definitions. The startup self-test checks normal ASK and security denial. Model-level category rules remain CX-PARITY's separate change.
+
 Permissions that ask, and only an administrator can answer. Sign-in without a terminal, a pause switch and a model pin.
 
 - **Watch closure fixes (CX-RC-START.f2).** Exempt only the root UI-owned YAML files from automatic undo; matching names in packages or other subfolders remain checked. Reuse verified SHA-256 recovery copies across files and restarts, with a 128-copy/64 MiB store limit. When a new copy will not fit, report without undoing or deleting older recovery copies.
