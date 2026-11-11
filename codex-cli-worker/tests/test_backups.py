@@ -435,7 +435,7 @@ class RunTests(unittest.TestCase):
         self.assertEqual(self.events[-1]["backups"], expected)
         self.assertEqual(task["unchecked_edits"], ["scripts.yaml"])
         self.assertEqual(task["details"], "Notes\n\nThe configuration edit check could not check these files without a "
-                         "verified earlier copy: scripts.yaml\n\nNo copy of the previous version was saved for: `scripts.yaml`. "
+                         "verified earlier copy: scripts.yaml; review these before any reload or restart.\n\nNo copy of the previous version was saved for: `scripts.yaml`. "
                          "Use a Home Assistant backup to restore such a file.")
         self.assertFalse((self.run_dir / server.SNAPSHOT_FILE).exists())
         self.assertNotIn("snapshot", task)

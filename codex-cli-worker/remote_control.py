@@ -289,7 +289,7 @@ class ConfigWatch:
                 continue
         scripts = self.refused_scripts(texts, rules, enabled)
         lines = {rel: found for rel, text in texts.items() if (found := gate_rules.active_findings(text, rules, scripts, enabled))}
-        blocks = {rel: found for rel, text in texts.items() if enabled and (found := gate_rules.refused_blocks(text, rules, scripts, enabled))}
+        blocks = {rel: found for rel, text in texts.items() if (found := gate_rules.refused_blocks(text, rules, scripts, enabled))}
         return lines, blocks
 
     def has_baseline(self) -> bool:

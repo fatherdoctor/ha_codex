@@ -155,6 +155,7 @@ class CompletedExchangeTests(unittest.TestCase):
             if not verified_copy:
                 self.assertEqual(task['unchecked_edits'], ['sample.yaml'])
                 self.assertIn('could not check', task['details'])
+                self.assertIn('review these before any reload or restart', task['details'])
                 self.assertEqual(task['refused_edits'], [])
         finally:
             if runner is not None and runner.is_alive():

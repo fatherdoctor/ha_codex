@@ -12,9 +12,10 @@ app's Allow and Deny buttons. The check below holds outside the model:
 - ``find_refused`` is the scan both sides use on YAML text. The worker runs it
   over ``/config`` to catch edits the hook cannot see (a shell command that
   writes a file) and raises a Home Assistant repair for them.
-- ``refused_blocks`` hashes top-level YAML blocks for the opt-in category
-  check. With categories off, an unchanged always-on call does not make a
-  changed trigger or condition a newly planted call.
+- ``refused_blocks`` always hashes definition, platform and template blocks,
+  and hashes other refused blocks for the opt-in category check. With
+  categories off, an unchanged call does not make a changed trigger or
+  condition a newly planted call.
 
 The refused domains live in one file, ``policy/refused-domains.json``
 (``/usr/share/ha_codex/refused-domains.json`` in the image). When that file is
@@ -54,7 +55,7 @@ STRICT_RULES: dict[str, Any] = {
     "reaches_anything": ["hassio", "pyscript", "python_script", "rest_command", "shell_command"],
     "message_script_words": ["alert", "announce", "call", "message", "notification", "notify", "sms", "text"],
     "runs_on_load_platforms": ["command_line", "rest", "scrape"],
-    "runs_on_load_keys": ["command_line", "rest", "rest_command", "scrape", "shell_command"],
+    "runs_on_load_keys": ["command_line", "rest", "rest_command", "scrape", "shell_command", "python_script", "pyscript"],
     "device_actions": {
         "alarm_control_panel": ["arm_away", "arm_custom_bypass", "arm_home", "arm_night", "arm_vacation",
                                 "disarm", "trigger"],
@@ -82,6 +83,7 @@ PLATFORM_RE = re.compile(r"""^\s*-?\s*platform\s*:\s*["']?([a-z0-9_]+)["']?\s*(?
 # A definition key whose value is a block or an include: `shell_command:`, `  rest: !include rest.yaml`.
 DEFINITION_KEY_RE = re.compile(r"""^\s*-?\s*([a-z0-9_]+)\s*:\s*(?:!include\S*\s+\S+\s*)?(?:#.*)?$""")
 SCRIPT_REF_RE = re.compile(r"""\bscript\.([a-z0-9_]+)\b""")
+SCRIPT_TARGET_RE = re.compile(r"""^\s*-?\s*(?:["']?script\.|entity_id\s*:|target\s*:\s*\{\s*entity_id\s*:)""")
 # The script domain's own services are not scripts.
 SCRIPT_SERVICES = {"turn_on", "turn_off", "toggle", "reload"}
 
@@ -234,7 +236,7 @@ def find_refused(text: str, rules: dict[str, Any], refused_scripts: frozenset[st
                     break
         if not match:
             for ref in SCRIPT_REF_RE.findall(line):
-                if ref in SCRIPT_SERVICES or not re.match(r"^\s*-?\s*(?:entity_id\s*:\s*)?[\"']?script\.", line):
+                if ref in SCRIPT_SERVICES or not SCRIPT_TARGET_RE.match(line):
                     continue
                 if ref in refused_scripts:
                     findings.append(Finding(number, f"a call to script.{ref}, which itself acts on a refused domain", line,
@@ -263,19 +265,23 @@ def refused_blocks(text: str, rules: dict[str, Any], scripts: set[str] | frozens
                    categories: bool | None = None) -> dict[str, tuple[int, int, str]]:
     """Return {hash: (first line number, last line number, first line)} for each top-level block of this YAML text that holds a refused line.
 
+    Definitions, platforms and templates stay hashed with categories off;
+    blocks containing only unchanged calls then follow normal approval.
     A block starts at a line that begins in the first column (``- id: ...`` in
     automations.yaml, ``goodnight:`` in scripts.yaml, ``automation:`` in a
     package). Changing a trigger or a condition of an automation that already
     holds a refused action leaves the action line as it was, so the line
     findings see nothing new; the block's hash changes.
     """
+    enabled = category_refusals_enabled() if categories is None else categories
     out: dict[str, tuple[int, int, str]] = {}
     block: list[str] = []
     start = 1
     for number, line in enumerate(text.splitlines() + ["__end__"], start=1):
         if line[:1] and not line[:1].isspace() and not line.startswith("#") and block:
             body = "\n".join(item.rstrip() for item in block).strip()
-            if body and active_findings(body, rules, scripts, categories):
+            findings = active_findings(body, rules, scripts, enabled)
+            if body and any(enabled or finding.kind in {"runs_on_load", "template"} for finding in findings):
                 out[hashlib.sha256(body.encode("utf-8")).hexdigest()] = (start, number - 1, block[0])
             block, start = [], number
         block.append(line)
@@ -293,10 +299,10 @@ def new_refused(before: str, after: str, rules: dict[str, Any], scripts: set[str
             counts[item.key()] -= 1
         else:
             found.append(item)
-    # With categories off, an unchanged security call follows normal approval;
-    # changing its trigger or condition does not create a new call.
-    previous = refused_blocks(before, rules, scripts, enabled) if enabled else {}
-    for digest, (first, last, text) in (refused_blocks(after, rules, scripts, enabled) if enabled else {}).items():
+    # Definition/platform/template bodies stay checked. With categories off,
+    # refused_blocks skips blocks whose active findings are call lines alone.
+    previous = refused_blocks(before, rules, scripts, enabled)
+    for digest, (first, last, text) in refused_blocks(after, rules, scripts, enabled).items():
         if digest not in previous and not any(first <= item.line <= last for item in found):
             found.append(Finding(first, BLOCK_CHANGED, text))
     return found

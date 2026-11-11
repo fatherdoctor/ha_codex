@@ -4966,7 +4966,8 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
             task_id, reason, final.get("summary"), final.get("details"), lifecycle_error):
         final["summary"] = SIGN_IN_EXPIRED_SUMMARY
     if unchecked_edits:
-        note = "The configuration edit check could not check these files without a verified earlier copy: " + ", ".join(unchecked_edits)
+        note = ("The configuration edit check could not check these files without a verified earlier copy: "
+                + ", ".join(unchecked_edits) + "; review these before any reload or restart.")
         final["details"] = "\n\n".join(part for part in (str(final.get("details") or "").strip(), note) if part)
     if planted_edits or planted_error:
         unrestored = [item["path"] for item in planted_edits if not item["undone"]]
