@@ -1,0 +1,246 @@
+# Upstream watch for a patch fork (fatherdoctor; David 2026-10-15: "one we should implement for all forks").
+# Daily, and from the Actions tab: when the upstream repo publishes a release newer than the version our patches are
+# built on, open ONE issue (deduplicated by title) with the release notes, the compare link, each patch branch's
+# rebase result and the test result with the patches applied. It never pushes, tags, releases or opens a PR: the
+# issue is the trigger for a person (or a builder run) to rebase the patches.
+# Generic: a new fork copies this file unchanged and edits only the `env:` block. See docs/upstream-watch.md.
+# Lives on the fork's DEFAULT branch (scheduled workflows only run there), as .github/workflows/upstream-watch.yml.
+name: Upstream watch
+
+on:
+  schedule:
+    - cron: "17 11 * * *"   # daily, 11:17 UTC (early morning in the US)
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: "Test against this upstream tag/branch instead of the latest release (e.g. main). Empty = latest release."
+        required: false
+        default: ""
+      dry_run:
+        description: "Report in the run summary only; do not open an issue."
+        type: boolean
+        required: false
+        default: false
+      test_branch:
+        description: "Also run the tests on this one patch branch, rebased (e.g. refuse-raises-error). Empty = none."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  issues: write
+  actions: write   # only for the last step: re-enable this workflow so GitHub's 60-day idle rule never switches it off
+
+concurrency:
+  group: upstream-watch
+  cancel-in-progress: false
+
+env:
+  # ---- the only part a new fork edits ----
+  UPSTREAM_REPO: moryoav/home-assistant-codex                    # owner/repo of the upstream
+  TAG_PREFIX: "v"                                                # upstream tags look like v0.1.81
+  PATCHES_BRANCH: main                                           # a full fork: main carries our changes; its version file names our base
+  VERSION_FILE: custom_components/codex_cli/manifest.json        # JSON file with a "version" field on PATCHES_BRANCH
+  BASE_PARTS: "3"                                                # our version is upstream's + one more number: 0.1.81.1 -> 0.1.81
+  PATCH_BRANCHES: ""                                             # no separate patch branches: only the merge of the tag into main is tried
+  TEST_CMD: "uv run --no-project --python 3.12 --with aiohttp --with flask --with pyyaml --with qrcode --with requests --with websocket-client python -m unittest discover -s codex-cli-worker/tests"
+  LABEL: upstream-release
+  # ----------------------------------------
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60   # up to four test runs of at most 10 minutes each, plus setup and the rebases
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false   # the fork is public: fetching needs no token, so none is left in .git/config
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e   # v6.8.0
+
+      - name: Compare, rebase, test, report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_REF: ${{ inputs.upstream_ref }}
+          INPUT_DRY: ${{ inputs.dry_run }}
+          INPUT_BRANCH: ${{ inputs.test_branch }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          # Explicit errexit: Actions already runs this as `bash -e`, but a run outside Actions (the offline check)
+          # does not, and there a failed `git fetch upstream` would leave FETCH_HEAD on our own branch: a false green.
+          set -euo pipefail
+          git config user.name "upstream-watch"; git config user.email "upstream-watch@users.noreply.github.com"
+          out="$RUNNER_TEMP/report.md"; : > "$out"
+          say() { echo "$*" | tee -a "$GITHUB_STEP_SUMMARY"; }
+          # A ref name from upstream's API or the dispatch form goes to git as a bare argument: refuse anything that
+          # could be read as an option (a leading `-`) or is not a plain tag/branch name.
+          check_ref() { [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || { say "Refusing odd ref name '$1'"; exit 1; }; }
+          # test_branch must be one of our own patch branches (never an arbitrary ref).
+          if [ -n "${INPUT_BRANCH:-}" ]; then
+            ok=""; for b in $PATCH_BRANCHES; do if [ "$b" = "$INPUT_BRANCH" ]; then ok=1; fi; done
+            [ -n "$ok" ] || { say "test_branch '$INPUT_BRANCH' is not one of: $PATCH_BRANCHES"; exit 1; }
+          fi
+
+          # 1. Our base version: the patches branch's version minus the fork's own trailing number.
+          git fetch -q origin "$PATCHES_BRANCH" $PATCH_BRANCHES || { say "Cannot fetch our branches"; exit 1; }
+          ours=$(git show "origin/$PATCHES_BRANCH:$VERSION_FILE" | jq -r .version) || { say "No version in $VERSION_FILE"; exit 1; }
+          base=$(echo "$ours" | cut -d. -f1-"$BASE_PARTS")
+
+          # 2. Upstream's latest release (or the ref asked for by hand).
+          if [ -n "${INPUT_REF:-}" ]; then
+            check_ref "$INPUT_REF"
+            tag="$INPUT_REF"; notes="(manual run against $INPUT_REF; no release notes)"; rel_url="https://github.com/$UPSTREAM_REPO/tree/$INPUT_REF"
+          else
+            rel=$(gh api "repos/$UPSTREAM_REPO/releases/latest") || { say "Cannot read upstream's latest release"; exit 1; }
+            tag=$(echo "$rel" | jq -r .tag_name); check_ref "$tag"; rel_url=$(echo "$rel" | jq -r .html_url)
+            # Cut in jq (characters, never half a multibyte one). Then make the notes safe to paste into OUR repo:
+            # `#123` -> `owner/repo#123` (a bare one would link to our issue 123), then break `@user` mentions with a
+            # zero-width space entity so nobody upstream is notified from here. A `#` right after `&` is an HTML entity
+            # (upstream's own `&#39;`, or the `&#8203;` added next), never an issue number, so it is left alone.
+            notes=$(echo "$rel" | jq -r '.body // "" | .[:20000]' \
+                    | sed -E 's%(^|[^A-Za-z0-9/&])#([0-9]+)%\1'"$UPSTREAM_REPO"'#\2%g' \
+                    | sed -E 's/@([A-Za-z0-9])/@\&#8203;\1/g')
+          fi
+          up="${tag#"$TAG_PREFIX"}"
+          say "Our patches ($PATCHES_BRANCH) are version $ours, built on upstream $base. Upstream: $tag."
+
+          if [ -z "${INPUT_REF:-}" ]; then
+            newest=$(printf '%s\n%s\n' "$base" "$up" | sort -V | tail -1)
+            if [ "$up" = "$base" ] || [ "$newest" = "$base" ]; then say "Up to date: nothing to do."; exit 0; fi
+          fi
+          title="Upstream $tag released - rebase patches"
+
+          # 3. One issue per release: an existing issue with this exact title (open or closed) ends the run.
+          if [ "${INPUT_DRY:-false}" != "true" ]; then
+            # Matched on the exact title only, not the label: a person who removes the label must not get a new issue.
+            found=$(gh issue list --repo "$GITHUB_REPOSITORY" --state all --limit 1000 --json title \
+                    | jq --arg t "$title" '[.[] | select(.title == $t)] | length') \
+                    || { say "Cannot list issues (are Issues enabled on this fork?)"; exit 1; }
+            if [ "${found:-0}" != "0" ]; then say "Issue \"$title\" already exists: nothing to do."; exit 0; fi
+          fi
+
+          # 4. Rebase each patch branch onto the upstream tag, in the runner only. Never pushed.
+          git remote add upstream "https://github.com/$UPSTREAM_REPO.git"
+          if git ls-remote --exit-code --tags upstream "refs/tags/$tag" >/dev/null; then
+            git fetch -q --no-tags upstream "refs/tags/$tag:refs/tags/$tag"; target="refs/tags/$tag"
+          else
+            git fetch -q --no-tags upstream "$tag"; target=FETCH_HEAD
+          fi
+          target=$(git rev-parse "$target^{commit}")
+          rebase_one() {   # $1 = branch; prints "applies cleanly" or the conflicting files
+            git checkout -q -B "try-$1" "origin/$1"
+            if git rebase -q "$target" >/dev/null 2>&1; then echo "applies cleanly"; return 0; fi
+            files=$(git diff --name-only --diff-filter=U | sed 's/^/`/; s/$/`/' | paste -sd, -)
+            git rebase --abort >/dev/null 2>&1; echo "CONFLICTS: ${files:-(could not list)}"; return 1
+          }
+          # The combined branch is built by MERGING the patch branches, so it is checked the way it is updated:
+          # merge the new upstream into it. (A plain rebase flattens its merges and loses their resolutions, which
+          # reports conflicts that a real update would not have.) Leaves the merged tree checked out on success.
+          merge_combined() {
+            git checkout -q -B try-combined "origin/$PATCHES_BRANCH"
+            if git merge -q --no-edit "$target" >/dev/null 2>&1; then echo "merges cleanly"; return 0; fi
+            files=$(git diff --name-only --diff-filter=U | sed 's/^/`/; s/$/`/' | paste -sd, -)
+            git merge --abort >/dev/null 2>&1; echo "CONFLICTS: ${files:-(could not list)}"; return 1
+          }
+          {
+            echo "| Branch | Onto \`$tag\` |"; echo "|---|---|"
+            for b in $PATCH_BRANCHES; do echo "| \`$b\` (rebase) | $(rebase_one "$b" || true) |"; done
+          } > "$RUNNER_TEMP/rebase.md"
+          combined=$(merge_combined || true)   # last, so on success try-combined holds the merge for the tests
+          echo "| \`$PATCHES_BRANCH\` (merge \`$tag\` in) | $combined |" >> "$RUNNER_TEMP/rebase.md"
+
+          # 5. Tests: upstream alone, then with our combined patches (only if they rebased cleanly). A failing run is
+          #    re-run once and reported "flaky" if the second passes (upstream's suite has known flaky tests).
+          #    Upstream's code runs here, so it runs WITHOUT our token (`env -u`); `gh` keeps it for the report.
+          run_tests() {   # $1 = label; current checkout
+            log="$RUNNER_TEMP/test-$1.log"
+            if timeout 600 env -u GH_TOKEN -u GITHUB_TOKEN sh -c "$TEST_CMD" >"$log" 2>&1; then echo "pass ($(tail -1 "$log" | tr -d '=' | xargs))"; return; fi
+            first=$(grep -E '^(FAILED|ERROR) ' "$log" | head -10 | sed 's/^/`/; s/$/`/' | paste -sd' ' - || true)
+            if timeout 600 env -u GH_TOKEN -u GITHUB_TOKEN sh -c "$TEST_CMD" >"$log.2" 2>&1; then echo "flaky: failed once, passed on a re-run (${first:-no test named})"; return; fi
+            echo "FAIL: $(grep -E '^(FAILED|ERROR) ' "$log.2" | head -10 | sed 's/^/`/; s/$/`/' | paste -sd' ' - || true) ($(tail -1 "$log.2" | tr -d '=' | xargs))"
+          }
+          git checkout -q --detach "$target"; t_up=$(run_tests upstream)
+          if [ "$combined" = "merges cleanly" ]; then
+            git checkout -q try-combined; t_ours=$(run_tests patched)
+          else
+            t_ours="not run: \`$PATCHES_BRANCH\` does not merge cleanly"
+          fi
+          t_one=""
+          if [ -n "${INPUT_BRANCH:-}" ]; then   # the one branch alone, rebased onto the target
+            if git checkout -q -B "one-$INPUT_BRANCH" "origin/$INPUT_BRANCH" && git rebase -q "$target" >/dev/null 2>&1; then
+              t_one=$(run_tests "one-$INPUT_BRANCH")
+            else
+              git rebase --abort >/dev/null 2>&1 || true; t_one="not run: does not rebase cleanly"
+            fi
+          fi
+
+          # 6. The report.
+          {
+            echo "Upstream [$UPSTREAM_REPO]($rel_url) released **$tag**. Our patches (\`$PATCHES_BRANCH\`, version \`$ours\`) are built on \`$base\`."
+            echo
+            echo "Compare: https://github.com/$UPSTREAM_REPO/compare/$TAG_PREFIX$base...$tag"
+            echo
+            echo "### Patch branches"
+            cat "$RUNNER_TEMP/rebase.md"
+            echo
+            echo "### Tests (\`$TEST_CMD\`)"
+            echo "- upstream \`$tag\` alone: $t_up"
+            echo "- upstream \`$tag\` + \`$PATCHES_BRANCH\`: $t_ours"
+            if [ -n "$t_one" ]; then echo "- upstream \`$tag\` + \`$INPUT_BRANCH\` alone: $t_one"; fi
+            echo
+            echo "<details><summary>Upstream release notes</summary>"
+            echo
+            echo "$notes"
+            echo
+            echo "</details>"
+            echo
+            echo "---"
+            echo "Opened by the upstream-watch workflow ([run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)). It pushed nothing, tagged nothing and opened no PR. Next: rebase the patch branches onto \`$tag\`, merge \`$tag\` into \`$PATCHES_BRANCH\`, bump \`$VERSION_FILE\` to \`$up.1\`, re-run the tests, review."
+          } > "$out"
+          cat "$out" >> "$GITHUB_STEP_SUMMARY"
+          # The report also goes to the log (readable through the API: `gh run view --log`) and is uploaded as the
+          # `upstream-watch-report` artifact by the next step - the summary page alone is not readable by a script.
+          echo "----- report -----"; cat "$out"; echo "----- end of report -----"
+
+          # Verdict: anything that is not a clean result. A manual run FAILS on it, so its green means green.
+          # A scheduled run stays green and says it in the issue (the issue is the trigger; no failure email).
+          problems=""
+          grep -q "CONFLICTS" "$RUNNER_TEMP/rebase.md" && problems="$problems conflicts;"
+          for r in "$t_up" "$t_ours" "$t_one"; do
+            case "$r" in FAIL*|"not run"*) problems="$problems tests: ${r%%(*};";; esac
+          done
+          if [ -n "$problems" ]; then say "Result: NOT CLEAN -$problems"; else say "Result: clean."; fi
+
+          if [ "${INPUT_DRY:-false}" = "true" ] || [ -n "${INPUT_REF:-}" ]; then
+            say "Dry run or manual ref: no issue opened."
+            if [ -n "$problems" ] && [ "${EVENT:-}" = "workflow_dispatch" ]; then exit 1; fi
+            exit 0
+          fi
+          gh label create "$LABEL" --repo "$GITHUB_REPOSITORY" --color FBCA04 --description "A newer upstream release to rebase onto" 2>/dev/null || true
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --label "$LABEL" --body-file "$out" \
+            || { say "Could not open the issue (are Issues enabled on this fork?)"; exit 1; }
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: upstream-watch-report
+          path: ${{ runner.temp }}/report.md
+          if-no-files-found: ignore
+          retention-days: 30
+
+      # 7. Keep the schedule alive. GitHub switches off a public repo's scheduled workflows after 60 days without a
+      #    commit on the default branch, and a patch fork is idle exactly between upstream releases. Enabling the
+      #    workflow through the API every run resets that clock (the approach of keepalive-workflow v2). Runs even when
+      #    the step above stopped early or failed; it only needs `actions: write` on this repo's own workflows.
+      - name: Keep the schedule alive
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          wf="${GITHUB_WORKFLOW_REF%@*}"; wf="${wf##*/}"   # owner/repo/.github/workflows/<file>@ref -> <file>
+          gh api -X PUT "repos/$GITHUB_REPOSITORY/actions/workflows/$wf/enable" \
+            || echo "Could not re-enable $wf: run 'gh workflow enable $wf -R $GITHUB_REPOSITORY' by hand" >> "$GITHUB_STEP_SUMMARY"

@@ -108,6 +108,16 @@ class ForkReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(fr.ReleaseError, "integration says 0.1.81.0"):
             fr.plan_tag("0.1.81.1", self.repo)
 
+    def test_an_unreleased_changelog_heading_is_not_tagged(self) -> None:
+        self.write_version("0.1.81.2", code="print('next')\n")
+        changelog = self.repo / fr.CHANGELOG
+        changelog.write_text(changelog.read_text(encoding="utf-8").replace("## 0.1.81.2\n", "## 0.1.81.2 (unreleased)\n"),
+                             encoding="utf-8")
+        marked = self.commit("0.1.81.2 still unreleased")
+        self.record("0.1.81.2", marked)
+        with self.assertRaisesRegex(fr.ReleaseError, r"still marks 0\.1\.81\.2 as \(unreleased\)"):
+            fr.plan_tag("0.1.81.2", self.repo)
+
     def test_a_version_is_never_tagged_twice_or_backwards(self) -> None:
         self.record("0.1.81.1", self.good)
         self.release("0.1.81.1")

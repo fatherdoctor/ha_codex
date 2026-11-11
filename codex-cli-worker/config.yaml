@@ -6,7 +6,7 @@ url: https://github.com/fatherdoctor/ha_codex
 image: ghcr.io/fatherdoctor/codex-cli-worker
 init: false
 startup: services
-boot: manual
+boot: auto
 stdin: true
 ingress: true
 ingress_port: 9123
@@ -28,11 +28,13 @@ discovery:
   - codex_cli
 options:
   codex_model: default
+  model_pin: gpt-6.1-sol
   model_reasoning_effort: medium
   reasoning_summary: concise
   codex_sandbox: workspace-write
   task_root: /config/codex_tasks
   task_timeout_seconds: 3600
+  task_stall_seconds: 600
   auto_save_lovelace: true
   config_check: true
   full_snapshot: false
@@ -41,14 +43,17 @@ options:
   browser_memory_limit_mib: 1536
   local_docs: true
   ha_url: http://homeassistant:8123
+  remote_control_name: Home Assistant
 schema:
   codex_model: list(default|gpt-6-astra|gpt-6.1-sol|gpt-6.1-terra|gpt-6-sol|gpt-6-luna|gpt-5.6-sol|gpt-5.6-terra|gpt-5.6-luna|gpt-5.5)
+  model_pin: str?
   model_reasoning_effort: list(minimal|low|medium|high|xhigh)
   reasoning_summary: list(concise|detailed|none)
   codex_sandbox: list(workspace-write|read-only)
   task_root: str
   notify_service: str?
   task_timeout_seconds: int
+  task_stall_seconds: int(0,86400)
   auto_save_lovelace: bool
   config_check: bool
   full_snapshot: bool
@@ -58,3 +63,4 @@ schema:
   local_docs: bool
   ha_url: str
   HA_TOKEN: password?
+  remote_control_name: str?
