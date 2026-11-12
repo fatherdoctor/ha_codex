@@ -165,6 +165,15 @@ class ReviewApiTests(unittest.TestCase):
         for i in range(20): self.service.dispatch(payload)
         with self.assertRaises(scheduling.RateLimit): self.service.dispatch(payload)
 
+    def test_f9_tool_can_page_past_approved_capacity_into_proposals(self):
+        store=self.service.engine().store
+        for i in range(scheduling.MAX_SCHEDULES): store.save(proposal(),owner=True,now=NOW)
+        for i in range(scheduling.MAX_PROPOSALS): store.save(proposal(),owner=False,now=NOW)
+        task_id='sample'; server.tasks[task_id]={'status':'running','current_turn_id':'verified-turn'}
+        cap=server.ha_data.begin(task_id); self.addCleanup(lambda: server.ha_data.end(task_id))
+        result=self.service.dispatch({'operation':'list_schedules','arguments':{'offset':110,'limit':10},'capability':cap})
+        self.assertEqual(len(result['items']),10); self.assertIsNone(result['next_offset'])
+
     def test_f3_background_outcomes_are_log_only_and_chat_still_pushes(self):
         with patch.object(server,'notify') as notify, patch.object(server,'notify_question') as question:
             for source in ('lead','schedule'):

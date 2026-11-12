@@ -98,7 +98,7 @@ class Service:
                 return {'ok': True, 'schedule_id': item['id'], 'approved': False, 'enabled': False,
                         'message': 'Waiting for owner approval on the Codex page.'}
             if operation in ('list_schedules', 'read_mailbox'):
-                maximum = 100 if operation == 'list_schedules' else 500
+                maximum = scheduling.MAX_SCHEDULES + scheduling.MAX_PROPOSALS if operation == 'list_schedules' else scheduling.MAX_MESSAGES
                 offset = args.get('offset', 0); limit = args.get('limit', 10)
                 if set(args) - {'offset', 'limit'} or type(offset) is not int or not 0 <= offset <= maximum or type(limit) is not int or not 1 <= limit <= 20:
                     raise ValueError('Invalid page offset.')
