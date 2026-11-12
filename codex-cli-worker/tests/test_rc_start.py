@@ -252,11 +252,10 @@ class FurtherRegressions(unittest.TestCase):
 
 
 class HookBudgetTests(unittest.TestCase):
-    def test_expired_hook_budget_refuses_instead_of_leaving_a_long_scan(self):
-        clock = iter((0.0, 3.0))
-        with patch.object(rules, 'time', types.SimpleNamespace(monotonic=lambda:next(clock))):
-            self.assertIn('time budget', rules.check_tool_call('PreToolUse',
-                {'tool_input':{'command':'ls /config'}}, True, rules.load_rules()))
+    def test_clock_speed_does_not_change_an_ordinary_command_decision(self):
+        with patch.object(rules.time, 'monotonic', side_effect=AssertionError('clock-based work limit')):
+            self.assertEqual(rules.check_tool_call('PreToolUse',
+                {'tool_input': {'command': 'ls /config'}}, True, rules.load_rules()), '')
 
     def test_large_command_input_refused_without_configuration_io(self):
         with patch.object(rules, 'read_config_bytes', side_effect=AssertionError('must not read')):

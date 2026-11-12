@@ -112,6 +112,59 @@ class WorkBudgetTests(unittest.TestCase):
         self.assertIsNotNone(rules.yaml_node(large.AUTOMATIONS * 5))
         self.assertIsNotNone(rules.yaml_node(large.SCRIPTS * 5))
 
+    def test_include_work_limits_report_stably_instead_of_escaping_watch(self):
+        texts = {'configuration.yaml': 'shell_command: !include commands.txt\n'}
+        self.write('configuration.yaml', texts['configuration.yaml'])
+        self.write('commands.txt', 'sample: echo sample\n')
+        for limit in ('INCLUDE_MAX_NODES', 'INCLUDE_MAX_FILES', 'INCLUDE_MAX_BYTES'):
+            with self.subTest(limit=limit), patch.object(rules, limit, 0):
+                rules.extend_include_texts(texts, self.root, self.policy)
+                watch = rc.ConfigWatch(self.root, Path(self.tmp.name) / limit)
+                watch.take_baseline()
+                self.assertEqual(watch.new_findings(remote_on=True), [])
+                findings = watch.scan()
+                self.assertTrue(any('budget' in item.reason for values in findings.values() for item in values))
+
+    def test_content_change_invalidates_retained_nodes(self):
+        target = self.write('ordinary.yaml', 'input_boolean: {}\n')
+        watch = rc.ConfigWatch(self.root, Path(self.tmp.name) / 'baseline')
+        self.assertEqual(watch.scan(), {})
+        target.write_text('shell_command: {sample: echo sample}\n')
+        self.assertIn('ordinary.yaml', watch.scan())
+
+    def test_parse_cache_releases_old_entries_within_its_byte_limit(self):
+        cache = rules.YamlCache()
+        for index in range(3):
+            cache.put(bytes([index]), 8 * 1024 * 1024, (None, 'limit'))
+        self.assertLessEqual(cache.bytes, 16 * 1024 * 1024)
+        self.assertIsNone(cache.get(bytes([0])))
+
+    def test_comment_only_script_and_include_notes_do_not_block_ordinary_edits(self):
+        self.write('scripts.yaml', '# Scripts go here\n')
+        self.write('notes.yaml', '# Example: !include commands.txt\n')
+        self.assertEqual(self.hook('ordinary.yaml', '# before\n', '# after\n'), '')
+
+    def test_quoted_and_escaped_package_script_keys_are_checked(self):
+        for key in ('"script"', '"scr\\u0069pt"'):
+            with self.subTest(key=key):
+                self.write('package.yaml', key + ': {sample: {sequence: [{action: shell_command.sample}]}}\n')
+                reason = self.hook('caller.yaml', '[]\n', '- {action: script.sample}\n')
+                self.assertIn('script.sample', reason)
+
+    def test_uncomposed_escaped_script_definition_cannot_grant_approval(self):
+        self.write('package.yaml', '"scr\\u0069pt": {sample: {sequence: []}}\n')
+        original = rules._compose_yaml
+
+        def over_limit(text):
+            if text.startswith('"scr\\u0069pt"'):
+                raise rules.YamlBudgetError('test node limit')
+            return original(text)
+
+        with patch.object(rules, '_compose_yaml', side_effect=over_limit):
+            reason = self.hook('caller.yaml', '[]\n', '- {action: script.sample}\n')
+        self.assertIn('package.yaml', reason)
+        self.assertIn('refused', reason)
+
 
 if __name__ == '__main__':
     unittest.main()

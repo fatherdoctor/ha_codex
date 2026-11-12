@@ -2,6 +2,12 @@
 
 ## 0.1.81.2 (unreleased)
 
+- Budget parsed YAML checks by bytes and node visits instead of elapsed time. Retain bounded, hash-keyed
+  watch parse results, inspect script body nodes without serializing them again, refuse unparsed script/include
+  dependencies in the command check, recognize comma-separated script targets, and report include work limits
+  without throwing out of the watch. Reuse included bytes when saving its baseline and explain the 512 KiB
+  touched-file limit in refusals.
+
 - **Parsed YAML command checks (CX-YAML).** Recognize flow and quoted keys, case-normalized action/service mappings, script targets and per-file script includes alongside the line rules. Share bounded parse results per scan, retain line fallback and file-specific reports on parsing limits, and keep unrelated large files from refusing ordinary patches. Track included command definitions as whole files across the hook, exchange check and config watch; safe tags remain opaque and include paths cannot reach credential files or links.
 - **Core address and first-run relay reads (CX-HA-URL).** Discover Core's actual port and SSL setting from Supervisor at startup and each task/relay launch. Make the address option an empty override and retire old default values. Offer a bounded read-only relay tool using a temporary capability; no hand-made Core token is needed for entity reads and the Supervisor token stays in the worker. Unsupported shell reads still request native network approval; direct commands still need a separately configured credential.
 

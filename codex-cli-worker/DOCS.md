@@ -395,11 +395,17 @@ is not evidence that the requested permissions were granted.
 **Parsed YAML and include checks.** The command check retains the line rules for incomplete edits and
 adds a safe composed-node pass for quoted keys, flow mappings, action/service values, script targets,
 anchors and YAML merges. Home Assistant tags remain nodes: `!secret` is never resolved or read.
-The parser constructs no Python objects. Alias visits (150,000), nesting (64), input bytes (2 MiB)
-and per-document parsing (1.5 seconds) are bounded, with four seconds of shared parsing per scan.
-Each document, including a failed parse, is cached only for that hook/watch/exchange operation.
+The parser constructs no Python objects. Node visits (1,000,000), nesting (64) and input bytes
+(10 MiB per document) bound parsing by work, independently of the machine's clock or load.
+These limits admit five copies of the reference-sized automation and script documents. Include discovery
+also bounds node visits (1,000,000), files (3,000), bytes (16 MiB) and dependency expansion rounds (64).
+Each document, including a failed parse, is cached by its content hash. Hook/exchange caches last only
+for that operation; the watch retains its cache between scans, bounded to 512 entries and 16 MiB of source
+bytes. Parsed graphs use additional memory. An unchanged idle scan composes no documents while its
+working set fits the cache; evicted documents are parsed again. Changed hashes always require a fresh parse.
 A parsed-check budget failure is reported on its file; the line rules continue without raising
-out of script resolution or include discovery. Untouched large files do not veto an ordinary patch.
+out of script resolution or include discovery. In the hook, a script or include dependency that could not
+be parsed refuses the patch by filename; unrelated large ordinary files do not veto an ordinary patch.
 Service names and script entity IDs are stripped and lower-cased before matching.
 
 A definition such as `shell_command: !include commands.yaml` protects the entire included file,
@@ -422,8 +428,9 @@ contact Home Assistant, or change Codex's approval policy.
 **Hook timeout and undo limits.** A synchronous hook that times out can fail open in Codex 0.166: the tool
 call may run after the timeout. The hook checks bounded inputs and refuses an uncertain, oversized or
 ambiguous YAML patch. Hook-edited source files are capped at 512 KiB; larger touched files are refused by name.
-The unrelated inventory uses the larger read cap above; files beyond the 2 MiB parsed cap retain
-line-only script resolution and a watch finding. While remote control is on it reconstructs the whole proposed YAML file, so edits
+The unrelated inventory uses the larger read cap above. A file beyond a parsed work limit retains the
+line checks and a watch finding, but an unparsed script/include dependency cannot authorize a hook edit.
+While remote control is on it reconstructs the whole proposed YAML file, so edits
 beneath an existing `shell_command`, `rest_command` or `command_line` key are also checked. The checked-in
 fixtures use the captured Bash/apply_patch command-string inputs. PermissionRequest is checked for named security
 restrictions; needing network or other ordinary sandbox permission is not itself a refusal. Earlier small-fixture measurements of 30 isolated

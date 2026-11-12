@@ -181,6 +181,12 @@ def scan_failures():
     return dict(scan.failures) if scan is not None else {}
 
 
+def has_yaml_content(text):
+    """A comment-only/empty document is not an unknown dependency."""
+    return any(line.strip() and not line.lstrip().startswith('#')
+               and line.strip() not in ('---', '...') for line in text.splitlines())
+
+
 def include_failure(source, reason, strict):
     message = f'{source}: {reason}'
     if strict:
@@ -468,11 +474,12 @@ def refused_scripts(texts: dict[str, str], rules: dict[str, Any], strict: bool =
     blocks = {}
     sources = {rel: 'auto' for rel in texts if rel == 'scripts.yaml' or rel.startswith('scripts/')}
     for source, text in texts.items():
-        if not re.search(r"\bscript\s*:", text):
-            continue
-        if strict and yaml_node(text) is None:
+        node, error = yaml_result(text)
+        if strict and (error or (node is None and re.search(r'\bscript\b', text) and has_yaml_content(text))):
             raise ValueError(f'{source}: script definitions could not be parsed; calls are refused')
-        for mapping in yaml_mappings(yaml_node(text)):
+        # Inspect composed keys, including quoted/escaped script keys. A text
+        # prefilter cannot prove an uncomposed document has no script definitions.
+        for mapping in yaml_mappings(node):
             for key, value in mapping.value:
                 if not isinstance(key, yaml.ScalarNode) or key.value != 'script':
                     continue
@@ -501,7 +508,7 @@ def refused_scripts(texts: dict[str, str], rules: dict[str, Any], strict: bool =
                     if isinstance(key, yaml.ScalarNode):
                         blocks[key.value] = (value, text)
         else:
-            if strict and text.strip():
+            if strict and has_yaml_content(text):
                 raise ValueError(f'{rel}: script definitions could not be parsed; calls are refused')
             # Preserve the line pass for partially edited script maps.
             current, block = '', []
@@ -517,7 +524,9 @@ def refused_scripts(texts: dict[str, str], rules: dict[str, Any], strict: bool =
     while True:
         found = set()
         for name, body in blocks.items():
-            findings = node_findings(body[0], body[1], rules, refused) if isinstance(body, tuple) else find_refused(body, rules, refused)
+            # Classification needs the node, not source lines. Splitting the full
+            # script-map text once per body makes an ordinary map quadratic.
+            findings = node_findings(body[0], '', rules, refused) if isinstance(body, tuple) else find_refused(body, rules, refused)
             if any(f.kind != "parse_budget" for f in findings):
                 found.add(name)
         if found <= refused:
@@ -542,8 +551,8 @@ def included_definitions(texts: dict[str, str], rules: dict[str, Any], strict: b
     """Resolve include chains and definition directories; every member is hashed whole."""
     definitions: dict[str, set[str]] = {}
     roots = {}
-    for rel, text in texts.items():
-        if '!include' in text:
+    for rel, text in sorted(texts.items()):
+        if '!include' in text and has_yaml_content(text):
             roots[rel] = yaml_node(text)
             if roots[rel] is None:
                 include_failure(rel, 'include source could not be parsed', strict)
@@ -578,7 +587,7 @@ def included_definitions(texts: dict[str, str], rules: dict[str, Any], strict: b
                 if rel in texts:
                     if rel not in roots:
                         roots[rel] = yaml_node(texts[rel])
-                        if roots[rel] is None and texts[rel].strip():
+                        if roots[rel] is None and has_yaml_content(texts[rel]):
                             include_failure(rel, 'included definition could not be parsed', strict)
                     todo.append((rel, roots[rel], kinds))
         elif isinstance(node, yaml.MappingNode):
