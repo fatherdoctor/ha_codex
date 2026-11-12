@@ -122,6 +122,8 @@ def check_child(name, parent, directory, mode=None):
                  'relay_cwd': f'/proc/{parent}/cwd/marker', 'sibling_root': f'/proc/{sibling.pid}/root{directory}/marker'}
         results = {key: errno_read(path) for key, path in paths.items()}
         assert all(code in (1, 2, 13) for code in results.values()), 'A protected synthetic proc view was readable'
+        if not mode:
+            assert all(code == 13 for code in results.values()), 'A visible direct proc view must fail with EACCES'
         if mode:
             marker = Path('/config/owner-marker')
             assert marker.stat().st_uid == marker.stat().st_gid == 1000

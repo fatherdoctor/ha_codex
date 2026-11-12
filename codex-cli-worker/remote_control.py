@@ -702,9 +702,11 @@ class Supervisor:
         watch_interval: float = WATCH_INTERVAL,
         control_factory: Callable[[Path], Any] = ControlClient,
         instructions_factory: Callable[[], str] = lambda: "",
+        tool_args_factory: Callable[[], list[str]] = lambda: [],
     ) -> None:
         self.control_factory = control_factory
         self.instructions_factory = instructions_factory
+        self.tool_args_factory = tool_args_factory
         self.control_socket: Path | None = None
         self.codex_binary = codex_binary
         self.state_path = state_path
@@ -891,7 +893,7 @@ class Supervisor:
                 self._name_failed()
         instructions = self.instructions_factory()
         config = ("-c", "developer_instructions=" + json.dumps(instructions)) if instructions else ()
-        arguments = (*config, *args)
+        arguments = (*config, *self.tool_args_factory(), *args)
         return (build_command(self.codex_binary, name, *arguments) if self._name_supported
                 else [RELAY_LAUNCHER, "--plain", self.codex_binary, *arguments])
 
@@ -927,9 +929,16 @@ class Supervisor:
                 control_parent = prepare_control_parent(self.state_path.parent)
                 private = tempfile.TemporaryDirectory(prefix="rc-", dir=control_parent)
                 path = Path(private.name) / "rc.sock"
+                # Namespace probing and environment refresh can call Supervisor.
+                # Keep both outside the lock used by snapshot, reads and stop.
+                command = self._command("app-server", "--listen", f"unix://{path}", "--remote-control")
+                environment = remote_env(self.env_factory())
                 with self.lock:
-                    proc = self.popen(self._command("app-server", "--listen", f"unix://{path}", "--remote-control"),
-                                      env=remote_env(self.env_factory()), cwd="/config", stdin=subprocess.DEVNULL,
+                    if self.wake.is_set() or not self.enabled():
+                        private.cleanup()
+                        return
+                    proc = self.popen(command,
+                                      env=environment, cwd="/config", stdin=subprocess.DEVNULL,
                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                       start_new_session=True)
                     self.proc = proc
