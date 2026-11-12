@@ -12,8 +12,8 @@ const assert = require('node:assert/strict');
         const req=route.request(), path=new URL(req.url()).pathname.replace('/preview/','');
         if (path.startsWith('assets/')) return route.continue();
         const data=req.postDataJSON();
-        if (req.method()==='GET') return route.fulfill({json:{ok:true,schedules,runs:[{created:1803859200,status:'waiting_for_approval',task_id:'sample-task',error:''}],mailbox,lead_token_configured:newTokens>0}});
-        if (path==='schedules') { created=data; schedules=[{...data,id:'sample',approved:true,enabled:true,revision:'revision-one',next_due:1803862800}]; }
+        if (req.method()==='GET') return route.fulfill({json:{ok:true,timezone:'America/Chicago',schedules,runs:[{created:1803859200,status:'waiting_for_approval',task_id:'sample-task',error:''}],mailbox,lead_token_configured:newTokens>0}});
+        if (path==='schedules') { created=data; schedules=[{...data,id:'sample',approved:true,enabled:true,revision:'revision-one',next_due:1803862800}]; if(data.spec.kind==='once') schedules[0].spec={kind:'once',at:Date.parse(data.spec.at+'-06:00')/1000}; }
         else if(req.method()==='PATCH') { edits++; schedules=[{...schedules[0],...data}]; }
         else if(path.endsWith('/pause')) schedules[0].enabled=false;
         else if(path.endsWith('/resume')) schedules[0].enabled=true;
@@ -23,6 +23,7 @@ const assert = require('node:assert/strict');
       });
       await page.route('**/lead-token', route=>{newTokens++;return route.fulfill({json:{ok:true,token:'synthetic-once-only-value'}});});
       await page.route('**/schedule-mailbox**', route=>{
+        if (route.request().method()==='DELETE') { mailbox=[]; return route.fulfill({json:{ok:true}}); }
         const data=route.request().postDataJSON();
         mailbox.push({id:'mail-'+mailbox.length,parent:route.request().url().endsWith('/reply')?'mail-0':null,body:data.body,author:'owner',created:1803859200});
         return route.fulfill({json:{ok:true}});
@@ -54,6 +55,22 @@ const assert = require('node:assert/strict');
       assert.equal(edits,1);assert.equal(schedules[0].spec.expression,'0 9 * * 1-5');
       await page.locator('#schedule-list').getByRole('button',{name:'Delete',exact:true}).click();
       await page.locator('#schedule-list').getByText('No schedules saved.').waitFor();
+      // The browser zone is deliberately different from HA; submit local wall time without Z.
+      await page.locator('#schedule-name').fill('Local once');
+      await page.locator('#schedule-prompt').fill('Complete replacement prompt.');
+      await page.locator('#schedule-kind').selectOption('once');
+      await page.locator('#schedule-value').fill('2027-03-12T09:00');
+      await page.locator('#schedule-form button[type=submit]').click();
+      await page.locator('#schedule-list').getByText('Local once',{exact:true}).waitFor();
+      assert.equal(created.spec.at,'2027-03-12T09:00:00');
+      assert.ok((await page.locator('#schedule-timezone').textContent()).includes('America/Chicago'));
+      schedules[0].prompt='Use [redacted]'; schedules[0].prompt_redacted=true;
+      await page.evaluate(()=>document.querySelector('#settings').close()); await openSettings();
+      await page.locator('#schedule-list').getByText('Prompt contains masked credentials.',{exact:false}).waitFor();
+      assert.equal(await page.locator('#schedule-list').getByRole('button',{name:'Edit',exact:true}).isDisabled(),true);
+      await page.locator('#schedule-list').getByRole('button',{name:'Delete',exact:true}).click();
+      await page.locator('#schedule-list').getByText('No schedules saved.').waitFor();
+      created={name:'Sample proposal',prompt:'Sample prompt',mode:'read-only',spec:{kind:'interval',seconds:3600}};
       // An agent proposal must visibly require approval, and its revision accompanies the action.
       schedules=[{...created,id:'sample',approved:false,enabled:false,revision:'current-proposal',next_due:1803862800}];
       await page.evaluate(()=>document.querySelector('#settings').close());
@@ -69,6 +86,8 @@ const assert = require('node:assert/strict');
       await page.locator('#schedule-mail-form button[type=submit]').click();
       await page.locator('#schedule-mailbox').getByText('A sample reply',{exact:true}).waitFor();
       assert.equal(mailbox[1].parent,'mail-0');
+      await page.locator('#schedule-mailbox').getByRole('button',{name:'Clear mailbox',exact:true}).click();
+      await page.locator('#schedule-mailbox').getByText('No local messages.').waitFor();
       await page.locator('#lead-token-create').click();
       await page.locator('#lead-token-result').waitFor({state:'visible'});
       assert.equal(await page.locator('#lead-token-value').getAttribute('type'),'password');
@@ -80,7 +99,7 @@ const assert = require('node:assert/strict');
       await page.waitForFunction(()=>document.querySelector('#lead-token-value').value==='');
       assert.deepEqual(errors,[]);
       await page.close();
-      console.log(`PASS ${width}px: schedule CRUD, owner proposal approval, literal prompt/mail rendering, mailbox reply, pending status and one-time token cleanup.`);
+      console.log(`PASS ${width}px: schedule CRUD, HA-zone one-off entry, masked Edit disabled, proposal approval, literal rendering, mailbox clearing, pending status and token cleanup.`);
     }
   } finally {await browser.close();}
 })().catch(error=>{console.error(error.stack);process.exitCode=1;});

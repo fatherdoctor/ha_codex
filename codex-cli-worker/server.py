@@ -27,6 +27,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from http.cookiejar import LWPCookieJar, LoadError
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Any, Callable, TextIO
 from urllib.parse import urlparse, urlunparse
@@ -3117,6 +3118,21 @@ def notify(title: str, message: str, *, still_wanted: Callable[[], bool] | None 
         )
 
 
+def background_task(task_id: str) -> bool:
+    with lock:
+        return tasks.get(task_id, {}).get('task_source') in {'schedule', 'lead'}
+
+
+def notify_task_outcome(task_id, status, summary, turn_id='', question='', choices=None):
+    """Background work reports in its run log; only permission requests push."""
+    if background_task(task_id):
+        return
+    if status == 'needs_input':
+        notify_question(task_id, turn_id, question or 'Codex needs your input.', choices or [])
+    else:
+        notify('Codex task completed' if status == 'completed' else 'Codex task failed', f'{summary} Task: {task_id}')
+
+
 def notify_question(task_id: str, turn_id: str, question: str, choices: list[str]) -> None:
     """Notify that Codex waits for an answer, and offer its choices.
 
@@ -4486,7 +4502,8 @@ def publish_cancelled_task_outcome(task_id: str, returncode: int | None = None) 
     ok, detail = fire_ha_event("codex_cli_task_result", event_data)
     if not ok:
         print(f"Codex task result event failed: {detail}", flush=True)
-    notify("Codex task cancelled", f"{CANCELLED_TASK_SUMMARY}. Task: {task_id}")
+    if not background_task(task_id):
+        notify("Codex task cancelled", f"{CANCELLED_TASK_SUMMARY}. Task: {task_id}")
     refresh_usage_status_async(force=True)
     return True
 
@@ -4605,7 +4622,7 @@ def fail_task_launch(
     ok, detail = fire_ha_event("codex_cli_task_result", event_data)
     if not ok:
         print(f"Codex task result event failed: {detail}", flush=True)
-    notify("Codex task failed", f"{summary} Task: {task_id}")
+    notify_task_outcome(task_id, "failed", summary)
     refresh_usage_status_async(force=True)
 
 
@@ -5121,12 +5138,8 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     if not ok:
         print(f"Codex task result event failed: {detail}", flush=True)
 
-    if status == "needs_input":
-        notify_question(task_id, turn_id, str(final.get("question") or "Codex needs your input."), choices)
-    elif status == "completed":
-        notify("Codex task completed", f"{final.get('summary', 'Done')} Task: {task_id}")
-    else:
-        notify("Codex task failed", f"{final.get('summary', 'Failed')} Task: {task_id}")
+    notify_task_outcome(task_id, status, str(final.get('summary') or ''), turn_id,
+                        str(final.get('question') or ''), choices)
     refresh_usage_status_async(force=True)
 
 
@@ -6441,6 +6454,43 @@ def delete_queued_message(queue_id: str) -> Response:
 
 
 
+_schedule_timezone_cache = {'name': None, 'until': 0.0}
+_schedule_timezone_lock = threading.Lock()
+
+
+def schedule_timezone():
+    """Read the Home Assistant IANA time zone; unavailable metadata stays unavailable."""
+    now = time.monotonic()
+    with _schedule_timezone_lock:
+        if now < _schedule_timezone_cache['until']:
+            return _schedule_timezone_cache['name']
+    name = None
+    token = ha_token()
+    if token:
+        try:
+            with requests.Session() as client:
+                client.trust_env = False
+                with client.get(ha_api_url('config'), headers={'Authorization': 'Bearer ' + token},
+                                timeout=(3, 5), allow_redirects=False, stream=True) as response:
+                    if response.status_code != 200:
+                        raise ValueError()
+                    raw = bytearray()
+                    for chunk in response.iter_content(4096):
+                        raw.extend(chunk)
+                        if len(raw) > 262144:
+                            raise ValueError()
+                    candidate = json.loads(raw)['time_zone']
+                    if not isinstance(candidate, str):
+                        raise ValueError()
+                    ZoneInfo(candidate)
+                    name = candidate
+        except Exception:
+            name = None
+    with _schedule_timezone_lock:
+        _schedule_timezone_cache.update(name=name, until=now + (60 if name else 5))
+    return name
+
+
 schedule_service = schedule_api.register(_ToolWorker())
 
 
@@ -6487,6 +6537,7 @@ def main() -> None:
     print(f"Codex sandbox preflight: {sandbox['message']}", flush=True)
     load_task_index()
     load_message_queue()
+    schedule_service.engine()  # Materialize the private database/journal before any task or relay starts.
     verification.cleanup()
     ha_data.cleanup()
     threading.Thread(target=backup_cleanup_loop, daemon=True).start()

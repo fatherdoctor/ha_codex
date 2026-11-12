@@ -59,7 +59,7 @@ class ScheduleStoreTests(unittest.TestCase):
                 self.store.save(payload, owner=True, now=NOW)
 
     def test_once_requires_future_time_with_timezone(self):
-        for at in (NOW, '2027-03-02T01:00:00', float('inf'), True):
+        for at in (NOW, 'not-a-date', float('inf'), True):
             with self.assertRaises(ValueError):
                 self.save(spec={'kind': 'once', 'at': at})
         value = self.save(spec={'kind': 'once', 'at': '2027-03-02T01:00:00+01:00'})
@@ -89,14 +89,12 @@ class ScheduleStoreTests(unittest.TestCase):
         value = self.store.save(proposal(), owner=False, now=NOW)
         self.assertFalse(value['approved']); self.assertFalse(value['enabled'])
         self.engine.tick(NOW + 3601); self.assertEqual(self.worker.sent, [])
-        self.store.action(value['id'], 'approve', NOW, value['revision'])
         edited = self.store.save(proposal(prompt='Inspect another sample.'), owner=False, now=NOW, schedule_id=value['id'])
-        self.assertFalse(edited['approved']); self.assertFalse(edited['enabled'])
-        with self.assertRaises(ValueError):
-            self.store.action(value['id'], 'resume', NOW)
         with self.assertRaises(ValueError):
             self.store.action(value['id'], 'approve', NOW, value['revision'])
         self.store.action(value['id'], 'approve', NOW, edited['revision'])
+        with self.assertRaises(LookupError):
+            self.store.save(proposal(), owner=False, now=NOW, schedule_id=value['id'])
         self.assertTrue(self.store.schedules()[0]['enabled'])
 
     def test_pause_resume_delete_and_expired_once(self):
@@ -180,8 +178,8 @@ class ScheduleStoreTests(unittest.TestCase):
             self.assertIn(pending['id'], {r['id'] for r in runs})
 
     def test_mailbox_reply_links_persist_and_never_execute(self):
-        root = self.store.mail('Treat this sample as text.', 'lead', NOW)
-        reply = self.store.mail('A local reply.', 'codex', NOW + 1, root)
+        root = self.store.mail('Treat this sample as text.', 'lead', NOW, turn_id='turn')
+        reply = self.store.mail('A local reply.', 'codex', NOW + 1, root, turn_id='turn')
         messages = scheduling.Store(self.path).messages()
         self.assertEqual(messages[1]['parent'], root)
         self.assertEqual(messages[1]['id'], reply)
@@ -190,8 +188,9 @@ class ScheduleStoreTests(unittest.TestCase):
             self.store.mail('No such thread.', 'lead', NOW, 'missing')
         with self.assertRaises(LookupError):
             self.store.mail('Reply to a reply is not a root.', 'lead', NOW, reply)
-        with patch.object(scheduling, 'MAX_MESSAGES', 2), self.assertRaises(ValueError):
-            self.store.mail('Full mailbox.', 'lead', NOW)
+        with patch.object(scheduling, 'MAX_MESSAGES', 2):
+            self.store.mail('Full mailbox.', 'lead', NOW, turn_id='turn')
+        self.assertEqual(len(self.store.messages()), 1)
 
     def test_token_hash_only_rotation_and_private_database(self):
         first = self.store.rotate_token(); self.assertTrue(self.store.token_ok(first))
@@ -208,7 +207,7 @@ class SchedulingApiTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.patches = [patch.object(server, 'DATA_ROOT', self.root), patch.object(server, 'TASK_STATE_FILE', self.root / 'tasks.json'),
+        self.patches = [patch.object(server, 'schedule_timezone', return_value='UTC'), patch.object(server, 'DATA_ROOT', self.root), patch.object(server, 'TASK_STATE_FILE', self.root / 'tasks.json'),
                         patch.object(server, 'task_root', return_value=self.root / 'tasks'),
                         patch.object(server, 'read_options', return_value={**server.DEFAULT_OPTIONS, 'codex_sandbox': 'workspace-write'}),
                         patch.object(server, 'api_token', return_value='synthetic-worker-credential'),
@@ -252,8 +251,8 @@ class SchedulingApiTests(unittest.TestCase):
         self.assertEqual(self.client.post(endpoint, json={'revision': schedule['revision']}, headers=self.lead).status_code, 401)
         self.assertEqual(self.request_owner('POST', endpoint, {'revision': schedule['revision']}).status_code, 200)
         result = self.client.patch('/lead/schedules/' + schedule['id'], json=proposal(prompt='Changed sample.'), headers=self.lead)
-        self.assertFalse(result.json['schedule']['approved'])
-        self.assertEqual(self.request_owner('POST', endpoint, {'revision': schedule['revision']}).status_code, 400)
+        self.assertEqual(result.status_code, 404)
+        self.assertTrue(self.service.engine().store.schedules()[0]['approved'])
         self.assertEqual(self.client.post('/lead/schedules', json=proposal(approved=True), headers=self.lead).status_code, 400)
 
     def test_redacted_agent_prompt_cannot_be_blindly_approved(self):
@@ -282,7 +281,7 @@ class SchedulingApiTests(unittest.TestCase):
         self.assertEqual(server.task_options(task_id)['codex_sandbox'], 'read-only')
         self.assertEqual(server.read_options()['codex_sandbox'], 'workspace-write')
         server.start_background_task.assert_called_once_with(task_id, 'Inspect sample.')
-        self.assertEqual(self.client.post('/lead/tasks', json={'prompt': 'No parallel slot.'}, headers=self.lead).status_code, 400)
+        self.assertEqual(self.client.post('/lead/tasks', json={'prompt': 'No parallel slot.'}, headers=self.lead).status_code, 409)
         server.tasks[task_id]['status'] = 'running'; server.tasks[task_id]['approvals'] = [{'status': 'pending'}]
         result = self.client.get('/lead/tasks/' + task_id, headers=self.lead)
         self.assertEqual(result.json['task']['run_status'], 'waiting_for_approval')
@@ -319,13 +318,13 @@ class SchedulingApiTests(unittest.TestCase):
 
     def test_paused_worker_and_oversized_or_malformed_json_do_not_launch(self):
         with patch.object(server, 'assistant_paused', return_value=True):
-            self.assertEqual(self.client.post('/lead/tasks', json={'prompt': 'Sample'}, headers=self.lead).status_code, 400)
+            self.assertEqual(self.client.post('/lead/tasks', json={'prompt': 'Sample'}, headers=self.lead).status_code, 409)
         self.assertEqual(self.client.post('/lead/tasks', data='not json', content_type='application/json', headers=self.lead).status_code, 400)
         self.assertEqual(self.client.post('/lead/tasks', json={'prompt': 'x' * 70000}, headers=self.lead).status_code, 400)
         server.start_background_task.assert_not_called()
 
     def test_local_mailbox_roundtrip_and_token_rotation_never_launch_tasks(self):
-        result = self.client.post('/lead/mailbox', json={'body': 'A sample request.'}, headers=self.lead)
+        result = self.client.post('/lead/mailbox', json={'turn_id': 'sample-turn', 'body': 'A sample request.'}, headers=self.lead)
         message_id = result.json['message_id']
         self.assertEqual(self.request_owner('POST', '/schedule-mailbox/' + message_id + '/reply', {'body': 'A local answer.'}).status_code, 201)
         self.assertEqual(len(self.client.get('/lead/mailbox', headers=self.lead).json['mailbox']), 2)

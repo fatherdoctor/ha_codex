@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import hmac
 import json
 import os
 import socketserver
@@ -17,6 +18,9 @@ import scheduling
 class Worker:
     def __init__(self, worker):
         self.worker = worker
+
+    def dispatch_slot(self):
+        return self.worker.lock
 
     def busy(self):
         w = self.worker
@@ -36,7 +40,7 @@ class Worker:
             raise ValueError('The configured sandbox policy refuses this task.')
         with w.lock:
             if self.busy():
-                raise ValueError('The assistant is busy or paused.')
+                raise scheduling.Busy('The assistant is busy or paused.')
             settings = dict(w.DEFAULT_CHAT_SETTINGS)
             turn = w.new_turn(prompt)
             turn['execution_settings'] = w.resolve_chat_settings(settings, options)
@@ -62,10 +66,16 @@ class Service:
 
     def engine(self):
         path = Path(self.worker.DATA_ROOT) / 'schedules.sqlite3'
+        zone = self.worker.schedule_timezone()
         with self._lock:
             if path != self._path:
-                self._engine = scheduling.Engine(scheduling.Store(path), Worker(self.worker))
+                self._engine = scheduling.Engine(scheduling.Store(path, zone=zone), Worker(self.worker))
                 self._path = path
+            elif self._engine.store.timezone != zone:
+                if zone is not None:
+                    self._engine.store.set_timezone(zone, time.time())
+                else:
+                    self._engine.store.timezone = None
             return self._engine
 
     def dispatch(self, payload):
@@ -76,7 +86,7 @@ class Service:
         w = self.worker
         with w.lock:
             with w.ha_data.lock:
-                task_id = next((key for key, value in w.ha_data.capabilities.items() if value == cap and cap), None)
+                task_id = next((key for key, value in w.ha_data.capabilities.items() if isinstance(cap, str) and cap and hmac.compare_digest(value, cap)), None)
             if not task_id or not w.ha_data.active(task_id, cap):
                 raise ValueError('This exchange has ended.')
             operation, args = payload['operation'], payload['arguments']
@@ -84,7 +94,7 @@ class Service:
                 raise ValueError('Arguments must be an object.')
             store = self.engine().store
             if operation == 'propose_schedule':
-                item = store.save(args, owner=False, now=time.time())
+                item = store.save(args, owner=False, author='codex', now=time.time())
                 return {'ok': True, 'schedule_id': item['id'], 'approved': False, 'enabled': False,
                         'message': 'Waiting for owner approval on the Codex page.'}
             if operation in ('list_schedules', 'read_mailbox'):
@@ -106,7 +116,8 @@ class Service:
                 parent = args.get('parent')
                 if parent is not None and (not isinstance(parent, str) or len(parent) != 32):
                     raise ValueError('Invalid mailbox thread.')
-                message_id = store.mail(args.get('body'), 'codex', time.time(), parent)
+                turn_id = str(w.tasks[task_id]['current_turn_id'])
+                message_id = store.mail(args.get('body'), 'codex', time.time(), parent, task_id + ':' + turn_id)
                 return {'ok': True, 'message_id': message_id}
             raise ValueError('Unsupported scheduling operation; approvals are owner-only.')
 
@@ -187,6 +198,10 @@ def register(worker):
         def run(*args, **kwargs):
             try:
                 return func(*args, **kwargs)
+            except scheduling.RateLimit as exc:
+                return jsonify(ok=False, error=str(exc)), 429
+            except scheduling.Busy as exc:
+                return jsonify(ok=False, error=str(exc)), 409
             except LookupError:
                 return jsonify(ok=False, error='Record not found.'), 404
             except ValueError as exc:
@@ -215,15 +230,23 @@ def register(worker):
             return func(*args, **kwargs)
         return run
 
+    def schedule_payload(row):
+        result = clean(row)
+        result['prompt_redacted'] = result['prompt'] != row['prompt']
+        return result
+
     def state():
         engine = service.engine()
         # Tick/lead dispatch owns this lock while reserving and saving a task. A page
         # refresh must not mark that tiny in-flight gap interrupted.
         with engine.tick_lock:
             engine.reconcile()
-            return jsonify(ok=True, schedules=clean(engine.store.schedules()), runs=clean(engine.store.runs()),
-                           mailbox=clean(engine.store.messages()), lead_token_configured=engine.store.has_token(),
-                           limits={'schedules': scheduling.MAX_SCHEDULES, 'daily_runs': scheduling.MAX_DAILY_RUNS,
+            return jsonify(ok=True, schedules=[schedule_payload(row) for row in engine.store.schedules()], runs=clean(engine.store.runs()),
+                           mailbox=clean(engine.store.messages()), timezone=engine.store.timezone,
+                           timezone_error='' if engine.store.timezone else 'Home Assistant time zone unavailable; schedule entry and dispatch are paused.',
+                           lead_token_configured=engine.store.has_token(),
+                           limits={'proposals': scheduling.MAX_PROPOSALS, 'mail_per_turn': scheduling.MAX_MAIL_PER_TURN,
+                                   'mail_per_day': scheduling.MAX_MAIL_PER_DAY, 'schedules': scheduling.MAX_SCHEDULES, 'daily_runs': scheduling.MAX_DAILY_RUNS,
                                    'schedule_daily_runs': scheduling.MAX_SCHEDULE_DAILY_RUNS})
 
     @app.get('/schedules')
@@ -237,14 +260,14 @@ def register(worker):
     @owner
     def schedules_create():
         value = service.engine().store.save(body(), owner=True, now=time.time())
-        return jsonify(ok=True, schedule=clean(value)), 201
+        return jsonify(ok=True, schedule=schedule_payload(value)), 201
 
     @app.patch('/schedules/<schedule_id>')
     @guarded
     @owner
     def schedules_edit(schedule_id):
         value = service.engine().store.save(body(), owner=True, now=time.time(), schedule_id=schedule_id)
-        return jsonify(ok=True, schedule=clean(value))
+        return jsonify(ok=True, schedule=schedule_payload(value))
 
     @app.post('/schedules/<schedule_id>/<action>')
     @guarded
@@ -277,21 +300,28 @@ def register(worker):
     @guarded
     @lead
     def lead_schedules_list():
-        return jsonify(ok=True, schedules=clean(service.engine().store.schedules()))
+        return jsonify(ok=True, schedules=[schedule_payload(row) for row in service.engine().store.schedules()])
 
     @app.post('/lead/schedules')
     @guarded
     @lead
     def lead_schedules_propose():
         value = service.engine().store.save(body(), owner=False, now=time.time())
-        return jsonify(ok=True, schedule=clean(value)), 201
+        return jsonify(ok=True, schedule=schedule_payload(value)), 201
 
     @app.patch('/lead/schedules/<schedule_id>')
     @guarded
     @lead
     def lead_schedules_edit(schedule_id):
         value = service.engine().store.save(body(), owner=False, now=time.time(), schedule_id=schedule_id)
-        return jsonify(ok=True, schedule=clean(value))
+        return jsonify(ok=True, schedule=schedule_payload(value))
+
+    @app.delete('/lead/schedules/<schedule_id>')
+    @guarded
+    @lead
+    def lead_schedules_delete(schedule_id):
+        service.engine().store.delete_proposal(schedule_id, 'lead')
+        return jsonify(ok=True)
 
     @app.post('/lead/tasks')
     @guarded
@@ -325,9 +355,10 @@ def register(worker):
 
     def mail_send(author, parent=None):
         data = body()
-        if set(data) != {'body'}:
-            raise ValueError('A message accepts only body.')
-        message_id = service.engine().store.mail(data['body'], author, time.time(), parent)
+        fields = {'body', 'turn_id'} if author == 'lead' else {'body'}
+        if set(data) != fields:
+            raise ValueError('A lead message needs body and turn_id; an owner message needs body only.')
+        message_id = service.engine().store.mail(data['body'], author, time.time(), parent, data.get('turn_id'))
         return jsonify(ok=True, message_id=message_id), 201
 
     @app.post('/lead/mailbox')
@@ -353,5 +384,29 @@ def register(worker):
     @owner
     def owner_mail_reply(message_id):
         return mail_send('owner', message_id)
+
+    @app.delete('/schedule-mailbox')
+    @guarded
+    @owner
+    def owner_mail_clear():
+        return jsonify(ok=True, removed=service.engine().store.clear_mail())
+
+    @app.delete('/schedule-mailbox/<message_id>')
+    @guarded
+    @owner
+    def owner_mail_delete(message_id):
+        return jsonify(ok=True, removed=service.engine().store.clear_mail(parent=message_id))
+
+    @app.delete('/lead/mailbox')
+    @guarded
+    @lead
+    def lead_mail_clear():
+        return jsonify(ok=True, removed=service.engine().store.clear_mail(author='lead'))
+
+    @app.delete('/lead/mailbox/<message_id>')
+    @guarded
+    @lead
+    def lead_mail_delete(message_id):
+        return jsonify(ok=True, removed=service.engine().store.clear_mail(author='lead', parent=message_id))
 
     return service

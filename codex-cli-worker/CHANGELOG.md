@@ -2,7 +2,7 @@
 
 ## 0.1.81.2 (unreleased)
 
-- **Scheduled work and local lead channel (CX-SCHED).** Persist owner-approved interval, UTC cron and one-off schedules, bounded run history and a plain-text local mailbox. Agent proposals require owner review; native permissions remain pending human decisions. Add a separately authenticated lead API and turn-scoped proposal/mailbox tools. Preserve existing sandbox and refusal paths. Page-task phone pushes follow the existing notification setting; ChatGPT approval mirroring remains a separate integration question.
+- **Scheduled work and local lead channel (CX-SCHED).** Persist owner-approved interval, Home Assistant local-time cron and one-off schedules, bounded run history and a plain-text local mailbox. Agent proposals require owner review; native permissions remain pending human decisions. Add a separately authenticated lead API and turn-scoped proposal/mailbox tools. Preserve existing sandbox and refusal paths. The lead accepted Home Assistant phone permission notification plus the responsive page; no ChatGPT approval mirror. Background outcomes stay in the run log, with only permission-wait pushes. Review fixes protect approved schedules and database sidecars, cap proposals and mailbox writes, allow mailbox clearing, preserve one-offs on busy races and refuse masked-prompt edits.
 
 - **No bundled house rules (CX-NORULES).** Stop packaging and installing house-practice instructions. Preserve owner workspace instructions and all enforced protections. Upgrade cleanup removes only the exact legacy bundled home copy, preserving edited files and symlinks. Documentation points optional house practices to the starter kit.
 

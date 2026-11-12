@@ -436,21 +436,22 @@
       </section>
       <section id="scheduled-work">
         <h3>Scheduled runs</h3>
-        <p class="muted">Schedules use UTC. Proposals from agents stay off until you approve them. A permission request waits in its chat; it is never allowed automatically.</p>
+        <p class="muted">Schedules follow Home Assistant time. Proposals from agents stay off until you approve them. A permission request waits in its chat; it is never allowed automatically.</p>
         <p class="muted">Up to 24 runs per schedule and 64 scheduled or lead runs per UTC day. The assistant runs one task at a time.</p>
+        <p id="schedule-timezone" class="muted"></p>
         <div id="schedule-list"></div>
         <form id="schedule-form">
           <input id="schedule-id" type="hidden" />
           <label for="schedule-name">Name</label><input id="schedule-name" maxlength="80" required />
           <label for="schedule-prompt">Prompt</label><textarea id="schedule-prompt" rows="3" maxlength="16000" required></textarea>
           <label for="schedule-mode">Mode</label><select id="schedule-mode"><option value="default">Default</option><option value="read-only">Read only</option></select>
-          <label for="schedule-kind">When</label><select id="schedule-kind"><option value="minutes">Every N minutes</option><option value="hours">Every N hours</option><option value="cron">Cron (UTC)</option><option value="once">Once (UTC)</option></select>
+          <label for="schedule-kind">When</label><select id="schedule-kind"><option value="minutes">Every N minutes</option><option value="hours">Every N hours</option><option value="cron">Cron (Home Assistant time)</option><option value="once">Once (Home Assistant time)</option></select>
           <label for="schedule-value" id="schedule-value-label">Minutes</label><input id="schedule-value" value="60" required />
           <p id="schedule-format-note" class="muted">Use a whole number, at least 1.</p>
           <div class="settings-actions"><button type="submit">Save and approve schedule</button><button id="schedule-reset" type="button" class="subtle">Clear form</button></div>
         </form>
         <h4>Run log</h4><div id="schedule-runs"></div>
-        <h3>House Lead channel</h3>
+        <h3>Lead agent channel</h3>
         <p class="muted">Create a separate token for the other agent on this box. Copy it to that agent's private configuration. It can propose schedules and exchange local messages, but cannot approve actions or schedules. Rotation revokes the old token.</p>
         <button id="lead-token-create" type="button">Create or rotate lead token</button>
         <div id="lead-token-result" hidden><label for="lead-token-value">Token (shown once)</label><input id="lead-token-value" type="password" readonly autocomplete="off" /><button id="lead-token-copy" type="button">Copy token</button><button id="lead-token-hide" type="button" class="subtle">Clear token</button></div>

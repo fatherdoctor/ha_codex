@@ -33,7 +33,8 @@ RUN apk add --no-cache \
     py3-pip \
     rsync \
     tar \
-    util-linux-misc
+    util-linux-misc \
+    tzdata
 
 RUN install -D -m 0755 /usr/bin/bwrap /opt/codex-sandbox/bwrap.exec \
     && install -m 0755 /usr/bin/bwrap /opt/codex-sandbox/relay-bwrap
