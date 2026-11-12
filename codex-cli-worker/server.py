@@ -67,6 +67,18 @@ DATA_ROOT = Path("/data")
 interaction_logs = RollingDiagnostics(DATA_ROOT / "interaction-diagnostics.json")
 diagnostics = InteractionRecorder(interaction_logs, os.environ.get("ADDON_VERSION", "unknown"),
                                  os.environ.get("CODEX_VERSION", "unknown"))
+def record_diagnostic(method, *args, **kwargs):
+    """Diagnostics are observational, including when a recorder is broken."""
+    try:
+        return getattr(diagnostics, method)(*args, **kwargs)
+    except Exception:
+        try:
+            interaction_logs.unavailable = True
+        except Exception:
+            pass
+        return None
+
+
 ha_data = HomeAssistantData(_ToolWorker(), DATA_ROOT / "ha-data")
 CODEX_HOME = DATA_ROOT / "codex-home"
 OPTIONS_PATH = DATA_ROOT / "options.json"
@@ -1655,7 +1667,7 @@ def record_activity_event(task_id: str, event: Any) -> None:
     """Map one line of `codex exec --json` output onto the running exchange's steps."""
     if not isinstance(event, dict):
         return
-    diagnostics.activity(task_id, event)
+    record_diagnostic("activity", task_id, event)
     kind = str(event.get("type") or "")
     if kind == "thread.started":
         finish_phase(task_id, "launch")
@@ -4174,7 +4186,7 @@ def reader_thread(task_id: str, stream_name: str, handle, session_holder: dict[s
             break
         write_task_log(task_id, stream_name, line)
         if stream_name == "stderr":
-            diagnostics.gate_message(task_id, line)
+            record_diagnostic("gate_message", task_id, line)
         if stream_name == "stdout":
             try:
                 event = json.loads(line)
@@ -4271,7 +4283,7 @@ def create_approval_session(
 
     def save_approvals(records: list[dict[str, Any]]) -> None:
         """Save display-only decisions on the matching exchange, including expiration, and announce a new request."""
-        diagnostics.approvals(task_id, records)
+        record_diagnostic("approvals", task_id, records)
         # Before anything can fail: an answered or expired request must not be announced late.
         for item in records:
             if item["status"] != "pending" and item["approval_id"] in alerts:
@@ -4587,7 +4599,7 @@ def fail_task_launch(
     detail_prefix: str | None = None,
 ) -> None:
     """Record and publish a clean task failure when Codex cannot start."""
-    diagnostics.event(task_id, {"kind": "error", "type": type(exc).__name__})
+    record_diagnostic("event", task_id, {"kind": "error", "type": type(exc).__name__})
     if task_cancellation_requested(task_id):
         return
     completed_at = utc_now()
@@ -4724,6 +4736,13 @@ def stall_summary(stall_seconds: int) -> str:
             "The network may have dropped. Send the request again, or continue the conversation.")
 
 
+def launch_policy_diagnostic_rule(problem):
+    """Name only causes known from the policy check; never infer full access."""
+    if 'sandbox mode "danger-full-access"' in problem:
+        return 'full_access'
+    return 'other'
+
+
 def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: str | None = None) -> None:
     """Run one exchange: record the configuration, launch Codex, then check and report what it changed."""
     if task_cancellation_requested(task_id):
@@ -4733,7 +4752,7 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     policy_problem = (protected_policy.policy_problem(read_options())
                       or protected_policy.policy_problem(task_options(task_id)))
     if policy_problem:
-        diagnostics.event(task_id, {"kind": "gate", "rule": "full_access"})
+        record_diagnostic("event", task_id, {"kind": "gate", "rule": launch_policy_diagnostic_rule(policy_problem)})
         fail_task_launch(
             task_id,
             RuntimeError(policy_problem),
@@ -4758,7 +4777,7 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     if task_cancellation_requested(task_id):
         return
     options = task_options(task_id)
-    diagnostics.model(task_id, latest_execution(task_id, options).get("model", "default"))
+    record_diagnostic("model", task_id, latest_execution(task_id, options).get("model", "default"))
     refresh_core_address(options)
     if not before_manifest_path.exists():
         try:
@@ -4973,7 +4992,7 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
         unchecked_edits = [item["path"] for item in edit_checks if item.get("checked") is False]
         planted_edits = [item for item in edit_checks if item.get("checked") is not False]
         if planted_edits:
-            diagnostics.event(task_id, {"kind": "gate", "rule": "planted_definition"},
+            record_diagnostic("event", task_id, {"kind": "gate", "rule": "planted_definition"},
                               paths=[str(CONFIG_ROOT / p["path"]) for p in planted_edits])
         if planted_edits or unchecked_edits:
             fields = {"refused_edits": planted_edits, "unchecked_edits": unchecked_edits}
@@ -5036,8 +5055,8 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     # already has its own summary, as a timeout or one Codex reports, needs none.
     reason = ""
     if timed_out:
-        diagnostics.event(task_id, {"kind": "error", "type": "TimeoutError"})
-        diagnostics.finish(task_id, "timed_out")
+        record_diagnostic("event", task_id, {"kind": "error", "type": "TimeoutError"})
+        record_diagnostic("finish", task_id, "timed_out")
         final = {
             "status": "failed",
             "summary": f"Codex timed out after {timeout} seconds.",
@@ -5288,11 +5307,11 @@ def _run_background_task(
         diagnostic_task = tasks.get(task_id, {})
         source = {"schedule": "scheduled_run", "lead": "lead_channel"}.get(diagnostic_task.get("task_source"), "addon_page")
         model = (diagnostic_task.get("chat_settings") or {}).get("model", "default")
-    diagnostics.begin(task_id, source, model)
     try:
+        record_diagnostic("begin", task_id, source, model)
         run_task(task_id, prompt, session_id, reply)
     except Exception as exc:
-        diagnostics.event(task_id, {"kind": "error", "type": type(exc).__name__})
+        record_diagnostic("event", task_id, {"kind": "error", "type": type(exc).__name__})
         fail_task_launch(task_id, exc, session_id=session_id, summary="The Codex task could not finish.")
     finally:
         verification.end(task_id)
@@ -5310,7 +5329,7 @@ def _run_background_task(
                         running_processes.pop(task_id, None)
         with lock:
             result = tasks.get(task_id, {}).get("status")
-        diagnostics.finish(task_id, {"completed": "done", "waiting_for_input": "done", "cancelled": "stopped",
+        record_diagnostic("finish", task_id, {"completed": "done", "waiting_for_input": "done", "cancelled": "stopped",
                                      "failed": "failed"}.get(result, "unknown"))
         finish_activity(task_id)
         remove_run_artifacts(get_run_dir(task_id), WORKING_FILES)
@@ -5671,10 +5690,47 @@ def status() -> Response:
     )
 
 
+@app.get("/diagnostics/settings")
+@require_auth
+def get_diagnostic_settings():
+    if is_ingress_request():
+        admin, refusal = ingress_admin()
+        if admin is None:
+            return jsonify({"ok": False, "error": refusal}), 403
+    return jsonify({"ok": True, "capacity": interaction_logs.capacity})
+
+
+@app.post("/diagnostics/settings")
+@require_auth
+def set_diagnostic_settings():
+    admin, refusal = ingress_admin()
+    if admin is None:
+        return jsonify({"ok": False, "error": refusal}), 403
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or set(payload) != {"capacity"}:
+        return jsonify({"ok": False, "error": "Choose an interaction count."}), 400
+    try:
+        interaction_logs.configure(payload["capacity"])
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception:
+        return jsonify({"ok": False, "error": "Could not save diagnostic retention."}), 503
+    return jsonify({"ok": True, "capacity": interaction_logs.capacity})
+
+
 @app.get("/diagnostics/export")
 @require_auth
 def export_interaction_logs() -> Response:
     """Download metadata only; no task histories, accounts or configuration are exported."""
+    if is_ingress_request():
+        admin, refusal = ingress_admin()
+        if admin is None:
+            return jsonify({"ok": False, "error": refusal}), 403
+    try:
+        relay_reads.finish_observation_if_stopped()
+    except Exception:
+        pass
+    record_diagnostic("flush")
     response = jsonify(interaction_logs.export())
     response.headers["Content-Disposition"] = 'attachment; filename="codex-interactions.json"'
     response.headers["Cache-Control"] = "no-store"
@@ -6262,21 +6318,12 @@ def relay_read_redact(value: str) -> str:
 
 
 def record_relay_read(metadata, result, error, started):
-    """Observe this worker's read RPC only, without inspecting a remote thread."""
-    key = uuid.uuid4().hex
-    diagnostics.begin(key, "relay_read", "unknown", start=started)
-    operation = metadata.get("operation")
-    entity = metadata.get("entity_id")
-    domain = entity.split(".", 1)[0] if isinstance(entity, str) else metadata.get("domain")
-    diagnostics.event(key, {"kind": "ha_read", "operation": operation, "domain": domain},
-                      entities=[entity] if isinstance(entity, str) else [])
-    diagnostics.event(key, {"kind": "tool", "name": "read", "result": "failed" if error else "done",
-                           "duration_seconds": max(0, time.time() - started)})
-    if isinstance(error, RelayReadError):
-        diagnostics.event(key, {"kind": "gate", "rule": "credential" if str(error) in {
-            "Use a noncredential entity id.", "Password-mode text entities are unavailable to relay reads."
-        } else "other"})
-    diagnostics.finish(key, "failed" if error else "done", error)
+    """Group only worker-owned relay RPC observations within a capability lifetime."""
+    session = metadata.get("session")
+    if metadata.get("event") == "end":
+        record_diagnostic("relay_end", session)
+    else:
+        record_diagnostic("relay_read", session, metadata, error, started)
 
 
 relay_reads = RelayReads(relay_process_state, ha_token, relay_read_redact, observer=record_relay_read)

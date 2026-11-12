@@ -384,7 +384,10 @@
       </section>
       <section>
         <h3>Interaction logs</h3>
-        <p class="muted">Export metadata from the last 10 interactions. Remote ChatGPT threads are not recorded. Review the file before sharing it.</p>
+        <p class="muted">Export recent worker metadata. Remote ChatGPT threads are not recorded. Review the file before sharing it.</p>
+        <label for="diagnostic-retention">Interactions to keep (10–100)</label>
+        <input id="diagnostic-retention" type="number" min="10" max="100" value="25" step="1">
+        <button id="save-diagnostic-retention" class="subtle">Save log retention</button>
         <button id="export-interaction-logs" class="subtle">Export logs</button>
         <p id="export-logs-status" class="muted" role="status"></p>
       </section>

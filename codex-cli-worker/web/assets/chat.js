@@ -465,6 +465,19 @@ document.getElementById("export-interaction-logs").addEventListener("click", asy
     button.disabled = false;
   }
 });
+
+document.getElementById("save-diagnostic-retention").addEventListener("click", async () => {
+  const status = document.getElementById("export-logs-status");
+  try {
+    const capacity = Number(document.getElementById("diagnostic-retention").value);
+    if (!Number.isInteger(capacity) || capacity < 10 || capacity > 100)
+      throw new Error("Keep between 10 and 100 interactions.");
+    await api("diagnostics/settings", { capacity });
+    status.textContent = `Keeping up to ${capacity} interactions. Running interactions are retained.`;
+  } catch (error) {
+    status.textContent = error.message;
+  }
+});
 /** Build an error that keeps the HTTP status so callers can tell 404 apart. */
 function workerError(message, status) {
   const error = new Error(message);
@@ -2881,6 +2894,12 @@ function settingsError(error) {
   $("settings-result").textContent = String(error.message || error);
 }
 $("settings-button").onclick = async () => {
+  try {
+    const data = await api("diagnostics/settings");
+    $("diagnostic-retention").value = data.capacity;
+  } catch (_error) {
+    $("export-logs-status").textContent = "Log retention is available to administrators.";
+  }
   sidebar(false);
   $("settings").showModal();
   $("settings-result").textContent = "";

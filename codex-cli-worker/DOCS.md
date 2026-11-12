@@ -735,33 +735,47 @@ Schedule prompts containing recognized credentials are masked in responses and m
 
 ## Export logs for a bug report
 
-In the add-on page, open Settings and choose **Export logs**. The integration's
-Home Assistant **Download diagnostics** button downloads the same JSON schema
-and anonymized metadata, with Home Assistant's redaction applied again. Review
-the downloaded file before attaching it to a bug report; neither button sends
-anything to another service. Connection settings, account details, task titles,
-prompts, answers and raw tool output are excluded.
+In the add-on page, open Settings and choose **Export logs**. Home Assistant's
+integration **Download diagnostics** button includes the same anonymized data
+inside Home Assistant's own diagnostics envelope. The whole files differ:
+Home Assistant adds system information, including the time zone, component
+information and the integration manifest. Review the entire downloaded file
+before sharing it. Neither button sends a report to another service.
 
-The worker keeps up to ten recent interactions in its private add-on data,
-capped at 128 KiB. Records include start/end times, duration, source, add-on/CLI
-and model identifiers, outcome, tool classes and result classes, worker-visible
-approval requests/answers, gate categories, fixed error descriptions, and HA
-read operations/domains. Each record retains at most 48 events, 64 entity
-references and 32 file categories; excess detail and older records are dropped.
-Entity references are hashed again per download and stay consistent within that
-file. Paths under `/config` retain only an allowlisted folder category and file
-extension; other paths and arbitrary names are excluded. Unknown models/tools
-are reported as unknown/other. Unrecognized build versions, including development
-builds, are marked unknown. The version allowlists must follow package pins. Active records have no end time yet; interruption
-can leave such a record unfinished rather than inventing an outcome.
+The worker's data excludes connection settings, accounts, task titles, prompts,
+answers and raw tool output. The former integration entry/coordinator snapshot
+was removed for this privacy boundary. Error descriptions and tool/model
+categories come from fixed allowlists. Numeric release strings are retained;
+ambiguous address-shaped four-part values are rejected. Unknown values remain
+unknown. A test ties the bundled CLI version to its Dockerfile pin.
 
-**Remote ChatGPT threads are not recorded in this first delivery.** Every export
-includes the coverage field `remote ChatGPT threads: not recorded`. The worker
-does not connect to, subscribe to, resume, attach to, or read the history of a
-remote thread for diagnostics. It records its own add-on page tasks, scheduled
-runs and lead-channel tasks. Its relay-read RPCs are separate worker interactions;
-they do not describe a remote conversation or its approvals. Only refusals and
-approval events visible to the worker are included; there is no new hook log or
-remote event observer. Diagnostics do not change an approval, gate or read
-result. An unavailable worker returns an empty export marked unavailable through
-the integration, without exporting its error message or connection address.
+Settings lets an administrator choose **10–100 interactions**, with **25 by
+default**. The byte cap scales from 128 KiB at ten to 1,280 KiB at 100. Completed
+records are removed before still-running interactions; reducing retention also
+preserves running work. Per record, retain at most 48 events, 64 entity
+references, 32 file categories and 64 operation/domain counters. Raw paths under
+`/config` become only an allowlisted folder category and extension. Entity IDs
+become HMAC-SHA256 references using a random installation key in private add-on
+data, mode 0600. The key is never included in either export. Each download adds
+a fresh, unexported salt, keeping an entity's public reference consistent within
+one file while changing it between downloads. Legacy unkeyed references are
+dropped during migration because their original IDs cannot safely be recovered.
+
+Diagnostic writes are coalesced every eight metadata changes and flushed at
+begin, finish and export. Abrupt termination can lose the buffered tail; an
+unfinished record stays unfinished rather than inventing an outcome. A corrupt,
+too-deep or wrong-shaped store is set aside privately with a content-free note,
+and a fresh store is started. Non-object rows are dropped with a count. Failures
+of diagnostic collection never decide whether an action runs or a queue advances.
+
+**Remote ChatGPT thread events are not recorded in this first delivery.** Every
+export includes `remote ChatGPT threads: not recorded`. No diagnostic connection,
+subscription, resume, attachment or remote history read is added. Add-on page,
+scheduled and lead-channel tasks are recorded by their worker lifecycle. Relay
+read RPCs are grouped separately within one capability lifetime, with counts per
+operation/domain; they do not describe the remote conversation or its approvals.
+Only worker-visible gate refusals and approval events are included. The export
+requires an administrator for Ingress requests; the integration's worker token
+remains able to fetch it. Only an Ingress administrator may change retention.
+An unavailable worker returns an unavailable data section without its exception
+message or connection address.

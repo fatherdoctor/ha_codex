@@ -67,12 +67,29 @@ class RelayReads:
         self.lock = threading.Lock(); self.capability = ''
         self.inflight = threading.Lock()
         self.observer = observer
+        self.observation_session = None
 
     def environment(self, base):
         """Called only by relay launch/probe paths; every new launch rotates it."""
+        self.end_observation()
         with self.lock:
+            self.observation_session = secrets.token_hex(16)
             self.capability = 'harc_' + secrets.token_urlsafe(32)
             return {**base, 'HA_RELAY_CAPABILITY': self.capability}
+
+    def end_observation(self):
+        session = self.observation_session
+        self.observation_session = None
+        if session is not None and self.observer is not None:
+            try:
+                self.observer({'event': 'end', 'session': session}, None, None, time.time())
+            except Exception:
+                pass
+
+    def finish_observation_if_stopped(self):
+        proc, stopping = self.state()
+        if proc is None or stopping or proc.poll() is not None:
+            self.end_observation()
 
     def active(self, supplied):
         if not isinstance(supplied, str) or not supplied:
@@ -114,9 +131,11 @@ class RelayReads:
             error = exc
             raise
         finally:
-            if self.observer is not None and observation.get('authorized'):
+            if (self.observer is not None and observation.get('authorized')
+                    and observation.get('session') == self.observation_session):
                 args = request.get('arguments')
                 metadata = {k: args.get(k) for k in ('operation', 'entity_id', 'domain')} if isinstance(args, dict) else {}
+                metadata['session'] = observation.get('session')
                 try:
                     self.observer(metadata, result, error, started)
                 except Exception:
@@ -126,6 +145,7 @@ class RelayReads:
         if not isinstance(request, dict) or set(request) != {'capability', 'arguments'} or not self.active(request['capability']):
             raise ReadError('Inactive relay capability.')
         observation['authorized'] = True
+        observation['session'] = self.observation_session
         args = request['arguments']
         if not isinstance(args, dict):
             raise ReadError('Read arguments must be an object.')
