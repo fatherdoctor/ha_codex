@@ -4,6 +4,7 @@ import copy
 from datetime import datetime, timezone
 import io
 import json
+import os
 from pathlib import Path
 import tempfile
 import types
@@ -346,6 +347,11 @@ class SchedulingApiTests(unittest.TestCase):
                 self.service.dispatch({'operation': 'read_mailbox', 'arguments': {'limit': limit}, 'capability': cap})
 
     def test_tool_transport_roundtrip_and_expired_capability(self):
+        # The HA pytest harness blocks sockets; allow only this local Unix
+        # transport, keeping all IP networking blocked for this test.
+        if os.environ.get('PYTEST_CURRENT_TEST'):
+            import pytest_socket
+            pytest_socket.socket_allow_hosts([], allow_unix_socket=True)
         task_id = 'synthetic-task'; server.tasks[task_id] = {'status': 'running', 'current_turn_id': 'synthetic-turn'}
         cap = server.ha_data.begin(task_id); self.addCleanup(lambda: server.ha_data.end(task_id))
         path = self.root / 'schedules.sock'; listener = self.service.serve(path)
