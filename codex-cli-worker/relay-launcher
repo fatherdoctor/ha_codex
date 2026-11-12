@@ -56,8 +56,15 @@ def drop_capabilities() -> None:
         raise LaunchError('capability/status verification') from None
 
 
+def read_label() -> str:
+    try:
+        return Path('/proc/self/attr/apparmor/current').read_text().strip()
+    except FileNotFoundError:
+        return Path('/proc/self/attr/current').read_text().strip()
+
+
 def main() -> None:
-    label = Path('/proc/self/attr/current').read_text().strip()
+    label = read_label()
     if not label.endswith('///opt/codex-sandbox/relay-launcher (enforce)') or '//&' in label:
         raise LaunchError('relay AppArmor label entry (reload the updated profile)')
     command = sys.argv[1:]

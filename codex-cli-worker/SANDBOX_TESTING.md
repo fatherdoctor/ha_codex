@@ -36,6 +36,34 @@ The fake-Bubblewrap tests cover both true-command paths, recognized error reason
 
 These tests do not prove HAOS/AppArmor compatibility or filesystem isolation on the affected host.
 
+### HAOS parser and policy ABI
+
+HAOS 16–18.5 pins AppArmor 3.1.7. The profile declares `abi <abi/3.0>,` so
+stacking and ptrace mediation participate in compilation. In 3.1.7 an untagged
+profile uses a legacy policy ABI without `domain/stack`; even when the kernel
+supports stacks, the change-profile rule then fails with "does not support
+stacking of named transitions". A literal target alone does not fix it.
+Do not pass a policy-feature override to the compatibility check: it hides
+this missing declaration. The exact relay-only target stays unchanged.
+
+The 3.1.7 source is the HAOS buildroot release tarball, SHA-256 checked against
+[the HAOS buildroot pin](https://github.com/home-assistant/buildroot/blob/5c344b3789e3/package/apparmor/apparmor.hash).
+Tests compile the actual shipped source with local and repository-prefixed
+Supervisor names, and remove only the ABI declaration for a failing control.
+A local offline compile does not prove that the kernel accepts a load.
+
+The `AppArmor 3.1.7 enforcement` CI job builds that pinned release and loads
+the shipped policy on a disposable Ubuntu runner, using its real kernel
+features. It tests both Supervisor prefixes and both production relay launch
+routes. Pipe and PTY commands must run the actual guard under `NoNewPrivs=1`,
+retain the relay plus tool stack, and deny reads of synthetic relay/sibling
+proc views. A same-label positive control proves the synthetic marker was
+readable before the stack. Removing only the stack permission must make the
+guard refuse execution. Missing enforcement support fails the job; it never
+silently skips. The job removes only its own profiles and fixture files.
+This is loaded-policy evidence; the lead must still perform the HAOS version
+update and enrolled phone acceptance below.
+
 ### Remote-control profile regression
 
 The relay has its own nested AppArmor label. Relay tools retain that component and add the
@@ -74,7 +102,10 @@ readable/writable protected probe is a failure. The two modes produce four JSON 
 including labels/NNP/errnos for PTY as well as pipes. These are actual command results,
 not labels inferred from the profile text. The probe attempts only synthetic reads through the
 fixed control parent and the relay's `/proc/<pid>/root`, `cwd` and `environ`, plus a synthetic
-write through `cwd`. It fails if any is accessible. Errno 2 means the PID/path is hidden; errno
+write through `cwd`. It fails if any is accessible. The stacked tool component also denies ptrace
+reads of a sibling with the same relay+tool stack; `/proc/self` still works.
+This means process inspection tools can see fewer sibling details than on the
+single-label chat path. This restriction is intentional. Errno 2 means the PID/path is hidden; errno
 13/1 means denied, and errno 30 means read-only. Capture those results and the host's AppArmor
 DENIED records to distinguish namespace hiding from an enforced cross-label denial. In particular,
 repeat on the affected HAOS no-proc fallback where outer PIDs are visible. A pass on a fresh proc

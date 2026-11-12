@@ -19,7 +19,10 @@ class LaunchError(ValueError):
 
 
 def read_label() -> str:
-    return Path('/proc/self/attr/current').read_text().strip()
+    try:
+        return Path('/proc/self/attr/apparmor/current').read_text().strip()
+    except FileNotFoundError:
+        return Path('/proc/self/attr/current').read_text().strip()
 
 
 def read_nnp() -> str:
@@ -31,7 +34,11 @@ def read_nnp() -> str:
 def stack_label(target: str) -> None:
     # AppArmor's AA_CHANGE_STACK operation adds confinement; it never replaces
     # the relay label. Its permission is limited to this exact nested component.
-    with open('/proc/self/attr/current', 'w') as stream:
+    try:
+        stream = open('/proc/self/attr/apparmor/current', 'w')
+    except FileNotFoundError:
+        stream = open('/proc/self/attr/current', 'w')
+    with stream:
         stream.write('stack ' + target)
 
 
