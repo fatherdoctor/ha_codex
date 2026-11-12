@@ -67,11 +67,11 @@ class ReviewCases(unittest.TestCase):
                         'cp /etc/codex/requirements.toml /tmp/copy',
                         'sed -i x /etc/codex/requirements.toml',
                         'echo x > /etc/codex/requirements.toml',
-                        'tee /etc/codex/requirements.toml'):
+                        'tee /etc/codex/requirements.toml',
+                        'cat /etc/codex/requirements.toml.bak',
+                        'cat /etc/codex/requirements.toml.example'):
             with self.subTest(command=command):
                 self.assertTrue(approvals.command_names_protected_path(command))
-        for command in ('cat /etc/codex/requirements.toml.bak',
-                        'cat /etc/codex/requirements.toml.example', 'cat /config/requirements.toml',
-                        'cat /tmp/r'):
+        for command in ('cat /config/requirements.toml', 'cat /tmp/r'):
             with self.subTest(command=command):
                 self.assertFalse(approvals.command_names_protected_path(command))

@@ -45,10 +45,11 @@ class ClosureCases(unittest.TestCase):
                 self.assertTrue(approvals.command_names_protected_path(command))
 
     def test_c4_globs_do_not_cross_directories(self):
-        for command in ('ls /*', 'ls /e*', 'cat /etc/*', 'ls /etc/codex',
-                        'cat /etc/codex/requirements.toml.bak'):
+        for command in ('ls /*', 'ls /e*'):
             with self.subTest(command=command):
                 self.assertFalse(approvals.command_names_protected_path(command))
-        for command in ('cat /etc/codex/*', 'cat /etc/co*/req*'):
+        # Directory targets and matching directory globs are now protected by N4.
+        for command in ('cat /etc/codex/*', 'cat /etc/co*/req*', 'cat /etc/*',
+                        'ls /etc/codex', 'cat /etc/codex/requirements.toml.bak'):
             with self.subTest(command=command):
                 self.assertTrue(approvals.command_names_protected_path(command))

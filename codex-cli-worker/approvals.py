@@ -61,6 +61,12 @@ def command_names_protected_path(command: str) -> bool:
         return len(parts) == len(expected) and all(fnmatch.fnmatchcase(part, pat)
                                                     for pat, part in zip(parts, expected))
 
+    def names_directory(pattern: str) -> bool:
+        parts = posixpath.normpath(pattern).lower().split('/')
+        expected = '/etc/codex'.split('/')
+        return len(parts) >= len(expected) and all(fnmatch.fnmatchcase(part, pat)
+                                                    for pat, part in zip(parts, expected))
+
     words = re.findall(r"[^\s<>;&|(){}]+(?:\{[^{}]*\}[^\s<>;&|(){}]*)?", text)
     expanded = []
     for word in words:
@@ -70,18 +76,24 @@ def command_names_protected_path(command: str) -> bool:
                             for choice in brace[1].split(','))
         else:
             expanded.append(word)
-    names_directory = any(word.startswith('/') and matches_path(word, '/etc/codex') for word in expanded)
-    if names_directory and any('/' not in word and fnmatch.fnmatchcase('requirements.toml', word.lower())
-                               for word in expanded):
+    # Paths may be embedded in options such as --chdir=/etc/codex or -C/etc/codex.
+    if any('/' in word and names_directory(word[word.index('/'):]) for word in expanded):
+        return True
+    # A find from an ancestor can select the managed requirements file.
+    if (re.search(r"\bfind\s+/(?:etc)?(?:\s|/|$)", text, re.IGNORECASE)
+            and any(fnmatch.fnmatchcase('requirements.toml', posixpath.basename(word).lower())
+                    for word in expanded)):
         return True
     directory = ""
-    for part in re.split(r"[;&|\n]+", text):
+    for part in re.split(r"[;&|(){}\n]+", text):
         words = re.findall(r"[^\s<>]+", part)
         if not words:
             continue
-        if words[0] == "cd" and len(words) > 1:
-            path = words[1]
-            directory = posixpath.normpath(path if path.startswith("/") else posixpath.join(directory, path))
+        if words[0] in ("cd", "pushd"):
+            paths = [word for word in words[1:] if not word.startswith('-')]
+            if paths:
+                path = paths[0]
+                directory = posixpath.normpath(path if path.startswith("/") else posixpath.join(directory, path))
         for word in words:
             if word.startswith("/"):
                 candidate = posixpath.normpath(word)
@@ -89,7 +101,7 @@ def command_names_protected_path(command: str) -> bool:
                 candidate = posixpath.normpath(posixpath.join(directory, word))
             else:
                 continue
-            if matches_path(candidate, target):
+            if names_directory(candidate) or matches_path(candidate, target):
                 return True
     if any(word.startswith('/') and matches_path(word, target) for word in expanded):
         return True

@@ -624,6 +624,32 @@ SHELL_ASSIGNMENT_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*=")
 HA_REMOTE_TEXT_RE = re.compile(
     r"\bha\s+(?:(?:--(?:log-level|api-token|endpoint|config)(?:=\S+|\s+\S+)|-\S+)\s+)*"
     r"(?:add-?ons?|host|os|core|hardware|network|backups?|apps)\b", re.IGNORECASE)
+# Flag values and shell syntax can obscure the exact argument boundaries. The
+# always-refused families remain protected even when they follow such values.
+HA_WORD_RE = re.compile(r"\bha\b", re.IGNORECASE)
+HA_SHELL_WORD_RE = re.compile(r"\bh[\"'\\]*a\b", re.IGNORECASE)
+HA_ALWAYS_TEXT_RE = re.compile(r"\b(?:supervisor|su)\b", re.IGNORECASE)
+HA_UNKNOWN_FLAG_RE = re.compile(
+    r"--(?:log-level|api-token|endpoint|config)(?:=|\s+)"
+    r"(?:[\"'`]|[^\s;]*\$\()", re.IGNORECASE)
+
+
+def _ha_always_in_text(text: str) -> bool:
+    """Find an always-refused family following HA on the same line."""
+    for line in text.splitlines():
+        word = HA_WORD_RE.search(line)
+        if word and HA_ALWAYS_TEXT_RE.search(line, word.end()):
+            return True
+    return False
+
+
+def _ha_unknown_flag(text: str) -> bool:
+    """Conservatively refuse a quoted or computed global-flag value."""
+    for line in text.splitlines():
+        word = HA_SHELL_WORD_RE.search(line)
+        if word and HA_UNKNOWN_FLAG_RE.search(line, word.end()):
+            return True
+    return False
 
 
 def _ha_command(text: str, remote_on: bool, depth: int = 0) -> bool:
@@ -689,7 +715,7 @@ def _ha_command(text: str, remote_on: bool, depth: int = 0) -> bool:
         while index < len(segment) and segment[index].startswith("-"):
             flag = segment[index].lower()
             index += 1
-            if flag == "--log-level" and index < len(segment):
+            if flag in ("--log-level", "--api-token", "--endpoint", "--config") and index < len(segment):
                 index += 1
         if index < len(segment):
             family = segment[index].lower()
@@ -794,7 +820,9 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
             if definition:
                 return f"This command names a {definition[1]} definition, which Codex may not write or edit."
         plain_ha = re.sub(r"[\"'`]", "", text.replace("\\\n", " "))
-        if (remote_on and HA_REMOTE_TEXT_RE.search(plain_ha)) or _ha_command(text, remote_on):
+        if (_ha_always_in_text(plain_ha)
+                or (remote_on and (HA_REMOTE_TEXT_RE.search(plain_ha) or _ha_unknown_flag(text)))
+                or _ha_command(text, remote_on)):
             return "This command talks to the Home Assistant Supervisor, which is never allowed."
         for pattern, why in PROTECTED_COMMAND_RES:
             if pattern.search(text):
