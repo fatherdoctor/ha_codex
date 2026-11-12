@@ -311,12 +311,19 @@ summary and details. Marking the watch reviewed acknowledges findings; it does n
 OpenAI's remote control (`codex remote-control`) lets the ChatGPT app on a phone or tablet work on this Home Assistant through OpenAI's relay. The app runs it for you; there is no terminal step.
 
 **Startup on Home Assistant OS.** An immutable launcher enters a dedicated relay AppArmor label.
-Its separate Bubblewrap binary sets a private UTS host name (`--unshare-user --unshare-uts --hostname
-"Home Assistant"`) and drops all capabilities before Codex starts. The root worker profile gains no
+Its separate Bubblewrap binary sets a private UTS host name and maps container root to UID/GID
+1000 inside the outer user namespace, then drops all capabilities before Codex starts. The root worker profile gains no
 capabilities. A namespace-only probe selects this route; if setup fails, the page and log show
-**Machine-name namespace unavailable**. The plain fallback still enters the relay label and clears
-all capability sets before starting Codex, failing closed if it cannot do so. Launcher errors
+**Machine-name namespace unavailable**. The fallback omits the private hostname but still creates
+the non-zero user mapping and enters the relay label. It clears and verifies all capability sets
+and NoNewPrivs before starting Codex, failing closed if the safe mapping cannot be made. Launcher errors
 identify a fixed label, stack, capability or exec stage without printing arguments or raw exceptions.
+
+The inner UID represents the same kernel file owner as container root, so existing `/config`
+and `/data` ownership and access are preserved; files are not chowned. This avoids Linux's
+CAP_SETFCAP requirement for a new mapping of parent UID 0 after privileges were dropped.
+Codex's nested sandbox instead maps parent UID 1000 to itself. Neither route retains a capability
+or relaxes the tool sandbox to make that operation succeed.
 
 The worker creates `/data/remote_control_control/` at startup, including with remote control off.
 The sandbox wrapper masks that fixed parent, so an earlier chat sandbox cannot see a later control

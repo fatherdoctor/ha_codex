@@ -64,6 +64,23 @@ silently skips. The job removes only its own profiles and fixture files.
 This is loaded-policy evidence; the lead must still perform the HAOS version
 update and enrolled phone acceptance below.
 
+Both relay paths map outside root to UID/GID 1000 inside their outer user
+namespace before `--cap-drop ALL`. The fallback omits UTS setup but uses the
+same mapping and verifies all capability sets are zero and NNP is set before
+exec. No file ownership changes: a mode-0600 file owned by container root is
+still owned by the relay's kernel UID. Without the mapping, Linux's UID-0
+CAP_SETFCAP requirement prevents the capability-free relay from creating a
+nested user namespace. Do not retain capabilities to work around that failure.
+
+The 3.1.7 job starts as real root, loads both Supervisor names, and checks both
+routes with the image's SHA-256-verified CLI release bundle. Real `command/exec`
+pipes and PTYs must read the root-owned `/config` fixture, refuse its write in
+read-only, and allow its write in workspace-write. The inner UID/GID must be
+1000, host ownership must remain 0:0, all five capability sets must be zero,
+and NNP must remain 1. The named route must keep its private hostname without
+changing the runner's hostname. The direct guarded commands additionally use
+the existing proc view to verify denials even when outer PIDs are visible.
+
 ### Remote-control profile regression
 
 The relay has its own nested AppArmor label. Relay tools retain that component and add the
@@ -116,7 +133,7 @@ The probe ships in the worker image, uses a temporary synthetic Codex home and p
 and never enables remote control, signs in, requests a pairing code or calls Home Assistant. The
 control-mask parent must already exist at startup while remote control is off; the probe does not
 create it. The normal launch path and `--plain` fallback must both pass. A fallback that cannot
-drop its bounding set fails closed. Do not relax AppArmor or give the worker new privileges to
+create its safe user mapping or drop its bounding set fails closed. Do not relax AppArmor or give the worker new privileges to
 make it pass.
 
 For an account-free Linux regression with the pinned CLI installed separately, run:

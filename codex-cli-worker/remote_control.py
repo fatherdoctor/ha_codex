@@ -107,7 +107,7 @@ RELAY_BWRAP = "/opt/codex-sandbox/relay-bwrap"
 
 def build_command(codex_binary: str, name: str, *args: str) -> list[str]:
     """Enter the relay label, preserve device nodes, then drop namespace setup caps."""
-    return [RELAY_LAUNCHER, RELAY_BWRAP, "--unshare-user", "--unshare-uts",
+    return [RELAY_LAUNCHER, RELAY_BWRAP, "--unshare-user", "--uid", "1000", "--gid", "1000", "--unshare-uts",
             "--hostname", name, "--bind", "/", "/", "--dev", "/dev", "--bind-try", "/dev/shm", "/dev/shm",
             "--cap-drop", "ALL", "--", codex_binary, *args]
 

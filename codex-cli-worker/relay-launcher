@@ -2,13 +2,17 @@
 """Immutable AppArmor transition point for the relay, separate from tool sandboxes.
 
 The namespace path delegates privilege removal to Bubblewrap's --cap-drop ALL.
-The plain fallback has no such setup stage and must remove every capability here.
+Both paths map container root to UID/GID 1000 before dropping setup capabilities.
+The fallback omits only UTS setup and verifies capability removal again afterward.
 """
 import ctypes
 import errno
 import os
 import sys
 from pathlib import Path
+
+RELAY_BWRAP = '/opt/codex-sandbox/relay-bwrap'
+LAUNCHER = '/opt/codex-sandbox/relay-launcher'
 
 
 class LaunchError(ValueError):
@@ -69,9 +73,21 @@ def main() -> None:
         raise LaunchError('relay AppArmor label entry (reload the updated profile)')
     command = sys.argv[1:]
     if command[:1] == ['--plain']:
+        if len(command) == 1:
+            raise LaunchError('relay command selection')
+        # Root must create this map while it still has setup capabilities.
+        # UID/GID 1000 inside still represent the same kernel owner outside.
+        # Even without a private UTS, a capability-free UID-0 relay could not
+        # create Codex's nested uid map (the CAP_SETFCAP rule since Linux 5.12).
+        command = [RELAY_BWRAP, '--unshare-user', '--uid', '1000', '--gid', '1000',
+                   '--bind', '/', '/', '--dev', '/dev', '--bind-try', '/dev/shm', '/dev/shm',
+                   '--cap-drop', 'ALL', '--', LAUNCHER, '--mapped-plain', *command[1:]]
+    elif command[:1] == ['--mapped-plain']:
+        if os.getuid() != 1000 or os.getgid() != 1000:
+            raise LaunchError('relay non-root uid/gid verification')
         drop_capabilities()
         command = command[1:]
-    elif not command or command[0] != '/opt/codex-sandbox/relay-bwrap':
+    elif not command or command[0] != RELAY_BWRAP:
         raise LaunchError('relay namespace helper selection')
     if not command:
         raise LaunchError('relay command selection')
