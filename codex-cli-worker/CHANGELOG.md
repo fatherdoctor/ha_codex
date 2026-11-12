@@ -2,6 +2,11 @@
 
 ## 0.1.81.2 (unreleased)
 
+- Close diagnostics interrupted by a worker restart as unknown, retaining room for new completed work.
+  Create the private entity key without hard links and explain recovery while collecting other metadata.
+  Protect private diagnostic files, retain only the newest corrupt store, distinguish policy causes and
+  clarify privacy-test inputs and backup limits.
+
 - **Anonymized interaction diagnostics.** Add bounded worker metadata and local exports in Settings and Home Assistant diagnostics. Replace the previous integration entry/coordinator snapshot to exclude prompts, titles and connection data. Home Assistant still adds its own system envelope. Use private keyed entity references, administrator-checked downloads, failure-isolated collection and grouped relay reads. Keep 25 interactions by default, configurable from 10 to 100; preserve running work and scale the size cap. Remote ChatGPT thread events remain explicitly excluded.
 
 - **Core address and first-run relay reads (CX-HA-URL).** Discover Core's actual port and SSL setting from Supervisor at startup and each task/relay launch. Make the address option an empty override and retire old default values. Offer a bounded read-only relay tool using a temporary capability; no hand-made Core token is needed for entity reads and the Supervisor token stays in the worker. Unsupported shell reads still request native network approval; direct commands still need a separately configured credential.

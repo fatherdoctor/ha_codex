@@ -41,6 +41,7 @@ class RollingDiagnostics:
         self.discarded_rows = 0
         self.store_resets = 0
         self._entity_key = None
+        self._key_warning = False
         self.capacity = MAX_INTERACTIONS
         self.max_bytes = MAX_BYTES * MAX_INTERACTIONS // 10
         self.configure(capacity, persist=False)
@@ -51,6 +52,26 @@ class RollingDiagnostics:
             pass
         except Exception:
             self.unavailable = True
+        try:
+            self._close_abandoned()
+        except Exception:
+            # Diagnostics must not prevent the worker from starting.
+            self.unavailable = True
+            _LOGGER.warning('Interrupted diagnostic rows could not be closed at startup.')
+
+    def _close_abandoned(self):
+        """Only startup closes persisted work; reads never close this process's live rows."""
+        with self.lock:
+            rows = self._read()
+            ended = time.time()
+            changed = False
+            for row in rows:
+                if row.get('outcome') == 'running':
+                    row['outcome'] = 'unknown (restart)'
+                    row['end'] = ended
+                    changed = True
+            if changed:
+                self._atomic_write(self._retain(rows))
 
     def _atomic_write(self, value, destination=None):
         destination = destination or self.path
@@ -75,31 +96,37 @@ class RollingDiagnostics:
                 self._atomic_write(self._retain(self._read()))
 
     def entity_key(self):
-        """Create an atomic, private random key; never include it in a diagnostic record."""
+        """Use an exclusive private key; omit entity references if it needs owner repair."""
         with self.lock:
             if self._entity_key is not None:
                 return self._entity_key
-            self.key_path.parent.mkdir(parents=True, exist_ok=True)
-            if not self.key_path.exists():
-                descriptor, name = tempfile.mkstemp(prefix='.diagnostics-key-', dir=self.key_path.parent)
+            try:
+                self.key_path.parent.mkdir(parents=True, exist_ok=True)
                 try:
+                    descriptor = os.open(self.key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+                except FileExistsError:
+                    pass
+                else:
                     with os.fdopen(descriptor, 'wb') as stream:
                         stream.write(secrets.token_bytes(32))
-                    try:
-                        os.link(name, self.key_path)
-                    except FileExistsError:
-                        pass
-                finally:
-                    Path(name).unlink(missing_ok=True)
-            descriptor = os.open(self.key_path, os.O_RDONLY | os.O_NOFOLLOW)
-            with os.fdopen(descriptor, 'rb') as stream:
-                metadata = os.fstat(stream.fileno())
-                if not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 63:
-                    raise ValueError('Diagnostic key permissions are unsafe.')
-                key = stream.read(33)
-            if len(key) != 32:
-                raise ValueError('Diagnostic key is invalid.')
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                descriptor = os.open(self.key_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                with os.fdopen(descriptor, 'rb') as stream:
+                    metadata = os.fstat(stream.fileno())
+                    if not stat.S_ISREG(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o600:
+                        raise ValueError('Unsafe diagnostic key.')
+                    key = stream.read(33)
+                if len(key) != 32:
+                    raise ValueError('Invalid diagnostic key.')
+            except (OSError, ValueError):
+                if not self._key_warning:
+                    _LOGGER.warning('Diagnostic entity key is unavailable or unsafe. Delete the diagnostic key file '
+                                    'to start a new key. Other metadata is still collected without entity references.')
+                    self._key_warning = True
+                return None
             self._entity_key = key
+            self._key_warning = False
             return key
 
     def prepare(self, record, stored=False):
@@ -116,6 +143,11 @@ class RollingDiagnostics:
         if self.path.exists() or self.path.is_symlink():
             quarantine = self.path.with_name(self.path.name + '.corrupt-' + uuid.uuid4().hex[:12])
             os.replace(self.path, quarantine)
+            # Retain just this newest set-aside file; never open its contents.
+            pattern = re.compile(re.escape(self.path.name) + r'\.corrupt-[a-f0-9]{12}')
+            for older in self.path.parent.glob(self.path.name + '.corrupt-*'):
+                if older != quarantine and pattern.fullmatch(older.name) and (older.is_symlink() or not older.is_dir()):
+                    older.unlink(missing_ok=True)
         self.store_resets += 1
         self._atomic_write([])
         _LOGGER.warning('Diagnostic store set aside; a fresh store was started.')

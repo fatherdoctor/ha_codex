@@ -28,13 +28,11 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
             task = {'task_source': source, 'status': 'running', 'chat_settings': {'model': 'gpt-6.1-sol'}}
 
             def run(*args):
-                # Synthetic privacy canary representing command text.
                 server.record_activity_event('sample', {
                     'type': 'item.started',
-                    # Synthetic privacy canary; the field/identifier names the private data it represents.
+                    # A tool-start event contains private command text that must be excluded.
                     'item': {'id': 'one', 'type': 'command_execution', 'command': 'PRIVATE_COMMAND_CANARY'},
                 })
-                # Synthetic privacy canary representing tool output, command text.
                 server.record_activity_event('sample', {
                     'type': 'item.completed',
                     'item': {
@@ -42,7 +40,7 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
                         'type': 'command_execution',
                         'status': 'completed',
                         'exit_code': 0,
-                        # Synthetic privacy canary; the field/identifier names the private data it represents.
+                        # Raw command output must be discarded after metadata extraction.
                         'aggregated_output': 'PRIVATE_OUTPUT_CANARY',
                     },
                 })
@@ -56,16 +54,14 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
                 stack.enter_context(patch.object(server.ha_data, 'end'))
                 stack.enter_context(patch.object(server, 'get_run_dir', return_value=Path('/synthetic')))
                 stack.enter_context(patch.object(server, 'run_task', side_effect=run))
-                # Synthetic privacy canary representing prompt.
+                # The page task prompt must not be collected.
                 server._run_background_task('sample', 'PRIVATE_PROMPT_CANARY', None, None)
             row = self.store.export()['interactions'][-1]
             self.assertEqual(row['source'], expected)
             self.assertEqual(row['outcome'], 'done')
             self.assertEqual(row['events'][0]['name'], 'commandExecution')
             self.assertIsNotNone(row['end'])
-        # Synthetic privacy canary representing path.
         self.assertNotIn('CANARY', self.store.path.read_text())
-        # Synthetic privacy canary representing untrusted free text.
         self.assertNotIn('CANARY', json.dumps(self.store.export()))
 
     def test_real_session_records_request_and_human_decision_without_changing_it(self):
@@ -84,17 +80,16 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
         with (
             patch.object(server, 'tasks', {'sample': task}),
             patch.object(server, 'running_processes', {'sample': proc}),
-            # Synthetic privacy canary representing credential.
+            # This fake worker credential is never real authentication material.
             patch.object(server, 'api_token', return_value='SYNTHETIC_TOKEN_CANARY'),
             patch.object(server, 'update_task', side_effect=update),
             patch.object(server, 'notify_permission_async'),
             patch.object(server, 'prompt_attachment_paths', return_value=[]),
         ):
-            # Synthetic privacy canary representing path, prompt, approval identifier.
             session = server.create_approval_session(
                 'sample',
                 proc,
-                # Synthetic privacy canary; the field/identifier names the private data it represents.
+                # The session prompt must remain outside diagnostic metadata.
                 'PRIVATE_PROMPT_CANARY',
                 Path('/synthetic/final'),
                 None,
@@ -103,7 +98,6 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
             )
             session.thread_id = 'synthetic-thread'
             session.turn_id = 'synthetic-turn'
-            # Synthetic privacy canary representing command text, approval identifier, approval reason.
             session.receive({
                 'id': 4,
                 'method': COMMAND_APPROVAL,
@@ -112,31 +106,29 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
                     'turnId': 'synthetic-turn',
                     'command': 'echo sample',
                     'cwd': '/config',
-                    # Synthetic privacy canary; the field/identifier names the private data it represents.
+                    # The approval explanation is private prose, not an exported rule.
                     'reason': 'PRIVATE_REASON_CANARY',
                 },
             })
             approval = task['approvals'][0]['approval_id']
-            # Synthetic privacy canary representing person name, approval identifier.
+            # The approval actor identifier must not be exported.
             session.decide(approval, 'allow', {'id': 'PRIVATE_PERSON_CANARY'})
             self.assertIn('accept', proc.stdin.getvalue())
         self.recorder.finish('sample', 'done')
         row = self.store.export()['interactions'][0]
         self.assertEqual([x['decision'] for x in row['events'] if x['kind'] == 'approval'], ['asked', 'allowed'])
-        # Synthetic privacy canary representing untrusted free text.
         self.assertNotIn('CANARY', json.dumps(row))
         self.assertNotIn('echo sample', json.dumps(row))
 
     def test_relay_read_observer_preserves_results_and_refusals(self):
         proc = Mock()
         proc.poll.return_value = None
-        # Synthetic privacy canary representing credential, entity identifier.
         engine = RelayReads(
             lambda: (proc, False),
-            # Synthetic privacy canary; the field/identifier names the private data it represents.
+            # The read backend receives a fake credential, which the observer must never log.
             lambda: 'SYNTHETIC_TOKEN_CANARY',
             lambda x: x,
-            # Synthetic privacy canary; the field/identifier names the private data it represents.
+            # A private state value must still reach the caller but never the diagnostic observer.
             fetch=lambda *_: {'entity_id': 'light.synthetic', 'state': 'PRIVATE_STATE_CANARY', 'attributes': {}},
             observer=server.record_relay_read,
         )
@@ -145,13 +137,11 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
             'capability': engine.capability,
             'arguments': {'operation': 'state', 'entity_id': 'light.synthetic'},
         })
-        # Synthetic privacy canary representing untrusted free text.
         self.assertEqual(result['state'], 'PRIVATE_STATE_CANARY')
         with self.assertRaises(ReadError):
-            # Synthetic privacy canary representing credential, entity identifier.
             engine.dispatch({
                 'capability': engine.capability,
-                # Synthetic privacy canary; the field/identifier names the private data it represents.
+                # This credential-shaped entity identifier must be refused by the read engine.
                 'arguments': {'operation': 'state', 'entity_id': 'sensor.private_token_canary'},
             })
         engine.end_observation()
@@ -160,18 +150,15 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
         self.assertEqual(rows[0]['source'], 'relay_read')
         self.assertEqual(rows[0]['outcome'], 'done')
         self.assertEqual(rows[0]['events'][0]['domain'], 'light')
-        self.assertTrue(any((e['kind'] == 'error' for e in rows[0]['events'])))
+        self.assertTrue(any(e['kind'] == 'error' for e in rows[0]['events']))
         self.assertIn('credential', [e.get('rule') for e in rows[0]['events']])
-        # Synthetic privacy canary representing untrusted free text.
         self.assertNotIn('CANARY', json.dumps(rows))
         self.assertNotIn('light.synthetic', json.dumps(rows))
-        # Synthetic privacy canary representing exception text.
+        # A failing observer exception must not alter a successful read.
         engine.observer = Mock(side_effect=OSError('PRIVATE_CANARY'))
-        # Synthetic privacy canary representing entity identifier.
         self.assertEqual(engine.dispatch({
             'capability': engine.capability,
             'arguments': {'operation': 'state', 'entity_id': 'light.synthetic'},
-        # Synthetic privacy canary; the field/identifier names the private data it represents.
         })['state'], 'PRIVATE_STATE_CANARY')
 
     def test_export_route_requires_auth_and_discloses_coverage_without_caching(self):
@@ -200,18 +187,16 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
         self.recorder.begin('sample', 'addon_page')
         message = 'This request enables full access, which is never allowed.'
         with patch.object(server, 'write_task_log'):
-            # Synthetic privacy canary representing secret, person name.
             server.reader_thread(
                 'sample',
                 'stderr',
-                # Synthetic privacy canary; the field/identifier names the private data it represents.
+                # Arbitrary actor and secret prose surround the one fixed refusal in stderr.
                 io.StringIO('PRIVATE_PERSON_CANARY\n' + message + '\nPRIVATE_SECRET_CANARY\n'),
                 {},
             )
         self.recorder.finish('sample', 'failed')
         row = self.store.export()['interactions'][0]
         self.assertEqual([x['rule'] for x in row['events'] if x['kind'] == 'gate'], ['full_access'])
-        # Synthetic privacy canary representing untrusted free text.
         self.assertNotIn('CANARY', json.dumps(row))
 
     def test_history_read_metadata_follows_authorization_and_cannot_break_the_read(self):
@@ -241,7 +226,7 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
             self.assertEqual(history.call_count, 1)
             engine.queries['chat'] = 0
             worker.diagnostics = Mock()
-            # Synthetic privacy canary representing exception text.
+            # A private observer exception must not change an authorized history read.
             worker.diagnostics.event.side_effect = OSError('PRIVATE_CANARY')
             self.assertEqual(engine.dispatch(payload), {'status': 'observed'})
         self.recorder.finish('chat', 'done')

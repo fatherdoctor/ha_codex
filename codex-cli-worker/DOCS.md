@@ -760,12 +760,21 @@ data, mode 0600. The key is never included in either export. Each download adds
 a fresh, unexported salt, keeping an entity's public reference consistent within
 one file while changing it between downloads. Legacy unkeyed references are
 dropped during migration because their original IDs cannot safely be recovered.
+Add-on backups carry the private key and the diagnostic store together; keyed references protect a
+store copied on its own, not a backup containing both files. The key, retention settings and set-aside
+stores are protected from named task commands and file-change approvals.
+If the key is unsafe or unreadable, the worker logs a recovery instruction and continues collecting
+other metadata without new entity references. Delete `/data/interaction-diagnostics.key` to let the
+worker create a fresh private key; old and new entity references will no longer link.
 
 Diagnostic writes are coalesced every eight metadata changes and flushed at
 begin, finish and export. Abrupt termination can lose the buffered tail; an
-unfinished record stays unfinished rather than inventing an outcome. A corrupt,
+unfinished record is closed at the next worker startup as **unknown (restart)**. Its end time is the
+observed restart time, not a claim about when the interrupted action ended; its result remains unknown.
+Only this process's still-running records receive priority over completed tasks. A corrupt,
 too-deep or wrong-shaped store is set aside privately with a content-free note,
-and a fresh store is started. Non-object rows are dropped with a count. Failures
+and a fresh store is started. Only the newest set-aside corrupt store is kept. Non-object rows are
+dropped with a count. Refused approval-policy and policy-parse problems have distinct fixed labels. Failures
 of diagnostic collection never decide whether an action runs or a queue advances.
 
 **Remote ChatGPT thread events are not recorded in this first delivery.** Every

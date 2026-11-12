@@ -62,7 +62,7 @@ class DiagnosticsReviewTests(unittest.TestCase):
                 self.recorder.begin('sample', 'addon_page')
                 self.recorder.finish('sample', 'done')
                 self.assertEqual(self.store.export()['interactions'][-1]['outcome'], 'done')
-        self.assertGreaterEqual(len(list(self.root.glob('*.corrupt-*'))), 3)
+        self.assertEqual(len(list(self.root.glob('*.corrupt-*'))), 1)
 
     def test_f3_failed_recorder_cannot_prevent_execution_or_queue_release(self):
         recorder = Mock()
@@ -148,9 +148,9 @@ class DiagnosticsReviewTests(unittest.TestCase):
     def test_f5_launch_policy_causes_are_not_all_called_full_access(self):
         self.assertEqual(
             server.launch_policy_diagnostic_rule('The effective approval policy is "never", which this app refuses.'),
-            'other',
+            'approval_policy_never',
         )
-        self.assertEqual(server.launch_policy_diagnostic_rule('Permission policy could not be parsed'), 'other')
+        self.assertEqual(server.launch_policy_diagnostic_rule('Permission policy could not be parsed'), 'policy_parse')
         self.assertEqual(
             server.launch_policy_diagnostic_rule('The sandbox mode "danger-full-access" is not allowed in this app.'),
             'full_access',

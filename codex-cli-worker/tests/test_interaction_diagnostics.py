@@ -18,7 +18,6 @@ class DiagnosticsTests(unittest.TestCase):
         self.store = diag.RollingDiagnostics(self.path)
 
     def sample(self):
-        # Synthetic privacy canary representing path, command text, approval identifier, model identifier, exception text.
         return {
             'source': 'addon_page',
             'start': 1700000000,
@@ -27,41 +26,40 @@ class DiagnosticsTests(unittest.TestCase):
             'outcome': 'done',
             'addon_version': '0.1.81.2',
             'model': 'gpt-6.1-sol',
+            # Repeated synthetic entity IDs test stable pseudonyms within one export.
             'entities': ['light.sample', 'light.sample'],
-            # Synthetic privacy canary; the field/identifier names the private data it represents.
+            # The private filename must reduce to a folder and extension.
             'paths': ['/config/scripts/private_canary.yaml'],
-            # Synthetic privacy canary; the field/identifier names the private data it represents.
+            # The error message stands for private exception prose and must be discarded.
             'events': [{'kind': 'tool', 'name': 'commandExecution', 'result': 'done', 'duration_seconds': 1}, {'kind': 'approval', 'decision': 'denied'}, {'kind': 'gate', 'rule': 'credential'}, {'kind': 'error', 'type': 'ValueError', 'message': 'PRIVATE_CANARY'}, {'kind': 'ha_read', 'operation': 'state', 'domain': 'light'}],
         }
 
     def test_golden_export_drops_all_unstructured_canaries(self):
         record = self.sample()
-        # Synthetic privacy canary representing credential, person name, host name, phone number, address, location, prompt, answer.
-        # Documentation-range address built only for a privacy test; never a network destination.
         record.update(
-            # Synthetic privacy canary; the field/identifier names the private data it represents.
+            # Private prompt prose is not part of diagnostic metadata.
             prompt='PROMPT_CANARY',
-            # Synthetic privacy canary; the field/identifier names the private data it represents.
+            # Private answer prose is not part of diagnostic metadata.
             answer='ANSWER_CANARY',
-            # Synthetic privacy canary; the field/identifier names the private data it represents.
+            # A credential value must never reach either store or export.
             token='TOKEN_CANARY',
-            # Synthetic privacy canary; the field/identifier names the private data it represents.
+            # A person identifier must be excluded from the diagnostic schema.
             person='PERSON_CANARY',
-            # Synthetic privacy canary; the field/identifier names the private data it represents.
+            # A location label must be excluded from diagnostic metadata.
             location='LOCATION_CANARY',
-            # Synthetic privacy canary; the field/identifier names the private data it represents.
+            # A server label must be excluded from diagnostic metadata.
             host='HOST_CANARY',
-            # Synthetic privacy canary; the field/identifier names the private data it represents.
+            # A contact field must be excluded from diagnostic metadata.
             email='EMAIL_CANARY',
-            # Synthetic privacy canary; the field/identifier names the private data it represents.
+            # A telephone field must be excluded from diagnostic metadata.
             phone='PHONE_CANARY',
+            # A constructed documentation-range address is data only, never a network destination.
             address='.'.join(map(str, (192, 0, 2, 10))),
         )
         self.store.append(record)
         with patch.object(diag.secrets, 'token_bytes', return_value=b'x' * 32):
             export = self.store.export()
         raw = json.dumps(export)
-        # Synthetic privacy canary representing credential, person name, host name, phone number, address, location, prompt, answer.
         for value in ('PROMPT_CANARY', 'ANSWER_CANARY', 'TOKEN_CANARY', 'PERSON_CANARY', 'LOCATION_CANARY', 'HOST_CANARY', 'EMAIL_CANARY', 'PHONE_CANARY', 'PRIVATE_CANARY', 'private_canary', 'light.sample', record['address']):
             self.assertNotIn(value, raw)
             self.assertNotIn(value, self.path.read_text())
@@ -95,30 +93,27 @@ class DiagnosticsTests(unittest.TestCase):
 
     def test_event_caps_and_untrusted_identifiers_are_allowlisted(self):
         record = self.sample()
-        # Synthetic privacy canary representing model identifier.
+        # Unrecognized source, model and release values must reduce to fixed enums.
         record.update(source='SOURCE_CANARY', model='MODEL_CANARY', addon_version='VERSION_CANARY')
-        # Synthetic privacy canary representing untrusted free text.
+        # Unrecognized tool names and results must not escape their allowlists.
         record['events'] = [{'kind': 'tool', 'name': 'TOOL_CANARY', 'result': 'RESULT_CANARY'}] * 1000
         self.store.append(record)
         out = self.store.export()['interactions'][0]
         self.assertEqual(len(out['events']), diag.MAX_EVENTS)
-        # Synthetic privacy canary representing untrusted free text.
         self.assertNotIn('CANARY', json.dumps(out))
         self.assertEqual(out['events'][0]['name'], 'other')
 
     def test_export_revalidates_tampered_disk_and_nonfinite_numbers(self):
-        # Synthetic privacy canary representing person name, path, prompt, exception text.
         self.path.write_text(json.dumps([{
-            # Synthetic privacy canary; the field/identifier names the private data it represents.
+            # A planted prompt in untrusted input must be dropped.
             'prompt': 'PROMPT_CANARY',
-            # Synthetic privacy canary; the field/identifier names the private data it represents.
+            # An unrecognized origin must become the fixed unknown value.
             'source': 'SOURCE_CANARY',
-            # Synthetic privacy canary; the field/identifier names the private data it represents.
+            # Private error-type and message strings must become a fixed error description.
             'events': [{'kind': 'error', 'type': 'PERSON_CANARY', 'message': 'PRIVATE_CANARY'}],
             'start': float('nan'),
         }]))
         out = self.store.export()
-        # Synthetic privacy canary representing untrusted free text.
         self.assertNotIn('CANARY', json.dumps(out))
         self.assertIsNone(out['interactions'][0]['start'])
 
@@ -134,17 +129,15 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertEqual(self.store.export()['interactions'], [])
 
     def test_append_revalidates_old_disk_rows_before_retaining_them(self):
-        # Synthetic privacy canary representing path, prompt, exception text.
         self.path.write_text(json.dumps([{
-            # Synthetic privacy canary; the field/identifier names the private data it represents.
+            # A private string in a timestamp field must be discarded.
             'start': 'PRIVATE_CANARY',
-            # Synthetic privacy canary; the field/identifier names the private data it represents.
+            # Old disk rows cannot retain private prompt prose.
             'prompt': 'PRIVATE_CANARY',
-            # Synthetic privacy canary; the field/identifier names the private data it represents.
+            # Old disk rows cannot retain arbitrary exception text.
             'events': [{'kind': 'error', 'message': 'PRIVATE_CANARY'}],
         }]))
         self.store.append(self.sample())
-        # Synthetic privacy canary representing path.
         self.assertNotIn('PRIVATE_CANARY', self.path.read_text())
         self.assertEqual(len(self.store.export()['interactions']), 2)
 
@@ -165,67 +158,55 @@ class RecorderTests(unittest.TestCase):
         )
 
     def test_full_golden_record_has_timing_outcomes_and_no_prose(self):
-        # Synthetic privacy canary representing untrusted free text.
+        # The internal task identifier stands for private thread metadata.
         self.recorder.begin('PRIVATE_TASK_CANARY', 'scheduled_run', 'gpt-6.1-sol')
-        # Synthetic privacy canary representing command text.
         self.recorder.activity('PRIVATE_TASK_CANARY', {
             'type': 'item.started',
-            # Synthetic privacy canary; the field/identifier names the private data it represents.
+            # Private tool identifiers and command text must not enter the metadata store.
             'item': {'id': 'PRIVATE_TOOL_CANARY', 'type': 'command_execution', 'command': 'PRIVATE_COMMAND_CANARY'},
         })
         self.time += 3
-        # Synthetic privacy canary representing tool output, command text.
         self.recorder.activity('PRIVATE_TASK_CANARY', {
             'type': 'item.completed',
             'item': {
-                # Synthetic privacy canary; the field/identifier names the private data it represents.
                 'id': 'PRIVATE_TOOL_CANARY',
                 'type': 'command_execution',
                 'status': 'completed',
                 'exit_code': 0,
-                # Synthetic privacy canary; the field/identifier names the private data it represents.
+                # Raw command output must be discarded after metadata extraction.
                 'aggregated_output': 'PRIVATE_OUTPUT_CANARY',
             },
         })
-        # Synthetic privacy canary representing approval identifier, approval reason.
         self.recorder.approvals('PRIVATE_TASK_CANARY', [{
-            # Synthetic privacy canary; the field/identifier names the private data it represents.
+            # An approval request identifier must remain internal.
             'approval_id': 'PRIVATE_APPROVAL_CANARY',
             'status': 'pending',
-            # Synthetic privacy canary; the field/identifier names the private data it represents.
+            # The approval explanation is private prose, not an exported rule.
             'reason': 'PRIVATE_REASON_CANARY',
             'can_allow': True,
         }])
         self.time += 2
-        # Synthetic privacy canary representing approval identifier.
         self.recorder.approvals(
-            # Synthetic privacy canary; the field/identifier names the private data it represents.
             'PRIVATE_TASK_CANARY',
-            # Synthetic privacy canary; the field/identifier names the private data it represents.
+            # A resolved approval still must not export its internal identifier.
             [{'approval_id': 'PRIVATE_APPROVAL_CANARY', 'status': 'denied', 'can_allow': True}],
         )
-        # Synthetic privacy canary representing entity identifier, file name, path.
         self.recorder.event(
-            # Synthetic privacy canary; the field/identifier names the private data it represents.
             'PRIVATE_TASK_CANARY',
             {'kind': 'ha_read', 'operation': 'history', 'domain': 'light'},
-            # Synthetic privacy canary; the field/identifier names the private data it represents.
+            # Raw entity identifiers must be replaced with keyed references.
             entities=['light.private_entity_canary', 'light.private_entity_canary'],
-            # Synthetic privacy canary; the field/identifier names the private data it represents.
+            # Only the folder category and suffix may survive this filename.
             paths=['/config/scripts/private_file_canary.yaml'],
         )
-        # Synthetic privacy canary representing exception text.
+        # The exception message must be replaced with the fixed ValueError text.
         self.recorder.finish('PRIVATE_TASK_CANARY', 'failed', ValueError('PRIVATE_ERROR_CANARY'))
         export = self.store.export()
         raw = json.dumps(export)
         disk = self.store.path.read_text()
-        # Synthetic privacy canary representing untrusted free text.
         self.assertNotIn('CANARY', raw)
-        # Synthetic privacy canary representing untrusted free text.
         self.assertNotIn('CANARY', disk)
-        # Synthetic privacy canary representing entity identifier.
         self.assertNotIn('private_entity_canary', raw)
-        # Synthetic privacy canary representing file name.
         self.assertNotIn('private_file_canary', raw)
         self.assertEqual(export['coverage'], 'remote ChatGPT threads: not recorded')
         row = export['interactions'][0]
@@ -247,8 +228,8 @@ class RecorderTests(unittest.TestCase):
         self.recorder.finish('long', 'stopped')
         rows = self.store.export()['interactions']
         self.assertEqual(len(rows), 25)
-        self.assertEqual(sum((x['source'] == 'lead_channel' for x in rows)), 24)
-        self.assertEqual(sum((x['source'] == 'addon_page' and x['outcome'] == 'stopped' for x in rows)), 1)
+        self.assertEqual(sum(x['source'] == 'lead_channel' for x in rows), 24)
+        self.assertEqual(sum(x['source'] == 'addon_page' and x['outcome'] == 'stopped' for x in rows), 1)
         self.assertLessEqual(self.store.path.stat().st_size, diag.MAX_BYTES)
 
     def test_timeout_and_cancel_close_pending_tools_without_inventing_results(self):
@@ -265,10 +246,9 @@ class RecorderTests(unittest.TestCase):
 
     def test_gate_classification_does_not_infer_hidden_rules(self):
         self.recorder.begin('task', 'addon_page')
-        # Synthetic privacy canary representing approval identifier.
         self.recorder.approvals(
             'task',
-            # Synthetic privacy canary; the field/identifier names the private data it represents.
+            # Untrusted approval prose cannot identify a hidden gate rule.
             [{'approval_id': 'one', 'status': 'pending', 'can_allow': False, 'note': 'PRIVATE_CANARY'}],
         )
         self.recorder.approvals('task', [{
@@ -282,7 +262,7 @@ class RecorderTests(unittest.TestCase):
         self.assertEqual(gates, ['other', 'protected_policy'])
 
     def test_storage_failure_never_changes_execution(self):
-        # Synthetic privacy canary representing exception text.
+        # A storage exception carries private text that must not affect task execution.
         with patch.object(self.store, 'append', side_effect=OSError('PRIVATE_CANARY')):
             self.recorder.begin('task', 'addon_page')
             self.recorder.event('task', {'kind': 'error'})
@@ -292,7 +272,6 @@ class RecorderTests(unittest.TestCase):
 
     def test_address_shaped_version_fields_are_not_exported(self):
         from diagnostics_scrub import sanitize_export
-        # Documentation-range address built only for a privacy test; never a network destination.
         address = '.'.join(map(str, (192, 0, 2, 44)))
         out = sanitize_export({'interactions': [{'addon_version': address, 'cli_version': address}]})
         self.assertNotIn(address, json.dumps(out))
@@ -307,22 +286,20 @@ class RecorderTests(unittest.TestCase):
 
     def test_export_revalidation_rejects_nested_planted_values(self):
         from diagnostics_scrub import sanitize_export
-        # Synthetic privacy canary representing path.
         out = sanitize_export({
-            # Synthetic privacy canary; the field/identifier names the private data it represents.
+            # An arbitrary availability label must not bypass export validation.
             'availability': 'PRIVATE_CANARY',
-            # Synthetic privacy canary; the field/identifier names the private data it represents.
+            # Coverage prose is replaced with the fixed supported coverage statement.
             'coverage': 'PRIVATE_CANARY',
             'interactions': [{
                 'source': 'remote_thread',
-                # Synthetic privacy canary; the field/identifier names the private data it represents.
+                # A malicious tool name and message must be revalidated.
                 'events': [{'kind': 'tool', 'name': 'PRIVATE_CANARY', 'message': 'PRIVATE_CANARY'}],
-                # Synthetic privacy canary; the field/identifier names the private data it represents.
+                # Invalid entity-reference fields must not reach a download.
                 'entities': [{'id': 'PRIVATE_CANARY', 'domain': 'PRIVATE_CANARY'}],
-                # Synthetic privacy canary; the field/identifier names the private data it represents.
+                # Invalid path categories must reduce to fixed values.
                 'paths': [{'folder': 'PRIVATE_CANARY', 'extension': 'PRIVATE_CANARY'}],
             }],
         })
-        # Synthetic privacy canary representing untrusted free text.
         self.assertNotIn('CANARY', json.dumps(out))
         self.assertEqual(out['interactions'][0]['source'], 'unknown')

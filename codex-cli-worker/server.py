@@ -4740,6 +4740,10 @@ def launch_policy_diagnostic_rule(problem):
     """Name only causes known from the policy check; never infer full access."""
     if 'sandbox mode "danger-full-access"' in problem:
         return 'full_access'
+    if ('approval policy' in problem or 'approval_policy' in problem) and '"never"' in problem:
+        return 'approval_policy_never'
+    if 'could not be read' in problem or 'could not be parsed' in problem or 'is not a JSON object' in problem:
+        return 'policy_parse'
     return 'other'
 
 

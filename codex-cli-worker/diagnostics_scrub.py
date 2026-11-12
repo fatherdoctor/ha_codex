@@ -15,7 +15,7 @@ MAX_EVENTS = 48
 DOMAINS = frozenset(('light', 'sensor', 'binary_sensor', 'switch', 'climate', 'lock', 'cover', 'alarm_control_panel', 'input_boolean', 'input_number', 'input_text', 'text', 'script', 'automation', 'scene', 'fan', 'media_player', 'camera', 'button', 'number', 'select', 'other'))
 TOOLS = frozenset(('commandExecution', 'fileChange', 'mcpToolCall', 'webSearch', 'read', 'history', 'statistics', 'apply_patch', 'other'))
 ORIGINS = frozenset(('addon_page', 'relay_read', 'scheduled_run', 'lead_channel'))
-RESULTS = frozenset(('done', 'failed', 'stopped', 'timed_out', 'running', 'unknown'))
+RESULTS = frozenset(('done', 'failed', 'stopped', 'timed_out', 'running', 'unknown', 'unknown (restart)'))
 DECISIONS = frozenset(('asked', 'allowed', 'denied', 'expired', 'cancelled', 'unknown'))
 ERRORS = {
     'TimeoutError': 'Operation timed out.',
@@ -24,17 +24,20 @@ ERRORS = {
     'ValueError': 'Invalid operation.',
     'RuntimeError': 'Operation failed.',
 }
-RULES = frozenset(('credential', 'process_environment', 'protected_policy', 'full_access', 'planted_definition', 'template_action', 'other'))
+RULES = frozenset(('credential', 'process_environment', 'protected_policy', 'full_access', 'approval_policy_never', 'policy_parse', 'planted_definition', 'template_action', 'other'))
 MODELS = frozenset(('gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-5.3-codex', 'gpt-5.4', 'gpt-5.5', 'gpt-6.1', 'gpt-6-astra', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'default'))
+
 
 def choice(value, allowed, default='unknown'):
     return value if isinstance(value, str) and value in allowed else default
 
+
 def number(value, maximum=86400):
     return round(float(value), 3) if type(value) in (int, float) and 0 <= value <= maximum and math.isfinite(value) else None
 
+
 def timestamp(value):
-    if isinstance(value, str) and re.fullmatch('\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(?:\\.\\d{1,6})?\\+00:00', value):
+    if isinstance(value, str) and re.fullmatch(r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,6})?\+00:00', value):
         try:
             value = datetime.fromisoformat(value).timestamp()
         except ValueError:
@@ -44,20 +47,26 @@ def timestamp(value):
         return None
     return datetime.fromtimestamp(value, timezone.utc).isoformat()
 
+
 def version(value):
     """Accept bounded numeric releases; ambiguous address-shaped quads fail closed."""
-    if not isinstance(value, str) or not re.fullmatch('[0-9]{1,4}\\.[0-9]{1,4}\\.[0-9]{1,4}(?:\\.[0-9]{1,4})?', value):
+    # Build versions are numeric, but address-shaped quads must not become exported metadata.
+    if not isinstance(value, str) or not re.fullmatch(r'[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}(?:\.[0-9]{1,4})?', value):
         return 'unknown'
     parts = value.split('.')
-    if len(parts) == 4 and parts[0] != '0' and all((int(part) <= 255 for part in parts)):
+    if len(parts) == 4 and parts[0] != '0' and all(int(part) <= 255 for part in parts):
         return 'unknown'
     return value
+
+
 FOLDERS = frozenset({'root', 'automations', 'scripts', 'templates', 'packages'})
 EXTENSIONS = frozenset({'.yaml', '.yml', '.json'})
+
 
 def path_categories(values):
     """The only path boundary: raw config paths or already categorized paths."""
     result = []
+    # Keep categories only: no basename, absolute host path or traversal survives.
     for value in values[:32] if isinstance(values, list) else []:
         if isinstance(value, dict):
             folder = choice(value.get('folder'), FOLDERS, 'other')
@@ -71,6 +80,7 @@ def path_categories(values):
         result.append({'folder': folder, 'extension': extension})
     return result
 
+
 def entity_references(values, *, key=None, salt=None, public=False):
     """One entity boundary for raw IDs, keyed disk references and public IDs.
 
@@ -79,9 +89,10 @@ def entity_references(values, *, key=None, salt=None, public=False):
     The integration only accepts the resulting short public IDs.
     """
     result = []
+    # Never hash raw IDs without the installation key; a missing key drops them.
     for value in values[:64] if isinstance(values, list) else []:
         if isinstance(value, str) and key is not None:
-            if not re.fullmatch('[a-z_]+\\.[a-z0-9_]+', value):
+            if not re.fullmatch(r'[a-z_]+\.[a-z0-9_]+', value):
                 continue
             domain = choice(value.split('.', 1)[0], DOMAINS, 'other')
             reference = hmac.new(key, value.encode(), hashlib.sha256).hexdigest()
@@ -100,6 +111,7 @@ def entity_references(values, *, key=None, salt=None, public=False):
             result.append({'domain': domain, 'id' if public else 'reference': reference})
     return result
 
+
 def scrub(record, entity_key=None, stored=False):
     """Keep only schema-owned values, never attempt to redact arbitrary prose."""
     if not isinstance(record, dict):
@@ -116,6 +128,7 @@ def scrub(record, entity_key=None, stored=False):
     }
     events = record.get('events')
     out['events'] = []
+    # Rebuild each event by kind. Unknown keys and arbitrary prose never cross this boundary.
     for event in events[:MAX_EVENTS] if isinstance(events, list) else []:
         if not isinstance(event, dict):
             continue
@@ -134,6 +147,7 @@ def scrub(record, entity_key=None, stored=False):
             item.update(operation=choice(event.get('operation'), {'state', 'states', 'history', 'statistics'}), domain=choice(event.get('domain'), DOMAINS, 'other'))
         out['events'].append(item)
     values = record.get('entities')
+    # New records accept only raw entity IDs; stored records accept only keyed references.
     if not stored:
         values = [value for value in values if isinstance(value, str)] if isinstance(values, list) else []
     out['entities'] = entity_references(values, key=entity_key)
@@ -152,10 +166,14 @@ def scrub(record, entity_key=None, stored=False):
             'count': total,
         })
     return out
+
+
 COVERAGE = 'remote ChatGPT threads: not recorded'
+
 
 def sanitize_export(value):
     """Rebuild untrusted exports, including diagnostic counters, without prose."""
+    # Treat even a worker response as untrusted when the integration exports it.
     rows = value.get('interactions') if isinstance(value, dict) else None
     result = []
     for row in rows[-MAX_RETENTION:] if isinstance(rows, list) else []:
