@@ -20,7 +20,7 @@ Relay instructions prefer this read tool. For a read outside its supported opera
 
 - N8: correct the ABI explanation: domain/stack and network_v8 become mediated; ptrace was already mediated. Document the tool-label socket-family restriction. The ordinary chat-path HAOS acceptance remains the lead's.
 - N9: document that the plain relay route still requires a user namespace and fails closed if creation is denied; it is not a promise to work without user namespaces.
-- N10: the requested stricter errno assertion is in tests/apparmor_317_check.py, an existing CI helper. Outside brief §4 forbids CI/helper edits. Leave it byte-identical and report this scope conflict to the lead; do not infer an exception from the earlier, different card's CI permission.
+- N10: the lead's named reply to 2026-11-11-2339-cx-ha-url-ci-scope.md authorizes the two-line direct-row assertion in tests/apparmor_317_check.py for this card only. Direct proc-denial rows require errno 13; pinned command/exec rows retain 1, 2 or 13 because the relay pid can be hidden there. No other CI, workflow, hook, profile, launcher, mask, policy or approval change is authorized. The ordinary merge of current main preserves its upstream scheduler protections without changing their bytes.
 
 Tests cover discovery on the default, alternate and custom ports, SSL, old defaults, overrides and unavailable/malformed readings; refresh on actual launch paths; first-run reads with no HA_TOKEN; malformed/mutation requests and token leakage; capability rotation, stop and in-flight expiry; and unchanged native policies. Use local synthetic Core/Supervisor responses and sockets only. Container and pinned CLI checks use the repository jobs; local container smoke is not run because of VFS disk.
 

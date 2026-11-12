@@ -207,9 +207,10 @@ The plain relay route omits private UTS setup, but still needs a user namespace
 and the non-root mapping. If user namespace creation itself is denied, the
 relay fails closed and retries with backoff; no working fallback is promised.
 
-The loaded-policy direct rows know the relay pid is visible and should require
+The loaded-policy direct rows know the relay pid is visible and require
 errno 13. The pinned command/exec rows can instead hide that pid in Codex's pid
 namespace, where errno 2 is not evidence of ptrace enforcement. Ubuntu runner
-kernel features, including its socket mediation, differ from HAOS. N10's
-stricter direct-row assertion remains a CI-helper scope conflict on this card;
-the existing CI helper is unchanged.
+kernel features, including its socket mediation, differ from HAOS. N10 now
+requires EACCES (13) on every direct-row proc read. Pinned command/exec rows
+retain accepted denials 1, 2 and 13. The named lead exception permits only this
+assertion in the existing CI helper; loaded-policy CI proves it on real profiles.
