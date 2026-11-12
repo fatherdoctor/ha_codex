@@ -110,13 +110,9 @@ class ParityTests(unittest.TestCase):
         self.assertTrue(approvals.touches_protected_path('/data/options.json'))
         self.assertTrue(approvals.command_names_protected_path('edit /usr/share/ha_codex/policy.json'))
 
-    def test_shipped_practice_keeps_confirmation_and_ambiguity_without_categories(self):
-        text = (ROOT / 'policy/house-rules.md').read_text().lower()
-        self.assertIn('ask which', text)
-        self.assertIn('wait', text)
-        self.assertIn('/config/agents.md', text)
-        for phrase in ('never act on locks', 'never send a message', 'never push', 'lights, switches and scenes'):
-            self.assertNotIn(phrase, text)
+    def test_no_house_practice_is_bundled(self):
+        self.assertFalse((ROOT / 'policy/house-rules.md').exists())
+        self.assertIn('/config/AGENTS.md', (ROOT / 'server.py').read_text())
 
 
 class ApprovalParityTests(unittest.TestCase):

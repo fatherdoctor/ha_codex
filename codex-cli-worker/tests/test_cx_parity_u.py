@@ -47,12 +47,9 @@ class ParityReviewDocsTests(unittest.TestCase):
         bullet = next(line for line in docs.splitlines() if line.startswith('- **Command checks.**'))
         self.assert_normal_approval_contract(' '.join(bullet.lower().split()))
 
-    def test_f2_config_api_deletion_requires_yaml_and_backup_without_category_bans(self):
-        text = ' '.join((ROOT / 'policy/house-rules.md').read_text().lower().split())
-        self.assertRegex(text, r'never delete automations, scripts or helpers through the config api;? edit the yaml with a backup instead')
-        self.assertIn('/config/agents.md', text)
-        for blanket in ('never act on locks', 'never send a message', 'never push', 'never release', 'never publish'):
-            self.assertNotIn(blanket, text)
+    def test_no_house_practice_is_bundled(self):
+        self.assertFalse((ROOT / 'policy/house-rules.md').exists())
+        self.assertIn('/config/AGENTS.md', (ROOT / 'server.py').read_text())
 
 
 if __name__ == '__main__':
