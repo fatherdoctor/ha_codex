@@ -98,7 +98,7 @@ PROTECTED_COMMAND_RES = (
     (re.compile(r"/proc/\S*environ"), "reads a process environment, which can hold the Supervisor token"),
     (re.compile(r"\b(?:SUPERVISOR_TOKEN|HASSIO_TOKEN)\b"), "uses the Supervisor token"),
     (re.compile(r"/run/s6/container_environment"), "reads the app's saved environment, which holds the Supervisor token"),
-    (re.compile(r"https?://supervisor\b|\bsupervisor/|\bbashio::", re.IGNORECASE),
+    (re.compile(r"https?://supervisor\b|\bsupervisor/|\bha\s+(?:supervisor|su)\b|\bbashio::", re.IGNORECASE),
      "talks to the Home Assistant Supervisor"),
     (re.compile(r"\.storage/+auth"), "reads Home Assistant's sign-in store"),
     (re.compile(r"secrets\.ya?ml"), "reads secrets.yaml"),
@@ -936,12 +936,12 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
             definition = re.search(r"\b(" + "|".join(REMOTE_DEFINITIONS) + r")\s*:", text)
             if definition:
                 return f"This command names a {definition[1]} definition, which Codex may not write or edit."
+        for pattern, why in PROTECTED_COMMAND_RES:
+            if pattern.search(text):
+                return f"This command {why}, which is never allowed."
         plain_ha = re.sub(r"[\"'`]", "", text.replace("\\\n", " "))
         if (_ha_supervisor_command(text)
                 or (remote_on and (HA_REMOTE_TEXT_RE.search(plain_ha) or _ha_unknown_flag(text)))
                 or _ha_command(text, remote_on)):
             return "This command talks to the Home Assistant Supervisor, which is never allowed."
-        for pattern, why in PROTECTED_COMMAND_RES:
-            if pattern.search(text):
-                return f"This command {why}, which is never allowed."
     return ""

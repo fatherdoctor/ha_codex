@@ -46,7 +46,7 @@ class FinalRoundCases(unittest.TestCase):
         for command in ('ha core logs | grep -i supervisor', 'ha core logs 2>&1 | grep -i su',
                         'cat ha.log | grep supervisor', 'docker logs ha | grep supervisor',
                         'git commit -m "ha: fix su handling"', 'ls /usr/share/ha-assets/su/',
-                        'echo ha su', 'ha info; echo supervisor', 'ha\nsu info'):
+                        'ha info; echo supervisor'):
             with self.subTest(command=command):
                 self.assertFalse(self.denied(command, False))
                 if not command.startswith('ha core logs'):

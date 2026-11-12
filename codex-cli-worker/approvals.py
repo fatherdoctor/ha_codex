@@ -50,6 +50,7 @@ def _protected_ancestor_operations(command: str, initial_cwd: str = '', depth: i
     """Conservatively identify named requirements, root searches and writes into root or /etc.
 
     This checks command text only; it does not follow aliases, symlinks or computed paths.
+    Rare forms such as bsdtar, cpio, 7z, remote rsync, find -O3 and computed Python paths can be missed.
     """
     if depth > 5:
         return False
@@ -97,8 +98,9 @@ def _protected_ancestor_operations(command: str, initial_cwd: str = '', depth: i
             if re.match(r'^[A-Za-z_][A-Za-z0-9_]*=', word):
                 index += 1
                 continue
-            wrapper = word.lower()
-            if wrapper not in ('sudo', 'env', 'command'):
+            wrapper = posixpath.basename(word).lower()
+            if wrapper not in ('sudo', 'env', 'command', 'nohup', 'timeout', 'nice', 'ionice',
+                               'doas', 'setsid', 'stdbuf', 'xargs'):
                 break
             index += 1
             while index < len(segment) and segment[index].startswith('-'):
@@ -107,10 +109,20 @@ def _protected_ancestor_operations(command: str, initial_cwd: str = '', depth: i
                 if wrapper == 'env' and (flag.startswith('--chdir=') or flag.startswith('-C') and len(flag) > 2):
                     path = flag.split('=', 1)[1] if flag.startswith('--chdir=') else flag[2:]
                     cwd = target_path(path) if path.startswith('/') or cwd else ''
-                elif flag in ('-u', '--user', '-g', '--group', '-C', '--chdir') and index < len(segment):
+                elif ((wrapper in ('sudo', 'doas') and flag in ('-u', '--user', '-g', '--group'))
+                      or (wrapper == 'env' and flag in ('-u', '--unset', '-C', '--chdir'))
+                      or (wrapper == 'timeout' and flag in ('-s', '--signal', '-k', '--kill-after'))
+                      or (wrapper == 'nice' and flag in ('-n', '--adjustment'))
+                      or (wrapper == 'ionice' and flag in ('-c', '--class', '-n', '--classdata', '-p', '-P'))
+                      or (wrapper == 'stdbuf' and flag in ('-i', '-o', '-e', '--input', '--output', '--error'))
+                      or (wrapper == 'xargs' and flag in ('-I', '-n', '-L', '-P', '-s', '-a', '-E', '-d',
+                                                        '--replace', '--max-args', '--max-lines', '--max-procs',
+                                                        '--max-chars', '--arg-file', '--eof', '--delimiter'))) and index < len(segment):
                     value = segment[index]; index += 1
                     if wrapper == 'env' and flag in ('-C', '--chdir'):
                         cwd = target_path(value) if value.startswith('/') or cwd else ''
+            if wrapper == 'timeout' and index < len(segment):
+                index += 1  # duration
         if index >= len(segment):
             continue
         program = posixpath.basename(segment[index]).lower()
@@ -144,7 +156,17 @@ def _protected_ancestor_operations(command: str, initial_cwd: str = '', depth: i
                 path = target_path(start).lower()
                 if path in ('/', '/etc') or fnmatch.fnmatchcase('/etc', path):
                     return True
-        if cwd.lower() in ('/', '/etc') and program in ('cp', 'mv', 'install', 'rsync', 'ln', 'tar', 'unzip'):
+            for i, word in enumerate(args):
+                if word in ('-exec', '-execdir'):
+                    end = next((j for j in range(i + 1, len(args)) if args[j] == '+'), len(args))
+                    if _protected_ancestor_operations(shlex.join(args[i + 1:end]), cwd, depth + 1):
+                        return True
+        tar_extract = program == 'tar' and any(
+            word in ('--extract', '--get') or
+            (word.startswith('-') and not word.startswith('--') and 'x' in word[1:]) or
+            (i == 0 and not word.startswith('-') and 'x' in word)
+            for i, word in enumerate(args))
+        if cwd.lower() in ('/', '/etc') and (program in ('cp', 'mv', 'install', 'rsync', 'ln', 'unzip') or tar_extract):
             return True
         if program in ('cp', 'mv', 'install', 'rsync', 'ln'):
             explicit = ''
@@ -155,11 +177,14 @@ def _protected_ancestor_operations(command: str, initial_cwd: str = '', depth: i
                     explicit = word.split('=', 1)[1]
                 elif word.startswith('-t') and len(word) > 2:
                     explicit = word[2:]
+                elif word.startswith('-') and not word.startswith('--') and 't' in word[1:]:
+                    rest = word[word.index('t') + 1:]
+                    explicit = rest or (args[i + 1] if i + 1 < len(args) else '')
             operands = [word for word in args if not word.startswith('-')]
             destination = explicit or (operands[-1] if operands else '')
             if destination and protected_destination(destination):
                 return True
-        if program in ('tar', 'unzip'):
+        if tar_extract or program == 'unzip':
             directory = ''
             for i, word in enumerate(args):
                 if word in ('-C', '--directory', '-d') and i + 1 < len(args):
