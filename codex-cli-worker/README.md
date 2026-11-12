@@ -2,7 +2,7 @@
 
 Use Codex CLI to inspect and edit your configuration through a chat in Home Assistant.
 
-The assistant can act on any device the owner confirms. Put limits specific to your installation in `/config/AGENTS.md`. Shipped practice covers privacy and secrets, reading first, confirmation, backups, configuration checks and honest reporting.
+The assistant can act on any device the owner confirms. Put limits specific to your installation in `/config/AGENTS.md`. Codex uses its defaults and your workspace instructions; the app bundles no house rules. Its permission policy, approval checks and other enforced safeguards remain in place.
 
 The app provides a responsive chat UI with saved conversations, a resizable desktop sidebar, and a mobile chat drawer. It also provides a token-protected local API for the Codex integration, device-code sign-in, backup tracking, task logs, and notifications when work completes or needs input.
 

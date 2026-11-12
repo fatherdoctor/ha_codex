@@ -66,7 +66,7 @@ class RelayFixTests(unittest.TestCase):
                                 SCHEMA_PATH=data / 'schema.json', AUTH_QR_DIR=data / 'qr'), \
                     patch.object(server, 'api_token', return_value='synthetic'), \
                     patch.object(server, 'task_root', return_value=data / 'tasks'), \
-                    patch.object(server.protected_policy, 'install_instructions'):
+                    patch.object(server.protected_policy, 'remove_legacy_instructions'):
                 server.ensure_runtime_files()
             parent = data / rc.CONTROL_FOLDER
             self.assertEqual(parent.stat().st_mode & 0o777, 0o700)
