@@ -39,7 +39,8 @@ These tests do not prove HAOS/AppArmor compatibility or filesystem isolation on 
 ### HAOS parser and policy ABI
 
 HAOS 16–18.5 pins AppArmor 3.1.7. The profile declares `abi <abi/3.0>,` so
-stacking and ptrace mediation participate in compilation. In 3.1.7 an untagged
+domain/stack and network_v8 mediation participate in compilation. Ptrace was
+already mediated before this declaration. In 3.1.7 an untagged
 profile uses a legacy policy ABI without `domain/stack`; even when the kernel
 supports stacks, the change-profile rule then fails with "does not support
 stacking of named transitions". A literal target alone does not fix it.
@@ -191,3 +192,24 @@ Repeat the basic checks on a host where fresh `/proc` mounting succeeds. A succe
 ## Removing the workaround
 
 Once the pinned upstream CLI recognizes both proc error formats, remove the wrapper's special-probe path, the helper, and its Docker copy. Retain the real Codex readiness check and fail-closed tests. Verify the affected HAOS setup before removing compatibility code or declaring issue #9 resolved.
+
+
+### ABI socket-family change and namespace fallback
+
+On HAOS's kernel features, ABI 3.0 enables network_v8 mediation for both chat
+and relay tool labels. Those labels retain Unix sockets and raw netlink only;
+AF_INET/AF_INET6/packet socket creation in sandboxed commands is refused.
+Approved escalations retain the existing parent/relay policy. The lead must
+run one ordinary chat-page sandboxed shell read plus the history MCP tool on
+HAOS after a profile reload. Runner tests do not substitute for that acceptance.
+
+The plain relay route omits private UTS setup, but still needs a user namespace
+and the non-root mapping. If user namespace creation itself is denied, the
+relay fails closed and retries with backoff; no working fallback is promised.
+
+The loaded-policy direct rows know the relay pid is visible and should require
+errno 13. The pinned command/exec rows can instead hide that pid in Codex's pid
+namespace, where errno 2 is not evidence of ptrace enforcement. Ubuntu runner
+kernel features, including its socket mediation, differ from HAOS. N10's
+stricter direct-row assertion remains a CI-helper scope conflict on this card;
+the existing CI helper is unchanged.

@@ -282,10 +282,15 @@ class RouteTests(unittest.TestCase):
         self.addCleanup(admin.stop)
 
     def test_token_reads_state(self) -> None:
-        with patch.object(server.remote_control_supervisor, "snapshot", return_value={"state": "off"}):
+        with patch.object(server.remote_control_supervisor, "snapshot", return_value={"state": "off"}), patch.object(server, "core_address", server.CoreAddress()):
             response = self.client.get("/remote-control", headers={"Authorization": "Bearer tok"})
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json()["remote_control"], {"state": "off"})
+        state = response.get_json()['remote_control']
+        self.assertEqual(state['state'], 'off')
+        self.assertIsNone(state['core_address']['url'])
+        self.assertEqual(state['core_address']['source'], 'unavailable')
+        self.assertIn('no Core API token is needed', state['read_tools'])
+        self.assertNotIn('capability', json.dumps(state))
 
     def test_token_cannot_turn_it_on(self) -> None:
         with patch.object(server.remote_control_supervisor, "start") as start:

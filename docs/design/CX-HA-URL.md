@@ -27,3 +27,8 @@ Tests cover discovery on the default, alternate and custom ports, SSL, old defau
 ## Scratch-folder proposal (do not build)
 
 A future owner-controlled notes folder under the worker's persistent data tree could keep Codex's own notes out of `/config`. It needs an explicit retention/size policy, a narrow sandbox bind and review of the existing `/data` masks and self-edit refusals. It must not share the credential/control folders. Do not add that folder or widen any bind in this card. Temporary analysis can continue in the existing ephemeral scratch space; durable notes require a separate scoped change and owner choice.
+
+
+## Supervisor source checked
+
+The upstream [Core info implementation](https://github.com/home-assistant/supervisor/blob/main/supervisor/api/homeassistant.py), read on 2026-11-12, returns `port` from `api_port` and `ssl` from `api_ssl`. Tests exercise those exact fields in the standard Supervisor response envelope. This is source verification, not a live-box reading.

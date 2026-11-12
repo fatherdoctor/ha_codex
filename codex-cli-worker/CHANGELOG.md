@@ -2,6 +2,10 @@
 
 ## 0.1.81.2 (unreleased)
 
+- **Core address and first-run relay reads (CX-HA-URL).** Discover Core's actual port and SSL setting from Supervisor at startup and each task/relay launch. Make the address option an empty override and retire old default values. Offer a bounded read-only relay tool using a temporary capability; no hand-made Core token is needed for entity reads and the Supervisor token stays in the worker. Unsupported shell reads still request native network approval; direct commands still need a separately configured credential.
+
+- **ABI and fallback documentation (N8/N9).** Describe domain/stack and network_v8 mediation, the tool-label socket-family restrictions, and the plain relay route's continuing user-namespace requirement. HAOS chat-path acceptance remains the lead's. N10's stricter direct-row errno assertion remains blocked by the outside lane's CI-helper restriction.
+
 - **No bundled house rules (CX-NORULES).** Stop packaging and installing house-practice instructions. Preserve owner workspace instructions and all enforced protections. Upgrade cleanup removes only the exact legacy bundled home copy, preserving edited files and symlinks. Documentation points optional house practices to the starter kit.
 
 - **HAOS AppArmor ABI compatibility (CX-RC-EXEC.f3).** Declare ABI 3.0 so HAOS's 3.1.7 parser enables the stack rule instead of applying its legacy untagged-policy defaults. Keep the exact relay-only stack target. Prefer the AppArmor-specific proc attribute, with legacy fallback only when it is absent; access denials still fail closed. Document the intentional same-stack sibling ptrace restriction.

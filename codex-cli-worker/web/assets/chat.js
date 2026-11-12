@@ -2790,6 +2790,9 @@ function renderRemoteControl(rc) {
   if (!rc.available) status = rc.blocked_reason;
   else if (!rc.enabled) status = `Off. When on, this Home Assistant shows in the ChatGPT app as “${rc.configured_name}”.`;
   $("remote-control-status").textContent = status;
+  const address = rc.core_address;
+  $("remote-core-address").textContent = address ? address.url ? `Core address (${address.source}): ${address.url}` : address.error || "Core address unavailable." : "";
+  $("remote-read-tools").textContent = rc.read_tools || "";
   for (const [id, text] of [
     ["remote-control-name-warning", rc.name_warning],
     ["remote-control-policy-warning", rc.policy_warning],

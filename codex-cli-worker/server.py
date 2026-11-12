@@ -44,6 +44,8 @@ import policy as protected_policy
 from ha_data import HomeAssistantData
 import remote_control
 import gate_rules
+from core_address import CoreAddress
+from relay_reads import RelayReads
 
 
 class _ToolWorker:
@@ -119,7 +121,7 @@ DEFAULT_OPTIONS = {
     "browser_verification": True,
     "browser_memory_limit_mib": DEFAULT_BROWSER_MEMORY_LIMIT_MIB,
     "local_docs": True,
-    "ha_url": CORE_URL,
+    "ha_url": "",
     "HA_TOKEN": "",
 }
 BACKUP_RETENTION_DAYS_RANGE = (1, 365)
@@ -867,7 +869,7 @@ def expire_saved_approvals(task: dict[str, Any]) -> None:
 
 def redact(text: str) -> str:
     """Replace Supervisor tokens, tool capabilities, and values that look like keys or tokens with [redacted]."""
-    redacted = text
+    redacted = re.sub(r"harc_[A-Za-z0-9_-]{43}", "[redacted]", text)
     for value in (os.environ.get("SUPERVISOR_TOKEN"), os.environ.get("HASSIO_TOKEN")):
         if value:
             redacted = redacted.replace(value, "[redacted]")
@@ -3846,17 +3848,17 @@ Pages contain Liquid tags; snippets they include are under _includes. Search for
 """
 
 
-def codex_ha_url(options: dict[str, Any]) -> str:
-    """Return the address Codex's own Home Assistant API calls go to with the HA_TOKEN option.
+core_address = CoreAddress()
 
-    It is the ha_url option. The option used to default to the Supervisor's Core
-    proxy, which does not accept a Home Assistant token, so that address and an
-    empty option stand for Core's own address.
-    """
-    url = str(options.get("ha_url") or "").strip().rstrip("/")
-    if not url or urlparse(url).hostname == "supervisor":
-        return CORE_URL
-    return url
+
+def refresh_core_address(options: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Read Supervisor metadata at startup and each actual task or relay launch."""
+    return core_address.refresh(read_options() if options is None else options, ha_token())
+
+
+def codex_ha_url(options: dict[str, Any]) -> str | None:
+    """Use an explicit override or the latest verified Supervisor discovery."""
+    return core_address.snapshot(options)['url']
 
 
 def codex_env() -> dict[str, str]:
@@ -3867,7 +3869,7 @@ def codex_env() -> dict[str, str]:
     from the add-on option, together with HA_URL, the address it works at.
     """
     env = dict(os.environ)
-    for key in ("SUPERVISOR_TOKEN", "HASSIO_TOKEN", "HA_TOKEN", "HA_URL", "HA_VERIFICATION_CAPABILITY", "HA_DATA_CAPABILITY", "HA_DATA_SOCKET"):
+    for key in ("SUPERVISOR_TOKEN", "HASSIO_TOKEN", "HA_TOKEN", "HA_URL", "HA_VERIFICATION_CAPABILITY", "HA_DATA_CAPABILITY", "HA_DATA_SOCKET", "HA_RELAY_CAPABILITY", "HA_RELAY_SOCKET"):
         env.pop(key, None)
     env["CODEX_HOME"] = str(CODEX_HOME)
     env["HOME"] = str(DATA_ROOT)
@@ -3875,7 +3877,9 @@ def codex_env() -> dict[str, str]:
     token = str(options.get("HA_TOKEN") or "").strip()
     if token:
         env["HA_TOKEN"] = token
-        env["HA_URL"] = codex_ha_url(options)
+    url = codex_ha_url(options)
+    if url:
+        env["HA_URL"] = url
     return env
 
 
@@ -3938,20 +3942,21 @@ def home_assistant_api_instructions(options: dict[str, Any]) -> str:
 
 
 def remote_control_instructions(options: dict[str, Any]) -> str:
-    """Give relay-created threads the same Core API path as chat tasks.
-
-    These instructions contain variable names only, never option values.
-    MCP capabilities from an individual chat turn are not reusable by a relay.
-    """
+    """Offer token-free observational reads and keep native command decisions intact."""
     return (
         "You are running in the Home Assistant add-on. Workspace: /config. Owner workspace instructions: /config/AGENTS.md. "
-        "Keep API credentials private. A sandboxed command that needs network or file access outside its "
-        "sandbox must request native approval for that specific action. Never bypass a denial or request "
-        "permanent permission rules. Native approval does not supply credentials. "
-        "The chat page's per-turn verification and history MCP tools are not attached to relay threads. "
+        "Use the home_assistant_relay.read tool for entity listings and state readback; it needs no hand-made HA_TOKEN. "
+        "Use operation states with a domain and bounded page, or state with an exact entity_id. It is read-only: "
+        "no service calls, reloads or credential access. A state read does not prove automation behavior. "
+        "The chat page's per-turn verification/history capabilities are separate and must not be reused. "
+        "For a supported read, prefer this tool instead of a shell socket command. If a different read needs shell networking, "
+        "request native approval for that specific network command on your own; do not silently give up after a sandbox network denial. "
+        "Keep API credentials private. A sandboxed command needing network or file access outside its sandbox must request "
+        "native approval for that specific action. Never bypass a denial or request permanent permission rules. "
+        "Native approval does not supply credentials. If HA_URL is unset, report address discovery unavailable instead of guessing a port. "
         + (home_assistant_api_instructions(options) or
-           "No Core API token is configured for direct commands. Ask the owner to configure the app's "
-           "HA_TOKEN option; do not obtain credentials from stores or process environments.")
+           "No Core API token is configured for direct commands. The read tool still works through the worker. "
+           "Direct API commands require a separately configured HA_TOKEN; do not obtain credentials from stores or process environments.")
     )
 
 
@@ -4689,6 +4694,7 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     if task_cancellation_requested(task_id):
         return
     options = read_options()
+    refresh_core_address(options)
     if not before_manifest_path.exists():
         try:
             start_phase(task_id, "baseline", "Noting the current state of your configuration files")
@@ -6156,12 +6162,45 @@ def require_ingress(func):
     return wrapper
 
 
+def relay_process_state():
+    """Keep the read capability bound to the current live, nonstopping relay."""
+    with remote_control_supervisor.lock:
+        return remote_control_supervisor.proc, remote_control_supervisor.wake.is_set()
+
+
+def relay_read_redact(value: str) -> str:
+    for secret in (ha_token(), api_token(), str(read_options().get('HA_TOKEN') or '').strip()):
+        if secret:
+            value = value.replace(secret, '[redacted]')
+    return redact(value)
+
+
+relay_reads = RelayReads(relay_process_state, ha_token, relay_read_redact)
+
+
+def relay_env() -> dict[str, str]:
+    refresh_core_address()
+    return relay_reads.environment(codex_env())
+
+
+def relay_read_mcp_args() -> list[str]:
+    settings = {
+        'command': sys.executable, 'args': [str(Path(__file__).with_name('relay_reads_mcp.py'))],
+        'env_vars': ['HA_RELAY_CAPABILITY'], 'enabled': True, 'required': True,
+        'startup_timeout_sec': 10, 'tool_timeout_sec': 20,
+        'tools.read.approval_mode': 'approve',
+    }
+    return [argument for name, value in settings.items()
+            for argument in ('--config', f'mcp_servers.home_assistant_relay.{name}={json.dumps(value)}')]
+
+
 remote_control_supervisor = remote_control.Supervisor(
     codex_binary=CODEX_BINARY,
     state_path=DATA_ROOT / "remote_control.json",
-    env_factory=lambda: codex_env(),
+    env_factory=lambda: relay_env(),
     name_factory=lambda: read_options().get("remote_control_name"),
     instructions_factory=lambda: remote_control_instructions(read_options()),
+    tool_args_factory=relay_read_mcp_args,
     watch=remote_control.ConfigWatch(CONFIG_ROOT, DATA_ROOT / "remote_control_baseline.json"),
 )
 
@@ -6177,6 +6216,8 @@ def remote_control_summary() -> dict[str, Any]:
 def get_remote_control() -> Response:
     """Return the remote-control state: on or off, connected or not, machine name, pairing code, recent log."""
     state = dict(remote_control_supervisor.snapshot())
+    state["core_address"] = core_address.snapshot(read_options())
+    state["read_tools"] = "Read-only entity tools are offered while remote control is on; no Core API token is needed."
     if not is_ingress_request() or ingress_admin()[0] is None:
         state.pop("pairing_code", None)
         state.pop("pairing_qr", None)
@@ -6448,6 +6489,7 @@ def main() -> None:
     if not make_worker_undumpable():
         print("Could not mark the worker process not dumpable; its environment stays readable to root.", flush=True)
     ensure_runtime_files()
+    refresh_core_address()
     version = codex_version_status()
     sandbox = sandbox_readiness()
     if version["version"]:
@@ -6462,6 +6504,7 @@ def main() -> None:
     threading.Thread(target=backup_cleanup_loop, daemon=True).start()
     verification.serve(DATA_ROOT / "verification.sock")
     ha_data.serve(DATA_ROOT / "ha-data.sock")
+    relay_reads.serve(DATA_ROOT / "relay-read.sock")
     # Nothing else is running yet, so interrupted work from the last run can go.
     for leftover in ("download", "old"):
         shutil.rmtree(ha_docs_sibling(leftover), ignore_errors=True)

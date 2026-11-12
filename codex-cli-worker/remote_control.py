@@ -702,9 +702,11 @@ class Supervisor:
         watch_interval: float = WATCH_INTERVAL,
         control_factory: Callable[[Path], Any] = ControlClient,
         instructions_factory: Callable[[], str] = lambda: "",
+        tool_args_factory: Callable[[], list[str]] = lambda: [],
     ) -> None:
         self.control_factory = control_factory
         self.instructions_factory = instructions_factory
+        self.tool_args_factory = tool_args_factory
         self.control_socket: Path | None = None
         self.codex_binary = codex_binary
         self.state_path = state_path
@@ -891,7 +893,7 @@ class Supervisor:
                 self._name_failed()
         instructions = self.instructions_factory()
         config = ("-c", "developer_instructions=" + json.dumps(instructions)) if instructions else ()
-        arguments = (*config, *args)
+        arguments = (*config, *self.tool_args_factory(), *args)
         return (build_command(self.codex_binary, name, *arguments) if self._name_supported
                 else [RELAY_LAUNCHER, "--plain", self.codex_binary, *arguments])
 
