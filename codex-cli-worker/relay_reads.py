@@ -14,8 +14,9 @@ from core_address import get_json, ResponseTooLarge
 ENTITY = re.compile(r'^[a-z_][a-z0-9_]*\.[a-z0-9_]+$')
 DOMAIN = re.compile(r'^[a-z_][a-z0-9_]*$')
 PRIVATE = re.compile(
-    r'(?:^|_)(?:pass|passwords?|passcodes?|codes?|pin(?:code)?|key|apikey|api_key|'
-    r'otp|secrets?|tokens?|credentials?|pw)(?:_|$)')
+    r'(?:^|_)(?:pass|passwords?|passcodes?|passphrases?|codes?|usercodes?|pins?|'
+    r'pincodes?|keys?|apikeys?|api_keys?|otps?|totps?|secrets?|tokens?|credentials?|pw)'
+    r'\d*(?:_|$)')
 ATTRIBUTES = frozenset(('friendly_name', 'unit_of_measurement', 'device_class', 'supported_features',
                        'brightness', 'color_temp', 'current_temperature', 'temperature', 'hvac_modes',
                        'supported_color_modes', 'assumed_state', 'icon'))

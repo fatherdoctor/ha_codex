@@ -37,6 +37,33 @@ class ReadFilterTests(unittest.TestCase):
                     self.call(operation='state', entity_id='input_text.' + name)
         self.fetch.assert_not_called()
 
+    def test_numbered_plural_and_extended_credential_segments_stay_hidden(self):
+        names = ('alarm_pin1', 'door_code1', 'wifi_password2', 'secret2',
+                 'bearer_token2', 'apikey2', 'api_keys', 'ssh_keys', 'pins',
+                 'user_pins', 'totp', 'lock_usercode', 'wifi_passphrase')
+        words = ('pass', 'password', 'passcode', 'code', 'pin', 'pincode', 'key',
+                 'apikey', 'api_key', 'otp', 'totp', 'secret', 'token',
+                 'credential', 'pw', 'usercode', 'passphrase', 'keys', 'pins',
+                 'apikeys', 'api_keys', 'otps')
+        variants = names + tuple(word + digits + suffix for word in words
+                                 for digits in ('1', '27') for suffix in ('', '_sample'))
+        for name in variants:
+            with self.subTest(name=name):
+                self.fetch.reset_mock()
+                entity_id = 'input_text.' + name
+                with self.assertRaises(ValueError):
+                    self.call(operation='state', entity_id=entity_id)
+                self.fetch.assert_not_called()
+                self.fetch.return_value = [{'entity_id': entity_id,
+                                            'state': 'synthetic-private-value',
+                                            'attributes': {'mode': 'text'}}]
+                result = self.call(operation='states')
+                self.assertEqual(result['entities'], [])
+                self.assertEqual(result['total'], 0)
+                self.assertEqual(result['notes'],
+                                 ['Credential-like or password-mode entities were hidden.'])
+                self.assertNotIn('synthetic-private-value', json.dumps(result))
+
     def test_hidden_rows_do_not_leak_names_or_values_in_listing_notes(self):
         self.fetch.return_value = [
             {'entity_id': 'light.sample', 'state': 'on'},
