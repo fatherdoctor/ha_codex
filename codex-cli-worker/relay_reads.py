@@ -9,11 +9,11 @@ import secrets
 import socketserver
 import threading
 
-from core_address import get_json
+from core_address import get_json, ResponseTooLarge
 
 ENTITY = re.compile(r'^[a-z_][a-z0-9_]*\.[a-z0-9_]+$')
 DOMAIN = re.compile(r'^[a-z_][a-z0-9_]*$')
-PRIVATE = re.compile(r'(?:^|_)(?:token|password|secret|credential|api_key|pin|code)(?:_|$)')
+PRIVATE = re.compile(r'pass|code|pin|key|otp|secret|token|credential|pw')
 ATTRIBUTES = frozenset(('friendly_name', 'unit_of_measurement', 'device_class', 'supported_features',
                        'brightness', 'color_temp', 'current_temperature', 'temperature', 'hvac_modes',
                        'supported_color_modes', 'assumed_state', 'icon'))
@@ -23,7 +23,20 @@ MAX_RESPONSE = 65536
 def fetch_states(path, token):
     if path != '/states' and not (path.startswith('/states/') and ENTITY.fullmatch(path[8:])):
         raise ValueError('Unsupported Core read path.')
-    return get_json('http://supervisor/core/api' + path, token, 2 * 1024 * 1024)
+    try:
+        return get_json('http://supervisor/core/api' + path, token, 16 * 1024 * 1024)
+    except ResponseTooLarge:
+        raise StateResponseTooLarge('Core state response exceeds 16 MiB. Request a single entity instead.') from None
+
+
+class StateResponseTooLarge(ValueError):
+    pass
+
+
+def password_state(row):
+    attrs = row.get('attributes')
+    return str(row.get('entity_id', '')).startswith('input_text.') and (
+        not isinstance(attrs, dict) or str(attrs.get('mode', '')).lower() == 'password')
 
 
 class RelayReads:
@@ -105,6 +118,8 @@ class RelayReads:
             if operation == 'state':
                 if not isinstance(data, dict) or data.get('entity_id') != entity_id or not isinstance(data.get('state'), str):
                     raise ValueError('Core returned an unavailable or invalid entity.')
+                if password_state(data):
+                    raise ValueError('Password-mode text entities are unavailable to relay reads.')
                 raw_attrs = data.get('attributes')
                 if not isinstance(raw_attrs, dict):
                     raise ValueError('Core returned invalid attributes.')
@@ -116,6 +131,8 @@ class RelayReads:
                     raise ValueError('Core returned an invalid entity listing.')
                 safe = []
                 for row in data:
+                    if password_state(row):
+                        continue
                     try:
                         candidate = self.entity_id(row.get('entity_id'))
                     except ValueError:
@@ -147,6 +164,8 @@ class RelayReads:
                     if len(raw) > 16384:
                         raise ValueError()
                     result = broker.dispatch(json.loads(raw))
+                except StateResponseTooLarge as exc:
+                    result = {'ok': False, 'error': str(exc)}
                 except Exception:
                     result = {'ok': False, 'error': 'Read unavailable, refused or expired. No action was performed.'}
                 try:

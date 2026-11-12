@@ -45,7 +45,7 @@ import policy as protected_policy
 from ha_data import HomeAssistantData
 import remote_control
 import gate_rules
-from core_address import CoreAddress
+from core_address import CoreAddress, probe_core
 from relay_reads import RelayReads
 import schedule_api
 
@@ -3871,7 +3871,16 @@ core_address = CoreAddress()
 
 def refresh_core_address(options: dict[str, Any] | None = None) -> dict[str, Any]:
     """Read Supervisor metadata at startup and each actual task or relay launch."""
-    return core_address.refresh(read_options() if options is None else options, ha_token())
+    token = ha_token()
+    value = core_address.refresh(read_options() if options is None else options, token,
+                                 probe=probe_core if token else None,
+                                 retry_wait=(lambda: time.sleep(1)) if token else None)
+    source = value['source']
+    if source == 'fallback':
+        print(f"Core address source: verified fallback API probe on port {urlparse(value['url']).port}.", flush=True)
+    else:
+        print(f"Core address source: {source}.", flush=True)
+    return value
 
 
 def codex_ha_url(options: dict[str, Any]) -> str | None:

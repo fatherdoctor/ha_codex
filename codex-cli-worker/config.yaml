@@ -20,6 +20,7 @@ map:
     read_only: false
     path: /config
 homeassistant_api: true
+hassio_api: true
 backup_exclude:
   - "*/ha-docs*"
   - "*/ha-data*"

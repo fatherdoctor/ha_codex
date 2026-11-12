@@ -929,9 +929,16 @@ class Supervisor:
                 control_parent = prepare_control_parent(self.state_path.parent)
                 private = tempfile.TemporaryDirectory(prefix="rc-", dir=control_parent)
                 path = Path(private.name) / "rc.sock"
+                # Namespace probing and environment refresh can call Supervisor.
+                # Keep both outside the lock used by snapshot, reads and stop.
+                command = self._command("app-server", "--listen", f"unix://{path}", "--remote-control")
+                environment = remote_env(self.env_factory())
                 with self.lock:
-                    proc = self.popen(self._command("app-server", "--listen", f"unix://{path}", "--remote-control"),
-                                      env=remote_env(self.env_factory()), cwd="/config", stdin=subprocess.DEVNULL,
+                    if self.wake.is_set() or not self.enabled():
+                        private.cleanup()
+                        return
+                    proc = self.popen(command,
+                                      env=environment, cwd="/config", stdin=subprocess.DEVNULL,
                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                       start_new_session=True)
                     self.proc = proc
