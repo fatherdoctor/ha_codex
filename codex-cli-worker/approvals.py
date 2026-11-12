@@ -23,7 +23,8 @@ REQUEST_LIMIT = 50
 COMMAND_APPROVAL = "item/commandExecution/requestApproval"
 # The app's permission policy, its house rules and Codex's own configuration: a change there is never allowed here.
 PROTECTED_PREFIXES = ("/usr/share/ha_codex", "/data/codex-home/AGENTS.md", "/data/codex-home/config.toml",
-                      "/data/options.json", "/data/worker_api_token")
+                      "/data/options.json", "/data/worker_api_token", "/data/schedules.sqlite3",
+                      "/data/schedules.sqlite3-journal", "/data/schedules.sqlite3-wal", "/data/schedules.sqlite3-shm")
 
 
 def touches_protected_path(path: str) -> bool:
@@ -40,7 +41,7 @@ PROTECTED_COMMAND_RES = (
     re.compile(r"ha_codex/+(policy|agents|house)", re.IGNORECASE),
     re.compile(r"codex-home/+[^\s/]*[*?\[]", re.IGNORECASE),
     re.compile(r"codex-home.*(agents\.md|config\.toml)|(agents\.md|config\.toml).*codex-home", re.IGNORECASE | re.DOTALL),
-    re.compile(r"/data/+options\.json|worker_api_token", re.IGNORECASE),
+    re.compile(r"/data/+options\.json|worker_api_token|schedules\.sqlite3(?:-(?:journal|wal|shm))?|/data/+sched[^/\s]*[*?\[]", re.IGNORECASE),
 )
 
 

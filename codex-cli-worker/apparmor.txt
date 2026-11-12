@@ -1,3 +1,5 @@
+abi <abi/3.0>,
+
 #include <tunables/global>
 
 profile codex_cli_worker flags=(attach_disconnected,mediate_deleted) {
@@ -17,10 +19,9 @@ profile codex_cli_worker flags=(attach_disconnected,mediate_deleted) {
   /usr/bin/** rix,
   /usr/sbin/** rix,
   /usr/local/bin/** rix,
-
-  # The wrapper forces capability removal before a sandboxed command starts.
-  # Only the trusted Bubblewrap setup binary enters the capability-bearing
-  # child profile; the worker and Codex processes remain in this parent profile.
+  # Only this immutable launcher enters the relay's own label. Its outer
+  # namespace binary is a separate copy so it cannot select a tool label.
+  /opt/codex-sandbox/relay-launcher cx,
   /opt/codex-sandbox/bwrap rix,
   /opt/codex-sandbox/bwrap.real cx,
 
@@ -73,5 +74,53 @@ profile codex_cli_worker flags=(attach_disconnected,mediate_deleted) {
     /opt/codex-sandbox/bwrap rix,
     /opt/codex-sandbox/bwrap.real rix,
     /config/** rix,
+  }
+
+  profile /opt/codex-sandbox/relay-launcher flags=(attach_disconnected,mediate_deleted) {
+    #include <abstractions/base>
+    file,
+    network,
+    capability net_admin,
+    capability sys_admin,
+    capability sys_chroot,
+    capability setgid,
+    capability setuid,
+    capability setpcap,
+    mount,
+    umount,
+    pivot_root,
+    signal,
+    /opt/codex-sandbox/relay-bwrap rix,
+    # bwrap.real is an immutable Python guard, not the native binary. It must
+    # add the nested tool component and verify NNP before exec'ing bwrap.exec.
+    # change_profile's label pattern expands profile_name; named exec targets
+    # do not, and Supervisor rewrites only the root profile declaration.
+    /opt/codex-sandbox/bwrap.real rix,
+    change_profile -> &@{profile_name}///opt/codex-sandbox/bwrap.real,
+
+    profile /opt/codex-sandbox/bwrap.real flags=(attach_disconnected,mediate_deleted) {
+      #include <abstractions/base>
+
+      file,
+      network netlink raw,
+      capability net_admin,
+      capability sys_admin,
+      capability sys_chroot,
+      capability setgid,
+      capability setuid,
+      mount,
+      umount,
+      pivot_root,
+      signal,
+
+      /bin/** rix,
+      /sbin/** rix,
+      /usr/bin/** rix,
+      /usr/sbin/** rix,
+      /usr/local/bin/** rix,
+      /opt/codex-sandbox/bwrap rix,
+      /opt/codex-sandbox/bwrap.real rix,
+      /config/** rix,
+    }
   }
 }
