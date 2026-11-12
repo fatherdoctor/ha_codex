@@ -170,6 +170,12 @@ def enforce(stage, worker):
         for dst in ('bwrap.exec', 'relay-bwrap'):
             shutil.copyfile('/usr/bin/bwrap', BINDIR / dst)
             (BINDIR / dst).chmod(0o555)
+        # The checkout's runner-owned parent can require DAC override. After
+        # dropping capabilities the fixture must use a traversable root-owned
+        # path, just like the production immutable launchers.
+        fixture_script = BINDIR / 'apparmor-proof.py'
+        shutil.copyfile(Path(__file__).resolve(), fixture_script)
+        fixture_script.chmod(0o555)
         sys.path.insert(0, str(worker))
         import remote_control as rc
         for name, path, text in profiles:
@@ -177,7 +183,7 @@ def enforce(stage, worker):
             loaded.append(path)
             for plain in (False, True):
                 with tempfile.TemporaryDirectory(prefix='apparmor-proof-') as directory:
-                    payload = [sys.executable, '-I', str(Path(__file__).resolve()), 'fixture', name, directory]
+                    payload = [sys.executable, '-I', str(fixture_script), 'fixture', name, directory]
                     launch = [rc.RELAY_LAUNCHER, '--plain', *payload] if plain else rc.build_command(payload[0], 'Synthetic relay', *payload[1:])
                     # Enter the container root label immediately, then let the
                     # production exec rule select the relay's cx profile.
