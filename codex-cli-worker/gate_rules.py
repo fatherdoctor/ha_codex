@@ -97,7 +97,7 @@ PROTECTED_COMMAND_RES = (
     (re.compile(r"/proc/\S*environ"), "reads a process environment, which can hold the Supervisor token"),
     (re.compile(r"\b(?:SUPERVISOR_TOKEN|HASSIO_TOKEN)\b"), "uses the Supervisor token"),
     (re.compile(r"/run/s6/container_environment"), "reads the app's saved environment, which holds the Supervisor token"),
-    (re.compile(r"https?://supervisor\b|\bsupervisor/|\bbashio::", re.IGNORECASE),
+    (re.compile(r"https?://supervisor\b|\bsupervisor/|\bha\s+(?:supervisor|su)\b|\bbashio::", re.IGNORECASE),
      "talks to the Home Assistant Supervisor"),
     (re.compile(r"\.storage/+auth"), "reads Home Assistant's sign-in store"),
     (re.compile(r"secrets\.ya?ml"), "reads secrets.yaml"),
@@ -619,6 +619,11 @@ HA_REMOTE_FAMILIES = frozenset(("addon", "addons", "add-on", "add-ons", "host", 
                                 "hardware", "network", "backup", "backups", "apps"))
 HA_ALWAYS_FAMILIES = frozenset(("supervisor", "su"))
 SHELL_ASSIGNMENT_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*=")
+# A conservative text floor also catches shell constructs the parser cannot place.
+# The four documented value-taking global flags may precede the family.
+HA_REMOTE_TEXT_RE = re.compile(
+    r"\bha\s+(?:(?:--(?:log-level|api-token|endpoint|config)(?:=\S+|\s+\S+)|-\S+)\s+)*"
+    r"(?:add-?ons?|host|os|core|hardware|network|backups?|apps)\b", re.IGNORECASE)
 
 
 def _ha_command(text: str, remote_on: bool, depth: int = 0) -> bool:
@@ -788,7 +793,8 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
             definition = re.search(r"\b(" + "|".join(REMOTE_DEFINITIONS) + r")\s*:", text)
             if definition:
                 return f"This command names a {definition[1]} definition, which Codex may not write or edit."
-        if _ha_command(text, remote_on):
+        plain_ha = re.sub(r"[\"'`]", "", text.replace("\\\n", " "))
+        if (remote_on and HA_REMOTE_TEXT_RE.search(plain_ha)) or _ha_command(text, remote_on):
             return "This command talks to the Home Assistant Supervisor, which is never allowed."
         for pattern, why in PROTECTED_COMMAND_RES:
             if pattern.search(text):

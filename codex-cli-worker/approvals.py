@@ -52,9 +52,28 @@ def command_names_protected_path(command: str) -> bool:
     if (any(pattern.search(text) for pattern in PROTECTED_COMMAND_RES)
             or re.search(r"/etc/codex/requirements\.toml(?![\w./-])", text, re.IGNORECASE)):
         return True
-    # Match literal and globbed path components without expanding the filesystem.
-    # Track an explicit cd for relative names; paths computed at runtime remain out of scope.
+    # Match per path component: a shell wildcard cannot cross a slash.
+    # Consider the complete command so cd, pushd, env -C and grouped commands
+    # cannot hide a relative requirements name. No filesystem expansion occurs.
     target = "/etc/codex/requirements.toml"
+    def matches_path(pattern: str, path: str) -> bool:
+        expected, parts = path.lower().split('/'), posixpath.normpath(pattern).lower().split('/')
+        return len(parts) == len(expected) and all(fnmatch.fnmatchcase(part, pat)
+                                                    for pat, part in zip(parts, expected))
+
+    words = re.findall(r"[^\s<>;&|(){}]+(?:\{[^{}]*\}[^\s<>;&|(){}]*)?", text)
+    expanded = []
+    for word in words:
+        brace = re.search(r"\{([^{}]+)\}", word)
+        if brace:
+            expanded.extend(word[:brace.start()] + choice + word[brace.end():]
+                            for choice in brace[1].split(','))
+        else:
+            expanded.append(word)
+    names_directory = any(word.startswith('/') and matches_path(word, '/etc/codex') for word in expanded)
+    if names_directory and any('/' not in word and fnmatch.fnmatchcase('requirements.toml', word.lower())
+                               for word in expanded):
+        return True
     directory = ""
     for part in re.split(r"[;&|\n]+", text):
         words = re.findall(r"[^\s<>]+", part)
@@ -70,8 +89,10 @@ def command_names_protected_path(command: str) -> bool:
                 candidate = posixpath.normpath(posixpath.join(directory, word))
             else:
                 continue
-            if fnmatch.fnmatchcase(target, candidate.lower()):
+            if matches_path(candidate, target):
                 return True
+    if any(word.startswith('/') and matches_path(word, target) for word in expanded):
+        return True
     return False
 
 

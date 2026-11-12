@@ -34,13 +34,17 @@ class ReviewCases(unittest.TestCase):
                 self.assertTrue(self.denied(command))
 
     def test_non_commands_are_not_ha_invocations(self):
-        for command in ('echo ha core', 'grep ha core file', 'echo "the ha host is down"',
-                        'git log --format=%ha host', 'x.ha core', 'cat ha-notes',
-                        'sha256sum x', 'sha core', 'chain addons', 'ha-core restart',
+        for command in ('cat ha-notes', 'sha256sum x', 'sha core', 'chain addons', 'ha-core restart',
                         'ha_host info', 'ls /ha/core', 'ha.os', 'ha hostname',
                         'ha -h', 'ha --help', 'ha info', 'ha states list'):
             with self.subTest(command=command):
                 self.assertFalse(self.denied(command))
+        # The closure ruling accepts these conservative refusals with remote on.
+        for command in ('echo ha core', 'grep ha core file', 'echo "the ha host is down"',
+                        'git log --format=%ha host', 'x.ha core'):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+                self.assertFalse(self.denied(command, False))
 
     def test_permission_requests_and_other_families(self):
         for command in ('ha apps info', 'ha core info', 'ha os info', 'ha hardware info',
