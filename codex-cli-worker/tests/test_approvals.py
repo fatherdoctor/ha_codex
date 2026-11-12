@@ -208,6 +208,7 @@ class ApprovalTests(unittest.TestCase):
             "cat /usr//share/ha_c*/policy.json",
             "cd /data/codex-home && sed -i 1d AGENTS.md",
             "rm /data/codex-home/*",
+            "sed -i 1d /etc/codex/requirements.toml",
         ]):
             approval_id = self.request(request_id=index, command=command)
             self.assertFalse(self.records[-1]["can_allow"], command)

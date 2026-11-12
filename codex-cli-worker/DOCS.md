@@ -265,6 +265,8 @@ This fork has no `danger-full-access` mode. The upstream app's full-access mode 
 
 **Who can answer.** Only a signed-in Home Assistant administrator can answer **Allow once** or **Deny**, on the Codex page. The worker checks the user Home Assistant names for the page against its user list and records who answered on the request. The integration's API token cannot answer permission requests, and the integration's actions refuse callers who are not administrators. An automation or script that runs on its own may call the actions; one that a user who is not an administrator starts carries that user, and its call is refused too.
 
+Commands that write to or search protected places, such as `/etc/codex`, lose **Allow once**. That check reads only the command text: it cannot see a path built while the command runs, a symlink, or a relative path from an unknown folder. Such a command keeps **Allow once**, so read it before you allow it.
+
 **Prompt counts.** Each conversation keeps a count of the permission requests it raised, by kind (`command`, `command_input`, `file_change`, `other`). The integration's **Permission prompts** sensor shows the latest conversation's total, with the counts by kind as attributes.
 
 The app still provides safeguards: instructions to save per-file backups, optional full snapshots, checks of changed YAML and JSON, Home Assistant configuration checks, and built-in verification of states and dashboards. These help catch mistakes and recover changes; they do not guarantee that every action is safe or reversible. Keep normal Home Assistant backups too.
