@@ -302,6 +302,15 @@ class SchedulingApiTests(unittest.TestCase):
             self.assertEqual(self.client.post('/lead/tasks', json=data, headers=self.lead).status_code, 400)
         server.start_background_task.assert_not_called()
 
+    def test_saved_readonly_task_still_refuses_an_invalid_global_policy(self):
+        task_id = 'synthetic-task'
+        server.tasks[task_id] = {'status': 'queued', 'task_source': 'schedule', 'background_mode': 'read-only'}
+        with patch.object(server, 'read_options', return_value={**server.DEFAULT_OPTIONS, 'codex_sandbox': 'danger-full-access'}), \
+             patch.object(server, 'fail_task_launch') as refused, \
+             patch.object(server, 'record_baseline') as baseline:
+            server.run_task(task_id, 'Inspect the sample configuration.')
+        refused.assert_called_once(); baseline.assert_not_called()
+
     def test_policy_refusal_is_not_bypassed_by_lead_submission(self):
         with patch.object(server.protected_policy, 'policy_problem', return_value='Synthetic policy refusal.'):
             result = self.client.post('/lead/tasks', json={'prompt': 'Inspect sample.'}, headers=self.lead)

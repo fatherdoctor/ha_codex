@@ -4689,7 +4689,8 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
         return
     # A mode the protected policy refuses stops here, before the task is marked running or any
     # baseline, snapshot or backup work is done for it.
-    policy_problem = protected_policy.policy_problem(task_options(task_id))
+    policy_problem = (protected_policy.policy_problem(read_options())
+                      or protected_policy.policy_problem(task_options(task_id)))
     if policy_problem:
         fail_task_launch(
             task_id,
