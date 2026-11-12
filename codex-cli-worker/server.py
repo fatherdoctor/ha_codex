@@ -2746,6 +2746,7 @@ def previous_versions(run_dir: Path, paths: list[str], before: dict[str, Any]) -
     return entries
 
 
+@gate_rules.yaml_scan
 def refuse_planted_edits(run_dir: Path, changes: dict[str, list[str]], before: dict[str, Any]) -> list[dict[str, Any]]:
     """Undo new Core escape paths in every exchange.
 

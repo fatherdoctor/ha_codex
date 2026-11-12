@@ -34,7 +34,8 @@ import os
 import stat
 import time
 import posixpath
-from functools import lru_cache
+from functools import wraps
+from contextvars import ContextVar
 import yaml
 from collections import Counter
 from dataclasses import dataclass
@@ -54,12 +55,12 @@ STRICT_RULES: dict[str, Any] = {
 LIST_KEYS = ("reaches_anything", "runs_on_load_platforms", "runs_on_load_keys")
 
 
-ACTION_RE = re.compile(r"""^\s*-?\s*(?:service|action)\s*:\s*["']?([a-z0-9_]+)\.([a-z0-9_]+)""")
+ACTION_RE = re.compile(r"""^\s*-?\s*(?:service|action)\s*:\s*["']?([a-z0-9_]+)\.([a-z0-9_]+)""", re.IGNORECASE)
 TEMPLATE_ACTION_RE = re.compile(r"""^\s*-?\s*(?:(?:service|action)\s*:.*(?:\{\{|\{%)|service_template\s*:)""")
-PLATFORM_RE = re.compile(r"""^\s*-?\s*platform\s*:\s*["']?([a-z0-9_]+)["']?\s*(?:#.*)?$""")
+PLATFORM_RE = re.compile(r"""^\s*-?\s*platform\s*:\s*["']?([a-z0-9_]+)["']?\s*(?:#.*)?$""", re.IGNORECASE)
 # A definition key can hold a block, include or inline value: all run on load.
 DEFINITION_KEY_RE = re.compile(r"""^\s*-?\s*([a-z0-9_]+)\s*:""")
-SCRIPT_REF_RE = re.compile(r"""\bscript\.([a-z0-9_]+)\b""")
+SCRIPT_REF_RE = re.compile(r"""\bscript\.([a-z0-9_]+)\b""", re.IGNORECASE)
 SCRIPT_TARGET_RE = re.compile(r"""^\s*-?\s*(?:["']?script\.|entity_id\s*:|target\s*:\s*\{\s*entity_id\s*:)""")
 # The script domain's own services are not scripts.
 SCRIPT_SERVICES = {"turn_on", "turn_off", "toggle", "reload"}
@@ -138,8 +139,44 @@ class YamlBudgetError(ValueError):
     """The parsed second pass cannot finish within its fixed work budget."""
 
 
-@lru_cache(maxsize=8)
+_scan_nodes = ContextVar("yaml_scan_nodes", default=None)
+_SCAN_DEADLINE = object()
+
+
+def yaml_scan(function):
+    """Share bounded parse results (including failures) for one hook/watch scan."""
+    @wraps(function)
+    def run(*args, **kwargs):
+        if _scan_nodes.get() is not None:
+            return function(*args, **kwargs)
+        token = _scan_nodes.set({_SCAN_DEADLINE: time.monotonic() + 4.0})
+        try:
+            return function(*args, **kwargs)
+        finally:
+            _scan_nodes.reset(token)
+    return run
+
+
+def yaml_result(text):
+    cache = _scan_nodes.get()
+    if cache is not None and text in cache:
+        return cache[text]
+    try:
+        if cache is not None and time.monotonic() > cache[_SCAN_DEADLINE]:
+            raise YamlBudgetError('shared parse budget exceeded')
+        result = (_compose_yaml(text), '')
+    except (YamlBudgetError, RecursionError) as exc:
+        result = (None, 'YAML exceeds the bounded parsed check; review this file manually')
+    if cache is not None:
+        cache[text] = result
+    return result
+
+
 def yaml_node(text: str) -> Any:
+    return yaml_result(text)[0]
+
+
+def _compose_yaml(text: str) -> Any:
     """Compose safe nodes, retaining !include/!secret tags without constructing objects.
 
     Alias visits, nesting, input bytes and elapsed parsing are bounded. Invalid
@@ -151,13 +188,13 @@ def yaml_node(text: str) -> Any:
         def __init__(self, stream):
             super().__init__(stream)
             self.visits, self.depth = 0, 0
-            self.deadline = time.monotonic() + 0.25
+            self.deadline = min(time.monotonic() + 1.5, (_scan_nodes.get() or {}).get(_SCAN_DEADLINE, float("inf")))
 
         def compose_node(self, parent, index):
             self.visits += 1
             self.depth += 1
             try:
-                if self.visits > 20000 or self.depth > 64 or time.monotonic() > self.deadline:
+                if self.visits > 150000 or self.depth > 64 or time.monotonic() > self.deadline:
                     raise YamlBudgetError("YAML parse budget exceeded")
                 return super().compose_node(parent, index)
             finally:
@@ -218,7 +255,7 @@ def parsed_findings(text: str, rules: dict[str, Any], scripts: set[str] | frozen
             if not isinstance(key, yaml.ScalarNode):
                 continue
             name = key.value
-            scalar = value.value if isinstance(value, yaml.ScalarNode) and value.tag.startswith('tag:yaml.org,2002:') else ''
+            scalar = value.value.strip().lower() if isinstance(value, yaml.ScalarNode) and value.tag.startswith('tag:yaml.org,2002:') else ''
             number = key.start_mark.line + 1
             source = lines[number - 1] if number <= len(lines) else ''
             def add(reason, kind):
@@ -232,7 +269,7 @@ def parsed_findings(text: str, rules: dict[str, Any], scripts: set[str] | frozen
                     add('a templated action', 'template')
                 match = re.fullmatch(r'([a-z0-9_]+)\.([a-z0-9_]+)', scalar)
                 if match:
-                    domain, service = match.groups()
+                    domain, service = (x.strip().lower() for x in match.groups())
                     if domain in rules['reaches_anything']:
                         add(f"an action on {domain}, which can reach anything", domain)
                     elif domain == 'script' and service not in SCRIPT_SERVICES:
@@ -241,8 +278,8 @@ def parsed_findings(text: str, rules: dict[str, Any], scripts: set[str] | frozen
             if name == 'entity_id':
                 values = value.value if isinstance(value, yaml.SequenceNode) else [value]
                 for target in values:
-                    if isinstance(target, yaml.ScalarNode) and target.value.startswith('script.'):
-                        service = target.value[7:]
+                    if isinstance(target, yaml.ScalarNode) and target.value.strip().lower().startswith('script.'):
+                        service = target.value.strip().lower()[7:]
                         if service in scripts:
                             add(f"a call to script.{service}, which itself acts on a refused domain", 'refused_script')
     return findings
@@ -255,7 +292,7 @@ def parsed_blocks(text: str, rules: dict[str, Any]) -> dict[str, tuple[int, int,
         for key, value in mapping.value:
             if not isinstance(key, yaml.ScalarNode):
                 continue
-            scalar = value.value if isinstance(value, yaml.ScalarNode) else ''
+            scalar = value.value.strip().lower() if isinstance(value, yaml.ScalarNode) else ''
             definition = key.value in rules['runs_on_load_keys'] and (isinstance(value, (yaml.MappingNode, yaml.SequenceNode)) or value.tag == 'tag:yaml.org,2002:null' or value.tag.startswith('!'))
             security = definition or (
                 key.value == 'platform' and scalar in rules['runs_on_load_platforms']) or (
@@ -268,6 +305,7 @@ def parsed_blocks(text: str, rules: dict[str, Any]) -> dict[str, tuple[int, int,
     return blocks
 
 
+@yaml_scan
 def find_refused(text: str, rules: dict[str, Any], refused_scripts: frozenset[str] | set[str] = frozenset()) -> list[Finding]:
     """Find always-on commands, definitions/platforms, templated actions and indirect security calls.
 
@@ -281,7 +319,7 @@ def find_refused(text: str, rules: dict[str, Any], refused_scripts: frozenset[st
     for number, line in enumerate(text.splitlines(), 1):
         match = ACTION_RE.match(line)
         if match:
-            domain, service = match.groups()
+            domain, service = (x.strip().lower() for x in match.groups())
             if domain in anything:
                 findings.append(Finding(number, f"an action on {domain}, which can reach anything", line, domain))
             elif domain == "script" and service not in SCRIPT_SERVICES and service in refused_scripts:
@@ -289,7 +327,7 @@ def find_refused(text: str, rules: dict[str, Any], refused_scripts: frozenset[st
                                         "refused_script"))
         else:
             platform = PLATFORM_RE.match(line)
-            if platform and platform.group(1) in platforms:
+            if platform and platform.group(1).lower() in platforms:
                 findings.append(Finding(number, f"a {platform.group(1)} platform, which runs on its own once loaded", line,
                                         "runs_on_load"))
             definition = DEFINITION_KEY_RE.match(line)
@@ -298,8 +336,8 @@ def find_refused(text: str, rules: dict[str, Any], refused_scripts: frozenset[st
                                         "runs_on_load"))
         if TEMPLATE_ACTION_RE.match(line):
             findings.append(Finding(number, "a templated action", line, "template"))
-        if not match and SCRIPT_TARGET_RE.match(line):
-            for ref in SCRIPT_REF_RE.findall(line):
+        if not match and SCRIPT_TARGET_RE.match(line.lower()):
+            for ref in (x.lower() for x in SCRIPT_REF_RE.findall(line)):
                 if ref not in SCRIPT_SERVICES and ref in refused_scripts:
                     findings.append(Finding(number, f"a call to script.{ref}, which itself acts on a refused domain", line,
                                             "refused_script"))
@@ -308,6 +346,8 @@ def find_refused(text: str, rules: dict[str, Any], refused_scripts: frozenset[st
         additions = parsed_findings(text, rules, refused_scripts)
     except YamlBudgetError:
         additions = [Finding(1, "YAML exceeds the bounded parsed check; review this file manually", "", "runs_on_load")]
+    if yaml_result(text)[1]:
+        additions.append(Finding(1, yaml_result(text)[1], '', 'parse_budget'))
     seen = {(f.line, f.reason, f.kind) for f in findings}
     findings.extend(f for f in additions if (f.line, f.reason, f.kind) not in seen)
     return findings
@@ -316,6 +356,7 @@ def find_refused(text: str, rules: dict[str, Any], refused_scripts: frozenset[st
 BLOCK_CHANGED = "a change to a block that holds a refused action"
 
 
+@yaml_scan
 def refused_blocks(text: str, rules: dict[str, Any], scripts: set[str] | frozenset[str] = frozenset()) -> dict[str, tuple[int, int, str]]:
     """Return {hash: (first line number, last line number, first line)} for each top-level block of this YAML text that holds a refused line.
 
@@ -330,21 +371,25 @@ def refused_blocks(text: str, rules: dict[str, Any], scripts: set[str] | frozens
     out: dict[str, tuple[int, int, str]] = {}
     block: list[str] = []
     start = 1
+    all_findings = find_refused(text, rules, scripts)
     for number, line in enumerate(text.splitlines() + ["__end__"], start=1):
         if line[:1] and not line[:1].isspace() and not line.startswith("#") and block:
             body = "\n".join(item.rstrip() for item in block).strip()
-            findings = find_refused(body, rules, scripts)
+            findings = [f for f in all_findings if start <= f.line < number]
             if body and any(finding.kind in {"runs_on_load", "template"} for finding in findings):
                 out[hashlib.sha256(body.encode("utf-8")).hexdigest()] = (start, number - 1, block[0])
             block, start = [], number
         block.append(line)
     try:
         out.update(parsed_blocks(text, rules))
+        if yaml_result(text)[1]:
+            out[hashlib.sha256(text.encode()).hexdigest()] = (1, max(1, len(text.splitlines())), "YAML parsed-check budget exceeded")
     except YamlBudgetError:
         out[hashlib.sha256(text.encode()).hexdigest()] = (1, max(1, len(text.splitlines())), "YAML parsed-check budget exceeded")
     return out
 
 
+@yaml_scan
 def new_refused(before: str, after: str, rules: dict[str, Any], scripts: set[str] | frozenset[str] = frozenset()) -> list[Finding]:
     """Find newly added refused lines and changed blocks, without treating moved lines as new."""
     counts = Counter(item.key() for item in find_refused(before, rules, scripts))
@@ -364,11 +409,14 @@ def new_refused(before: str, after: str, rules: dict[str, Any], scripts: set[str
 
 
 
+@yaml_scan
 def refused_scripts(texts: dict[str, str], rules: dict[str, Any], deadline: float | None = None) -> set[str]:
     """Resolve scripts transitively using always-on security kinds within the time budget."""
     blocks: dict[str, str] = {}
     sources = {rel: 'auto' for rel in texts if rel == 'scripts.yaml' or rel.startswith('scripts/')}
     for source, text in texts.items():
+        if not re.search(r"\bscript\s*:", text):
+            continue
         for mapping in yaml_mappings(yaml_node(text)):
             for key, value in mapping.value:
                 if not isinstance(key, yaml.ScalarNode) or key.value != 'script':
@@ -386,8 +434,6 @@ def refused_scripts(texts: dict[str, str], rules: dict[str, Any], deadline: floa
                             if rel.startswith(target + '/') and rel.lower().endswith(YAML_SUFFIXES):
                                 sources[rel] = 'file' if value.tag == '!include_dir_named' else 'map'
     for rel, text in texts.items():
-        if deadline is not None and time.monotonic() > deadline:
-            raise ValueError("script scan time budget exceeded")
         if rel not in sources:
             continue
         node = yaml_node(text)
@@ -414,9 +460,7 @@ def refused_scripts(texts: dict[str, str], rules: dict[str, Any], deadline: floa
     while True:
         found = set()
         for name, text in blocks.items():
-            if deadline is not None and time.monotonic() > deadline:
-                raise ValueError("script scan time budget exceeded")
-            if find_refused(text, rules, refused):
+            if any(f.kind != "parse_budget" for f in find_refused(text, rules, refused)):
                 found.add(name)
         if found <= refused:
             return refused
@@ -435,32 +479,36 @@ def include_path(source: str, value: str) -> str:
     return rel
 
 
+@yaml_scan
 def included_definitions(texts: dict[str, str], rules: dict[str, Any], strict: bool = False, deadline: float | None = None) -> dict[str, set[str]]:
     """Resolve include chains and definition directories; every member is hashed whole."""
     definitions: dict[str, set[str]] = {}
-    deadline = time.monotonic() + 0.75 if deadline is None else deadline
+    deadline = time.monotonic() + 4.0 if deadline is None else deadline
     roots = {}
     for rel, text in texts.items():
-        if time.monotonic() > deadline:
-            raise YamlBudgetError('include parse deadline exceeded')
-        roots[rel] = yaml_node(text)
+        if '!include' in text:
+            roots[rel] = yaml_node(text)
     todo = [(rel, node, frozenset()) for rel, node in roots.items()]
     seen = set()
     while todo:
         source, node, kinds = todo.pop()
         if time.monotonic() > deadline:
-            raise YamlBudgetError('include graph deadline exceeded')
+            if strict:
+                raise ValueError(f'{source}: include graph time budget exceeded')
+            break
         if node is None or (source, id(node), kinds) in seen:
             continue
         seen.add((source, id(node), kinds))
-        if len(seen) > 40000:
-            raise YamlBudgetError('include graph budget exceeded')
+        if len(seen) > 200000:
+            if strict:
+                raise ValueError(f'{source}: include graph node budget exceeded')
+            break
         if isinstance(node, yaml.ScalarNode) and node.tag.startswith('!include'):
             try:
                 target = include_path(source, node.value)
             except ValueError:
                 if strict:
-                    raise
+                    raise ValueError(f'{source}: include cannot be checked safely') from None
                 continue
             if node.tag == '!include':
                 targets = [target]
@@ -468,12 +516,14 @@ def included_definitions(texts: dict[str, str], rules: dict[str, Any], strict: b
                 targets = [rel for rel in texts if rel.startswith(target + '/') and rel.lower().endswith(YAML_SUFFIXES)]
             else:
                 if strict:
-                    raise ValueError('unsupported include tag')
+                    raise ValueError(f'{source}: unsupported include tag')
                 continue
             for rel in targets:
                 if kinds:
                     definitions.setdefault(rel, set()).update(kinds)
-                if rel in roots:
+                if rel in texts:
+                    if rel not in roots:
+                        roots[rel] = yaml_node(texts[rel])
                     todo.append((rel, roots[rel], kinds))
         elif isinstance(node, yaml.MappingNode):
             platform_kinds = {v.value for k, v in node.value if isinstance(k, yaml.ScalarNode) and k.value == 'platform' and isinstance(v, yaml.ScalarNode) and v.value in rules['runs_on_load_platforms']}
@@ -491,7 +541,7 @@ def included_finding(rel: str, kinds: set[str], text: str) -> Finding:
                    text.splitlines()[0] if text.splitlines() else '', 'runs_on_load')
 
 
-def config_yaml_texts(root: Path, max_bytes: int = 512 * 1024) -> dict[str, str]:
+def config_yaml_texts(root: Path, max_bytes: int = 8 * 1024 * 1024) -> dict[str, str]:
     """Read a bounded ordinary configuration inventory, never links or secret tags."""
     texts = {}
     total = 0
@@ -511,25 +561,30 @@ def config_yaml_texts(root: Path, max_bytes: int = 512 * 1024) -> dict[str, str]
                 include_path('', rel)
             except ValueError:
                 continue  # Credential-named inventories are never opened.
-            raw = read_config_bytes(root, rel, max_bytes)
+            try:
+                raw = read_config_bytes(root, rel, max_bytes)
+            except ValueError:
+                continue  # Unrelated oversized files cannot veto a bounded patch.
             total += len(raw)
-            if total > 8 * 1024 * 1024:
+            if total > 16 * 1024 * 1024:
                 raise ValueError('configuration inventory byte budget exceeded')
             texts[rel] = raw.decode('utf-8', errors='replace')
     return texts
 
 
+@yaml_scan
 def extend_include_texts(texts: dict[str, str], root: Path, rules: dict[str, Any],
-                         strict: bool = False, max_bytes: int = 512 * 1024) -> dict[str, str]:
+                         strict: bool = False, max_bytes: int = 512 * 1024,
+                         raw_files: dict[str, bytes] | None = None) -> dict[str, str]:
     """Load ordinary referenced definitions even when their suffix is not YAML."""
     texts = dict(texts)
     loaded, total = set(texts), sum(len(text.encode()) for text in texts.values())
-    deadline = time.monotonic() + 0.75
+    deadline = time.monotonic() + 4.0
     for _ in range(64):
         added = False
         for rel in included_definitions(texts, rules, strict, deadline):
             if time.monotonic() > deadline:
-                raise YamlBudgetError('include read deadline exceeded')
+                raise ValueError(f'{rel}: include read deadline exceeded')
             if rel in loaded:
                 continue
             loaded.add(rel)
@@ -539,25 +594,28 @@ def extend_include_texts(texts: dict[str, str], root: Path, rules: dict[str, Any
                 raw = read_config_bytes(root, rel, max_bytes)
             except FileNotFoundError:
                 if strict:
-                    raise ValueError('included definition is missing') from None
+                    raise ValueError(f'{rel}: included definition is missing') from None
                 continue
             except (OSError, ValueError):
                 if strict:
-                    raise ValueError('included definition is not an ordinary bounded file') from None
+                    raise ValueError(f'{rel}: included definition is not an ordinary bounded file') from None
                 continue
             total += len(raw)
             if total > 16 * 1024 * 1024:
                 raise ValueError('include byte budget exceeded')
             texts[rel] = raw.decode('utf-8', errors='replace')
+            if raw_files is not None:
+                raw_files[rel] = raw
             added = True
         if not added:
             return texts
     raise ValueError('include depth budget exceeded')
 
 
+@yaml_scan
 def config_refused_scripts(rules: dict[str, Any]) -> set[str]:
     texts = config_yaml_texts(CONFIG_ROOT)
-    return refused_scripts(texts, rules, deadline=time.monotonic() + 0.5)
+    return refused_scripts(texts, rules)
 
 
 PATCH_MAX_BYTES = 256 * 1024
@@ -581,11 +639,11 @@ def read_config_bytes(root: Path, rel: str, max_bytes: int = CONFIG_MAX_BYTES) -
         try:
             info = os.fstat(fd)
             if not stat.S_ISREG(info.st_mode) or info.st_size > max_bytes or info.st_nlink != 1:
-                raise ValueError("not a bounded ordinary configuration file")
+                raise ValueError(f"{rel}: not a bounded ordinary configuration file")
             with os.fdopen(fd, "rb", closefd=False) as source:
                 data = source.read(max_bytes + 1)
             if len(data) > max_bytes:
-                raise ValueError("configuration file exceeds size limit")
+                raise ValueError(f"{rel}: configuration file exceeds size limit")
             return data
         finally:
             os.close(fd)
@@ -607,7 +665,7 @@ def patch_versions(text: str, cwd: str = "", extra_paths: set[str] | frozenset[s
         raise ValueError("incomplete patch")
     if len(PATCH_BLOCK_RE.findall(text)) != 1:
         raise ValueError("multiple patch bodies are not checked as one edit")
-    deadline = time.monotonic() + 0.75
+    deadline = time.monotonic() + 4.0
     lines = match.group().splitlines()[1:-1]
     records: list[tuple[str, str, list[str]]] = []
     for line in lines:
@@ -828,6 +886,7 @@ def _python_definition(path: str) -> str:
     return ("python_script" if match[1] == "python_scripts" else "pyscript") if match else ""
 
 
+@yaml_scan
 def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, Any]) -> str:
     """Return why the hook refuses this tool call or permission request, or an empty string to let it through.
 
@@ -846,7 +905,7 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
     # unchanged hook returns exit 0 with no output, never an allow decision.
     if remote_on:
         rules = {**rules, "runs_on_load_keys": sorted(set(rules["runs_on_load_keys"]) | {"template"})}
-    deadline = time.monotonic() + 2.0
+    deadline = _scan_nodes.get()[_SCAN_DEADLINE] - 4.0 + (7.0 if any(PATCH_BEGIN in value for value in _strings(tool_input)) else 2.0)
     texts = _strings(tool_input)
     if len(texts) > 128 or sum(len(text) for text in texts) > 1024 * 1024:
         return "This tool input exceeds the command check's size budget; it is refused."
@@ -866,7 +925,15 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
             if len(text.encode("utf-8")) > PATCH_MAX_BYTES:
                 return "This patch exceeds the command check's size budget; it is refused."
             try:
-                scripts = config_refused_scripts(rules)
+                # Reserve parsing of proposed content before scanning unrelated inventory.
+                if remote_on:
+                    for path, before, after in patch_versions(text, str(data.get("cwd") or "")):
+                        yaml_node(before)
+                        yaml_node(after)
+                for path, added in parse_patch(text):
+                    yaml_node(added)
+                inventory = extend_include_texts(config_yaml_texts(CONFIG_ROOT), CONFIG_ROOT, rules, strict=remote_on)
+                scripts = refused_scripts(inventory, rules)
                 for path, added in parse_patch(text):
                     if time.monotonic() > deadline:
                         raise ValueError("command check time budget exceeded")
@@ -876,10 +943,9 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
                     if path.lower().endswith(YAML_SUFFIXES):
                         found = find_refused(added, rules, scripts)
                         if found:
-                            return f"This edit adds {found[0].reason}. A person must add this change outside Codex."
+                            return f"This edit to {path} adds {found[0].reason}. A person must add this change outside Codex."
                 if remote_on:
                     versions = patch_versions(text, str(data.get("cwd") or ""))
-                    inventory = extend_include_texts(config_yaml_texts(CONFIG_ROOT), CONFIG_ROOT, rules, strict=True)
                     original = dict(inventory)
                     inventory.update({path: after for path, before, after in versions})
                     definitions = included_definitions(original, rules, strict=True)
@@ -890,7 +956,7 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
                     versions = patch_versions(text, str(data.get("cwd") or ""), set(definitions))
                     for path, before, after in versions:
                         if path in definitions and before != after:
-                            return f"This edit changes {included_finding(path, definitions[path], after).reason}. A person must add it outside Codex."
+                            return f"This edit to {path} changes {included_finding(path, definitions[path], after).reason}. A person must add it outside Codex."
                         if time.monotonic() > deadline:
                             raise ValueError("command check time budget exceeded")
                         found = new_refused(before, after, rules, scripts)
@@ -902,8 +968,11 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
                                 body = find_refused(after, rules, scripts)
                                 reason = next((item.reason for item in body if item.kind in {"runs_on_load", "template"}), reason)
                             return f"This edit to {path} makes {reason}. A person must add this change outside Codex."
-            except (OSError, ValueError, UnicodeError):
-                return "This edit cannot be checked safely against the complete configuration file; it is refused."
+            except (OSError, ValueError, UnicodeError) as exc:
+                # ValueError messages here are worker-authored paths/reasons, never bytes read from a file.
+                detail = str(exc) if isinstance(exc, ValueError) else 'configuration read failed'
+                paths = ", ".join(path for path, _ in parse_patch(text))[:256]
+                return f"This edit to {paths or 'the configuration'} cannot be checked safely: {detail}; it is refused."
             # The rest of a command that carries a patch (a heredoc) is still a command.
             text = PATCH_BLOCK_RE.sub(" ", text)
         if remote_on:

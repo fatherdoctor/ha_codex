@@ -309,24 +309,27 @@ class ConfigWatch:
         """Return the refused actions in every YAML file, by path relative to the config folder."""
         return self._scan()[0]
 
+    @gate_rules.yaml_scan
     def _scan(self) -> tuple[dict[str, list[gate_rules.Finding]], dict[str, dict[str, tuple[int, int, str]]]]:
         """Return the refused lines and the refused blocks (see ``gate_rules.refused_blocks``) of every YAML file."""
         rules = self.rules()
         texts: dict[str, str] = {}
+        raw_files = {}
         for path in self.files():
             try:
-                texts[path.relative_to(self.root).as_posix()] = gate_rules.read_config_bytes(
-                    self.root, path.relative_to(self.root).as_posix()).decode("utf-8", errors="replace")
+                rel = path.relative_to(self.root).as_posix()
+                raw_files[rel] = gate_rules.read_config_bytes(self.root, rel)
+                texts[rel] = raw_files[rel].decode("utf-8", errors="replace")
             except (OSError, ValueError):
                 continue
-        texts = gate_rules.extend_include_texts(texts, self.root, rules, max_bytes=WATCH_MAX_BYTES)
+        texts = gate_rules.extend_include_texts(texts, self.root, rules, max_bytes=WATCH_MAX_BYTES, raw_files=raw_files)
         scripts = self.refused_scripts(texts, rules)
         lines = {rel: found for rel, text in texts.items() if (found := gate_rules.find_refused(text, rules, scripts))}
         blocks = {rel: found for rel, text in texts.items() if (found := gate_rules.refused_blocks(text, rules, scripts))}
         for rel, kinds in gate_rules.included_definitions(texts, rules).items():
             if rel in texts:
                 lines.setdefault(rel, []).append(gate_rules.included_finding(rel, kinds, texts[rel]))
-                blocks.setdefault(rel, {})['include:' + hashlib.sha256(gate_rules.read_config_bytes(self.root, rel)).hexdigest()] = (
+                blocks.setdefault(rel, {})['include:' + hashlib.sha256(raw_files[rel]).hexdigest()] = (
                     1, max(1, len(texts[rel].splitlines())), texts[rel].splitlines()[0] if texts[rel].splitlines() else '')
         return lines, blocks
 
@@ -343,10 +346,11 @@ class ConfigWatch:
             for name in sorted(names):
                 if not name.startswith(".") and name.lower() not in {"secrets.yaml", "secrets.yml"}:
                     present.append((Path(folder)/name).relative_to(self.root).as_posix())
-                    if len(present) >= WATCH_MAX_FILES:
+                    if len(present) >= 10 * WATCH_MAX_FILES:
                         return present, False
         return present, True
 
+    @gate_rules.yaml_scan
     def take_baseline(self) -> None:
         """Save what is in the config folder now as the baseline later scans compare with."""
         with self.lock:
@@ -522,6 +526,7 @@ class ConfigWatch:
             except FileNotFoundError:
                 pass
 
+    @gate_rules.yaml_scan
     def new_findings(self, remote_on: bool = False) -> list[dict[str, Any]]:
         with self.lock:
             if not self.has_baseline():

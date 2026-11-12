@@ -393,9 +393,12 @@ is not evidence that the requested permissions were granted.
 **Parsed YAML and include checks.** The command check retains the line rules for incomplete edits and
 adds a safe composed-node pass for quoted keys, flow mappings, action/service values, script targets,
 anchors and YAML merges. Home Assistant tags remain nodes: `!secret` is never resolved or read.
-The parser constructs no Python objects. Alias visits (20,000), nesting (64), input bytes (2 MiB)
-and per-document parsing (0.25 seconds) are bounded; a parsed-check budget failure is a finding,
-not permission to run unchecked.
+The parser constructs no Python objects. Alias visits (150,000), nesting (64), input bytes (2 MiB)
+and per-document parsing (1.5 seconds) are bounded, with four seconds of shared parsing per scan.
+Each document, including a failed parse, is cached only for that hook/watch/exchange operation.
+A parsed-check budget failure is reported on its file; the line rules continue without raising
+out of script resolution or include discovery. Untouched large files do not veto an ordinary patch.
+Service names and script entity IDs are stripped and lower-cased before matching.
 
 A definition such as `shell_command: !include commands.yaml` protects the entire included file,
 including a filename with a non-YAML suffix. Definition directories and nested includes are tracked,
@@ -407,23 +410,30 @@ requirement. An earlier file is never presumed absent merely because it had a di
 
 Include reads stay under the configuration root through no-follow file descriptors. Hidden paths,
 credential-named includes, symlinks and hardlinks are excluded or refused. The hook inventory is bounded
-at 3,000 files/8 MiB, include reads at 16 MiB and 64 passes, with a shared 0.75-second graph/read budget.
+at 3,000 files/16 MiB (8 MiB per inventory file); include reads at 16 MiB and 64 passes, with a
+four-second graph/read budget. An inventory file beyond the read cap is skipped, while touched
+source files remain capped and refused by name. Include refusals identify their source or target file.
 A missing, unsafe or over-budget dependency cannot grant a hook approval. Watch findings still require
 review before reload; this does not reverse a command that already ran. These checks do not execute YAML,
 contact Home Assistant, or change Codex's approval policy.
 
 **Hook timeout and undo limits.** A synchronous hook that times out can fail open in Codex 0.166: the tool
 call may run after the timeout. The hook checks bounded inputs and refuses an uncertain, oversized or
-ambiguous YAML patch. Hook-checked source and script files are capped at 512 KiB; larger files are refused before scanning. While remote control is on it reconstructs the whole proposed YAML file, so edits
+ambiguous YAML patch. Hook-edited source files are capped at 512 KiB; larger touched files are refused by name.
+The unrelated inventory uses the larger read cap above; files beyond the 2 MiB parsed cap retain
+line-only script resolution and a watch finding. While remote control is on it reconstructs the whole proposed YAML file, so edits
 beneath an existing `shell_command`, `rest_command` or `command_line` key are also checked. The checked-in
 fixtures use the captured Bash/apply_patch command-string inputs. PermissionRequest is checked for named security
-restrictions; needing network or other ordinary sandbox permission is not itself a refusal. In the outside executor, 30 isolated
-hook-process measurements took at most 0.412 seconds against the configured 10-second timeout, including
+restrictions; needing network or other ordinary sandbox permission is not itself a refusal. Earlier small-fixture measurements of 30 isolated
+hook processes took at most 0.412 seconds against the configured 10-second timeout, including
 a repetitive 450 KiB YAML file (Codex 0.166 shapes, Python 3.12). Reproduce with
 `python codex-cli-worker/tests/measure_gate.py` in the worker's test environment; this timing is not an HAOS
 latency guarantee.
 
-The config watch runs every 30 seconds over at most 3,000 ordinary YAML files, each at most 2 MiB. While remote control is on, a new or changed always-on command,
+The config watch runs every 30 seconds over at most 3,000 ordinary YAML files, each at most 2 MiB.
+The separate presence manifest holds up to 30,000 ordinary filenames, including non-YAML
+include candidates, so unrelated media does not consume the YAML scan limit. At that presence cap
+the manifest is incomplete and never proves absence. While remote control is on, a new or changed always-on command,
 platform or template block causes the **whole affected file** to be restored from its hash-verified earlier
 bytes; a newly created file can be removed only with a complete earlier absence manifest. Before either change,
 the replaced bytes are saved with mode 0600 under the app's private data folder, in
