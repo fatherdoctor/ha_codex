@@ -310,15 +310,79 @@ summary and details. Marking the watch reviewed acknowledges findings; it does n
 
 OpenAI's remote control (`codex remote-control`) lets the ChatGPT app on a phone or tablet work on this Home Assistant through OpenAI's relay. The app runs it for you; there is no terminal step.
 
-**Startup on Home Assistant OS.** The app uses the existing Bubblewrap child profile to set a private
-UTS host name (`bwrap.real --unshare-user --unshare-uts --hostname "Home Assistant"`). The outer AppArmor
-profile gains no capabilities. This follows Bubblewrap's
-[documented hostname option](https://github.com/containers/bubblewrap/blob/main/bwrap.xml), which succeeded
-in the HAOS lab. A short namespace-only probe runs before Codex; if the probe or the actual namespace setup
-fails, the page and log show **Machine-name namespace unavailable** and Codex starts without a custom name.
-It does not repeatedly restart the failed `unshare -Ur -u` command. Pairing uses the same selected launch path.
-The nested sandbox wrapper is permitted in the existing Bubblewrap child profile. HAOS end-to-end pairing
-and nested-sandbox confirmation still belong to the lead's lab; the outside lane uses disposable fixtures only.
+**Startup on Home Assistant OS.** An immutable launcher enters a dedicated relay AppArmor label.
+Its separate Bubblewrap binary sets a private UTS host name and maps container root to UID/GID
+1000 inside the outer user namespace, then drops all capabilities before Codex starts. The root worker profile gains no
+capabilities. A namespace-only probe selects this route; if setup fails, the page and log show
+**Machine-name namespace unavailable**. The fallback omits the private hostname but still creates
+the non-zero user mapping and enters the relay label. It clears and verifies all capability sets
+and NoNewPrivs before starting Codex, failing closed if the safe mapping cannot be made. Launcher errors
+identify a fixed label, stack, capability or exec stage without printing arguments or raw exceptions.
+
+The inner UID represents the same kernel file owner as container root, so existing `/config`
+and `/data` ownership and access are preserved; files are not chowned. This avoids Linux's
+CAP_SETFCAP requirement for a new mapping of parent UID 0 after privileges were dropped.
+Codex's nested sandbox instead maps parent UID 1000 to itself. Neither route retains a capability
+or relaxes the tool sandbox to make that operation succeed.
+
+The worker creates `/data/remote_control_control/` at startup, including with remote control off.
+The sandbox wrapper masks that fixed parent, so an earlier chat sandbox cannot see a later control
+socket through its ordinary path. Relay tool commands retain the relay label and add a separate
+restrictive tool component while `NoNewPrivs=1`. An immutable guard verifies the actual stack
+before starting native Bubblewrap; the chat tool label is unchanged.
+This prevents the base abstraction's same-label ptrace-read rule from granting a sandbox access to
+the relay's `/proc/<pid>/root`, `cwd` or `environ` in the no-proc fallback. Loaded-label and proc-view
+isolation still require the lead's HAOS acceptance check described in
+[SANDBOX_TESTING.md](SANDBOX_TESTING.md#remote-control-profile-regression).
+
+**Relay execution (CX-RC-EXEC.f2).** The reproduced unified-exec failure was a `nodev` root bind, not
+a missing executable rule. Under the previous outer `--bind / /`, opening `/dev/null` and
+`/dev/ptmx` failed with `EACCES`; pipe commands and PTY commands both failed before exec. The
+outer relay now applies `--dev /dev` after the root bind and preserves shared memory with
+`--bind-try /dev/shm /dev/shm`, exposing standard devices rather than the whole container device
+tree. Removing those device setup flags reproduces the native regression. The former `/opt` rules
+were redundant with `file,` and have been removed. Tool sandbox labels retain their narrower
+`network netlink raw,` rule; the relay alone keeps its parent transport access. Native approvals,
+managed requirements and the command check remain in effect. The relay starts in `/config`.
+
+When the owner configures `HA_TOKEN`, relay commands receive the same `HA_URL`/`HA_TOKEN` pair as chat
+commands. Relay-only launch arguments explain that API route using variable names only. They are regenerated
+from current options on each launch and are not written into the shared chat configuration. Supervisor
+tokens and individual chat-turn MCP capabilities remain stripped. The chat page's verification/history
+MCP tools are not attached to relay threads; shell network access can still require native approval.
+With no configured Core token, the instructions say so instead of suggesting credential-store access.
+
+**Updates keep the enrollment.** Startup sets `CODEX_HOME=/data/codex-home` and pins `sqlite_home` to
+that same persistent directory. It refreshes configuration/instructions without replacing Codex's state
+database or the saved enabled choice. The initialize request retains the client name `ha_codex` across image versions and nonempty display
+name changes. Display/UTS names are not enrollment keys; do not request a new code merely because
+the image changed. The pinned
+[enrollment implementation](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/app-server-transport/src/transport/remote_control/enroll.rs#L293)
+loads enrollment from the state database, keyed by relay target, account and stable app-server client
+name. This is separate from a transient control socket and the replaceable image. An update preserves
+data; uninstalling, clearing data, changing account or revoking enrollment is a different operation.
+Actual reconnect without a new code remains a lead lab acceptance check.
+
+**First pairing (Codex 0.166).** Turn remote control on, wait for the connected state, then choose
+**New pairing code** and type the displayed code into the ChatGPT app. The button calls
+`remoteControl/pairing/start` with `manualCode: true` on the running process's own Unix WebSocket.
+It uses `manualPairingCode`, not the opaque QR pairing token. A missing, unsupported or failed response
+shows an error and clears an earlier code. Turning off or restarting clears the page's code. Codes
+are kept only in administrator page state; recent logs, non-administrator Ingress reads,
+the integration and `/status` omit them. Start, stop, review and new-code requests all require
+an active Home Assistant administrator verified through the same check as task approvals.
+
+This follows the pinned upstream sources at `rust-v0.166.0`:
+
+- [cli/src/remote_control_cmd.rs:187-204](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/cli/src/remote_control_cmd.rs#L187):
+  foreground mode creates a private socket; the separate CLI `pair` command selects the daemon socket.
+- [cli/src/main.rs:591-606 and 1298-1314](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/cli/src/main.rs#L591):
+  `app-server --listen unix://PATH --remote-control` selects ephemeral remote control on this process.
+- [app-server-daemon/src/client.rs:63-140](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/app-server-daemon/src/client.rs#L63)
+  and [remote_control_client.rs:60-140](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/app-server-daemon/src/remote_control_client.rs#L60):
+  Unix WebSocket, experimental initialization, ephemeral enable, status and manual-code request.
+- [app-server-protocol/src/protocol/v2/remote_control.rs:70-83](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/app-server-protocol/src/protocol/v2/remote_control.rs#L70):
+  manual-code request and response fields. No second daemon or terminal pairing step is needed.
 
 **Managed policy and read-only fallback (Codex 0.166).** The requirements allow only `read-only` and
 `workspace-write`, only `on-request` approvals (never `never`), and only managed hooks. Integration-owned
@@ -365,10 +429,10 @@ prevent a reload before the scan, or guarantee capture of an obfuscated referenc
 undo reduce exposure; neither removes the upstream timeout risk.
 
 - **Off until you turn it on.** Open the app page, then **Settings**, then **Remote control from the ChatGPT app**. The choice is saved and holds across app restarts.
-- **One supervised process.** The app runs `codex remote-control --no-daemon` in the foreground and starts it again, with a growing delay, if it exits. **Turn off** stops it.
+- **One supervised process.** The app runs `codex app-server --listen unix://<private socket> --remote-control` in the foreground and starts it again, with a growing delay, if it exits. **Turn off** stops it.
 - **Machine name.** The ChatGPT app lists this machine as **Home Assistant** unless you change the **Remote control machine name** option. Codex has no name setting, so the app starts it with that name as its host name inside a private namespace. If the private name namespace is unavailable, the page explains that Codex is using its existing host name.
 - **Pairing.** The pairing code is shown as large text and as a QR code. Pairing is kept in the app's private storage with the Codex sign-in, so a restart does not ask for it again. **New pairing code** asks Codex for a fresh one when the ChatGPT app has lost this machine.
-- **No Home Assistant credentials.** The remote-control process gets no Home Assistant token and no Supervisor token, even when the `HA_TOKEN` option is set for the chat page.
+- **The same configured Core API access as chat.** Relay commands keep the owner's configured `HA_URL`/`HA_TOKEN` pair. They never receive the Supervisor token or a chat turn's private MCP capabilities. Never print API credentials; approval does not create them.
 - **The command check.** Commands from the ChatGPT app do not pass through this app's Allow and Deny buttons, so the app ships a check that holds outside the model, for every client:
   - Codex's managed requirements (`/etc/codex/requirements.toml`, read-only) rule out the full-access sandbox and any hook other than the app's own.
   - With remote control on, the managed hook leaves normal light, lock, network and checked-file requests to Codex's native approval flow. It says nothing (exit 0), never auto-approves. Credential access, explicit full-access requests, the app's own settings/policy/rules and planted command or template definitions remain refused with a named reason. There are no device-category refusals.

@@ -35,12 +35,15 @@ RUN apk add --no-cache \
     tar \
     util-linux-misc
 
-RUN install -D -m 0755 /usr/bin/bwrap /opt/codex-sandbox/bwrap.real
+RUN install -D -m 0755 /usr/bin/bwrap /opt/codex-sandbox/bwrap.exec \
+    && install -m 0755 /usr/bin/bwrap /opt/codex-sandbox/relay-bwrap
 
+COPY relay-launcher /opt/codex-sandbox/relay-launcher
+COPY relay-tool-launcher /opt/codex-sandbox/bwrap.real
 COPY codex-bwrap /opt/codex-sandbox/bwrap
 COPY codex-bwrap-probe.py /opt/codex-sandbox/codex-bwrap-probe.py
 
-RUN chmod 0755 /opt/codex-sandbox/bwrap
+RUN chmod 0555 /opt/codex-sandbox/bwrap /opt/codex-sandbox/relay-launcher /opt/codex-sandbox/bwrap.real /opt/codex-sandbox/bwrap.exec /opt/codex-sandbox/relay-bwrap
 
 ENV PATH="/opt/codex-sandbox:${PATH}"
 
@@ -93,7 +96,7 @@ COPY gate/remote-control-gate.json /usr/share/ha_codex/remote-control-gate.json
 RUN chmod 0644 /etc/codex/requirements.toml /etc/codex/managed_config.toml /usr/share/ha_codex/* \
     && chown -R root:root /etc/codex /usr/share/ha_codex
 
-COPY approvals.py policy.py gate_rules.py remote_control.py verification.py verification_mcp.py browser_permissions.py browser_permission_policy.json ha_data.py ha_data_mcp.py browser.cjs browser_resources.cjs browser_permissions.cjs /
+COPY approvals.py policy.py gate_rules.py remote_control.py relay_diagnostics.py verification.py verification_mcp.py browser_permissions.py browser_permission_policy.json ha_data.py ha_data_mcp.py browser.cjs browser_resources.cjs browser_permissions.cjs /
 COPY web /web
 # The protected permission policy and house rules: read-only, outside /config and every sandbox's writable roots.
 COPY policy/policy.json /usr/share/ha_codex/policy.json

@@ -773,6 +773,7 @@ def ensure_runtime_files() -> None:
     """Create the worker's folders, make an API token if there is none, and write Codex's output schema and config."""
     CODEX_HOME.mkdir(parents=True, exist_ok=True)
     DATA_ROOT.mkdir(parents=True, exist_ok=True)
+    remote_control.prepare_control_parent(DATA_ROOT)
     task_root().mkdir(parents=True, exist_ok=True)
     AUTH_QR_DIR.mkdir(parents=True, exist_ok=True)
     if not api_token():
@@ -790,6 +791,9 @@ def ensure_runtime_files() -> None:
                 'approvals_reviewer = "user"',
                 'sandbox_mode = "workspace-write"',
                 'web_search = "cached"',
+                # Enrollment is in Codex's SQLite state, not in the image or
+                # the transient local control socket. Pin it to durable data.
+                f'sqlite_home = {json.dumps(str(CODEX_HOME))}',
                 "",
             ]
         ),
@@ -3933,6 +3937,24 @@ def home_assistant_api_instructions(options: dict[str, Any]) -> str:
     )
 
 
+def remote_control_instructions(options: dict[str, Any]) -> str:
+    """Give relay-created threads the same Core API path as chat tasks.
+
+    These instructions contain variable names only, never option values.
+    MCP capabilities from an individual chat turn are not reusable by a relay.
+    """
+    return (
+        "You are running in the Home Assistant add-on. Workspace: /config. Follow /config/AGENTS.md. "
+        "Keep API credentials private. A sandboxed command that needs network or file access outside its "
+        "sandbox must request native approval for that specific action. Never bypass a denial or request "
+        "permanent permission rules. Native approval does not supply credentials. "
+        "The chat page's per-turn verification and history MCP tools are not attached to relay threads. "
+        + (home_assistant_api_instructions(options) or
+           "No Core API token is configured for direct commands. Ask the owner to configure the app's "
+           "HA_TOKEN option; do not obtain credentials from stores or process environments.")
+    )
+
+
 def build_prompt(user_prompt: str, task_id: str, reply: str | None = None, backup_dir: Path | None = None) -> str:
     """Write the instructions Codex gets for one message, including where to save its backups."""
     current_request = reply if reply is not None else user_prompt
@@ -6137,6 +6159,7 @@ remote_control_supervisor = remote_control.Supervisor(
     state_path=DATA_ROOT / "remote_control.json",
     env_factory=lambda: codex_env(),
     name_factory=lambda: read_options().get("remote_control_name"),
+    instructions_factory=lambda: remote_control_instructions(read_options()),
     watch=remote_control.ConfigWatch(CONFIG_ROOT, DATA_ROOT / "remote_control_baseline.json"),
 )
 
@@ -6151,7 +6174,11 @@ def remote_control_summary() -> dict[str, Any]:
 @require_auth
 def get_remote_control() -> Response:
     """Return the remote-control state: on or off, connected or not, machine name, pairing code, recent log."""
-    return jsonify({"ok": True, "remote_control": remote_control_supervisor.snapshot()})
+    state = dict(remote_control_supervisor.snapshot())
+    if not is_ingress_request() or ingress_admin()[0] is None:
+        state.pop("pairing_code", None)
+        state.pop("pairing_qr", None)
+    return jsonify({"ok": True, "remote_control": state})
 
 
 @app.post("/remote-control/<action>")
@@ -6160,8 +6187,11 @@ def get_remote_control() -> Response:
 def change_remote_control(action: str) -> Response | tuple[Response, int]:
     """Turn remote control on or off, ask for a new pairing code, or mark config changes reviewed.
 
-    Only from the app page, never with the API token.
+    Only from an administrator on the app page, never with the API token.
     """
+    admin, refusal = ingress_admin()
+    if admin is None:
+        return jsonify({"ok": False, "error": refusal}), 403
     if action == "start":
         ok, state = remote_control_supervisor.start()
         if not ok:

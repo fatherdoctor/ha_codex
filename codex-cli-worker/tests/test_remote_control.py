@@ -58,6 +58,19 @@ class FakeProc:
         self.exit(-sig)
 
 
+class FakeControl:
+    def __init__(self, path):
+        self.path = path
+
+    def enable(self, cancelled=lambda: False):
+        return {"status": "connected", "serverName": "Home Assistant"}
+
+    status = enable
+
+    def pair(self, cancelled=lambda: False):
+        return {"manualPairingCode": "WXYZ-9876"}
+
+
 def wait_for(predicate, timeout: float = 3.0) -> bool:
     """Poll until the predicate holds or the timeout passes."""
     end = time.monotonic() + timeout
@@ -93,15 +106,15 @@ class CommandTests(unittest.TestCase):
 
     def test_name_is_an_argument_never_part_of_the_script(self) -> None:
         cmd = rc.build_command("/usr/local/bin/codex", "Home Assistant", "remote-control", "--no-daemon")
-        self.assertEqual(cmd[0], "/opt/codex-sandbox/bwrap.real")
+        self.assertEqual(cmd[:2], [rc.RELAY_LAUNCHER, rc.RELAY_BWRAP])
         self.assertEqual(cmd[cmd.index("--hostname") + 1], "Home Assistant")
         self.assertEqual(cmd[-3:], ["/usr/local/bin/codex", "remote-control", "--no-daemon"])
         self.assertNotIn("sh", cmd)
 
-    def test_environment_has_no_credentials(self) -> None:
+    def test_environment_keeps_core_pair_without_supervisor_credentials(self) -> None:
         env = rc.remote_env({"SUPERVISOR_TOKEN": "s", "HASSIO_TOKEN": "h", "HA_TOKEN": "t", "HA_URL": "u",
                              "HA_DATA_SOCKET": "d", "CODEX_HOME": "/data/codex-home", "PATH": "/bin"})
-        self.assertEqual(env, {"CODEX_HOME": "/data/codex-home", "PATH": "/bin"})
+        self.assertEqual(env, {"HA_TOKEN": "t", "HA_URL": "u", "CODEX_HOME": "/data/codex-home", "PATH": "/bin"})
 
 
 class GateTests(unittest.TestCase):
@@ -161,7 +174,7 @@ class SupervisorTests(unittest.TestCase):
         self.sup = rc.Supervisor(
             codex_binary="/usr/local/bin/codex", state_path=self.state,
             env_factory=lambda: {"HA_TOKEN": "secret", "CODEX_HOME": "/data/codex-home"},
-            name_factory=lambda: "Home Assistant", gate=lambda: self.gate_reason, popen=popen)
+            name_factory=lambda: "Home Assistant", gate=lambda: self.gate_reason, popen=popen, control_factory=FakeControl)
         patcher = patch.multiple(rc, BACKOFF_START=0.05, BACKOFF_CAP=0.1, STOP_GRACE=0.2)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -192,8 +205,9 @@ class SupervisorTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertTrue(self.sup.enabled())
         self.assertTrue(wait_for(lambda: self.procs))
-        self.assertEqual(self.commands[0][-2:], ["remote-control", "--no-daemon"])
-        self.assertNotIn("HA_TOKEN", self.envs[0])
+        self.assertIn("app-server", self.commands[0])
+        self.assertEqual(self.commands[0][-1], "--remote-control")
+        self.assertEqual(self.envs[0]["HA_TOKEN"], "secret")
         proc = self.procs[0]
         proc.stdout.lines.put("Pairing code: ABCD-1234\n")
         self.assertTrue(wait_for(lambda: self.sup.snapshot()["pairing_code"] == "ABCD-1234"))
@@ -237,18 +251,11 @@ class SupervisorTests(unittest.TestCase):
     def test_pair_reads_new_code(self) -> None:
         self.sup.start()
         self.assertTrue(wait_for(lambda: self.procs))
-        calls = []
-
-        def run(cmd, **kwargs):
-            calls.append((cmd, kwargs["env"]))
-            return types.SimpleNamespace(stdout="Pairing code: WXYZ-9876\n", stderr="")
-
-        self.sup.run = run
+        self.assertTrue(wait_for(lambda: self.sup.control_socket is not None))
         ok, state = self.sup.pair()
         self.assertTrue(ok)
         self.assertEqual(state["pairing_code"], "WXYZ-9876")
-        self.assertEqual(calls[0][0][-2:], ["remote-control", "pair"])
-        self.assertNotIn("HA_TOKEN", calls[0][1])
+        self.assertEqual(len(self.commands), 1)
 
 
 SERVER_PATH = ROOT / "server.py"
@@ -270,6 +277,9 @@ class RouteTests(unittest.TestCase):
         patcher = patch.object(server, "api_token", return_value="tok")
         patcher.start()
         self.addCleanup(patcher.stop)
+        admin = patch.object(server, "ingress_admin", return_value=({"user_id": "fixture-admin"}, ""))
+        admin.start()
+        self.addCleanup(admin.stop)
 
     def test_token_reads_state(self) -> None:
         with patch.object(server.remote_control_supervisor, "snapshot", return_value={"state": "off"}):
