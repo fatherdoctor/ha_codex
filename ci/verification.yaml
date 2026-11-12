@@ -1,0 +1,121 @@
+name: Verification checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  browser-and-auth:
+    name: Browser and auth (Core ${{ matrix.core }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - core: '2026.6.1'
+            pytest-ha: '0.13.337'
+          - core: '2026.9.4'
+            pytest-ha: '0.13.367'
+          - core: '2026.10.3'
+            pytest-ha: '0.13.374'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Install test dependencies
+        run: |
+          pip install pytest-homeassistant-custom-component==${{ matrix.pytest-ha }} homeassistant==${{ matrix.core }} flask pyyaml requests websocket-client
+          python codex-cli-worker/tests/install_frontend_test_deps.py
+          npm install --prefix "$RUNNER_TEMP/codex-test" @openai/codex@0.166.0
+          echo "HA_TEST_CODEX=$RUNNER_TEMP/codex-test/node_modules/.bin/codex" >> "$GITHUB_ENV"
+          npm install --prefix "$RUNNER_TEMP/browser-deps" playwright@1.63.0 ws@8.18.3
+          # The runner's package mirrors can fail to resolve or hang (11-11): bound every apt call,
+          # retry the system-library install, and keep the browser download (no apt) separate.
+          printf 'Acquire::Retries "5";\nAcquire::http::Timeout "20";\nAcquire::https::Timeout "20";\n' | sudo tee /etc/apt/apt.conf.d/80-ci-retries >/dev/null
+          PW="$RUNNER_TEMP/browser-deps/node_modules/.bin/playwright"
+          "$PW" install chromium
+          deps=no
+          for attempt in 1 2 3; do
+            if timeout 240 "$PW" install-deps chromium; then deps=yes; break; fi
+            echo "::warning::install-deps attempt $attempt failed"
+            sleep $((attempt * 20))
+          done
+          echo "system libraries installed: $deps"
+          echo "NODE_PATH=$RUNNER_TEMP/browser-deps/node_modules" >> "$GITHUB_ENV"
+      - name: Find the test browser
+        run: echo "HA_BROWSER_EXECUTABLE=$(node -e 'console.log(require("playwright").chromium.executablePath())')" >> "$GITHUB_ENV"
+      - name: Check the test browser starts
+        run: node -e 'const {chromium}=require("playwright"); (async()=>{const b=await chromium.launch(); await b.close();})().catch(e=>{console.error(e.message);process.exit(1);})'
+      - name: Test worker and real Home Assistant authentication/frontend
+        env:
+          HA_BROWSER_NODE: node
+        run: pytest
+      - name: Test single-action user approvals through the pinned CLI
+        run: python codex-cli-worker/tests/codex_approval_smoke.py
+      - name: Exercise browser protocol and restrictions
+        run: |
+          node codex-cli-worker/tests/browser_resources.cjs
+          node codex-cli-worker/tests/browser_permissions.cjs
+          node codex-cli-worker/tests/browser_verification.cjs
+      - name: Exercise chat evidence on desktop and mobile
+        run: |
+          python codex-cli-worker/tests/web_fixture.py > "$RUNNER_TEMP/web-fixture.log" 2>&1 &
+          fixture_pid=$!
+          trap 'kill "$fixture_pid"' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --silent --fail http://127.0.0.1:9137/preview/ > /dev/null; then break; fi
+            sleep 1
+          done
+          node codex-cli-worker/tests/browser_smoke.cjs
+          node codex-cli-worker/tests/browser_copy.cjs
+          node codex-cli-worker/tests/browser_permissions_ui.cjs
+
+  container:
+    name: Container (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build without publishing
+        run: docker build --build-arg BUILD_ARCH=${{ matrix.arch }} --build-arg BUILD_VERSION=pr-test -t verification-test codex-cli-worker
+      - name: Smoke test packaged Chromium
+        run: |
+          docker run --rm --entrypoint /usr/bin/chromium-browser verification-test --version
+          docker run --rm --entrypoint node verification-test -e 'const {chromium}=require("playwright-core"); (async()=>{const browser=await chromium.launch({executablePath:"/usr/bin/chromium-browser",headless:true,chromiumSandbox:false,args:["--disable-dev-shm-usage"]}); const page=await browser.newPage(); await page.setContent("<h1>Verification</h1>"); if(await page.locator("h1").innerText()!=="Verification") throw Error("Render failed"); await browser.close();})().catch(e=>{console.error(e);process.exit(1);})'
+      - name: Smoke test packaged historical data tools
+        run: |
+          docker run --rm --workdir / --entrypoint python3 verification-test -c 'import server, ha_data, ha_data_mcp; assert {tool["name"] for tool in ha_data_mcp.TOOLS} == {"history", "statistics"}; assert server.ha_data is not server.verification'
+      - name: Test packaged SSH with single-command approvals in both sandbox modes
+        # Paramiko is a test-only SSH target in the disposable container.
+        # The runtime image installs only the OpenSSH client, not an SSH server.
+        run: |
+          docker run --rm --privileged --entrypoint sh -v "$PWD/codex-cli-worker/tests:/tests:ro" verification-test -c 'pip3 install --no-cache-dir --break-system-packages paramiko && python3 /tests/codex_approval_smoke.py --ssh'
+      - name: Analyze large data files through the packaged CLI in both sandbox modes
+        # The host runner blocks loopback setup in unprivileged user namespaces.
+        # Use the app's real sandbox wrapper, as in the documentation check below.
+        run: |
+          docker run --rm --privileged --workdir / --entrypoint python3 -v "$PWD/codex-cli-worker/tests:/tests:ro" verification-test /tests/codex_verification_smoke.py
+      - name: Download the Home Assistant documentation and read it from the Codex sandbox
+        # Bubblewrap needs namespace privileges that the runner's default container profile withholds.
+        run: |
+          docker run --rm --privileged --entrypoint sh -v "$PWD/codex-cli-worker/tests:/tests:ro" verification-test /tests/local_docs_container.sh
+      - name: Test packaged browser with loopback and LAN HTTP origins
+        run: |
+          docker run --rm --entrypoint sh -v "$PWD/codex-cli-worker/tests:/tests:ro" verification-test -c 'npm install --prefix /tmp/test-deps ws@8.18.3 >/dev/null && NODE_PATH=/tmp/test-deps/node_modules:/opt/verification/node_modules node /tests/browser_verification.cjs'
