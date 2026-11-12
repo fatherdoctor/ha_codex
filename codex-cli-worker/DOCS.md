@@ -732,3 +732,36 @@ The API is served by the same worker HTTP listener as the existing local API. Th
 The page shows the same mailbox and can post or reply. Messages remain plain text, confer no authority and never execute themselves or reach an external recipient. A lead explicitly submits a separate task if it wants work performed. The mailbox retains at most 500 messages, pruning the oldest other thread (including replies) when full. If only the current reply thread fills it, its oldest replies are pruned. Lead and Codex each have limits of 20 writes per turn and 64 per UTC day, returning HTTP 429 for lead writes at the limit. The lead supplies a stable `turn_id`; Codex’s turn comes from its verified exchange. Usage counters survive message clearing and app restarts. The owner is not rate limited. `DELETE /lead/mailbox` clears lead-authored root threads and replies; `DELETE /lead/mailbox/<id>` clears one such thread. Administrator page controls can clear all threads or delete one. Clearing does not execute anything or reset write limits. No lead endpoint creates permanent permissions, changes sandbox policy, approves a schedule or answers a native permission request. Owner management and token rotation require authenticated administrator Ingress, including a fresh check of the administrator identity under the existing cache rules.
 
 Schedule prompts containing recognized credentials are masked in responses and marked `prompt_redacted`; Edit is disabled so masked text cannot replace the saved prompt. Create a replacement with a complete prompt instead. All save routes reject the literal `[redacted]` marker. The private database and its journal/WAL/SHM paths are protected like the worker token from tool file access and native permission grants. A persistent SQLite journal is materialized before tasks or remote control start, so its mask remains present across transactions. Schema version 1 adds proposal authorship; legacy proposals without an attributable author remain owner-owned.
+
+## Export logs for a bug report
+
+In the add-on page, open Settings and choose **Export logs**. The integration's
+Home Assistant **Download diagnostics** button downloads the same JSON schema
+and anonymized metadata, with Home Assistant's redaction applied again. Review
+the downloaded file before attaching it to a bug report; neither button sends
+anything to another service. Connection settings, account details, task titles,
+prompts, answers and raw tool output are excluded.
+
+The worker keeps up to ten recent interactions in its private add-on data,
+capped at 128 KiB. Records include start/end times, duration, source, add-on/CLI
+and model identifiers, outcome, tool classes and result classes, worker-visible
+approval requests/answers, gate categories, fixed error descriptions, and HA
+read operations/domains. Each record retains at most 48 events, 64 entity
+references and 32 file categories; excess detail and older records are dropped.
+Entity references are hashed again per download and stay consistent within that
+file. Paths under `/config` retain only an allowlisted folder category and file
+extension; other paths and arbitrary names are excluded. Unknown models/tools
+are reported as unknown/other. Version values unavailable in a development
+checkout are marked unknown. Active records have no end time yet; interruption
+can leave such a record unfinished rather than inventing an outcome.
+
+**Remote ChatGPT threads are not recorded in this first delivery.** Every export
+includes the coverage field `remote ChatGPT threads: not recorded`. The worker
+does not connect to, subscribe to, resume, attach to, or read the history of a
+remote thread for diagnostics. It records its own add-on page tasks, scheduled
+runs and lead-channel tasks. Its relay-read RPCs are separate worker interactions;
+they do not describe a remote conversation or its approvals. Only refusals and
+approval events visible to the worker are included; there is no new hook log or
+remote event observer. Diagnostics do not change an approval, gate or read
+result. An unavailable worker returns an empty export marked unavailable through
+the integration, without exporting its error message or connection address.

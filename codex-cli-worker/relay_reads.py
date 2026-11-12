@@ -8,6 +8,7 @@ import re
 import secrets
 import socketserver
 import threading
+import time
 
 from core_address import get_json, ResponseTooLarge
 
@@ -61,10 +62,11 @@ def password_state(row):
 
 
 class RelayReads:
-    def __init__(self, state, token, redact, fetch=fetch_states):
+    def __init__(self, state, token, redact, fetch=fetch_states, observer=None):
         self.state = state; self.token = token; self.redact = redact; self.fetch = fetch
         self.lock = threading.Lock(); self.capability = ''
         self.inflight = threading.Lock()
+        self.observer = observer
 
     def environment(self, base):
         """Called only by relay launch/probe paths; every new launch rotates it."""
@@ -101,8 +103,29 @@ class RelayReads:
         return value
 
     def dispatch(self, request):
+        """Keep observations separate from authorization and readback behavior."""
+        observation = {}
+        started = time.time()
+        result, error = None, None
+        try:
+            result = self._dispatch(request, observation)
+            return result
+        except Exception as exc:
+            error = exc
+            raise
+        finally:
+            if self.observer is not None and observation.get('authorized'):
+                args = request.get('arguments')
+                metadata = {k: args.get(k) for k in ('operation', 'entity_id', 'domain')} if isinstance(args, dict) else {}
+                try:
+                    self.observer(metadata, result, error, started)
+                except Exception:
+                    pass  # Diagnostic failures must not change the read result.
+
+    def _dispatch(self, request, observation):
         if not isinstance(request, dict) or set(request) != {'capability', 'arguments'} or not self.active(request['capability']):
             raise ReadError('Inactive relay capability.')
+        observation['authorized'] = True
         args = request['arguments']
         if not isinstance(args, dict):
             raise ReadError('Read arguments must be an object.')

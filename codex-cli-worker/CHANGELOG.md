@@ -2,6 +2,8 @@
 
 ## 0.1.81.2 (unreleased)
 
+- **Anonymized interaction diagnostics.** Add bounded worker metadata and matching local JSON downloads in Settings and Home Assistant diagnostics. Exclude remote ChatGPT threads explicitly, never prompts or answers; re-key entity references per export.
+
 - **Core address and first-run relay reads (CX-HA-URL).** Discover Core's actual port and SSL setting from Supervisor at startup and each task/relay launch. Make the address option an empty override and retire old default values. Offer a bounded read-only relay tool using a temporary capability; no hand-made Core token is needed for entity reads and the Supervisor token stays in the worker. Unsupported shell reads still request native network approval; direct commands still need a separately configured credential.
 
 - **ABI and fallback documentation (N8/N9).** Describe domain/stack and network_v8 mediation, the tool-label socket-family restrictions, and the plain relay route's continuing user-namespace requirement. HAOS chat-path acceptance remains the lead's. Under the named lead exception, N10 requires errno 13 on direct proc-denial rows; pinned command/exec rows retain 1, 2 or 13.

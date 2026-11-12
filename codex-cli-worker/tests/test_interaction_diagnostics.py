@@ -72,3 +72,88 @@ class DiagnosticsTests(unittest.TestCase):
         self.path.write_text('x'*(diag.MAX_BYTES+1));self.assertEqual(self.store.export()['interactions'],[])
         self.path.unlink();other=self.path.with_name('other');other.write_text('[]');self.path.symlink_to(other)
         self.assertEqual(self.store.export()['interactions'],[])
+
+    def test_append_revalidates_old_disk_rows_before_retaining_them(self):
+        self.path.write_text(json.dumps([{'start':'PRIVATE_CANARY','prompt':'PRIVATE_CANARY',
+            'events':[{'kind':'error','message':'PRIVATE_CANARY'}]}]))
+        self.store.append(self.sample())
+        self.assertNotIn('PRIVATE_CANARY',self.path.read_text())
+        self.assertEqual(len(self.store.export()['interactions']),2)
+
+
+class RecorderTests(unittest.TestCase):
+    def setUp(self):
+        tmp=tempfile.TemporaryDirectory();self.addCleanup(tmp.cleanup)
+        self.store=diag.RollingDiagnostics(Path(tmp.name)/'interactions.json')
+        self.time=1700000000.0
+        self.recorder=diag.InteractionRecorder(self.store,'0.1.81.2','0.166.0',clock=lambda:self.time)
+
+    def test_packaged_schema_copies_are_identical(self):
+        root=Path(__file__).resolve().parents[2]
+        self.assertEqual((root/'codex-cli-worker/diagnostics_scrub.py').read_bytes(),
+                         (root/'custom_components/codex_cli/diagnostics_scrub.py').read_bytes())
+
+    def test_full_golden_record_has_timing_outcomes_and_no_prose(self):
+        self.recorder.begin('PRIVATE_TASK_CANARY','scheduled_run','gpt-6.1-sol')
+        self.recorder.activity('PRIVATE_TASK_CANARY',{'type':'item.started','item':{'id':'PRIVATE_TOOL_CANARY','type':'command_execution','command':'PRIVATE_COMMAND_CANARY'}})
+        self.time+=3
+        self.recorder.activity('PRIVATE_TASK_CANARY',{'type':'item.completed','item':{'id':'PRIVATE_TOOL_CANARY','type':'command_execution','status':'completed','exit_code':0,'aggregated_output':'PRIVATE_OUTPUT_CANARY'}})
+        self.recorder.approvals('PRIVATE_TASK_CANARY',[{'approval_id':'PRIVATE_APPROVAL_CANARY','status':'pending','reason':'PRIVATE_REASON_CANARY','can_allow':True}])
+        self.time+=2
+        self.recorder.approvals('PRIVATE_TASK_CANARY',[{'approval_id':'PRIVATE_APPROVAL_CANARY','status':'denied','can_allow':True}])
+        self.recorder.event('PRIVATE_TASK_CANARY',{'kind':'ha_read','operation':'history','domain':'light'},entities=['light.private_entity_canary','light.private_entity_canary'],paths=['/config/scripts/private_file_canary.yaml'])
+        self.recorder.finish('PRIVATE_TASK_CANARY','failed',ValueError('PRIVATE_ERROR_CANARY'))
+        export=self.store.export();raw=json.dumps(export);disk=self.store.path.read_text()
+        self.assertNotIn('CANARY',raw);self.assertNotIn('CANARY',disk)
+        self.assertNotIn('private_entity_canary',raw);self.assertNotIn('private_file_canary',raw)
+        self.assertEqual(export['coverage'],'remote ChatGPT threads: not recorded')
+        row=export['interactions'][0]
+        self.assertEqual(row['duration_seconds'],5);self.assertEqual(row['cli_version'],'0.166.0')
+        self.assertEqual(row['events'][0]['duration_seconds'],3)
+        self.assertEqual([x['decision'] for x in row['events'] if x['kind']=='approval'],['asked','denied'])
+        self.assertEqual(row['events'][-1]['message'],'Invalid operation.')
+        self.assertEqual(row['entities'][0],row['entities'][1]);self.assertEqual(row['source'],'scheduled_run')
+
+    def test_running_upserts_do_not_duplicate_and_sort_by_start(self):
+        self.recorder.begin('long','addon_page')
+        for n in range(12):
+            self.time+=1;self.recorder.begin(str(n),'lead_channel');self.recorder.finish(str(n),'done')
+        # An old, still-running task must not evict a newer interaction.
+        self.recorder.event('long',{'kind':'error','type':'RuntimeError'})
+        self.recorder.finish('long','stopped')
+        rows=self.store.export()['interactions'];self.assertEqual(len(rows),10)
+        self.assertTrue(all(x['source']=='lead_channel' for x in rows))
+        self.assertTrue(all(x['outcome']=='done' for x in rows))
+        self.assertLessEqual(self.store.path.stat().st_size,diag.MAX_BYTES)
+
+    def test_timeout_and_cancel_close_pending_tools_without_inventing_results(self):
+        for outcome in ('stopped','timed_out'):
+            self.recorder.begin(outcome,'addon_page')
+            self.recorder.activity(outcome,{'type':'item.started','item':{'id':'tool','type':'file_change'}})
+            self.time+=4;self.recorder.finish(outcome,outcome)
+        rows=self.store.export()['interactions']
+        self.assertEqual([x['outcome'] for x in rows],['stopped','timed_out'])
+        self.assertEqual(rows[0]['events'][0]['name'],'fileChange')
+        self.assertEqual(rows[0]['events'][0]['result'],'stopped')
+        self.assertEqual(rows[1]['events'][0]['result'],'unknown')
+
+    def test_gate_classification_does_not_infer_hidden_rules(self):
+        self.recorder.begin('task','addon_page')
+        self.recorder.approvals('task',[{'approval_id':'one','status':'pending','can_allow':False,'note':'PRIVATE_CANARY'}])
+        self.recorder.approvals('task',[{'approval_id':'two','status':'pending','can_allow':False,'note':"This request touches the app's permission policy or settings, which Codex may not edit. Deny it."}])
+        self.recorder.finish('task','done')
+        gates=[x['rule'] for x in self.store.export()['interactions'][0]['events'] if x['kind']=='gate']
+        self.assertEqual(gates,['other','protected_policy'])
+
+    def test_storage_failure_never_changes_execution(self):
+        with patch.object(self.store,'append',side_effect=OSError('PRIVATE_CANARY')):
+            self.recorder.begin('task','addon_page');self.recorder.event('task',{'kind':'error'});self.recorder.finish('task','failed')
+        self.assertEqual(self.recorder.active,{})
+        self.assertEqual(self.store.export()['availability'],'unavailable')
+
+    def test_export_revalidation_rejects_nested_planted_values(self):
+        from diagnostics_scrub import sanitize_export
+        out=sanitize_export({'availability':'PRIVATE_CANARY','coverage':'PRIVATE_CANARY','interactions':[
+            {'source':'remote_thread','events':[{'kind':'tool','name':'PRIVATE_CANARY','message':'PRIVATE_CANARY'}],
+             'entities':[{'id':'PRIVATE_CANARY','domain':'PRIVATE_CANARY'}],'paths':[{'folder':'PRIVATE_CANARY','extension':'PRIVATE_CANARY'}]}]})
+        self.assertNotIn('CANARY',json.dumps(out));self.assertEqual(out['interactions'][0]['source'],'unknown')
