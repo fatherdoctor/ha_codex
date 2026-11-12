@@ -13,7 +13,9 @@ from core_address import get_json, ResponseTooLarge
 
 ENTITY = re.compile(r'^[a-z_][a-z0-9_]*\.[a-z0-9_]+$')
 DOMAIN = re.compile(r'^[a-z_][a-z0-9_]*$')
-PRIVATE = re.compile(r'pass|code|pin|key|otp|secret|token|credential|pw')
+PRIVATE = re.compile(
+    r'(?:^|_)(?:pass|passwords?|passcodes?|codes?|pin(?:code)?|key|apikey|api_key|'
+    r'otp|secrets?|tokens?|credentials?|pw)(?:_|$)')
 ATTRIBUTES = frozenset(('friendly_name', 'unit_of_measurement', 'device_class', 'supported_features',
                        'brightness', 'color_temp', 'current_temperature', 'temperature', 'hvac_modes',
                        'supported_color_modes', 'assumed_state', 'icon'))
@@ -53,7 +55,7 @@ class StateResponseTooLarge(ReadError):
 
 def password_state(row):
     attrs = row.get('attributes')
-    return str(row.get('entity_id', '')).startswith('input_text.') and (
+    return str(row.get('entity_id', '')).startswith(('input_text.', 'text.')) and (
         not isinstance(attrs, dict) or str(attrs.get('mode', '')).lower() == 'password')
 
 
@@ -159,12 +161,19 @@ class RelayReads:
                 if not isinstance(data, list) or any(not isinstance(row, dict) for row in data):
                     raise ReadError('Core returned an invalid entity listing.')
                 safe = []
+                hidden = False
                 for row in data:
+                    raw_id = row.get('entity_id')
+                    if domain is not None and (not isinstance(raw_id, str) or raw_id.split('.', 1)[0] != domain):
+                        continue
                     if password_state(row):
+                        hidden = True
                         continue
                     try:
-                        candidate = self.entity_id(row.get('entity_id'))
+                        candidate = self.entity_id(raw_id)
                     except ValueError:
+                        if isinstance(raw_id, str) and ENTITY.fullmatch(raw_id) and PRIVATE.search(raw_id.split('.', 1)[1]):
+                            hidden = True
                         continue
                     if domain is None or candidate.split('.', 1)[0] == domain:
                         if not isinstance(row.get('state'), str):
@@ -176,6 +185,8 @@ class RelayReads:
                           'next_offset': offset + limit if offset + limit < len(safe) else None}
                 if clamped:
                     result['notes'] = ['Page limit capped at 50.']
+                if hidden:
+                    result.setdefault('notes', []).append('Credential-like or password-mode entities were hidden.')
             result = self.clean(result)
             if len(json.dumps(result).encode()) + 1 > MAX_RESPONSE:
                 raise ReadError('Read response is too large. Request fewer attributes or a smaller page.')
