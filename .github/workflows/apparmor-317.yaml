@@ -1,0 +1,25 @@
+name: AppArmor 3.1.7 enforcement
+on:
+  pull_request:
+    paths:
+      - 'codex-cli-worker/**'
+      - '.github/workflows/apparmor-317.yaml'
+  push:
+    branches: [main]
+    paths:
+      - 'codex-cli-worker/**'
+      - '.github/workflows/apparmor-317.yaml'
+permissions:
+  contents: read
+jobs:
+  apparmor-317:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install parser build prerequisites
+        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config bison flex libapparmor-dev libfl-dev libpcre2-dev libzstd-dev apparmor-utils bubblewrap python3-websocket
+      - name: Build pinned HAOS parser
+        run: /usr/bin/python3 codex-cli-worker/tests/apparmor_317_check.py build "$RUNNER_TEMP/apparmor-317"
+      - name: Compile and enforce both Supervisor profile names
+        run: sudo /usr/bin/python3 codex-cli-worker/tests/apparmor_317_check.py enforce "$RUNNER_TEMP/apparmor-317"

@@ -30,7 +30,6 @@ class YamlTests(unittest.TestCase):
         self.policy=rules.load_rules();self.server=base.server
         for obj,key in [(rules,'CONFIG_ROOT'),(self.server,'CONFIG_ROOT')]:
             p=patch.object(obj,key,self.root);p.start();self.addCleanup(p.stop)
-        p=patch.object(rules,'category_refusals_enabled',return_value=False);p.start();self.addCleanup(p.stop)
 
     def write(self,name,text):
         p=self.root/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(text);return p
@@ -51,7 +50,7 @@ class YamlTests(unittest.TestCase):
     def test_flow_quoted_action_and_script_spellings_in_all_three_checks(self):
         for i,text in enumerate(SPELLINGS):
             with self.subTest(spelling=i):
-                self.assertTrue(rules.active_findings(text,self.policy,{'sample'},False))
+                self.assertTrue(rules.find_refused(text,self.policy,{'sample'}))
                 self.write('scripts.yaml','sample:\n  sequence:\n    - action: shell_command.sample\n')
                 name='case'+str(i)+'.yaml';before='input_boolean: {}\n';p=self.write(name,before)
                 watch=rc.ConfigWatch(self.root,Path(self.tmp.name)/('base'+str(i)));watch.take_baseline();p.write_text(text)
@@ -61,7 +60,7 @@ class YamlTests(unittest.TestCase):
 
     def test_flow_definition_body_changes_are_hashed(self):
         before='"shell_command": {sample: echo before}\n';after=before.replace('before','after')
-        self.assertTrue(rules.new_refused(before,after,self.policy,categories=False))
+        self.assertTrue(rules.new_refused(before,after,self.policy))
         self.assertTrue(self.hook('configuration.yaml',before,after))
 
     def test_include_body_is_refused_restored_and_watched_whole(self):
@@ -101,12 +100,12 @@ class YamlTests(unittest.TestCase):
         self.assertNotIn('secrets.yaml',seen);self.assertEqual(outside.read_text(),'sample: hidden\n')
 
     def test_tags_anchors_aliases_and_ordinary_target_have_safe_semantics(self):
-        self.assertTrue(rules.active_findings('commands: &x {sample: echo sample}\n"shell_command": *x\n',self.policy,categories=False))
-        self.assertTrue(rules.active_findings('base: &x {shell_command: {sample: echo sample}}\npackage: {<<: *x}\n',self.policy,categories=False))
-        self.assertFalse(rules.active_findings('value: !secret example\nlight: !include ordinary.yaml\n',self.policy,categories=False))
-        self.assertFalse(rules.active_findings('- action: light.turn_on\n  target: {entity_id: light.sample}\n',self.policy,categories=False))
+        self.assertTrue(rules.find_refused('commands: &x {sample: echo sample}\n"shell_command": *x\n',self.policy))
+        self.assertTrue(rules.find_refused('base: &x {shell_command: {sample: echo sample}}\npackage: {<<: *x}\n',self.policy))
+        self.assertFalse(rules.find_refused('value: !secret example\nlight: !include ordinary.yaml\n',self.policy))
+        self.assertFalse(rules.find_refused('- action: light.turn_on\n  target: {entity_id: light.sample}\n',self.policy))
         # A cyclic YAML alias must finish, never recursively expand forever.
-        self.assertFalse(rules.active_findings('sample: &loop {next: *loop}\n',self.policy,categories=False))
+        self.assertFalse(rules.find_refused('sample: &loop {next: *loop}\n',self.policy))
 
     def test_configured_script_directory_and_inline_scripts_resolve(self):
         self.write('configuration.yaml','script: !include_dir_named actions/\n')

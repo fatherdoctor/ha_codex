@@ -5,8 +5,8 @@ REAL_BWRAP=/opt/codex-sandbox/bwrap.real
 # Never shown to a sandboxed command: the container environment s6 keeps (it holds the Supervisor
 # token), Home Assistant's secrets and sign-in store, and the app's own options and API token.
 # Codex never needs them; `!secret` values resolve inside Home Assistant.
-HIDDEN_DIRS="/run/s6"
-HIDDEN_FILES="/config/secrets.yaml /config/.storage/auth /config/.storage/auth_provider.homeassistant /data/options.json /data/worker_api_token"
+HIDDEN_DIRS="/run/s6 /data/remote_control_control"
+HIDDEN_FILES="/config/secrets.yaml /config/.storage/auth /config/.storage/auth_provider.homeassistant /data/options.json /data/worker_api_token /data/schedules.sqlite3 /data/schedules.sqlite3-journal /data/schedules.sqlite3-wal /data/schedules.sqlite3-shm"
 
 if [ "${1:-}" = "--version" ]; then
   exec "$REAL_BWRAP" "$@"

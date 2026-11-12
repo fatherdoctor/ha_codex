@@ -22,7 +22,7 @@ class MoveReviewTests(unittest.TestCase):
                     (root/'notes.txt').write_text('# before\nshell_command:\n  example: echo fixture\n')
                     if destination=='configuration.yaml':(root/destination).write_text('light:\n  name: existing\n')
                     body='*** Begin Patch\n*** Update File: notes.txt\n*** Move to: '+destination+'\n'+hunk+'*** End Patch'
-                    with patch.object(gate_rules,'CONFIG_ROOT',root), patch.object(gate_rules,'category_refusals_enabled',return_value=False):
+                    with patch.object(gate_rules,'CONFIG_ROOT',root):
                         reason=gate_rules.check_tool_call('PreToolUse',{'tool_name':'apply_patch','tool_input':{'command':body}},True,gate_rules.load_rules())
                     self.assertTrue(reason,'Moving a planted definition into YAML must be refused')
 

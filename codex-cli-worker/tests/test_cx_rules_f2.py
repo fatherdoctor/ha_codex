@@ -33,8 +33,7 @@ class ClosureTests(unittest.TestCase):
         self.run.mkdir()
         self.rules = gate_rules.load_rules()
         for obj, name, value in ((server, 'CONFIG_ROOT', self.config),
-                                 (gate_rules, 'CONFIG_ROOT', self.config),
-                                 (gate_rules, 'OPTIONS_PATH', self.root / 'absent.json')):
+                                 (gate_rules, 'CONFIG_ROOT', self.config)):
             mock = patch.object(obj, name, value)
             mock.start()
             self.addCleanup(mock.stop)
@@ -124,13 +123,12 @@ class ClosureTests(unittest.TestCase):
                 target.write_text('- action: script.turn_on\n' + line)
                 self.assertTrue(watch.new_findings())
 
-    def test_c2_flow_list_with_other_entities_and_both_modes(self):
-        for enabled in (False, True):
-            for line in ('entity_id: [light.sample, script.run_shell]', *FLOW_TARGETS):
-                with self.subTest(enabled=enabled, line=line):
-                    self.assertTrue(gate_rules.active_findings(line, self.rules, {'run_shell'}, enabled))
-        self.assertEqual(gate_rules.active_findings('description: script.run_shell', self.rules, {'run_shell'}), [])
-        self.assertEqual(gate_rules.active_findings('# entity_id: [script.run_shell]', self.rules, {'run_shell'}), [])
+    def test_c2_flow_list_with_other_entities(self):
+        for line in ('entity_id: [light.sample, script.run_shell]', *FLOW_TARGETS):
+            with self.subTest(line=line):
+                self.assertTrue(gate_rules.find_refused(line, self.rules, {'run_shell'}))
+        self.assertEqual(gate_rules.find_refused('description: script.run_shell', self.rules, {'run_shell'}), [])
+        self.assertEqual(gate_rules.find_refused('# entity_id: [script.run_shell]', self.rules, {'run_shell'}), [])
 
 
 if __name__ == '__main__':

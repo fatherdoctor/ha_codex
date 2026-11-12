@@ -1394,6 +1394,10 @@ function renderApproval(approval, taskId, turnId, active) {
   card.setAttribute("aria-label", "Permission request");
   const statuses = { allowed: "Allowed once", denied: "Denied", expired: "Expired" };
   card.append(textNode("strong", pending ? "Permission needed" : statuses[approval.status] || "Expired"));
+  const plain = approval.confirmation || {};
+  for (const [key, label] of [["what", "What changes"], ["where", "Where"], ["effect", "The effect"]]) {
+    if (plain[key]) card.append(textNode("p", `${label}: ${plain[key]}`, "permission-plain"));
+  }
   if (approval.reason) card.append(textNode("p", approval.reason));
   card.append(textNode("p", approval.scope || "", "permission-scope"));
   if (approval.cwd) card.append(textNode("p", `Working folder: ${approval.cwd}`, "permission-folder"));
@@ -2786,6 +2790,9 @@ function renderRemoteControl(rc) {
   if (!rc.available) status = rc.blocked_reason;
   else if (!rc.enabled) status = `Off. When on, this Home Assistant shows in the ChatGPT app as “${rc.configured_name}”.`;
   $("remote-control-status").textContent = status;
+  const address = rc.core_address;
+  $("remote-core-address").textContent = address ? address.url ? `Core address (${address.source}): ${address.url}` : address.error || "Core address unavailable." : "";
+  $("remote-read-tools").textContent = rc.read_tools || "";
   for (const [id, text] of [
     ["remote-control-name-warning", rc.name_warning],
     ["remote-control-policy-warning", rc.policy_warning],
