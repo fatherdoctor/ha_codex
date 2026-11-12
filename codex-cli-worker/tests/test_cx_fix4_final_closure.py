@@ -69,6 +69,6 @@ class FinalClosureCases(unittest.TestCase):
                 self.assertTrue(self.denied(command, True))
                 self.assertFalse(self.denied(command, False))
         for remote in (False, True):
-            self.assertTrue(self.denied("grep 'ha su' notes.txt", remote))
+            self.assertFalse(self.denied("grep 'ha su' notes.txt", remote))
             self.assertFalse(self.denied('grep supervisor x', remote))
             self.assertFalse(self.denied('grep -i supervisor home-assistant.log', remote))

@@ -12,6 +12,7 @@ import fnmatch
 import json
 import posixpath
 import re
+import shlex
 import threading
 import time
 import uuid
@@ -45,8 +46,139 @@ PROTECTED_COMMAND_RES = (
 )
 
 
+def _protected_ancestor_operations(command: str, initial_cwd: str = '', depth: int = 0) -> bool:
+    """Conservatively identify named requirements, root searches and writes into root or /etc.
+
+    This checks command text only; it does not follow aliases, symlinks or computed paths.
+    """
+    if depth > 5:
+        return False
+    lexer = shlex.shlex(command.replace('\\\n', ' '), posix=True, punctuation_chars=';&|()\n<>')
+    lexer.whitespace = ' \t\r'
+    lexer.whitespace_split = True
+    lexer.commenters = '#'
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return False
+    segments, segment = [], []
+    for token in tokens:
+        if token and all(ch in ';&|()\n<>' for ch in token):
+            if segment:
+                segments.append(segment); segment = []
+        else:
+            segment.append(token)
+    if segment:
+        segments.append(segment)
+    cwd = initial_cwd
+
+    def target_path(word: str) -> str:
+        path = posixpath.normpath(word if word.startswith('/') else posixpath.join(cwd, word))
+        return '/' + path.lstrip('/') if path.startswith('//') else path
+
+    def protected_destination(word: str) -> bool:
+        path = target_path(word).lower()
+        parts = path.split('/')
+        return path == '/' or (len(parts) > 1 and parts[0] == '' and fnmatch.fnmatchcase('etc', parts[1]))
+
+    for segment in segments:
+        for word in segment:
+            lower = word.lower()
+            base = posixpath.basename(lower)
+            readable = re.sub(r'\[([a-z0-9.])\]', r'\1', lower)
+            readable = re.sub(r'\\(.)', r'\1', readable)
+            if ('requirements.toml' in readable or
+                    (any(ch in base for ch in '*?[') and base not in ('*', '?')
+                     and fnmatch.fnmatchcase('requirements.toml', base))):
+                return True
+        index = 0
+        while index < len(segment):
+            word = segment[index]
+            if re.match(r'^[A-Za-z_][A-Za-z0-9_]*=', word):
+                index += 1
+                continue
+            wrapper = word.lower()
+            if wrapper not in ('sudo', 'env', 'command'):
+                break
+            index += 1
+            while index < len(segment) and segment[index].startswith('-'):
+                flag = segment[index]
+                index += 1
+                if wrapper == 'env' and (flag.startswith('--chdir=') or flag.startswith('-C') and len(flag) > 2):
+                    path = flag.split('=', 1)[1] if flag.startswith('--chdir=') else flag[2:]
+                    cwd = target_path(path) if path.startswith('/') or cwd else ''
+                elif flag in ('-u', '--user', '-g', '--group', '-C', '--chdir') and index < len(segment):
+                    value = segment[index]; index += 1
+                    if wrapper == 'env' and flag in ('-C', '--chdir'):
+                        cwd = target_path(value) if value.startswith('/') or cwd else ''
+        if index >= len(segment):
+            continue
+        program = posixpath.basename(segment[index]).lower()
+        args = segment[index + 1:]
+        if program in ('sh', 'bash', 'zsh'):
+            for i, flag in enumerate(args):
+                if flag.startswith('-') and 'c' in flag[1:]:
+                    script = i + 1
+                    if script < len(args) and args[script] == '--':
+                        script += 1
+                    if script < len(args) and _protected_ancestor_operations(args[script], cwd, depth + 1):
+                        return True
+                    break
+        if program in ('cd', 'pushd'):
+            paths = [word for word in args if not word.startswith('-')]
+            if paths:
+                candidate = paths[0]
+                cwd = target_path(candidate) if candidate.startswith('/') or cwd else ''
+            continue
+        if program == 'find':
+            starts = []
+            for word in args:
+                if word in ('-H', '-L', '-P', '--') and not starts:
+                    continue
+                if word.startswith('-'):
+                    break
+                starts.append(word)
+            for start in starts or ('.',):
+                if cwd.lower() in ('/', '/etc') and not start.startswith('/'):
+                    return True
+                path = target_path(start).lower()
+                if path in ('/', '/etc') or fnmatch.fnmatchcase('/etc', path):
+                    return True
+        if cwd.lower() in ('/', '/etc') and program in ('cp', 'mv', 'install', 'rsync', 'ln', 'tar', 'unzip'):
+            return True
+        if program in ('cp', 'mv', 'install', 'rsync', 'ln'):
+            explicit = ''
+            for i, word in enumerate(args):
+                if word in ('-t', '--target-directory') and i + 1 < len(args):
+                    explicit = args[i + 1]
+                elif word.startswith('--target-directory='):
+                    explicit = word.split('=', 1)[1]
+                elif word.startswith('-t') and len(word) > 2:
+                    explicit = word[2:]
+            operands = [word for word in args if not word.startswith('-')]
+            destination = explicit or (operands[-1] if operands else '')
+            if destination and protected_destination(destination):
+                return True
+        if program in ('tar', 'unzip'):
+            directory = ''
+            for i, word in enumerate(args):
+                if word in ('-C', '--directory', '-d') and i + 1 < len(args):
+                    directory = args[i + 1]
+                elif word.startswith('--directory='):
+                    directory = word.split('=', 1)[1]
+                elif len(word) > 2 and word[:2] in ('-C', '-d'):
+                    directory = word[2:]
+            if directory and protected_destination(directory):
+                return True
+            if not directory and cwd and protected_destination('.'):
+                return True
+    return False
+
+
 def command_names_protected_path(command: str) -> bool:
     """Return whether a command's text names a protected policy location by any plain spelling."""
+    if _protected_ancestor_operations(str(command or '')):
+        return True
     text = re.sub(r"[\'\"\\]", "", str(command or ""))
     text = re.sub(r"/{2,}", "/", text)
     if (any(pattern.search(text) for pattern in PROTECTED_COMMAND_RES)

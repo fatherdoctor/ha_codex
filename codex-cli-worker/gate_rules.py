@@ -28,6 +28,7 @@ configuration watch remain separate defenses.
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import re
@@ -97,7 +98,7 @@ PROTECTED_COMMAND_RES = (
     (re.compile(r"/proc/\S*environ"), "reads a process environment, which can hold the Supervisor token"),
     (re.compile(r"\b(?:SUPERVISOR_TOKEN|HASSIO_TOKEN)\b"), "uses the Supervisor token"),
     (re.compile(r"/run/s6/container_environment"), "reads the app's saved environment, which holds the Supervisor token"),
-    (re.compile(r"https?://supervisor\b|\bsupervisor/|\bha\s+(?:supervisor|su)\b|\bbashio::", re.IGNORECASE),
+    (re.compile(r"https?://supervisor\b|\bsupervisor/|\bbashio::", re.IGNORECASE),
      "talks to the Home Assistant Supervisor"),
     (re.compile(r"\.storage/+auth"), "reads Home Assistant's sign-in store"),
     (re.compile(r"secrets\.ya?ml"), "reads secrets.yaml"),
@@ -626,21 +627,10 @@ HA_REMOTE_TEXT_RE = re.compile(
     r"(?:add-?ons?|host|os|core|hardware|network|backups?|apps)\b", re.IGNORECASE)
 # Flag values and shell syntax can obscure the exact argument boundaries. The
 # always-refused families remain protected even when they follow such values.
-HA_WORD_RE = re.compile(r"\bha\b", re.IGNORECASE)
 HA_SHELL_WORD_RE = re.compile(r"\bh[\"'\\]*a\b", re.IGNORECASE)
-HA_ALWAYS_TEXT_RE = re.compile(r"\b(?:supervisor|su)\b", re.IGNORECASE)
 HA_UNKNOWN_FLAG_RE = re.compile(
     r"--(?:log-level|api-token|endpoint|config)(?:=|\s+)"
     r"[^\s;]*(?:[\"'`]|\$\()", re.IGNORECASE)
-
-
-def _ha_always_in_text(text: str) -> bool:
-    """Find an always-refused family following HA on the same line."""
-    for line in text.splitlines():
-        word = HA_WORD_RE.search(line)
-        if word and HA_ALWAYS_TEXT_RE.search(line, word.end()):
-            return True
-    return False
 
 
 def _ha_unknown_flag(text: str) -> bool:
@@ -648,6 +638,137 @@ def _ha_unknown_flag(text: str) -> bool:
     for line in text.splitlines():
         word = HA_SHELL_WORD_RE.search(line)
         if word and HA_UNKNOWN_FLAG_RE.search(line, word.end()):
+            return True
+    return False
+
+
+def _shell_substitutions(text: str) -> tuple[str, list[str]]:
+    """Mask literal shell substitutions while retaining their commands for inspection."""
+    out, nested = [], []
+    i, quote = 0, ''
+    while i < len(text):
+        ch = text[i]
+        if ch == '\\' and i + 1 < len(text) and quote != "'":
+            out.append(text[i:i + 2]); i += 2; continue
+        if ch == "'" and quote != '"':
+            quote = '' if quote == "'" else "'"
+        elif ch == '"' and quote != "'":
+            quote = '' if quote == '"' else '"'
+        if quote != "'" and text.startswith('$(', i):
+            depth, end, inner_quote = 1, i + 2, ''
+            while end < len(text) and depth:
+                if text[end] == '\\' and end + 1 < len(text) and inner_quote != "'":
+                    end += 2; continue
+                if text[end] == "'" and inner_quote != '"':
+                    inner_quote = '' if inner_quote == "'" else "'"
+                elif text[end] == '"' and inner_quote != "'":
+                    inner_quote = '' if inner_quote == '"' else '"'
+                elif not inner_quote and text[end] == '(':
+                    depth += 1
+                elif not inner_quote and text[end] == ')':
+                    depth -= 1
+                end += 1
+            if not depth:
+                nested.append(text[i + 2:end - 1]); out.append('SUBSTITUTION'); i = end; continue
+        if quote != "'" and ch == '`':
+            end = text.find('`', i + 1)
+            if end >= 0:
+                nested.append(text[i + 1:end]); out.append('SUBSTITUTION'); i = end + 1; continue
+        out.append(ch); i += 1
+    return ''.join(out), nested
+
+
+def _ha_supervisor_command(text: str, depth: int = 0) -> bool:
+    """Find ha su/supervisor in a simple command, without executing shell text."""
+    if depth > 6:
+        return False
+    masked, nested = _shell_substitutions(text.replace('\\\n', ' '))
+    if any(_ha_supervisor_command(item, depth + 1) for item in nested):
+        return True
+    lexer = shlex.shlex(masked, posix=True, punctuation_chars=';&|()\n')
+    lexer.whitespace = ' \t\r'
+    lexer.whitespace_split = True
+    lexer.commenters = '#'
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return False
+    segments, segment = [], []
+    for token in tokens:
+        if token and all(ch in ';&|()\n' for ch in token):
+            if segment:
+                segments.append(segment); segment = []
+        else:
+            segment.append(token)
+    if segment:
+        segments.append(segment)
+    for segment in segments:
+        index = 0
+        while index < len(segment):
+            word = segment[index].lower()
+            if word == 'eval' and index + 1 < len(segment):
+                if _ha_supervisor_command(' '.join(segment[index + 1:]), depth + 1):
+                    return True
+                break
+            if SHELL_ASSIGNMENT_RE.match(segment[index]) or word in ('if', 'then', 'do', '!', '{', 'exec', 'time', 'nohup'):
+                index += 1; continue
+            if word in ('sudo', 'env', 'command', 'xargs', 'timeout', 'watch', 'stdbuf', 'nice'):
+                index += 1
+                while index < len(segment) and segment[index].startswith('-'):
+                    flag = segment[index]
+                    index += 1
+                    takes_value = ((word == 'sudo' and flag in ('-u', '--user', '-g', '--group'))
+                                   or (word == 'env' and flag in ('-u', '--unset', '-C', '--chdir'))
+                                   or (word == 'xargs' and flag in ('-n', '-I', '-P', '-s'))
+                                   or (word == 'watch' and flag in ('-n', '--interval'))
+                                   or (word == 'timeout' and flag in ('-s', '--signal', '-k', '--kill-after'))
+                                   or (word == 'nice' and flag in ('-n', '--adjustment')))
+                    if takes_value and index < len(segment):
+                        index += 1
+                if word == 'timeout' and index < len(segment):
+                    index += 1
+                continue
+            break
+        if index >= len(segment):
+            continue
+        program = segment[index].lower().rsplit('/', 1)[-1]
+        if program == 'find' and '-exec' in segment[index + 1:]:
+            start = segment.index('-exec', index + 1) + 1
+            if _ha_supervisor_command(shlex.join(segment[start:]), depth + 1):
+                return True
+        if program == 'busybox' and index + 1 < len(segment):
+            index += 1; program = segment[index].lower()
+        if program in ('sh', 'bash', 'zsh'):
+            for j in range(index + 1, len(segment)):
+                if segment[j].startswith('-') and 'c' in segment[j][1:]:
+                    j += 1
+                    if j < len(segment) and segment[j] == '--':
+                        j += 1
+                    if j < len(segment) and _ha_supervisor_command(segment[j], depth + 1):
+                        return True
+                    break
+        if program in ('python', 'python3') and index + 2 < len(segment) and segment[index + 1] == '-c':
+            try:
+                tree = ast.parse(segment[index + 2])
+                for node in ast.walk(tree):
+                    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                            and isinstance(node.func.value, ast.Name) and node.func.value.id == 'os'
+                            and node.func.attr == 'system' and node.args and isinstance(node.args[0], ast.Constant)
+                            and isinstance(node.args[0].value, str)
+                            and _ha_supervisor_command(node.args[0].value, depth + 1)):
+                        return True
+            except (SyntaxError, ValueError):
+                pass
+        if program != 'ha' or (segment[index].lower() != 'ha' and not segment[index].lower().endswith('/ha')):
+            continue
+        index += 1
+        while index < len(segment) and segment[index].startswith('-'):
+            flag = segment[index].lower(); index += 1
+            if flag == '--':
+                break
+            if flag in ('--log-level', '--api-token', '--endpoint', '--config') and index < len(segment):
+                index += 1
+        if index < len(segment) and segment[index].lower() in HA_ALWAYS_FAMILIES:
             return True
     return False
 
@@ -680,10 +801,6 @@ def _ha_command(text: str, remote_on: bool, depth: int = 0) -> bool:
     segment = []
     for token in tokens:
         if token and all(char in ";&|()\n" for char in token):
-            # Keep a line break following a bare HA word conservative, as with
-            # other whitespace; still recognize new commands on separate lines.
-            if token == "\n" and len(segment) == 1 and segment[0].lower() == "ha":
-                continue
             if segment:
                 segments.append(segment)
                 segment = []
@@ -719,7 +836,7 @@ def _ha_command(text: str, remote_on: bool, depth: int = 0) -> bool:
                 index += 1
         if index < len(segment):
             family = segment[index].lower()
-            if family in HA_ALWAYS_FAMILIES or (remote_on and family in HA_REMOTE_FAMILIES):
+            if remote_on and family in HA_REMOTE_FAMILIES:
                 return True
     return False
 
@@ -820,7 +937,7 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
             if definition:
                 return f"This command names a {definition[1]} definition, which Codex may not write or edit."
         plain_ha = re.sub(r"[\"'`]", "", text.replace("\\\n", " "))
-        if (_ha_always_in_text(plain_ha)
+        if (_ha_supervisor_command(text)
                 or (remote_on and (HA_REMOTE_TEXT_RE.search(plain_ha) or _ha_unknown_flag(text)))
                 or _ha_command(text, remote_on)):
             return "This command talks to the Home Assistant Supervisor, which is never allowed."
