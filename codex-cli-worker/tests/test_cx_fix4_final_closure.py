@@ -33,7 +33,8 @@ class FinalClosureCases(unittest.TestCase):
                         'ha --api-token $(cat /tmp/t) core restart',
                         'ha --api-token `cat t` core info', "ha --api-token 'a b' core info",
                         'ha --endpoint=sample --api-token=$(cat t) core info',
-                        'ha --config "some path" info', "'h'a --api-token 'a b' info"):
+                        'ha --config "some path" info', "'h'a --api-token 'a b' info",
+                        "ha --config=a' b' info", 'ha --api-token=prefix`cat t` info'):
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command, True))
                 self.assertFalse(self.denied(command, False))

@@ -631,7 +631,7 @@ HA_SHELL_WORD_RE = re.compile(r"\bh[\"'\\]*a\b", re.IGNORECASE)
 HA_ALWAYS_TEXT_RE = re.compile(r"\b(?:supervisor|su)\b", re.IGNORECASE)
 HA_UNKNOWN_FLAG_RE = re.compile(
     r"--(?:log-level|api-token|endpoint|config)(?:=|\s+)"
-    r"(?:[\"'`]|[^\s;]*\$\()", re.IGNORECASE)
+    r"[^\s;]*(?:[\"'`]|\$\()", re.IGNORECASE)
 
 
 def _ha_always_in_text(text: str) -> bool:
