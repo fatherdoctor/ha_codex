@@ -2,6 +2,8 @@
 
 ## 0.1.81.2 (unreleased)
 
+- **Scheduled work and local lead channel (CX-SCHED).** Persist owner-approved interval, UTC cron and one-off schedules, bounded run history and a plain-text local mailbox. Agent proposals require owner review; native permissions remain pending human decisions. Add a separately authenticated lead API and turn-scoped proposal/mailbox tools. Preserve existing sandbox and refusal paths. Page-task phone pushes follow the existing notification setting; ChatGPT approval mirroring remains a separate integration question.
+
 - **No bundled house rules (CX-NORULES).** Stop packaging and installing house-practice instructions. Preserve owner workspace instructions and all enforced protections. Upgrade cleanup removes only the exact legacy bundled home copy, preserving edited files and symlinks. Documentation points optional house practices to the starter kit.
 
 - **HAOS AppArmor ABI compatibility (CX-RC-EXEC.f3).** Declare ABI 3.0 so HAOS's 3.1.7 parser enables the stack rule instead of applying its legacy untagged-policy defaults. Keep the exact relay-only stack target. Prefer the AppArmor-specific proc attribute, with legacy fallback only when it is absent; access denials still fail closed. Document the intentional same-stack sibling ptrace restriction.

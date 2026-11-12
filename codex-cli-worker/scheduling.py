@@ -1,0 +1,338 @@
+"""Durable schedules and a bounded local-agent mailbox; no process or network calls."""
+from __future__ import annotations
+
+import contextlib
+import hashlib
+import hmac
+import json
+import math
+import os
+from pathlib import Path
+import secrets
+import sqlite3
+import threading
+import time
+import uuid
+from datetime import datetime, timedelta, timezone
+
+MAX_SCHEDULES = 100
+MAX_DAILY_RUNS = 64
+MAX_SCHEDULE_DAILY_RUNS = 24
+MAX_MESSAGES = 500
+MAX_RUNS = 500
+ACTIVE = ('reserved', 'queued', 'running', 'waiting_for_approval', 'waiting_for_input')
+
+
+def text(value, label, limit):
+    if not isinstance(value, str) or not value.strip() or len(value) > limit:
+        raise ValueError(f'{label} must be nonempty text, at most {limit} characters.')
+    return value.strip()
+
+
+def cron_fields(expression):
+    expression = text(expression, 'cron', 256)
+    parts = expression.split()
+    if len(parts) != 5:
+        raise ValueError('Use five numeric cron fields: minute hour day month weekday (UTC).')
+    fields = []
+    for part, low, high in zip(parts, (0, 0, 1, 1, 0), (59, 23, 31, 12, 7)):
+        values = set()
+        for item in part.split(','):
+            base, *steps = item.split('/')
+            if len(steps) > 1 or (steps and (not steps[0].isdigit() or int(steps[0]) < 1)):
+                raise ValueError('Invalid cron step.')
+            step = int(steps[0]) if steps else 1
+            if base == '*':
+                start, end = low, high
+            elif '-' in base:
+                edges = base.split('-')
+                if len(edges) != 2 or not all(v.isdigit() for v in edges):
+                    raise ValueError('Invalid cron range.')
+                start, end = map(int, edges)
+            elif base.isdigit():
+                start = int(base); end = high if steps else start
+            else:
+                raise ValueError('Cron fields must use numbers, *, lists, ranges or steps.')
+            if not low <= start <= end <= high or step > high - low + 1:
+                raise ValueError('Cron value is out of range.')
+            values.update(range(start, end + 1, step))
+        fields.append(values)
+    fields[4] = {0 if day == 7 else day for day in fields[4]}
+    return fields, parts[2] == '*', parts[4] == '*'
+
+
+def next_due(spec, after):
+    """Return the next occurrence strictly after a UTC timestamp, without catch-up bursts."""
+    if spec['kind'] == 'once':
+        return spec['at'] if spec['at'] > after else None
+    if spec['kind'] == 'interval':
+        return after + spec['seconds']
+    fields, dom_any, dow_any = cron_fields(spec['expression'])
+    minutes, hours, days, months, weekdays = fields
+    start = datetime.fromtimestamp(after, timezone.utc).replace(second=0, microsecond=0) + timedelta(minutes=1)
+    for offset in range(367):
+        day = start.replace(hour=0, minute=0) + timedelta(days=offset)
+        if day.month not in months:
+            continue
+        dom = day.day in days; dow = (day.weekday() + 1) % 7 in weekdays
+        match = (dom and dow) if dom_any or dow_any else (dom or dow)
+        if not match:
+            continue
+        for hour in sorted(hours):
+            for minute in sorted(minutes):
+                candidate = day.replace(hour=hour, minute=minute)
+                if candidate >= start:
+                    return candidate.timestamp()
+    raise ValueError('Cron has no occurrence in the next 366 days.')
+
+
+def validate(payload, now):
+    if not isinstance(payload, dict) or set(payload) - {'name', 'prompt', 'mode', 'spec'}:
+        raise ValueError('A schedule accepts only name, prompt, mode and spec.')
+    name = text(payload.get('name'), 'name', 80)
+    prompt = text(payload.get('prompt'), 'prompt', 16000)
+    mode = payload.get('mode', 'default')
+    if mode not in ('default', 'read-only'):
+        raise ValueError('Mode must be default or read-only.')
+    spec = payload.get('spec')
+    if not isinstance(spec, dict):
+        raise ValueError('spec must describe interval, cron or once.')
+    kind = spec.get('kind')
+    if kind == 'interval' and set(spec) == {'kind', 'seconds'}:
+        seconds = spec['seconds']
+        if type(seconds) is not int or not 60 <= seconds <= 366 * 86400:
+            raise ValueError('Interval must be an integer from 60 seconds through 366 days.')
+        spec = {'kind': kind, 'seconds': seconds}
+    elif kind == 'cron' and set(spec) == {'kind', 'expression'}:
+        cron_fields(spec['expression'])
+        spec = {'kind': kind, 'expression': ' '.join(spec['expression'].split())}
+    elif kind == 'once' and set(spec) == {'kind', 'at'}:
+        at = spec['at']
+        if isinstance(at, str):
+            try:
+                date = datetime.fromisoformat(at.replace('Z', '+00:00'))
+                if date.tzinfo is None:
+                    raise ValueError()
+                at = date.timestamp()
+            except (ValueError, OverflowError):
+                raise ValueError('One-off time must include its UTC offset.') from None
+        if type(at) not in (int, float) or not math.isfinite(at) or not now < at <= now + 366 * 86400:
+            raise ValueError('One-off time must be in the next 366 days.')
+        spec = {'kind': kind, 'at': at}
+    else:
+        raise ValueError('Invalid schedule specification.')
+    return {'name': name, 'prompt': prompt, 'mode': mode, 'spec': spec, 'next_due': next_due(spec, now)}
+
+
+class Store:
+    """Transactions protect occurrence reservation and owner approval from concurrent edits."""
+    def __init__(self, path):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(self.path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        try:
+            os.fchmod(fd, 0o600)
+        finally:
+            os.close(fd)
+        with self.connect() as db:
+            db.executescript('''
+                CREATE TABLE IF NOT EXISTS schedules (
+                    id TEXT PRIMARY KEY, name TEXT NOT NULL, prompt TEXT NOT NULL,
+                    mode TEXT NOT NULL, spec TEXT NOT NULL, approved INTEGER NOT NULL,
+                    enabled INTEGER NOT NULL, next_due REAL, updated REAL NOT NULL, revision TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS runs (
+                    id TEXT PRIMARY KEY, schedule_id TEXT, task_id TEXT UNIQUE NOT NULL,
+                    due REAL NOT NULL, created REAL NOT NULL, status TEXT NOT NULL,
+                    error TEXT NOT NULL DEFAULT '');
+                CREATE TABLE IF NOT EXISTS mailbox (
+                    id TEXT PRIMARY KEY, parent TEXT, author TEXT NOT NULL,
+                    body TEXT NOT NULL, created REAL NOT NULL);
+                CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            ''')
+
+    @contextlib.contextmanager
+    def connect(self):
+        db = sqlite3.connect(self.path, timeout=5)
+        db.row_factory = sqlite3.Row
+        try:
+            db.execute('BEGIN IMMEDIATE')
+            yield db
+            db.commit()
+        except BaseException:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    @staticmethod
+    def schedule(row):
+        value = dict(row); value['spec'] = json.loads(value['spec'])
+        value['approved'] = bool(value['approved']); value['enabled'] = bool(value['enabled'])
+        return value
+
+    def schedules(self):
+        with self.connect() as db:
+            return [self.schedule(row) for row in db.execute('SELECT * FROM schedules ORDER BY updated DESC, id')]
+
+    def save(self, payload, *, owner, now, schedule_id=None):
+        value = validate(payload, now)
+        with self.connect() as db:
+            if schedule_id and not db.execute('SELECT id FROM schedules WHERE id=?', (schedule_id,)).fetchone():
+                raise LookupError('Schedule not found.')
+            if not schedule_id and db.execute('SELECT count(*) FROM schedules').fetchone()[0] >= MAX_SCHEDULES:
+                raise ValueError('Schedule limit reached.')
+            schedule_id = schedule_id or uuid.uuid4().hex
+            db.execute('INSERT OR REPLACE INTO schedules VALUES (?,?,?,?,?,?,?,?,?,?)', (
+                schedule_id, value['name'], value['prompt'], value['mode'], json.dumps(value['spec']),
+                int(owner), int(owner), value['next_due'], now, uuid.uuid4().hex))
+            return self.schedule(db.execute('SELECT * FROM schedules WHERE id=?', (schedule_id,)).fetchone())
+
+    def action(self, schedule_id, action, now, revision=None):
+        with self.connect() as db:
+            row = db.execute('SELECT * FROM schedules WHERE id=?', (schedule_id,)).fetchone()
+            if row is None:
+                raise LookupError('Schedule not found.')
+            if action == 'delete':
+                db.execute('DELETE FROM schedules WHERE id=?', (schedule_id,)); return
+            if action not in ('approve', 'pause', 'resume'):
+                raise ValueError('Unknown schedule action.')
+            if action == 'approve' and revision != row['revision']:
+                raise ValueError('This proposal changed. Refresh and review it before approving.')
+            approved = bool(row['approved']) or action == 'approve'
+            if action == 'resume' and not approved:
+                raise ValueError('Approve this proposal before enabling it.')
+            due = row['next_due']
+            if action != 'pause':
+                due = next_due(json.loads(row['spec']), now)
+                if due is None:
+                    raise ValueError('This one-off time has passed. Edit it before enabling it.')
+            db.execute('UPDATE schedules SET approved=?,enabled=?,next_due=?,updated=?,revision=? WHERE id=?',
+                       (int(approved), int(action != 'pause'), due, now, uuid.uuid4().hex, schedule_id))
+
+    def reserve(self, now, schedule_id=None):
+        """Claim before dispatch. Missing tasks after a crash become interrupted, never retried."""
+        with self.connect() as db:
+            row = None
+            if schedule_id:
+                row = db.execute('SELECT * FROM schedules WHERE id=? AND approved=1 AND enabled=1 AND next_due<=?',
+                                 (schedule_id, now)).fetchone()
+                if row is None:
+                    return None
+                if db.execute('SELECT 1 FROM runs WHERE schedule_id=? AND status IN (?,?,?,?,?)', (schedule_id, *ACTIVE)).fetchone():
+                    return None
+            day = datetime.fromtimestamp(now, timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+            if db.execute('SELECT count(*) FROM runs WHERE created>=? AND created<?', (day, day + 86400)).fetchone()[0] >= MAX_DAILY_RUNS:
+                return None
+            if schedule_id and db.execute('SELECT count(*) FROM runs WHERE schedule_id=? AND created>=? AND created<?', (schedule_id, day, day + 86400)).fetchone()[0] >= MAX_SCHEDULE_DAILY_RUNS:
+                return None
+            run_id = uuid.uuid4().hex
+            task_id = datetime.fromtimestamp(now, timezone.utc).strftime('%Y%m%dT%H%M%SZ-') + uuid.uuid4().hex[:8]
+            due = row['next_due'] if row else now
+            db.execute('INSERT INTO runs(id,schedule_id,task_id,due,created,status) VALUES(?,?,?,?,?,?)',
+                       (run_id, schedule_id, task_id, due, now, 'reserved'))
+            if row:
+                try:
+                    following = next_due(json.loads(row['spec']), now)
+                except ValueError:
+                    following = None  # No next occurrence within the bounded cron horizon.
+                db.execute('UPDATE schedules SET next_due=?,enabled=? WHERE id=?', (following, int(following is not None), schedule_id))
+            return {'id': run_id, 'task_id': task_id, 'schedule': self.schedule(row) if row else None}
+
+    def finish(self, run_id, status, error=''):
+        with self.connect() as db:
+            db.execute('UPDATE runs SET status=?,error=? WHERE id=?', (status, error[:500], run_id))
+            db.execute('''DELETE FROM runs WHERE id IN (
+                SELECT id FROM runs WHERE status NOT IN ('reserved','queued','running','waiting_for_approval','waiting_for_input')
+                ORDER BY created DESC, id DESC LIMIT -1 OFFSET ?)''', (MAX_RUNS,))
+
+    def runs(self):
+        with self.connect() as db:
+            return [dict(row) for row in db.execute('SELECT * FROM runs ORDER BY created DESC,id DESC LIMIT 600')]
+
+    def rotate_token(self):
+        token = 'cxlead_' + secrets.token_urlsafe(48)
+        with self.connect() as db:
+            db.execute('INSERT OR REPLACE INTO settings VALUES (?,?)', ('lead_token_hash', hashlib.sha256(token.encode()).hexdigest()))
+        return token
+
+    def token_ok(self, token):
+        if not isinstance(token, str) or not 32 <= len(token) <= 256:
+            return False
+        with self.connect() as db:
+            row = db.execute('SELECT value FROM settings WHERE key=?', ('lead_token_hash',)).fetchone()
+        return bool(row and hmac.compare_digest(row[0], hashlib.sha256(token.encode()).hexdigest()))
+
+    def has_token(self):
+        with self.connect() as db:
+            return db.execute('SELECT 1 FROM settings WHERE key=?', ('lead_token_hash',)).fetchone() is not None
+
+    def mail(self, body, author, now, parent=None):
+        body = text(body, 'message', 8000)
+        with self.connect() as db:
+            if db.execute('SELECT count(*) FROM mailbox').fetchone()[0] >= MAX_MESSAGES:
+                raise ValueError('Mailbox is full (500 messages).')
+            if parent and not db.execute('SELECT id FROM mailbox WHERE id=? AND parent IS NULL', (parent,)).fetchone():
+                raise LookupError('Mailbox thread not found.')
+            message_id = uuid.uuid4().hex
+            db.execute('INSERT INTO mailbox VALUES(?,?,?,?,?)', (message_id, parent, author, body, now))
+            return message_id
+
+    def messages(self):
+        with self.connect() as db:
+            return [dict(row) for row in db.execute('SELECT * FROM mailbox ORDER BY created,id')]
+
+
+class Engine:
+    """One scheduler tick dispatches at most one ordinary task, never native decisions."""
+    def __init__(self, store, worker):
+        self.store = store; self.worker = worker
+        self.tick_lock = threading.Lock()
+
+    def reconcile(self):
+        for run in self.store.runs():
+            if run['status'] in ACTIVE:
+                task = self.worker.snapshot(run['task_id'])
+                if task is None:
+                    self.store.finish(run['id'], 'interrupted', 'Worker restarted before this task was saved; not retried.')
+                else:
+                    pending = any(a.get('status') == 'pending' for a in task.get('approvals') or [])
+                    self.store.finish(run['id'], 'waiting_for_approval' if pending else task.get('status', 'interrupted'))
+
+    def submit(self, run, prompt, mode, name):
+        try:
+            self.worker.submit(run['task_id'], prompt, mode, name, (run['schedule'] or {}).get('id'))
+        except Exception:
+            self.store.finish(run['id'], 'failed', 'Could not start the ordinary task. Not retried.')
+            raise
+        self.store.finish(run['id'], 'queued')
+        return run['task_id']
+
+    def tick(self, now=None):
+        if not self.tick_lock.acquire(blocking=False):
+            return
+        try:
+            now = time.time() if now is None else now
+            self.reconcile()
+            if self.worker.busy():
+                return
+            for schedule in sorted(self.store.schedules(), key=lambda s: s['next_due'] or float('inf')):
+                if schedule['enabled'] and schedule['approved'] and schedule['next_due'] is not None and schedule['next_due'] <= now:
+                    run = self.store.reserve(now, schedule['id'])
+                    if run:
+                        claimed = run['schedule']
+                        self.submit(run, claimed['prompt'], claimed['mode'], claimed['name'])
+                        return
+        finally:
+            self.tick_lock.release()
+
+    def lead_task(self, prompt, mode, now=None):
+        prompt = text(prompt, 'prompt', 16000)
+        if mode not in ('default', 'read-only'):
+            raise ValueError('Mode must be default or read-only.')
+        with self.tick_lock:
+            if self.worker.busy():
+                raise ValueError('The assistant is busy or paused. Try again later.')
+            run = self.store.reserve(time.time() if now is None else now)
+            if run is None:
+                raise ValueError('Daily unattended-run limit reached.')
+            return self.submit(run, prompt, mode, 'House Lead task')

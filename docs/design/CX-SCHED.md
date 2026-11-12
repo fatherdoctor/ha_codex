@@ -30,3 +30,9 @@ Page management routes require authenticated Home Assistant Ingress and administ
 A settings section offers a schedule form, a list with edit/pause/approve/delete, next due time and run history, plus token rotation and mailbox controls. All stored prompts and messages are rendered as text. A bounded refresh updates parked outcomes without opening a second runner.
 
 Tests use temporary databases, a fixed clock and a synthetic worker. They cover cron/date edges, validation, approval invalidation, limits, restart/crash gaps, no duplicate claims, persistence, paused/busy workers, refusal of unapproved schedules, read-only propagation, pending native approval parking, token isolation/rotation, administrator-only management, task-result readback and mailbox replies. The full worker suite and repository container/browser jobs validate integration. Live-box and phone acceptance remain the lead's.
+
+## Implementation boundary needing a lead ruling
+
+The existing worker routes page-task approvals to `create_approval_session` and Home Assistant notifications. Its separate remote-control process owns ChatGPT-native approvals for remote threads. No supported bridge is established here for mirroring a scheduled page-task approval into a ChatGPT thread. The implemented page works on phones and retains configured Home Assistant push notifications; a ChatGPT-native mirror is unproven. The card's phone requirement needs a ruling on that surface or a supported integration contract before this portion can be completed. This draft does not change the relay, gate, policy or approval-decision code to guess at that contract.
+
+Implementation also binds proposal approval to a fresh revision, refuses approval of a redacted agent prompt, and supports bounded tool-page sizes so large text can be read in smaller pages. These details preserve the original design's owner-review and response-size requirements.
