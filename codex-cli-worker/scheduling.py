@@ -58,7 +58,8 @@ def cron_fields(expression):
             values.update(range(start, end + 1, step))
         fields.append(values)
     fields[4] = {0 if day == 7 else day for day in fields[4]}
-    return fields, parts[2] == '*', parts[4] == '*'
+    # A leading wildcard keeps the other day field restrictive, including */N.
+    return fields, parts[2].startswith('*'), parts[4].startswith('*')
 
 
 def next_due(spec, after):

@@ -6,7 +6,7 @@ Design recorded before implementation for CX-SCHED. The worker uses the same ord
 
 A SQLite database under `/data` stores schedules, run records, mailbox messages and a hash of a separate lead token. A schedule contains a name, prompt, mode (Default or Read only), interval/UTC cron/one-off specification, enabled flag, owner approval and next due time. A run links one due occurrence to one normal task. SQLite transactions reserve the occurrence and advance its due time before launch. A crash in that gap is reported as interrupted; it is never retried automatically. On restart, ordinary saved tasks supply the outcome. Missed intervals coalesce into one run, with no catch-up burst. One-off schedules disable after reservation. Updates preserve the database in `/data`.
 
-Cron has five numeric fields, UTC only, with lists, ranges and steps; Sunday is 0 or 7. Day-of-month and day-of-week use the conventional OR when both are restricted. Next-occurrence search is bounded to 366 days and rejects specifications with no occurrence in that horizon. Intervals are at least one minute. Limits: 100 schedules, 24 runs per schedule per UTC day, 64 scheduled runs total per UTC day, 500 retained completed run records and 500 mailbox messages. The normal worker's single task slot, pause switch and queue limits still apply. Due schedules wait while the worker is busy or paused.
+Cron has five numeric fields, UTC only, with lists, ranges and steps; Sunday is 0 or 7. Day-of-month and day-of-week use OR when neither field starts with a wildcard; a leading wildcard, including */N, requires the other day field to match too. Next-occurrence search is bounded to 366 days and rejects specifications with no occurrence in that horizon. Intervals are at least one minute. Limits: 100 schedules, 24 runs per schedule per UTC day, 64 scheduled runs total per UTC day, 500 retained completed run records and 500 mailbox messages. The normal worker's single task slot, pause switch and queue limits still apply. Due schedules wait while the worker is busy or paused.
 
 ## Owner approval and unattended runs
 
@@ -19,7 +19,7 @@ A permission request parks the native exchange: no automatic answer, no permanen
 The administrator creates or rotates a separate token on the page and copies it directly to the other agent's private configuration. It is returned once; the worker stores only its SHA-256 hash. Rotation revokes the old token. It is not the integration token, and Ingress headers cannot authenticate a lead API call. Every `/lead/` route requires a bearer token, bounds its inputs and returns redacted text. The token cannot approve native actions, approve schedules, change policy or impersonate an administrator.
 
 - `POST /lead/tasks`: submit a bounded prompt as an ordinary task, with Default or Read only; busy/paused workers refuse without silently creating duplicate work.
-- `GET /lead/tasks/<id>`: read that task's normal result and pending approval state.
+- `GET /lead/tasks/<id>`: read background work's normal result and pending approval state; unrelated human chats are refused.
 - `GET/POST /lead/schedules`, `PATCH /lead/schedules/<id>`: list or propose a schedule; proposals and agent edits require owner approval on the page.
 - `GET/POST /lead/mailbox`, `POST /lead/mailbox/<id>/reply`: exchange plain-text messages and replies with the owner/other agent. Messages are data, not executable commands. The same mailbox is visible on the page. The worker does not send them to people or execute them. A lead must explicitly submit a task to request work.
 

@@ -309,7 +309,8 @@ def register(worker):
     def lead_task_result(task_id):
         with worker.lock:
             task = worker.tasks.get(task_id)
-            if task is None:
+            if task is None or task.get('task_source') not in {'lead', 'schedule'}:
+                # A lead token reads background work, not unrelated human chats.
                 raise LookupError()
             result = worker.task_payload(task, private=False)
             if any(a.get('status') == 'pending' for a in task.get('approvals') or []):

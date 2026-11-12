@@ -76,6 +76,7 @@ class ScheduleStoreTests(unittest.TestCase):
         spec = {'kind': 'cron', 'expression': '0 0 2 * 3'}
         self.assertEqual(scheduling.next_due(spec, NOW), NOW + 86400)
         self.assertEqual(scheduling.next_due({'kind': 'cron', 'expression': '0 0 * * 3'}, NOW), NOW + 2 * 86400)
+        self.assertEqual(scheduling.next_due({'kind': 'cron', 'expression': '0 0 */2 * 1'}, NOW), NOW + 14 * 86400)
 
     def test_cron_midnight_month_boundary_and_impossible_day(self):
         date = datetime(2027, 3, 31, 23, 59, tzinfo=timezone.utc).timestamp()
@@ -286,6 +287,14 @@ class SchedulingApiTests(unittest.TestCase):
         result = self.client.get('/lead/tasks/' + task_id, headers=self.lead)
         self.assertEqual(result.json['task']['run_status'], 'waiting_for_approval')
         self.assertEqual(self.client.get('/lead/tasks/missing', headers=self.lead).status_code, 404)
+
+    def test_lead_result_route_cannot_read_unrelated_page_chats(self):
+        server.tasks['private-page-chat'] = {'task_id': 'private-page-chat', 'status': 'completed', 'summary': 'Synthetic page-only text.'}
+        response = self.client.get('/lead/tasks/private-page-chat', headers=self.lead)
+        self.assertEqual(response.status_code, 404)
+        self.assertNotIn('Synthetic page-only text.', response.get_data(as_text=True))
+        server.tasks['scheduled-chat'] = {'task_id': 'scheduled-chat', 'task_source': 'schedule', 'status': 'completed'}
+        self.assertEqual(self.client.get('/lead/tasks/scheduled-chat', headers=self.lead).status_code, 200)
 
     def test_lead_cannot_answer_native_approval_or_create_bypass_fields(self):
         self.assertEqual(self.client.post('/tasks/sample/approvals/sample', json={'decision': 'allow'}, headers=self.lead).status_code, 401)
