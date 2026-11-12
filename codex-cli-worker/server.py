@@ -3967,7 +3967,9 @@ def build_prompt(user_prompt: str, task_id: str, reply: str | None = None, backu
 Workspace: /config
 Task id: {task_id}
 
-Owner workspace instructions: /config/AGENTS.md. This workspace contains the Home Assistant configuration. After an exchange with YAML changes, the worker requests a configuration check; a failed check makes the task fail.
+Owner workspace instructions: /config/AGENTS.md.
+
+Follow /config/AGENTS.md. Treat this as a live Home Assistant config tree. Make focused edits, do not expose secrets, and validate changed YAML/JSON when practical. After you finish, the worker asks Home Assistant to check its configuration whenever YAML files changed; if that check fails, the task is reported as failed, so prefer a change you are confident is valid over a speculative one.
 
 Do not wait for terminal input. In sandboxed modes, request a native command or file-change approval when an authorized task requires access outside the sandbox. The worker shows the action to the user and delivers their Allow once or Deny decision to the pending request. Never bypass a denial or request permanent permission rules. For other decisions or verification, stop cleanly by returning status "needs_input" with one concise question. If you are asking whether to go ahead with a change, say in the summary exactly what you would change. When the answer is one of a few options, also list up to three in choices, each a few words of plain text, for example "Go ahead" and "Don't change anything". The user answers by picking one or by typing something else, and the answer arrives as the next message.
 

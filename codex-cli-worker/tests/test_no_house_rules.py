@@ -49,7 +49,7 @@ class NoHouseRules(unittest.TestCase):
             with patch.object(server, 'AGENTS_PATH', target):
                 self.assertEqual(server.read_agents_file(), 'Owner workspace instructions')
 
-    def test_task_context_states_workspace_facts_without_house_style(self):
+    def test_task_context_keeps_owner_pointer_and_original_upstream_guidance(self):
         with patch.object(server, 'attached_image_note', return_value=''), \
              patch.object(server, 'backup_instructions', return_value=''), \
              patch.object(server, 'home_assistant_api_instructions', return_value=''), \
@@ -57,5 +57,31 @@ class NoHouseRules(unittest.TestCase):
              patch.object(server, 'read_options', return_value={}):
             text = server.build_prompt('Inspect the configuration', 'synthetic')
         self.assertIn('Owner workspace instructions: /config/AGENTS.md.', text)
-        self.assertNotIn('Make focused edits', text)
-        self.assertNotIn('prefer a change you are confident', text)
+        self.assertIn('Follow /config/AGENTS.md. Treat this as a live Home Assistant config tree. Make focused edits, do not expose secrets, and validate changed YAML/JSON when practical. After you finish, the worker asks Home Assistant to check its configuration whenever YAML files changed; if that check fails, the task is reported as failed, so prefer a change you are confident is valid over a speculative one.', text)
+
+    def test_optional_starter_reference_is_plain_published_separately_text(self):
+        docs = (ROOT / 'DOCS.md').read_text()
+        paragraph = next(line for line in docs.splitlines() if line.startswith('**Protected policy.**'))
+        self.assertIn('the Whole Home Agent starter kit (published separately)', paragraph)
+        self.assertNotIn('https://', paragraph)
+        self.assertNotIn('whole_home', paragraph)
+
+    def test_readmes_describe_defaults_and_owner_instructions(self):
+        for path in (ROOT.parent / 'README.md', ROOT / 'README.md'):
+            with self.subTest(path=path.name):
+                text = path.read_text()
+                self.assertNotIn('Shipped practice covers', text)
+                self.assertIn('Codex uses its defaults and your workspace instructions', text)
+                self.assertIn('the app bundles no house rules', text)
+        version = next(line for line in (ROOT.parent / 'README.md').read_text().splitlines()
+                       if line.startswith('| 0.1.81.2 '))
+        self.assertNotIn('policy and house rules in the image', version)
+        self.assertIn('no bundled house rules', version)
+
+    def test_reviewed_document_sections_have_one_blank_line(self):
+        docs = (ROOT / 'DOCS.md').read_text()
+        policy = next(line for line in docs.splitlines() if line.startswith('**Protected policy.**'))
+        self.assertIn(policy + '\n\n**Who can answer.**', docs)
+        changelog = (ROOT / 'CHANGELOG.md').read_text()
+        entry = next(line for line in changelog.splitlines() if line.startswith('- **No bundled house rules'))
+        self.assertIn(entry + '\n\n- **HAOS AppArmor', changelog)
