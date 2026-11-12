@@ -1,7 +1,7 @@
 # Permissions overrides
 
-Status: design prepared; implementation waits on a remote-thread permission contract.
-Source baseline: ha_codex main `6966e2cb8ced`, Codex CLI 0.166.0.
+Status: policy and Core adapter prepared; installation blocked on the diagnostics integration base.
+Source baseline: ha_codex main `e5dfcf26ce8d`, Codex CLI 0.166.0.
 
 The worker can perform selected Home Assistant actions without an escalation prompt when an administrator
 has enabled their group. It must establish the calling turn's effective permissions before doing so.
@@ -51,51 +51,33 @@ unverifiable snapshot cannot authorize a pre-approved action. A read-only prefli
 an external actor will not change a scene between checks and execution; document that limitation rather
 than claiming a transaction Core does not provide.
 
-## Modes and the unresolved authority boundary
+## Mode ruling and prepared implementation
 
-| Effective calling turn | Intended behavior |
-| --- | --- |
-| Read only | Never use a group to authorize a write |
-| Default | Enabled groups run after target/guard checks; otherwise use the existing approval path |
-| Auto-review | Check enabled groups before the reviewer; other requests go to that reviewer |
-| Full access | Name/log actions and retain guard rails and hard refusals; do not add a prompt merely for a group |
-| Custom | Groups apply only when the actual sandbox allows writes and the request would otherwise ask |
-| Missing, stale or unverifiable authority | No pre-approved write |
+The named lead reply to `2026-11-12-1612-cx-allow-authority.md` settles the authority boundary:
 
-The current chat worker owns its task mode, but the remote app-server owns remote threads. The existing
-`relay_reads.py:70` capability rotates per relay launch, not per thread or turn. Its MCP bridge forwards
-only the capability and model-supplied arguments (`relay_reads_mcp.py:28`). The shared relay capability
-proves an active relay, not whether this call came from a read-only thread. Do not repurpose it as write authority.
+- Use the chat worker's protected launch policy, never a model-supplied mode. The prepared service resolves
+  the existing current-turn capability and rechecks its task/turn/cancellation state before dispatch.
+- Read-only, remote, missing, stale and unrecognized authority cannot pre-approve anything. The prepared
+  backend accepts only a worker-owned workspace-write/on-request context under today's managed policy.
+- No real captured sandbox-state envelopes for the pinned CLI are available here. The prepared implementation
+  does not interpret that opaque metadata. Every remote turn requires native approval, including a remote
+  thread that claims to be Default. This follows the lead's explicit fallback; no metadata parser is shipped.
+- Auto-review and Full access remain conditional future behavior for CX-PERM. No managed policy, hook or
+  gate file changes are part of this build. The Authority boundary keeps future mode classification separate
+  from model arguments. Full-access behavior still needs the later policy work; it is not enabled here.
 
-The pinned upstream has a possible transport, not yet a verified mode-classification contract:
+Prepared modules are `codex-cli-worker/permission_overrides.py` (settings, authority, guard rails and effect
+resolution) and `permission_overrides_api.py` (fixed Core adapter and current-turn/admin-route adapter).
+They are not imported, registered, packaged or exposed as an MCP tool by the running worker yet.
+The tests use synthetic backends only. A failed/unknown write is explicitly nonretryable; a failed preflight
+never dispatches. An audit failure before execution refuses the action. After execution, audit failure
+cannot change the reported execution result.
 
-- [mcp_tool_call.rs](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/core/src/mcp_tool_call.rs#L540)
-  adds host-owned thread/session metadata and can negotiate experimental sandbox state.
-- [sandbox_metadata.rs](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/codex-mcp/src/sandbox_metadata.rs#L23)
-  explicitly defines that state as **opaque**, to be forwarded unchanged to `codex sandbox
-  --sandbox-state-json`; only the separate launcher envelope's documented fields may be interpreted.
-  The existing bridge neither advertises this capability nor authenticates a turn-specific envelope to the worker.
-- [hook_runtime.rs](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/core/src/hook_runtime.rs#L1073)
-  derives hook `permission_mode` from approval policy alone: on-request is `default`. It does not distinguish
-  read-only/on-request from workspace-write/on-request. Copying that string would not solve the problem.
-
-Before implementation, establish a supported, authenticated per-call classification of the effective
-sandbox and approval/reviewer settings, with evidence for remote mode changes and resumed threads.
-Thread IDs alone, model-supplied mode fields, stale startup settings and parsing undocumented opaque
-policy fields are not sufficient evidence. A local subprocess probe may be investigated, but success
-must prove the relevant authority without granting side effects or trusting a caller-selected launcher.
-No live Home Assistant or owner-account probe is part of this work.
-
-There is also a policy decision to settle: `gate/requirements.toml:11` allows only read-only/workspace-write
-and on-request approvals; `policy.py:88` refuses full access, never approvals and a reviewer other than the
-user. Thus the currently shipped policy cannot exercise the card's full-access/auto-review cases as written.
-This design does not loosen that policy. The outside-lane brief excludes hook files. The lead needs to
-clarify whether these cases are conditional future behavior or require a separate policy/authority change.
-
-When a group is off or a guard rail applies, return `approval_required` with a safe description, without
-executing. That response is not itself an approval prompt. Verify the real client approval/reviewer path
-and its single-action binding before promising seamless fallback, especially where a direct command has
-no separately configured Core API token.
+The prepared Core adapter uses the existing worker's Core authentication, not sandbox-visible credentials.
+It performs one HTTP attempt without redirects; WebSocket commands use fixed types. Definition preflight
+uses Core configuration endpoints, never state attributes alone. Source checks used Home Assistant Core's
+config/automation.py, config/script.py, config/scene.py and config/config_entries.py handlers. Not every
+prepared operation has an endpoint-level integration test yet; this is not a completed feature delivery.
 
 ## Settings and diagnostics
 
@@ -115,6 +97,20 @@ owner instructions in exported diagnostics. Ensure an observer failure cannot ch
 make a completed write look unexecuted. The current main does not yet contain the diagnostics PR, so
 integrate its published interface after merge rather than recreating its delivered implementation.
 
+**Current blocker:** fresh main `e5dfcf26ce8d` has neither `interaction_diagnostics.py` nor `diagnostics_scrub.py`;
+CX-DIAG's published work remains on PR #41. Every pre-approved action must have a typed, privacy-filtered,
+flushed audit event before the write. The prepared service therefore refuses when that recorder/typed contract
+is absent, including when it fails to save. It does not substitute a second logger or copy the published PR.
+The proposed typed contract is an `override` event with a fixed operation and outcome; it must be integrated
+into the shared scrubber after the correct base is established. Existing generic tool events do not identify
+which pre-approved operation ran.
+
+Worker/MCP registration, the five Settings switches, the private-settings path protection, complete Core
+adapter tests, actual action export coverage and light/dark screenshots remain unproven and uninstalled.
+The UI target was checked against frontend ha-switch.ts (48px track width, 24px height, 18px thumb and HA
+color variables) and ha-settings-row.ts (16px horizontal spacing and 72px two-line rows). No screenshot of a
+working settings control is claimed.
+
 ## Acceptance checks before enabling writes
 
 1. Prove the authority contract with two concurrent remote threads of different modes, changes between turns,
@@ -130,6 +126,5 @@ integrate its published interface after merge rather than recreating its deliver
 6. Full worker/integration suites, repository-data smoke, local light/dark browser checks and the repository's
    existing Container CI. Local container smoke is not run (VFS disk).
 
-Implementation is blocked at the authority contract and policy interpretation above. This is not a
-claim that upstream lacks any possible solution; the cited experimental transport needs a supported
-interpretation and an offline proof before it can authorize writes outside the sandbox.
+Installation is blocked on the shared diagnostics base and typed export integration. The original mode
+question is resolved by the lead ruling above; remote writes stay unrecognized rather than guessed.
