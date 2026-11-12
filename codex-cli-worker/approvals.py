@@ -8,6 +8,7 @@ responses never install command rules or grant access for a session.
 from __future__ import annotations
 
 import copy
+import fnmatch
 import json
 import posixpath
 import re
@@ -41,7 +42,6 @@ PROTECTED_COMMAND_RES = (
     re.compile(r"codex-home/+[^\s/]*[*?\[]", re.IGNORECASE),
     re.compile(r"codex-home.*(agents\.md|config\.toml)|(agents\.md|config\.toml).*codex-home", re.IGNORECASE | re.DOTALL),
     re.compile(r"/data/+options\.json|worker_api_token", re.IGNORECASE),
-    re.compile(r"/etc/codex/requirements\.toml(?![\w./-])", re.IGNORECASE),
 )
 
 
@@ -49,7 +49,30 @@ def command_names_protected_path(command: str) -> bool:
     """Return whether a command's text names a protected policy location by any plain spelling."""
     text = re.sub(r"[\'\"\\]", "", str(command or ""))
     text = re.sub(r"/{2,}", "/", text)
-    return any(pattern.search(text) for pattern in PROTECTED_COMMAND_RES)
+    if (any(pattern.search(text) for pattern in PROTECTED_COMMAND_RES)
+            or re.search(r"/etc/codex/requirements\.toml(?![\w./-])", text, re.IGNORECASE)):
+        return True
+    # Match literal and globbed path components without expanding the filesystem.
+    # Track an explicit cd for relative names; paths computed at runtime remain out of scope.
+    target = "/etc/codex/requirements.toml"
+    directory = ""
+    for part in re.split(r"[;&|\n]+", text):
+        words = re.findall(r"[^\s<>]+", part)
+        if not words:
+            continue
+        if words[0] == "cd" and len(words) > 1:
+            path = words[1]
+            directory = posixpath.normpath(path if path.startswith("/") else posixpath.join(directory, path))
+        for word in words:
+            if word.startswith("/"):
+                candidate = posixpath.normpath(word)
+            elif directory:
+                candidate = posixpath.normpath(posixpath.join(directory, word))
+            else:
+                continue
+            if fnmatch.fnmatchcase(target, candidate.lower()):
+                return True
+    return False
 
 
 FILE_APPROVAL = "item/fileChange/requestApproval"

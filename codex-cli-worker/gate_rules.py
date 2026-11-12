@@ -32,6 +32,7 @@ import hashlib
 import json
 import re
 import os
+import shlex
 import stat
 import time
 from collections import Counter
@@ -96,7 +97,7 @@ PROTECTED_COMMAND_RES = (
     (re.compile(r"/proc/\S*environ"), "reads a process environment, which can hold the Supervisor token"),
     (re.compile(r"\b(?:SUPERVISOR_TOKEN|HASSIO_TOKEN)\b"), "uses the Supervisor token"),
     (re.compile(r"/run/s6/container_environment"), "reads the app's saved environment, which holds the Supervisor token"),
-    (re.compile(r"https?://supervisor\b|\bsupervisor/|\bha\s+(?:supervisor|su|add-?ons?|host|os|core|hardware|network|backups?)\b|\bbashio::", re.IGNORECASE),
+    (re.compile(r"https?://supervisor\b|\bsupervisor/|\bbashio::", re.IGNORECASE),
      "talks to the Home Assistant Supervisor"),
     (re.compile(r"\.storage/+auth"), "reads Home Assistant's sign-in store"),
     (re.compile(r"secrets\.ya?ml"), "reads secrets.yaml"),
@@ -614,6 +615,83 @@ def asks_for_escalation(tool_input: Any) -> bool:
 REMOTE_DEFINITIONS = ("shell_command", "rest_command", "command_line", "python_script", "pyscript", "template")
 FULL_ACCESS_RE = re.compile(r"danger[-_]?full[-_]?access|dangerFullAccess|--dangerously-bypass-approvals-and-sandbox|--yolo\b", re.IGNORECASE)
 
+HA_REMOTE_FAMILIES = frozenset(("addon", "addons", "add-on", "add-ons", "host", "os", "core",
+                                "hardware", "network", "backup", "backups", "apps"))
+HA_ALWAYS_FAMILIES = frozenset(("supervisor", "su"))
+SHELL_ASSIGNMENT_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*=")
+
+
+def _ha_command(text: str, remote_on: bool, depth: int = 0) -> bool:
+    """Recognize literal HA invocations in command position, including simple shell wrappers.
+
+    This is a text check, not a shell interpreter: computed commands still depend on the sandbox.
+    """
+    if depth > 3:
+        return False
+    lexer = shlex.shlex(text.replace("\\\n", " "), posix=True, punctuation_chars=";&|()\n")
+    lexer.whitespace = " \t\r"
+    lexer.whitespace_split = True
+    lexer.commenters = "#"
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        # An unfinished quote must not turn a recognizable command into an escape.
+        lexer = shlex.shlex(text.replace("\\\n", " ").replace('"', '').replace("'", ""),
+                            posix=True, punctuation_chars=";&|()\n")
+        lexer.whitespace = " \t\r"
+        lexer.whitespace_split = True
+        lexer.commenters = "#"
+        try:
+            tokens = list(lexer)
+        except ValueError:
+            return False
+    segments = []
+    segment = []
+    for token in tokens:
+        if token and all(char in ";&|()\n" for char in token):
+            # Keep a line break following a bare HA word conservative, as with
+            # other whitespace; still recognize new commands on separate lines.
+            if token == "\n" and len(segment) == 1 and segment[0].lower() == "ha":
+                continue
+            if segment:
+                segments.append(segment)
+                segment = []
+        else:
+            segment.append(token)
+    if segment:
+        segments.append(segment)
+    for segment in segments:
+        index = 0
+        while index < len(segment):
+            word = segment[index]
+            if SHELL_ASSIGNMENT_RE.match(word):
+                index += 1
+            elif word.lower() in ("env", "sudo", "command", "xargs"):
+                index += 1
+                while index < len(segment) and segment[index].startswith("-"):
+                    index += 1
+            else:
+                break
+        if index >= len(segment):
+            continue
+        program = segment[index].lower()
+        if program.rsplit("/", 1)[-1] in ("sh", "bash") and index + 2 < len(segment) and segment[index + 1] == "-c":
+            if _ha_command(segment[index + 2], remote_on, depth + 1):
+                return True
+        if program != "ha" and not (program.startswith("/") and program.endswith("/ha")):
+            continue
+        index += 1
+        while index < len(segment) and segment[index].startswith("-"):
+            flag = segment[index].lower()
+            index += 1
+            if flag == "--log-level" and index < len(segment):
+                index += 1
+        if index < len(segment):
+            family = segment[index].lower()
+            if family in HA_ALWAYS_FAMILIES or (remote_on and family in HA_REMOTE_FAMILIES):
+                return True
+    return False
+
 
 def _policy_restriction(text: str) -> str:
     """Name protected app settings/rules/policy in either a patch path or command text.
@@ -710,6 +788,8 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
             definition = re.search(r"\b(" + "|".join(REMOTE_DEFINITIONS) + r")\s*:", text)
             if definition:
                 return f"This command names a {definition[1]} definition, which Codex may not write or edit."
+        if _ha_command(text, remote_on):
+            return "This command talks to the Home Assistant Supervisor, which is never allowed."
         for pattern, why in PROTECTED_COMMAND_RES:
             if pattern.search(text):
                 return f"This command {why}, which is never allowed."
