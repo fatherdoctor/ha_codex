@@ -49,8 +49,14 @@ def timestamp(value):
     return datetime.fromtimestamp(value, timezone.utc).isoformat()
 
 
-def version(value):
-    return value if isinstance(value, str) and re.fullmatch(r'\d{1,4}\.\d{1,4}\.\d{1,4}(?:\.\d{1,4})?', value) else 'unknown'
+# Versions are schema-owned metadata too. A dotted-quad alone could be an
+# address planted in a version field; update these alongside package pins.
+ADDON_VERSIONS = frozenset({'0.1.81.2'})
+CLI_VERSIONS = frozenset({'0.166.0'})
+
+
+def version(value, allowed):
+    return choice(value, allowed)
 
 
 def scrub(record):
@@ -60,11 +66,10 @@ def scrub(record):
     out = {'source': choice(record.get('source'), ORIGINS),
            'start': timestamp(record.get('start')), 'end': timestamp(record.get('end')),
            'duration_seconds': number(record.get('duration_seconds')),
-           'cli_version': version(record.get('cli_version')),
+           'cli_version': version(record.get('cli_version'), CLI_VERSIONS),
            'outcome': choice(record.get('outcome'), RESULTS),
            'model': choice(record.get('model'), MODELS),
-           'addon_version': record.get('addon_version') if isinstance(record.get('addon_version'), str)
-           and re.fullmatch(r'\d{1,4}\.\d{1,4}\.\d{1,4}(?:\.\d{1,4})?', record['addon_version']) else 'unknown'}
+           'addon_version': version(record.get('addon_version'), ADDON_VERSIONS)}
     events = record.get('events')
     out['events'] = []
     for event in events[:MAX_EVENTS] if isinstance(events, list) else []:

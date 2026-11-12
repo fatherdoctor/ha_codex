@@ -751,8 +751,8 @@ references and 32 file categories; excess detail and older records are dropped.
 Entity references are hashed again per download and stay consistent within that
 file. Paths under `/config` retain only an allowlisted folder category and file
 extension; other paths and arbitrary names are excluded. Unknown models/tools
-are reported as unknown/other. Version values unavailable in a development
-checkout are marked unknown. Active records have no end time yet; interruption
+are reported as unknown/other. Unrecognized build versions, including development
+builds, are marked unknown. The version allowlists must follow package pins. Active records have no end time yet; interruption
 can leave such a record unfinished rather than inventing an outcome.
 
 **Remote ChatGPT threads are not recorded in this first delivery.** Every export

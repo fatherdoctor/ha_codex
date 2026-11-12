@@ -151,6 +151,17 @@ class RecorderTests(unittest.TestCase):
         self.assertEqual(self.recorder.active,{})
         self.assertEqual(self.store.export()['availability'],'unavailable')
 
+    def test_address_shaped_version_fields_are_not_exported(self):
+        from diagnostics_scrub import sanitize_export
+        address='.'.join(map(str,(192,0,2,44)))
+        out=sanitize_export({'interactions':[{'addon_version':address,'cli_version':address}]})
+        self.assertNotIn(address,json.dumps(out))
+        self.assertEqual(out['interactions'][0]['addon_version'],'unknown')
+        self.assertEqual(out['interactions'][0]['cli_version'],'unknown')
+        config=Path(__file__).resolve().parents[1]/'config.yaml'
+        import yaml
+        self.assertIn(yaml.safe_load(config.read_text())['version'],__import__('diagnostics_scrub').ADDON_VERSIONS)
+
     def test_export_revalidation_rejects_nested_planted_values(self):
         from diagnostics_scrub import sanitize_export
         out=sanitize_export({'availability':'PRIVATE_CANARY','coverage':'PRIVATE_CANARY','interactions':[
