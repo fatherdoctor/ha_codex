@@ -7,21 +7,27 @@ import sys
 
 ATTRIBUTES = ['friendly_name', 'unit_of_measurement', 'device_class', 'supported_features', 'brightness',
               'color_temp', 'current_temperature', 'temperature', 'hvac_modes', 'supported_color_modes', 'assumed_state', 'icon']
-TOOL = {'name': 'read', 'description': 'Read Home Assistant entity ids and current states through the worker without a hand-made API token. This is observational: no service calls, reloads, arbitrary URLs or credential entities. Use states with an optional domain and bounded page; use state with an exact entity id and optional documented attributes. Truncated values are marked. This does not verify automation behavior.',
+class ReadRequestError(ValueError):
+    """A fixed local argument error; transport/backend exceptions stay generic."""
+
+
+TOOL = {'name': 'read', 'description': 'Read entity ids and current states through the worker without a hand-made API token. Observational only: no actions, arbitrary URLs, credential entities or approvals. For states, send only domain and paging; for state, send entity_id and optional attributes. Omit unrelated fields or use null/empty values. Truncated values and capped pages are marked.',
         'inputSchema': {'type': 'object', 'additionalProperties': False, 'properties': {
-            'operation': {'enum': ['states', 'state']}, 'entity_id': {'type': 'string', 'maxLength': 255},
-            'attributes': {'type': 'array', 'maxItems': 10, 'items': {'enum': ATTRIBUTES}},
-            'domain': {'type': 'string', 'maxLength': 64}, 'offset': {'type': 'integer', 'minimum': 0, 'maximum': 100000},
-            'limit': {'type': 'integer', 'minimum': 1, 'maximum': 50}}, 'required': ['operation']},
+            'operation': {'type': 'string', 'enum': ['states', 'state'], 'description': 'states lists a page; state reads one exact entity.'},
+            'entity_id': {'type': ['string', 'null'], 'maxLength': 255, 'description': 'Required for state. For states, omit or send null/empty text.'},
+            'attributes': {'type': ['array', 'null'], 'maxItems': 10, 'items': {'enum': ATTRIBUTES}, 'description': 'For state only: documented attributes to return; omitted/null means none. For states, omit, null or empty array.'},
+            'domain': {'type': ['string', 'null'], 'maxLength': 64, 'description': 'For states only: optional domain filter; omitted/null/blank means all. For state, omit or null.'},
+            'offset': {'type': ['integer', 'null'], 'minimum': 0, 'maximum': 100000, 'description': 'For states only: omitted/null means 0. For state, omit or null.'},
+            'limit': {'type': ['integer', 'null'], 'minimum': 1, 'description': 'For states only: omitted/null means 10. Values above 50 are capped at 50 with a result note. For state, omit or null.'}}, 'required': ['operation']},
         'annotations': {'readOnlyHint': True, 'destructiveHint': False, 'idempotentHint': True, 'openWorldHint': False}}
 
 
 def read(arguments):
     if not isinstance(arguments, dict) or set(arguments) - set(TOOL['inputSchema']['properties']):
-        raise ValueError('Unsupported read arguments.')
+        raise ReadRequestError('Unsupported read arguments.')
     raw = json.dumps({'capability': os.environ.get('HA_RELAY_CAPABILITY', ''), 'arguments': arguments}).encode() + b'\n'
     if len(raw) > 16384:
-        raise ValueError('Read request is too large.')
+        raise ReadRequestError('Read request is too large.')
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
         client.settimeout(15)
         client.connect(os.environ.get('HA_RELAY_SOCKET', '/data/relay-read.sock'))
@@ -29,7 +35,7 @@ def read(arguments):
         with client.makefile('rb') as stream:
             response = stream.readline(65537)
     if not response or len(response) > 65536:
-        raise ValueError('Read response is unavailable or oversized.')
+        raise ReadRequestError('Read response is unavailable or oversized.')
     return json.loads(response)
 
 
@@ -45,8 +51,10 @@ def respond(request):
         try:
             params = request.get('params', {})
             if params.get('name') != 'read':
-                raise ValueError()
+                raise ReadRequestError('Unsupported read tool.')
             result = read(params.get('arguments', {}))
+        except ReadRequestError as exc:
+            result = {'ok': False, 'error': str(exc)}
         except (OSError, ValueError, TypeError, AttributeError):
             result = {'ok': False, 'error': 'Relay read unavailable or expired. No action was performed.'}
         return {'content': [{'type': 'text', 'text': json.dumps(result)}], 'isError': not result.get('ok')}

@@ -20,16 +20,34 @@ ATTRIBUTES = frozenset(('friendly_name', 'unit_of_measurement', 'device_class', 
 MAX_RESPONSE = 65536
 
 
+class ReadError(ValueError):
+    """A fixed worker-authored message safe to return to the caller."""
+
+
+READ_FIELDS = frozenset(('operation', 'entity_id', 'attributes', 'domain', 'offset', 'limit'))
+
+
+def operation_arguments(args, allowed, reason):
+    """Ignore only known, inapplicable fields whose values carry no request."""
+    for key, value in args.items():
+        if key in allowed:
+            continue
+        empty = value is None or (isinstance(value, str) and not value.strip()) or (isinstance(value, list) and not value)
+        if key not in READ_FIELDS or not empty:
+            raise ReadError(reason)
+    return {key: value for key, value in args.items() if key in allowed}
+
+
 def fetch_states(path, token):
     if path != '/states' and not (path.startswith('/states/') and ENTITY.fullmatch(path[8:])):
-        raise ValueError('Unsupported Core read path.')
+        raise ReadError('Unsupported Core read path.')
     try:
         return get_json('http://supervisor/core/api' + path, token, 16 * 1024 * 1024)
     except ResponseTooLarge:
         raise StateResponseTooLarge('Core state response exceeds 16 MiB. Request a single entity instead.') from None
 
 
-class StateResponseTooLarge(ValueError):
+class StateResponseTooLarge(ReadError):
     pass
 
 
@@ -81,54 +99,65 @@ class RelayReads:
 
     def dispatch(self, request):
         if not isinstance(request, dict) or set(request) != {'capability', 'arguments'} or not self.active(request['capability']):
-            raise ValueError('Inactive relay capability.')
+            raise ReadError('Inactive relay capability.')
         args = request['arguments']
         if not isinstance(args, dict):
-            raise ValueError('Read arguments must be an object.')
+            raise ReadError('Read arguments must be an object.')
         operation = args.get('operation')
         if operation == 'state':
-            if set(args) - {'operation', 'entity_id', 'attributes'}:
-                raise ValueError('Unsupported state fields.')
-            entity_id = self.entity_id(args.get('entity_id'))
-            attributes = args.get('attributes', [])
+            args = operation_arguments(args, {'operation', 'entity_id', 'attributes'}, 'Unsupported state fields.')
+            try:
+                entity_id = self.entity_id(args.get('entity_id'))
+            except ValueError:
+                raise ReadError('Use a noncredential entity id.') from None
+            attributes = args.get('attributes')
+            if attributes is None:
+                attributes = []
             if (not isinstance(attributes, list) or len(attributes) > 10
                     or any(not isinstance(key, str) or key not in ATTRIBUTES for key in attributes)):
-                raise ValueError('Use only the documented observational attributes.')
+                raise ReadError('Use only the documented observational attributes.')
             path = '/states/' + entity_id
         elif operation == 'states':
-            if set(args) - {'operation', 'domain', 'offset', 'limit'}:
-                raise ValueError('Unsupported entity-list fields.')
-            domain, offset, limit = args.get('domain'), args.get('offset', 0), args.get('limit', 10)
+            args = operation_arguments(args, {'operation', 'domain', 'offset', 'limit'}, 'Unsupported entity-list fields.')
+            domain, offset, limit = args.get('domain'), args.get('offset'), args.get('limit')
+            if domain is None or (isinstance(domain, str) and not domain.strip()):
+                domain = None
+            if offset is None:
+                offset = 0
+            if limit is None:
+                limit = 10
             if domain is not None and (not isinstance(domain, str) or not DOMAIN.fullmatch(domain) or len(domain) > 64):
-                raise ValueError('Invalid domain.')
-            if type(offset) is not int or not 0 <= offset <= 100000 or type(limit) is not int or not 1 <= limit <= 50:
-                raise ValueError('Use a valid page offset and a limit from 1 through 50.')
+                raise ReadError('Invalid domain.')
+            if type(offset) is not int or not 0 <= offset <= 100000 or type(limit) is not int or limit < 1:
+                raise ReadError('Use an integer page offset from 0 through 100000 and a positive integer limit.')
+            clamped = limit > 50
+            limit = min(limit, 50)
             path = '/states'
         else:
-            raise ValueError('Only entity listings and state readback are supported. No actions or arbitrary URLs.')
+            raise ReadError('Only entity listings and state readback are supported. No actions or arbitrary URLs.')
         if not self.inflight.acquire(blocking=False):
-            raise ValueError('A relay read is already running. Try again later.')
+            raise ReadError('A relay read is already running. Try again later.')
         try:
             if not self.active(request['capability']):
-                raise ValueError('Relay capability expired.')
+                raise ReadError('Relay capability expired.')
             token = self.token()
             if not token:
-                raise ValueError('Worker Core access is unavailable.')
+                raise ReadError('Worker Core access is unavailable.')
             data = self.fetch(path, token)
             if operation == 'state':
                 if not isinstance(data, dict) or data.get('entity_id') != entity_id or not isinstance(data.get('state'), str):
-                    raise ValueError('Core returned an unavailable or invalid entity.')
+                    raise ReadError('Core returned an unavailable or invalid entity.')
                 if password_state(data):
-                    raise ValueError('Password-mode text entities are unavailable to relay reads.')
+                    raise ReadError('Password-mode text entities are unavailable to relay reads.')
                 raw_attrs = data.get('attributes')
                 if not isinstance(raw_attrs, dict):
-                    raise ValueError('Core returned invalid attributes.')
+                    raise ReadError('Core returned invalid attributes.')
                 result = {'ok': True, 'entity_id': entity_id, 'state': data['state'][:512],
                           'state_truncated': len(data['state']) > 512,
                           'attributes': {key: raw_attrs[key] for key in attributes if key in raw_attrs}}
             else:
                 if not isinstance(data, list) or any(not isinstance(row, dict) for row in data):
-                    raise ValueError('Core returned an invalid entity listing.')
+                    raise ReadError('Core returned an invalid entity listing.')
                 safe = []
                 for row in data:
                     if password_state(row):
@@ -139,17 +168,19 @@ class RelayReads:
                         continue
                     if domain is None or candidate.split('.', 1)[0] == domain:
                         if not isinstance(row.get('state'), str):
-                            raise ValueError('Core returned an invalid state.')
+                            raise ReadError('Core returned an invalid state.')
                         safe.append({'entity_id': candidate, 'state': row['state'][:512],
                                      'state_truncated': len(row['state']) > 512})
                 safe.sort(key=lambda item: item['entity_id'])
                 result = {'ok': True, 'entities': safe[offset:offset + limit], 'total': len(safe),
                           'next_offset': offset + limit if offset + limit < len(safe) else None}
+                if clamped:
+                    result['notes'] = ['Page limit capped at 50.']
             result = self.clean(result)
             if len(json.dumps(result).encode()) + 1 > MAX_RESPONSE:
-                raise ValueError('Read response is too large. Request fewer attributes or a smaller page.')
+                raise ReadError('Read response is too large. Request fewer attributes or a smaller page.')
             if not self.active(request['capability']):
-                raise ValueError('Relay capability expired before readback finished.')
+                raise ReadError('Relay capability expired before readback finished.')
             return result
         finally:
             self.inflight.release()
@@ -162,9 +193,13 @@ class RelayReads:
                 try:
                     raw = self.rfile.readline(16385)
                     if len(raw) > 16384:
-                        raise ValueError()
-                    result = broker.dispatch(json.loads(raw))
-                except StateResponseTooLarge as exc:
+                        raise ReadError('Read request exceeds 16 KiB.')
+                    try:
+                        payload = json.loads(raw)
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        raise ReadError('Invalid relay read request JSON.') from None
+                    result = broker.dispatch(payload)
+                except ReadError as exc:
                     result = {'ok': False, 'error': str(exc)}
                 except Exception:
                     result = {'ok': False, 'error': 'Read unavailable, refused or expired. No action was performed.'}
