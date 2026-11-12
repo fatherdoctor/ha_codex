@@ -403,6 +403,8 @@ Each document, including a failed parse, is cached by its content hash. Hook/exc
 for that operation; the watch retains its cache between scans, bounded to 512 entries and 16 MiB of source
 bytes. Parsed graphs use additional memory. An unchanged idle scan composes no documents while its
 working set fits the cache; evicted documents are parsed again. Changed hashes always require a fresh parse.
+The watch also reuses its last classification only when every scanned file hash, active rule and include
+error is unchanged. It still reads included bytes, so a changed non-YAML dependency invalidates that result.
 A parsed-check budget failure is reported on its file; the line rules continue without raising
 out of script resolution or include discovery. In the hook, a script or include dependency that could not
 be parsed refuses the patch by filename; unrelated large ordinary files do not veto an ordinary patch.

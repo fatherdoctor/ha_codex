@@ -165,6 +165,27 @@ class WorkBudgetTests(unittest.TestCase):
         self.assertIn('package.yaml', reason)
         self.assertIn('refused', reason)
 
+    def test_idle_scan_reuses_classification_but_rule_changes_invalidate_it(self):
+        self.write('ordinary.yaml', '- action: light.turn_on\n')
+        policy = dict(self.policy)
+        watch = rc.ConfigWatch(self.root, Path(self.tmp.name) / 'baseline', rules=lambda: policy)
+        self.assertEqual(watch.scan(), {})
+        with patch.object(rules, 'find_refused', side_effect=AssertionError('idle classification repeated')):
+            self.assertEqual(watch.scan(), {})
+
+        policy['reaches_anything'] = list(policy['reaches_anything']) + ['light']
+        self.assertIn('ordinary.yaml', watch.scan())
+
+    def test_caller_cannot_mutate_retained_classification(self):
+        self.write('commands.yaml', 'shell_command: {sample: echo sample}\n')
+        watch = rc.ConfigWatch(self.root, Path(self.tmp.name) / 'baseline')
+        first = watch.scan()
+        first['commands.yaml'].clear()
+        first['extra.yaml'] = []
+        second = watch.scan()
+        self.assertTrue(second['commands.yaml'])
+        self.assertNotIn('extra.yaml', second)
+
 
 if __name__ == '__main__':
     unittest.main()

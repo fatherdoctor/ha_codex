@@ -22,6 +22,7 @@ setup fails, Codex starts without the custom name and the page explains why.
 from __future__ import annotations
 
 import base64
+import copy
 import fcntl
 import io
 import hashlib
@@ -282,6 +283,7 @@ class ConfigWatch:
         self.rules = rules
         self.lock = threading.RLock()
         self._yaml_cache = gate_rules.YamlCache()
+        self._classification_cache = None
 
     def files(self) -> list[Path]:
         """Return the YAML files the watch reads, sorted, skipping stores, code, caches and very large files."""
@@ -324,6 +326,13 @@ class ConfigWatch:
             except (OSError, ValueError):
                 continue
         texts = gate_rules.extend_include_texts(texts, self.root, rules, max_bytes=WATCH_MAX_BYTES, raw_files=raw_files)
+        signature = (
+            tuple(sorted((rel, hashlib.sha256(raw).digest()) for rel, raw in raw_files.items())),
+            json.dumps(rules, sort_keys=True),
+            tuple(sorted(gate_rules.scan_failures().items())),
+        )
+        if self._classification_cache is not None and self._classification_cache[0] == signature:
+            return copy.deepcopy(self._classification_cache[1])
         scripts = self.refused_scripts(texts, rules)
         lines = {rel: found for rel, text in texts.items() if (found := gate_rules.find_refused(text, rules, scripts))}
         blocks = {rel: found for rel, text in texts.items() if (found := gate_rules.refused_blocks(text, rules, scripts))}
@@ -335,6 +344,7 @@ class ConfigWatch:
         for rel, reason in gate_rules.scan_failures().items():
             finding = gate_rules.Finding(1, reason, '', 'parse_budget')
             lines.setdefault(rel, []).append(finding)
+        self._classification_cache = (signature, copy.deepcopy((lines, blocks)))
         return lines, blocks
 
     def has_baseline(self) -> bool:
