@@ -84,6 +84,9 @@ class Service:
             raise ValueError('Invalid scheduling request.')
         cap = payload['capability']
         w = self.worker
+        # Refresh cached HA metadata before taking the worker lock. Validate the
+        # turn afterward, since it may expire while a slow HA request completes.
+        store = self.engine().store
         with w.lock:
             with w.ha_data.lock:
                 task_id = next((key for key, value in w.ha_data.capabilities.items() if isinstance(cap, str) and cap and hmac.compare_digest(value, cap)), None)
@@ -92,7 +95,6 @@ class Service:
             operation, args = payload['operation'], payload['arguments']
             if not isinstance(args, dict):
                 raise ValueError('Arguments must be an object.')
-            store = self.engine().store
             if operation == 'propose_schedule':
                 item = store.save(args, owner=False, author='codex', now=time.time())
                 return {'ok': True, 'schedule_id': item['id'], 'approved': False, 'enabled': False,

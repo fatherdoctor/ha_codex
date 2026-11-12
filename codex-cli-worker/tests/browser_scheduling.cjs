@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
     for (const width of [390, 1100]) {
       const page = await browser.newPage({viewport:{width,height:844}});
       const errors=[]; page.on('pageerror', e=>errors.push(e.message));
-      let schedules=[], mailbox=[], created, edits=0, newTokens=0;
+      let schedules=[], mailbox=[], created, edits=0, newTokens=0, mailDeletes=0;
       await page.route('**/schedules**', async route => {
         const req=route.request(), path=new URL(req.url()).pathname.replace('/preview/','');
         if (path.startsWith('assets/')) return route.continue();
@@ -23,7 +23,7 @@ const assert = require('node:assert/strict');
       });
       await page.route('**/lead-token', route=>{newTokens++;return route.fulfill({json:{ok:true,token:'synthetic-once-only-value'}});});
       await page.route('**/schedule-mailbox**', route=>{
-        if (route.request().method()==='DELETE') { mailbox=[]; return route.fulfill({json:{ok:true}}); }
+        if (route.request().method()==='DELETE') { mailDeletes++; mailbox=[]; return route.fulfill({json:{ok:true}}); }
         const data=route.request().postDataJSON();
         mailbox.push({id:'mail-'+mailbox.length,parent:route.request().url().endsWith('/reply')?'mail-0':null,body:data.body,author:'owner',created:1803859200});
         return route.fulfill({json:{ok:true}});
@@ -87,7 +87,22 @@ const assert = require('node:assert/strict');
       await page.locator('#schedule-mailbox').getByText('A sample reply',{exact:true}).waitFor();
       assert.equal(mailbox[1].parent,'mail-0');
       await page.locator('#schedule-mailbox').getByRole('button',{name:'Clear mailbox',exact:true}).click();
+      await page.waitForFunction(()=>document.querySelector('#schedule-mail-clear-confirmation') || document.querySelector('#schedule-mailbox').textContent.includes('No local messages.'));
+      assert.equal(mailDeletes,0,'The first tap must not delete messages');
+      const confirmation=page.locator('#schedule-mail-clear-confirmation');
+      await confirmation.getByRole('button',{name:'Cancel',exact:true}).click();
+      await page.locator('#schedule-mailbox').getByRole('button',{name:'Clear mailbox',exact:true}).waitFor();
+      assert.equal(mailDeletes,0); assert.equal(mailbox.length,2);
+      await page.locator('#schedule-mailbox').getByRole('button',{name:'Clear mailbox',exact:true}).click();
+      await confirmation.waitFor();
+      await page.locator('#close-settings').click(); await openSettings();
+      await page.locator('#schedule-mailbox').getByRole('button',{name:'Clear mailbox',exact:true}).waitFor();
+      assert.equal(await confirmation.count(),0,'Closing settings cancels pending confirmation');
+      assert.equal(mailDeletes,0);
+      await page.locator('#schedule-mailbox').getByRole('button',{name:'Clear mailbox',exact:true}).click();
+      await confirmation.getByRole('button',{name:'Clear all messages',exact:true}).click();
       await page.locator('#schedule-mailbox').getByText('No local messages.').waitFor();
+      assert.equal(mailDeletes,1);
       await page.locator('#lead-token-create').click();
       await page.locator('#lead-token-result').waitFor({state:'visible'});
       assert.equal(await page.locator('#lead-token-value').getAttribute('type'),'password');
@@ -99,7 +114,7 @@ const assert = require('node:assert/strict');
       await page.waitForFunction(()=>document.querySelector('#lead-token-value').value==='');
       assert.deepEqual(errors,[]);
       await page.close();
-      console.log(`PASS ${width}px: schedule CRUD, HA-zone one-off entry, masked Edit disabled, proposal approval, literal rendering, mailbox clearing, pending status and token cleanup.`);
+      console.log(`PASS ${width}px: schedule CRUD, HA-zone one-off entry, masked Edit disabled, proposal approval, literal rendering, in-page mailbox confirmation/cancel/close, pending status and token cleanup.`);
     }
   } finally {await browser.close();}
 })().catch(error=>{console.error(error.stack);process.exitCode=1;});

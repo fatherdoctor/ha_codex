@@ -6,6 +6,8 @@
   let timer;
   let zone = null;
   let refreshing = false;
+  let clearConfirmation = false;
+  let focusClearCancel = false;
   function message(error) {
     el("schedule-result").textContent = String(error.message || error);
   }
@@ -34,6 +36,7 @@
     };
     return value;
   }
+  function cancelMailClear() { clearConfirmation = false; focusClearCancel = false; }
   function describe(spec) {
     if (spec.kind === "interval") return `Every ${spec.seconds / 60} minutes`;
     if (spec.kind === "cron") return `Cron: ${spec.expression} (${zone || "time zone unavailable"})`;
@@ -88,7 +91,27 @@
       if (!data.runs.length) runs.append(node("p", "No runs yet.", "muted"));
       el("lead-token-status").textContent = data.lead_token_configured ? "A lead token is configured." : "No lead token is configured.";
       const mailbox = el("schedule-mailbox"); mailbox.replaceChildren();
-      if (data.mailbox.length) mailbox.append(button("Clear mailbox", () => api("schedule-mailbox", undefined, "DELETE")));
+      if (data.mailbox.length) {
+        if (clearConfirmation) {
+          const confirmation = node("div", "");
+          confirmation.id = "schedule-mail-clear-confirmation";
+          confirmation.setAttribute("role", "group");
+          confirmation.setAttribute("aria-label", "Clear mailbox confirmation");
+          confirmation.append(node("p", "Delete all mailbox threads and replies? This cannot be undone."));
+          const actions = node("div", "", "settings-actions");
+          const cancel = button("Cancel", cancelMailClear);
+          actions.append(cancel, button("Clear all messages", async () => {
+            await api("schedule-mailbox", undefined, "DELETE");
+            cancelMailClear();
+            el("schedule-mail-parent").value = "";
+            el("schedule-mail-target").textContent = "New message";
+          }));
+          confirmation.append(actions); mailbox.append(confirmation);
+          if (focusClearCancel) { cancel.focus(); focusClearCancel = false; }
+        } else {
+          mailbox.append(button("Clear mailbox", () => { clearConfirmation = true; focusClearCancel = true; }));
+        }
+      } else cancelMailClear();
       for (const mail of data.mailbox) {
         const item = node("div", "");
         item.append(node("strong", `${mail.author} · ${when(mail.created)}${mail.parent ? " · reply" : ""}`), node("pre", mail.body));
@@ -141,8 +164,8 @@
   new MutationObserver(() => {
     clearInterval(timer);
     if (dialog.open) { refresh(); timer = setInterval(refresh, 15000); }
-    else hideToken();
+    else { hideToken(); cancelMailClear(); }
   }).observe(dialog, {attributes: true, attributeFilter: ["open"]});
-  dialog.addEventListener("close", () => { clearInterval(timer); hideToken(); });
+  dialog.addEventListener("close", () => { clearInterval(timer); hideToken(); cancelMailClear(); });
   format();
 })();
