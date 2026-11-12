@@ -59,9 +59,9 @@ class ClosureCases(unittest.TestCase):
         text = (pathlib.Path(__file__).resolve().parents[1] / 'DOCS.md').read_text()
         protected = text.index('**Protected policy.**')
         who = text.index('**Who can answer.**', protected)
-        warning = 'This check reads only the command text. It cannot see a path built while the command runs, a symlink, or a relative path from an unknown folder. Such a command keeps **Allow once**, so read it before you allow it.'
+        warning = 'Commands that write to or search protected places, such as `/etc/codex`, lose **Allow once**. That check reads only the command text: it cannot see a path built while the command runs, a symlink, or a relative path from an unknown folder. Such a command keeps **Allow once**, so read it before you allow it.'
         self.assertIn(warning, text[who:])
-        self.assertNotIn('This check reads only the command text.', text[protected:who])
+        self.assertNotIn('That check reads only the command text', text[protected:who])
         self.assertNotIn('The Allow-button check', text)
 
 
