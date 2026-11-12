@@ -33,7 +33,8 @@ RUN apk add --no-cache \
     py3-pip \
     rsync \
     tar \
-    util-linux-misc
+    util-linux-misc \
+    tzdata
 
 RUN install -D -m 0755 /usr/bin/bwrap /opt/codex-sandbox/bwrap.exec \
     && install -m 0755 /usr/bin/bwrap /opt/codex-sandbox/relay-bwrap
@@ -96,7 +97,7 @@ COPY gate/remote-control-gate.json /usr/share/ha_codex/remote-control-gate.json
 RUN chmod 0644 /etc/codex/requirements.toml /etc/codex/managed_config.toml /usr/share/ha_codex/* \
     && chown -R root:root /etc/codex /usr/share/ha_codex
 
-COPY approvals.py policy.py gate_rules.py remote_control.py relay_diagnostics.py verification.py verification_mcp.py browser_permissions.py browser_permission_policy.json ha_data.py ha_data_mcp.py browser.cjs browser_resources.cjs browser_permissions.cjs /
+COPY scheduling.py schedule_api.py scheduling_mcp.py approvals.py policy.py gate_rules.py remote_control.py relay_diagnostics.py verification.py verification_mcp.py browser_permissions.py browser_permission_policy.json ha_data.py ha_data_mcp.py browser.cjs browser_resources.cjs browser_permissions.cjs /
 COPY web /web
 # The protected permission policy: read-only, outside /config and every sandbox's writable roots.
 COPY policy/policy.json /usr/share/ha_codex/policy.json
