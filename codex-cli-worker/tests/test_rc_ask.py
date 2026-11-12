@@ -22,9 +22,8 @@ class AskHookTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
         self.config = Path(self.tmp.name)/'config'; self.config.mkdir()
         self.state = Path(self.tmp.name)/'state.json'; self.state.write_text('{"enabled":true}')
-        self.options = Path(self.tmp.name)/'options.json'; self.options.write_text('{"refuse_categories":true}')
-        for key, value in [('CONFIG_ROOT', self.config), ('OPTIONS_PATH', self.options)]:
-            p = patch.object(rules, key, value); p.start(); self.addCleanup(p.stop)
+        p = patch.object(rules, 'CONFIG_ROOT', self.config)
+        p.start(); self.addCleanup(p.stop)
 
     def hook(self, command, event='PermissionRequest', **fields):
         payload = {'hook_event_name': event, 'tool_name':'Bash', 'cwd': str(self.config),

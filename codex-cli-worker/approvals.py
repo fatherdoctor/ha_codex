@@ -25,7 +25,8 @@ REQUEST_LIMIT = 50
 COMMAND_APPROVAL = "item/commandExecution/requestApproval"
 # The app's permission policy, its house rules and Codex's own configuration: a change there is never allowed here.
 PROTECTED_PREFIXES = ("/usr/share/ha_codex", "/data/codex-home/AGENTS.md", "/data/codex-home/config.toml",
-                      "/data/options.json", "/data/worker_api_token")
+                      "/data/options.json", "/data/worker_api_token", "/data/schedules.sqlite3",
+                      "/data/schedules.sqlite3-journal", "/data/schedules.sqlite3-wal", "/data/schedules.sqlite3-shm")
 
 
 def touches_protected_path(path: str) -> bool:
@@ -42,7 +43,7 @@ PROTECTED_COMMAND_RES = (
     re.compile(r"ha_codex/+(policy|agents|house)", re.IGNORECASE),
     re.compile(r"codex-home/+[^\s/]*[*?\[]", re.IGNORECASE),
     re.compile(r"codex-home.*(agents\.md|config\.toml)|(agents\.md|config\.toml).*codex-home", re.IGNORECASE | re.DOTALL),
-    re.compile(r"/data/+options\.json|worker_api_token", re.IGNORECASE),
+    re.compile(r"/data/+options\.json|worker_api_token|schedules\.sqlite3(?:-(?:journal|wal|shm))?|/data/+sched[^/\s]*[*?\[]", re.IGNORECASE),
 )
 
 
@@ -268,6 +269,84 @@ def command_names_protected_path(command: str) -> bool:
 FILE_APPROVAL = "item/fileChange/requestApproval"
 
 
+_SERVICE_PATH = re.compile(r"/api/services/([a-z0-9_]+)/([a-z0-9_]+)")
+
+_SERVICE_WORDS = {"turn_on": "turns on", "turn_off": "turns off", "toggle": "toggles"}
+
+_RELOADS = {
+    ("automation", "reload"): ("Reload the automations.", "Automations read their configuration again; none is run by this step."),
+    ("script", "reload"): ("Reload the scripts.", "Scripts read their configuration again; none is run by this step."),
+    ("scene", "reload"): ("Reload the scenes.", "Scenes read their configuration again; none is applied by this step."),
+    ("homeassistant", "restart"): ("Restart Home Assistant.", "Home Assistant is unavailable for a minute or two."),
+}
+
+_FILE_EFFECTS = (
+    (re.compile(r"(^|/)automations\.yaml$"), "Your automations change once automations are reloaded."),
+    (re.compile(r"(^|/)scripts\.yaml$"), "Your scripts change once scripts are reloaded."),
+    (re.compile(r"(^|/)scenes\.yaml$"), "Your scenes change once scenes are reloaded."),
+    (re.compile(r"(^|/)\.storage/lovelace"), "A dashboard changes; open it to see the change."),
+    (re.compile(r"(^|/)(configuration\.yaml|packages/.+\.ya?ml)$"),
+     "Home Assistant's configuration changes; most parts take effect after a reload or a restart."),
+    (re.compile(r"\.ya?ml$"), "A configuration file changes; it takes effect when Home Assistant next reads it."),
+)
+
+_KIND_WORDS = {"add": "Create", "update": "Change", "delete": "Delete"}
+
+_ENTITY_ID = re.compile(r"(?<![\w.-])[a-z_][a-z0-9_]*\.[a-z0-9_]+\b")
+
+
+def _entity_ids(text: str) -> list[str]:
+    """Return the entity ids a command names, in order, without repeats."""
+    return list(dict.fromkeys(_ENTITY_ID.findall(text)))
+
+def _command_confirmation(command: str, cwd: str, network: str) -> dict[str, str]:
+    """Plain words for a command: a Home Assistant action when one is named, else the command itself."""
+    lower = (command or "").lower()
+    call = _SERVICE_PATH.search(lower)
+    if call:
+        domain, service = call.groups()
+        if (domain, service) in _RELOADS:
+            what, effect = _RELOADS[(domain, service)]
+            return {"what": what, "where": "This Home Assistant.", "effect": effect}
+        targets = [entity for entity in _entity_ids(lower) if entity.split(".")[0] == domain] or _entity_ids(lower)
+        where = ", ".join(targets) if targets else f"every {domain} the action reaches"
+        verb = _SERVICE_WORDS.get(service, f"runs {domain}.{service} on")
+        if domain == "scene" and service == "turn_on":
+            verb = "applies"
+        return {"what": f"Run the Home Assistant action {domain}.{service}.", "where": (where if targets else where.capitalize()) + ".",
+                "effect": f"This {verb} {where}."}
+    where = f"In {cwd}" + (f", reaching {network}" if network else "") + "." if cwd else "On this Home Assistant."
+    return {"what": "Run one command outside the sandbox, shown below.", "where": where,
+            "effect": "Only what that command does; it may read files and use the network."}
+
+def _file_effect(paths: list[str]) -> str:
+    """The plain effect of changing these files: the most specific one that applies to each, without repeats."""
+    effects: list[str] = []
+    for path in paths:
+        effect = next((text for pattern, text in _FILE_EFFECTS if pattern.search(path)), "The file changes.")
+        if effect not in effects:
+            effects.append(effect)
+    return " ".join(effects)
+
+def _changes_confirmation(changes: list[dict[str, Any]]) -> dict[str, str]:
+    """Plain words for a file change: create, change or delete, which files, and what that does."""
+    present = {str(change.get("kind") or "update") for change in changes}
+    verbs = " and ".join(word.lower() for kind, word in _KIND_WORDS.items() if kind in present) or "change"
+    paths = list(dict.fromkeys(str(change[key]) for change in changes for key in ("path", "move_path") if change.get(key)))
+    count = len(changes)
+    what = f"{verbs[0].upper() + verbs[1:]} {count} file{'s' if count != 1 else ''}."
+    return {"what": what, "where": (", ".join(paths) + ".") if paths else "Not given.", "effect": _file_effect(paths)}
+
+
+def confirmation(record: dict[str, Any]) -> dict[str, str]:
+    """Describe the redacted action without making or suppressing its approval decision."""
+    text = (_command_confirmation(record["command"], record["cwd"], record.get("network", ""))
+            if record["kind"] == "command" else _changes_confirmation(record["changes"]))
+    if not record["can_allow"]:
+        text["effect"] = "This request cannot be allowed here. " + record["note"]
+    return text
+
+
 def require_supported_policy(params: dict[str, Any]) -> None:
     """Integration-owned requests must refuse full access instead of relying on Codex's fallback."""
     config = params.get("config") or {}
@@ -466,6 +545,7 @@ class AppServerSession:
             record["note"] = "The complete action is missing, too large, or redacted. Deny it and request an action without hidden details."
         else:
             record["note"] = "Known credentials are hidden. This does not change your sandbox setting or approve future requests."
+        record["confirmation"] = confirmation(record)
         self._records.append(record)
         self._pending[record["approval_id"]] = request_id
         if method == FILE_APPROVAL:

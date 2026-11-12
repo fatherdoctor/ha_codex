@@ -1,0 +1,106 @@
+#!/usr/bin/python3 -I
+"""Immutable AppArmor transition point for the relay, separate from tool sandboxes.
+
+The namespace path delegates privilege removal to Bubblewrap's --cap-drop ALL.
+Both paths map container root to UID/GID 1000 before dropping setup capabilities.
+The fallback omits only UTS setup and verifies capability removal again afterward.
+"""
+import ctypes
+import errno
+import os
+import sys
+from pathlib import Path
+
+RELAY_BWRAP = '/opt/codex-sandbox/relay-bwrap'
+LAUNCHER = '/opt/codex-sandbox/relay-launcher'
+
+
+class LaunchError(ValueError):
+    """A fixed, noncredential failure stage."""
+
+
+def drop_capabilities() -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+
+    def prctl(option, *arguments, stage):
+        if libc.prctl(ctypes.c_int(option), *(ctypes.c_ulong(x) for x in arguments)) < 0:
+            raise LaunchError(stage)
+
+    for capability in range(64):
+        present = libc.prctl(23, capability, 0, 0, 0)  # PR_CAPBSET_READ
+        if present < 0:
+            if ctypes.get_errno() == errno.EINVAL:
+                break
+            raise LaunchError('capability bounding-set read')
+        if present:
+            prctl(24, capability, 0, 0, 0, stage='capability bounding-set drop')
+    prctl(47, 4, 0, 0, 0, stage='ambient capability clear')
+
+    class Header(ctypes.Structure):
+        _fields_ = [('version', ctypes.c_uint32), ('pid', ctypes.c_int)]
+
+    class Data(ctypes.Structure):
+        _fields_ = [('effective', ctypes.c_uint32), ('permitted', ctypes.c_uint32),
+                    ('inheritable', ctypes.c_uint32)]
+
+    header, data = Header(0x20080522, 0), (Data * 2)()
+    if libc.capset(ctypes.byref(header), ctypes.byref(data)) != 0:
+        raise LaunchError('capability set clear')
+    prctl(38, 1, 0, 0, 0, stage='NoNewPrivs set')
+    try:
+        fields = dict(line.split(':', 1) for line in Path('/proc/self/status').read_text().splitlines()
+                      if ':' in line)
+        if any(int(fields[key].strip(), 16) for key in ('CapInh', 'CapPrm', 'CapEff', 'CapBnd', 'CapAmb')):
+            raise LaunchError('capability-set verification')
+        if fields['NoNewPrivs'].strip() != '1':
+            raise LaunchError('NoNewPrivs verification')
+    except (OSError, KeyError, ValueError) as error:
+        if isinstance(error, LaunchError):
+            raise
+        raise LaunchError('capability/status verification') from None
+
+
+def read_label() -> str:
+    try:
+        return Path('/proc/self/attr/apparmor/current').read_text().strip()
+    except FileNotFoundError:
+        return Path('/proc/self/attr/current').read_text().strip()
+
+
+def main() -> None:
+    label = read_label()
+    if not label.endswith('///opt/codex-sandbox/relay-launcher (enforce)') or '//&' in label:
+        raise LaunchError('relay AppArmor label entry (reload the updated profile)')
+    command = sys.argv[1:]
+    if command[:1] == ['--plain']:
+        if len(command) == 1:
+            raise LaunchError('relay command selection')
+        # Root must create this map while it still has setup capabilities.
+        # UID/GID 1000 inside still represent the same kernel owner outside.
+        # Even without a private UTS, a capability-free UID-0 relay could not
+        # create Codex's nested uid map (the CAP_SETFCAP rule since Linux 5.12).
+        command = [RELAY_BWRAP, '--unshare-user', '--uid', '1000', '--gid', '1000',
+                   '--bind', '/', '/', '--dev', '/dev', '--bind-try', '/dev/shm', '/dev/shm',
+                   '--cap-drop', 'ALL', '--', LAUNCHER, '--mapped-plain', *command[1:]]
+    elif command[:1] == ['--mapped-plain']:
+        if os.getuid() != 1000 or os.getgid() != 1000:
+            raise LaunchError('relay non-root uid/gid verification')
+        drop_capabilities()
+        command = command[1:]
+    elif not command or command[0] != RELAY_BWRAP:
+        raise LaunchError('relay namespace helper selection')
+    if not command:
+        raise LaunchError('relay command selection')
+    try:
+        os.execv(command[0], command)
+    except OSError:
+        raise LaunchError('relay namespace helper or Codex exec') from None
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (OSError, ValueError, KeyError) as error:
+        stage = str(error) if isinstance(error, LaunchError) else 'relay label/status read'
+        print('Relay launch failed closed at ' + stage + '.', file=sys.stderr)
+        sys.exit(1)

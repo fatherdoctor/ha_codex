@@ -4,13 +4,12 @@ from pathlib import Path
 root=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(root))
 bootstrap=("import sys,runpy;from pathlib import Path;sys.path.insert(0,sys.argv[1]);import gate_rules;"
-           "gate_rules.CONFIG_ROOT=Path(sys.argv[2]);gate_rules.OPTIONS_PATH=Path(sys.argv[3]);"
-           "sys.argv=sys.argv[4:];runpy.run_path(sys.argv[0],run_name='__main__')")
+           "gate_rules.CONFIG_ROOT=Path(sys.argv[2]);"
+           "sys.argv=sys.argv[3:];runpy.run_path(sys.argv[0],run_name='__main__')")
 values=[];results=[]
 with tempfile.TemporaryDirectory() as folder:
     tmp=Path(folder); config=tmp/'config';config.mkdir()
     state=tmp/'state.json';state.write_text('{"enabled":true}')
-    options=tmp/'options.json';options.write_text('{"refuse_categories":false}')
     target=config/'configuration.yaml'
     normal='shell_command:\n  example: before\n'
     # Long repetitive context stresses ambiguous-match refusal without quadratic work.
@@ -23,7 +22,7 @@ with tempfile.TemporaryDirectory() as folder:
         samples=[];target.write_text(body)
         for _ in range(10):
             start=time.perf_counter()
-            result=subprocess.run([sys.executable,'-I','-c',bootstrap,str(root),str(config),str(options),
+            result=subprocess.run([sys.executable,'-I','-c',bootstrap,str(root),str(config),
                 str(root/'gate/gate_hook.py'),'--state',str(state)],
                 input=json.dumps({**payload,'hook_event_name':'PreToolUse','cwd':str(config)}),
                 text=True,capture_output=True,timeout=5)

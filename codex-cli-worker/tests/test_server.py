@@ -646,14 +646,15 @@ class ModelSelectionTests(unittest.TestCase):
         )
 
     def test_home_assistant_api_url_defaults_to_core(self) -> None:
-        """config.yaml and the worker default the API URL to Home Assistant's own address, where HA_TOKEN works."""
+        """An empty override must not invent a Core port before Supervisor discovery."""
         config = server.yaml.safe_load(
             (SERVER_PATH.parent / "config.yaml").read_text(encoding="utf-8")
         )
 
-        self.assertEqual(config["options"]["ha_url"], "http://homeassistant:8123")
-        self.assertEqual(server.DEFAULT_OPTIONS["ha_url"], "http://homeassistant:8123")
-        self.assertEqual(server.codex_ha_url(config["options"]), "http://homeassistant:8123")
+        self.assertEqual(config["options"]["ha_url"], "")
+        self.assertEqual(server.DEFAULT_OPTIONS["ha_url"], "")
+        with patch.object(server, "core_address", server.CoreAddress()):
+            self.assertIsNone(server.codex_ha_url(config["options"]))
         translations = server.yaml.safe_load(
             (SERVER_PATH.parent / "translations" / "en.yaml").read_text(encoding="utf-8")
         )

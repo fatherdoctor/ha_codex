@@ -24,8 +24,7 @@ class ReviewFixTests(unittest.TestCase):
         self.run = self.root / 'run'
         self.run.mkdir()
         self.rules = gate_rules.load_rules()
-        for obj, name, value in [(server, 'CONFIG_ROOT', self.config),
-                                 (gate_rules, 'OPTIONS_PATH', self.root / 'options.json')]:
+        for obj, name, value in [(server, 'CONFIG_ROOT', self.config)]:
             mock = patch.object(obj, name, value)
             mock.start()
             self.addCleanup(mock.stop)
@@ -61,7 +60,7 @@ class ReviewFixTests(unittest.TestCase):
                 'run_nested:\n  sequence:\n    - action: script.run_shell\n'
                 'run_device:\n  sequence:\n    - action: lock.lock\n')
 
-    def test_f4_watch_resolves_only_security_scripts_when_categories_off(self):
+    def test_f4_watch_resolves_only_security_scripts_without_device_refusals(self):
         (self.config / 'scripts.yaml').write_text(self.script_text())
         target = self.config / 'sample.yaml'
         target.write_text('- action: light.turn_on\n')
@@ -81,7 +80,7 @@ class ReviewFixTests(unittest.TestCase):
         result = server.refuse_planted_edits(self.run, {'added': ['sample.yaml']}, {})
         self.assertEqual(result[0]['undone'], 'removed')
 
-    def test_f4_hook_checks_security_script_calls_without_categories(self):
+    def test_f4_hook_checks_security_script_calls_with_security_rules(self):
         (self.config / 'scripts.yaml').write_text(self.script_text())
         patch_text = '*** Begin Patch\n*** Add File: sample.yaml\n+- action: script.run_nested\n*** End Patch\n'
         with patch.object(gate_rules, 'CONFIG_ROOT', self.config, create=True):
@@ -91,11 +90,10 @@ class ReviewFixTests(unittest.TestCase):
     def test_f5_changed_trigger_with_same_call_is_not_new(self):
         before = '- alias: sample\n  trigger: old\n  action: shell_command.sample\n'
         after = before.replace('old', 'new')
-        self.assertEqual(gate_rules.new_refused(before, after, self.rules, categories=False), [])
-        self.assertTrue(gate_rules.new_refused(before, after, self.rules, categories=True))
+        self.assertEqual(gate_rules.new_refused(before, after, self.rules), [])
         for text in (after.replace('shell_command.sample', 'shell_command.other'), after + 'rest_command:\n  sample: {}\n', after + '- action: \"{{ selected }}\"\n'):
             with self.subTest(text=text):
-                self.assertTrue(gate_rules.new_refused(before, text, self.rules, categories=False))
+                self.assertTrue(gate_rules.new_refused(before, text, self.rules))
 
     def test_f5_watch_does_not_flag_changed_trigger_with_same_call(self):
         target = self.config / 'sample.yaml'
@@ -106,7 +104,7 @@ class ReviewFixTests(unittest.TestCase):
         target.write_text(before.replace('old', 'new'))
         self.assertEqual(watch.new_findings(), [])
 
-    def test_n4_refused_blocks_default_honors_option(self):
+    def test_device_calls_do_not_hash_blocks(self):
         self.assertEqual(gate_rules.refused_blocks('- action: lock.lock', self.rules), {})
 
 
@@ -126,7 +124,6 @@ class CompletedExchangeTests(unittest.TestCase):
             fixture.options['full_snapshot'] = False
             fixture.stack.enter_context(patch.object(worker, 'CONFIG_ROOT', config))
             fixture.stack.enter_context(patch.object(worker, 'build_manifest', fixture.real_build_manifest))
-            fixture.stack.enter_context(patch.object(gate_rules, 'OPTIONS_PATH', fixture.root / 'absent.json'))
             def edit():
                 target.write_text(original.replace('old', 'new'))
                 run = worker.get_run_dir('task')

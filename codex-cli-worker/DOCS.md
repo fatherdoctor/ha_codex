@@ -261,7 +261,7 @@ Codex needs to be able to write to the backup folder. In `workspace-write` mode 
 
 This fork has no `danger-full-access` mode. The upstream app's full-access mode turned the permission requests off; here the protected policy (below) refuses it, and an older setting that still names it stops the app at startup with a log line saying so.
 
-**Protected policy.** The allowed sandbox modes and the approval policy come from `/usr/share/ha_codex/policy.json` inside the app image, outside `/config` and outside every sandbox's writable folders. Nothing in `/config`, the app options or a chat can loosen it: a mode it does not allow stops the app at startup, and each task is refused with a "needs support" message instead of asking anyone to approve an escalation. A file change Codex proposes to the policy, its house rules or the app's own settings can only be denied, and so can a command whose text names one of those places (the check reads the command as written, so it cannot see a path the command builds while it runs). The house rules (`/usr/share/ha_codex/AGENTS.md`) are copied into Codex's home folder at every start, so an edited copy in Codex's home folder does not survive a restart; the image's own copy is restored when the app is updated or rebuilt, not by a restart. Your own `/config/AGENTS.md` adds to them. A command you allow once runs outside the sandbox and is not limited by this policy, so read each one before you allow it.
+**Protected policy.** Allowed sandbox modes and approval policy come from `/usr/share/ha_codex/policy.json` inside the app image, outside `/config` and sandbox writable roots. Options and chats cannot loosen that policy: unsupported modes stop startup and each task. The gate hook, refused domains, private-file masks, Supervisor-token protection and self-edit refusals remain enforced. No house rules are bundled or copied into Codex's home. Codex uses its defaults and the owner's `/config/AGENTS.md`, whose existing editor and reading path remain available. Updates remove only a byte-identical legacy bundled home copy; edited owner files and symlinks are preserved. Owners who want house practices can use the Whole Home Agent starter kit (published separately) and choose their own instructions. Native approval remains specific to the displayed request; read each action before allowing it.
 
 **Who can answer.** Only a signed-in Home Assistant administrator can answer **Allow once** or **Deny**, on the Codex page. The worker checks the user Home Assistant names for the page against its user list and records who answered on the request. The integration's API token cannot answer permission requests, and the integration's actions refuse callers who are not administrators. An automation or script that runs on its own may call the actions; one that a user who is not an administrator starts carries that user, and its call is refused too.
 
@@ -287,29 +287,99 @@ The request and decision remain in the exchange's `approvals` history, with sens
 
 Authenticated API clients can answer a live request using `POST /tasks/<task_id>/approvals/<approval_id>` with `{"turn_id":"<current_turn_id>","decision":"allow"}` or `"deny"`. Read the redacted `approvals` records from `GET /tasks/<task_id>` first. A stale or already answered request returns HTTP 409. Task summaries include `permission_required` while an exchange is waiting. Permission decisions are made directly on the live exchange and are never queued as chat messages.
 
-### Category rules and planted commands
+### Confirmed actions and planted commands
 
-**Refuse actions by category** (`refuse_categories`) is off by default. Codex still keeps the shipped rules: no actions on locks, alarms, covers or cameras, no messages to people, and no publishing. It must refuse even a request to ignore those rules. The existing plain-word confirmation and administrator approval flow remains in place.
+Codex follows its defaults and the owner's `/config/AGENTS.md`. The integration does not bundle a house-practice file prescribing device categories, API-deletion practices or a writing style. Owners can choose such practices through their own workspace instructions or the starter kit. Permission cards and the enforced gate continue to operate independently of prose instructions.
 
-An unreadable or invalid options file leaves this opt-in off; an unreadable remote-control state counts as on, preserving its escalation check. Turn the option on to also enforce the existing device and message checks on configuration edits and the remote-control configuration watch. With it off, those categories and calls to scripts containing them are rules for Codex to keep. The option never enables full access or disables checks on process environments, the Supervisor token, private sign-in files, or sandbox escalation while remote control is on.
+Credential and permission-policy protections remain always on, including the Supervisor token, process environments,
+private sign-in files, secrets and the app's own settings. Normal remote actions follow Codex's native approval flow; explicit full-access requests remain refused.
+Planted shell, REST and Python commands, command/platform definitions and templated action or service names stay
+checked in the hook, configuration watch and end-of-exchange check. An unchanged call or templated target follows
+normal approval; it is not a reason to hash or undo an otherwise ordinary change.
 
-Planted shell, REST and Python commands, platforms that run when loaded, and templated actions or targets are a separate security check. They are refused in patch calls and checked after every local exchange too, including a failed or cancelled exchange. A new unsafe file is removed; a changed one is restored only from a hash-verified earlier copy. The task records any refused edits. Without a verified copy the check reports "could not check" in the task details and leaves the file alone; it does not treat existing lines as new or fail the exchange for them. Review these files before any reload or restart. Per-file copies depend on Codex following its backup instructions; `full_snapshot` saves a complete earlier copy. With category refusals off, changing a trigger or condition around an unchanged always-on call follows the normal approval flow; new calls and changes inside definition, platform or template blocks remain checked. With categories on, changed blocks containing refused actions are also checked. The task's `refused_edits` field records confirmed findings, while `unchecked_edits` lists paths without verified copies; the chat shows the summary and details, not a separate findings table.
+A new unsafe file is removed; a changed file is restored only from a hash-verified earlier copy. Without one, the
+check reports “could not check” without failing the exchange; review those files before any reload or restart.
+Per-file copies depend on the assistant's backup instructions; `full_snapshot` saves a complete earlier copy.
+Confirmed findings stay in `refused_edits`; `unchecked_edits` lists paths with no verified copy. The chat shows
+summary and details. Marking the watch reviewed acknowledges findings; it does not relax the always-on checks.
 
-The configuration watch uses the same distinction while remote control is on. Its baseline retains all categories, so changing the option does not make unchanged earlier actions appear new. Marking the watch reviewed acknowledges its current findings; it does not relax the always-on security checks or the shipped rules.
 
 ## Remote control from the ChatGPT app
 
 OpenAI's remote control (`codex remote-control`) lets the ChatGPT app on a phone or tablet work on this Home Assistant through OpenAI's relay. The app runs it for you; there is no terminal step.
 
-**Startup on Home Assistant OS.** The app uses the existing Bubblewrap child profile to set a private
-UTS host name (`bwrap.real --unshare-user --unshare-uts --hostname "Home Assistant"`). The outer AppArmor
-profile gains no capabilities. This follows Bubblewrap's
-[documented hostname option](https://github.com/containers/bubblewrap/blob/main/bwrap.xml), which succeeded
-in the HAOS lab. A short namespace-only probe runs before Codex; if the probe or the actual namespace setup
-fails, the page and log show **Machine-name namespace unavailable** and Codex starts without a custom name.
-It does not repeatedly restart the failed `unshare -Ur -u` command. Pairing uses the same selected launch path.
-The nested sandbox wrapper is permitted in the existing Bubblewrap child profile. HAOS end-to-end pairing
-and nested-sandbox confirmation still belong to the lead's lab; the outside lane uses disposable fixtures only.
+**Startup on Home Assistant OS.** An immutable launcher enters a dedicated relay AppArmor label.
+Its separate Bubblewrap binary sets a private UTS host name and maps container root to UID/GID
+1000 inside the outer user namespace, then drops all capabilities before Codex starts. The root worker profile gains no
+capabilities. A namespace-only probe selects this route; if setup fails, the page and log show
+**Machine-name namespace unavailable**. The fallback omits the private hostname but still creates
+the non-zero user mapping and enters the relay label. It clears and verifies all capability sets
+and NoNewPrivs before starting Codex, failing closed if the safe mapping cannot be made. Launcher errors
+identify a fixed label, stack, capability or exec stage without printing arguments or raw exceptions.
+
+The inner UID represents the same kernel file owner as container root, so existing `/config`
+and `/data` ownership and access are preserved; files are not chowned. This avoids Linux's
+CAP_SETFCAP requirement for a new mapping of parent UID 0 after privileges were dropped.
+Codex's nested sandbox instead maps parent UID 1000 to itself. Neither route retains a capability
+or relaxes the tool sandbox to make that operation succeed.
+
+The worker creates `/data/remote_control_control/` at startup, including with remote control off.
+The sandbox wrapper masks that fixed parent, so an earlier chat sandbox cannot see a later control
+socket through its ordinary path. Relay tool commands retain the relay label and add a separate
+restrictive tool component while `NoNewPrivs=1`. An immutable guard verifies the actual stack
+before starting native Bubblewrap; the chat tool label is unchanged.
+This prevents the base abstraction's same-label ptrace-read rule from granting a sandbox access to
+the relay's `/proc/<pid>/root`, `cwd` or `environ` in the no-proc fallback. Loaded-label and proc-view
+isolation still require the lead's HAOS acceptance check described in
+[SANDBOX_TESTING.md](SANDBOX_TESTING.md#remote-control-profile-regression).
+
+**Relay execution (CX-RC-EXEC.f2).** The reproduced unified-exec failure was a `nodev` root bind, not
+a missing executable rule. Under the previous outer `--bind / /`, opening `/dev/null` and
+`/dev/ptmx` failed with `EACCES`; pipe commands and PTY commands both failed before exec. The
+outer relay now applies `--dev /dev` after the root bind and preserves shared memory with
+`--bind-try /dev/shm /dev/shm`, exposing standard devices rather than the whole container device
+tree. Removing those device setup flags reproduces the native regression. The former `/opt` rules
+were redundant with `file,` and have been removed. Tool sandbox labels retain their narrower
+`network netlink raw,` rule; the relay alone keeps its parent transport access. Native approvals,
+managed requirements and the command check remain in effect. The relay starts in `/config`.
+
+**First run: no hand-made token for reads.** Pair remote control, then ask for entity ids or current state. The `home_assistant_relay.read` tool uses the worker's existing Supervisor access for bounded, observational entity listings and state readback. The relay receives only a temporary read capability; the Supervisor credential stays in the worker. The page shows the discovered Core address and explains the read tool. Capability rotation, relay exit or stopping revokes a pending read; late results are discarded. This tool is separate from a page task's verification/history tools and cannot call services, reload, approve an action or read credential stores.
+
+Use `{"operation":"states","domain":"light","limit":10}` to list a page, then `{"operation":"state","entity_id":"light.sample","attributes":["friendly_name","brightness"]}` for selected observational attributes. Lists are sorted and return `next_offset`; limits are 1–50 and the default is 10. State strings longer than 512 characters are explicitly marked truncated. Credential-like entity ids and undocumented attributes are refused, and recognized credential values are redacted. A state read does not prove automation behavior. Responses are capped at 64 KiB and Core responses at 16 MiB; request a smaller page or fewer attributes when a read is too large. One relay read runs at a time. Downloads above 16 MiB return an explicit error asking for a single entity. Password-mode input_text entities and credential-like id substrings are excluded from both listings and state readback.
+
+For an unsupported read that needs shell networking, relay instructions tell Codex to request native approval for that specific command instead of silently stopping on a sandbox network denial. Direct commands still require an appropriate Core credential: when the owner optionally configures `HA_TOKEN`, relay commands receive it together with the resolved `HA_URL`. Native approval does not create credentials. The read tool's automatic authentication adds no service-write authority and does not bypass any #22/#27 refusal. Never obtain credentials from stores or process environments.
+
+**Updates keep the enrollment.** Startup sets `CODEX_HOME=/data/codex-home` and pins `sqlite_home` to
+that same persistent directory. It refreshes configuration/instructions without replacing Codex's state
+database or the saved enabled choice. The initialize request retains the client name `ha_codex` across image versions and nonempty display
+name changes. Display/UTS names are not enrollment keys; do not request a new code merely because
+the image changed. The pinned
+[enrollment implementation](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/app-server-transport/src/transport/remote_control/enroll.rs#L293)
+loads enrollment from the state database, keyed by relay target, account and stable app-server client
+name. This is separate from a transient control socket and the replaceable image. An update preserves
+data; uninstalling, clearing data, changing account or revoking enrollment is a different operation.
+Actual reconnect without a new code remains a lead lab acceptance check.
+
+**First pairing (Codex 0.166).** Turn remote control on, wait for the connected state, then choose
+**New pairing code** and type the displayed code into the ChatGPT app. The button calls
+`remoteControl/pairing/start` with `manualCode: true` on the running process's own Unix WebSocket.
+It uses `manualPairingCode`, not the opaque QR pairing token. A missing, unsupported or failed response
+shows an error and clears an earlier code. Turning off or restarting clears the page's code. Codes
+are kept only in administrator page state; recent logs, non-administrator Ingress reads,
+the integration and `/status` omit them. Start, stop, review and new-code requests all require
+an active Home Assistant administrator verified through the same check as task approvals.
+
+This follows the pinned upstream sources at `rust-v0.166.0`:
+
+- [cli/src/remote_control_cmd.rs:187-204](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/cli/src/remote_control_cmd.rs#L187):
+  foreground mode creates a private socket; the separate CLI `pair` command selects the daemon socket.
+- [cli/src/main.rs:591-606 and 1298-1314](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/cli/src/main.rs#L591):
+  `app-server --listen unix://PATH --remote-control` selects ephemeral remote control on this process.
+- [app-server-daemon/src/client.rs:63-140](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/app-server-daemon/src/client.rs#L63)
+  and [remote_control_client.rs:60-140](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/app-server-daemon/src/remote_control_client.rs#L60):
+  Unix WebSocket, experimental initialization, ephemeral enable, status and manual-code request.
+- [app-server-protocol/src/protocol/v2/remote_control.rs:70-83](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/app-server-protocol/src/protocol/v2/remote_control.rs#L70):
+  manual-code request and response fields. No second daemon or terminal pairing step is needed.
 
 **Managed policy and read-only fallback (Codex 0.166).** The requirements allow only `read-only` and
 `workspace-write`, only `on-request` approvals (never `never`), and only managed hooks. Integration-owned
@@ -356,18 +426,18 @@ prevent a reload before the scan, or guarantee capture of an obfuscated referenc
 undo reduce exposure; neither removes the upstream timeout risk.
 
 - **Off until you turn it on.** Open the app page, then **Settings**, then **Remote control from the ChatGPT app**. The choice is saved and holds across app restarts.
-- **One supervised process.** The app runs `codex remote-control --no-daemon` in the foreground and starts it again, with a growing delay, if it exits. **Turn off** stops it.
+- **One supervised process.** The app runs `codex app-server --listen unix://<private socket> --remote-control` in the foreground and starts it again, with a growing delay, if it exits. **Turn off** stops it.
 - **Machine name.** The ChatGPT app lists this machine as **Home Assistant** unless you change the **Remote control machine name** option. Codex has no name setting, so the app starts it with that name as its host name inside a private namespace. If the private name namespace is unavailable, the page explains that Codex is using its existing host name.
 - **Pairing.** The pairing code is shown as large text and as a QR code. Pairing is kept in the app's private storage with the Codex sign-in, so a restart does not ask for it again. **New pairing code** asks Codex for a fresh one when the ChatGPT app has lost this machine.
-- **No Home Assistant credentials.** The remote-control process gets no Home Assistant token and no Supervisor token, even when the `HA_TOKEN` option is set for the chat page.
+- **Automatic Core address and first-run reads.** Relay commands receive the discovered or explicitly overridden `HA_URL`; an owner-configured `HA_TOKEN` remains optional. The separate observational read tool needs no hand-made token. Relay processes never receive the Supervisor token or a chat turn's private MCP capabilities. Never print credentials; approval does not create them.
 - **The command check.** Commands from the ChatGPT app do not pass through this app's Allow and Deny buttons, so the app ships a check that holds outside the model, for every client:
   - Codex's managed requirements (`/etc/codex/requirements.toml`, read-only) rule out the full-access sandbox and any hook other than the app's own.
-  - With remote control on, the managed hook leaves normal light, lock, network and checked-file requests to Codex's native approval flow. It says nothing (exit 0), never auto-approves. The legacy category option cannot make this hook refuse a device action. Credential access, explicit full access, the app's own settings/policy/rules and planted command or template definitions remain refused with a named reason. The watch's separate category behavior remains pending CX-PARITY.
-  - A config watch compares YAML with the baseline from when remote control was turned on. While remote control is on, it undoes planted commands and templates using verified copies with either category setting, and reports device and message findings only with the option on. Review its findings in Settings before reloading or restarting.
-  - **What the scan reads.** The hook, exchange check and config watch share the line-based scan in `gate_rules.py` and `refused-domains.json`. Shell, REST and Python actions, `hassio` and `pyscript`, command/platform definitions and templated actions or targets stay checked, including indirect calls to scripts containing those kinds. With category refusals on it also checks device actions, scene states, message scripts and calls to scripts containing refused actions. It can read an incomplete edit but may miss an obfuscated reference; this does not replace the sandbox or house rules.
-  - The phone uses Codex's own approval card, not this page's buttons: review what will change, where and the effect, then allow or deny that request. A hook no-opinion result leaves the native request waiting; it never grants permission. This hook change proves that route only. The shipped model-level device rules are changed separately by CX-PARITY (#22); actual phone presentation still needs the owner's phone test.
+  - With remote control on, the managed hook leaves normal light, lock, network and checked-file requests to Codex's native approval flow. It says nothing (exit 0), never auto-approves. Credential access, explicit full-access requests, the app's own settings/policy/rules and planted command or template definitions remain refused with a named reason. There are no device-category refusals.
+  - A config watch compares YAML with the baseline from when remote control was turned on. While remote control is on, it undoes new planted commands and templated actions using verified earlier copies, saves replaced bytes privately, and retains undo results until review. Review its findings in Settings before reloading or restarting.
+  - **What the scan reads.** The hook, exchange check and config watch share the line-based scan in `gate_rules.py` and `refused-domains.json`. Shell, REST and Python actions, `hassio` and `pyscript`, command/platform definitions and templated actions stay checked, including indirect calls to scripts containing those kinds. Ordinary actions and templated targets follow the owner's normal confirmation flow. It can read an incomplete edit but may miss an obfuscated reference; this does not replace the sandbox or owner instructions.
+  - The phone uses Codex's own approval card, not this page's buttons: review what will change, where and the effect, then allow or deny that request. A hook no-opinion result leaves the native request waiting; it never grants permission. Actual phone presentation still needs the owner's phone test.
 - **Why Turn on can be unavailable.** Missing command-check files or a failed self-test disable **Turn on** with a reason; the chat page remains available.
-- **Command checks.** Remote control requires the installed gate and its self-test. The self-test checks both a normal PermissionRequest with no hook decision and a credential request that must be refused. Explicit full access and credential access remain refused. Planted commands and templates stay checked with either category setting; the optional category checks are described above. The configuration watch retains undo results and unreviewed changes for review before a reload or restart.
+- **Command checks.** Remote control requires the installed gate and its self-test. Normal remote requests follow Codex's native approval flow, never an automatic approval from the hook. The self-test checks a normal PermissionRequest with no hook decision and a credential request that must be refused. Explicit full-access requests, credential access, changes to the app's settings/policy/rules and planted command definitions remain refused. Templated action names stay checked; installation-specific limits belong in `/config/AGENTS.md`. The configuration watch retains undo results and unreviewed changes before a reload or restart.
 - Remote control is experimental upstream. If it breaks, the chat page is not affected.
 
 ## Codex Sign-In
@@ -401,6 +471,14 @@ The app web UI includes an editor for `/config/AGENTS.md` under **Settings**. Th
 The optional `HA_TOKEN` app option is passed to Codex subprocesses as the `HA_TOKEN` environment variable. Configure it only if you want Codex tasks to call Home Assistant APIs directly. A Home Assistant long-lived access token inherits its user's permissions; use a dedicated user with permissions appropriate for the intended work.
 
 From **0.1.68**, a task that has `HA_TOKEN` also gets `HA_URL`, the address those calls go to, and the worker's instructions tell Codex to use the two together. The address is the **Home Assistant API URL** option (`ha_url`), which now defaults to `http://homeassistant:8123`, Home Assistant's own address inside the app network. Change it only if your Home Assistant uses HTTPS or another port. Before, Codex was given the token without an address and tended to use `http://supervisor/core`, the Supervisor's Core proxy, which rejects a Home Assistant token with HTTP 401; a reload or restart it was asked for then failed. An installation that still has `http://supervisor/core` saved in the option gets the new default, so nothing has to be changed after the update. The app's own calls to Home Assistant keep using the Supervisor proxy with the app's own token and do not use this option.
+
+From **0.1.81.2**, the worker discovers Core's port and SSL flag from Supervisor `/core/info` at startup and each task or relay launch. `ha_url` is now an empty-by-default **Core API URL override**. Leave it empty for discovery; an explicit HTTP(S) override wins. Saved values equal to the former direct default or former Supervisor proxy defaults are treated as unset. Overrides cannot contain credentials, a query or a fragment. Discovery requests use the worker's Supervisor credential only at the fixed internal endpoint, without proxy inheritance or redirects, with bounded timeouts and response size.
+
+The manifest grants `hassio_api: true` with the default Supervisor role and no `hassio_role` override. The default role admits read-only `/info` endpoints such as `/core/info`; the grant exists only to discover Core's port and SSL setting. The Supervisor credential stays in the worker. Each relay and task launch retries a failed metadata read once, then probes the two fixed internal Core API ports in order without any credential. Only a verified API response supplies a fallback address; the log records which source and fallback port were used. Failed probes leave discovery unavailable.
+
+With SSL, set the Home Assistant API URL override to the configured certificate hostname and port. Never disable TLS verification or use insecure client flags to bypass a hostname or certificate error. Discovery does not turn verification off.
+
+`HA_URL` is passed to Codex even without `HA_TOKEN`. If discovery is unavailable or malformed and there is no valid override, the value stays unavailable and is omitted from the environment; neither the worker nor the instructions invent a port. Settings reports that state. A later launch refreshes discovery. The app's own authenticated API calls continue through its Supervisor Core proxy, which does not accept an owner Core token. None of these changes grants shell networking: an unsupported direct API read needs native approval for that command and a separately configured credential.
 
 These calls come from Codex's shell. In `workspace-write` and `read-only`, Codex must request permission for the specific command that needs networking. What Codex can do with the token is whatever the token's user may do, including reloading configuration and restarting Home Assistant.
 
@@ -613,3 +691,44 @@ API: `POST /tasks/<task_id>/pin` with `{"pinned": true}` or `{"pinned": false}` 
 Each new exchange stores its user message, timestamps, status, and response in the task's `turns` list. Prompts, final output, backups, and the list of changed files are stored separately under `<task_root>/<task_id>/turns/<turn_id>/`. The task-level result and existing result events continue to describe the latest exchange. Old tasks are adapted from their available prompt, replies, and last result, with a notice that earlier responses may be missing. History is retained until its files are removed; there is no automatic expiry, except for [backups](#backups).
 
 For local browser checks, run `python codex-cli-worker/tests/web_fixture.py` from the repository root, then `node codex-cli-worker/tests/browser_smoke.cjs` with Playwright available. The fixture uses temporary storage and simulated responses, and never launches Codex or contacts Home Assistant. Set `CODEX_CHAT_BROWSER=msedge` to use installed Edge, and optionally `CODEX_CHAT_QA_DIR` to choose a screenshot directory outside the repository.
+
+
+### ABI and relay fallback acceptance (N8/N9)
+
+The AppArmor ABI declaration enables domain/stack and network_v8 mediation on HAOS; ptrace was already mediated. Both tool labels keep their existing Unix/raw-netlink socket permissions, so sandboxed AF_INET/AF_INET6/packet socket creation is denied. Approved escalations keep the existing parent/relay policy. The lead must run an ordinary chat-page shell read and the history MCP tool after loading the updated HAOS profile; CI's Ubuntu kernel is not that acceptance.
+
+The plain relay route still creates a user namespace and maps to the fixed non-root identity. It omits the private hostname, not the namespace requirement. If namespace creation is refused, it fails closed and retries with backoff. No working fallback is promised in that case. See [sandbox checks](SANDBOX_TESTING.md#abi-socket-family-change-and-namespace-fallback). The scratch-folder proposal is in [CX-HA-URL's design note](../docs/design/CX-HA-URL.md#scratch-folder-proposal-do-not-build); this change creates no notes folder or sandbox bind.
+
+## Scheduled runs and the lead agent channel
+
+In **Settings → Scheduled runs**, save a name, prompt and schedule, using **Default** or **Read only**. Default follows the app's configured sandbox; Read only narrows that mode. **Save and approve schedule** authorizes the exact prompt and timing you submitted. An agent's proposal stays off until an administrator reviews and approves it on this page. An agent can edit or delete only its own unapproved proposals; an approved schedule is owner-only. If a proposal changes while you review it, refresh before approving it. Proposals whose prompt contains masked credentials cannot be approved or prefilled for editing; create a replacement with a complete prompt.
+
+Intervals accept whole minutes or hours, with a minimum of one minute. One-off entry and displayed dates use Home Assistant’s configured IANA time zone, shown above the form. Cron follows that local wall time across daylight-saving changes: missing minutes are skipped and repeated minutes run once, at the first occurrence. One-off nonexistent local times are refused; repeated times use their first occurrence. Entry and scheduled dispatch pause if the Home Assistant time zone is unavailable. Explicit API timestamps with an offset remain absolute instants. Cron uses five numeric local fields: minute, hour, day of month, month and weekday. Lists, ranges and steps are supported. Sunday is 0 or 7. When neither day field starts with a wildcard, either can match. A leading wildcard, including a step such as `*/2`, keeps the other day field restrictive. The next occurrence must be within 366 days. A cron schedule disables after its last occurrence if no next occurrence lies within that horizon; edit it to enable it again. One-off schedules disable after their occurrence is reserved. Pause, resume, edit or delete schedules from the list; deleting a schedule stops future runs, not a task already in progress. Cancel a running task in its chat.
+
+The worker checks due schedules every five seconds. It uses the ordinary task launcher, backups, validation and permission checks, and starts at most one scheduled task per check. Due work waits while the assistant is busy or paused. A missed interval coalesces into one run, without a burst of catch-up tasks. Limits are 100 approved schedules plus 20 unapproved proposals, 24 runs per schedule per UTC day, and 64 scheduled or lead-submitted runs total per UTC day. A run that reaches a limit waits until a later UTC day. Completed run history retains the latest 500 records; active records are kept separately. Schedules, occurrence reservations, run history and mailbox data live in `/data/schedules.sqlite3` and survive app restarts and updates. Reservation and launch share the normal chat-slot lock; a busy launch restores the due occurrence without overwriting a concurrent owner edit. A crash after reservation but before saving the ordinary task records an interrupted run and does not retry it automatically.
+
+**Permission requests remain human decisions.** The run log shows **waiting for approval** while a native request is pending. Open its chat to review the command or diff and choose **Allow once** or **Deny** as an administrator. No scheduler, lead token or mailbox reply can answer it. The parked exchange keeps the worker's normal execution slot; other schedules do not bypass it. Existing task timeouts, cancellation and restart expiration still apply. A question instead shows **waiting for input**. Scheduled and lead tasks report completion, failure, cancellation and questions in the run log/chat without pushes. Only their existing permission-wait notification uses `notify_service` (or persistent Home Assistant notifications). The lead accepted Home Assistant phone notification and the responsive permission page; a ChatGPT approval mirror is not required or provided.
+
+Codex on the worker receives the `codex_scheduling` tools: `propose_schedule`, `list_schedules`, `read_mailbox` and `post_mailbox`. They use a running-turn capability that expires when the exchange ends. Proposal tools cannot approve schedules or grant native permissions. Mailbox and schedule summaries are paginated in groups of 10 by default (`limit` can select 1–20); prompt/message excerpts are limited to 512 characters. Read the complete proposed prompt on the page before approving. These tools are for page tasks; native remote threads do not receive page-task capabilities.
+
+### Connecting the other local agent
+
+An administrator creates or rotates a separate lead token in Settings. It is shown once, cleared when Settings closes, and never saved in browser storage. Copy it directly into the other agent's private configuration. The worker stores only its hash. Rotation immediately revokes the previous token. This token is separate from the integration's worker token and cannot replace a Home Assistant administrator. Never put it in a prompt, URL, mailbox message or repository.
+
+The API is served by the same worker HTTP listener as the existing local API. The other agent uses its configured local worker address and sends `Authorization: Bearer <lead token>`; it must not rely on Ingress headers. Requests use JSON and are limited to 64 KiB. Prompts are limited to 16,000 characters, names to 80, and mailbox messages to 8,000. Responses are not cached and redact recognized credentials. The API does not configure network exposure; keep it on the existing local app network and protect the token as a credential.
+
+| Method and path | Purpose and fields |
+|---|---|
+| `POST /lead/tasks` | `{"prompt":"Inspect the sample configuration.","mode":"read-only"}` starts an ordinary task and returns `task_id`. A busy or paused worker refuses it; it is not silently queued or retried. The daily unattended-run limit applies. |
+| `GET /lead/tasks/<task_id>` | Read a lead-submitted or scheduled task's saved result and pending-approval status. Unrelated human chats return not found. It cannot answer an approval. |
+| `GET /lead/schedules` | Read saved schedules and proposals. |
+| `POST /lead/schedules` | Propose `{"name":"Sample inspection","prompt":"Inspect the sample configuration.","mode":"read-only","spec":{"kind":"interval","seconds":3600}}`. The result has `approved:false` and `enabled:false`. |
+| `PATCH /lead/schedules/<id>` | Replace only a lead-authored, unapproved proposal with those same four fields. Approved schedules and proposals by other authors return 404. Every edit changes the review revision. Other specification shapes are `{"kind":"cron","expression":"0 9 * * 1-5"}` and `{"kind":"once","at":"2027-03-12T09:00:00Z"}`; choose a future time. |
+| `DELETE /lead/schedules/<id>` | Delete only a lead-authored, unapproved proposal. |
+| `GET /lead/mailbox` | Read local plain-text messages and replies. |
+| `POST /lead/mailbox` | Save `{"body":"A local sample message.","turn_id":"unique-lead-turn"}` as a new thread. |
+| `POST /lead/mailbox/<message_id>/reply` | Save `{"body":"A local sample reply.","turn_id":"unique-lead-turn"}` on that root thread. |
+
+The page shows the same mailbox and can post or reply. Messages remain plain text, confer no authority and never execute themselves or reach an external recipient. A lead explicitly submits a separate task if it wants work performed. The mailbox retains at most 500 messages, pruning the oldest other thread (including replies) when full. If only the current reply thread fills it, its oldest replies are pruned. Lead and Codex each have limits of 20 writes per turn and 64 per UTC day, returning HTTP 429 for lead writes at the limit. The lead supplies a stable `turn_id`; Codex’s turn comes from its verified exchange. Usage counters survive message clearing and app restarts. The owner is not rate limited. `DELETE /lead/mailbox` clears lead-authored root threads and replies; `DELETE /lead/mailbox/<id>` clears one such thread. Administrator page controls can clear all threads or delete one. Clearing does not execute anything or reset write limits. No lead endpoint creates permanent permissions, changes sandbox policy, approves a schedule or answers a native permission request. Owner management and token rotation require authenticated administrator Ingress, including a fresh check of the administrator identity under the existing cache rules.
+
+Schedule prompts containing recognized credentials are masked in responses and marked `prompt_redacted`; Edit is disabled so masked text cannot replace the saved prompt. Create a replacement with a complete prompt instead. All save routes reject the literal `[redacted]` marker. The private database and its journal/WAL/SHM paths are protected like the worker token from tool file access and native permission grants. A persistent SQLite journal is materialized before tasks or remote control start, so its mask remains present across transactions. Schema version 1 adds proposal authorship; legacy proposals without an attributable author remain owner-owned.
