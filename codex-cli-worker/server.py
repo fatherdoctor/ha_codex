@@ -799,11 +799,11 @@ def ensure_runtime_files() -> None:
         ),
         encoding="utf-8",
     )
-    # The house rules from the image replace any copy a task edited.
+    # Retire only a byte-identical copy of the formerly bundled instructions.
     try:
-        protected_policy.install_instructions(CODEX_HOME)
-    except OSError as exc:
-        print(f"Could not install the protected house rules: {exc}", flush=True)
+        protected_policy.remove_legacy_instructions(CODEX_HOME)
+    except OSError:
+        print("Could not retire legacy bundled instructions.", flush=True)
 
 
 def save_task_index() -> None:
@@ -3944,7 +3944,7 @@ def remote_control_instructions(options: dict[str, Any]) -> str:
     MCP capabilities from an individual chat turn are not reusable by a relay.
     """
     return (
-        "You are running in the Home Assistant add-on. Workspace: /config. Follow /config/AGENTS.md. "
+        "You are running in the Home Assistant add-on. Workspace: /config. Owner workspace instructions: /config/AGENTS.md. "
         "Keep API credentials private. A sandboxed command that needs network or file access outside its "
         "sandbox must request native approval for that specific action. Never bypass a denial or request "
         "permanent permission rules. Native approval does not supply credentials. "
@@ -3966,6 +3966,8 @@ def build_prompt(user_prompt: str, task_id: str, reply: str | None = None, backu
 
 Workspace: /config
 Task id: {task_id}
+
+Owner workspace instructions: /config/AGENTS.md.
 
 Follow /config/AGENTS.md. Treat this as a live Home Assistant config tree. Make focused edits, do not expose secrets, and validate changed YAML/JSON when practical. After you finish, the worker asks Home Assistant to check its configuration whenever YAML files changed; if that check fails, the task is reported as failed, so prefer a change you are confident is valid over a speculative one.
 

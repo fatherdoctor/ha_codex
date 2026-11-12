@@ -3,7 +3,7 @@
 A Home Assistant app and integration that let one household member ask OpenAI's Codex, in plain words and from the
 Home Assistant app, to explain the house or make a configuration change, with one confirmation per change.
 
-The assistant can act on any device the owner confirms. Put limits specific to your installation in `/config/AGENTS.md`. Shipped practice covers privacy and secrets, reading first, confirmation, backups, configuration checks and honest reporting.
+The assistant can act on any device the owner confirms. Put limits specific to your installation in `/config/AGENTS.md`. Codex uses its defaults and your workspace instructions; the app bundles no house rules. Its permission policy, approval checks and other enforced safeguards remain in place.
 
 [![License][license-badge]][license-url]
 
@@ -67,7 +67,7 @@ daily workflow opens one issue when upstream releases something newer.
 
 | Version | Changes |
 |---|---|
-| 0.1.81.2 (unreleased) | No full-access mode; a protected permission policy and house rules in the image; permission answers and the integration's actions only from Home Assistant administrators; a permission-prompt sensor. |
+| 0.1.81.2 (unreleased) | No full-access mode; a protected permission policy in the image, no bundled house rules and owner workspace instructions; permission answers and the integration's actions only from Home Assistant administrators; a permission-prompt sensor. |
 | 0.1.81.1 (unreleased) | Packaged Codex CLI 0.166.0 pinned by checksum, no self-update, base image by digest, links and maintainer for the fork. Details in the [changelog](codex-cli-worker/CHANGELOG.md). |
 
 Planned for the fork's v1, not in this release: category denials (locks, alarm, garage, cameras, messages to people) enforced outside the model, a page for sign-in

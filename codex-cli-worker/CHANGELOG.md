@@ -2,6 +2,8 @@
 
 ## 0.1.81.2 (unreleased)
 
+- **No bundled house rules (CX-NORULES).** Stop packaging and installing house-practice instructions. Preserve owner workspace instructions and all enforced protections. Upgrade cleanup removes only the exact legacy bundled home copy, preserving edited files and symlinks. Documentation points optional house practices to the starter kit.
+
 - **HAOS AppArmor ABI compatibility (CX-RC-EXEC.f3).** Declare ABI 3.0 so HAOS's 3.1.7 parser enables the stack rule instead of applying its legacy untagged-policy defaults. Keep the exact relay-only stack target. Prefer the AppArmor-specific proc attribute, with legacy fallback only when it is absent; access denials still fail closed. Document the intentional same-stack sibling ptrace restriction.
 
 - **Root relay namespace mapping (CX-RC-EXEC.f3, lead ruling).** Both relay launch paths map outside root to inner UID/GID 1000 before dropping all capabilities. The fallback omits UTS setup but keeps the mapping and verifies its non-root IDs, zero capabilities and NNP before exec. Existing kernel file ownership, the private hostname and the exact tool stack remain. CI uses the pinned release CLI to test real-root startup, both loaded profile names, pipe/PTY execution and root-owned `/config` reads/writes under each sandbox policy.
