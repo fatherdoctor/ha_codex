@@ -281,6 +281,7 @@ class ConfigWatch:
         self.baseline_path = baseline_path
         self.rules = rules
         self.lock = threading.RLock()
+        self._yaml_cache = gate_rules.YamlCache()
 
     def files(self) -> list[Path]:
         """Return the YAML files the watch reads, sorted, skipping stores, code, caches and very large files."""
@@ -331,6 +332,9 @@ class ConfigWatch:
                 lines.setdefault(rel, []).append(gate_rules.included_finding(rel, kinds, texts[rel]))
                 blocks.setdefault(rel, {})['include:' + hashlib.sha256(raw_files[rel]).hexdigest()] = (
                     1, max(1, len(texts[rel].splitlines())), texts[rel].splitlines()[0] if texts[rel].splitlines() else '')
+        for rel, reason in gate_rules.scan_failures().items():
+            finding = gate_rules.Finding(1, reason, '', 'parse_budget')
+            lines.setdefault(rel, []).append(finding)
         return lines, blocks
 
     def has_baseline(self) -> bool:
@@ -375,9 +379,11 @@ class ConfigWatch:
             texts = {rel: base64.b64decode(entry["data"]).decode("utf-8", errors="replace")
                      for rel, entry in copies.items()}
             rules = self.rules()
-            expanded = gate_rules.extend_include_texts(texts, self.root, rules, max_bytes=WATCH_MAX_BYTES)
+            raw_files = {}
+            expanded = gate_rules.extend_include_texts(texts, self.root, rules, max_bytes=WATCH_MAX_BYTES,
+                                                       raw_files=raw_files)
             for rel in expanded.keys() - texts.keys():
-                raw = gate_rules.read_config_bytes(self.root, rel)
+                raw = raw_files[rel]
                 total += len(raw)
                 if total > 8 * WATCH_MAX_BYTES:
                     complete = False
@@ -392,6 +398,9 @@ class ConfigWatch:
                 if rel in texts:
                     data.setdefault(rel, []).append(list(gate_rules.included_finding(rel, kinds, texts[rel]).key()))
                     hashes.setdefault(rel, []).append('include:' + copies[rel]['sha256'])
+            for rel, reason in gate_rules.scan_failures().items():
+                finding = gate_rules.Finding(1, reason, '', 'parse_budget')
+                data.setdefault(rel, []).append(list(finding.key()))
             self._save_baseline({"taken": time.time(), "files": data, "blocks": hashes,
                                  "copies": copies, "present": present, "complete": complete, "undo_events": []})
 
