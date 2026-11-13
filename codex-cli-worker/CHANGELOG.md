@@ -2,6 +2,10 @@
 
 ## 0.1.81.2 (unreleased)
 
+- Add durable unread mailbox counts for lead and owner, an unread-only lead filter, and page acknowledgments.
+  Expose a lead unread sensor and deduplicated, body-free arrival events through the normal status poll.
+  Mail remains data and never starts work by itself.
+
 - Document the line-based command check’s known YAML blind spots and the protections that still apply.
 
 - Add the Quiet Studio chat layout with Home Assistant themes, a bottom composer, photo/file menu,
