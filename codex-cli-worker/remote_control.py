@@ -970,9 +970,12 @@ class Supervisor:
                     if line.lstrip().startswith("bwrap:") and re.search(
                             r"namespace|hostname|Operation not permitted|Permission denied", line, re.IGNORECASE):
                         namespace_error = True
-                    self._parse(line)
+                    pairing_code = self._parse(line)
+                    # A new pair request can clear status before observation. Mask
+                    # this line with its own parsed code, independent of that state.
+                    observed = line.replace(pairing_code, '[redacted]') if pairing_code else line
                     try:
-                        self.on_log(line)
+                        self.on_log(observed)
                     except Exception:
                         pass
                 code = proc.wait()

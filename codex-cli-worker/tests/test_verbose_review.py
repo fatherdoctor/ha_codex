@@ -177,6 +177,66 @@ class VerboseReviewTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 server.verbose_secrets()
 
+    def test_pairing_code_is_masked_when_a_failed_pair_request_clears_status_before_capture(self):
+        from remote_control import ControlError, Supervisor
+        # A synthetic pairing credential, never a real device or account code.
+        code = 'SYNTHETIC-PAIR-CODE'
+        options = self.root / 'options.json'
+        options.write_text('{}')
+        home = self.root / 'home'
+        home.mkdir()
+        results = []
+
+        class Process:
+            stdout = io.StringIO('Pairing code: ' + code + '\n')
+
+            def poll(self):
+                return None
+
+            def wait(self):
+                relay.wake.set()
+                return 0
+
+        class FailedPairing:
+            def pair(self, cancelled):
+                raise ControlError('synthetic pairing failure')
+
+        relay = Supervisor('synthetic-codex', self.root / 'relay.json', lambda: {}, lambda: 'synthetic',
+                           gate=lambda: '', popen=lambda *args, **kwargs: Process(),
+                           control_factory=lambda path: FailedPairing(),
+                           on_log=lambda line: self.store.capture('relay', line))
+        relay.save_enabled(True)
+        parse = relay._parse
+
+        def interleaved(line):
+            parsed_code = parse(line)
+            if parsed_code:
+                # Force the precise race: pair() clears the published code, then fails.
+                ok, state = relay.pair()
+                results.append((ok, state['pairing_code'], server.verbose_secrets()))
+            return parsed_code
+
+        self.store.secrets = server.verbose_secrets
+        with (patch.object(server, 'OPTIONS_PATH', options),
+              patch.object(server, 'WORKER_TOKEN_PATH', self.root / 'absent-worker-token'),
+              patch.object(server, 'CODEX_HOME', home),
+              patch.object(server, '_verbose_credential_files', verbose_log.CredentialCache()),
+              patch.object(server, 'remote_control_supervisor', relay),
+              patch.object(relay, '_command', return_value=['synthetic-codex']),
+              patch.object(relay, '_monitor_control'),
+              patch.object(relay, '_parse', side_effect=interleaved)):
+            relay._loop()
+
+        self.assertEqual(len(results), 1)
+        self.assertFalse(results[0][0])
+        self.assertEqual(results[0][1], '')
+        self.assertNotIn(code, results[0][2])
+        # Assert on the stored bytes before any export can mask them a second time.
+        raw = self.path.read_bytes()
+        self.assertNotIn(code.encode(), raw)
+        self.assertIn(b'Pairing code: [redacted]', raw)
+        self.assertEqual(raw.count(b'Pairing code:'), 1)
+
     def test_relay_output_is_observed_once_while_local_notes_still_are_observed(self):
         from remote_control import Supervisor
         relay = Supervisor('synthetic-codex', self.root / 'relay.json', lambda: {}, lambda: 'synthetic', on_log=lambda line: self.store.capture('relay', line))
