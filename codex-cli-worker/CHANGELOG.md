@@ -2,6 +2,11 @@
 
 ## 0.1.81.2 (unreleased)
 
+- The command hook now answers within 1.5 seconds of starting. Codex 0.166 runs a tool call whose hook
+  passes its 10-second timeout, so a slow check could let a call through. The check now runs in a child
+  process that the hook stops at the deadline, refusing the request with a plain reason, even when the check
+  is stuck inside one long call. `tests/measure_gate.py` prints the hook's own time for each call.
+
 - Document the line-based command check’s known YAML blind spots and the protections that still apply.
 
 - Add the Quiet Studio chat layout with Home Assistant themes, a bottom composer, photo/file menu,

@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -118,6 +119,102 @@ class HookStateTests(unittest.TestCase):
                 gate_rules.check_tool_call = original
         self.assertEqual(code, 2)
         self.assertIn(gate_hook.UNREADABLE, err.getvalue())
+
+
+# A scan stuck inside one long call. This pattern backtracks for several seconds (about 14 on a 2026 laptop,
+# doubling with each extra "a"), and Python cannot be interrupted until the call returns, so only a watchdog
+# in another process can answer in time. It does end, so a hook without the deadline fails these tests
+# instead of hanging them.
+STUCK_SCAN = "import re; re.match(r'(a+)+$', 'a' * 28 + '!')"
+# The time the tests allow past the deadline, for the test machine's own delays in starting and reaping processes.
+DEADLINE_MARGIN = 0.75
+
+
+def run_hook_with_stuck_scan(remote_on: bool, tmp: str) -> tuple[subprocess.CompletedProcess, float]:
+    """Run the unchanged hook script with its scan replaced by STUCK_SCAN; return the result and its wall time."""
+    state = Path(tmp) / "state.json"
+    state.write_text(json.dumps({"enabled": remote_on}), encoding="utf-8")
+    bootstrap = ("import sys,runpy; sys.path.insert(0,sys.argv[1]); import gate_rules; "
+                 f"gate_rules.check_tool_call=lambda *a: exec({STUCK_SCAN!r}) or ''; "
+                 "sys.argv=sys.argv[2:]; runpy.run_path(sys.argv[0],run_name='__main__')")
+    payload = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "ls /config"}}
+    start = time.monotonic()
+    result = subprocess.run([sys.executable, "-I", "-c", bootstrap, str(ROOT), str(HOOK),
+                             "--event", "PreToolUse", "--state", str(state), "--timing"],
+                            input=json.dumps(payload), capture_output=True, text=True, timeout=10, check=False)
+    return result, time.monotonic() - start
+
+
+class HookDeadlineTests(unittest.TestCase):
+    """The hook answers before its own deadline, so Codex never runs an action because the hook was late."""
+
+    def assert_refused_in_time(self, result: subprocess.CompletedProcess, elapsed: float) -> None:
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn(gate_hook.TOO_SLOW, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertLess(elapsed, gate_hook.DEADLINE_SECONDS + DEADLINE_MARGIN)
+
+    def test_a_stuck_scan_is_refused_by_the_deadline(self) -> None:
+        for remote_on in (True, False):
+            with self.subTest(remote_control_on=remote_on), tempfile.TemporaryDirectory() as tmp:
+                result, elapsed = run_hook_with_stuck_scan(remote_on, tmp)
+                self.assert_refused_in_time(result, elapsed)
+
+    def test_input_that_never_ends_is_refused_by_the_deadline(self) -> None:
+        # Codex should close stdin after the event; a hook left waiting for more must still answer.
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state.json"
+            state.write_text('{"enabled": true}', encoding="utf-8")
+            start = time.monotonic()
+            with subprocess.Popen([sys.executable, "-I", str(HOOK), "--state", str(state)],
+                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                  text=True) as hook:
+                hook.stdin.write('{"tool_input": ')
+                hook.stdin.flush()
+                try:
+                    hook.wait(timeout=10)  # stdin stays open; communicate() would close it
+                except subprocess.TimeoutExpired:
+                    hook.kill()
+                    raise
+                out, err = hook.stdout.read(), hook.stderr.read()
+        self.assert_refused_in_time(subprocess.CompletedProcess(hook.args, hook.returncode, out, err),
+                                    time.monotonic() - start)
+
+    def test_a_stuck_check_in_this_process_is_refused(self) -> None:
+        out, err = io.StringIO(), io.StringIO()
+        with tempfile.TemporaryDirectory() as tmp:
+            original = gate_rules.check_tool_call
+            gate_rules.check_tool_call = lambda *a: exec(STUCK_SCAN) or ""
+            start = time.monotonic()
+            try:
+                code = gate_hook.main(["--state", str(Path(tmp) / "s.json")], io.StringIO("{}"), out, err)
+            finally:
+                gate_rules.check_tool_call = original
+        self.assertEqual(code, 2)
+        self.assertIn(gate_hook.TOO_SLOW, err.getvalue())
+        self.assertLess(time.monotonic() - start, gate_hook.DEADLINE_SECONDS + DEADLINE_MARGIN)
+
+    def test_a_normal_call_is_answered_as_before_and_reports_its_time(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state.json"
+            state.write_text('{"enabled": true}', encoding="utf-8")
+            payload = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "ls /config"}}
+            result = subprocess.run([sys.executable, "-I", str(HOOK), "--state", str(state), "--timing"],
+                                    input=json.dumps(payload), capture_output=True, text=True, timeout=10,
+                                    check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertRegex(result.stderr, r"^gate_hook timing: [0-9.]+ ms from process start, deadline 1500 ms\n$")
+
+    def test_the_deadline_leaves_room_inside_the_codex_timeout(self) -> None:
+        managed = (ROOT / "gate" / "managed_config.toml").read_text(encoding="utf-8")
+        timeouts = [int(line.split("=")[1]) for line in managed.splitlines() if line.startswith("timeout")]
+        self.assertEqual(len(timeouts), 2)
+        self.assertLessEqual(gate_hook.DEADLINE_SECONDS * 4, min(timeouts))
+
+    def test_the_process_start_includes_time_before_the_call(self) -> None:
+        # The test runner started long before this test, so its process start is well in the past.
+        self.assertLess(gate_hook.process_started_at(), time.monotonic() - 0.01)
 
 
 class RulesTests(unittest.TestCase):
