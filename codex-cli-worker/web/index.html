@@ -9,9 +9,11 @@
     <meta name="color-scheme" content="light dark" />
     <title>Codex for Home Assistant</title>
     <link rel="stylesheet" href="assets/chat.css" />
+    <link rel="stylesheet" href="assets/studio.css" />
     <script src="assets/vendor/marked.umd.js" defer></script>
     <script src="assets/markdown.js" defer></script>
     <script src="assets/chat.js" defer></script>
+    <script src="assets/studio.js" defer></script>
     <script src="assets/schedules.js" defer></script>
   </head>
   <body>
@@ -48,6 +50,7 @@
         <p id="list-empty" class="muted">
           Your conversations will appear here.
         </p>
+        <button id="archive-list" class="subtle">Archived chats</button>
         <button id="load-more" class="subtle" hidden>Load older chats</button>
         <div class="sidebar-footer">
           <div class="workspace-label">
@@ -100,8 +103,23 @@
             <h1 id="chat-title">New chat</h1>
             <p id="chat-status">Your Home Assistant, with a little help.</p>
           </div>
+          <div class="header-actions">
+            <button id="connection-chip" class="connection-chip">Home Assistant · Loading</button>
+            <button id="header-status" class="subtle">Status</button>
+            <button id="thread-actions" class="icon" aria-label="Thread menu" aria-haspopup="menu">⋯</button>
+            <button id="header-settings" class="icon" aria-label="Settings">⚙</button>
+          </div>
           <button id="cancel" class="subtle" hidden>Stop task</button>
         </header>
+        <div class="connection-strip" role="status">
+          <span class="status-dot" aria-hidden="true"></span><strong>Remote connection</strong>
+          <span id="connection-summary">Loading…</span>
+          <button id="connection-manage" class="text-button">Manage</button>
+          <button id="strip-pair" class="text-button" hidden>Pair a device</button>
+        </div>
+        <div class="phone-thread-tools"><button id="phone-history" class="icon" aria-label="Open conversations">☰</button>
+          <span id="phone-title">New chat</span><button id="phone-new" class="icon" aria-label="New chat">＋</button>
+          <button id="phone-thread-actions" class="icon" aria-label="Thread menu" aria-haspopup="menu">⋯</button></div>
         <p id="integration-notice" role="status" hidden></p>
         <section id="signin-banner" class="page-banner" role="status" hidden>
           <p><strong id="signin-banner-text">The assistant is not signed in to ChatGPT.</strong></p>
@@ -121,25 +139,7 @@
           tabindex="0"
           aria-label="Conversation"
         >
-          <div class="welcome">
-            <div class="welcome-icon" aria-hidden="true">⌘</div>
-            <p class="eyebrow">CODEX FOR HOME ASSISTANT</p>
-            <h2>What would you like to work on?</h2>
-            <p>Start something new, or pick up where you left off.</p>
-            <div class="suggestions">
-              <button
-                data-prompt="Review my automations and suggest improvements. Do not make changes yet."
-              >
-                <span>Review automations</span
-                ><small>Find ways to simplify your setup</small></button
-              ><button
-                data-prompt="Check my dashboard configuration for problems. Do not make changes yet."
-              >
-                <span>Check a dashboard</span
-                ><small>Take a closer look at your config</small>
-              </button>
-            </div>
-          </div>
+          <div class="welcome"><h2 id="greeting">Good evening</h2></div>
         </div>
         <div class="compose-area">
           <p id="notice" role="status" hidden></p>
@@ -158,22 +158,10 @@
                 <button
                   id="attach"
                   type="button"
-                  aria-label="Attach images"
-                  title="Attach images. You can also paste or drop them here."
+                  aria-label="Add to message"
+                  title="Upload a photo or file"
                 >
-                  <svg
-                    aria-hidden="true"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.8"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  >
-                    <path
-                      d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"
-                    />
-                  </svg>
+                  <span aria-hidden="true">＋</span>
                 </button>
                 <input
                   id="file-input"
@@ -182,6 +170,12 @@
                   multiple
                   hidden
                 />
+                <button id="permission-button" type="button" class="permission-pill" aria-haspopup="dialog">Default permissions⌄</button>
+                <div id="plus-menu" class="picker-popover" role="menu" aria-label="Add to message" hidden>
+                  <button id="upload-photo" type="button" role="menuitem">Upload photo</button>
+                  <button id="upload-document" type="button" role="menuitem">Upload file</button>
+                </div>
+                <input id="document-input" type="file" accept=".txt,.md,.yaml,.yml,.json,.csv,.log,.py,.js,.html,.css,.xml,.pdf" multiple hidden>
               <div id="chat-picker" class="chat-picker">
                 <div class="picker-pill">
                   <button
@@ -286,9 +280,7 @@
             </div>
           </form>
           <p id="compose-hint">A new chat starts a separate conversation.</p>
-          <p class="footnote">
-            Codex can make mistakes. Review changes to your home configuration.
-          </p>
+
         </div>
       </main>
     </div>
@@ -313,6 +305,11 @@
       <button type="button" role="menuitem" data-action="delete" class="danger">
         Delete
       </button>
+      <button type="button" role="menuitem" data-action="copy-id">Copy thread ID</button>
+      <button type="button" role="menuitem" data-action="archive">Archive</button>
+      <button type="button" role="menuitem" data-action="status">Status</button>
+      <button type="button" role="menuitem" data-action="history">Conversations</button>
+      <button type="button" role="menuitem" data-action="new-chat">New chat</button>
       <button type="button" role="menuitem" data-action="close">Cancel</button>
     </div>
     <dialog id="rename-dialog" class="small-dialog" aria-labelledby="rename-title">
@@ -365,6 +362,18 @@
         <button type="button" id="copy-close">Close</button>
       </div>
     </dialog>
+    <dialog id="permissions-dialog" class="studio-sheet" aria-labelledby="permissions-title">
+      <div class="dialog-header"><h2 id="permissions-title">Permissions</h2><button class="icon" data-close="permissions-dialog" aria-label="Close permissions">✕</button></div>
+      <p class="muted">Choose how this chat starts its next turn. A choice cannot expand the add-on's configured permissions.</p>
+      <button class="permission-option" data-mode="default"><strong>Default permissions</strong><span>Use the configured sandbox and ask for native approval when needed.</span></button>
+      <button class="permission-option" data-mode="read-only"><strong>Read only</strong><span>Inspect and explain. Changes require a specific owner approval.</span></button>
+      <button class="permission-option" disabled><strong>Auto-review · Coming</strong><span>Not available in this build.</span></button>
+      <button class="permission-option" disabled><strong>Full access · Coming</strong><span>Not available in this build.</span></button>
+      <p id="permission-result" role="status"></p>
+    </dialog>
+    <dialog id="status-dialog" class="studio-sheet" aria-labelledby="status-title"><div class="dialog-header"><h2 id="status-title">Status</h2><button class="icon" data-close="status-dialog" aria-label="Close status">✕</button></div><dl id="status-details"></dl></dialog>
+    <dialog id="connection-dialog" class="studio-sheet" aria-labelledby="connection-title"><div class="dialog-header"><h2 id="connection-title">Remote connection</h2><button class="icon" data-close="connection-dialog" aria-label="Close remote connection">✕</button></div><div id="connection-content"></div><p id="connection-result" role="alert"></p></dialog>
+    <dialog id="workspace-dialog" class="studio-sheet" aria-labelledby="workspace-title"><div class="dialog-header"><h2 id="workspace-title">Workspace rules</h2><button class="icon" data-close="workspace-dialog" aria-label="Close workspace rules">✕</button></div><div id="workspace-content"></div><p id="workspace-result" role="status"></p></dialog>
     <dialog id="settings">
       <div class="dialog-header">
         <h2>Settings</h2>
@@ -483,7 +492,7 @@
         <form id="schedule-mail-form"><input id="schedule-mail-parent" type="hidden" /><p id="schedule-mail-target" class="muted">New message</p><label for="schedule-mail-body">Message</label><textarea id="schedule-mail-body" rows="3" maxlength="8000" required></textarea><div class="settings-actions"><button type="submit">Save message</button><button id="schedule-mail-reset" type="button" class="subtle">New thread</button></div></form>
         <p id="schedule-result" role="status"></p>
       </section>
-      <section>
+      <section id="workspace-section">
         <h3>Workspace instructions</h3>
         <p class="muted">
           Codex follows these instructions when working in your Home Assistant
@@ -493,6 +502,8 @@
         ><textarea id="agents" rows="12" spellcheck="false"></textarea
         ><button id="save-agents">Save instructions</button>
       </section>
+      <section><h3>Appearance</h3><p class="muted">Follow Home Assistant</p></section>
+      <details class="advanced"><summary>Advanced</summary><button id="workspace-open" class="subtle">Workspace rules</button></details>
       <p id="settings-result" role="status"></p>
     </dialog>
   </body>

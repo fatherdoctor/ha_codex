@@ -225,7 +225,7 @@ There is no chat UI control for this setting; change it in the app configuration
 After every task the worker compares the `/config` tree with the list of files it recorded before the run, then validates what changed in two passes. This comparison also includes files written by Home Assistant or another editor during the task.
 
 1. **Syntax.** Added and changed YAML files are parsed with Home Assistant's YAML loader, and JSON and `.storage` files are parsed as JSON. Cookie jars that integrations keep under `.storage` in the LWP text format are checked as cookie jars instead, without rewriting them: Home Assistant's iCloud jars, which are the files under `.storage/icloud/` ending in `.cookiejar`, and any other `.storage` file that starts with the `#LWP-Cookies-` header, as the jars of custom integrations such as iCloud3 do. Malformed cookie jars are reported without including their contents in errors. Any parse error fails the task.
-2. **Home Assistant's configuration check.** From **0.1.56**, when YAML files outside `.storage` were added, changed, or deleted and the syntax pass succeeded, the worker calls `POST /api/config/core/check_config`, the same check as Developer Tools. An `invalid` result fails the task with Home Assistant's error text. The check needs the Supervisor's Core API access the app already has, and can take some seconds on large configurations; the worker waits up to three minutes. If the check cannot run, because Core is restarting or the API is unreachable, the task still completes and its details say the change is applied but unverified. Set `config_check` to `false` to skip this pass.
+2. **Home Assistant's configuration check.** From **0.1.56**, when YAML files outside `.storage` were added, changed, or deleted and the syntax pass succeeded, the worker calls `POST /api/config/core/check_config`, the same check as Tools. An `invalid` result fails the task with Home Assistant's error text. The check needs the Supervisor's Core API access the app already has, and can take some seconds on large configurations; the worker waits up to three minutes. If the check cannot run, because Core is restarting or the API is unreachable, the task still completes and its details say the change is applied but unverified. Set `config_check` to `false` to skip this pass.
 
 When validation fails, the task details list the saved previous version of each affected file under `<task_root>/<task_id>/turns/<turn_id>/backups/`, so a broken edit can be restored by copying the file back. Files the task created have no previous version and are listed separately, and so are affected files that have no saved copy. See [Backups](#backups) for where the copies come from and how long they are kept.
 
@@ -550,6 +550,16 @@ The worker disables Codex update checks at startup. Codex CLI is installed and v
 
 A missing window has an `unknown` sensor state and a `reported: false` attribute. The existing 5-hour entities and worker fields remain in place so upgrades do not break automations on accounts that still report or reference them. Diagnostic excerpts remove account, email, and session identifiers before being exposed.
 
+## Reporting a bug
+
+A report with logs is much easier to fix. On Home Assistant 2026.11:
+
+1. Note the date and time of the failed interaction, with your time zone.
+2. Open the worker app log: Settings, Apps, Codex for Home Assistant, Log tab. Copy the lines around that time.
+3. Download the integration diagnostics: Settings, Devices & services, Codex, three-dot menu, Download diagnostics. Attach the file to the issue.
+4. For problems that may involve Home Assistant Core, open Settings, System, Logs, type `codex` in the filter box, and copy the matching lines.
+5. Remove secrets, tokens, device codes, private URLs, and personal configuration before posting, then [open an issue](https://github.com/fatherdoctor/ha_codex/issues/new/choose).
+
 ## Notifications
 
 Leave `notify_service` unset or empty to use Home Assistant persistent notifications for task completion, failures, questions, and permission requests. If you want push notifications, set it to a Home Assistant notify service such as `notify.mobile_app_your_phone`.
@@ -611,7 +621,7 @@ Messages are treated as untrusted text:
 - Images are never loaded from a message, because a remote image would tell its server that the message was read. They appear as links. Images that Codex generates or that you attach are shown as before.
 - A message longer than 50,000 characters, or one that takes unusually long to format, is shown as plain text.
 
-The Markdown parser, [marked](https://github.com/markedjs/marked) 18.0.14, is bundled with the app under `web/assets/vendor/` with its MIT license, so the chat does not load scripts from another server. Codex decides how it writes its answers; to ask for Markdown, add an instruction to `/config/AGENTS.md` as described under [Task Output](https://github.com/fatherdoctor/ha_codex/blob/main/README.md#task-output).
+The Markdown parser, [marked](https://github.com/markedjs/marked) 18.0.14, is bundled with the app under `web/assets/vendor/` with its MIT license, so the chat does not load scripts from another server. Codex decides how it writes its answers; to ask for Markdown, add an instruction to `/config/AGENTS.md` as described under [Task Output](../docs/upstream-README.md#task-output).
 
 ### Queueing messages while another chat works
 
@@ -631,7 +641,7 @@ From **0.1.48**, the pill below the message box opens a model menu and a reasoni
 
 A chat without a model of its own follows the app's model setting. From **0.1.67**, the pill names that model instead of showing **Default**: the model set in the app options or, when that option is `default`, the model Codex picks for the signed-in account. The worker reads the latter from Codex's own status report when it checks the quota, and shows GPT-6.1 Sol, the bundled CLI's default, until the first report. The menu marks that model, and choosing it makes the chat follow the app setting again. The reasoning reset button inherits the app's reasoning setting. These can be reset independently. New and older chats without saved overrides inherit both defaults. When an exchange starts, it records its resolved `execution_settings`; changing defaults later does not change that running exchange. Queued messages resolve inherited defaults when they start.
 
-The model choices match the add-on model selector, without the retired `gpt-5.5`. Supported reasoning levels follow the bundled CLI 0.165.0 catalog: Low, Medium, High, Extra High, Max and Ultra for GPT-6 Astra, GPT-6.1 Sol, GPT-6.1 Terra, GPT-6 Sol, GPT-5.6 Sol and GPT-5.6 Terra; through Max for GPT-6 Luna and GPT-5.6 Luna. Ultra enables automatic task delegation. With the add-on model on `default`, the levels are those of the model Codex picks; a model the worker has no entry for gets the common Low through Extra High choices. If switching models makes a saved reasoning choice incompatible, the UI resets reasoning to the add-on default. An inherited reasoning level that the model does not support falls back to Medium. So does a level saved in a chat that follows the add-on model, when that model changes to one without the level; the saved level applies again once the model has it. A chat that had GPT-5.5 selected continues on GPT-5.6 Sol, the next model up, and keeps its reasoning level. Model availability still depends on the account; unavailable-model errors are reported by the CLI.
+With the default pin, the picker offers only the pinned model; set `model_pin` to `none` in the app configuration to use the other choices. With the pin off, model choices match the app model selector, without the retired `gpt-5.5`. Supported reasoning levels follow the bundled CLI 0.166.0 catalog: Low, Medium, High, Extra High, Max and Ultra for GPT-6 Astra, GPT-6.1 Sol, GPT-6.1 Terra, GPT-6 Sol, GPT-5.6 Sol and GPT-5.6 Terra; through Max for GPT-6 Luna and GPT-5.6 Luna. Ultra enables automatic task delegation. With the app model on `default`, the levels are those of the model Codex picks; a model the worker has no entry for gets the common Low through Extra High choices. If switching models makes a saved reasoning choice incompatible, the UI resets reasoning to the app default. An inherited reasoning level that the model does not support falls back to Medium. So does a level saved in a chat that follows the app model, when that model changes to one without the level; the saved level applies again once the model has it. A chat that had GPT-5.5 selected continues on GPT-5.6 Sol, the next model up, and keeps its reasoning level. Model availability still depends on the account; unavailable-model errors are reported by the CLI.
 
 The authenticated worker API exposes `GET /chat-options` for choices and defaults, with `default_model` naming the model a chat without its own selection runs on, and `POST /tasks/<task_id>/settings` with `{"chat_settings": {"model": "gpt-6-astra", "reasoning_effort": "xhigh"}}` to save selections for an idle chat. Each value can be `null` to inherit the add-on default. `POST /tasks`, `/tasks/<task_id>/continue`, and `/tasks/<task_id>/reply` also accept the optional `chat_settings` object. Omitting the object preserves existing selections. Invalid models and reasoning levels, and a level the selected model lacks, return HTTP 400; changes to active chats return HTTP 409. `GET /tasks/<task_id>` includes the saved `chat_settings`. Home Assistant actions continue using their existing parameters and honor settings already saved for the conversation.
 
@@ -649,7 +659,7 @@ The worker keeps the steps of the running exchange in memory and writes them to 
 
 From **0.1.49**, images that Codex generates during a conversation appear in the chat under the response that produced them. Click an image to open it at full size, or use **Download** to save it. Images stay with their exchange across reloads, worker restarts, and continued conversations.
 
-Image generation uses Codex's built-in `image_gen` tool with the signed-in ChatGPT account. It needs no separate OpenAI API key. Tool availability and usage limits depend on the account. The app currently bundles Codex CLI 0.165.0.
+Image generation uses Codex's built-in `image_gen` tool with the signed-in ChatGPT account. It needs no separate OpenAI API key. Tool availability and usage limits depend on the account. The app currently bundles Codex CLI 0.166.0.
 
 After each run, the worker reads the session's rollout file under `/data/codex-home/sessions` and looks for completed `image_gen.generation` items that were not already present before the exchange. This works for app-server turns, including images absent from the live event stream. Codex saves each result under `/data/codex-home/generated_images/<session_id>/`. The worker copies the file into `<task_root>/<task_id>/turns/<turn_id>/attachments/` and records metadata on that exchange. If the saved file is missing, the worker decodes the inline result from the rollout instead. The original stays where Codex saved it so follow-up edits in the same conversation keep working.
 
@@ -818,3 +828,52 @@ Only a verified administrator on the Ingress page can read or save them; the wor
 satisfy that check. Corrupt or unreadable settings refuse actions. Every pre-approved operation needs
 an active shared diagnostics recorder and a saved requested event before execution. Exported events
 contain only the operation, group, decision, outcome, timing and duration; no payloads or raw targets.
+
+### Chat page and attachments
+
+The page follows Home Assistant colors in light and dark when its host exposes them; otherwise it follows
+the device appearance. Recent conversations stay alongside the writing canvas on tablets and desktop.
+On a phone the connection chip and Settings stay in the header, with conversations, New chat and the thread
+menu below. The composer stays at the bottom. Its model and reasoning controls show the saved chat choice
+or configured default, rather than a sample selection.
+
+The plus menu uploads photos or files. A message accepts at most six attachments, up to 10 MB each.
+Photos retain their existing resizing and image checks. File uploads support UTF-8 text, Markdown, YAML,
+JSON, CSV, logs, Python/JavaScript source, HTML/CSS/XML source, and PDF headers. Binary text and unsupported
+extensions are refused. Documents remain passive files: they are never executed or rendered in the page,
+and downloads use attachment disposition, no-sniff and a sandboxed content policy. They are stored privately
+with the message; Codex receives their validated paths and may read relevant contents as part of that task.
+PDF acceptance does not promise a particular extraction tool. Draft attachments stay in the browser until
+Send. Archiving a chat hides it from recent conversations without deleting its session or attachments;
+Archived chats can restore it. Delete remains a separate action.
+
+The Permissions picker starts at Default permissions: use the add-on's configured sandbox and native
+approval flow. Read only narrows the next turn to the read-only sandbox, including a resumed or queued turn.
+Neither choice expands a configured read-only sandbox, suppresses native approval, or changes managed
+security refusals. A queued message keeps the choice submitted with it. Auto-review and Full access are
+shown as Coming and cannot be selected. Camera and Plan mode are not offered in this build.
+
+The thread menu includes Pin, Rename, Copy thread ID, Archive and Status. A thread without a native ID
+reports that it is unavailable instead of substituting the page's task ID. Status shows the workspace,
+selected model and permissions; context and usage/reset remain unavailable in this view until verified
+window data is wired. No quota is inferred from activity.
+
+Remote connection opens a separate view for Off, Starting, Ready, Reconnecting and Error. Pairing uses two
+different protocol fields: the manual code for typing, and the opaque code for the Continue in ChatGPT URL
+and its QR. The manual code is never substituted into the URL. If only a manual code is available, request
+a new code or type it; no app link is invented. The QR has a four-module quiet zone at every width. Codes,
+URLs and QR images remain limited to verified Ingress administrators; API tokens alone cannot read them
+or start pairing. No live account enrollment or device handoff is implied by local rendering tests.
+
+Settings → Advanced → Workspace rules opens a separate editor. The file is read only when that editor
+opens, and Save remains an explicit action. Existing account, diagnostic, scheduling and browser-permission
+controls remain in Settings.
+
+
+A chat's **Read only** choice also disables worker-mediated dashboard saves: both
+verification with `save_pending` and the end-of-turn automatic save use the current
+turn's effective options. A dashboard file changed by another actor during that turn
+does not grant the chat permission to save it. The worker rechecks the mode immediately
+before saving; ordinary dashboard inspection remains available without `save_pending`.
+The direct **Status** button is available on tablet and desktop. On the phone, open
+Status from the thread menu.
