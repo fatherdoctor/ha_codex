@@ -217,3 +217,67 @@ class StatusUsageErrorTests(unittest.TestCase):
             payload = server.usage_status_payload()
         self.assertNotIn('SYNTHETIC_PRIVATE', json.dumps(payload))
         self.assertEqual(payload['rate_limits_error_category'], 'unavailable')
+
+
+class RunTaskSignInRecoveryTests(unittest.TestCase):
+    def exercise_turn(self, final_status, protocol_failure='completed'):
+        from test_approvals import ApprovalRunTests
+        from test_server import server
+        from unittest.mock import patch
+        import json
+        fixture = ApprovalRunTests('test_failed_turn_still_reviews_edits_and_recovery')
+        fixture.setUp()
+        try:
+            server.CODEX_HOME.mkdir(parents=True)
+            (server.CODEX_HOME / 'auth.json').write_text('{}')
+            fixture.stack.enter_context(patch.dict(server.sign_in_check,
+                {'result': '', 'auth_signature': None, 'checked_at': ''}, clear=True))
+            fixture.stack.enter_context(patch.object(server, 'task_sign_in_signatures', {}))
+            fixture.stack.enter_context(patch.object(server, 'codex_local_login_status',
+                side_effect=lambda: {'status_ok': True, 'has_auth_file': True}))
+            check = AccountAccess(server.codex_login_status, lambda: {}, server._auth_signature,
+                                  server.record_sign_in_check)
+            fixture.stack.enter_context(patch.object(server, 'account_access', check))
+            server.record_sign_in_check('rejected')
+            self.assertTrue(check.snapshot(server.codex_login_status())['needs_sign_in'])
+            final = {'status': final_status, 'summary': 'Synthetic result', 'details': '',
+                     'question': 'Continue?' if final_status == 'needs_input' else '',
+                     'choices': ['Continue'] if final_status == 'needs_input' else []}
+            process = fixture.process(failure=protocol_failure)
+            original_output = process.stdout
+            class Responses:
+                pending = None
+                def readline(self):
+                    if self.pending is not None:
+                        line, self.pending = self.pending, None
+                        return line
+                    line = original_output.readline()
+                    value = json.loads(line) if line.strip() else {}
+                    if value.get('method') == 'turn/completed':
+                        self.pending = line
+                        return json.dumps({'method': 'item/completed', 'params': {
+                            'threadId': value['params']['threadId'], 'turnId': 'native-turn',
+                            'item': {'id': 'synthetic-answer', 'type': 'agentMessage', 'phase': 'final_answer',
+                                     'text': json.dumps(final)}}}) + '\n'
+                    return line
+            process.stdout = Responses()
+            fixture.stack.enter_context(patch.object(server.subprocess, 'Popen', return_value=process))
+            server.run_task('task', 'Inspect the sample configuration.')
+            return dict(server.tasks['task']), check.snapshot(server.codex_login_status())
+        finally:
+            fixture.doCleanups()
+
+    def test_run_task_completed_exit_zero_clears_a_remembered_rejection(self):
+        task, access = self.exercise_turn('completed')
+        self.assertEqual((task['status'], task['returncode']), ('completed', 0))
+        self.assertFalse(access['needs_sign_in'])
+        self.assertEqual(access['state'], 'confirmed_by_turn')
+
+    def test_run_task_failed_waiting_and_nonzero_turns_do_not_clear_rejection(self):
+        for status, protocol, expected in (('failed', 'completed', 'failed'),
+                                            ('needs_input', 'completed', 'waiting_for_input'),
+                                            ('completed', 'failed', 'failed')):
+            with self.subTest(status=status, protocol=protocol):
+                task, access = self.exercise_turn(status, protocol)
+                self.assertEqual(task['status'], expected)
+                self.assertTrue(access['needs_sign_in'])

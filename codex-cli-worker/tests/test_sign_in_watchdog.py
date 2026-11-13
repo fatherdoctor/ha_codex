@@ -18,11 +18,11 @@ REJECTED = [
     "workspace routing discovery unauthorized (401)",
     'refresh failed: {"error": {"code": "token_revoked"}}',
     "Encountered invalidated oauth token for user",
-    "unexpected status 401 Unauthorized: Your session has ended",
     "refresh_token_reused",
 ]
 # Failures that are not about the sign-in: the network, a timeout, a line number that happens to be 401.
 NOT_REJECTED = [
+    "unexpected status 401 Unauthorized: Your session has ended",
     "stream disconnected before completion: error sending request",
     "Codex did not answer the usage read in time",
     "automations.yaml line 401: unknown key",
@@ -293,6 +293,28 @@ class AddonConfigTests(unittest.TestCase):
         self.assertEqual(config["options"]["task_stall_seconds"], 600)
         self.assertEqual(config["schema"]["task_stall_seconds"], "int(0,86400)")
         self.assertEqual(server.DEFAULT_OPTIONS["task_stall_seconds"], 600)
+
+
+
+class TaskSignInRepairTests(unittest.TestCase):
+    """Task errors use explicit sign-in signals, including the stderr boundary."""
+    setUp = SignInStateTests.setUp
+
+    def test_generic_task_http_errors_leave_the_signin_repair_clear(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(server, 'get_task_dir', return_value=Path(folder)):
+            for text in ('401 Unauthorized', 'MCP tool: HTTP 401 Unauthorized', 'curl failed: 401 unauthorized'):
+                with self.subTest(text=text):
+                    (Path(folder) / 'codex.log').write_text('[t] stderr: ' + text + '\n')
+                    server.note_task_sign_in('task-http')
+                    self.assertFalse(server.task_failed_on_sign_in('task-http', text))
+                    self.assertFalse(server.account_access.snapshot(server.codex_login_status())['needs_sign_in'])
+
+    def test_explicit_revocation_in_task_stderr_raises_the_signin_repair(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(server, 'get_task_dir', return_value=Path(folder)):
+            (Path(folder) / 'codex.log').write_text('[t] stderr: token_revoked\n')
+            server.note_task_sign_in('task-revoked')
+            self.assertTrue(server.task_failed_on_sign_in('task-revoked', 'Task failed'))
+            self.assertTrue(server.account_access.snapshot(server.codex_login_status())['needs_sign_in'])
 
 
 if __name__ == "__main__":

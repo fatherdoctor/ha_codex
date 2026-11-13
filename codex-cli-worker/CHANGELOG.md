@@ -2,6 +2,8 @@
 
 ## 0.1.81.2 (unreleased)
 
+- Do not report generic task HTTP errors as expired ChatGPT sign-in; test sign-in recovery through the full task lifecycle.
+
 - Keep generic passive HTTP errors out of the expired-sign-in Repair; expose only fixed usage-error messages and categories, never raw upstream errors.
 
 - State the Codex account requirement before sign-in, show plan information and uncertain access in Status,

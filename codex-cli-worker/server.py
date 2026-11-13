@@ -3341,12 +3341,11 @@ def save_lovelace_dashboard(ref: dict[str, str]) -> tuple[bool, str]:
 
 
 # `codex login status` only reads the local auth.json, so a sign-in that OpenAI has revoked
-# still reads as signed in. These markers come from a real revoked sign-in (the worker log said
-# `token_revoked`, "Encountered invalidated oauth token for user", and the task failed with
-# "workspace routing discovery unauthorized (401)") and from Codex's refresh-token error codes.
+# still reads as signed in. Task failures share the explicit passive sign-in
+# markers; retain only this exact additional phrase observed on a revoked sign-in.
+# A generic HTTP 401 from the task's own work is not a ChatGPT sign-in signal.
 SIGN_IN_REJECTED_RE = re.compile(
-    r"token_revoked|invalidated oauth token|refresh_token_(?:expired|reused|invalidated)"
-    r"|\b401\b[^\n]{0,80}unauthori[sz]ed|unauthori[sz]ed[^\n]{0,80}\b401\b",
+    r"\bworkspace routing discovery unauthorized \(401\)(?!\w)",
     re.IGNORECASE,
 )
 SIGN_IN_EXPIRED_SUMMARY = "Your ChatGPT sign-in has expired or was revoked. Sign in again from the worker page."
@@ -3359,7 +3358,7 @@ sign_in_check: dict[str, Any] = {"result": "", "auth_signature": None, "checked_
 
 def sign_in_rejected(text: Any) -> bool:
     """Return True when an error text says OpenAI refused the sign-in (revoked or expired), not a network fault."""
-    return bool(SIGN_IN_REJECTED_RE.search(str(text or "")))
+    return rejected_sign_in_error(text) or bool(SIGN_IN_REJECTED_RE.search(str(text or "")))
 
 
 def _auth_signature() -> tuple[int, int] | None:

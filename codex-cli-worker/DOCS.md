@@ -853,6 +853,9 @@ Status from the thread menu.
 
 ### Checking Codex account access
 
+You need a ChatGPT account with Codex access. The app cannot confirm access from a passive check; it warns
+when the sign-in is missing or explicitly expired, and a successful task confirms access for that sign-in.
+
 A ChatGPT account with Codex access is required. OpenAI's [availability page](https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan),
 read November 13, 2026, includes Codex across ChatGPT plans, including Free and Go; usage limits and workspace
 settings still apply. Codex Cloud eligibility is separate from the local CLI used by this app.
@@ -867,8 +870,9 @@ read, whose plan enum supplies informational Status text. No task is submitted t
 The existing Home Assistant sign-in Repair appears only for signed-out or known expired/rejected sign-in
 state, and clears on a good sign-in or a successful task using the same credentials. Unknown state raises
 nothing. The passive readers recognize explicit revoked-token markers and the pinned refresh-token expired, reused and invalidated codes and their exact user-facing messages; generic HTTP errors, quota exhaustion and plan names do not imply missing access. No distinct
-task-level entitlement error was verified, so no new task-error mapping is added. Existing task sign-in
-rejection handling is unchanged. Status explicitly says when passive reads cannot confirm Codex access.
+task-level entitlement error was verified, so no entitlement mapping is added. Task sign-in failures now use
+the same explicit rejection signals as passive checks, plus the exact observed revocation phrase
+`workspace routing discovery unauthorized (401)`; generic task HTTP failures do not raise the Repair. Status explicitly says when passive reads cannot confirm Codex access.
 
 Passive usage failures treat generic HTTP 401/403, rate exhaustion and network errors as unknown, not expired sign-in. Only explicit Codex sign-in rejection signals can raise the sign-in Repair. Status exposes fixed usage-error messages with `rate_limits_error_category` (`unavailable`, `sign_in_rejected` or `missing_window`); raw upstream errors and failed-read excerpts are omitted, including older cached failures.
 A real successful turn can confirm access for its current sign-in; changing credentials invalidates that
