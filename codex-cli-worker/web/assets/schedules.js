@@ -120,6 +120,9 @@
         mailbox.append(item);
       }
       if (!data.mailbox.length) mailbox.append(node("p", "No local messages.", "muted"));
+      if (dialog.open && data.mailbox.length) {
+        await api("schedule-mailbox/read", {ids: data.mailbox.map(mail => mail.id)});
+      }
     } catch (error) { message(error); }
     finally { refreshing = false; }
   }
