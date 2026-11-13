@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -221,7 +222,8 @@ class HookDeadlineTests(unittest.TestCase):
         # The test runner started long before this test, so its process start is well in the past.
         self.assertLess(gate_hook.process_started_at(), time.monotonic() - 0.01)
 
-    def run_hook_patched(self, patch: str, remote_on: bool, tmp: str) -> tuple[subprocess.CompletedProcess, float]:
+    def run_hook_patched(self, patch: str, remote_on: bool, tmp: str,
+                         event: str = "PreToolUse") -> tuple[subprocess.CompletedProcess, float]:
         """Run the unchanged hook script after ``patch`` (Python text) has run in the same process."""
         state = Path(tmp) / "state.json"
         state.write_text(json.dumps({"enabled": remote_on}), encoding="utf-8")
@@ -229,10 +231,10 @@ class HookDeadlineTests(unittest.TestCase):
                      "code = compile(open(hook, encoding='utf-8').read(), hook, 'exec'); "
                      f"exec({patch!r}); "
                      "sys.argv = sys.argv[2:]; exec(code, {'__name__': '__main__', '__file__': hook})")
-        payload = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "ls /config"}}
+        payload = {"hook_event_name": event, "tool_name": "Bash", "tool_input": {"command": "ls /config"}}
         start = time.monotonic()
         result = subprocess.run([sys.executable, "-I", "-c", bootstrap, str(ROOT), str(HOOK),
-                                 "--event", "PreToolUse", "--state", str(state)],
+                                 "--event", event, "--state", str(state)],
                                 input=json.dumps(payload), capture_output=True, text=True, timeout=15, check=False)
         return result, time.monotonic() - start
 
@@ -272,6 +274,77 @@ class HookDeadlineTests(unittest.TestCase):
             with self.subTest(remote_control_on=remote_on), tempfile.TemporaryDirectory() as tmp:
                 result, elapsed = self.run_hook_patched(patch, remote_on, tmp)
                 self.assert_refused_in_time(result, elapsed)
+
+    def test_an_answer_found_after_the_deadline_is_refused(self) -> None:
+        # The waiting process is not scheduled for 3 seconds right after the fork, while the child answers
+        # (at once, or after a 2-second check). The answer is waiting in the pipe when the waiting process
+        # looks, but it came too late, so the hook refuses instead of passing on that late answer.
+        fork_then_pause = ("fork = os.fork\n"
+                           "def fork_then_pause():\n"
+                           "    child = fork()\n"
+                           "    if child:\n"
+                           "        time.sleep(3)\n"
+                           "    return child\n"
+                           "os.fork = fork_then_pause\n")
+        slow_check = "import gate_rules\ngate_rules.check_tool_call = lambda *a: time.sleep(2) or ''\n"
+        for check, patch in (("fast", fork_then_pause), ("slow", slow_check + fork_then_pause)):
+            for event in ("PreToolUse", "PermissionRequest"):
+                for remote_on in (True, False):
+                    with self.subTest(check=check, event=event, remote_control_on=remote_on), \
+                            tempfile.TemporaryDirectory() as tmp:
+                        result, _elapsed = self.run_hook_patched(patch, remote_on, tmp, event)
+                        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                        self.assertIn(gate_hook.TOO_SLOW, result.stderr)
+                        self.assertEqual(result.stdout, gate_hook.parent_refusal(event, gate_hook.TOO_SLOW) + "\n")
+
+    def test_children_killed_at_the_deadline_are_reaped_for_a_caller_in_this_process(self) -> None:
+        # main() run twice in this process, each time with a check that takes 4 seconds: both calls are
+        # refused in time, and the killed children do not stay behind as zombies.
+        original = gate_rules.check_tool_call
+        gate_rules.check_tool_call = lambda *a: time.sleep(4) or ""
+        killed = []
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                for _ in range(2):
+                    before = list(gate_hook.killed_children)
+                    start = time.monotonic()
+                    code = gate_hook.main(["--state", str(Path(tmp) / "s.json")], io.StringIO("{}"),
+                                          io.StringIO(), io.StringIO())
+                    self.assertEqual(code, 2)
+                    self.assertLess(time.monotonic() - start, gate_hook.DEADLINE_SECONDS + DEADLINE_MARGIN)
+                    killed += [pid for pid in gate_hook.killed_children if pid not in before]
+        finally:
+            gate_rules.check_tool_call = original
+        self.assertEqual(len(killed), 2)
+        give_up = time.monotonic() + 5
+        while gate_hook.killed_children and time.monotonic() < give_up:
+            gate_hook.collect_killed_children()
+            time.sleep(0.01)
+        self.assertEqual(gate_hook.killed_children, [])
+        for pid in killed:
+            with self.assertRaises(ChildProcessError):  # already reaped: no zombie is left
+                os.waitpid(pid, os.WNOHANG)
+
+    def test_the_next_call_reaps_a_child_killed_by_an_earlier_one(self) -> None:
+        original = gate_rules.check_tool_call
+        gate_rules.check_tool_call = lambda *a: time.sleep(4) or ""
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                gate_hook.main(["--state", str(Path(tmp) / "s.json")], io.StringIO("{}"),
+                               io.StringIO(), io.StringIO())
+        finally:
+            gate_rules.check_tool_call = original
+        killed = list(gate_hook.killed_children)
+        self.assertTrue(killed)
+        time.sleep(0.5)  # long enough for a killed child to go
+        with tempfile.TemporaryDirectory() as tmp:
+            code = gate_hook.main(["--state", str(Path(tmp) / "s.json")], io.StringIO("{}"),
+                                  io.StringIO(), io.StringIO())
+        self.assertEqual(code, 0)
+        for pid in killed:
+            self.assertNotIn(pid, gate_hook.killed_children)
+            with self.assertRaises(ChildProcessError):
+                os.waitpid(pid, os.WNOHANG)
 
     def test_the_waiting_process_writes_the_same_refusal_as_the_child(self) -> None:
         for event in ("PreToolUse", "PermissionRequest", ""):

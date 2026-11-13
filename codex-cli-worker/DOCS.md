@@ -399,6 +399,8 @@ loading the check, reading files and the request, and checking it. The hook itse
 answer and never reads a file, so a stalled disk or a stuck check cannot hold it up. When the deadline
 passes, the hook stops the child and refuses the request with a plain reason (the check did not finish in
 time; ask again, or make the change yourself from the app page), without waiting for the child to exit.
+An answer the hook only finds after the deadline (for example when the machine did not run the hook while
+the check finished) is thrown away and refused the same way, so no answer is ever given late.
 This holds with remote control on or off, and also when the check is stuck inside one long call or the
 request never finishes arriving. Python's own start, before the hook's first line, cannot be interrupted;
 it counts against the 1.5 seconds. The hook also checks bounded inputs and refuses an uncertain, oversized or

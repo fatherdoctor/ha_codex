@@ -7,6 +7,8 @@
   process that the hook stops at the deadline, refusing the request with a plain reason, even when the check
   is stuck inside one long call. The child also does all of the file reading and module loading, so a stalled
   disk cannot delay the answer, and the hook does not wait for a stopped child to exit before it answers.
+  An answer that is ready only after the deadline is refused too, rather than passed on late. A program
+  that calls the hook's `main()` repeatedly in one process no longer collects stopped child processes.
   `tests/measure_gate.py` prints the hook's own time for each call.
 
 - Document the line-based command check’s known YAML blind spots and the protections that still apply.

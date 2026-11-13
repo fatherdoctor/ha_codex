@@ -28,7 +28,10 @@ reading the request and checking it. The parent only waits for the child's
 answer on a pipe, so nothing it does can block on a disk or on the check. When
 the deadline passes, the parent kills the child, writes the refusal and exits
 without waiting for the child to go away (whatever reaps the hook's orphans
-collects it).
+collects it). An answer the parent finds only after the deadline - because the
+parent itself was not scheduled while the child finished, say - is thrown away
+and refused like a late one: the parent checks the time after every read of
+the pipe, before it accepts anything.
 A separate process is used because neither a thread nor a signal can interrupt
 Python while it is stuck inside one long call, such as a regular expression
 that backtracks, or a file read on a stalled disk.
@@ -60,6 +63,11 @@ TOO_SLOW = ("The command check did not finish in time, so this request is refuse
 POLL_SECONDS = 0.005
 # The signal number of SIGKILL, the same on every Linux. Importing the signal module would read a file.
 SIGKILL = 9
+
+# Children killed at the deadline that have not been reaped yet. A hook run as a script exits right after
+# its answer, and whatever reaps its orphans collects them. A caller that runs main() in its own process
+# (the tests) keeps running, so collect_killed_children() reaps them for it, without waiting.
+killed_children: list[int] = []
 
 
 def remote_control_on(path) -> bool:
@@ -213,6 +221,9 @@ def wait_for_child(read_end: int, deadline: float) -> bytes | None:
     """Collect the child's message from the pipe; return None if it is not complete by ``deadline``.
 
     The pipe is read without blocking, so the parent never waits past the deadline.
+    The time is checked after every read, before anything read is accepted: an
+    answer that is already waiting in the pipe when the parent looks after the
+    deadline is not used.
     """
     os.set_blocking(read_end, False)
     message = b""
@@ -220,14 +231,16 @@ def wait_for_child(read_end: int, deadline: float) -> bytes | None:
         try:
             chunk = os.read(read_end, 65536)
         except BlockingIOError:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                return None
+            chunk = None  # nothing to read yet
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        if chunk is None:
             time.sleep(min(POLL_SECONDS, remaining))
-            continue
-        if not chunk:
-            return message  # the child closed the pipe: its message is complete
-        message += chunk
+        elif chunk:
+            message += chunk
+        else:
+            return message  # the child closed the pipe in time: its message is complete
 
 
 def collect_child(child: int) -> None:
@@ -242,11 +255,28 @@ def collect_child(child: int) -> None:
         pass
 
 
+def collect_killed_children() -> None:
+    """Reap the children killed at earlier deadlines that have gone, without waiting for the others.
+
+    The hook calls this at the start of every call, so a caller that runs main()
+    again and again in one process does not collect zombies; such a caller may
+    also call it when it is done.
+    """
+    for child in list(killed_children):
+        try:
+            pid, _status = os.waitpid(child, os.WNOHANG)
+        except ChildProcessError:
+            pid = child  # already reaped elsewhere
+        if pid == child:
+            killed_children.remove(child)
+
+
 def answer_before_deadline(argv: list[str], stdin, deadline: float) -> tuple[int, str, str]:
     """Run ``answer`` in a forked child; return its answer, or a refusal if it is not back by ``deadline``.
 
     A child that dies without an answer, or a fork that fails, refuses.
     """
+    collect_killed_children()
     event = option_value(argv, "--event")
     sys.stdout.flush()
     sys.stderr.flush()
@@ -272,12 +302,13 @@ def answer_before_deadline(argv: list[str], stdin, deadline: float) -> tuple[int
         os.close(read_end)
     if message is None:
         # Kill the child and answer at once. It is not reaped here: a killed child can take a while to
-        # go (held up in the kernel, say), and whatever reaps the hook's orphans collects it after the
-        # hook exits.
+        # go (held up in the kernel, say). Whatever reaps the hook's orphans collects it after the hook
+        # exits, or, for a caller that keeps running, collect_killed_children() does.
         try:
             os.kill(child, SIGKILL)
         except ProcessLookupError:
             pass
+        killed_children.append(child)
         return 2, parent_refusal(event, TOO_SLOW) + "\n", TOO_SLOW + "\n"
     collect_child(child)
     parts = message.decode("utf-8", errors="replace").split("\0")
