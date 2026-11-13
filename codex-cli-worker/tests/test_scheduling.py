@@ -226,6 +226,57 @@ class SchedulingApiTests(unittest.TestCase):
     def request_owner(self, method, path, data=None):
         return self.client.open(path, method=method, json=data, headers=self.owner, environ_overrides=self.owner_env)
 
+    def test_mail_unread_counts_are_per_reader_and_lead_filter_marks_only_its_page(self):
+        store = self.service.engine().store
+        first = store.mail('Synthetic message body', 'codex', NOW, turn_id='mail-test')
+        reply = store.mail('Synthetic reply', 'owner', NOW + 1, first)
+        status = store.mail_status()
+        self.assertEqual(status['unread'], {'lead': 2, 'owner': 1})
+        self.assertNotIn('body', str(status))
+        result = self.client.get('/lead/mailbox?unread_only=true', headers=self.lead)
+        self.assertEqual([row['id'] for row in result.json['mailbox']], [first, reply])
+        self.assertEqual(self.client.get('/lead/mailbox?unread_only=true', headers=self.lead).json['mailbox'], [])
+        self.assertEqual(store.mail_status()['unread'], {'lead': 0, 'owner': 1})
+        self.assertEqual(self.client.get('/lead/mailbox?unread_only=maybe', headers=self.lead).status_code, 400)
+
+    def test_status_mail_metadata_has_no_body_or_core_timezone_lookup(self):
+        self.service.engine().store.mail('UNTRUSTED_BODY', 'codex', NOW, turn_id='mail-test')
+        with patch.object(server, 'schedule_timezone', side_effect=AssertionError('No Core lookup')):
+            status = server.mailbox_status_payload()
+        self.assertEqual(status['unread']['lead'], 1)
+        self.assertNotIn('UNTRUSTED_BODY', str(status))
+        self.assertEqual(set(status['messages'][0]), {'message_id', 'thread_id', 'author', 'time'})
+
+    def test_owner_acknowledges_only_displayed_ids_and_requires_admin(self):
+        store = self.service.engine().store
+        first = store.mail('First synthetic message', 'codex', NOW, turn_id='mail-test')
+        self.request_owner('GET', '/schedules')
+        self.assertEqual(store.mail_status()['unread']['owner'], 1)
+        second = store.mail('Arrived after page snapshot', 'codex', NOW + 1, turn_id='mail-test')
+        response = self.request_owner('POST', '/schedule-mailbox/read', {'ids': [first]})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(store.mail_status()['unread']['owner'], 1)
+        self.assertEqual(store.messages(reader='owner', unread_only=True)[0]['id'], second)
+        self.assertEqual(store.mail_status()['unread']['lead'], 2)
+        self.assertIn(self.client.post('/schedule-mailbox/read', json={'ids': [second]}, headers=self.lead).status_code, (401, 403))
+        self.assertEqual(self.request_owner('POST', '/schedule-mailbox/read', {'ids': 'all'}).status_code, 400)
+        fresh = scheduling.Store(store.path)
+        self.assertEqual(fresh.mail_status()['unread']['owner'], 1)
+        self.assertFalse(server.tasks)
+
+    def test_read_tracking_is_pruned_with_existing_mailbox_limits(self):
+        store = self.service.engine().store
+        first = store.mail('First', 'codex', NOW, turn_id='mail-test')
+        store.mark_mail_read('owner', [first])
+        with patch.object(scheduling, 'MAX_MESSAGES', 1):
+            store.mail('Second', 'codex', NOW + 1, turn_id='mail-test')
+        self.assertEqual(len(store.messages()), 1)
+        with store.connect() as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM mailbox_reads').fetchone()[0], 0)
+        self.assertEqual(store.mail_status()['unread']['lead'], 1)
+        store.clear_mail()
+        self.assertEqual(store.mail_status(), {'unread': {'lead': 0, 'owner': 0}, 'messages': []})
+
     def test_lead_requires_separate_token_and_ingress_alone_is_not_a_token(self):
         self.assertEqual(self.client.get('/lead/mailbox').status_code, 401)
         self.assertEqual(self.client.get('/lead/mailbox', headers={'X-Codex-Worker-Token': 'synthetic-worker-credential'}).status_code, 401)

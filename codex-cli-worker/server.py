@@ -51,6 +51,7 @@ from core_address import CoreAddress, probe_core
 from relay_reads import RelayReads, ReadError as RelayReadError
 import schedule_api
 from verbose_log import VerboseLog, Tee as VerboseTee, CredentialCache
+import sqlite3
 from interaction_diagnostics import RollingDiagnostics, InteractionRecorder
 
 
@@ -5763,6 +5764,14 @@ def index() -> Response:
     return Response((WEB_ROOT / "index.html").read_text(encoding="utf-8"), mimetype="text/html")
 
 
+def mailbox_status_payload() -> dict[str, Any]:
+    """Report bounded mailbox metadata without making status depend on storage availability."""
+    try:
+        return schedule_service.mailbox_status()
+    except (OSError, ValueError, sqlite3.Error):
+        return {'available': False, 'unread': {'lead': None, 'owner': None}}
+
+
 @app.get("/health")
 @require_auth
 def health() -> Response:
@@ -5805,6 +5814,7 @@ def status() -> Response:
             "active_task_id": active_task_id(),
             "active_task_count": active_task_count(),
             "queued_message_count": queued,
+            "mailbox": mailbox_status_payload(),
             "task_count": active_task_count(),
             "total_task_count": len(task_values),
             "latest_task": latest,

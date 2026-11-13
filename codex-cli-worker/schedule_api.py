@@ -78,6 +78,13 @@ class Service:
                     self._engine.store.timezone = None
             return self._engine
 
+    def mailbox_status(self):
+        """Read mailbox metadata without refreshing Core time-zone metadata or dispatching work."""
+        path = Path(self.worker.DATA_ROOT) / 'schedules.sqlite3'
+        with self._lock:
+            store = self._engine.store if self._path == path else scheduling.Store(path)
+            return store.mail_status()
+
     def dispatch(self, payload):
         """Use the existing running-turn capability only for proposals and local text."""
         if not isinstance(payload, dict) or set(payload) != {'operation', 'arguments', 'capability'}:
@@ -353,7 +360,11 @@ def register(worker):
     @guarded
     @lead
     def lead_mail_list():
-        return jsonify(ok=True, mailbox=clean(service.engine().store.messages()))
+        value = request.args.get('unread_only', 'false')
+        if value not in ('true', 'false'):
+            raise ValueError('unread_only must be true or false.')
+        rows = service.engine().store.messages(reader='lead', unread_only=value == 'true', mark_read=True)
+        return jsonify(ok=True, mailbox=clean(rows))
 
     def mail_send(author, parent=None):
         data = body()
@@ -374,6 +385,16 @@ def register(worker):
     @lead
     def lead_mail_reply(message_id):
         return mail_send('lead', message_id)
+
+    @app.post('/schedule-mailbox/read')
+    @guarded
+    @owner
+    def owner_mail_read():
+        data = body()
+        if set(data) != {'ids'}:
+            raise ValueError('A mailbox acknowledgement needs ids only.')
+        service.engine().store.mark_mail_read('owner', data['ids'])
+        return jsonify(ok=True)
 
     @app.post('/schedule-mailbox')
     @guarded
