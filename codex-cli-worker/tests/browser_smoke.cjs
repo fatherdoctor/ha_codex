@@ -1,4 +1,5 @@
 // Run against web_fixture.py with Playwright available on NODE_PATH.
+// Start a fresh fixture for each browser suite; suites change its conversation state.
 const { chromium } = require("playwright");
 const assert = require("node:assert/strict");
 const path = require("node:path");

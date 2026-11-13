@@ -199,16 +199,17 @@ class Engine:
                 # Recheck settings, owner rules, definitions and the live turn immediately before dispatch.
                 if not still_active() or groups != self.settings.read() or rules != guard_rules(self.guards()):
                     raise ApprovalRequired('Permissions changed or the exchange ended; request normal approval.')
-                for target, digest in checks.items():
-                    value = (self.backend.reload_changes(target[7:]) if target.startswith('reload:')
-                             else self.backend.definition(target))
-                    if self.definition_digest(value) != digest:
-                        raise ApprovalRequired('An indirect action changed during checking; request normal approval.')
                 # A failed audit must stop BEFORE the write. The callback sees no payload or raw target.
                 self.observer(event('requested'))
                 if (not still_active() or groups != self.settings.read()
                         or rules != guard_rules(self.guards())):
                     raise ApprovalRequired('Permissions changed or the exchange ended; request normal approval.')
+                # Last Core read follows audit persistence and all other preflight work.
+                for target, digest in checks.items():
+                    value = (self.backend.reload_changes(target[7:]) if target.startswith('reload:')
+                             else self.backend.definition(target))
+                    if self.definition_digest(value) != digest:
+                        raise ApprovalRequired('An indirect action changed during checking; request normal approval.')
                 started_write = True
                 result = self.backend.execute(plan)
             except ApprovalRequired as exc:

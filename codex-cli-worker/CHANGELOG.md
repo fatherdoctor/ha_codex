@@ -2,10 +2,13 @@
 
 ## 0.1.81.2 (unreleased)
 
+- Recheck loaded actions and reload comparisons after audit persistence, directly before dispatch; identify affected groups for each selected limit.
+
 - Pin administrator-confirmed house rules for each action exchange; check loaded actions and changed reload
   definitions, keep unattended runs on normal prompts, and hand uncertain setup fields to Home Assistant.
 
 - Add administrator-selected permissions override groups for worker-launched Default exchanges, with a bounded Core action tool, guard-rail checks and shared private audit metadata. Remote turns continue to require normal approval.
+- Document the line-based command check’s known YAML blind spots and the protections that still apply.
 
 - Add the Quiet Studio chat layout with Home Assistant themes, a bottom composer, photo/file menu,
   per-chat narrowing permissions, thread status and archive/restore. Separate remote connection and

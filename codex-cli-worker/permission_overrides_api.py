@@ -538,7 +538,18 @@ class Service:
             rules = guard_rules(text)
             lines = [line for line in selected_guard_lines(text) if line in GUARD_LINES]
             if rules:
-                return 'Selected block limits suspend actions in these domains: ' + ', '.join(sorted(rules)) + '. ' + ' '.join(lines)
+                notes = []
+                for line in lines:
+                    domains = GUARD_LINES[line]
+                    if 'external' in domains:
+                        affected = ('Security and people; Organize; Bigger changes; '
+                                    'Apply checked changes for setup forms')
+                    else:
+                        affected = ('Security and people; Organize for matching entities; '
+                                    'Everyday controls, Bigger changes and Apply checked changes '
+                                    'when an indirect action reaches this domain')
+                    notes.append(line + ' Suspended groups/actions: ' + affected + '.')
+                return 'Selected block limits (' + ', '.join(sorted(rules)) + '): ' + ' '.join(notes)
         except ApprovalRequired as error:
             return str(error)
         return ''

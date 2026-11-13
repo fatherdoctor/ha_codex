@@ -132,6 +132,17 @@ class ConfirmedRules(unittest.TestCase):
         self.assertIn('lock', self.service.guard_note())
         self.assertIn('- Do not lock or unlock locks.', self.service.guard_note())
 
+    def test_multiple_selected_limits_name_their_affected_groups(self):
+        self.prepare()
+        self.path.write_text(MARKERS[0] + '\n- Do not lock or unlock locks.\n'
+                             '- Do not publish content or changes externally.\n' + MARKERS[1])
+        self.service.confirm_rules()
+        note = self.service.guard_note()
+        self.assertIn('locks. Suspended groups/actions: Security and people; Organize for matching entities', note)
+        self.assertIn('externally. Suspended groups/actions: Security and people; Organize; Bigger changes', note)
+        self.assertIn('Everyday controls', note)
+        self.assertIn('Apply checked changes', note)
+
     def test_unattended_runs_do_not_use_groups(self):
         self.worker.tasks = {'task': {}}
         for source in ('chat', 'schedule', 'lead', 'unknown', 'remote'):
@@ -206,6 +217,27 @@ class GuardAndMutationRegressions(unittest.TestCase):
                 self.assertIn('light.sample', result['performed'])
                 self.assertNotIn('lock.sample', result['performed'])
                 self.assertEqual(self.backend.writes[-1]['target'], ['light.sample'])
+
+    def test_definition_change_during_audit_refuses_loaded_action_and_reload(self):
+        safe = {'actions': [{'action': 'light.turn_on', 'target': {'entity_id': 'light.sample'}}]}
+        unsafe = {'actions': [{'action': 'lock.unlock', 'target': {'entity_id': 'lock.sample'}}]}
+        for reload in (False, True):
+            with self.subTest(reload=reload):
+                self.backend.writes.clear()
+                self.backend.definitions['automation.sample'] = deepcopy(safe)
+                changes = {'new': deepcopy(safe)}
+                self.backend.reload_changes = lambda domain: deepcopy(changes)
+                def audit(event):
+                    if event['outcome'] == 'requested':
+                        self.backend.definitions['automation.sample'] = deepcopy(unsafe)
+                        changes['new'] = deepcopy(unsafe)
+                self.engine.observer = audit
+                request = ({'operation': 'reload', 'target': 'automation'} if reload else
+                           {'operation': 'service', 'service': 'automation.trigger', 'target': ['automation.sample']})
+                result = self.dispatch(**request)
+                self.assertFalse(result['ok'])
+                self.assertTrue(result['approval_required'])
+                self.assertEqual(self.backend.writes, [])
 
     def test_reload_checks_only_new_or_changed_definitions_and_rechecks_them(self):
         self.backend.reload_changes = Mock(return_value={'new': {'actions': [{'action': 'lock.unlock', 'target': {'entity_id': 'lock.sample'}}]}})
