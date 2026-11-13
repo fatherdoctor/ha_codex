@@ -96,15 +96,23 @@ fs.mkdirSync(output,{recursive:true});
    await page.locator('#archive-list').click();
    await page.locator(`.row-main[data-task-id="${taskId}"]`).click();
    await page.waitForFunction(expected=>state.id===expected&&!state.loading,taskId);
+   const reloadArchived = width===1024 && theme==='light';
+   if(reloadArchived) {
+    await page.reload();
+    await page.waitForFunction(expected=>state.id===expected&&!state.loading,taskId);
+   }
+
    await page.locator(width===390?'#phone-thread-actions':'#thread-actions').click();
    await page.getByRole('menuitem',{name:'Restore chat',exact:true}).click();
    await page.waitForFunction(()=>state.id===null);
    const restored=(await (await page.request.get(base+'tasks/'+taskId)).json()).task;
    assert.equal(restored.archived,false);
    assert.equal(restored.turns[0].prompt_attachments[0].name,'sample.md');
-   if(width===390) await page.locator('#phone-history').click();
-   await page.locator('#archive-list').click();
-   if(width===390) await page.locator('#close-sidebar').click();
+   if(!reloadArchived) {
+    if(width===390) await page.locator('#phone-history').click();
+    await page.locator('#archive-list').click();
+    if(width===390) await page.locator('#close-sidebar').click();
+   }
 
    await page.locator('#header-settings').click();
    assert.equal(await page.locator('#agents').isVisible(),false);

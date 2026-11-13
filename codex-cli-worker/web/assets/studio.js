@@ -217,7 +217,8 @@ document.addEventListener("thread-action", async event => {
     } catch (error) { showError(error); }
   } else if (action === "archive") {
     try {
-      await api(`tasks/${encodeURIComponent(id)}/archive`, {archived: !chatById(id)?.archived});
+      const chat = chatById(id) || (id === state.id ? state.task : null);
+      await api(`tasks/${encodeURIComponent(id)}/archive`, {archived: !chat?.archived});
       if (id === state.id) await selectChat(null);
       await loadList();
     } catch (error) { showError(error); }
