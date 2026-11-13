@@ -789,3 +789,44 @@ requires an administrator for Ingress requests; the integration's worker token
 remains able to fetch it. Only an Ingress administrator may change retention.
 An unavailable worker returns an unavailable data section without its exception
 message or connection address.
+
+
+### Chat page and attachments
+
+The page follows Home Assistant colors in light and dark when its host exposes them; otherwise it follows
+the device appearance. Recent conversations stay alongside the writing canvas on tablets and desktop.
+On a phone the connection chip and Settings stay in the header, with conversations, New chat and the thread
+menu below. The composer stays at the bottom. Its model and reasoning controls show the saved chat choice
+or configured default, rather than a sample selection.
+
+The plus menu uploads photos or files. A message accepts at most six attachments, up to 10 MB each.
+Photos retain their existing resizing and image checks. File uploads support UTF-8 text, Markdown, YAML,
+JSON, CSV, logs, Python/JavaScript source, HTML/CSS/XML source, and PDF headers. Binary text and unsupported
+extensions are refused. Documents remain passive files: they are never executed or rendered in the page,
+and downloads use attachment disposition, no-sniff and a sandboxed content policy. They are stored privately
+with the message; Codex receives their validated paths and may read relevant contents as part of that task.
+PDF acceptance does not promise a particular extraction tool. Draft attachments stay in the browser until
+Send. Archiving a chat hides it from recent conversations without deleting its session or attachments;
+Archived chats can restore it. Delete remains a separate action.
+
+The Permissions picker starts at Default permissions: use the add-on's configured sandbox and native
+approval flow. Read only narrows the next turn to the read-only sandbox, including a resumed or queued turn.
+Neither choice expands a configured read-only sandbox, suppresses native approval, or changes managed
+security refusals. A queued message keeps the choice submitted with it. Auto-review and Full access are
+shown as Coming and cannot be selected. Camera and Plan mode are not offered in this build.
+
+The thread menu includes Pin, Rename, Copy thread ID, Archive and Status. A thread without a native ID
+reports that it is unavailable instead of substituting the page's task ID. Status shows the workspace,
+selected model and permissions; context and usage/reset remain unavailable in this view until verified
+window data is wired. No quota is inferred from activity.
+
+Remote connection opens a separate view for Off, Starting, Ready, Reconnecting and Error. Pairing uses two
+different protocol fields: the manual code for typing, and the opaque code for the Continue in ChatGPT URL
+and its QR. The manual code is never substituted into the URL. If only a manual code is available, request
+a new code or type it; no app link is invented. The QR has a four-module quiet zone at every width. Codes,
+URLs and QR images remain limited to verified Ingress administrators; API tokens alone cannot read them
+or start pairing. No live account enrollment or device handoff is implied by local rendering tests.
+
+Settings → Advanced → Workspace rules opens a separate editor. The file is read only when that editor
+opens, and Save remains an explicit action. Existing account, diagnostic, scheduling and browser-permission
+controls remain in Settings.

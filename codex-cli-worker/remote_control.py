@@ -28,6 +28,7 @@ import hashlib
 import stat
 import uuid
 import json
+import urllib.parse
 import os
 import re
 import signal
@@ -233,7 +234,7 @@ def qr_data_url(text: str) -> str:
         from qrcode.image.svg import SvgPathFillImage
     except ImportError:
         return ""
-    qr = QRCode(border=2)
+    qr = QRCode(border=4)
     qr.add_data(text)
     qr.make(fit=True)
     buffer = io.BytesIO()
@@ -682,7 +683,7 @@ class ControlClient:
     def pair(self, cancelled: Callable[[], bool] = lambda: False) -> dict[str, Any]:
         reply = self._request("remoteControl/pairing/start", {"manualCode": True}, 35.0, cancelled)
         # The opaque pairingCode is for QR clients, not a code a person can type.
-        return {"manualPairingCode": reply.get("manualPairingCode")}
+        return {"manualPairingCode": reply.get("manualPairingCode"), "pairingCode": reply.get("pairingCode")}
 
 
 class Supervisor:
@@ -844,6 +845,7 @@ class Supervisor:
         with self.lock:
             proc, path = self.proc, self.control_socket
             self.status["pairing_code"] = ""
+            self.status["pairing_url"] = ""
         if not self.enabled():
             return False, {**self.snapshot(), "error": "Turn remote control on first."}
         if proc is None or proc.poll() is not None or path is None:
@@ -858,6 +860,10 @@ class Supervisor:
                 if self.proc is not proc or self.control_socket != path or cancelled():
                     raise ControlError("Remote control restarted or stopped while pairing.")
                 self.status["pairing_code"] = code
+                opaque = reply.get('pairingCode')
+                url = ('https://chatgpt.com/codex/pair?pairing_code=' + urllib.parse.quote(opaque, safe='')) \
+                    if isinstance(opaque, str) and 0 < len(opaque) <= 2048 else ''
+                self.status['pairing_url'] = url if len(url.encode('utf-8')) <= 2048 else ''
                 self.log.append("A new pairing code is ready on this page.")
             return True, self.snapshot()
         except Exception:
@@ -1056,7 +1062,7 @@ class Supervisor:
         with self.lock:
             self.log.append("A pairing code is ready on this page." if code else redact(line))
         if code:
-            self.set_status("pairing", "Enter this pairing code in the ChatGPT app.", pairing_code=code)
+            self.set_status("pairing", "Enter this pairing code in the ChatGPT app.", pairing_code=code, pairing_url="")
             return code
         available = AVAILABLE_RE.search(line)
         if available:
@@ -1089,7 +1095,8 @@ class Supervisor:
             "available": not problem,
             "blocked_reason": problem,
             "configured_name": machine_name(self.name_factory()),
-            "pairing_qr": qr_data_url(code) if code else "",
+            "pairing_url": status.get("pairing_url", "") if code else "",
+            "pairing_qr": qr_data_url(status.get("pairing_url") or code) if code else "",
             "log": log,
             "config_findings": findings[:WATCH_SHOWN],
             "config_findings_count": len(findings),

@@ -2,6 +2,11 @@
 
 ## 0.1.81.2 (unreleased)
 
+- Add the Quiet Studio chat layout with Home Assistant themes, a bottom composer, photo/file menu,
+  per-chat narrowing permissions, thread status and archive/restore. Separate remote connection and
+  Advanced workspace-rules views; keep pairing URLs distinct from manual codes and administrator-only.
+  Auto-review and Full access remain unavailable; no managed security policy changes.
+
 - Close diagnostics interrupted by a worker restart as unknown, retaining room for new completed work.
   Create the private entity key without hard links and explain recovery while collecting other metadata.
   Protect private diagnostic files, retain only the newest corrupt store, distinguish policy causes and

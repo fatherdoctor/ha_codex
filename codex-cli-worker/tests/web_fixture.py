@@ -137,6 +137,11 @@ def main():
                                                     "text": json.dumps({"status": "completed", "summary": text, "question": "", "details": ""})}},
             ]
 
+        @server.app.post('/fixture/studio-pairing')
+        def studio_pairing():
+            from remote_control import qr_data_url
+            return {'qr': qr_data_url('https://chatgpt.com/codex/pair?pairing_code=SAMPLE-NOT-VALID')}
+
         release = threading.Event()
 
         def finish(task_id, prompt, session_id=session_id, reply=None):
