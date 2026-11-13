@@ -20,34 +20,34 @@ write. A file that exists but cannot be read counts as on.
 The hook answers within its own deadline, ``DEADLINE_SECONDS`` from the start
 of its process, well inside the timeout in ``managed_config.toml``. Codex 0.166
 runs the action when a hook passes that timeout, so a late answer would let
-the call through. The check itself runs in a forked child process; the parent
-only waits. When the deadline passes, the parent stops the child and refuses
-with a plain reason. A separate process is used because a thread or a signal
-cannot interrupt Python while it is stuck inside one long call, such as a
-regular expression that backtracks.
+the call through.
+
+How the deadline is kept: the hook's first lines fork a child process, and the
+child does all of the work - importing modules, finding and reading files,
+reading the request and checking it. The parent only waits for the child's
+answer on a pipe, so nothing it does can block on a disk or on the check. When
+the deadline passes, the parent kills the child, writes the refusal and exits
+without waiting for the child to go away (whatever reaps the hook's orphans
+collects it).
+A separate process is used because neither a thread nor a signal can interrupt
+Python while it is stuck inside one long call, such as a regular expression
+that backtracks, or a file read on a stalled disk.
+
+So that the parent never touches the disk, this module imports only ``os``,
+``sys`` and ``time`` at the top, which Python has already loaded before the
+script's first line runs; everything else is imported inside the child.
+Python's own start, before the first line, cannot be interrupted, but it
+counts against the deadline.
 """
 
-from __future__ import annotations
-
-import argparse
-import json
 import os
-import select
-import signal
 import sys
 import time
-from pathlib import Path
 
-# Taken before anything else is imported, for when the kernel's own start time cannot be read.
+# Taken before anything else, for when the kernel's own start time cannot be read.
 IMPORTED_AT = time.monotonic()
 
-# The image keeps gate_rules.py next to this script; a source checkout keeps it one folder up. Python runs
-# with -I, which leaves the script's folder off the path. The import happens in main(), so that a missing
-# or broken rules module refuses the request instead of failing with an exit code Codex would ignore.
-HERE = Path(__file__).resolve().parent
-RULES_DIR = HERE if (HERE / "gate_rules.py").is_file() else HERE.parent
-
-DEFAULT_STATE = Path("/data/remote_control.json")
+DEFAULT_STATE = "/data/remote_control.json"
 UNREADABLE = "The command check could not read this request, so it is refused."
 
 # How long the hook may take, counted from the start of its process. Codex waits 10 seconds
@@ -56,9 +56,16 @@ DEADLINE_SECONDS = 1.5
 TOO_SLOW = ("The command check did not finish in time, so this request is refused. "
             "Ask again, or make the change yourself from the app page.")
 
+# How often the parent looks for the child's answer while it waits.
+POLL_SECONDS = 0.005
+# The signal number of SIGKILL, the same on every Linux. Importing the signal module would read a file.
+SIGKILL = 9
 
-def remote_control_on(path: Path) -> bool:
+
+def remote_control_on(path) -> bool:
     """Return whether the owner left remote control on; a missing file is off, an unreadable one is on."""
+    import json
+
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -84,17 +91,36 @@ def refusal(event: str, reason: str) -> dict:
     }
 
 
+def parent_refusal(event: str, reason: str) -> str:
+    """Return the refusal the parent writes itself, as the JSON text ``refusal`` would give, without ``json``.
+
+    The parent may not import the json module (that reads files), so it writes
+    this text by hand. ``reason`` is always one of this module's own fixed
+    texts, which need no escaping; any event other than the two Codex sends
+    is answered in the PreToolUse shape. A test checks that the text is the
+    same as ``json.dumps(refusal(event, reason))``.
+    """
+    if event == "PermissionRequest":
+        return ('{"hookSpecificOutput": {"hookEventName": "PermissionRequest", '
+                f'"decision": {{"behavior": "deny", "message": "{reason}"}}}}}}')
+    return (f'{{"decision": "block", "reason": "{reason}", "hookSpecificOutput": {{"hookEventName": '
+            f'"PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "{reason}"}}}}')
+
+
 def process_started_at() -> float:
     """Return when this process started, on the ``time.monotonic()`` clock.
 
     The kernel records the start in ``/proc/self/stat`` (field 22, in clock
-    ticks since boot), which includes the time Python took to start. Where that
-    cannot be read, the time this module was imported is used instead.
+    ticks since boot), which includes the time Python took to start. That file
+    is made by the kernel from memory, never read from a disk. Where it cannot
+    be read, the time this module was imported is used instead.
     """
     try:
-        stat = Path("/proc/self/stat").read_text(encoding="ascii")
+        # Read as bytes: decoding as text could import a codec module, which is a file read.
+        with open("/proc/self/stat", "rb") as file:
+            stat = file.read()
         # The command name in field 2 may contain spaces, so count the fields after its closing parenthesis.
-        start_ticks = int(stat.rsplit(")", 1)[1].split()[19])
+        start_ticks = int(stat.rsplit(b")", 1)[1].split()[19])
         running_for = time.clock_gettime(time.CLOCK_BOOTTIME) - start_ticks / os.sysconf("SC_CLK_TCK")
     except (OSError, ValueError, IndexError, AttributeError):
         return IMPORTED_AT
@@ -103,12 +129,37 @@ def process_started_at() -> float:
     return time.monotonic() - running_for
 
 
-def judge(args: argparse.Namespace, stdin) -> tuple[str, str]:
+def option_value(argv: list[str], name: str) -> str:
+    """Return the value of ``--name value`` or ``--name=value`` in ``argv``, or "" when it is not there.
+
+    The parent reads ``--event`` with this rather than argparse, which it may
+    not import. The child's argparse is set to refuse shortened option names,
+    so both read the command line the same way.
+    """
+    for index, arg in enumerate(argv):
+        if arg == name and index + 1 < len(argv):
+            return argv[index + 1]
+        if arg.startswith(name + "="):
+            return arg[len(name) + 1:]
+    return ""
+
+
+# judge(), answer() and send_from_child() run only in the child, so they may import and read files.
+
+def judge(args, stdin) -> tuple[str, str]:
     """Read the event from stdin and return it with the reason to refuse it ("" lets it through)."""
+    import json
+    from pathlib import Path
+
     event = args.event
     try:
-        if str(RULES_DIR) not in sys.path:
-            sys.path.insert(0, str(RULES_DIR))
+        # The image keeps gate_rules.py next to this script; a source checkout keeps it one folder up. Python
+        # runs with -I, which leaves the script's folder off the path. A missing or broken rules module
+        # refuses the request.
+        here = Path(__file__).resolve().parent
+        rules_dir = here if (here / "gate_rules.py").is_file() else here.parent
+        if str(rules_dir) not in sys.path:
+            sys.path.insert(0, str(rules_dir))
         import gate_rules
 
         payload = json.loads(stdin.read() or "null")
@@ -121,63 +172,118 @@ def judge(args: argparse.Namespace, stdin) -> tuple[str, str]:
     return event, reason
 
 
-def judge_before_deadline(args: argparse.Namespace, stdin, deadline: float) -> tuple[str, str]:
-    """Run ``judge`` in a forked child and return its answer, or a refusal if it is not back by ``deadline``.
+def answer(argv: list[str], stdin) -> tuple[int, str, str]:
+    """Read the command line and the event, and return the exit code and the text for stdout and stderr."""
+    import argparse
+    import json
 
-    The child sends its answer as one JSON line on a pipe and exits. The parent
-    waits on the pipe until the deadline, then kills the child if it is still
-    running. A child that dies without an answer, or a fork that fails, refuses.
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
+    parser.add_argument("--event", default="", help="the hook event, when the input does not name it")
+    parser.add_argument("--state", default=DEFAULT_STATE, help="the app's saved remote-control choice")
+    parser.add_argument("--rules", default="", help="the refused-domain list (default: the image's)")
+    parser.add_argument("--timing", action="store_true",
+                        help="also write the hook's own time on stderr (for tests/measure_gate.py; Codex never sets it)")
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit:  # a bad command line refuses
+        return 2, json.dumps(refusal(option_value(argv, "--event"), UNREADABLE)) + "\n", UNREADABLE + "\n"
+    event, reason = judge(args, stdin)
+    if not reason:
+        return 0, "", ""
+    return 2, json.dumps(refusal(event, reason)) + "\n", reason + "\n"
+
+
+def send_from_child(argv: list[str], stdin, write_end: int) -> None:
+    """In the child: work out the answer and write it to the pipe as "code NUL stdout NUL stderr"."""
+    # Let go of the hook's stdout and stderr first, so that a child still stuck after the parent has
+    # answered does not keep Codex waiting for those streams to close.
+    os.close(1)
+    os.close(2)
+    null = os.open(os.devnull, os.O_WRONLY)
+    for fd in (1, 2):
+        if null != fd:
+            os.dup2(null, fd)
+    code, out, err = answer(argv, stdin)
+    message = f"{code}\0{out}\0{err}".encode()
+    while message:
+        message = message[os.write(write_end, message):]
+
+
+def wait_for_child(read_end: int, deadline: float) -> bytes | None:
+    """Collect the child's message from the pipe; return None if it is not complete by ``deadline``.
+
+    The pipe is read without blocking, so the parent never waits past the deadline.
     """
+    os.set_blocking(read_end, False)
+    message = b""
+    while True:
+        try:
+            chunk = os.read(read_end, 65536)
+        except BlockingIOError:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            time.sleep(min(POLL_SECONDS, remaining))
+            continue
+        if not chunk:
+            return message  # the child closed the pipe: its message is complete
+        message += chunk
+
+
+def collect_child(child: int) -> None:
+    """Reap the child, which has sent its answer and is exiting, without waiting for it.
+
+    A child that has not exited yet is left to whatever reaps the hook's
+    orphans once the hook exits; waiting here could delay the answer.
+    """
+    try:
+        os.waitpid(child, os.WNOHANG)
+    except ChildProcessError:
+        pass
+
+
+def answer_before_deadline(argv: list[str], stdin, deadline: float) -> tuple[int, str, str]:
+    """Run ``answer`` in a forked child; return its answer, or a refusal if it is not back by ``deadline``.
+
+    A child that dies without an answer, or a fork that fails, refuses.
+    """
+    event = option_value(argv, "--event")
     sys.stdout.flush()
     sys.stderr.flush()
     try:
         read_end, write_end = os.pipe()
         child = os.fork()
     except OSError:
-        return args.event, UNREADABLE
+        return 2, parent_refusal(event, UNREADABLE) + "\n", UNREADABLE + "\n"
     if child == 0:
-        # The child: judge, send the answer, and leave without running any of the parent's cleanup.
+        # The child: answer, and leave without running any of the parent's cleanup.
         exit_code = 1
         try:
             os.close(read_end)
-            event, reason = judge(args, stdin)
-            os.write(write_end, json.dumps({"event": event, "reason": reason}).encode("utf-8"))
+            send_from_child(argv, stdin, write_end)
             exit_code = 0
         finally:
             os._exit(exit_code)
 
     os.close(write_end)
-    answer = b""
-    timed_out = False
     try:
-        while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                timed_out = True
-                break
-            ready, _, _ = select.select([read_end], [], [], remaining)
-            if not ready:
-                continue  # the loop's next pass sees that the deadline has passed
-            chunk = os.read(read_end, 65536)
-            if not chunk:
-                break  # the child closed the pipe: its answer is complete
-            answer += chunk
+        message = wait_for_child(read_end, deadline)
     finally:
         os.close(read_end)
-        if timed_out:
-            try:
-                os.kill(child, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-        os.waitpid(child, 0)
-
-    if timed_out:
-        return args.event, TOO_SLOW
-    try:
-        data = json.loads(answer)
-        return str(data["event"]), str(data["reason"])
-    except (ValueError, KeyError, TypeError):
-        return args.event, UNREADABLE
+    if message is None:
+        # Kill the child and answer at once. It is not reaped here: a killed child can take a while to
+        # go (held up in the kernel, say), and whatever reaps the hook's orphans collects it after the
+        # hook exits.
+        try:
+            os.kill(child, SIGKILL)
+        except ProcessLookupError:
+            pass
+        return 2, parent_refusal(event, TOO_SLOW) + "\n", TOO_SLOW + "\n"
+    collect_child(child)
+    parts = message.decode("utf-8", errors="replace").split("\0")
+    if len(parts) != 3 or parts[0] not in ("0", "2"):
+        return 2, parent_refusal(event, UNREADABLE) + "\n", UNREADABLE + "\n"
+    return int(parts[0]), parts[1], parts[2]
 
 
 def main(argv: list[str] | None = None, stdin=None, stdout=None, stderr=None, started: float | None = None) -> int:
@@ -188,32 +294,23 @@ def main(argv: list[str] | None = None, stdin=None, stdout=None, stderr=None, st
     process (the tests) gets the time of the call.
     """
     started = time.monotonic() if started is None else started
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--event", default="", help="the hook event, when the input does not name it")
-    parser.add_argument("--state", default=str(DEFAULT_STATE), help="the app's saved remote-control choice")
-    parser.add_argument("--rules", default="", help="the refused-domain list (default: the image's)")
-    parser.add_argument("--timing", action="store_true",
-                        help="also write the hook's own time on stderr (for tests/measure_gate.py; Codex never sets it)")
-    args = parser.parse_args(argv)
+    argv = sys.argv[1:] if argv is None else argv
     stdin, stdout, stderr = stdin or sys.stdin, stdout or sys.stdout, stderr or sys.stderr
-    event, reason = judge_before_deadline(args, stdin, started + DEADLINE_SECONDS)
-    if args.timing:
+    code, out, err = answer_before_deadline(argv, stdin, started + DEADLINE_SECONDS)
+    if "--timing" in argv:
         elapsed_ms = (time.monotonic() - started) * 1000
         stderr.write(f"gate_hook timing: {elapsed_ms:.1f} ms from process start, "
                      f"deadline {DEADLINE_SECONDS * 1000:.0f} ms\n")
-    if not reason:
-        return 0
-    stdout.write(json.dumps(refusal(event, reason)) + "\n")
-    stderr.write(reason + "\n")
-    return 2
+    stdout.write(out)
+    stderr.write(err)
+    return code
 
 
 if __name__ == "__main__":
     try:
         code = main(started=process_started_at())
-    except SystemExit as exc:  # argparse: a bad command line refuses too
-        code = 0 if exc.code == 0 else 2
     except BaseException:  # noqa: BLE001 - whatever happens, a request the check cannot judge is refused
+        sys.stdout.write(parent_refusal(option_value(sys.argv[1:], "--event"), UNREADABLE) + "\n")
         sys.stderr.write(UNREADABLE + "\n")
         code = 2
     sys.exit(code)

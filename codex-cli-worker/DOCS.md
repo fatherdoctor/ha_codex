@@ -394,10 +394,14 @@ is not evidence that the requested permissions were granted.
 
 **Hook deadline and undo limits.** Codex 0.166 runs a tool call when its hook passes the configured
 10-second timeout, so the hook never lets that happen: it answers within its own deadline of 1.5 seconds
-from the start of its process. The check runs in a separate child process; when the deadline passes, the
-hook stops it and refuses the request with a plain reason (the check did not finish in time; ask again, or
-make the change yourself from the app page). This holds with remote control on or off, and also when the
-check is stuck inside one long call or the request never finishes arriving. The hook also checks bounded inputs and refuses an uncertain, oversized or
+from the start of its process. The hook's first lines start a child process that does all of the work:
+loading the check, reading files and the request, and checking it. The hook itself only waits for the
+answer and never reads a file, so a stalled disk or a stuck check cannot hold it up. When the deadline
+passes, the hook stops the child and refuses the request with a plain reason (the check did not finish in
+time; ask again, or make the change yourself from the app page), without waiting for the child to exit.
+This holds with remote control on or off, and also when the check is stuck inside one long call or the
+request never finishes arriving. Python's own start, before the hook's first line, cannot be interrupted;
+it counts against the 1.5 seconds. The hook also checks bounded inputs and refuses an uncertain, oversized or
 ambiguous YAML patch. Hook-checked source and script files are capped at 512 KiB; larger files are refused before scanning. While remote control is on it reconstructs the whole proposed YAML file, so edits
 beneath an existing `shell_command`, `rest_command` or `command_line` key are also checked. The checked-in
 fixtures use the captured Bash/apply_patch command-string inputs. PermissionRequest is checked for named security

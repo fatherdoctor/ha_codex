@@ -107,6 +107,11 @@ class HookStateTests(unittest.TestCase):
         result = subprocess.run([sys.executable, "-I", str(HOOK), "--no-such-option"], input="{}",
                                 capture_output=True, text=True, timeout=30, check=False)
         self.assertEqual(result.returncode, 2)
+        self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+        # A shortened option name is not guessed at: the waiting process could not read it the same way.
+        result = subprocess.run([sys.executable, "-I", str(HOOK), "--ev", "PermissionRequest"], input="{}",
+                                capture_output=True, text=True, timeout=30, check=False)
+        self.assertEqual(result.returncode, 2)
 
     def test_a_judging_error_refuses(self) -> None:
         out, err = io.StringIO(), io.StringIO()
@@ -215,6 +220,65 @@ class HookDeadlineTests(unittest.TestCase):
     def test_the_process_start_includes_time_before_the_call(self) -> None:
         # The test runner started long before this test, so its process start is well in the past.
         self.assertLess(gate_hook.process_started_at(), time.monotonic() - 0.01)
+
+    def run_hook_patched(self, patch: str, remote_on: bool, tmp: str) -> tuple[subprocess.CompletedProcess, float]:
+        """Run the unchanged hook script after ``patch`` (Python text) has run in the same process."""
+        state = Path(tmp) / "state.json"
+        state.write_text(json.dumps({"enabled": remote_on}), encoding="utf-8")
+        bootstrap = ("import os, sys, time; sys.path.insert(0, sys.argv[1]); hook = sys.argv[2]; "
+                     "code = compile(open(hook, encoding='utf-8').read(), hook, 'exec'); "
+                     f"exec({patch!r}); "
+                     "sys.argv = sys.argv[2:]; exec(code, {'__name__': '__main__', '__file__': hook})")
+        payload = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "ls /config"}}
+        start = time.monotonic()
+        result = subprocess.run([sys.executable, "-I", "-c", bootstrap, str(ROOT), str(HOOK),
+                                 "--event", "PreToolUse", "--state", str(state)],
+                                input=json.dumps(payload), capture_output=True, text=True, timeout=15, check=False)
+        return result, time.monotonic() - start
+
+    def test_the_waiting_process_reads_no_file_and_imports_nothing(self) -> None:
+        # Every file opened and every module imported in the hook's own process, after its first line,
+        # takes 3 seconds; the child it forks is not slowed. Only a hook whose waiting process does
+        # neither answers an ordinary request in time.
+        patch = ("parent = os.getpid()\n"
+                 "def slow(event, args):\n"
+                 "    if os.getpid() == parent and (event == 'import' or (event == 'open' and args[0] != '/proc/self/stat')):\n"
+                 "        time.sleep(3)\n"
+                 "sys.addaudithook(slow)\n")
+        for remote_on in (True, False):
+            with self.subTest(remote_control_on=remote_on), tempfile.TemporaryDirectory() as tmp:
+                result, elapsed = self.run_hook_patched(patch, remote_on, tmp)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertLess(elapsed, gate_hook.DEADLINE_SECONDS + DEADLINE_MARGIN)
+
+    def test_a_stalled_disk_while_finding_the_rules_is_refused_by_the_deadline(self) -> None:
+        # Looking for gate_rules.py next to the hook takes 3 seconds, as on a stalled disk.
+        patch = ("from pathlib import Path\n"
+                 "is_file = Path.is_file\n"
+                 "Path.is_file = lambda self: (self.name == 'gate_rules.py' and time.sleep(3)) or is_file(self)\n")
+        for remote_on in (True, False):
+            with self.subTest(remote_control_on=remote_on), tempfile.TemporaryDirectory() as tmp:
+                result, elapsed = self.run_hook_patched(patch, remote_on, tmp)
+                self.assert_refused_in_time(result, elapsed)
+
+    def test_a_child_that_does_not_go_away_does_not_delay_the_refusal(self) -> None:
+        # The check takes 4 seconds and the kill is lost, as for a child held up in the kernel:
+        # the refusal must not wait for the child to exit.
+        patch = ("import gate_rules\n"
+                 "gate_rules.check_tool_call = lambda *a: time.sleep(4) or ''\n"
+                 "os.kill = lambda pid, sig: None\n")
+        for remote_on in (True, False):
+            with self.subTest(remote_control_on=remote_on), tempfile.TemporaryDirectory() as tmp:
+                result, elapsed = self.run_hook_patched(patch, remote_on, tmp)
+                self.assert_refused_in_time(result, elapsed)
+
+    def test_the_waiting_process_writes_the_same_refusal_as_the_child(self) -> None:
+        for event in ("PreToolUse", "PermissionRequest", ""):
+            for reason in (gate_hook.TOO_SLOW, gate_hook.UNREADABLE):
+                with self.subTest(event=event, reason=reason):
+                    self.assertEqual(gate_hook.parent_refusal(event, reason),
+                                     json.dumps(gate_hook.refusal(event, reason)))
 
 
 class RulesTests(unittest.TestCase):

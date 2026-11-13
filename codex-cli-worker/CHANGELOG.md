@@ -5,7 +5,9 @@
 - The command hook now answers within 1.5 seconds of starting. Codex 0.166 runs a tool call whose hook
   passes its 10-second timeout, so a slow check could let a call through. The check now runs in a child
   process that the hook stops at the deadline, refusing the request with a plain reason, even when the check
-  is stuck inside one long call. `tests/measure_gate.py` prints the hook's own time for each call.
+  is stuck inside one long call. The child also does all of the file reading and module loading, so a stalled
+  disk cannot delay the answer, and the hook does not wait for a stopped child to exit before it answers.
+  `tests/measure_gate.py` prints the hook's own time for each call.
 
 - Document the line-based command check’s known YAML blind spots and the protections that still apply.
 
