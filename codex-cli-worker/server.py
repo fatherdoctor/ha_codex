@@ -2916,7 +2916,7 @@ def assess_changes(
     Assistant's own configuration check runs, unless the add-on option disables
     it. Dashboard saves are skipped for storage files that failed validation.
     """
-    options = read_options()
+    options = task_options(task_id)
     validation_errors = validate_changed_files(changes)
     config_check = dict(EMPTY_CONFIG_CHECK)
     yaml_changes = yaml_config_changes(changes)
@@ -2947,11 +2947,14 @@ def assess_changes(
                 "dashboard_id": Path(rel).name.removeprefix("lovelace."), "url_path": "", "storage_file": rel,
                 "success": False, "message": "Not saved: the file failed validation.",
             })
-    if options.get("auto_save_lovelace"):
+    if options.get("auto_save_lovelace") and options.get("codex_sandbox") != "read-only":
         for ref in find_lovelace_dashboard_refs(changes):
             if ref["storage_file"] in failed_storage:
                 continue
-            if task_cancellation_requested(task_id):
+            current_options = task_options(task_id)
+            if (task_cancellation_requested(task_id)
+                    or current_options.get("codex_sandbox") == "read-only"
+                    or not current_options.get("auto_save_lovelace")):
                 break
             ok, detail = save_lovelace_dashboard(ref)
             lovelace_results.append({**ref, "success": ok, "message": detail})

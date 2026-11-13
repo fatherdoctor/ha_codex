@@ -202,6 +202,7 @@ function showStudioStatus() {
   ]) details.append(textNode("dt", name), textNode("dd", value));
   $("status-dialog").showModal();
 }
+$("header-status").onclick = showStudioStatus;
 for (const id of ["thread-actions", "phone-thread-actions"])
   $(id).onclick = event => openChatMenu(state.id, event.currentTarget);
 document.addEventListener("thread-action", async event => {

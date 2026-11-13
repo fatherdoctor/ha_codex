@@ -830,3 +830,12 @@ or start pairing. No live account enrollment or device handoff is implied by loc
 Settings → Advanced → Workspace rules opens a separate editor. The file is read only when that editor
 opens, and Save remains an explicit action. Existing account, diagnostic, scheduling and browser-permission
 controls remain in Settings.
+
+
+A chat's **Read only** choice also disables worker-mediated dashboard saves: both
+verification with `save_pending` and the end-of-turn automatic save use the current
+turn's effective options. A dashboard file changed by another actor during that turn
+does not grant the chat permission to save it. The worker rechecks the mode immediately
+before saving; ordinary dashboard inspection remains available without `save_pending`.
+The direct **Status** button is available on tablet and desktop. On the phone, open
+Status from the thread menu.

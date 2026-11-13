@@ -30,6 +30,7 @@ fs.mkdirSync(output,{recursive:true});
     assert.deepEqual(errors,[]);await context.close();continue;
    }
    await page.locator('#connection-summary').filter({hasText:'Ready as'}).waitFor();
+   assert.equal(await page.locator('#header-status').isVisible(),width>700);
    if(width===1024) {
     const before=await page.locator('#sidebar').boundingBox();
     await page.locator('#divider').focus();
@@ -70,6 +71,11 @@ fs.mkdirSync(output,{recursive:true});
    await page.locator('[data-action="status"]').click();
    assert.match(await page.locator('#status-details').textContent(),/Usage and resetUnavailable/);
    await page.locator('[data-close="status-dialog"]').click();
+   if(width>700) {
+    await page.locator('#header-status').click();
+    assert.match(await page.locator('#status-details').textContent(),/Usage and resetUnavailable/);
+    await page.locator('[data-close="status-dialog"]').click();
+   }
    const taskId = await page.evaluate(()=>state.id);
    await page.route('**/tasks/*/settings', async route=>{await new Promise(resolve=>setTimeout(resolve,250));await route.continue();});
    await page.locator('#permission-button').click();

@@ -109,7 +109,7 @@ dialog::backdrop { background: #0006; }
 }
 @media (max-width: 700px) {
   .chat-header { padding: 10px 16px; min-height: 60px; }
-  .chat-header > #menu, .chat-header > .chat-heading, #thread-actions { display: none; }
+  .chat-header > #menu, .chat-header > .chat-heading, #thread-actions, #header-status { display: none; }
   .header-actions { width: 100%; margin: 0; justify-content: space-between; }
   .connection-chip { max-width: calc(100vw - 85px); }
   .connection-strip { padding: 10px 16px; gap: 8px; font-size: 11px; flex-wrap: wrap; }
