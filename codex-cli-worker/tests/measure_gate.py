@@ -60,6 +60,15 @@ def measure():
             ('million item inventory', '',
              '*** Begin Patch\n*** Add File: ordinary.yaml\n+name: sample\n*** End Patch', 2,
              {'big.yaml': '[' + ','.join(['a'] * 1000100) + ']'}),
+            ('reference-sized script and automation inventory',
+             'automation: !include automations.yaml\nscript: !include scripts.yaml\n',
+             '*** Begin Patch\n*** Add File: ordinary.yaml\n+# ordinary comment\n*** End Patch', 0,
+             {'automations.yaml': '- alias: Sample\n  trigger: []\n  action: [{action: light.turn_on, target: {entity_id: light.sample}}]\n' * 6300,
+              'scripts.yaml': ''.join(f'sample_{n}:\n  alias: Sample\n  sequence: [{{action: light.turn_on}}]\n' for n in range(3500))}),
+            ('identical graph inventory', '',
+             '*** Begin Patch\n*** Add File: ordinary.yaml\n+name: sample\n*** End Patch', 0,
+             {f'list_{n}.yaml': '[' + ','.join(['{}'] * 1500) + ']'
+              for n in range(2500)}),
             ('total node boundary', '',
              '*** Begin Patch\n*** Add File: ordinary.yaml\n+name: sample\n*** End Patch', 2,
              {'boundary.yaml': '[' + ','.join(['a'] * 150000) + ']'}),
@@ -94,6 +103,8 @@ def measure():
     maximum = max(r['max_ms'] for r in results)
     return {'hook_timeout_ms': 10000, 'slow_machine_factor': SLOW_MACHINE_FACTOR,
             'max_ms': maximum, 'projected_ms': round(maximum * SLOW_MACHINE_FACTOR, 2),
+            'reserve_target_ms': 2000,
+            'reserve_met': maximum * SLOW_MACHINE_FACTOR <= 8000,
             'cases': results}
 
 

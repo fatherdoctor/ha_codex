@@ -324,7 +324,7 @@ def _compose_yaml(text: str) -> Any:
         return None
 
 
-def yaml_mappings(node: Any, charge=False):
+def yaml_mappings(node: Any, charge=False, reject_includes=False):
     """Walk shared/cyclic aliases once, including merge-key mappings."""
     seen, todo = set(), [node]
     while todo:
@@ -335,6 +335,10 @@ def yaml_mappings(node: Any, charge=False):
         scan = _scan_nodes.get()
         if charge and scan is not None:
             scan.charge(nodes=1)
+        if reject_includes and isinstance(item, yaml.ScalarNode) and item.tag.startswith('!include'):
+            source = scan.source if scan is not None else 'script body'
+            raise ValueError(f'{source}: nested script include could not be checked; '
+                             'a person must review it outside Codex')
         if isinstance(item, yaml.MappingNode):
             yield item
             for key, value in item.value:
@@ -377,9 +381,9 @@ def is_definition(key, value, rules):
         or value.tag == 'tag:yaml.org,2002:null' or value.tag.startswith('!'))
 
 
-def node_findings(node, text, rules, scripts, count_work=False):
+def node_findings(node, text, rules, scripts, count_work=False, reject_includes=False):
     findings, lines = [], text.splitlines()
-    for mapping in yaml_mappings(node, charge=count_work):
+    for mapping in yaml_mappings(node, charge=count_work, reject_includes=reject_includes):
         for key, value in mapping.value:
             if not isinstance(key, yaml.ScalarNode):
                 continue
@@ -539,29 +543,32 @@ def refused_scripts(texts: dict[str, str], rules: dict[str, Any], strict: bool =
     """Resolve scripts from composed bodies; unknown script sources cannot approve edits."""
     blocks = {}
     sources = {rel: 'auto' for rel in texts if rel == 'scripts.yaml' or rel.startswith('scripts/')}
+    inspected = {}
     for source, text in texts.items():
         node, error = yaml_result(text, source)
         if strict and (error or (node is None and has_yaml_content(text))):
             raise ValueError(f'{source}: file could not be read by the check; '
                              'a person must repair it outside Codex')
-        # Inspect composed keys, including quoted/escaped script keys. A text
-        # prefilter cannot prove an uncomposed document has no script definitions.
-        for mapping in yaml_mappings(node):
-            for key, value in mapping.value:
-                if not isinstance(key, yaml.ScalarNode) or key.value != 'script':
-                    continue
-                if isinstance(value, yaml.MappingNode):
-                    for name, body in value.value:
-                        if isinstance(name, yaml.ScalarNode):
-                            blocks[name.value] = (body, text, source)
-                elif isinstance(value, yaml.ScalarNode) and value.tag.startswith('!include'):
-                    target = include_path(source, value.value)
-                    if value.tag == '!include':
-                        sources[target] = 'map'
-                    elif value.tag in ('!include_dir_named', '!include_dir_merge_named'):
-                        for rel in texts:
-                            if rel.startswith(target + '/') and rel.lower().endswith(YAML_SUFFIXES):
-                                sources[rel] = 'file' if value.tag == '!include_dir_named' else 'map'
+        # A cached graph's script keys are inspected once, not once per file.
+        # Resolve the saved include values relative to EACH source below.
+        digest = hashlib.sha256(text.encode('utf-8')).digest()
+        if digest not in inspected:
+            inspected[digest] = [value for mapping in yaml_mappings(node)
+                                 for key, value in mapping.value
+                                 if isinstance(key, yaml.ScalarNode) and key.value == 'script']
+        for value in inspected[digest]:
+            if isinstance(value, yaml.MappingNode):
+                for name, body in value.value:
+                    if isinstance(name, yaml.ScalarNode):
+                        blocks[name.value] = (body, text, source)
+            elif isinstance(value, yaml.ScalarNode) and value.tag.startswith('!include'):
+                target = include_path(source, value.value)
+                if value.tag == '!include':
+                    sources[target] = 'map'
+                elif value.tag in ('!include_dir_named', '!include_dir_merge_named'):
+                    for rel in texts:
+                        if rel.startswith(target + '/') and rel.lower().endswith(YAML_SUFFIXES):
+                            sources[rel] = 'file' if value.tag == '!include_dir_named' else 'map'
     for rel, text in texts.items():
         if rel not in sources:
             continue
@@ -599,7 +606,8 @@ def refused_scripts(texts: dict[str, str], rules: dict[str, Any], strict: bool =
                     scan.source = body[2]
                 # Transitive resolution may revisit bodies; those repeated walks
                 # must consume the same hook total as composition.
-                findings = node_findings(body[0], '', rules, refused, count_work=True)
+                findings = node_findings(body[0], '', rules, refused, count_work=True,
+                                         reject_includes=strict)
             else:
                 findings = find_refused(body, rules, refused)
             if any(f.kind != "parse_budget" for f in findings):
@@ -622,7 +630,8 @@ def include_path(source: str, value: str) -> str:
 
 
 @yaml_scan
-def included_definitions(texts: dict[str, str], rules: dict[str, Any], strict: bool = False) -> dict[str, set[str]]:
+def included_definitions(texts: dict[str, str], rules: dict[str, Any], strict: bool = False,
+                         include_scripts: bool = False) -> dict[str, set[str]]:
     """Resolve include chains and definition directories; every member is hashed whole."""
     definitions: dict[str, set[str]] = {}
     roots = {}
@@ -664,12 +673,16 @@ def included_definitions(texts: dict[str, str], rules: dict[str, Any], strict: b
                         roots[rel] = yaml_node(texts[rel])
                         if roots[rel] is None and has_yaml_content(texts[rel]):
                             include_failure(rel, 'included definition could not be parsed', strict)
-                    todo.append((rel, roots[rel], kinds))
+                    # The edge above already records this file's dependency.
+                    # A leaf without include tags has no further edges to discover.
+                    if '!include' in texts[rel]:
+                        todo.append((rel, roots[rel], kinds))
         elif isinstance(node, yaml.MappingNode):
             platform_kinds = {v.value for k, v in node.value if isinstance(k, yaml.ScalarNode) and k.value == 'platform' and isinstance(v, yaml.ScalarNode) and v.value in rules['runs_on_load_platforms']}
             kinds = kinds | frozenset(platform_kinds)
             for key, value in node.value:
-                extra = {key.value} if isinstance(key, yaml.ScalarNode) and key.value in rules['runs_on_load_keys'] else set()
+                tracked = set(rules['runs_on_load_keys']) | ({'script'} if include_scripts else set())
+                extra = {key.value} if isinstance(key, yaml.ScalarNode) and key.value in tracked else set()
                 todo.append((source, value, kinds | frozenset(extra)))
         elif isinstance(node, yaml.SequenceNode):
             todo.extend((source, child, kinds) for child in node.value)
@@ -720,7 +733,9 @@ def extend_include_texts(texts: dict[str, str], root: Path, rules: dict[str, Any
     loaded, total = set(texts), sum(len(text.encode()) for text in texts.values())
     for _ in range(64):
         added = False
-        for rel in included_definitions(texts, rules, strict):
+        # Ordinary script maps are dependencies too, without treating them as
+        # protected run-on-load definitions in the later edit checks.
+        for rel in included_definitions(texts, rules, strict, include_scripts=True):
             if rel in loaded:
                 continue
             loaded.add(rel)
@@ -1310,8 +1325,9 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
                     # Known includes are checked regardless of filename suffix, including
                     # newly proposed include paths and move destinations.
                     # Reconstruct once more only if a non-YAML include needs checking.
-                    if any(not path.lower().endswith(YAML_SUFFIXES) for path in definitions):
-                        versions = patch_versions(text, str(data.get("cwd") or ""), set(definitions))
+                    dependencies = set(definitions) | set(original)
+                    if any(not path.lower().endswith(YAML_SUFFIXES) for path in dependencies):
+                        versions = patch_versions(text, str(data.get("cwd") or ""), dependencies)
                     for path, before, after in versions:
                         if path in definitions and before != after:
                             return f"This edit to {path} changes {included_finding(path, definitions[path], after).reason}. A person must add it outside Codex."

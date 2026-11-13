@@ -407,13 +407,17 @@ check refuses before parsing and names the missing fast safe parser; it does not
 inside Codex's timeout. LibYAML is part of the declared PyYAML package's normal platform wheels.
 Past either total the hook refuses,
 names the file it could not read, and asks for a person's review or repair outside Codex. It never
-falls back to an incomplete line-only approval. Decisions do not depend on elapsed time. The isolated `tests/measure_gate.py` run measured a
-37,000-entry accepted edit at 148,009 node visits, 1,013,809 composed bytes and at most **1.243 s**.
-With the benchmark's explicit **6x slow-machine assumption**, that projects to **7.456 s**, below the
-10-second hook timeout. The four formerly allowed 242 KiB lists refuse in at most **0.609 s**;
-the million-item inventory refuses in **0.225 s**, both stopping at exactly 150,000 counted visits.
-The factor is a conservative engineering assumption, not a measurement on every supported machine;
-repeat the benchmark when changing the parser or its totals.
+falls back to an incomplete line-only approval. Decisions do not depend on elapsed time. The expanded isolated `tests/measure_gate.py`
+run includes a reference-sized script/automation inventory and 2,500 identical-content files.
+The reference-sized accepted case measured **1.527 s** maximum, 147,707 counted visits and
+869,795 composed bytes. The explicit **6x slow-machine assumption** projects **9.163 s**
+against the 10-second timeout, leaving only about 0.837 s: the benchmark's two-second reserve
+aim is **not met**. This timing limitation remains for review; it is not proof on a slow device.
+The 37,000-entry accepted edit measured 1.248 s maximum. The identical-content case measured
+0.232 s maximum with 1,507 charged nodes; duplicate source-discovery walks are avoided.
+The four formerly allowed lists and million-item inventory stopped at 150,000 counted visits
+in at most 0.624 s and 0.205 s respectively. Repeat the benchmark when changing the parser
+or its totals; no supported-machine timing guarantee is inferred from this executor alone.
 Each document, including a failed parse, is cached by content hash. A hook retains only graphs it has
 already paid for within its total; that temporary cache dies with the operation. The watch's retained
 cache is limited to **16 MiB estimated graph cost**, **2 MiB source bytes** and 512 entries. Cost is source
@@ -857,3 +861,14 @@ requires an administrator for Ingress requests; the integration's worker token
 remains able to fetch it. Only an Ingress administrator may change retention.
 An unavailable worker returns an unavailable data section without its exception
 message or connection address.
+
+
+Ordinary script `!include` targets are checked regardless of filename suffix. Missing,
+unreadable, malformed or non-map script targets refuse the patch with the target named.
+Nested script-body includes that cannot be resolved are also refused for manual review.
+Editing a discovered non-YAML script include is checked too;
+ordinary scripts are not treated as run-on-load definitions merely because they are included.
+Within one script-resolution pass, identical document content shares its script-key inspection.
+Relative include paths are still resolved for each source file. This avoids repeated cached-graph
+walks without spending the hook's work budget repeatedly on the same discovery; transitive
+script-body resolution continues to charge the shared node total.
