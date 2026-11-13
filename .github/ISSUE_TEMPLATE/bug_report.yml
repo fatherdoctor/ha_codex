@@ -31,7 +31,7 @@ body:
     attributes:
       label: Installation method
       options:
-        - Marketplace (HACS on older Home Assistant): custom integration and app/add-on repository
+        - "Marketplace (HACS on older Home Assistant): custom integration and app/add-on repository"
         - Manual custom integration install
         - Development branch
         - Other
