@@ -98,7 +98,7 @@ class PeerFlows(unittest.TestCase):
                 with self.assertRaises(ApprovalRequired):
                     self.core.execute({'operation': 'flow_continue', 'target': 'synthetic', 'data': {}})
                 self.assertEqual(rest.call_count, 1)
-        rejected = self.form(errors={'base': 'PRIVATE_CANARY', 'port': 'invalid_port'}, step_id='PRIVATE_CANARY')
+        rejected = self.form(errors={'base': 'private_canary', 'port': 'invalid_port'}, step_id='private_canary')
         with patch.object(self.core, 'rest', side_effect=[self.form(), rejected]):
-            result = self.core.execute({'operation': 'flow_continue', 'target': 'synthetic', 'data': {'port': 'PRIVATE_CANARY'}})
-        self.assertNotIn('PRIVATE_CANARY', json.dumps(result))
+            result = self.core.execute({'operation': 'flow_continue', 'target': 'synthetic', 'data': {'port': 'private_canary'}})
+        self.assertNotIn('private_canary', json.dumps(result))
