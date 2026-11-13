@@ -887,4 +887,3 @@ separates authentication and limits but supplies no verified, distinct missing-C
 The exact user-facing refresh messages are pinned at
 [login/src/auth/manager.rs:224-226](https://github.com/openai/codex/blob/6ff1e1ca3b30/codex-rs/login/src/auth/manager.rs#L224-L226).
 The new daily reader never clears a remembered rejection; a new sign-in or successful matching turn does.
-
