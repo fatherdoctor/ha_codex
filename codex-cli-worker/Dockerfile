@@ -8,6 +8,7 @@ ARG BUILD_ARCH=amd64
 # Codex CLI pinned (fatherdoctor fork, CG-6): the packaged build from OpenAI's GitHub release,
 # checked against these SHA-256 sums. The npm build cannot run `codex remote-control`.
 ARG CODEX_VERSION=0.166.0
+ENV ADDON_VERSION=${BUILD_VERSION} CODEX_VERSION=${CODEX_VERSION}
 ARG CODEX_SHA256_AMD64=1d44b28bc4ac9937d7d3532264baa68a507ce364956a0d4ebb856f331cdee254
 ARG CODEX_SHA256_AARCH64=7821b77dda2e6283fb1f63f3165177a271da8833e857cf673c6ca1c9db3bfcc6
 
@@ -88,6 +89,7 @@ WORKDIR /data
 
 COPY run.sh /
 COPY server.py /
+COPY interaction_diagnostics.py diagnostics_scrub.py /
 # The remote-control command check (CX-B6b): managed Codex requirements and hook, read-only, outside
 # /config and outside every sandbox's writable roots. The marker goes last: remote control can be
 # turned on only when it and every file it lists are present and the hook passes its self-test.

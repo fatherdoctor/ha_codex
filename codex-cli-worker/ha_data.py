@@ -67,6 +67,7 @@ class HomeAssistantData:
         self.export_root = Path(export_root).absolute()
         self.export_dirs = {}
         self.export_bytes = {}
+        self.diagnostic_failures = 0
 
     def begin(self, task_id):
         """Replace the previous turn's credential and reset its independent data-query budget."""
@@ -193,6 +194,15 @@ class HomeAssistantData:
                         if self.queries.get(task_id, MAX_QUERIES) >= MAX_QUERIES:
                             raise DataError("Historical data query limit reached for this turn")
                         self.queries[task_id] += 1
+                try:
+                    observer = getattr(self.worker, 'diagnostics', None)
+                    if observer is not None:
+                        ids = query.get('entity_ids') or query.get('statistic_ids') or []
+                        for domain in sorted({x.split('.', 1)[0] for x in ids}):
+                            observer.event(task_id, {'kind': 'ha_read', 'operation': operation, 'domain': domain}, entities=ids)
+                except Exception:
+                    self.diagnostic_failures += 1
+                    # Only a count is retained; exception text may contain private input.
                 result = self.history(query) if operation == "history" else self.statistics(query)
                 encoded = json.dumps(result, allow_nan=False)
                 # Bare configured credentials may occur as sensor values, not just in labelled fields.

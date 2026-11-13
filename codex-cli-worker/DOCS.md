@@ -732,3 +732,59 @@ The API is served by the same worker HTTP listener as the existing local API. Th
 The page shows the same mailbox and can post or reply. Messages remain plain text, confer no authority and never execute themselves or reach an external recipient. A lead explicitly submits a separate task if it wants work performed. The mailbox retains at most 500 messages, pruning the oldest other thread (including replies) when full. If only the current reply thread fills it, its oldest replies are pruned. Lead and Codex each have limits of 20 writes per turn and 64 per UTC day, returning HTTP 429 for lead writes at the limit. The lead supplies a stable `turn_id`; Codex’s turn comes from its verified exchange. Usage counters survive message clearing and app restarts. The owner is not rate limited. `DELETE /lead/mailbox` clears lead-authored root threads and replies; `DELETE /lead/mailbox/<id>` clears one such thread. Administrator page controls can clear all threads or delete one. Clearing does not execute anything or reset write limits. No lead endpoint creates permanent permissions, changes sandbox policy, approves a schedule or answers a native permission request. Owner management and token rotation require authenticated administrator Ingress, including a fresh check of the administrator identity under the existing cache rules.
 
 Schedule prompts containing recognized credentials are masked in responses and marked `prompt_redacted`; Edit is disabled so masked text cannot replace the saved prompt. Create a replacement with a complete prompt instead. All save routes reject the literal `[redacted]` marker. The private database and its journal/WAL/SHM paths are protected like the worker token from tool file access and native permission grants. A persistent SQLite journal is materialized before tasks or remote control start, so its mask remains present across transactions. Schema version 1 adds proposal authorship; legacy proposals without an attributable author remain owner-owned.
+
+## Export logs for a bug report
+
+In the add-on page, open Settings and choose **Export logs**. Home Assistant's
+integration **Download diagnostics** button includes the same anonymized data
+inside Home Assistant's own diagnostics envelope. The whole files differ:
+Home Assistant adds system information, including the time zone, component
+information and the integration manifest. Review the entire downloaded file
+before sharing it. Neither button sends a report to another service.
+
+The worker's data excludes connection settings, accounts, task titles, prompts,
+answers and raw tool output. The former integration entry/coordinator snapshot
+was removed for this privacy boundary. Error descriptions and tool/model
+categories come from fixed allowlists. Numeric release strings are retained;
+ambiguous address-shaped four-part values are rejected. Unknown values remain
+unknown. A test ties the bundled CLI version to its Dockerfile pin.
+
+Settings lets an administrator choose **10–100 interactions**, with **25 by
+default**. The byte cap scales from 128 KiB at ten to 1,280 KiB at 100. Completed
+records are removed before still-running interactions; reducing retention also
+preserves running work. Per record, retain at most 48 events, 64 entity
+references, 32 file categories and 64 operation/domain counters. Raw paths under
+`/config` become only an allowlisted folder category and extension. Entity IDs
+become HMAC-SHA256 references using a random installation key in private add-on
+data, mode 0600. The key is never included in either export. Each download adds
+a fresh, unexported salt, keeping an entity's public reference consistent within
+one file while changing it between downloads. Legacy unkeyed references are
+dropped during migration because their original IDs cannot safely be recovered.
+Add-on backups carry the private key and the diagnostic store together; keyed references protect a
+store copied on its own, not a backup containing both files. The key, retention settings and set-aside
+stores are protected from named task commands and file-change approvals.
+If the key is unsafe or unreadable, the worker logs a recovery instruction and continues collecting
+other metadata without new entity references. Delete `/data/interaction-diagnostics.key` to let the
+worker create a fresh private key; old and new entity references will no longer link.
+
+Diagnostic writes are coalesced every eight metadata changes and flushed at
+begin, finish and export. Abrupt termination can lose the buffered tail; an
+unfinished record is closed at the next worker startup as **unknown (restart)**. Its end time is the
+observed restart time, not a claim about when the interrupted action ended; its result remains unknown.
+Only this process's still-running records receive priority over completed tasks. A corrupt,
+too-deep or wrong-shaped store is set aside privately with a content-free note,
+and a fresh store is started. Only the newest set-aside corrupt store is kept. Non-object rows are
+dropped with a count. Refused approval-policy and policy-parse problems have distinct fixed labels. Failures
+of diagnostic collection never decide whether an action runs or a queue advances.
+
+**Remote ChatGPT thread events are not recorded in this first delivery.** Every
+export includes `remote ChatGPT threads: not recorded`. No diagnostic connection,
+subscription, resume, attachment or remote history read is added. Add-on page,
+scheduled and lead-channel tasks are recorded by their worker lifecycle. Relay
+read RPCs are grouped separately within one capability lifetime, with counts per
+operation/domain; they do not describe the remote conversation or its approvals.
+Only worker-visible gate refusals and approval events are included. The export
+requires an administrator for Ingress requests; the integration's worker token
+remains able to fetch it. Only an Ingress administrator may change retention.
+An unavailable worker returns an unavailable data section without its exception
+message or connection address.
