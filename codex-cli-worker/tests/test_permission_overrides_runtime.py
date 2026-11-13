@@ -128,6 +128,11 @@ class RuntimeOverrides(unittest.TestCase):
         self.assertFalse(touches_protected_path('/config/scripts.yaml'))
 
     def test_private_settings_and_capability_socket_roundtrip(self):
+        # Match the HA pytest harness: permit this Unix transport only, with
+        # every IP connection still blocked.
+        if os.environ.get('PYTEST_CURRENT_TEST'):
+            import pytest_socket
+            pytest_socket.socket_allow_hosts([], allow_unix_socket=True)
         self.service.settings().save(DEFAULTS)
         self.assertEqual(self.service.settings().path.stat().st_mode & 0o777, 0o600)
         sock = self.root / 'override.sock'

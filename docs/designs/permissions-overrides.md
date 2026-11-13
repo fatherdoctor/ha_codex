@@ -133,13 +133,15 @@ The original mode and diagnostics-base questions are resolved by the named lead 
 ## Visual evidence
 
 The light and dark comparisons under `screenshots/permissions-overrides-*.png` show the actual local
-Settings controls beside the official public frontend switch demo. They are explicitly labeled component
-references, not screenshots of an owner installation. Settings-row geometry was checked against
+Settings controls beside the shipped Home Assistant Settings frontend (Core 2026.10.3, frontend
+20260930.5), rendered by an isolated local HA test fixture with synthetic data and temporary test
+authentication. Neither side pictures an owner installation. The official switch demo was also checked. Settings-row geometry was checked against
 `home-assistant/frontend`'s `src/components/ha-settings-row.ts` (16px padding; 72px two-line rows).
 The switch uses the current `ha-switch.ts` geometry (48px track, 24px height, 18px thumb), border and
 checked/unchecked HA theme variables, inherited from the embedding HA page when accessible.
-Reference: https://contributors.home-assistant.io/design/components/switch/ . A full production HA
-Settings-page screenshot was not taken because this lane cannot access a live installation.
+Component reference: https://contributors.home-assistant.io/design/components/switch/ . The actual HA
+Settings-page screenshots came from the existing installed HA test environment; no live installation
+was accessed. The isolated fixture and its browser children were shut down and reaped after capture.
 
 The corresponding Claude add-on groups remain a later CLA-DESIGN handoff. This implementation changes only the Codex add-on; the lead can carry that parity note to the separate design card.
 
