@@ -734,8 +734,10 @@ class Supervisor:
         self._name_supported: bool | None = None
         self._checked_name = ""
 
-    def _log(self, line):
+    def _log(self, line, *, observe=True):
         self.log.append(line)
+        if not observe:
+            return
         try:
             self.on_log(line)
         except Exception:
@@ -1067,7 +1069,7 @@ class Supervisor:
         code_match = PAIRING_RE.search(line)
         code = code_match.group(1) if code_match else ""
         with self.lock:
-            self._log("A pairing code is ready on this page." if code else redact(line))
+            self._log("A pairing code is ready on this page." if code else redact(line), observe=False)
         if code:
             self.set_status("pairing", "Enter this pairing code in the ChatGPT app.", pairing_code=code)
             return code

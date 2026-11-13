@@ -50,7 +50,7 @@ import gate_rules
 from core_address import CoreAddress, probe_core
 from relay_reads import RelayReads, ReadError as RelayReadError
 import schedule_api
-from verbose_log import VerboseLog, Tee as VerboseTee, Handler as VerboseHandler, private_read
+from verbose_log import VerboseLog, Tee as VerboseTee, Handler as VerboseHandler, CredentialCache
 from interaction_diagnostics import RollingDiagnostics, InteractionRecorder
 
 
@@ -905,14 +905,21 @@ def redact(text: str) -> str:
     return redacted
 
 
+_verbose_credential_files = CredentialCache()
+
+
 def verbose_secrets():
     """Read only the add-on's own credential values; arbitrary user text is not scrubbed."""
-    values = [os.environ.get(key, '') for key in ('SUPERVISOR_TOKEN', 'HASSIO_TOKEN', 'HA_TOKEN', 'CODEX_WORKER_TOKEN', 'OPENAI_API_KEY')]
-    values.append(str(read_options().get('HA_TOKEN') or ''))
+    keys = ('SUPERVISOR_TOKEN', 'HASSIO_TOKEN', 'HA_TOKEN', 'CODEX_WORKER_TOKEN', 'OPENAI_API_KEY')
+    values = [os.environ.get(key, '') for key in keys]
+    options_raw = _verbose_credential_files.read(OPTIONS_PATH)
+    options = json.loads(options_raw) if options_raw is not None else {}
+    if not isinstance(options, dict):
+        raise ValueError('Own options are unavailable')
+    values.append(str(options.get('HA_TOKEN') or ''))
     for path, kind in ((WORKER_TOKEN_PATH, 'worker'), (CODEX_HOME / 'auth.json', 'signin')):
-        try:
-            raw = private_read(path, 1024 * 1024)
-        except FileNotFoundError:
+        raw = _verbose_credential_files.read(path)
+        if raw is None:
             continue
         if kind == 'worker':
             values.append(raw.decode().strip())
@@ -1309,7 +1316,7 @@ def _queue_app_server_lines(stream: TextIO, lines: queue.Queue[str | None]) -> N
     """Put each line the app-server writes on the queue, then None at end of output."""
     try:
         for line in stream:
-            capture_verbose("app-server.in", line)
+            capture_verbose("usage-reader.in", line)
             lines.put(line)
     except (OSError, ValueError):
         pass
@@ -1356,7 +1363,7 @@ def read_codex_rate_limits(codex: str) -> dict[str, Any]:
         threading.Thread(target=_queue_app_server_lines, args=(proc.stdout, lines), daemon=True).start()
 
         def send(message: dict[str, Any]) -> None:
-            capture_verbose("app-server.out", message)
+            capture_verbose("usage-reader.out", message)
             proc.stdin.write(json.dumps(message) + "\n")
             proc.stdin.flush()
 

@@ -803,17 +803,26 @@ message or connection address.
 
 ### Local verbose log
 
-Settings → Verbose log is an administrator-only, opt-in log. It starts off, keeps 500 lines by default,
+Settings → Verbose log is an administrator-only, opt-in log. It starts off, keeps up to 500 lines by default,
 and can keep 100 to 2000 lines. It remains on across restarts until you turn it off; the page displays
 an indicator while it is on. Enabling it does not ask for confirmation. The oldest physical lines are
 removed first, and the file never exceeds 2 MB. A single longer line is truncated with a marker.
-Records are trimmed before an atomic, private replacement, so interruption leaves the previous log
-readable. Restart re-establishes both caps before recording further lines.
+Single records append after masking. When the next record would exceed either cap, the oldest batch
+is removed and a private atomic replacement leaves roughly half the line/byte capacity free. Retention
+therefore varies up to the selected cap; it does not promise exactly that many lines after rotation.
+A bulk capture writes its bounded tail once. Rotation/settings/export replacements are synced; ordinary
+appends are not synced individually, so a power loss may lose recent appends or leave a partial final
+record. All written bytes are masked and bounded. Restart re-establishes both caps and private mode.
 
 This log deliberately keeps unfiltered worker-visible text: prompts, answers, tool arguments and outputs,
 approval traffic, errors, stdout/stderr and emitted Python logging records. Every incoming/outgoing
 app-server message the worker handles is observed before its usual redaction; invalid incoming JSON is
-also recorded. Worker-visible relay stdout and local relay log messages are included. Protocol messages
+also recorded. Worker-visible relay stdout is stored once, alongside separate local relay notes. The background
+usage reader is labeled `usage-reader.in` / `usage-reader.out`, separately from task app-server traffic.
+Only successful GET/HEAD werkzeug access lines for these polling routes are omitted: `/status`,
+`/tasks`, `/tasks/<id>`, `/tasks/<id>/activity`, `/tasks/<id>/log`, `/auth/status`, `/remote-control`,
+and `/queue` (including query strings). Warnings/errors, unsuccessful requests, non-poll routes,
+other methods and other loggers remain. This keeps idle polling from displacing useful task history. Protocol messages
 handled entirely inside the remote CLI are not available to the worker: it does not attach to remote
 threads, subscribe to them, or read their histories. A partial stdout/stderr line is buffered until its
 newline or normal process shutdown so a secret split across writes is not published as fragments.
@@ -822,7 +831,11 @@ Only the add-on's own known secret values are masked, by exact value (including 
 spelling): Supervisor/Core credentials, worker and tool/relay capabilities, and the current ChatGPT
 sign-in tokens and sign-in/pairing codes. Arbitrary user secrets, prompts and personal details remain.
 If own credentials cannot be checked, capture/export fails closed and the page reports unavailability;
-the owner's enabled setting stays on. Logging failures cannot change approvals or execution outcomes.
+the owner's enabled setting stays on. Credential files are reread only when their device/inode, size,
+modification/change times or mode changes; environment values and capabilities are checked each capture.
+Corrupt settings fall back to off/500 with a fixed note; Clear still removes the retained text. Exact
+masking includes literal and one JSON-escaped spelling, not arbitrary levels of nested JSON escaping.
+Logging failures cannot change approvals or execution outcomes.
 
 Export verbose log shows the personal-data warning and requires confirmation. Only an authenticated
 Ingress administrator can export or clear it; an API token alone is not enough. Read every export

@@ -1,10 +1,13 @@
 """Private, opt-in FIFO of worker-visible text; never an anonymized export source."""
 from collections import deque
 from datetime import datetime, timezone
+from itertools import chain
+from collections.abc import Iterable
 import io
 import json
 import logging
 import os
+import re
 from pathlib import Path
 import stat
 import tempfile
@@ -58,6 +61,8 @@ class VerboseLog:
         self.local = threading.local()
         self.rows = deque()
         self.bytes = 0
+        self.settings_note = ''
+        self.pending_note = False
 
     def _load(self):
         if self.loaded:
@@ -68,6 +73,10 @@ class VerboseLog:
             self.settings = value
         except FileNotFoundError:
             pass
+        except (OSError, ValueError, TypeError):
+            self.settings = dict(DEFAULTS)
+            self.settings_note = 'Verbose log settings were unreadable; defaults restored.'
+            self.pending_note = True
         self.rows.clear()
         self.bytes = 0
         try:
@@ -101,12 +110,40 @@ class VerboseLog:
         self.bytes += len(raw)
         while len(self.rows) > self.settings['lines'] or self.bytes > self.max_bytes:
             self.bytes -= len(self.rows.popleft())
+        return raw
+
+    def _append(self, raw, previous_bytes):
+        # Appends are already masked and bounded; a partial write is safe to read after restart.
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_size != previous_bytes:
+                raise OSError('Verbose log changed outside its writer')
+            os.fchmod(fd, 0o600)
+            view = memoryview(raw)
+            while view:
+                count = os.write(fd, view)
+                if count <= 0:
+                    raise OSError('Verbose append did not complete')
+                view = view[count:]
+        finally:
+            os.close(fd)
+
+    def _compact(self):
+        # Leave half the capacity free: repeated single-line captures remain linear writes.
+        newest = len(self.rows[-1]) if self.rows else 0
+        while len(self.rows) > 1 and (len(self.rows) > self.settings['lines'] // 2
+                                     or self.bytes > max(self.max_bytes // 2, newest)):
+            self.bytes -= len(self.rows.popleft())
+        self._save()
 
     def _save(self):
         # Both the old destination and the new temporary file remain within the byte cap.
         atomic(self.path, b''.join(self.rows))
 
-    def remember(self, values):
+    def remember(self, values: Iterable[object]) -> None:
+        """Retain exact own-secret values for masking, including credentials rotated away."""
         with self.lock:
             values = [v.strip() for v in values if isinstance(v, str) and v.strip()]
             if any('\n' in value or '\r' in value for value in values):
@@ -125,21 +162,22 @@ class VerboseLog:
             text = text.replace(value, '[redacted]')
         return text
 
-    def capture(self, source, text):
+    def capture(self, source: str, text: str, *, epoch: int | None = None) -> None:
+        """Observe text without changing execution; an optional stream epoch rejects stale lines."""
         if getattr(self.local, 'active', False):
             return
         self.local.active = True
         try:
-            self._capture(source, text)
+            self._capture(source, text, epoch)
         finally:
             self.local.active = False
 
-    def _capture(self, source, text):
+    def _capture(self, source, text, observed_epoch=None):
         """An observation failure never changes execution or turns the owner's toggle off."""
         try:
             with self.lock:
                 self._load()
-                if not self.settings['enabled']:
+                if not self.settings['enabled'] or (observed_epoch is not None and observed_epoch != self.epoch):
                     return
                 epoch = self.epoch
             # Never acquire worker/capability locks while holding the storage lock.
@@ -151,23 +189,44 @@ class VerboseLog:
                     return
                 stamp = datetime.now(timezone.utc).isoformat()
                 prefix = f'[{stamp}] {source}: '
-                for line in io.StringIO(str(text), newline=None):
-                    self._add(prefix + self._mask(line.rstrip('\r\n'), self.known) + '\n')
-                self._save()
+                lines = iter(io.StringIO(str(text), newline=None))
+                first = next(lines, None)
+                second = next(lines, None)
+                if second is not None:
+                    # One bulk capture may contain more than the cap; write only its bounded tail.
+                    for line in chain((first, second), lines):
+                        self._add(prefix + self._mask(line.rstrip('\r\n'), self.known) + '\n')
+                    self._save()
+                elif first is not None:
+                    before_bytes, before_lines = self.bytes, len(self.rows)
+                    raw = self._add(prefix + self._mask(first.rstrip('\r\n'), self.known) + '\n')
+                    if before_bytes + len(raw) <= self.max_bytes and before_lines < self.settings['lines']:
+                        self._append(raw, before_bytes)
+                    else:
+                        self._compact()
                 self.available = True
         except Exception:
             self.available = False
+            self.loaded = False
 
-    def status(self):
+    def status(self) -> dict:
+        """Return nonsecret settings, retained sizes and availability."""
         with self.lock:
             try:
                 self._load()
             except Exception:
                 self.available = False
-            return {**self.settings, 'byte_cap': self.max_bytes, 'stored_lines': len(self.rows),
-                    'stored_bytes': self.bytes, 'available': self.available}
+            result = {**self.settings, 'byte_cap': self.max_bytes, 'stored_lines': len(self.rows),
+                      'stored_bytes': self.bytes, 'available': self.available, 'note': self.settings_note}
+            note = self.settings_note if self.pending_note else ''
+            self.pending_note = False
+        # Root handlers can themselves capture text: never acquire their locks under the store lock.
+        if note:
+            logging.getLogger(__name__).warning(note)
+        return result
 
-    def configure(self, value):
+    def configure(self, value: dict) -> dict:
+        """Persist an explicit owner choice, trimming before publishing a smaller cap."""
         self.validate(value)
         with self.lock:
             self._load()
@@ -181,9 +240,12 @@ class VerboseLog:
             if self.settings['enabled'] != value['enabled']:
                 self.epoch += 1
             self.settings = dict(value)
+            self.settings_note = ''
+            self.pending_note = False
             return self.status()
 
-    def export(self):
+    def export(self) -> bytes:
+        """Refresh own secrets and return the bounded masked log for a confirmed export."""
         # Refresh own secrets before exporting, including credentials rotated since capture.
         values = tuple(self.secrets())
         self.remember(values)
@@ -197,9 +259,15 @@ class VerboseLog:
             self._save()
             return b''.join(self.rows)
 
-    def clear(self):
+    def clear(self) -> None:
+        """Remove retained text and invalidate in-flight observations without disabling capture."""
         with self.lock:
-            self._load()
+            try:
+                self._load()
+            except (OSError, ValueError):
+                self.settings = dict(DEFAULTS)
+                self.loaded = True
+                self.settings_note = 'Verbose log state was unreadable; defaults restored.'
             self.path.unlink(missing_ok=True)
             self.epoch += 1
             self.rows.clear()
@@ -235,21 +303,22 @@ class Tee:
                 if len(part) > room:
                     self.truncated = True
                 if part.endswith(('\n', '\r')):
-                    ready.append(self.pending.rstrip('\r\n') + (TRUNCATED if self.truncated else '\n'))
+                    ready.append((self.epoch, self.pending.rstrip('\r\n') + (TRUNCATED if self.truncated else '\n')))
                     self.pending = ''
                     self.truncated = False
         # Secret snapshots and disk I/O must not hold a stream lock.
-        for line in ready:
-            self.store.capture(self.source, line)
+        for epoch, line in ready:
+            self.store.capture(self.source, line, epoch=epoch)
         return result
 
     def finish(self):
         with self.lock:
             line = self.pending + (TRUNCATED if self.truncated else '\n') if self.pending else ''
+            epoch = self.epoch
             self.pending = ''
             self.truncated = False
-        if line and self.epoch == self.store.epoch:
-            self.store.capture(self.source, line)
+        if line:
+            self.store.capture(self.source, line, epoch=epoch)
 
     def flush(self):
         self.original.flush()
@@ -266,6 +335,62 @@ class Handler(logging.Handler):
 
     def emit(self, record):
         try:
+            if poll_access(record):
+                return
             self.store.capture('logging', self.format(record))
         except Exception:
             pass
+
+
+POLL_PATH = re.compile(r'/(?:status|auth/status|remote-control|queue|tasks(?:/[a-zA-Z0-9_-]+(?:/(?:activity|log))?)?)$')
+ACCESS_TEMPLATE = re.compile(r'^\S+ - - \[[^\]\r\n]+\] "%s" %s %s\n?$')
+REQUEST_LINE = re.compile(r'(?:GET|HEAD) ([^ "\t]+) HTTP/[0-9.]+')
+
+
+def poll_access(record: logging.LogRecord) -> bool:
+    """Exclude only successful werkzeug access records for known read-only polling routes."""
+    if record.name != 'werkzeug' or record.levelno >= logging.WARNING:
+        return False
+    # Match Werkzeug's access template and arguments, not arbitrary messages mentioning a request.
+    if (not isinstance(record.msg, str) or not ACCESS_TEMPLATE.fullmatch(record.msg)
+            or not isinstance(record.args, tuple) or len(record.args) != 3
+            or not isinstance(record.args[0], str)):
+        return False
+    request_line = re.sub(r'\x1b\[[0-9;]*m', '', record.args[0])
+    match = REQUEST_LINE.fullmatch(request_line)
+    code = str(record.args[1])
+    return bool(match and code.isdecimal() and 200 <= int(code) < 400
+                and POLL_PATH.fullmatch(match[1].split('?', 1)[0]))
+
+
+class CredentialCache:
+    """Read each own credential file again only when its filesystem identity changes."""
+    def __init__(self):
+        self.lock = threading.RLock()
+        self.entries = {}
+
+    @staticmethod
+    def signature(path):
+        """Capture identity and change metadata without following a link."""
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            return None
+        return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns, info.st_mode)
+
+    def read(self, path: Path) -> bytes | None:
+        """Return a verified snapshot; races or unreadable files fail closed, never use stale data."""
+        with self.lock:
+            before = self.signature(path)
+            if before is None:
+                self.entries.pop(path, None)
+                return None
+            if path in self.entries and self.entries[path][0] == before:
+                return self.entries[path][1]
+            raw = private_read(path, 1024 * 1024)
+            if before != self.signature(path):
+                raise OSError('Own credential changed during lookup')
+            if path not in self.entries and len(self.entries) >= 3:
+                self.entries.pop(next(iter(self.entries)))
+            self.entries[path] = (before, raw)
+            return raw

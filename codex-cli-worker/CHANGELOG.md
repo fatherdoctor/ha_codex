@@ -3,7 +3,10 @@
 ## 0.1.81.2 (unreleased)
 
 - Add an opt-in, persistent local verbose log with line/byte FIFO limits, exact own-secret masking,
-  administrator-only confirmed export and clearing, separate from anonymized diagnostics.
+  administrator-only confirmed export and clearing, separate from anonymized diagnostics. Append records
+  and compact in bounded batches to limit storage wear; reuse unchanged credential-file snapshots.
+  Leave successful status/progress access polls out while retaining warnings and failed requests;
+  recover from bad settings and prevent completed stream lines from crossing Clear.
 
 - Close diagnostics interrupted by a worker restart as unknown, retaining room for new completed work.
   Create the private entity key without hard links and explain recovery while collecting other metadata.
