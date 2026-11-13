@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
     for (const width of [390, 1100]) {
       const page = await browser.newPage({viewport:{width,height:844}});
       const errors=[]; page.on('pageerror', e=>errors.push(e.message));
-      let schedules=[], mailbox=[], created, edits=0, newTokens=0, mailDeletes=0;
+      let schedules=[], mailbox=[], created, edits=0, newTokens=0, mailDeletes=0, acknowledgements=[];
       await page.route('**/schedules**', async route => {
         const req=route.request(), path=new URL(req.url()).pathname.replace('/preview/','');
         if (path.startsWith('assets/')) return route.continue();
@@ -22,9 +22,14 @@ const assert = require('node:assert/strict');
         return route.fulfill({json:{ok:true}});
       });
       await page.route('**/lead-token', route=>{newTokens++;return route.fulfill({json:{ok:true,token:'synthetic-once-only-value'}});});
-      await page.route('**/schedule-mailbox**', route=>{
+      await page.route('**/schedule-mailbox**', async route=>{
         if (route.request().method()==='DELETE') { mailDeletes++; mailbox=[]; return route.fulfill({json:{ok:true}}); }
         const data=route.request().postDataJSON();
+        if (route.request().url().endsWith('/read')) {
+          assert.equal(await page.locator('#schedule-mailbox pre').count(), mailbox.length);
+          acknowledgements.push(data.ids);
+          return route.fulfill({json:{ok:true}});
+        }
         mailbox.push({id:'mail-'+mailbox.length,parent:route.request().url().endsWith('/reply')?'mail-0':null,body:data.body,author:'owner',created:1803859200});
         return route.fulfill({json:{ok:true}});
       });
@@ -83,8 +88,12 @@ const assert = require('node:assert/strict');
       assert.equal(await page.locator('#schedule-mailbox b').count(),0);
       await page.locator('#schedule-mailbox').getByRole('button',{name:'Reply',exact:true}).click();
       await page.locator('#schedule-mail-body').fill('A sample reply');
+      const replyRead = page.waitForResponse(response => response.url().endsWith('/schedule-mailbox/read')
+        && response.request().postDataJSON().ids.length === 2);
       await page.locator('#schedule-mail-form button[type=submit]').click();
       await page.locator('#schedule-mailbox').getByText('A sample reply',{exact:true}).waitFor();
+      await replyRead;
+      assert.deepEqual(acknowledgements.at(-1), ['mail-0', 'mail-1']);
       assert.equal(mailbox[1].parent,'mail-0');
       await page.locator('#schedule-mailbox').getByRole('button',{name:'Clear mailbox',exact:true}).click();
       await page.waitForFunction(()=>document.querySelector('#schedule-mail-clear-confirmation') || document.querySelector('#schedule-mailbox').textContent.includes('No local messages.'));
