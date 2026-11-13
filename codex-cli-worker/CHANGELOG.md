@@ -11,6 +11,8 @@
   that calls the hook's `main()` repeatedly in one process no longer collects stopped child processes.
   `tests/measure_gate.py` prints the hook's own time for each call.
 
+- Clarify remote pairing, Core address discovery, and workspace instructions in the newcomer guide.
+
 - Document the line-based command check’s known YAML blind spots and the protections that still apply.
 
 - Add the Quiet Studio chat layout with Home Assistant themes, a bottom composer, photo/file menu,
