@@ -24,7 +24,7 @@ When reporting a bug, please include:
 - Whether you installed through HACS, manually, or from the development branch.
 - Your architecture, such as `amd64` or `aarch64`.
 - Clear steps to reproduce the issue.
-- Relevant logs from Home Assistant or the Codex CLI Worker app.
+- Relevant logs from Home Assistant or the Codex for Home Assistant app.
 - What you expected to happen.
 - What actually happened.
 

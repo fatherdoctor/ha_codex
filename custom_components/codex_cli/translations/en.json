@@ -3,24 +3,24 @@
     "step": {
       "user": {
         "title": "Codex",
-        "description": "Codex automatically detects the installed Codex CLI Worker app and its generated worker API token."
+        "description": "Codex automatically detects the installed Codex for Home Assistant app and its generated worker API token."
       },
       "reauth_confirm": {
         "title": "Codex",
-        "description": "Reconnect to the installed Codex CLI Worker app."
+        "description": "Reconnect to the installed Codex for Home Assistant app."
       },
       "reconfigure": {
         "title": "Codex",
-        "description": "Reconnect to the installed Codex CLI Worker app."
+        "description": "Reconnect to the installed Codex for Home Assistant app."
       }
     },
     "error": {
-      "cannot_connect": "Could not discover or connect to the Codex CLI Worker app. Make sure it is installed, started, and has generated its worker API token.",
-      "invalid_auth": "The worker rejected its generated API token. Restart the Codex CLI Worker app and try again."
+      "cannot_connect": "Could not discover or connect to the Codex for Home Assistant app. Make sure it is installed, started, and has generated its worker API token.",
+      "invalid_auth": "The worker rejected its generated API token. Restart the Codex for Home Assistant app and try again."
     },
     "abort": {
       "already_configured": "Codex is already configured.",
-      "cannot_connect": "Could not discover or connect to the Codex CLI Worker app.",
+      "cannot_connect": "Could not discover or connect to the Codex for Home Assistant app.",
       "reauth_successful": "Codex was reconnected.",
       "reconfigure_successful": "Codex was reconfigured.",
       "unknown": "The Codex config entry could not be found."

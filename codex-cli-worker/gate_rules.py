@@ -375,7 +375,8 @@ def find_refused(text: str, rules: dict[str, Any], refused_scripts: frozenset[st
     """Find always-on commands, definitions/platforms, templated actions and indirect security calls.
 
     Device actions and targets follow the owner's normal approval flow. This
-    tolerant line scan also works while an edit is incomplete.
+    tolerant line scan also works while an edit is incomplete. A python_script
+    definition enables scripts that run when called.
     """
     anything = set(rules["reaches_anything"])
     platforms = set(rules["runs_on_load_platforms"])
