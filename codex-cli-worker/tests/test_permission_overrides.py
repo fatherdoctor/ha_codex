@@ -300,6 +300,6 @@ class PreparedAdapterTests(unittest.TestCase):
     def test_flow_result_never_echoes_credentials_or_raw_errors(self):
         core = api.Core(SimpleNamespace())
         with patch.object(core, 'rest', return_value={'flow_id': 'sample', 'type': 'form', 'step_id': 'user',
-                                                    'data': {'password': 'SYNTHETIC_PRIVATE_VALUE'}}):
+                                                    'data_schema': [], 'data': {'password': 'SYNTHETIC_PRIVATE_VALUE'}}):
             result = core.execute({'operation': 'flow_start', 'target': 'sample', 'data': {}})
-        self.assertEqual(result, {'flow_id': 'sample', 'type': 'form', 'step_id': 'user'})
+        self.assertEqual(result, {'flow_id': 'sample', 'type': 'form', 'step_id': 'user', 'fields': [], 'errors': {}})

@@ -161,3 +161,27 @@ Device removal uses the supported Core `config/device_registry/remove_config_ent
 in the 2026.6.1 handler. The newer dev-only `remove` spelling is not assumed. A device must have exactly
 one verified integration attachment; ambiguous/multiple attachments require normal approval. This
 preserves the backend's own support checks and avoids guessing how to dismantle a composite device.
+
+
+## Second peer review corrections
+
+Direct services and each scene effect now use one `guard_effect` decision. The selected
+external-publication rule therefore restricts security effects reached through a scene,
+including scenes called by scripts or automations; an enabled group cannot bypass it.
+
+Integration setup returns at most 64 field descriptors (name, type, required) and bounded
+Core validation error keys. Defaults, choices, labels, descriptions, submitted values and
+entry data are never returned. Before continuing, the adapter rereads the current form.
+Password/secret fields (by field name, secret flag or password text selector) and unsupported
+field shapes hand the entire step to the owner in Home Assistant, without a POST. Unknown
+submitted fields are refused. Supported nonsecret form fields can be submitted; reflected
+submission values are removed from response metadata and error keys too. No submitted
+input or form description enters diagnostics. Core can change a flow after the preflight;
+its API offers no atomic form-check-and-submit operation.
+
+Non-service receipts name their reload kind, entity, device, setup flow or dashboard target.
+Entity ID changes name both IDs. Registry display names and dashboard contents stay out of
+receipts, and diagnostics continue to contain only the fixed operation/group/outcome fields.
+
+The peer screenshot pair shows a native Home Assistant profile Settings row with an actual
+`ha-switch` beside the add-on rows, in both themes. Both sides use isolated synthetic fixtures.

@@ -260,6 +260,11 @@ class Engine:
             raise ApprovalRequired('Targets could not be fully resolved; request normal approval.')
         return list(dict.fromkeys(entity(value) for value in rows))
 
+    @staticmethod
+    def guard_effect(domain, rules):
+        if domain in rules or ('external' in rules and domain in SECURITY):
+            raise ApprovalRequired('Owner guard rails restrict this action; request normal approval.')
+
     def effect(self, service, selector, data, groups, rules, checks, trail=()):
         bounded_json(data)
         group = service_group(service)
@@ -268,8 +273,7 @@ class Engine:
         domain = service.split('.')[0]
         if domain == 'script' and service != 'script.turn_on':
             selector = [service]
-        if domain in rules or ('external' in rules and domain in SECURITY):
-            raise ApprovalRequired('Owner guard rails restrict this action; request normal approval.')
+        self.guard_effect(domain, rules)
         targets = [] if domain in ('notify', 'persistent_notification') else self.targets(selector)
         if any(target.split('.')[0] != domain for target in targets):
             raise ApprovalRequired('The service and target domains disagree; request normal approval.')
@@ -293,8 +297,7 @@ class Engine:
                         if nested_domain not in {'light', 'switch', 'input_boolean'} | SECURITY:
                             raise ApprovalRequired('Scene effects require normal approval.')
                         self.allowed(nested_group, groups)
-                        if nested_domain in rules:
-                            raise ApprovalRequired('Owner guard rails restrict a scene target; request normal approval.')
+                        self.guard_effect(nested_domain, rules)
                 else:
                     sequence = definition.get('sequence' if domain == 'script' else 'actions', definition.get('action'))
                     self.sequence(sequence, groups, rules, checks, trail + (target,))
@@ -374,7 +377,9 @@ class Engine:
                 if domain in rules or (domain in SECURITY and not groups['security']):
                     raise ApprovalRequired('A device entity requires normal approval.')
         self.backend.validate_operation(operation, target, data)
-        result = {'operation': operation, 'group': group, 'target': target, 'data': data, 'description': operation.replace('_', ' ')}
+        result = {'operation': operation, 'group': group, 'target': target, 'data': data, 'description': operation.replace('_', ' ') + (
+                      ' for ' + (target or 'default dashboard') if target is not None else '')}
         if operation == 'rename_entity':
+            result['description'] += ' to ' + data['new_entity_id']
             result['references'] = self.backend.references(target)
         return result

@@ -13,9 +13,74 @@ import time
 import uuid
 
 from flask import jsonify, request
-from permission_overrides import ApprovalRequired, Authority, Engine, Settings, bounded_json, entity, security_mentions_outside
+from permission_overrides import ApprovalRequired, Authority, Engine, Settings, bounded_json, entity, security_mentions_outside, PRIVATE
 
 IDENTIFIER = re.compile(r'[a-z0-9_-]{1,128}')
+
+
+# Core sends a serialized field list. Return its shape only, never defaults/options/values.
+FLOW_SCALARS = frozenset(('string', 'integer', 'float', 'boolean', 'select', 'multi_select'))
+FLOW_SELECTORS = frozenset(('text', 'number', 'boolean', 'select', 'entity', 'device', 'area',
+                            'label', 'duration', 'date', 'time', 'datetime', 'color_rgb', 'icon'))
+
+
+def flow_result(value, submitted=None):
+    if not isinstance(value, dict):
+        raise ApprovalRequired('Integration setup could not be described; finish this step in Home Assistant.')
+    # Also drop metadata that reflects a submitted value, even when identifier-shaped.
+    submitted_text = set()
+    def remember(item):
+        if isinstance(item, str) and item:
+            submitted_text.add(item)
+        elif isinstance(item, dict):
+            for child in item.values(): remember(child)
+        elif isinstance(item, list):
+            for child in item: remember(child)
+    remember(submitted or {})
+    def safe_identifier(item):
+        return (isinstance(item, str) and bool(IDENTIFIER.fullmatch(item))
+                and not any(text in item for text in submitted_text))
+    result = {key: value[key] for key in ('flow_id', 'type', 'step_id')
+              if safe_identifier(value.get(key))}
+    if value.get('type') != 'form':
+        result['handoff'] = 'Continue or check this setup in Home Assistant.'
+        return result
+    schema = value.get('data_schema')
+    if not isinstance(schema, list) or len(schema) > 64:
+        raise ApprovalRequired('Integration form is unavailable or oversized; finish this step in Home Assistant.')
+    fields, names, handoff = [], set(), False
+    for field in schema:
+        if not isinstance(field, dict) or not safe_identifier(field.get('name')):
+            raise ApprovalRequired('Integration field could not be described; finish this step in Home Assistant.')
+        name = field['name']
+        if name in names or type(field.get('required', False)) is not bool:
+            raise ApprovalRequired('Integration field could not be verified; finish this step in Home Assistant.')
+        names.add(name)
+        kind = field.get('type')
+        secret = bool(PRIVATE.search(name.lower()) or field.get('secret') or kind == 'password')
+        selector = field.get('selector')
+        if selector is not None:
+            if not isinstance(selector, dict) or len(selector) != 1:
+                kind = 'unsupported'
+            else:
+                kind, options = next(iter(selector.items()))
+                secret = secret or (kind == 'text' and isinstance(options, dict) and options.get('type') == 'password')
+                if kind not in FLOW_SELECTORS: kind = 'unsupported'
+        elif kind not in FLOW_SCALARS:
+            kind = 'unsupported'
+        if secret: kind = 'secret'
+        handoff = handoff or kind in ('secret', 'unsupported')
+        fields.append({'name': name, 'type': kind, 'required': field.get('required', False)})
+    result['fields'] = fields
+    errors = value.get('errors', {})
+    if not isinstance(errors, dict) or len(errors) > 65:
+        raise ApprovalRequired('Integration errors exceed their limit; finish this step in Home Assistant.')
+    result['errors'] = {key: error for key, error in errors.items()
+                        if (key == 'base' or key in names) and safe_identifier(key) and safe_identifier(error)}
+    if handoff:
+        result['handoff'] = 'Finish this step in Home Assistant. Password, secret or unsupported fields are never filled by the add-on.'
+    bounded_json(result, 32768)
+    return result
 
 
 class Core:
@@ -238,9 +303,15 @@ class Core:
                     raise ApprovalRequired('Start the integration form first, then continue its flow.')
                 value = self.rest('POST', 'config/config_entries/flow', {'handler': target})
             else:
+                current = self.rest('GET', 'config/config_entries/flow/' + target)
+                form = flow_result(current, data)
+                if 'handoff' in form:
+                    return form
+                names = {field['name'] for field in form['fields']}
+                if set(data) - names or any(PRIVATE.search(key.lower()) for key in data):
+                    raise ApprovalRequired('Submit only described nonsecret fields; finish other inputs in Home Assistant.')
                 value = self.rest('POST', 'config/config_entries/flow/' + target, data)
-            # No defaults, submitted values, credential data or backend errors are returned.
-            return {key: value[key] for key in ('flow_id', 'type', 'step_id') if isinstance(value.get(key), str)}
+            return flow_result(value, data)
         if operation in ('update_entity', 'rename_entity', 'delete_entity'):
             kind = 'remove' if operation == 'delete_entity' else 'update'
             self.ws('config/entity_registry/' + kind, entity_id=target, **data)

@@ -254,12 +254,16 @@ class CoreEndpoints(unittest.TestCase):
         self.assertEqual(calls, ['lovelace/config', 'lovelace/config/save', 'lovelace/config', 'lovelace/dashboards/list', 'lovelace/dashboards/delete'])
 
     def test_flow_paths_and_own_integration_refusal(self):
-        with patch.object(self.core, 'rest', return_value={'flow_id': 'synthetic', 'type': 'form', 'step_id': 'user'}) as rest:
+        value = {'handler': 'sample', 'flow_id': 'synthetic', 'type': 'form', 'step_id': 'user',
+                 'data_schema': [{'name': 'field', 'type': 'string', 'required': True}]}
+        with patch.object(self.core, 'rest', return_value=value) as rest:
             self.core.execute({'operation': 'flow_start', 'target': 'sample'})
             rest.assert_called_once_with('POST', 'config/config_entries/flow', {'handler': 'sample'})
             rest.reset_mock()
             self.core.execute({'operation': 'flow_continue', 'target': 'synthetic', 'data': {'field': 'synthetic'}})
-            rest.assert_called_once_with('POST', 'config/config_entries/flow/synthetic', {'field': 'synthetic'})
+            self.assertEqual([call.args for call in rest.call_args_list], [
+                ('GET', 'config/config_entries/flow/synthetic'),
+                ('POST', 'config/config_entries/flow/synthetic', {'field': 'synthetic'})])
         for handler in ('hassio', 'supervisor', 'codex_cli', 'ha_codex', None):
             with patch.object(self.core, 'rest', return_value={'handler': handler}):
                 with self.assertRaises(ApprovalRequired): self.core.validate_flow('flow_continue', 'synthetic')
