@@ -860,9 +860,29 @@ settings still apply. Codex Cloud eligibility is separate from the local CLI use
 The pinned CLI does not expose a documented boolean for account entitlement in `account/read`.
 Its rate-limit reader reports ordinary usage eligibility, which may also reflect exhausted allowance,
 and converts backend failures into a generic RPC error. A denied usage read cannot establish that the
-account lacks Codex access. No automatic access warning or daily entitlement check is shipped here;
-that behavior awaits an authoritative signal. Sign-in state and existing usage reporting remain separate.
+account lacks Codex access. The worker checks sign-in state on every status read and passively refreshes it at startup and at least
+daily while idle. Busy checks retry on the next minute; signing in also forces the existing passive usage
+read, whose plan enum supplies informational Status text. No task is submitted to check an account.
+
+The existing Home Assistant sign-in Repair appears only for signed-out or known expired/rejected sign-in
+state, and clears on a good sign-in or a successful task using the same credentials. Unknown state raises
+nothing. Only the pinned refresh-token expired, reused and invalidated codes and their exact user-facing messages are interpreted by the new
+daily reader; generic HTTP errors, quota exhaustion and plan names do not imply missing access. No distinct
+task-level entitlement error was verified, so no new task-error mapping is added. Existing task sign-in
+rejection handling is unchanged. Status explicitly says when passive reads cannot confirm Codex access.
+A real successful turn can confirm access for its current sign-in; changing credentials invalidates that
+confirmation and cached plan information. The new metadata cache retains no account email, token or raw error.
 
 Source: [account type at rust-v0.166.0](https://github.com/openai/codex/blob/6ff1e1ca3b30/codex-rs/app-server-protocol/src/protocol/v2/account.rs#L18-L38),
 [rate-limit errors](https://github.com/openai/codex/blob/6ff1e1ca3b30/codex-rs/app-server/src/request_processors/account_processor.rs#L1171-L1218),
 and [usage eligibility](https://github.com/openai/codex/blob/6ff1e1ca3b30/codex-rs/backend-client/src/client/rate_limit_resets.rs#L34-L66).
+
+The daily reader's refresh-code mapping follows
+[login/src/auth/manager.rs:1760](https://github.com/openai/codex/blob/6ff1e1ca3b30/codex-rs/login/src/auth/manager.rs#L1760-L1772).
+Plan labels follow [protocol/src/account.rs](https://github.com/openai/codex/blob/6ff1e1ca3b30/codex-rs/protocol/src/account.rs#L10-L50).
+The [task error enum](https://github.com/openai/codex/blob/6ff1e1ca3b30/codex-rs/protocol/src/protocol.rs#L2052-L2090)
+separates authentication and limits but supplies no verified, distinct missing-Codex-entitlement signal.
+
+The exact user-facing refresh messages are pinned at
+[login/src/auth/manager.rs:224-226](https://github.com/openai/codex/blob/6ff1e1ca3b30/codex-rs/login/src/auth/manager.rs#L224-L226).
+The new daily reader never clears a remembered rejection; a new sign-in or successful matching turn does.

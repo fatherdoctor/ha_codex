@@ -2,6 +2,10 @@
 
 ## 0.1.81.2 (unreleased)
 
+- State the Codex account requirement before sign-in, show plan information and uncertain access in Status,
+  and refresh sign-in metadata daily without a model task. Restrict the sign-in Repair to known signed-out
+  or expired state; a good sign-in or successful matching turn clears it.
+
 - Document the line-based command check’s known YAML blind spots and the protections that still apply.
 
 - Add the Quiet Studio chat layout with Home Assistant themes, a bottom composer, photo/file menu,

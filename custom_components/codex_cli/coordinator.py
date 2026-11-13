@@ -54,7 +54,9 @@ class CodexCliCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _update_repair_issue(self, data: dict[str, Any]) -> None:
         """Create a repair issue if Codex CLI needs sign-in."""
         login = data.get("codex_login") or {}
-        if login.get("status_ok"):
+        access = data.get("account_access")
+        needs_sign_in = access.get("needs_sign_in") if isinstance(access, dict) else not login.get("status_ok")
+        if needs_sign_in is not True:
             ir.async_delete_issue(self.hass, DOMAIN, ISSUE_NOT_SIGNED_IN)
             return
 

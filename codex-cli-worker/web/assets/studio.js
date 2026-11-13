@@ -200,7 +200,16 @@ function showStudioStatus() {
     ["Context", "Unavailable"], ["Usage and reset", "Unavailable"],
     ["Connection", lastRemoteState ? connectionLabel(lastRemoteState).text : "Unavailable"],
   ]) details.append(textNode("dt", name), textNode("dd", value));
+  const plan = textNode("dd", "Unavailable");
+  const access = textNode("dd", "Checking sign-in…");
+  details.append(textNode("dt", "ChatGPT plan (information only)"), plan,
+    textNode("dt", "Codex access"), access);
   $("status-dialog").showModal();
+  // Start with unavailable fields so switching accounts never displays an old plan.
+  api("status").then(data => {
+    plan.textContent = data.account_access?.plan_type || "Unavailable";
+    access.textContent = data.account_access?.message || "Codex access cannot be confirmed by a passive read.";
+  }).catch(() => { access.textContent = "Codex access could not be checked."; });
 }
 $("header-status").onclick = showStudioStatus;
 for (const id of ["thread-actions", "phone-thread-actions"])
