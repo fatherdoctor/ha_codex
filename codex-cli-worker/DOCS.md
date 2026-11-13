@@ -392,53 +392,46 @@ explain the possible downgrade. When Codex emits the warning on the supervised o
 that the request was downgraded. Not every relay thread warning is exposed there: absence of that message
 is not evidence that the requested permissions were granted.
 
-**Parsed YAML and include checks.** The command check retains the line rules for incomplete edits and
+**Parsed YAML and include checks.** The command check keeps the line rules for incomplete edits and
 adds a safe composed-node pass for quoted keys, flow mappings, action/service values, script targets,
-anchors and YAML merges. Home Assistant tags remain nodes: `!secret` is never resolved or read.
-The parser constructs no Python objects. Node visits (1,000,000), nesting (64) and input bytes
-(10 MiB per document) bound parsing by work, independently of the machine's clock or load.
-These per-document limits admit five copies of the reference-sized automation and script documents;
-they are not the hook's total. A hook run shares one `ParseScan`: at most **150,000 parser node events**
-and **2 MiB of composed source bytes** across all documents, including proposed versions and failed
-parses. Repeated transitive script-body node walks also consume that same node total. Repeated cached content costs no new composition. Parser events are counted before allocating
-a node graph, so a million-item flow list stops early. LibYAML's safe loader is used when installed;
-the slower Python safe loader remains available to the watch. If LibYAML is absent, a hook YAML
-check refuses before parsing and names the missing fast safe parser; it does not attempt the slow fallback
-inside Codex's timeout. LibYAML is part of the declared PyYAML package's normal platform wheels.
-Past either total the hook refuses,
-names the file it could not read, and asks for a person's review or repair outside Codex. It never
-falls back to an incomplete line-only approval. Decisions do not depend on elapsed time. The expanded isolated `tests/measure_gate.py`
-run includes a reference-sized script/automation inventory and 2,500 identical-content files.
-The reference-sized accepted case measured **1.527 s** maximum, 147,707 counted visits and
-869,795 composed bytes. The explicit **6x slow-machine assumption** projects **9.163 s**
-against the 10-second timeout, leaving only about 0.837 s: the benchmark's two-second reserve
-aim is **not met**. This timing limitation remains for review; it is not proof on a slow device.
-The 37,000-entry accepted edit measured 1.248 s maximum. The identical-content case measured
-0.232 s maximum with 1,507 charged nodes; duplicate source-discovery walks are avoided.
-The four formerly allowed lists and million-item inventory stopped at 150,000 counted visits
-in at most 0.624 s and 0.205 s respectively. Repeat the benchmark when changing the parser
-or its totals; no supported-machine timing guarantee is inferred from this executor alone.
-Each document, including a failed parse, is cached by content hash. A hook retains only graphs it has
-already paid for within its total; that temporary cache dies with the operation. The watch's retained
-cache is limited to **16 MiB estimated graph cost**, **2 MiB source bytes** and 512 entries. Cost is source
-bytes plus 1,024 bytes per distinct node, including key/value nodes; aliases are counted once. Large
-graphs are inspected but not retained. This conservative allowance bounds graphs rather than assuming
-a small source implies small memory. Unchanged watch classifications are reused after re-reading all
-ordinary file hashes, prior include dependencies and the active rules, even when a graph was evicted.
-Changed or missing dependencies invalidate that shortcut. The measurement below reports actual process
-RSS as well; the graph estimate does not bound other worker memory or the current temporary parse.
-An eight-copy synthetic reference inventory (6,957,664 source bytes), after a baseline and two idle
-scans, measured **112.4 MiB peak process RSS**, up from 19.1 MiB before scanning: about **14.1 MB of
-incremental process memory per MB of source**. Its large graphs were not retained (0 cache bytes).
-This is a whole-process measurement on the build executor, including baseline snapshots and temporary
-parses, not a claim that every YAML shape has that ratio or that total worker memory is capped there.
-The review's older implementation measured about 30 MB/MB and a 233 MB eight-copy peak on its machine.
-The watch also reuses its last classification only when every scanned file hash, active rule and include
-error is unchanged. It still reads included bytes, so a changed non-YAML dependency invalidates that result.
-A parsed-check budget failure is reported on its file; the line rules continue without raising
-out of script resolution or include discovery. In the hook, a file that could not be read within the shared total refuses the patch by filename.
-An unreadable nonempty YAML file requires a person to repair it outside Codex, including when a proposed
-patch would repair that file. A comment-only document remains usable.
+anchors and YAML merges. Tags remain nodes: `!secret` is never resolved or read, and no Python objects
+are constructed. It reads single-document YAML files only. A nonempty file that cannot be parsed,
+including a file containing two documents, needs manual repair outside Codex when remote control is on.
+
+One command-check call can compose **2 MiB of source** and spend **150,000 node visits**, including
+proposed versions, parser events and repeated script-body classification. Only candidate documents
+containing script, include, tracked definition or action words consume that total; escaped spellings
+also receive the parsed check. Other documents keep the line rules. Parser events are counted before
+graph allocation, so a relevant million-item document stops before allocating a million nodes.
+Each content hash is composed once per call. Graph indexes, semantic summaries and relative include
+edges are reused within that call; transitive script checks charge a new pass when their known refused
+script set changes. Include paths are still resolved separately for each source file.
+
+**Past either total, with remote control on, Codex cannot patch this configuration.** The refusal names
+the file and explains that this config holds more YAML than the check reads in one call. A person must
+make the change outside Codex. With remote control off, the check keeps the line rules instead of
+refusing merely because the parsed total was reached. An inventory file over the 8 MiB read cap follows
+the same rule: refusal when remote control is on, proposed-patch line checks when it is off. It is not
+silently omitted from a remote-on check. Touched files still have the separate 512 KiB limit below.
+These are work limits, independent of clocks. The isolated benchmark measures the actual hook,
+including 60 non-YAML include levels next to a 140,000-item document with remote control on and off.
+Slower machines scale the measured seconds; the 6x projection is an assumption, not a hardware guarantee.
+The lead's real-device timing remains necessary before release.
+On the Linux x86_64 build executor (AMD EPYC 9V74, Python 3.12.14), 66 isolated samples
+measured at most **1.293 seconds**; the explicit 6x assumption projects **7.756 seconds** of the
+10-second timeout. The 60-include case took at most **1.031 seconds with remote control off** and
+**0.911 seconds with it on**, with 420,312 graph items traversed in either mode. These measurements
+include traversal instrumentation. They describe this executor and these cases, not every configuration.
+
+The image build asserts that PyYAML supplies LibYAML. Without the fast safe loader, a candidate hook
+check refuses before parsing; the watch can use the slower Python safe loader. Individual watch parses
+are bounded by 10 MiB of source, 1,000,000 events and 64 nesting levels. During one scan, each distinct
+document, including large graphs and parse failures, is composed once. Those temporary graphs are
+dropped when the scan ends. Between scans the watch retains at most **16 MiB estimated graph cost**,
+**2 MiB source** and 512 entries: source bytes plus 1,024 bytes per distinct node. This retention limit
+is not a whole-process memory cap. Unchanged classifications are reused only after all ordinary file
+hashes, prior include dependencies and rules are checked again. Changed or missing dependencies
+invalidate that shortcut. Watch budget failures retain line findings and add a file-specific report.
 Service names and script entity IDs are stripped and lower-cased before matching.
 
 A definition such as `shell_command: !include commands.yaml` protects the entire included file,
@@ -452,8 +445,8 @@ requirement. An earlier file is never presumed absent merely because it had a di
 Include reads stay under the configuration root through no-follow file descriptors. Hidden paths,
 credential-named includes, symlinks and hardlinks are excluded or refused. The hook inventory is bounded
 at 3,000 files/16 MiB (8 MiB per inventory file); include reads at 16 MiB and 64 passes, with a
-1,000,000-node include graph limit and the hook composition total above. An inventory file beyond the read cap is skipped, while touched
-source files remain capped and refused by name. Include refusals identify their source or target file.
+1,000,000-state include-graph limit and the hook totals above. Oversized inventory follows the remote-on/refusal
+and remote-off/line-rules behavior above; touched source files remain capped and refused by name. Include refusals identify their source or target file.
 A missing, unsafe or over-budget dependency cannot grant a hook approval. Watch findings still require
 review before reload; this does not reverse a command that already ran. These checks do not execute YAML,
 contact Home Assistant, or change Codex's approval policy.
@@ -873,15 +866,12 @@ An unavailable worker returns an unavailable data section without its exception
 message or connection address.
 
 
-Ordinary script `!include` targets are checked regardless of filename suffix. Missing,
-unreadable, malformed or non-map script targets refuse the patch with the target named.
-Nested script-body includes that cannot be resolved are also refused for manual review.
-Editing a discovered non-YAML script include is checked too;
-ordinary scripts are not treated as run-on-load definitions merely because they are included.
-Within one script-resolution pass, identical document content shares its script-key inspection.
-Relative include paths are still resolved for each source file. This avoids repeated cached-graph
-walks without spending the hook's work budget repeatedly on the same discovery; transitive
-script-body resolution continues to charge the shared node total.
+Ordinary script `!include` targets are checked regardless of filename suffix. Both `script:` and
+labeled keys such as `script manual:` resolve includes and inline script maps. Missing, unreadable,
+malformed or non-map script targets refuse the patch with the target named. Nested script-body includes
+require manual review, including a patch introducing one into a previously plain script map. Editing
+a discovered non-YAML script include is checked too. Ordinary scripts are not treated as run-on-load
+definitions merely because they are included.
 
 ### Chat page and attachments
 

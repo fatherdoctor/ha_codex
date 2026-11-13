@@ -85,6 +85,9 @@ RUN pip3 install --no-cache-dir --break-system-packages \
     requests \
     websocket-client
 
+# The synchronous YAML check requires the fast safe parser on both architectures.
+RUN python3 -c "import yaml; assert yaml.__with_libyaml__"
+
 WORKDIR /data
 
 COPY run.sh /

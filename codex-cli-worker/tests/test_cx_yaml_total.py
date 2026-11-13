@@ -33,11 +33,11 @@ class TotalBudgetTests(unittest.TestCase):
         for n in range(4):
             self.write(f'lists/list_{n}.yaml', f'zz_list_{n}: [' + ','.join([str(n)] * 124000) + ']\n')
         reason, scan = self.run_hook(after='shell_command: {sample: echo sample}\n')
-        self.assertIn('refused', reason)
+        self.assertIn('shell_command', reason)
         self.assert_bounded(scan)
 
     def test_million_item_inventory_refuses_early_by_count(self):
-        self.write('big.yaml', '[' + ','.join(['a'] * 1000100) + ']')
+        self.write('big.yaml', 'sequence: [' + ','.join(['a'] * 1000100) + ']')
         reason, scan = self.run_hook()
         self.assertIn('big.yaml', reason)
         self.assertIn('refused', reason)
@@ -45,8 +45,8 @@ class TotalBudgetTests(unittest.TestCase):
         self.assertLess(scan.nodes, 1000100)
 
     def test_byte_total_is_shared_across_distinct_documents(self):
-        self.write('one.yaml', '# first\n' + 'x: ' + 'a' * 300000)
-        self.write('two.yaml', '# second\n' + 'x: ' + 'b' * 300000)
+        self.write('one.yaml', '# first\n' + 'action: ' + 'a' * 300000)
+        self.write('two.yaml', '# second\n' + 'action: ' + 'b' * 300000)
         with patch.object(rules, 'HOOK_COMPOSE_MAX_BYTES', 400000):
             reason, scan = self.run_hook()
             self.assertIn('refused', reason)
@@ -78,7 +78,7 @@ class TotalBudgetTests(unittest.TestCase):
     def test_hook_without_fast_loader_refuses_before_parsing(self):
         with patch.object(rules, 'YAML_LOADER', rules.yaml.SafeLoader):
             with patch.object(rules.yaml, 'parse', side_effect=AssertionError('slow parse')):
-                reason, scan = self.run_hook(after='name: sample\n')
+                reason, scan = self.run_hook(after='action: light.turn_on\n')
         self.assertIn('fast safe YAML parser is unavailable', reason)
         self.assertEqual(scan.nodes, 0)
 

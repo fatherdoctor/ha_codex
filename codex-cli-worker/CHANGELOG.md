@@ -2,6 +2,11 @@
 
 ## 0.1.81.2 (unreleased)
 
+- Reuse parsed graphs and include-edge summaries within each command check and watch scan. Resolve
+  labeled script keys and check newly introduced nested includes. Count only candidate YAML toward the
+  hook totals; explain capacity refusals with remote control on and retain line checks when it is off.
+  Apply the same rule to oversized inventory files, require single-document YAML and assert LibYAML at build.
+
 - Bound total hook YAML work across all documents before graph allocation, use the safe LibYAML loader
   where available, limit retained watch graphs by estimated node cost, and reuse unchanged classifications
   without keeping large graphs. Explain manual repair and name unreadable files in refusals.

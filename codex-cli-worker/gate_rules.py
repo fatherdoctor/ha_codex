@@ -211,17 +211,30 @@ class ParseScan:
             max_cost=HOOK_COMPOSE_MAX_BYTES + HOOK_MAX_NODES * YAML_NODE_COST
             if hook else YAML_CACHE_MAX_COST)
         self.failures = {}
+        self.results = {}  # Includes large graphs, for this operation only.
+        self.include_edges = {}
+        self.mapping_nodes = {}
+        self.script_values = {}
+        self.classifications = {}
+        self.node_digests = {}
+        self.body_findings = {}
+        self.script_entries = {}
+        self.candidates = {}
+        self.candidate_patterns = {}
+        self.required_sources = set()
+        self.disabled = False
+        self.rules = None
         self.hook = hook
         self.nodes = 0
         self.bytes = 0
         self.source = 'proposed YAML'
 
-    def charge(self, nodes=0, size=0):
+    def charge(self, nodes=0, size=0, source=None):
         if self.hook and (self.nodes + nodes > HOOK_MAX_NODES
                           or self.bytes + size > HOOK_COMPOSE_MAX_BYTES):
             raise HookBudgetError(
-                f'{self.source}: file could not be read within the total hook work limit; '
-                'a person must review or repair it outside Codex')
+                f'{source or self.source}: this config holds more YAML than the check reads in one call '
+                '(total hook work limit); a person must make this change outside Codex')
         self.nodes += nodes
         self.bytes += size
 
@@ -246,14 +259,16 @@ def include_failure(source, reason, strict):
         scan.failures[source] = reason
 
 
-def yaml_scan(function):
+def yaml_scan(function=None, *, hook=False):
     """Share bounded parse results (including failures) for one hook/watch scan."""
+    if function is None:
+        return lambda target: yaml_scan(target, hook=hook)
     @wraps(function)
     def run(*args, **kwargs):
         if _scan_nodes.get() is not None:
             return function(*args, **kwargs)
         cache = getattr(args[0], '_yaml_cache', None) if args else None
-        token = _scan_nodes.set(ParseScan(cache, hook=function.__name__ == 'check_tool_call'))
+        token = _scan_nodes.set(ParseScan(cache, hook=hook))
         try:
             return function(*args, **kwargs)
         finally:
@@ -265,10 +280,18 @@ def yaml_result(text, source=None):
     scan = _scan_nodes.get()
     if scan is not None and source is not None:
         scan.source = source
+    if scan is not None and scan.disabled:
+        return None, ''
+    if (scan is not None and scan.hook and scan.rules is not None
+            and source not in scan.required_sources and not relevant_yaml(text, scan.rules)):
+        return None, ''
     raw = text.encode('utf-8')
     digest = hashlib.sha256(raw).digest()
+    if scan is not None and digest in scan.results:
+        return scan.results[digest]
     cached = scan.cache.get(digest) if scan is not None else None
     if cached is not None:
+        scan.results[digest] = cached[1]
         return cached[1]
     try:
         result = (_compose_yaml(text), '')
@@ -277,8 +300,33 @@ def yaml_result(text, source=None):
     except (YamlBudgetError, RecursionError):
         result = (None, 'YAML exceeds the bounded parsed check; review this file manually')
     if scan is not None:
+        scan.results[digest] = result
         scan.cache.put(digest, len(raw), result)
     return result
+
+
+def relevant_yaml(text, rules):
+    """Candidate detection is shared by content/rules, just like graph analysis."""
+    scan = _scan_nodes.get()
+    rule_key = json.dumps(rules, sort_keys=True)
+    key = (hashlib.sha256(text.encode()).digest(), rule_key)
+    if scan is not None and key in scan.candidates:
+        return scan.candidates[key]
+    words = {'script', 'sequence', 'action', 'service', 'service_template', 'platform', 'template'}
+    words.update(rules['runs_on_load_keys'])
+    words.update(rules['runs_on_load_platforms'])
+    words.update(rules['reaches_anything'])
+    patterns = scan.candidate_patterns if scan is not None else {}
+    if rule_key not in patterns:
+        patterns[rule_key] = re.compile(r'(?<!\w)(?:' + '|'.join(re.escape(w) for w in sorted(words)) + r')(?!\w)', re.I)
+    candidate = '!include' in text or '\\' in text or bool(patterns[rule_key].search(text))
+    if scan is not None:
+        scan.candidates[key] = candidate
+    return candidate
+
+
+def script_key(value):
+    return value.split(' ', 1)[0] == 'script'
 
 
 def yaml_node(text: str, source=None) -> Any:
@@ -324,32 +372,47 @@ def _compose_yaml(text: str) -> Any:
         return None
 
 
-def yaml_mappings(node: Any, charge=False, reject_includes=False):
-    """Walk shared/cyclic aliases once, including merge-key mappings."""
-    seen, todo = set(), [node]
+def graph_nodes(node):
+    """Index each graph root once in the scan; aliases are not expanded repeatedly."""
+    scan = _scan_nodes.get()
+    if scan is not None and id(node) in scan.mapping_nodes:
+        return scan.mapping_nodes[id(node)]
+    seen, todo, nodes = set(), [node], []
     while todo:
         item = todo.pop()
         if item is None or id(item) in seen:
             continue
         seen.add(id(item))
-        scan = _scan_nodes.get()
-        if charge and scan is not None:
-            scan.charge(nodes=1)
-        if reject_includes and isinstance(item, yaml.ScalarNode) and item.tag.startswith('!include'):
-            source = scan.source if scan is not None else 'script body'
-            raise ValueError(f'{source}: nested script include could not be checked; '
-                             'a person must review it outside Codex')
+        nodes.append(item)
         if isinstance(item, yaml.MappingNode):
-            yield item
             for key, value in item.value:
                 todo.extend((key, value))
         elif isinstance(item, yaml.SequenceNode):
             todo.extend(item.value)
+    if scan is not None:
+        scan.mapping_nodes[id(node)] = nodes
+    return nodes
+
+
+def yaml_mappings(node: Any, charge=False, reject_includes=False, source=None):
+    """Repeated script-body passes pay for every visited node, including aliases once."""
+    scan = _scan_nodes.get()
+    for item in graph_nodes(node):
+        if charge and scan is not None:
+            scan.charge(nodes=1, source=source)
+        if reject_includes and isinstance(item, yaml.ScalarNode) and item.tag.startswith('!include'):
+            source = source or (scan.source if scan is not None else 'script body')
+            raise ValueError(f'{source}: nested script include could not be checked; '
+                             'a person must review it outside Codex')
+        if isinstance(item, yaml.MappingNode):
+            yield item
 
 
 def yaml_digest(node: Any) -> str:
     """Hash resolved node content once per node; cyclic aliases never expand."""
-    memo, visiting = {}, set()
+    scan = _scan_nodes.get()
+    memo = scan.node_digests if scan is not None else {}
+    visiting = set()
     def digest(item):
         identity = id(item)
         if identity in memo:
@@ -370,6 +433,22 @@ def yaml_digest(node: Any) -> str:
     return digest(node)
 
 
+def cached_classification(function):
+    """Do each semantic pass once per content/rule/script set in this operation."""
+    @wraps(function)
+    def run(text, rules, *args):
+        scan = _scan_nodes.get()
+        key = (function.__name__, hashlib.sha256(text.encode()).digest(),
+               json.dumps(rules, sort_keys=True), tuple(sorted(args[0])) if args else ())
+        if scan is None:
+            return function(text, rules, *args)
+        if key not in scan.classifications:
+            scan.classifications[key] = function(text, rules, *args)
+        return scan.classifications[key].copy()
+    return run
+
+
+@cached_classification
 def parsed_findings(text: str, rules: dict[str, Any], scripts: set[str] | frozenset[str]) -> list[Finding]:
     """Find semantic keys/values in flow, quoted and alias/merge spellings."""
     return node_findings(yaml_node(text), text, rules, scripts)
@@ -381,9 +460,13 @@ def is_definition(key, value, rules):
         or value.tag == 'tag:yaml.org,2002:null' or value.tag.startswith('!'))
 
 
-def node_findings(node, text, rules, scripts, count_work=False, reject_includes=False):
+def node_findings(node, text, rules, scripts, count_work=False, reject_includes=False, source=None):
+    scan = _scan_nodes.get()
+    cache_key = (id(node), json.dumps(rules, sort_keys=True), tuple(sorted(scripts)), reject_includes)
+    if count_work and scan is not None and cache_key in scan.body_findings:
+        return scan.body_findings[cache_key].copy()
     findings, lines = [], text.splitlines()
-    for mapping in yaml_mappings(node, charge=count_work, reject_includes=reject_includes):
+    for mapping in yaml_mappings(node, charge=count_work, reject_includes=reject_includes, source=source):
         for key, value in mapping.value:
             if not isinstance(key, yaml.ScalarNode):
                 continue
@@ -416,9 +499,12 @@ def node_findings(node, text, rules, scripts, count_work=False, reject_includes=
                             entity = entity.strip().lower()
                             if entity.startswith('script.') and entity[7:] in scripts:
                                 add(f"a call to {entity}, which itself acts on a refused domain", 'refused_script')
+    if count_work and scan is not None:
+        scan.body_findings[cache_key] = findings
     return findings
 
 
+@cached_classification
 def parsed_blocks(text: str, rules: dict[str, Any]) -> dict[str, tuple[int, int, str]]:
     """Definition hashes include resolved aliases, even when anchors live elsewhere."""
     lines, blocks = text.splitlines(), {}
@@ -440,7 +526,7 @@ def parsed_blocks(text: str, rules: dict[str, Any]) -> dict[str, tuple[int, int,
 
 
 @yaml_scan
-def find_refused(text: str, rules: dict[str, Any], refused_scripts: frozenset[str] | set[str] = frozenset()) -> list[Finding]:
+def find_refused(text: str, rules: dict[str, Any], refused_scripts: frozenset[str] | set[str] = frozenset(), *, parsed=True) -> list[Finding]:
     """Find always-on commands, definitions/platforms, templated actions and indirect security calls.
 
     Device actions and targets follow the owner's normal approval flow. This
@@ -477,6 +563,8 @@ def find_refused(text: str, rules: dict[str, Any], refused_scripts: frozenset[st
                     findings.append(Finding(number, f"a call to script.{ref}, which itself acts on a refused domain", line,
                                             "refused_script"))
                     break
+    if not parsed:
+        return findings
     additions = parsed_findings(text, rules, refused_scripts)
     if yaml_result(text)[1]:
         additions.append(Finding(1, yaml_result(text)[1], '', 'parse_budget'))
@@ -538,29 +626,43 @@ def new_refused(before: str, after: str, rules: dict[str, Any], scripts: set[str
 
 
 
-@yaml_scan
-def refused_scripts(texts: dict[str, str], rules: dict[str, Any], strict: bool = False) -> set[str]:
-    """Resolve scripts from composed bodies; unknown script sources cannot approve edits."""
+def script_map_entries(node):
+    scan = _scan_nodes.get()
+    if scan is not None and id(node) in scan.script_entries:
+        return scan.script_entries[id(node)]
+    pairs = tuple((key.value, value) for key, value in node.value if isinstance(key, yaml.ScalarNode))
+    if scan is not None:
+        scan.script_entries[id(node)] = pairs
+    return pairs
+
+
+def script_sources(texts, rules, strict):
+    """Discover inline blocks and included maps, resolving paths per source."""
     blocks = {}
+    scan = _scan_nodes.get()
     sources = {rel: 'auto' for rel in texts if rel == 'scripts.yaml' or rel.startswith('scripts/')}
-    inspected = {}
+    if scan is not None:
+        scan.required_sources.update(sources)
+    inspected = scan.script_values if scan is not None else {}
     for source, text in texts.items():
+        if (scan is not None and scan.hook and source not in scan.required_sources
+                and not relevant_yaml(text, rules)):
+            continue
         node, error = yaml_result(text, source)
         if strict and (error or (node is None and has_yaml_content(text))):
             raise ValueError(f'{source}: file could not be read by the check; '
-                             'a person must repair it outside Codex')
+                             'the check reads single-document YAML files only; a person must repair it outside Codex')
         # A cached graph's script keys are inspected once, not once per file.
         # Resolve the saved include values relative to EACH source below.
         digest = hashlib.sha256(text.encode('utf-8')).digest()
         if digest not in inspected:
             inspected[digest] = [value for mapping in yaml_mappings(node)
                                  for key, value in mapping.value
-                                 if isinstance(key, yaml.ScalarNode) and key.value == 'script']
+                                 if isinstance(key, yaml.ScalarNode) and script_key(key.value)]
         for value in inspected[digest]:
             if isinstance(value, yaml.MappingNode):
-                for name, body in value.value:
-                    if isinstance(name, yaml.ScalarNode):
-                        blocks[name.value] = (body, text, source)
+                for name, body in script_map_entries(value):
+                    blocks[name] = (body, text, source)
             elif isinstance(value, yaml.ScalarNode) and value.tag.startswith('!include'):
                 target = include_path(source, value.value)
                 if value.tag == '!include':
@@ -569,18 +671,25 @@ def refused_scripts(texts: dict[str, str], rules: dict[str, Any], strict: bool =
                     for rel in texts:
                         if rel.startswith(target + '/') and rel.lower().endswith(YAML_SUFFIXES):
                             sources[rel] = 'file' if value.tag == '!include_dir_named' else 'map'
-    for rel, text in texts.items():
-        if rel not in sources:
+    return blocks, sources
+
+
+def script_source_blocks(texts, sources, strict):
+    """Read each known script map; preserve the line fallback for incomplete edits."""
+    blocks = {}
+    for rel in sources:
+        if rel not in texts:
             continue
-        node = yaml_node(text)
+        text = texts[rel]
+        node = yaml_node(text, rel)
         if isinstance(node, yaml.MappingNode):
-            keys = {key.value for key, _ in node.value if isinstance(key, yaml.ScalarNode)}
+            entries = script_map_entries(node)
+            keys = {name for name, _ in entries}
             if sources[rel] == 'file' or (sources[rel] == 'auto' and rel.startswith('scripts/') and 'sequence' in keys):
                 blocks[Path(rel).stem] = (node, text, rel)
             else:
-                for key, value in node.value:
-                    if isinstance(key, yaml.ScalarNode):
-                        blocks[key.value] = (value, text, rel)
+                for name, value in entries:
+                    blocks[name] = (value, text, rel)
         else:
             if strict and has_yaml_content(text):
                 raise ValueError(f'{rel}: file could not be read by the check; a person must repair it outside Codex')
@@ -594,6 +703,11 @@ def refused_scripts(texts: dict[str, str], rules: dict[str, Any], strict: bool =
                     current, block = key.group(1), []
                 else:
                     block.append(line)
+    return blocks
+
+
+def resolve_script_blocks(blocks, rules, strict):
+    """Resolve transitive calls; each new refused set spends the shared node total."""
     refused: set[str] = set()
     while True:
         found = set()
@@ -601,13 +715,10 @@ def refused_scripts(texts: dict[str, str], rules: dict[str, Any], strict: bool =
             # Classification needs the node, not source lines. Splitting the full
             # script-map text once per body makes an ordinary map quadratic.
             if isinstance(body, tuple):
-                scan = _scan_nodes.get()
-                if scan is not None:
-                    scan.source = body[2]
                 # Transitive resolution may revisit bodies; those repeated walks
                 # must consume the same hook total as composition.
                 findings = node_findings(body[0], '', rules, refused, count_work=True,
-                                         reject_includes=strict)
+                                         reject_includes=strict, source=body[2])
             else:
                 findings = find_refused(body, rules, refused)
             if any(f.kind != "parse_budget" for f in findings):
@@ -615,6 +726,14 @@ def refused_scripts(texts: dict[str, str], rules: dict[str, Any], strict: bool =
         if found <= refused:
             return refused
         refused |= found
+
+
+@yaml_scan
+def refused_scripts(texts: dict[str, str], rules: dict[str, Any], strict: bool = False) -> set[str]:
+    """Resolve scripts without treating an unknown source as permission."""
+    blocks, sources = script_sources(texts, rules, strict)
+    blocks.update(script_source_blocks(texts, sources, strict))
+    return resolve_script_blocks(blocks, rules, strict)
 
 
 def include_path(source: str, value: str) -> str:
@@ -629,63 +748,93 @@ def include_path(source: str, value: str) -> str:
     return rel
 
 
+def document_include_edges(text, rules, include_scripts):
+    """Inspect each content hash once; edges remain relative to their source file."""
+    scan = _scan_nodes.get()
+    key = (hashlib.sha256(text.encode()).digest(), json.dumps(rules, sort_keys=True), include_scripts)
+    if scan is not None and key in scan.include_edges:
+        return scan.include_edges[key]
+    edges = []
+    todo = [(yaml_node(text), frozenset())]
+    seen = set()
+    tracked = set(rules['runs_on_load_keys'])
+    while todo:
+        node, kinds = todo.pop()
+        if node is None or (id(node), kinds) in seen:
+            continue
+        seen.add((id(node), kinds))
+        if len(seen) > INCLUDE_MAX_NODES:
+            raise YamlBudgetError('include graph node budget exceeded')
+        if isinstance(node, yaml.ScalarNode) and node.tag.startswith('!include'):
+            edges.append((node.tag, node.value, kinds))
+        elif isinstance(node, yaml.MappingNode):
+            platform_kinds = {v.value for k, v in node.value
+                              if isinstance(k, yaml.ScalarNode) and k.value == 'platform'
+                              and isinstance(v, yaml.ScalarNode) and v.value in rules['runs_on_load_platforms']}
+            kinds = kinds | frozenset(platform_kinds)
+            for key_node, value in node.value:
+                name = key_node.value if isinstance(key_node, yaml.ScalarNode) else ''
+                extra = {name} if name in tracked else set()
+                if include_scripts and script_key(name):
+                    extra.add('script')
+                todo.append((value, kinds | frozenset(extra)))
+        elif isinstance(node, yaml.SequenceNode):
+            todo.extend((child, kinds) for child in node.value)
+    if scan is not None:
+        scan.include_edges[key] = edges
+    return edges
+
+
 @yaml_scan
 def included_definitions(texts: dict[str, str], rules: dict[str, Any], strict: bool = False,
                          include_scripts: bool = False) -> dict[str, set[str]]:
-    """Resolve include chains and definition directories; every member is hashed whole."""
-    definitions: dict[str, set[str]] = {}
-    roots = {}
-    for rel, text in sorted(texts.items()):
-        if '!include' in text and has_yaml_content(text):
-            roots[rel] = yaml_node(text, rel)
-            if roots[rel] is None:
-                include_failure(rel, 'include source could not be parsed', strict)
-    todo = [(rel, node, frozenset()) for rel, node in roots.items()]
+    """Propagate cached edge summaries, never rewalk graphs for include passes."""
+    definitions = {}
+    todo = [(rel, frozenset()) for rel, text in sorted(texts.items()) if '!include' in text]
     seen = set()
+    scan = _scan_nodes.get()
     while todo:
-        source, node, kinds = todo.pop()
-        if node is None or (source, id(node), kinds) in seen:
+        source, inherited = todo.pop()
+        if (source, inherited) in seen:
             continue
-        seen.add((source, id(node), kinds))
+        seen.add((source, inherited))
         if len(seen) > INCLUDE_MAX_NODES:
             include_failure(source, 'include graph node budget exceeded', strict)
             break
-        if isinstance(node, yaml.ScalarNode) and node.tag.startswith('!include'):
+        text = texts[source]
+        yaml_node(text, source)  # Set the actual source before any parse failure.
+        try:
+            edges = document_include_edges(text, rules, include_scripts)
+        except YamlBudgetError:
+            include_failure(source, 'include graph node budget exceeded', strict)
+            continue
+        if yaml_node(text, source) is None and has_yaml_content(text):
+            include_failure(source, 'include source could not be parsed', strict)
+        for tag, value, local_kinds in edges:
+            kinds = inherited | local_kinds
             try:
-                target = include_path(source, node.value)
+                target = include_path(source, value)
             except ValueError:
-                if strict:
-                    raise ValueError(f'{source}: include cannot be checked safely') from None
+                include_failure(source, 'include cannot be checked safely', strict)
                 continue
-            if node.tag == '!include':
+            if tag == '!include':
                 targets = [target]
-            elif node.tag in ('!include_dir_named', '!include_dir_merge_named', '!include_dir_list', '!include_dir_merge_list'):
+            elif tag in ('!include_dir_named', '!include_dir_merge_named', '!include_dir_list', '!include_dir_merge_list'):
                 targets = [rel for rel in texts if rel.startswith(target + '/') and rel.lower().endswith(YAML_SUFFIXES)]
             else:
-                if strict:
-                    raise ValueError(f'{source}: unsupported include tag')
+                include_failure(source, 'unsupported include tag', strict)
                 continue
             for rel in targets:
                 if kinds:
                     definitions.setdefault(rel, set()).update(kinds)
+                if scan is not None:
+                    scan.required_sources.add(rel)
                 if rel in texts:
-                    if rel not in roots:
-                        roots[rel] = yaml_node(texts[rel])
-                        if roots[rel] is None and has_yaml_content(texts[rel]):
-                            include_failure(rel, 'included definition could not be parsed', strict)
-                    # The edge above already records this file's dependency.
-                    # A leaf without include tags has no further edges to discover.
+                    node = yaml_node(texts[rel], rel)
+                    if node is None and has_yaml_content(texts[rel]):
+                        include_failure(rel, 'included definition could not be parsed; single-document YAML required', strict)
                     if '!include' in texts[rel]:
-                        todo.append((rel, roots[rel], kinds))
-        elif isinstance(node, yaml.MappingNode):
-            platform_kinds = {v.value for k, v in node.value if isinstance(k, yaml.ScalarNode) and k.value == 'platform' and isinstance(v, yaml.ScalarNode) and v.value in rules['runs_on_load_platforms']}
-            kinds = kinds | frozenset(platform_kinds)
-            for key, value in node.value:
-                tracked = set(rules['runs_on_load_keys']) | ({'script'} if include_scripts else set())
-                extra = {key.value} if isinstance(key, yaml.ScalarNode) and key.value in tracked else set()
-                todo.append((source, value, kinds | frozenset(extra)))
-        elif isinstance(node, yaml.SequenceNode):
-            todo.extend((source, child, kinds) for child in node.value)
+                        todo.append((rel, kinds))
     return definitions
 
 
@@ -694,7 +843,7 @@ def included_finding(rel: str, kinds: set[str], text: str) -> Finding:
                    text.splitlines()[0] if text.splitlines() else '', 'runs_on_load')
 
 
-def config_yaml_texts(root: Path, max_bytes: int = 8 * 1024 * 1024) -> dict[str, str]:
+def config_yaml_texts(root: Path, max_bytes: int = 8 * 1024 * 1024, strict=False) -> dict[str, str]:
     """Read a bounded ordinary configuration inventory, never links or secret tags."""
     texts = {}
     total = 0
@@ -716,7 +865,10 @@ def config_yaml_texts(root: Path, max_bytes: int = 8 * 1024 * 1024) -> dict[str,
             try:
                 raw = read_config_bytes(root, rel, max_bytes)
             except ValueError:
-                continue  # Unrelated oversized files cannot veto a bounded patch.
+                if strict:
+                    raise HookBudgetError(f'{rel}: this config holds more YAML than the check reads in one call '
+                                          '(inventory read limit); a person must make this change outside Codex') from None
+                continue  # Remote-off line rules still check the proposed patch.
             total += len(raw)
             if total > 16 * 1024 * 1024:
                 raise ValueError('configuration inventory byte budget exceeded')
@@ -1261,7 +1413,7 @@ def _python_definition(path: str) -> str:
     return ("python_script" if match[1] == "python_scripts" else "pyscript") if match else ""
 
 
-@yaml_scan
+@yaml_scan(hook=True)
 def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, Any]) -> str:
     """Return why the hook refuses this tool call or permission request, or an empty string to let it through.
 
@@ -1269,6 +1421,8 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
     ``payload`` is the hook's input. Nothing here ever asks: the answer is a
     refusal or no opinion, and with no opinion the usual approval flow runs.
     """
+    scan = _scan_nodes.get()
+    scan.rules = rules
     data = payload if isinstance(payload, dict) else {}
     event = str(data.get("hook_event_name") or event or "")
     tool_input = data.get("tool_input", data.get("input", data))
@@ -1304,21 +1458,24 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
                     for path, before, after in versions:
                         yaml_node(before, path)
                         yaml_node(after, path)
-                for path, added in added_files:
-                    yaml_node(added, path)
-                inventory = extend_include_texts(config_yaml_texts(CONFIG_ROOT), CONFIG_ROOT, rules, strict=remote_on)
+                if not remote_on:
+                    for path, added in added_files:
+                        yaml_node(added, path)
+                inventory = extend_include_texts(config_yaml_texts(CONFIG_ROOT, strict=remote_on), CONFIG_ROOT, rules, strict=remote_on)
                 scripts = refused_scripts(inventory, rules, strict=remote_on)
                 for path, added in added_files:
                     for pattern, why in PROTECTED_PATH_RES:
                         if pattern.search(path):
                             return f"This edit {why}, which is never allowed."
                     if path.lower().endswith(YAML_SUFFIXES):
-                        found = find_refused(added, rules, scripts)
+                        found = find_refused(added, rules, scripts, parsed=not remote_on)
                         if found:
                             return f"This edit to {path} adds {found[0].reason}. A person must add this change outside Codex."
                 if remote_on:
                     original = dict(inventory)
                     inventory.update({path: after for path, before, after in versions})
+                    # New nested script includes cannot hide behind the old inventory.
+                    refused_scripts(inventory, rules, strict=True)
                     definitions = included_definitions(original, rules, strict=True)
                     for path, kinds in included_definitions(inventory, rules, strict=True).items():
                         definitions.setdefault(path, set()).update(kinds)
@@ -1328,6 +1485,8 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
                     dependencies = set(definitions) | set(original)
                     if any(not path.lower().endswith(YAML_SUFFIXES) for path in dependencies):
                         versions = patch_versions(text, str(data.get("cwd") or ""), dependencies)
+                        inventory.update({path: after for path, before, after in versions})
+                        refused_scripts(inventory, rules, strict=True)
                     for path, before, after in versions:
                         if path in definitions and before != after:
                             return f"This edit to {path} changes {included_finding(path, definitions[path], after).reason}. A person must add it outside Codex."
@@ -1338,6 +1497,11 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
                                 body = find_refused(after, rules, scripts)
                                 reason = next((item.reason for item in body if item.kind in {"runs_on_load", "template"}), reason)
                             return f"This edit to {path} makes {reason}. A person must add this change outside Codex."
+            except HookBudgetError as exc:
+                if not remote_on and not scan.disabled:
+                    scan.disabled = True
+                    return check_tool_call(event, payload, remote_on, rules)
+                return f'This edit cannot be checked safely: {exc}; it is refused.'
             except (OSError, ValueError, UnicodeError) as exc:
                 # ValueError messages here are worker-authored paths/reasons, never bytes read from a file.
                 detail = str(exc) if isinstance(exc, ValueError) else 'configuration read failed'
