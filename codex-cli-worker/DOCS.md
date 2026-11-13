@@ -849,3 +849,20 @@ does not grant the chat permission to save it. The worker rechecks the mode imme
 before saving; ordinary dashboard inspection remains available without `save_pending`.
 The direct **Status** button is available on tablet and desktop. On the phone, open
 Status from the thread menu.
+
+
+### Checking Codex account access
+
+A ChatGPT account with Codex access is required. OpenAI's [availability page](https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan),
+read November 13, 2026, includes Codex across ChatGPT plans, including Free and Go; usage limits and workspace
+settings still apply. Codex Cloud eligibility is separate from the local CLI used by this app.
+
+The pinned CLI does not expose a documented boolean for account entitlement in `account/read`.
+Its rate-limit reader reports ordinary usage eligibility, which may also reflect exhausted allowance,
+and converts backend failures into a generic RPC error. A denied usage read cannot establish that the
+account lacks Codex access. No automatic access warning or daily entitlement check is shipped here;
+that behavior awaits an authoritative signal. Sign-in state and existing usage reporting remain separate.
+
+Source: [account type at rust-v0.166.0](https://github.com/openai/codex/blob/6ff1e1ca3b30/codex-rs/app-server-protocol/src/protocol/v2/account.rs#L18-L38),
+[rate-limit errors](https://github.com/openai/codex/blob/6ff1e1ca3b30/codex-rs/app-server/src/request_processors/account_processor.rs#L1171-L1218),
+and [usage eligibility](https://github.com/openai/codex/blob/6ff1e1ca3b30/codex-rs/backend-client/src/client/rate_limit_resets.rs#L34-L66).
