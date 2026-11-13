@@ -382,6 +382,16 @@
         </div>
         <div id="login-card"></div>
       </section>
+      <section id="permission-overrides">
+        <h3>Permissions overrides</h3>
+        <p class="muted">Choose which actions can run without a prompt in Default permissions. Your guard rails still apply. Remote turns require normal approval in this version.</p>
+        <label class="permission-row"><span><strong>Apply my changes</strong><span class="permission-description">Reload YAML, check configuration, and set up integrations.</span></span><input type="checkbox" role="switch" data-permission-group="apply" disabled aria-label="Apply my changes"><span class="ha-permission-switch" aria-hidden="true"></span></label>
+        <label class="permission-row"><span><strong>Everyday control</strong><span class="permission-description">Lights, switches, scenes, automations, and helper values.</span></span><input type="checkbox" role="switch" data-permission-group="everyday" disabled aria-label="Everyday control"><span class="ha-permission-switch" aria-hidden="true"></span></label>
+        <label class="permission-row"><span><strong>Organize</strong><span class="permission-description">Names, areas, labels, and dashboard edits with a backup.</span></span><input type="checkbox" role="switch" data-permission-group="organize" disabled aria-label="Organize"><span class="ha-permission-switch" aria-hidden="true"></span></label>
+        <label class="permission-row"><span><strong>Bigger changes</strong><span class="permission-description">Scripts, entity IDs, backups, restarts, and deletions.</span></span><input type="checkbox" role="switch" data-permission-group="bigger" disabled aria-label="Bigger changes"><span class="ha-permission-switch" aria-hidden="true"></span></label>
+        <label class="permission-row"><span><strong>Security and people</strong><span class="permission-description">Locks, alarms, covers, cameras, and messages.</span></span><input type="checkbox" role="switch" data-permission-group="security" disabled aria-label="Security and people"><span class="ha-permission-switch" aria-hidden="true"></span></label>
+        <p id="permissions-overrides-result" role="status" class="muted">Available to administrators.</p>
+      </section>
       <section>
         <h3>Interaction logs</h3>
         <p class="muted">Export recent worker metadata. Remote ChatGPT threads are not recorded. Review the file before sharing it.</p>

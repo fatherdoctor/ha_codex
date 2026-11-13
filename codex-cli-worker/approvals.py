@@ -28,7 +28,7 @@ PROTECTED_PREFIXES = ("/usr/share/ha_codex", "/data/codex-home/AGENTS.md", "/dat
                       "/data/options.json", "/data/worker_api_token", "/data/schedules.sqlite3",
                       "/data/schedules.sqlite3-journal", "/data/schedules.sqlite3-wal", "/data/schedules.sqlite3-shm",
                       "/data/interaction-diagnostics.json", "/data/interaction-diagnostics.key",
-                      "/data/interaction-diagnostics.settings.json")
+                      "/data/interaction-diagnostics.settings.json", "/data/codex-home/house-rules")
 
 
 def touches_protected_path(path: str) -> bool:
@@ -43,6 +43,7 @@ def touches_protected_path(path: str) -> bool:
 # names are matched loosely (a glob such as /usr/share/ha_c* still names the image folder). Best effort on the
 # text, like the file-path check: it cannot see a path a command builds at run time.
 PROTECTED_COMMAND_RES = (
+    re.compile(r"codex-home/+house-rules(?:\b|[*?\[])", re.IGNORECASE),
     re.compile(r"/data/+interaction-diagnostics(?:\b|[*?\[])", re.IGNORECASE),
     re.compile(r"/share/+ha_", re.IGNORECASE),
     re.compile(r"ha_codex/+(policy|agents|house)", re.IGNORECASE),

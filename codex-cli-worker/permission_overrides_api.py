@@ -9,6 +9,7 @@ import re
 import socketserver
 import tempfile
 import threading
+import time
 import uuid
 
 from flask import jsonify, request
@@ -20,13 +21,20 @@ IDENTIFIER = re.compile(r'[a-z0-9_-]{1,128}')
 class Core:
     def __init__(self, worker):
         self.worker = worker
+        self.deadline = time.monotonic() + 120
+
+    def remaining(self):
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            raise ApprovalRequired('Action checking exceeded its deadline; request normal approval.')
+        return min(15, remaining)
 
     def rest(self, method, path, data=None):
         token = self.worker.ha_token()
         if not token:
             raise ApprovalRequired('Core authentication is unavailable; request normal approval.')
         with self.worker.requests.request(method, self.worker.ha_api_url(path), json=data,
-                headers={'Authorization': 'Bearer ' + token}, timeout=15,
+                headers={'Authorization': 'Bearer ' + token}, timeout=self.remaining(),
                 allow_redirects=False, stream=True) as response:
             if response.status_code not in (200, 201, 202):
                 raise ApprovalRequired('Core refused the action or its preflight; request normal approval.')
@@ -39,7 +47,7 @@ class Core:
         token = self.worker.ha_token()
         if not token:
             raise ApprovalRequired('Core authentication is unavailable; request normal approval.')
-        with closing(self.worker.websocket.create_connection(self.worker.ha_ws_url(), timeout=15)) as stream:
+        with closing(self.worker.websocket.create_connection(self.worker.ha_ws_url(), timeout=self.remaining())) as stream:
             initial = json.loads(stream.recv())
             if initial.get('type') == 'auth_required':
                 stream.send(json.dumps({'type': 'auth', 'access_token': token}))
@@ -48,6 +56,7 @@ class Core:
                 raise ApprovalRequired('Core authentication failed; request normal approval.')
             stream.send(json.dumps({**data, 'type': kind, 'id': 1}))
             for _ in range(32):
+                stream.settimeout(self.remaining())
                 raw = stream.recv()
                 if len(raw) > 1024 * 1024:
                     break
@@ -64,12 +73,17 @@ class Core:
             raise ApprovalRequired('The entity is unavailable; request normal approval.')
         if target.startswith(('input_text.', 'text.')) and row.get('attributes', {}).get('mode') == 'password':
             raise ApprovalRequired('Credential targets are not available through overrides.')
+        registry = self.ws('config/entity_registry/get', entity_id=target)
+        if isinstance(registry, dict) and registry.get('platform') in ('codex_cli', 'ha_codex', 'hassio'):
+            raise ApprovalRequired('The add-on and Supervisor settings cannot be changed through overrides.')
         return row
 
     def resolve(self, selector):
         if isinstance(selector, str):
             selector = [item.strip() for item in selector.split(',')]
         if isinstance(selector, list):
+            if not 1 <= len(selector) <= 64:
+                raise ApprovalRequired('Target count exceeds the action limit; request normal approval.')
             for target in selector:
                 self.require_entity(target)
             return selector
@@ -77,13 +91,13 @@ class Core:
             raise ApprovalRequired('Targets require explicit entities, devices, areas or labels; request normal approval.')
         entities = self.ws('config/entity_registry/list')
         devices = self.ws('config/device_registry/list')
-        if not isinstance(entities, list) or not isinstance(devices, list) or len(entities) > 30000:
+        if not isinstance(entities, list) or not isinstance(devices, list) or len(entities) > 30000 or len(devices) > 30000:
             raise ApprovalRequired('The target registry is unavailable or oversized; request normal approval.')
         device_map = {row['id']: row for row in devices}
         result = []
         for key, values in selector.items():
             values = values if isinstance(values, list) else [values]
-            if not values or any(not isinstance(v, str) or not v for v in values):
+            if not values or len(values) > 64 or any(not isinstance(v, str) or not v for v in values):
                 raise ApprovalRequired('An empty or dynamic target requires normal approval.')
             for value in values:
                 matches = []
@@ -97,6 +111,8 @@ class Core:
                 if not matches:
                     raise ApprovalRequired('A selector could not be fully resolved; request normal approval.')
                 result.extend(matches)
+                if len(set(result)) > 64:
+                    raise ApprovalRequired('Target count exceeds the action limit; request normal approval.')
         for target in result:
             self.require_entity(target)
         return result
@@ -195,6 +211,7 @@ class Core:
             old.unlink()
 
     def execute(self, plan):
+        self.remaining()
         operation, target, data = plan['operation'], plan.get('target'), plan.get('data', {})
         if operation in ('service', 'reload', 'check_config', 'backup', 'restart'):
             service = (plan['service'] if operation == 'service' else target + '.reload' if operation == 'reload' else
@@ -240,9 +257,20 @@ class Service:
     def __init__(self, worker):
         self.worker = worker
         self.lock = threading.RLock()
+        self.turns = {}
+
+    def begin(self, task_id, capability, options):
+        """Pin authority to the policy used to launch this exchange, never a later option."""
+        policy = self.worker.protected_policy.effective_policy(options, self.worker.protected_policy.load_policy())
+        with self.lock:
+            self.turns[task_id] = (capability, Authority(policy['sandbox'], policy['approval_policy'], policy['approvals_reviewer'], 'worker'))
+
+    def end(self, task_id):
+        with self.lock:
+            self.turns.pop(task_id, None)
 
     def settings(self):
-        return Settings(Path(self.worker.DATA_ROOT) / 'permission-overrides.json')
+        return Settings(Path(self.worker.DATA_ROOT) / 'codex-home/house-rules/permission-overrides.json')
 
     def guards(self):
         path = Path(self.worker.CONFIG_ROOT) / 'AGENTS.md'
@@ -266,16 +294,20 @@ class Service:
             raise ApprovalRequired('Typed action diagnostics are unavailable; request normal approval.') from None
         if event['operation'] not in OVERRIDE_OPERATIONS:
             raise ApprovalRequired('This action cannot be audited; request normal approval.')
-        recorder.event(task_id, {'kind': 'override', **event})
-        recorder.flush()
-        if recorder.store.unavailable:
-            raise ApprovalRequired('Action diagnostics could not be saved; request normal approval.')
+        with recorder.lock:
+            if task_id not in recorder.active or recorder.store.unavailable:
+                raise ApprovalRequired('Active action diagnostics are unavailable; request normal approval.')
+            failures = recorder.failures
+            recorder.event(task_id, {'kind': 'override', **event})
+            recorder.flush()
+            if recorder.failures != failures or recorder.store.unavailable:
+                raise ApprovalRequired('Action diagnostics could not be saved; request normal approval.')
 
     def dispatch(self, payload):
         if not isinstance(payload, dict) or set(payload) != {'arguments', 'capability'}:
             return {'ok': False, 'approval_required': True, 'reason': 'Unsupported action envelope; request normal approval.'}
         worker, capability = self.worker, payload['capability']
-        with self.lock, worker.lock:
+        with self.lock:
             with worker.ha_data.lock:
                 task_id = next((key for key, cap in worker.ha_data.capabilities.items()
                                 if isinstance(capability, str) and capability and hmac.compare_digest(capability, cap)), None)
@@ -286,7 +318,10 @@ class Service:
                 if worker.protected_policy.policy_problem(options):
                     raise ApprovalRequired('The managed launch policy refuses this action.')
                 policy = worker.protected_policy.effective_policy(options, worker.protected_policy.load_policy())
-                authority = Authority(policy['sandbox'], policy['approval_policy'], policy['approvals_reviewer'], 'worker')
+                current = Authority(policy['sandbox'], policy['approval_policy'], policy['approvals_reviewer'], 'worker')
+                pinned_capability, authority = self.turns.get(task_id, ('', Authority()))
+                if pinned_capability != capability or authority != current:
+                    raise ApprovalRequired('Launch permissions changed; request normal approval.')
                 engine = Engine(self.settings(), Core(worker), self.guards, lambda event: self.audit(task_id, event))
                 return engine.dispatch(payload['arguments'], authority, lambda: worker.ha_data.active(task_id, capability))
             except Exception:
@@ -334,6 +369,6 @@ def register(worker):
                                     'remote': 'Remote turns require normal approval in this version.'})
                 response.headers['Cache-Control'] = 'no-store'
                 return response
-        except (ValueError, OSError):
+        except (ValueError, OSError, ApprovalRequired):
             return jsonify({'ok': False, 'error': 'Permissions settings could not be read or saved.'}), 400
     return service

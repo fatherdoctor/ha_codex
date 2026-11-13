@@ -788,3 +788,32 @@ requires an administrator for Ingress requests; the integration's worker token
 remains able to fetch it. Only an Ingress administrator may change retention.
 An unavailable worker returns an unavailable data section without its exception
 message or connection address.
+
+
+### Permissions overrides
+
+Administrators can open Settings → Permissions overrides to choose five groups. Apply my changes,
+Everyday control and Organize start on; Bigger changes and Security and people start off. Changes save
+immediately. The worker tool `home_assistant_actions.act` performs only the supported fixed Core operations;
+it does not provide shell commands, arbitrary URLs or a Supervisor tool. A successful result names the
+action, and the assistant must name it in its answer. Refusals fall back to normal native approval. Never
+retry an unknown outcome automatically: inspect the affected state before any further attempt.
+
+Groups apply to worker-launched Default exchanges (workspace-write with on-request user approvals).
+Read only never pre-approves writes. Remote ChatGPT turns cannot establish exact pinned permission
+metadata in this version and therefore require normal approval. Auto-review and Full access remain
+future modes; this feature does not enable either or change the managed policy.
+
+Owner-selected guard rails in `/config/AGENTS.md` win over every enabled group. Unknown/custom limits,
+templates, unresolved or changing indirect definitions, mixed unsupported targets and unavailable Core
+preflight data require normal approval. Scenes and automation/script actions are checked transitively;
+there is no atomic Core transaction preventing another actor changing a definition after the last check.
+The tool cannot change its own settings/policy, access credential entities or invoke Supervisor actions.
+Dashboard edits save a private backup first; an entity-ID change returns Core's related-item report,
+which does not cover arbitrary text or external systems. Configuration flow results omit credentials.
+
+Settings are private, atomic booleans under `/data/codex-home/house-rules/permission-overrides.json`.
+Only a verified administrator on the Ingress page can read or save them; the worker API token does not
+satisfy that check. Corrupt or unreadable settings refuse actions. Every pre-approved operation needs
+an active shared diagnostics recorder and a saved requested event before execution. Exported events
+contain only the operation, group, decision, outcome, timing and duration; no payloads or raw targets.

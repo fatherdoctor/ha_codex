@@ -1,12 +1,12 @@
 # Permissions overrides
 
-Status: policy and Core adapter prepared; installation blocked on the diagnostics integration base.
-Source baseline: ha_codex main `e5dfcf26ce8d`, Codex CLI 0.166.0.
+Status: installed on the worker, with fail-closed current-turn authority and shared diagnostics.
+Source baseline: ha_codex main `9dcef3abe5bc`, Codex CLI 0.166.0.
 
 The worker can perform selected Home Assistant actions without an escalation prompt when an administrator
 has enabled their group. It must establish the calling turn's effective permissions before doing so.
 An MCP tool argument, prompt instruction, global add-on option, or another thread's mode cannot establish
-that authority. No write tool or settings route is enabled by this design document.
+that authority. The worker registers `home_assistant_actions.act` and administrator-only Settings routes.
 
 ## Groups and request boundary
 
@@ -21,8 +21,8 @@ that authority. No write tool or settings route is enabled by this design docume
 Use typed operations with closed schemas, length limits and exact service/command mappings. Do not accept
 arbitrary URLs, service names, shell commands, credentials, config paths or arbitrary WebSocket messages.
 Keep the Core credential in the worker. Validate registry identities and current target state using Core
-before execution; never infer a domain from a display name. Resolve areas, devices, labels and `all` to
-explicit entity IDs before checking permissions. An unresolved target returns an approval-required result.
+before execution; never infer a domain from a display name. Resolve areas, devices and labels to
+explicit entity IDs; ambiguous selectors such as `all` require normal approval. Resolve targets before checking permissions. An unresolved target returns an approval-required result.
 Configuration flows may request setup input but must never echo credentials into logs, results or diagnostics.
 
 Serialize checks and execution per request. Back up a dashboard before mutation and refuse if that fails.
@@ -51,7 +51,7 @@ unverifiable snapshot cannot authorize a pre-approved action. A read-only prefli
 an external actor will not change a scene between checks and execution; document that limitation rather
 than claiming a transaction Core does not provide.
 
-## Mode ruling and prepared implementation
+## Mode ruling and authority
 
 The named lead reply to `2026-11-12-1612-cx-allow-authority.md` settles the authority boundary:
 
@@ -68,28 +68,26 @@ The named lead reply to `2026-11-12-1612-cx-allow-authority.md` settles the auth
 
 Prepared modules are `codex-cli-worker/permission_overrides.py` (settings, authority, guard rails and effect
 resolution) and `permission_overrides_api.py` (fixed Core adapter and current-turn/admin-route adapter).
-They are not imported, registered, packaged or exposed as an MCP tool by the running worker yet.
-The tests use synthetic backends only. A failed/unknown write is explicitly nonretryable; a failed preflight
+They are imported, registered and packaged with the stdio MCP bridge. Tests use synthetic Core backends only; no live system was accessed. A failed/unknown write is explicitly nonretryable; a failed preflight
 never dispatches. An audit failure before execution refuses the action. After execution, audit failure
 cannot change the reported execution result.
 
 The prepared Core adapter uses the existing worker's Core authentication, not sandbox-visible credentials.
 It performs one HTTP attempt without redirects; WebSocket commands use fixed types. Definition preflight
 uses Core configuration endpoints, never state attributes alone. Source checks used Home Assistant Core's
-config/automation.py, config/script.py, config/scene.py and config/config_entries.py handlers. Not every
-prepared operation has an endpoint-level integration test yet; this is not a completed feature delivery.
+config/automation.py, config/script.py, config/scene.py and config/config_entries.py handlers. Endpoint tests cover all operation mappings, transport bounds, flow filtering, target expansion, registry authority and private dashboard backups.
 
 ## Settings and diagnostics
 
 Add **Permissions overrides** to the current Settings view, moving it to the new view if that view has
 merged before implementation. Five rows use Home Assistant's `ha-settings-row` spacing/dividers and
 `ha-switch` dimensions, checked track/knob colors and theme variables. Read/save routes are administrator
-ingress only; a worker API token is not enough. Persist booleans atomically in worker-owned data, mode 0600;
+ingress only; a worker API token is not enough. Persist booleans atomically at `/data/codex-home/house-rules/permission-overrides.json`, mode 0600;
 reject unknown keys, wrong types and non-admin requests. A chat, model tool call or writable config file
 cannot toggle its own permissions. Unreadable settings fail closed rather than restoring permissive defaults.
 
 Capture light/dark settings screenshots beside a Home Assistant settings reference using synthetic local
-fixtures. None are supplied yet: there is no working settings implementation to photograph.
+fixtures. Use only synthetic local data and the official frontend component reference, never owner data.
 
 Record the action kind, group, decision, outcome and duration through the shared diagnostics boundary.
 Apply its scrubber and anonymize targets; never put message bodies, flow credentials, dashboards or raw
@@ -97,19 +95,22 @@ owner instructions in exported diagnostics. Ensure an observer failure cannot ch
 make a completed write look unexecuted. The current main does not yet contain the diagnostics PR, so
 integrate its published interface after merge rather than recreating its delivered implementation.
 
-**Current blocker:** fresh main `e5dfcf26ce8d` has neither `interaction_diagnostics.py` nor `diagnostics_scrub.py`;
-CX-DIAG's published work remains on PR #41. Every pre-approved action must have a typed, privacy-filtered,
-flushed audit event before the write. The prepared service therefore refuses when that recorder/typed contract
-is absent, including when it fails to save. It does not substitute a second logger or copy the published PR.
-The proposed typed contract is an `override` event with a fixed operation and outcome; it must be integrated
-into the shared scrubber after the correct base is established. Existing generic tool events do not identify
-which pre-approved operation ran.
+The lead merged CX-DIAG's main into this branch. The shared worker/integration scrubbers now retain
+only allowlisted `override` events: operation, group, decision, outcome and duration. The worker requires
+an active recorder, saves and flushes the requested event before dispatch, and refuses if it cannot save.
+Completed, refused and unknown outcomes pass through the same boundary. Raw targets and payloads never
+enter these events. This is an extension of the shared schema, not a second logger.
 
-Worker/MCP registration, the five Settings switches, the private-settings path protection, complete Core
-adapter tests, actual action export coverage and light/dark screenshots remain unproven and uninstalled.
-The UI target was checked against frontend ha-switch.ts (48px track width, 24px height, 18px thumb and HA
-color variables) and ha-settings-row.ts (16px horizontal spacing and 72px two-line rows). No screenshot of a
-working settings control is claimed.
+Authority is pinned when the worker launches an exchange; current global options cannot upgrade an
+already-running read-only turn. Capability rotation, end/cancellation and a changed launch policy refuse.
+The worker rechecks activity after the audit and before execution. Core does not provide an atomic
+check-and-write transaction: external configuration changes during dispatch remain a documented limit.
+The returned result names the action; the tool description and worker instructions require naming it in
+the answer, but the model's final wording is not mechanically guaranteed.
+
+The settings directory is under the existing remote hook's protected house-rules path. The native
+approval adapter refuses that directory too, including ancestor replacement commands. No gate, hook,
+managed policy or CI file is changed. The shell sandbox's writable workspace remains `/config`.
 
 ## Acceptance checks before enabling writes
 
@@ -126,5 +127,18 @@ working settings control is claimed.
 6. Full worker/integration suites, repository-data smoke, local light/dark browser checks and the repository's
    existing Container CI. Local container smoke is not run (VFS disk).
 
-Installation is blocked on the shared diagnostics base and typed export integration. The original mode
-question is resolved by the lead ruling above; remote writes stay unrecognized rather than guessed.
+The original mode and diagnostics-base questions are resolved by the named lead replies. Remote writes stay unrecognized rather than guessed.
+
+
+## Visual evidence
+
+The light and dark comparisons under `screenshots/permissions-overrides-*.png` show the actual local
+Settings controls beside the official public frontend switch demo. They are explicitly labeled component
+references, not screenshots of an owner installation. Settings-row geometry was checked against
+`home-assistant/frontend`'s `src/components/ha-settings-row.ts` (16px padding; 72px two-line rows).
+The switch uses the current `ha-switch.ts` geometry (48px track, 24px height, 18px thumb), border and
+checked/unchecked HA theme variables, inherited from the embedding HA page when accessible.
+Reference: https://contributors.home-assistant.io/design/components/switch/ . A full production HA
+Settings-page screenshot was not taken because this lane cannot access a live installation.
+
+The corresponding Claude add-on groups remain a later CLA-DESIGN handoff. This implementation changes only the Codex add-on; the lead can carry that parity note to the separate design card.

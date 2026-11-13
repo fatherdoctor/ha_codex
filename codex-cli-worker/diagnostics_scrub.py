@@ -13,6 +13,7 @@ MAX_RETENTION = 100
 MAX_BYTES = 128 * 1024
 MAX_EVENTS = 48
 DOMAINS = frozenset(('light', 'sensor', 'binary_sensor', 'switch', 'climate', 'lock', 'cover', 'alarm_control_panel', 'input_boolean', 'input_number', 'input_text', 'text', 'script', 'automation', 'scene', 'fan', 'media_player', 'camera', 'button', 'number', 'select', 'other'))
+OVERRIDE_OPERATIONS = frozenset(('reload', 'check_config', 'flow_start', 'flow_continue', 'service', 'update_entity', 'update_device', 'rename_entity', 'save_dashboard', 'delete_entity', 'delete_device', 'delete_automation', 'delete_script', 'delete_scene', 'delete_dashboard', 'backup', 'restart'))
 TOOLS = frozenset(('commandExecution', 'fileChange', 'mcpToolCall', 'webSearch', 'read', 'history', 'statistics', 'apply_patch', 'other'))
 ORIGINS = frozenset(('addon_page', 'relay_read', 'scheduled_run', 'lead_channel'))
 RESULTS = frozenset(('done', 'failed', 'stopped', 'timed_out', 'running', 'unknown', 'unknown (restart)'))
@@ -132,7 +133,7 @@ def scrub(record, entity_key=None, stored=False):
     for event in events[:MAX_EVENTS] if isinstance(events, list) else []:
         if not isinstance(event, dict):
             continue
-        kind = choice(event.get('kind'), {'tool', 'approval', 'gate', 'error', 'ha_read'}, 'other')
+        kind = choice(event.get('kind'), {'tool', 'approval', 'gate', 'error', 'ha_read', 'override'}, 'other')
         item = {'kind': kind, 'time': timestamp(event.get('time'))}
         if kind == 'tool':
             item.update(name=choice(event.get('name'), TOOLS, 'other'), result=choice(event.get('result'), RESULTS), duration_seconds=number(event.get('duration_seconds')))
@@ -143,6 +144,12 @@ def scrub(record, entity_key=None, stored=False):
         elif kind == 'error':
             error = choice(event.get('type'), ERRORS, 'RuntimeError')
             item.update(type=error, message=ERRORS[error])
+        elif kind == 'override':
+            item.update(operation=choice(event.get('operation'), OVERRIDE_OPERATIONS),
+                        outcome=choice(event.get('outcome'), {'requested', 'completed', 'unknown', 'refused'}),
+                        group=choice(event.get('group'), {'apply', 'everyday', 'organize', 'bigger', 'security'}),
+                        decision=choice(event.get('decision'), {'preapproved', 'refused'}),
+                        duration_seconds=number(event.get('duration_seconds')))
         elif kind == 'ha_read':
             item.update(operation=choice(event.get('operation'), {'state', 'states', 'history', 'statistics'}), domain=choice(event.get('domain'), DOMAINS, 'other'))
         out['events'].append(item)

@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import tempfile
 import threading
+import time
 
 from relay_reads import ENTITY, PRIVATE
 
@@ -171,6 +172,17 @@ class Engine:
     def dispatch(self, request, authority, still_active=lambda: True):
         operation = request.get('operation') if isinstance(request, dict) else None
         operation = operation if operation in OPERATIONS else 'unknown'
+        started = time.monotonic()
+        group = 'unknown'
+        def event(outcome):
+            return {'operation': operation, 'group': group, 'outcome': outcome,
+                    'decision': 'preapproved' if outcome in ('requested', 'completed', 'unknown') else 'refused',
+                    'duration_seconds': time.monotonic() - started}
+        def final_event(outcome):
+            try:
+                self.observer(event(outcome))
+            except Exception:
+                pass
         with self.lock:
             started_write = False
             try:
@@ -183,6 +195,7 @@ class Engine:
                 rules = guard_rules(self.guards())
                 checks = {}
                 plan = self.plan(request, groups, rules, checks)
+                group = plan['group']
                 # Recheck settings, owner rules, definitions and the live turn immediately before dispatch.
                 if not still_active() or groups != self.settings.read() or rules != guard_rules(self.guards()):
                     raise ApprovalRequired('Permissions changed or the exchange ended; request normal approval.')
@@ -190,22 +203,23 @@ class Engine:
                     if self.definition_digest(self.backend.definition(target)) != digest:
                         raise ApprovalRequired('An indirect action changed during checking; request normal approval.')
                 # A failed audit must stop BEFORE the write. The callback sees no payload or raw target.
-                self.observer({'operation': operation, 'outcome': 'requested'})
+                self.observer(event('requested'))
+                if not still_active():
+                    raise ApprovalRequired('The exchange ended; request normal approval.')
                 started_write = True
                 result = self.backend.execute(plan)
             except ApprovalRequired as exc:
+                final_event('unknown' if started_write else 'refused')
                 if started_write:
                     return {'ok': False, 'approval_required': False, 'do_not_retry': True,
                             'reason': 'The action outcome is unknown. Check its state before any further action; do not retry automatically.'}
                 return {'ok': False, 'approval_required': True, 'reason': str(exc)}
             except Exception:
+                final_event('unknown' if started_write else 'refused')
                 return {'ok': False, 'approval_required': not started_write, 'do_not_retry': started_write,
                         'reason': 'The action could not be verified or completed. Its outcome may be unknown; do not retry automatically.'}
             # Observer failure after a write must never change the execution result.
-            try:
-                self.observer({'operation': operation, 'outcome': 'completed'})
-            except Exception:
-                pass
+            final_event('completed')
             return {'ok': True, 'performed': plan['description'], 'result': result,
                     'answer_instruction': 'Name this pre-approved action in your answer.'}
 
@@ -306,7 +320,7 @@ class Engine:
             service = request.get('service')
             targets = self.effect(service, target, data, groups, rules, checks)
             self.backend.validate_service(service, data)
-            return {'operation': operation, 'service': service, 'target': targets, 'data': data,
+            return {'operation': operation, 'group': service_group(service), 'service': service, 'target': targets, 'data': data,
                     'description': service + (' for ' + ', '.join(targets) if targets else '')}
         if 'service' in request:
             raise ApprovalRequired('This operation does not accept a service; request normal approval.')
@@ -337,7 +351,7 @@ class Engine:
                 if domain in rules or (domain in SECURITY and not groups['security']):
                     raise ApprovalRequired('A device entity requires normal approval.')
         self.backend.validate_operation(operation, target, data)
-        result = {'operation': operation, 'target': target, 'data': data, 'description': operation.replace('_', ' ')}
+        result = {'operation': operation, 'group': group, 'target': target, 'data': data, 'description': operation.replace('_', ' ')}
         if operation == 'rename_entity':
             result['references'] = self.backend.references(target)
         return result
