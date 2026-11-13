@@ -8,6 +8,8 @@
   definitions, keep unattended runs on normal prompts, and hand uncertain setup fields to Home Assistant.
 
 - Add administrator-selected permissions override groups for worker-launched Default exchanges, with a bounded Core action tool, guard-rail checks and shared private audit metadata. Remote turns continue to require normal approval.
+- Clarify remote pairing, Core address discovery, and workspace instructions in the newcomer guide.
+
 - Document the line-based command check’s known YAML blind spots and the protections that still apply.
 
 - Add the Quiet Studio chat layout with Home Assistant themes, a bottom composer, photo/file menu,

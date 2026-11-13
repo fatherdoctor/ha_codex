@@ -143,8 +143,10 @@ class ConfirmedRules(unittest.TestCase):
         self.assertIn('Everyday controls', note)
         self.assertIn('Apply checked changes', note)
 
-    def test_unattended_runs_do_not_use_groups(self):
+    def test_unattended_and_unverified_remote_origins_require_normal_approval(self):
         self.worker.tasks = {'task': {}}
+        # Codex 0.166 does not supply a trusted person-started origin for remote turns.
+        # A model/client source label cannot grant groups; only worker-owned chat turns qualify.
         for source in ('chat', 'schedule', 'lead', 'unknown', 'remote'):
             with self.subTest(source=source):
                 self.worker.tasks['task']['task_source'] = source
