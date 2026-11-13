@@ -28,7 +28,7 @@ PROTECTED_PREFIXES = ("/usr/share/ha_codex", "/data/codex-home/AGENTS.md", "/dat
                       "/data/options.json", "/data/worker_api_token", "/data/schedules.sqlite3",
                       "/data/schedules.sqlite3-journal", "/data/schedules.sqlite3-wal", "/data/schedules.sqlite3-shm",
                       "/data/interaction-diagnostics.json", "/data/interaction-diagnostics.key",
-                      "/data/interaction-diagnostics.settings.json")
+                      "/data/interaction-diagnostics.settings.json", "/data/codex-home/house-rules/verbose")
 
 
 def touches_protected_path(path: str) -> bool:
@@ -43,6 +43,7 @@ def touches_protected_path(path: str) -> bool:
 # names are matched loosely (a glob such as /usr/share/ha_c* still names the image folder). Best effort on the
 # text, like the file-path check: it cannot see a path a command builds at run time.
 PROTECTED_COMMAND_RES = (
+    re.compile(r"codex-home/+house-rules/+verbose(?:\b|[*?\[])", re.IGNORECASE),
     re.compile(r"/data/+interaction-diagnostics(?:\b|[*?\[])", re.IGNORECASE),
     re.compile(r"/share/+ha_", re.IGNORECASE),
     re.compile(r"ha_codex/+(policy|agents|house)", re.IGNORECASE),
@@ -380,6 +381,7 @@ class AppServerSession:
         on_approvals: Callable[[list[dict[str, Any]]], None],
         on_final: Callable[[str], None], is_active: Callable[[], bool],
         redact: Callable[[str], str],
+        on_message: Callable[[str, Any], None] | None = None,
     ) -> None:
         """Bind a live transport to one worker exchange and its persistence callbacks."""
         self.writer = writer
@@ -391,6 +393,7 @@ class AppServerSession:
         self.on_final = on_final
         self.is_active = is_active
         self.redact = redact
+        self.on_message = on_message
         self.finished = threading.Event()
         # When Codex last sent anything, or the user last answered; the worker's stall watchdog reads it.
         self.last_activity = time.monotonic()
@@ -408,8 +411,16 @@ class AppServerSession:
         self._file_changes: dict[str, list[dict[str, Any]]] = {}
         self._final_text = ""
 
+    def _observe(self, direction, message):
+        if self.on_message is not None:
+            try:
+                self.on_message(direction, message)
+            except Exception:
+                pass  # Optional local observation cannot change an approval or execution result.
+
     def _write(self, message: dict[str, Any]) -> None:
         """Write one complete JSON-RPC message while the shared lock is held."""
+        self._observe("app-server.out", message)
         self.writer.write(json.dumps(message) + "\n")
         self.writer.flush()
 
@@ -438,7 +449,12 @@ class AppServerSession:
         """Read the JSONL transport until completion or EOF, failing closed on errors."""
         try:
             for line in iter(handle.readline, ""):
-                self.receive(json.loads(line))
+                try:
+                    message = json.loads(line)
+                except ValueError:
+                    self._observe("app-server.invalid", line)
+                    raise
+                self.receive(message)
                 if self.finished.is_set():
                     break
             if not self.finished.is_set():
@@ -597,6 +613,7 @@ class AppServerSession:
 
     def receive(self, message: dict[str, Any]) -> None:
         """Dispatch a server message without treating model prose as permission."""
+        self._observe("app-server.in", message)
         with self.lock:
             self.last_activity = time.monotonic()
             if self._closed:

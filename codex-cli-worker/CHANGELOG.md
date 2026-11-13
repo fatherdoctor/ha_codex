@@ -2,6 +2,9 @@
 
 ## 0.1.81.2 (unreleased)
 
+- Add an opt-in, persistent local verbose log with line/byte FIFO limits, exact own-secret masking,
+  administrator-only confirmed export and clearing, separate from anonymized diagnostics.
+
 - Close diagnostics interrupted by a worker restart as unknown, retaining room for new completed work.
   Create the private entity key without hard links and explain recovery while collecting other metadata.
   Protect private diagnostic files, retain only the newest corrupt store, distinguish policy causes and

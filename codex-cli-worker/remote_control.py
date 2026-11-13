@@ -703,10 +703,12 @@ class Supervisor:
         control_factory: Callable[[Path], Any] = ControlClient,
         instructions_factory: Callable[[], str] = lambda: "",
         tool_args_factory: Callable[[], list[str]] = lambda: [],
+        on_log: Callable[[str], None] = lambda _line: None,
     ) -> None:
         self.control_factory = control_factory
         self.instructions_factory = instructions_factory
         self.tool_args_factory = tool_args_factory
+        self.on_log = on_log
         self.control_socket: Path | None = None
         self.codex_binary = codex_binary
         self.state_path = state_path
@@ -731,6 +733,13 @@ class Supervisor:
                                        "name_state": "unchecked", "name_warning": "", "policy_warning": ""}
         self._name_supported: bool | None = None
         self._checked_name = ""
+
+    def _log(self, line):
+        self.log.append(line)
+        try:
+            self.on_log(line)
+        except Exception:
+            pass
 
     # Saved choice -------------------------------------------------------------------------------
 
@@ -758,7 +767,7 @@ class Supervisor:
         """
         if self.watch is not None and self.enabled() and not self.watch.has_baseline():
             self.watch.take_baseline()
-            self.log.append("No saved baseline for the config watch; took one now.")
+            self._log("No saved baseline for the config watch; took one now.")
         self._start_watch()
         if not self.enabled():
             return self.snapshot()
@@ -858,7 +867,7 @@ class Supervisor:
                 if self.proc is not proc or self.control_socket != path or cancelled():
                     raise ControlError("Remote control restarted or stopped while pairing.")
                 self.status["pairing_code"] = code
-                self.log.append("A new pairing code is ready on this page.")
+                self._log("A new pairing code is ready on this page.")
             return True, self.snapshot()
         except Exception:
             # Never echo a raw RPC error: it may contain a code or relay credential.
@@ -872,7 +881,7 @@ class Supervisor:
         warning = "Machine-name namespace unavailable; starting without a custom machine name."
         with self.lock:
             if self.status.get("name_warning") != warning:
-                self.log.append(warning)
+                self._log(warning)
             self.status.update(name_state="namespace-unavailable", name_warning=warning, machine_name="")
 
     def _command(self, *args: str) -> list[str]:
@@ -918,7 +927,7 @@ class Supervisor:
                 return
             name = machine_name(self.name_factory())
             with self.lock:
-                self.log.append("Managed policy: a disallowed relay full-access request may be downgraded to read-only; "
+                self._log("Managed policy: a disallowed relay full-access request may be downgraded to read-only; "
                                 "the relay does not expose every thread warning here.")
             started = self.clock()
             private = None
@@ -960,6 +969,10 @@ class Supervisor:
                             r"namespace|hostname|Operation not permitted|Permission denied", line, re.IGNORECASE):
                         namespace_error = True
                     self._parse(line)
+                    try:
+                        self.on_log(line)
+                    except Exception:
+                        pass
                 code = proc.wait()
                 done.set()
                 monitor.join(timeout=3.0)
@@ -1041,7 +1054,7 @@ class Supervisor:
                 warning = f"Codex reported that a {setting} request was downgraded to {target}."
                 with self.lock:
                     self.status["policy_warning"] = warning
-                    self.log.append(warning)
+                    self._log(warning)
                 policy_downgrade = True
         elif ("configwarning" in lower or "warning" in lower) and (
                 "read-only" in lower or "readonly" in lower) and (
@@ -1049,12 +1062,12 @@ class Supervisor:
             warning = "Codex reported that a request was downgraded to read-only by the managed policy."
             with self.lock:
                 self.status["policy_warning"] = warning
-                self.log.append(warning)
+                self._log(warning)
             policy_downgrade = True
         code_match = PAIRING_RE.search(line)
         code = code_match.group(1) if code_match else ""
         with self.lock:
-            self.log.append("A pairing code is ready on this page." if code else redact(line))
+            self._log("A pairing code is ready on this page." if code else redact(line))
         if code:
             self.set_status("pairing", "Enter this pairing code in the ChatGPT app.", pairing_code=code)
             return code

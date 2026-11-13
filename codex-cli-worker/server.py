@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import base64
+import atexit
 import binascii
 import copy
 import hashlib
 import hmac
+import logging
 import json
 import os
 import queue
@@ -48,6 +50,7 @@ import gate_rules
 from core_address import CoreAddress, probe_core
 from relay_reads import RelayReads, ReadError as RelayReadError
 import schedule_api
+from verbose_log import VerboseLog, Tee as VerboseTee, Handler as VerboseHandler, private_read
 from interaction_diagnostics import RollingDiagnostics, InteractionRecorder
 
 
@@ -64,6 +67,7 @@ verification = Verification(_ToolWorker())
 
 CONFIG_ROOT = Path("/config")
 DATA_ROOT = Path("/data")
+verbose_logs = VerboseLog(DATA_ROOT / "codex-home/house-rules/verbose/worker.log", lambda: verbose_secrets())
 interaction_logs = RollingDiagnostics(DATA_ROOT / "interaction-diagnostics.json")
 diagnostics = InteractionRecorder(interaction_logs, os.environ.get("ADDON_VERSION", "unknown"),
                                  os.environ.get("CODEX_VERSION", "unknown"))
@@ -901,6 +905,41 @@ def redact(text: str) -> str:
     return redacted
 
 
+def verbose_secrets():
+    """Read only the add-on's own credential values; arbitrary user text is not scrubbed."""
+    values = [os.environ.get(key, '') for key in ('SUPERVISOR_TOKEN', 'HASSIO_TOKEN', 'HA_TOKEN', 'CODEX_WORKER_TOKEN', 'OPENAI_API_KEY')]
+    values.append(str(read_options().get('HA_TOKEN') or ''))
+    for path, kind in ((WORKER_TOKEN_PATH, 'worker'), (CODEX_HOME / 'auth.json', 'signin')):
+        try:
+            raw = private_read(path, 1024 * 1024)
+        except FileNotFoundError:
+            continue
+        if kind == 'worker':
+            values.append(raw.decode().strip())
+        else:
+            data = json.loads(raw)
+            if not isinstance(data, dict):
+                raise ValueError('Own credential data is unavailable')
+            values.append(data.get('OPENAI_API_KEY'))
+            tokens = data.get('tokens')
+            if isinstance(tokens, dict):
+                values.extend(tokens.get(key) for key in ('access_token', 'refresh_token', 'id_token'))
+    # Logging handlers may already hold their own lock. Never wait on worker locks here.
+    for engine in (verification, ha_data):
+        values.extend(engine.capabilities.copy().values())
+    values.append(relay_reads.capability)
+    values.append(remote_control_supervisor.status.get('pairing_code'))
+    values.append(auth_state.get('user_code'))
+    return [value for value in values if isinstance(value, str) and value]
+
+
+def capture_verbose(source, value):
+    try:
+        verbose_logs.capture(source, value if isinstance(value, str) else json.dumps(value, ensure_ascii=False))
+    except Exception:
+        pass
+
+
 def clean_cli_text(text: str) -> str:
     """Remove ANSI escapes and normalize Codex CLI output."""
     return ANSI_RE.sub("", text).replace("\r", "\n")
@@ -1270,6 +1309,7 @@ def _queue_app_server_lines(stream: TextIO, lines: queue.Queue[str | None]) -> N
     """Put each line the app-server writes on the queue, then None at end of output."""
     try:
         for line in stream:
+            capture_verbose("app-server.in", line)
             lines.put(line)
     except (OSError, ValueError):
         pass
@@ -1316,6 +1356,7 @@ def read_codex_rate_limits(codex: str) -> dict[str, Any]:
         threading.Thread(target=_queue_app_server_lines, args=(proc.stdout, lines), daemon=True).start()
 
         def send(message: dict[str, Any]) -> None:
+            capture_verbose("app-server.out", message)
             proc.stdin.write(json.dumps(message) + "\n")
             proc.stdin.flush()
 
@@ -1432,6 +1473,7 @@ def refresh_usage_status_async(force: bool = False) -> None:
 
 def write_task_log(task_id: str, stream: str, text: str) -> None:
     """Append a redacted, timestamped line to the codex.log in the task's folder."""
+    capture_verbose("task." + stream, text)
     task_dir = get_task_dir(task_id)
     task_dir.mkdir(parents=True, exist_ok=True)
     path = task_dir / "codex.log"
@@ -3495,8 +3537,12 @@ def auth_reader_thread(handle) -> None:
             break
         cleaned = clean_cli_text(line)
         buffer += cleaned
-        write_task_log("auth", "codex-login", cleaned)
         parsed = parse_login_output(buffer)
+        try:
+            verbose_logs.remember([parsed.get("code")])
+        except Exception:
+            pass
+        write_task_log("auth", "codex-login", cleaned)
         if parsed["url"] and (not notified or (parsed["code"] and not notified_code)):
             with auth_lock:
                 login_id = str(auth_state.get("login_id") or uuid.uuid4().hex[:8])
@@ -4339,7 +4385,7 @@ def create_approval_session(
                      "approvalPolicy": "on-request", "approvalsReviewer": "user"},
         on_event=event, on_approvals=save_approvals,
         on_final=lambda text: final_file.write_text(text, encoding="utf-8"),
-        is_active=active, redact=approval_redact,
+        is_active=active, redact=approval_redact, on_message=capture_verbose,
     )
 
 
@@ -5690,8 +5736,63 @@ def status() -> Response:
             "codex_usage": usage_status_payload(),
             "integration": integration_status(),
             "remote_control": remote_control_summary(),
+            "verbose_log_enabled": verbose_logs.status()["enabled"] if verbose_logs.status()["available"] else None,
         }
     )
+
+
+@app.route("/verbose/settings", methods=["GET", "POST"])
+@require_auth
+def verbose_settings():
+    if not is_ingress_request():
+        return jsonify({'ok': False, 'error': 'Open the administrator controls through Ingress.'}), 403
+    admin, refusal = ingress_admin()
+    if admin is None:
+        return jsonify({'ok': False, 'error': refusal}), 403
+    try:
+        if request.method == 'POST':
+            verbose_logs.configure(request.get_json(silent=True))
+        result = jsonify({'ok': True, **verbose_logs.status()})
+        result.headers['Cache-Control'] = 'no-store'
+        return result
+    except Exception:
+        return jsonify({'ok': False, 'error': 'The verbose log settings are unavailable.'}), 503
+
+
+@app.post("/verbose/export")
+@require_auth
+def export_verbose():
+    if not is_ingress_request():
+        return jsonify({'ok': False, 'error': 'Open the administrator controls through Ingress.'}), 403
+    admin, refusal = ingress_admin()
+    if admin is None:
+        return jsonify({'ok': False, 'error': refusal}), 403
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or set(payload) != {'confirmed'} or payload['confirmed'] is not True:
+        return jsonify({'ok': False, 'error': 'Confirm the personal-data warning before exporting.'}), 400
+    try:
+        return Response(verbose_logs.export(), mimetype='text/plain', headers={
+            'Content-Disposition': 'attachment; filename="codex-verbose.log"', 'Cache-Control': 'no-store',
+            'X-Content-Type-Options': 'nosniff'})
+    except Exception:
+        return jsonify({'ok': False, 'error': 'The verbose log could not be exported safely.'}), 503
+
+
+@app.post("/verbose/clear")
+@require_auth
+def clear_verbose():
+    if not is_ingress_request():
+        return jsonify({'ok': False, 'error': 'Open the administrator controls through Ingress.'}), 403
+    admin, refusal = ingress_admin()
+    if admin is None:
+        return jsonify({'ok': False, 'error': refusal}), 403
+    if request.get_json(silent=True) != {}:
+        return jsonify({'ok': False, 'error': 'Send an explicit clear request.'}), 400
+    try:
+        verbose_logs.clear()
+        return jsonify({'ok': True})
+    except Exception:
+        return jsonify({'ok': False, 'error': 'The verbose log could not be cleared.'}), 503
 
 
 @app.get("/diagnostics/settings")
@@ -6356,6 +6457,7 @@ remote_control_supervisor = remote_control.Supervisor(
     name_factory=lambda: read_options().get("remote_control_name"),
     instructions_factory=lambda: remote_control_instructions(read_options()),
     tool_args_factory=relay_read_mcp_args,
+    on_log=lambda line: capture_verbose("relay", line),
     watch=remote_control.ConfigWatch(CONFIG_ROOT, DATA_ROOT / "remote_control_baseline.json"),
 )
 
@@ -6717,5 +6819,15 @@ def main() -> None:
     app.run(host="0.0.0.0", port=9123)
 
 
+def install_verbose_logging():
+    """Install after module initialization, before the worker's startup checks/logs."""
+    sys.stdout = VerboseTee(sys.stdout, verbose_logs, 'stdout')
+    sys.stderr = VerboseTee(sys.stderr, verbose_logs, 'stderr')
+    logging.getLogger().addHandler(VerboseHandler(verbose_logs))
+    atexit.register(sys.stdout.finish)
+    atexit.register(sys.stderr.finish)
+
+
 if __name__ == "__main__":
+    install_verbose_logging()
     main()

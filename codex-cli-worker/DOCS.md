@@ -788,3 +788,40 @@ requires an administrator for Ingress requests; the integration's worker token
 remains able to fetch it. Only an Ingress administrator may change retention.
 An unavailable worker returns an unavailable data section without its exception
 message or connection address.
+
+
+### Local verbose log
+
+Settings → Verbose log is an administrator-only, opt-in log. It starts off, keeps 500 lines by default,
+and can keep 100 to 2000 lines. It remains on across restarts until you turn it off; the page displays
+an indicator while it is on. Enabling it does not ask for confirmation. The oldest physical lines are
+removed first, and the file never exceeds 2 MB. A single longer line is truncated with a marker.
+Records are trimmed before an atomic, private replacement, so interruption leaves the previous log
+readable. Restart re-establishes both caps before recording further lines.
+
+This log deliberately keeps unfiltered worker-visible text: prompts, answers, tool arguments and outputs,
+approval traffic, errors, stdout/stderr and emitted Python logging records. Every incoming/outgoing
+app-server message the worker handles is observed before its usual redaction; invalid incoming JSON is
+also recorded. Worker-visible relay stdout and local relay log messages are included. Protocol messages
+handled entirely inside the remote CLI are not available to the worker: it does not attach to remote
+threads, subscribe to them, or read their histories. A partial stdout/stderr line is buffered until its
+newline or normal process shutdown so a secret split across writes is not published as fragments.
+
+Only the add-on's own known secret values are masked, by exact value (including their JSON-escaped
+spelling): Supervisor/Core credentials, worker and tool/relay capabilities, and the current ChatGPT
+sign-in tokens and sign-in/pairing codes. Arbitrary user secrets, prompts and personal details remain.
+If own credentials cannot be checked, capture/export fails closed and the page reports unavailability;
+the owner's enabled setting stays on. Logging failures cannot change approvals or execution outcomes.
+
+Export verbose log shows the personal-data warning and requires confirmation. Only an authenticated
+Ingress administrator can export or clear it; an API token alone is not enough. Read every export
+before sharing it. Clear removes the file but leaves the toggle on, so new lines can immediately start
+another log. Turning the toggle off stops capture and retains the existing bounded file for explicit
+export or clearing. It never enters Download diagnostics or the anonymized interaction export.
+
+The file is `/data/codex-home/house-rules/verbose/worker.log`; its settings and temporary replacements
+stay in the same protected directory, outside the writable workspace, with private 0600 files. Existing
+remote hook house-rules protection and native approval path protection cover the directory. No policy,
+gate, hook or CI file is changed. A full add-on data backup can include this private log: handle such
+backups as sensitive, just as other local add-on state. Browser/task and anonymized diagnostic exports
+do not collect it.
