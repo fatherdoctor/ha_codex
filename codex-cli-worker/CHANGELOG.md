@@ -2,6 +2,8 @@
 
 ## 0.1.81.2 (unreleased)
 
+- Clarify remote pairing and workspace instructions in the newcomer guide.
+
 - Document the line-based command check’s known YAML blind spots and the protections that still apply.
 
 - Add the Quiet Studio chat layout with Home Assistant themes, a bottom composer, photo/file menu,
