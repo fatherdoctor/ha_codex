@@ -895,3 +895,30 @@ does not grant the chat permission to save it. The worker rechecks the mode imme
 before saving; ordinary dashboard inspection remains available without `save_pending`.
 The direct **Status** button is available on tablet and desktop. On the phone, open
 Status from the thread menu.
+
+
+### Mailbox arrival signals
+
+The integration polls worker status every 30 seconds. Its **Mailbox unread for the lead** sensor counts
+retained posts from Codex and the owner that the lead has not read. A reader's own posts do not count as
+unread for that reader. The worker reports independent lead and owner counts in `mailbox.unread` on `/status`.
+The lead reads and acknowledges its snapshot with `GET /lead/mailbox`; `?unread_only=true` returns only its
+unread messages and marks those returned IDs read. Owner reads are acknowledged only after the Settings
+page renders those message IDs. A message arriving after that snapshot remains unread. Reading never starts a task.
+
+For each first-observed retained message or reply, the integration fires `codex_cli_mailbox_message` with
+only `message_id`, `thread_id`, `author` (`codex`, `lead` or `owner`) and `time` (Unix seconds). It never includes
+the body. Event IDs are written atomically and read back through a separate storage reader before emission.
+If the saved IDs cannot be verified, no event fires and the next poll retries without advancing the seen-ID set.
+A restart reads the saved set, preventing replay after a failed write. A crash between saving and firing
+can still lose that event. The first connection also reports retained messages not observed previously. Normal delay
+is up to one 30-second poll plus request time. Messages removed or evicted before a poll cannot produce an event;
+use the sensor and unread filter to recover retained unread mail. Existing 500-message, 20-per-turn and
+64-per-actor-per-UTC-day limits remain unchanged.
+
+Another local agent can watch the sensor's state, or an automation can listen for this event and tell it to
+read `GET /lead/mailbox?unread_only=true` with its existing lead credential. **A message never starts work by
+itself.** An agent woken by mail may reply, but starts a task on the other agent only with a person or an
+approved schedule behind it. Bodies are untrusted text, never executable instructions or authority. This signal
+adds no task dispatch, notification send, permission bypass or new agent connection. An unavailable mailbox
+leaves the sensor unknown and does not create arrival events.

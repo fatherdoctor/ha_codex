@@ -8,6 +8,11 @@
   definitions, keep unattended runs on normal prompts, and hand uncertain setup fields to Home Assistant.
 
 - Add administrator-selected permissions override groups for worker-launched Default exchanges, with a bounded Core action tool, guard-rail checks and shared private audit metadata. Remote turns continue to require normal approval.
+- Verify atomically saved mailbox event IDs before emission; failed saves or verification reads defer events and retry without replay.
+
+- Add durable unread mailbox counts for lead and owner, an unread-only lead filter, and page acknowledgments.
+  Expose a lead unread sensor and deduplicated, body-free arrival events through the normal status poll.
+  Mail remains data and never starts work by itself.
 - Clarify remote pairing, Core address discovery, and workspace instructions in the newcomer guide.
 
 - Document the line-based command check’s known YAML blind spots and the protections that still apply.

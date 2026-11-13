@@ -91,7 +91,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     _async_update_discovered_entry(hass, entry, worker.base_url)
     client = CodexCliApiClient(session, worker.base_url, worker.api_token)
-    coordinator = CodexCliCoordinator(hass, client)
+    coordinator = CodexCliCoordinator(hass, client, entry.entry_id)
     entry.runtime_data = CodexCliRuntimeData(client=client, coordinator=coordinator)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     await coordinator.async_config_entry_first_refresh()
