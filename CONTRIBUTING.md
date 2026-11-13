@@ -34,11 +34,9 @@ When reporting a bug, please include:
 Logs are usually the fastest way to find a bug. On Home Assistant 2026.11, collect whichever of these apply:
 
 - **Export logs file (attach this first):** open the worker app page, choose Settings, then Export logs. The file holds anonymized details of the last interactions. It is anonymized automatically, but read the whole file before you post it.
-- **Worker app log:** go to Settings, Apps, Codex CLI Worker, then the Log tab. Copy the lines around the time of the failure.
+- **Worker app log:** go to Settings, Apps, Codex for Home Assistant, then the Log tab. Copy the lines around the time of the failure.
 - **Integration diagnostics:** go to Settings, Devices & services, Codex, open the three-dot menu, and choose Download diagnostics. Attach the downloaded file to the issue. It carries the same anonymized interactions as Export logs, so either file will do; read it before posting.
 - **Home Assistant Core log:** go to Settings, System, Logs and type `codex` in the filter box. Copy the matching lines.
-
-Remove secrets, tokens, device codes, private URLs, and personal configuration from anything you post.
 
 Please remove secrets, tokens, URLs, device codes, personal paths, and private Home Assistant configuration before sharing logs or screenshots.
 

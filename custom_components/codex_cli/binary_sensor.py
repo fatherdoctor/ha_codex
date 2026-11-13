@@ -41,7 +41,7 @@ class CodexRunningBinarySensor(CoordinatorEntity[CodexCliCoordinator], BinarySen
             "identifiers": {(DOMAIN, entry.entry_id)},
             "name": "Codex",
             "manufacturer": "OpenAI",
-            "model": "Codex CLI Worker",
+            "model": "Codex for Home Assistant",
             "configuration_url": entry.data.get(CONF_BASE_URL),
         }
 

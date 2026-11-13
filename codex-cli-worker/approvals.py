@@ -26,12 +26,16 @@ COMMAND_APPROVAL = "item/commandExecution/requestApproval"
 # The app's permission policy, its house rules and Codex's own configuration: a change there is never allowed here.
 PROTECTED_PREFIXES = ("/usr/share/ha_codex", "/data/codex-home/AGENTS.md", "/data/codex-home/config.toml",
                       "/data/options.json", "/data/worker_api_token", "/data/schedules.sqlite3",
-                      "/data/schedules.sqlite3-journal", "/data/schedules.sqlite3-wal", "/data/schedules.sqlite3-shm")
+                      "/data/schedules.sqlite3-journal", "/data/schedules.sqlite3-wal", "/data/schedules.sqlite3-shm",
+                      "/data/interaction-diagnostics.json", "/data/interaction-diagnostics.key",
+                      "/data/interaction-diagnostics.settings.json")
 
 
 def touches_protected_path(path: str) -> bool:
     """Return whether a file change path is, or lies inside, a protected policy location."""
     normalized = posixpath.normpath(posixpath.join("/config", str(path)))
+    if normalized.startswith('/data/interaction-diagnostics.json.corrupt-'):
+        return True
     return any(normalized == prefix or normalized.startswith(prefix + "/") for prefix in PROTECTED_PREFIXES)
 
 
@@ -39,6 +43,7 @@ def touches_protected_path(path: str) -> bool:
 # names are matched loosely (a glob such as /usr/share/ha_c* still names the image folder). Best effort on the
 # text, like the file-path check: it cannot see a path a command builds at run time.
 PROTECTED_COMMAND_RES = (
+    re.compile(r"/data/+interaction-diagnostics(?:\b|[*?\[])", re.IGNORECASE),
     re.compile(r"/share/+ha_", re.IGNORECASE),
     re.compile(r"ha_codex/+(policy|agents|house)", re.IGNORECASE),
     re.compile(r"codex-home/+[^\s/]*[*?\[]", re.IGNORECASE),
@@ -101,7 +106,7 @@ def _protected_ancestor_operations(command: str, initial_cwd: str = '', depth: i
                 continue
             wrapper = posixpath.basename(word).lower()
             if wrapper not in ('sudo', 'env', 'command', 'nohup', 'timeout', 'nice', 'ionice',
-                               'doas', 'setsid', 'stdbuf', 'xargs'):
+                               'doas', 'setsid', 'stdbuf', 'xargs', 'time', 'exec', 'unbuffer'):
                 break
             index += 1
             while index < len(segment) and segment[index].startswith('-'):
@@ -114,6 +119,8 @@ def _protected_ancestor_operations(command: str, initial_cwd: str = '', depth: i
                       or (wrapper == 'env' and flag in ('-u', '--unset', '-C', '--chdir'))
                       or (wrapper == 'timeout' and flag in ('-s', '--signal', '-k', '--kill-after'))
                       or (wrapper == 'nice' and flag in ('-n', '--adjustment'))
+                      or (wrapper == 'time' and flag in ('-f', '--format', '-o', '--output'))
+                      or (wrapper == 'exec' and flag == '-a')
                       or (wrapper == 'ionice' and flag in ('-c', '--class', '-n', '--classdata', '-p', '-P'))
                       or (wrapper == 'stdbuf' and flag in ('-i', '-o', '-e', '--input', '--output', '--error'))
                       or (wrapper == 'xargs' and flag in ('-I', '-n', '-L', '-P', '-s', '-a', '-E', '-d',

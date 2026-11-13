@@ -7,7 +7,7 @@
       content="width=device-width, initial-scale=1, viewport-fit=cover"
     />
     <meta name="color-scheme" content="light dark" />
-    <title>Codex · Home Assistant</title>
+    <title>Codex for Home Assistant</title>
     <link rel="stylesheet" href="assets/chat.css" />
     <script src="assets/vendor/marked.umd.js" defer></script>
     <script src="assets/markdown.js" defer></script>
@@ -25,7 +25,7 @@
       <aside id="sidebar" aria-label="Conversations">
         <div class="brand">
           <span class="brand-icon" aria-hidden="true">⌘</span
-          ><strong>Codex</strong><span class="tag">HOME ASSISTANT</span
+          ><strong>Codex</strong><span class="tag">for Home Assistant</span
           ><button
             id="close-sidebar"
             class="icon mobile"
@@ -381,6 +381,15 @@
           ><button id="logout" class="subtle">Sign out</button>
         </div>
         <div id="login-card"></div>
+      </section>
+      <section>
+        <h3>Interaction logs</h3>
+        <p class="muted">Export recent worker metadata. Remote ChatGPT threads are not recorded. Review the file before sharing it.</p>
+        <label for="diagnostic-retention">Interactions to keep (10–100)</label>
+        <input id="diagnostic-retention" type="number" min="10" max="100" value="25" step="1">
+        <button id="save-diagnostic-retention" class="subtle">Save log retention</button>
+        <button id="export-interaction-logs" class="subtle">Export logs</button>
+        <p id="export-logs-status" class="muted" role="status"></p>
       </section>
       <section id="remote-control-section">
         <h3>Remote control from the ChatGPT app</h3>

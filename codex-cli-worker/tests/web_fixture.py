@@ -45,6 +45,12 @@ def main():
     with tempfile.TemporaryDirectory(prefix="codex-chat-preview-") as temp:
         root = Path(temp)
         server.DATA_ROOT = root
+        from interaction_diagnostics import RollingDiagnostics, InteractionRecorder
+        server.interaction_logs = RollingDiagnostics(root / "interaction-diagnostics.json")
+        server.diagnostics = InteractionRecorder(server.interaction_logs, "0.1.81.2", "0.166.0")
+        server.diagnostics.begin("synthetic", "addon_page", "gpt-6.1-sol")
+        server.diagnostics.event("synthetic", {"kind": "tool", "name": "read", "result": "done"})
+        server.diagnostics.finish("synthetic", "done")
         server.task_root = lambda: root / "tasks"
         server.TASK_STATE_FILE = root / "index.json"
         server.MESSAGE_QUEUE_FILE = root / "queue.json"
