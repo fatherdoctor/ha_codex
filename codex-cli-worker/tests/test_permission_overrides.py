@@ -17,6 +17,7 @@ import permission_overrides_api as api
 class Backend:
     validate_service = api.Core.validate_service
     validate_operation = api.Core.validate_operation
+    device_entry = lambda self, target: "synthetic"
 
     def __init__(self):
         self.writes = []

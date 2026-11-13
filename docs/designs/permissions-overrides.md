@@ -142,3 +142,9 @@ Reference: https://contributors.home-assistant.io/design/components/switch/ . A 
 Settings-page screenshot was not taken because this lane cannot access a live installation.
 
 The corresponding Claude add-on groups remain a later CLA-DESIGN handoff. This implementation changes only the Codex add-on; the lead can carry that parity note to the separate design card.
+
+
+Device removal uses the supported Core `config/device_registry/remove_config_entry` command, as read
+in the 2026.6.1 handler. The newer dev-only `remove` spelling is not assumed. A device must have exactly
+one verified integration attachment; ambiguous/multiple attachments require normal approval. This
+preserves the backend's own support checks and avoids guessing how to dismantle a composite device.

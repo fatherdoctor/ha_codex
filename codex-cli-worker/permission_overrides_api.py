@@ -157,6 +157,16 @@ class Core:
             if not isinstance(handler, str) or handler in ('hassio', 'supervisor', 'codex_cli', 'ha_codex'):
                 raise ApprovalRequired('This integration setup cannot be pre-approved.')
 
+    def device_entry(self, target):
+        rows = self.ws('config/device_registry/list')
+        if not isinstance(rows, list) or len(rows) > 30000:
+            raise ApprovalRequired('The device registry is unavailable; request normal approval.')
+        row = next((row for row in rows if isinstance(row, dict) and row.get('id') == target), None)
+        entries = row.get('config_entries', [row.get('config_entry_id')]) if row else []
+        if not isinstance(entries, list) or len(entries) != 1 or not isinstance(entries[0], str) or not IDENTIFIER.fullmatch(entries[0]):
+            raise ApprovalRequired('Device removal requires one verified integration attachment; request normal approval.')
+        return entries[0]
+
     def validate_operation(self, operation, target, data):
         if operation in ('update_device', 'delete_device', 'save_dashboard', 'delete_dashboard'):
             if not isinstance(target, str) or (target and not IDENTIFIER.fullmatch(target)):
@@ -179,8 +189,11 @@ class Core:
             if set(data) != {'config'} or not isinstance(data['config'], dict):
                 raise ApprovalRequired('Supply one UI dashboard configuration.')
             bounded_json(data, 512 * 1024)
-        elif operation.startswith('delete_') and data:
-            raise ApprovalRequired('Delete operations do not accept extra data.')
+        elif operation.startswith('delete_'):
+            if data:
+                raise ApprovalRequired('Delete operations do not accept extra data.')
+            if operation == 'delete_device':
+                self.device_entry(target)
 
     def references(self, target):
         # Core supplies semantic references; refuse rather than claim a complete hand-made text search.
@@ -233,7 +246,11 @@ class Core:
             self.ws('config/entity_registry/' + kind, entity_id=target, **data)
             return {'status': 'updated', **({'references': plan['references']} if 'references' in plan else {})}
         if operation in ('update_device', 'delete_device'):
-            self.ws('config/device_registry/' + ('remove' if operation == 'delete_device' else 'update'), device_id=target, **data)
+            if operation == 'delete_device':
+                entry = self.device_entry(target)
+                self.ws('config/device_registry/remove_config_entry', device_id=target, config_entry_id=entry)
+            else:
+                self.ws('config/device_registry/update', device_id=target, **data)
             return {'status': 'updated'}
         if operation in ('save_dashboard', 'delete_dashboard'):
             self.backup_dashboard(target)

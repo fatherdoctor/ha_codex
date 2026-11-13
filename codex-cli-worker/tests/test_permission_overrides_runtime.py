@@ -186,7 +186,6 @@ class CoreEndpoints(unittest.TestCase):
             ('rename_entity', 'light.sample', {'new_entity_id': 'light.renamed'}, 'config/entity_registry/update', {'entity_id': 'light.sample', 'new_entity_id': 'light.renamed'}),
             ('delete_entity', 'light.sample', {}, 'config/entity_registry/remove', {'entity_id': 'light.sample'}),
             ('update_device', 'sample', {'name_by_user': 'Sample'}, 'config/device_registry/update', {'device_id': 'sample', 'name_by_user': 'Sample'}),
-            ('delete_device', 'sample', {}, 'config/device_registry/remove', {'device_id': 'sample'}),
         ):
             with self.subTest(operation=operation), patch.object(self.core, 'ws') as ws:
                 self.core.execute({'operation': operation, 'target': target, 'data': data})
@@ -194,6 +193,18 @@ class CoreEndpoints(unittest.TestCase):
         with patch.object(self.core, 'ws', return_value={'automation': ['sample']}) as ws:
             self.assertIn('coverage', self.core.references('light.sample'))
             ws.assert_called_once_with('search/related', item_type='entity', item_id='light.sample')
+
+    def test_device_delete_uses_the_supported_core_config_entry_contract(self):
+        # The 2026.6.1 and 2026.10.3 handlers take device_id + config_entry_id.
+        # The newer dev-only /remove command is not assumed on supported releases.
+        with patch.object(self.core, 'ws', side_effect=[[{'id': 'sample', 'config_entries': ['synthetic']}], None]) as ws:
+            self.core.execute({'operation': 'delete_device', 'target': 'sample'})
+            self.assertEqual(ws.call_args_list[-1].args, ('config/device_registry/remove_config_entry',))
+            self.assertEqual(ws.call_args_list[-1].kwargs, {'device_id': 'sample', 'config_entry_id': 'synthetic'})
+        for row in ({'id': 'sample', 'config_entries': []}, {'id': 'sample', 'config_entries': ['first', 'second']}):
+            with patch.object(self.core, 'ws', return_value=[row]) as ws:
+                with self.assertRaises(ApprovalRequired): self.core.execute({'operation': 'delete_device', 'target': 'sample'})
+                ws.assert_called_once_with('config/device_registry/list')
 
     def test_config_definition_and_delete_endpoints(self):
         for domain in ('script', 'automation', 'scene'):
