@@ -622,6 +622,16 @@ The worker disables Codex update checks at startup. Codex CLI is installed and v
 
 A missing window has an `unknown` sensor state and a `reported: false` attribute. The existing 5-hour entities and worker fields remain in place so upgrades do not break automations on accounts that still report or reference them. Diagnostic excerpts remove account, email, and session identifiers before being exposed.
 
+## Reporting a bug
+
+A report with logs is much easier to fix. On Home Assistant 2026.11:
+
+1. Note the date and time of the failed interaction, with your time zone.
+2. Open the worker app log: Settings, Apps, Codex for Home Assistant, Log tab. Copy the lines around that time.
+3. Download the integration diagnostics: Settings, Devices & services, Codex, three-dot menu, Download diagnostics. Attach the file to the issue.
+4. For problems that may involve Home Assistant Core, open Settings, System, Logs, type `codex` in the filter box, and copy the matching lines.
+5. Remove secrets, tokens, device codes, private URLs, and personal configuration before posting, then [open an issue](https://github.com/fatherdoctor/ha_codex/issues/new/choose).
+
 ## Notifications
 
 Leave `notify_service` unset or empty to use Home Assistant persistent notifications for task completion, failures, questions, and permission requests. If you want push notifications, set it to a Home Assistant notify service such as `notify.mobile_app_your_phone`.
@@ -872,3 +882,52 @@ Within one script-resolution pass, identical document content shares its script-
 Relative include paths are still resolved for each source file. This avoids repeated cached-graph
 walks without spending the hook's work budget repeatedly on the same discovery; transitive
 script-body resolution continues to charge the shared node total.
+
+### Chat page and attachments
+
+The page follows Home Assistant colors in light and dark when its host exposes them; otherwise it follows
+the device appearance. Recent conversations stay alongside the writing canvas on tablets and desktop.
+On a phone the connection chip and Settings stay in the header, with conversations, New chat and the thread
+menu below. The composer stays at the bottom. Its model and reasoning controls show the saved chat choice
+or configured default, rather than a sample selection.
+
+The plus menu uploads photos or files. A message accepts at most six attachments, up to 10 MB each.
+Photos retain their existing resizing and image checks. File uploads support UTF-8 text, Markdown, YAML,
+JSON, CSV, logs, Python/JavaScript source, HTML/CSS/XML source, and PDF headers. Binary text and unsupported
+extensions are refused. Documents remain passive files: they are never executed or rendered in the page,
+and downloads use attachment disposition, no-sniff and a sandboxed content policy. They are stored privately
+with the message; Codex receives their validated paths and may read relevant contents as part of that task.
+PDF acceptance does not promise a particular extraction tool. Draft attachments stay in the browser until
+Send. Archiving a chat hides it from recent conversations without deleting its session or attachments;
+Archived chats can restore it. Delete remains a separate action.
+
+The Permissions picker starts at Default permissions: use the add-on's configured sandbox and native
+approval flow. Read only narrows the next turn to the read-only sandbox, including a resumed or queued turn.
+Neither choice expands a configured read-only sandbox, suppresses native approval, or changes managed
+security refusals. A queued message keeps the choice submitted with it. Auto-review and Full access are
+shown as Coming and cannot be selected. Camera and Plan mode are not offered in this build.
+
+The thread menu includes Pin, Rename, Copy thread ID, Archive and Status. A thread without a native ID
+reports that it is unavailable instead of substituting the page's task ID. Status shows the workspace,
+selected model and permissions; context and usage/reset remain unavailable in this view until verified
+window data is wired. No quota is inferred from activity.
+
+Remote connection opens a separate view for Off, Starting, Ready, Reconnecting and Error. Pairing uses two
+different protocol fields: the manual code for typing, and the opaque code for the Continue in ChatGPT URL
+and its QR. The manual code is never substituted into the URL. If only a manual code is available, request
+a new code or type it; no app link is invented. The QR has a four-module quiet zone at every width. Codes,
+URLs and QR images remain limited to verified Ingress administrators; API tokens alone cannot read them
+or start pairing. No live account enrollment or device handoff is implied by local rendering tests.
+
+Settings → Advanced → Workspace rules opens a separate editor. The file is read only when that editor
+opens, and Save remains an explicit action. Existing account, diagnostic, scheduling and browser-permission
+controls remain in Settings.
+
+
+A chat's **Read only** choice also disables worker-mediated dashboard saves: both
+verification with `save_pending` and the end-of-turn automatic save use the current
+turn's effective options. A dashboard file changed by another actor during that turn
+does not grant the chat permission to save it. The worker rechecks the mode immediately
+before saving; ordinary dashboard inspection remains available without `save_pending`.
+The direct **Status** button is available on tablet and desktop. On the phone, open
+Status from the thread menu.

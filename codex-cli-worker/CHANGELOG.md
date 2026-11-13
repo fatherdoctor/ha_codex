@@ -13,6 +13,12 @@
   touched-file limit in refusals.
 
 - **Parsed YAML command checks (CX-YAML).** Recognize flow and quoted keys, case-normalized action/service mappings, script targets and per-file script includes alongside the line rules. Share bounded parse results per scan, retain line fallback and file-specific reports on parsing limits, and keep unrelated large files from refusing ordinary patches. Track included command definitions as whole files across the hook, exchange check and config watch; safe tags remain opaque and include paths cannot reach credential files or links.
+
+- Add the Quiet Studio chat layout with Home Assistant themes, a bottom composer, photo/file menu,
+  per-chat narrowing permissions, thread status and archive/restore. Separate remote connection and
+  Advanced workspace-rules views; keep pairing URLs distinct from manual codes and administrator-only.
+  Auto-review and Full access remain unavailable; no managed security policy changes.
+
 - Close diagnostics interrupted by a worker restart as unknown, retaining room for new completed work.
   Create the private entity key without hard links and explain recovery while collecting other metadata.
   Protect private diagnostic files, retain only the newest corrupt store, distinguish policy causes and

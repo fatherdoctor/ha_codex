@@ -96,11 +96,26 @@ body:
     validations:
       required: true
 
+  - type: input
+    id: failure_time
+    attributes:
+      label: When did it happen?
+      description: Give the date and time of the failed interaction, with your time zone. It lets me find the right lines in the logs.
+      placeholder: "Example: 2026-11-12 14:32 US Central"
+    validations:
+      required: true
+
   - type: textarea
     id: logs
     attributes:
       label: Relevant logs
-      description: Paste relevant Home Assistant or worker app logs after removing sensitive information.
+      description: |
+        Logs are the fastest way to get a bug fixed. Please include whichever of these apply, after removing sensitive information:
+
+        - **Export logs file (attach this first):** open the worker app page, choose Settings, then Export logs. It holds anonymized details of the last interactions. Read the whole file before you post it; anonymizing is automatic, but you are the last check. This box takes text only, so attach files under Additional context below.
+        - **Worker app log:** Settings, Apps, Codex for Home Assistant, Log tab. Copy the lines around the time of the failure.
+        - **Integration diagnostics:** Settings, Devices & services, Codex, three-dot menu, Download diagnostics. Attach the downloaded file under Additional context too. It carries the same anonymized interactions as Export logs, so you can send either one; read it before posting.
+        - **Home Assistant Core log:** Settings, System, Logs. Type `codex` in the filter box and copy the matching lines.
       render: text
 
   - type: textarea
