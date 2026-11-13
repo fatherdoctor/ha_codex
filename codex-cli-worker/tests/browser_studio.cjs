@@ -30,6 +30,15 @@ fs.mkdirSync(output,{recursive:true});
     assert.deepEqual(errors,[]);await context.close();continue;
    }
    await page.locator('#connection-summary').filter({hasText:'Ready as'}).waitFor();
+   if(width===1024) {
+    const before=await page.locator('#sidebar').boundingBox();
+    await page.locator('#divider').focus();
+    await page.locator('#divider').press('ArrowRight');
+    const after=await page.locator('#sidebar').boundingBox();
+    assert.ok(after.width>before.width,'Tablet sidebar resize must move the visible edge');
+    await page.locator('#divider').press('ArrowLeft');
+   }
+
    assert.equal(await page.locator('#greeting').isVisible(),true);
    assert.equal(await page.locator('#permission-button').getAttribute('aria-label'),'Default permissions');
    const compose=await page.locator('#composer').boundingBox();

@@ -101,7 +101,6 @@ dialog::backdrop { background: #0006; }
 #workspace-section > h3 { display: none; }
 #agents { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line); padding: 12px; border-radius: 10px; }
 @media (max-width: 1050px) and (min-width: 701px) {
-  .app { --sidebar-width: 228px; }
   .chat-header { padding: 14px 20px; }
   .connection-chip { max-width: 220px; }
   .connection-strip { padding: 12px 20px; flex-wrap: wrap; }
