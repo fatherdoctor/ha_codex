@@ -1,7 +1,7 @@
 # Permissions overrides
 
-Status: installed on the worker, with fail-closed current-turn authority and shared diagnostics.
-Source baseline: ha_codex main `9dcef3abe5bc`, Codex CLI 0.166.0.
+Status: implemented with fail-closed current-turn authority and shared diagnostics.
+Source baseline: ha_codex main `7e9eb3b`, Codex CLI 0.166.0.
 
 The worker can perform selected Home Assistant actions without an escalation prompt when an administrator
 has enabled their group. It must establish the calling turn's effective permissions before doing so.
@@ -31,33 +31,29 @@ after execution, or a bounded error identifying whether any mutation may already
 automatically retry a write after a timeout. Inform the assistant that a pre-approved action must be named
 in its answer; this instruction alone cannot guarantee what the model eventually says.
 
-## Review F1: security mentions outside the block
+## Confirmed rules and indirect targets
 
-Any security-target mention outside the marked block disables pre-approval for the entire
-Security and people group, even when its switch is on. This is a vocabulary check, not an
-attempt to interpret intent: both “Keep locks unchanged.” and benign camera documentation
-require normal approval. It includes security entity domains and plural target names.
-Selected limits inside the exact marked block retain their existing domain-specific meaning.
-Settings explains this fallback without exposing the instructions file's contents; unrelated
-groups remain available subject to their existing checks. Indirect security effects are also
-blocked, and the instructions are reread before every action and immediately before a write.
+Settings uses the current chat page's Permissions overrides section. Only the exact marked block in
+`/config/AGENTS.md` controls the tool. All other prose, including the kit's Careful start and Direct sets,
+remains for the assistant to follow in chat. Unknown block lines suspend every group; known selected
+lines identify their restricted domains beside the switches.
 
-## Guard rails and indirect targets
+An administrator's Save or Review and confirm action saves the instructions text and SHA-256 under
+`/data/house-rules/`, outside the writable agent workspace. Missing instructions are a confirmed state.
+Compare the live file against the confirmed copy, pin that snapshot at begin(), and refuse every action
+if it changes or becomes unreadable. Once observed, a change taints the whole exchange, even if restored.
+Confirmation requires a new exchange to use the changed text. The permission adapter protects this
+private folder; no new gate, policy, launcher or hook rules are introduced.
 
-Read the owner's marked guard-rail section in `/config/AGENTS.md` on every action; do not cache it across
-changes. The kit's `templates/agent-guard-rails.md` supplies six optional natural-language lines and explicitly
-allows narrower custom wording. It is not a machine-readable policy schema. Recognize the documented lines
-conservatively, but treat an unrecognized/custom restriction, unreadable file, malformed markers or ambiguous
-target as requiring approval. Do not silently ignore a restriction because its spelling is unfamiliar.
 The add-on's hard refusals always remain: Supervisor/credential access and modification of its own policy
 or settings cannot be enabled by a group. Group 5 is an optional group, not a bundled ban on its domains.
 
-For scenes, inspect every entity in the current scene configuration. For automation/script execution,
-recursively inspect every reachable action, branch, parallel sequence, script and scene. Check both the
+For scenes, inspect every member in the loaded scene state. For automation/script execution,
+recursively inspect supported action branches, scripts and scenes; unsupported parallel sequences refuse.
+Read automation/config and script/config loaded raw_config snapshots, not editable disk definitions. Check both the
 entry action's group and every reachable effect's group and owner restriction. Runtime templates,
 unresolved dynamic targets, integrations with unknown indirect effects, recursion, missing configuration,
-unsupported actions or an exhausted work budget require approval. Do not claim to have checked these from
-state attributes alone. Use a bounded configuration snapshot and detect changes before execution; an
+unsupported actions or an exhausted work budget require approval. A scene state proves only membership; loaded member values remain unavailable. Use a bounded configuration snapshot and detect changes before execution; an
 unverifiable snapshot cannot authorize a pre-approved action. A read-only preflight cannot guarantee that
 an external actor will not change a scene between checks and execution; document that limitation rather
 than claiming a transaction Core does not provide.
@@ -185,3 +181,14 @@ receipts, and diagnostics continue to contain only the fixed operation/group/out
 
 The peer screenshot pair shows a native Home Assistant profile Settings row with an actual
 `ha-switch` beside the add-on rows, in both themes. Both sides use isolated synthetic fixtures.
+
+## Reload comparison and setup inputs
+
+For automation and script reloads, compare bounded standard YAML includes against loaded snapshots.
+Walk only definitions that are new or changed. Unchanged definitions are the owner’s and are not re-judged.
+Custom packages/includes or unavailable snapshots require approval. Scene reloads require approval because
+Core does not expose loaded member values for comparison. Person-started exchanges alone use the groups;
+scheduled and lead-channel exchanges retain their normal prompts. Remote turns still lack verifiable authority.
+
+Setup fills only host, port, name, username, title and scan_interval. Any other name, secret flag or password
+selector hands off the entire form. No field values, choices, defaults or raw Core errors enter results.

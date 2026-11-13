@@ -147,24 +147,19 @@ class RuntimeOverrides(unittest.TestCase):
                 listener.shutdown(); listener.server_close()
         self.assertEqual(sock.stat().st_mode & 0o777, 0o600)
 
-    def test_settings_explain_outside_security_mentions_without_disclosing_text(self):
+    def test_settings_report_unconfirmed_rules_without_disclosing_text(self):
         with contextlib.ExitStack() as stack:
             stack.enter_context(patch.object(server, 'DATA_ROOT', self.root))
+            stack.enter_context(patch.object(server, 'CONFIG_ROOT', self.config))
             stack.enter_context(patch.object(server, 'ingress_admin', return_value=({'user_id': 'synthetic-admin'}, '')))
             stack.enter_context(patch.object(server, 'is_ingress_request', return_value=True))
-            guards = stack.enter_context(patch.object(server.override_service, 'guards', return_value='Keep locks unchanged. Synthetic private wording.'))
+            (self.config / 'AGENTS.md').write_text('Synthetic private instructions.')
             client = server.app.test_client()
-            for method in ('get', 'post'):
-                response = getattr(client, method)('/permissions-overrides', json=DEFAULTS)
-                self.assertEqual(response.status_code, 200)
-                self.assertIn('Security and people requires normal approval', response.json['guard_note'])
-                self.assertIn('marked guard-rails block', response.json['guard_note'])
-                self.assertNotIn('Synthetic private wording', response.get_data(as_text=True))
-                self.assertEqual(response.headers['Cache-Control'], 'no-store')
-            guards.return_value = ''
+            response = client.get('/permissions-overrides')
+            self.assertIn('changed since confirmation', response.json['guard_note'])
+            self.assertNotIn('Synthetic private instructions', response.get_data(as_text=True))
+            self.assertEqual(client.post('/permissions-overrides', json=DEFAULTS).status_code, 200)
             self.assertEqual(client.get('/permissions-overrides').json['guard_note'], '')
-            guards.side_effect = ApprovalRequired('synthetic private failure')
-            self.assertIn('could not be verified', client.get('/permissions-overrides').json['guard_note'])
 
     def test_admin_only_get_and_post_fail_closed_with_no_worker_token_bypass(self):
         with contextlib.ExitStack() as stack:
@@ -230,12 +225,9 @@ class CoreEndpoints(unittest.TestCase):
                 with self.assertRaises(ApprovalRequired): self.core.execute({'operation': 'delete_device', 'target': 'sample'})
                 ws.assert_called_once_with('config/device_registry/list')
 
-    def test_config_definition_and_delete_endpoints(self):
+    def test_config_delete_endpoints(self):
         for domain in ('script', 'automation', 'scene'):
             with self.subTest(domain=domain), patch.object(self.core, 'config_id', return_value='sample'), patch.object(self.core, 'rest', return_value={}) as rest:
-                self.core.definition(domain + '.sample')
-                rest.assert_called_once_with('GET', 'config/' + domain + '/config/sample')
-                rest.reset_mock()
                 self.core.execute({'operation': 'delete_' + domain, 'target': domain + '.sample'})
                 rest.assert_called_once_with('DELETE', 'config/' + domain + '/config/sample')
 
@@ -255,15 +247,15 @@ class CoreEndpoints(unittest.TestCase):
 
     def test_flow_paths_and_own_integration_refusal(self):
         value = {'handler': 'sample', 'flow_id': 'synthetic', 'type': 'form', 'step_id': 'user',
-                 'data_schema': [{'name': 'field', 'type': 'string', 'required': True}]}
+                 'data_schema': [{'name': 'host', 'type': 'string', 'required': True}]}
         with patch.object(self.core, 'rest', return_value=value) as rest:
             self.core.execute({'operation': 'flow_start', 'target': 'sample'})
             rest.assert_called_once_with('POST', 'config/config_entries/flow', {'handler': 'sample'})
             rest.reset_mock()
-            self.core.execute({'operation': 'flow_continue', 'target': 'synthetic', 'data': {'field': 'synthetic'}})
+            self.core.execute({'operation': 'flow_continue', 'target': 'synthetic', 'data': {'host': 'synthetic'}})
             self.assertEqual([call.args for call in rest.call_args_list], [
                 ('GET', 'config/config_entries/flow/synthetic'),
-                ('POST', 'config/config_entries/flow/synthetic', {'field': 'synthetic'})])
+                ('POST', 'config/config_entries/flow/synthetic', {'host': 'synthetic'})])
         for handler in ('hassio', 'supervisor', 'codex_cli', 'ha_codex', None):
             with patch.object(self.core, 'rest', return_value={'handler': handler}):
                 with self.assertRaises(ApprovalRequired): self.core.validate_flow('flow_continue', 'synthetic')

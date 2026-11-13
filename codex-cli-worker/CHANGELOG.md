@@ -2,6 +2,9 @@
 
 ## 0.1.81.2 (unreleased)
 
+- Pin administrator-confirmed house rules for each action exchange; check loaded actions and changed reload
+  definitions, keep unattended runs on normal prompts, and hand uncertain setup fields to Home Assistant.
+
 - Add administrator-selected permissions override groups for worker-launched Default exchanges, with a bounded Core action tool, guard-rail checks and shared private audit metadata. Remote turns continue to require normal approval.
 
 - Add the Quiet Studio chat layout with Home Assistant themes, a bottom composer, photo/file menu,

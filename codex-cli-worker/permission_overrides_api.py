@@ -2,6 +2,8 @@
 from __future__ import annotations
 from contextlib import closing
 import hmac
+import hashlib
+import stat
 import json
 import os
 from pathlib import Path
@@ -11,14 +13,16 @@ import tempfile
 import threading
 import time
 import uuid
+import yaml
 
 from flask import jsonify, request
-from permission_overrides import ApprovalRequired, Authority, Engine, Settings, bounded_json, entity, security_mentions_outside, PRIVATE
+from permission_overrides import ApprovalRequired, Authority, Engine, Settings, bounded_json, entity, selected_guard_lines, guard_rules, GUARD_LINES, PRIVATE
 
 IDENTIFIER = re.compile(r'[a-z0-9_-]{1,128}')
 
 
 # Core sends a serialized field list. Return its shape only, never defaults/options/values.
+SAFE_FLOW_FIELDS = frozenset(('host', 'port', 'name', 'username', 'title', 'scan_interval'))
 FLOW_SCALARS = frozenset(('string', 'integer', 'float', 'boolean', 'select', 'multi_select'))
 FLOW_SELECTORS = frozenset(('text', 'number', 'boolean', 'select', 'entity', 'device', 'area',
                             'label', 'duration', 'date', 'time', 'datetime', 'color_rgb', 'icon'))
@@ -33,9 +37,11 @@ def flow_result(value, submitted=None):
         if isinstance(item, str) and item:
             submitted_text.add(item)
         elif isinstance(item, dict):
-            for child in item.values(): remember(child)
+            for child in item.values():
+                remember(child)
         elif isinstance(item, list):
-            for child in item: remember(child)
+            for child in item:
+                remember(child)
     remember(submitted or {})
     def safe_identifier(item):
         return (isinstance(item, str) and bool(IDENTIFIER.fullmatch(item))
@@ -57,7 +63,8 @@ def flow_result(value, submitted=None):
             raise ApprovalRequired('Integration field could not be verified; finish this step in Home Assistant.')
         names.add(name)
         kind = field.get('type')
-        secret = bool(PRIVATE.search(name.lower()) or field.get('secret') or kind == 'password')
+        secret = bool(name not in SAFE_FLOW_FIELDS or PRIVATE.search(name.lower())
+                      or field.get('secret') or kind == 'password')
         selector = field.get('selector')
         if selector is not None:
             if not isinstance(selector, dict) or len(selector) != 1:
@@ -65,10 +72,12 @@ def flow_result(value, submitted=None):
             else:
                 kind, options = next(iter(selector.items()))
                 secret = secret or (kind == 'text' and isinstance(options, dict) and options.get('type') == 'password')
-                if kind not in FLOW_SELECTORS: kind = 'unsupported'
+                if kind not in FLOW_SELECTORS:
+                    kind = 'unsupported'
         elif kind not in FLOW_SCALARS:
             kind = 'unsupported'
-        if secret: kind = 'secret'
+        if secret:
+            kind = 'secret'
         handoff = handoff or kind in ('secret', 'unsupported')
         fields.append({'name': name, 'type': kind, 'required': field.get('required', False)})
     result['fields'] = fields
@@ -143,17 +152,16 @@ class Core:
             raise ApprovalRequired('The add-on and Supervisor settings cannot be changed through overrides.')
         return row
 
-    def resolve(self, selector):
+    def resolve(self, selector, service_domain=None):
         if isinstance(selector, str):
             selector = [item.strip() for item in selector.split(',')]
         if isinstance(selector, list):
             if not 1 <= len(selector) <= 64:
                 raise ApprovalRequired('Target count exceeds the action limit; request normal approval.')
-            for target in selector:
-                self.require_entity(target)
             return selector
         if not isinstance(selector, dict) or not selector or set(selector) - {'entity_id', 'device_id', 'area_id', 'label_id'}:
             raise ApprovalRequired('Targets require explicit entities, devices, areas or labels; request normal approval.')
+        domain_filter = service_domain if set(selector) <= {'area_id', 'device_id', 'label_id'} else None
         entities = self.ws('config/entity_registry/list')
         devices = self.ws('config/device_registry/list')
         if not isinstance(entities, list) or not isinstance(devices, list) or len(entities) > 30000 or len(devices) > 30000:
@@ -172,14 +180,13 @@ class Core:
                             or (key == 'device_id' and row.get('device_id') == value)
                             or (key == 'area_id' and (row.get('area_id') or device.get('area_id')) == value)
                             or (key == 'label_id' and (value in row.get('labels', []) or value in device.get('labels', [])))):
-                        matches.append(row['entity_id'])
+                        if domain_filter is None or row['entity_id'].split('.')[0] == domain_filter:
+                            matches.append(row['entity_id'])
                 if not matches:
                     raise ApprovalRequired('A selector could not be fully resolved; request normal approval.')
                 result.extend(matches)
                 if len(set(result)) > 64:
                     raise ApprovalRequired('Target count exceeds the action limit; request normal approval.')
-        for target in result:
-            self.require_entity(target)
         return result
 
     def config_id(self, target):
@@ -191,10 +198,91 @@ class Core:
         return identifier
 
     def definition(self, target):
+        """Inspect loaded actions, never the editable file that a pending reload will replace."""
         domain = entity(target).split('.')[0]
-        if domain not in ('automation', 'script', 'scene'):
-            raise ApprovalRequired('This indirect action cannot be inspected; request normal approval.')
-        return self.rest('GET', f'config/{domain}/config/{self.config_id(target)}')
+        if domain in ('automation', 'script'):
+            self.require_entity(target)
+            response = self.ws(domain + '/config', entity_id=target)
+            if isinstance(response, dict) and isinstance(response.get('config'), dict):
+                return response['config']
+        elif domain == 'scene':
+            row = self.require_entity(target)
+            members = row.get('attributes', {}).get('entity_id')
+            if isinstance(members, list) and members and len(members) <= 128:
+                return {'entities': {entity(member): None for member in members}}
+        raise ApprovalRequired('The loaded definition is unavailable; request normal approval.')
+
+    def reload_changes(self, domain):
+        """Compare bounded, standard YAML includes with loaded Core definitions; custom layouts ask."""
+        filenames = {'automation': 'automations.yaml', 'script': 'scripts.yaml', 'scene': 'scenes.yaml'}
+        filename = filenames[domain]
+        root = Path(self.worker.CONFIG_ROOT)
+        config = self.read_reload_yaml(root / 'configuration.yaml', includes=True)
+        if (not isinstance(config, dict) or config.get(domain) != {'include': filename}
+                or 'packages' in config.get('homeassistant', {})
+                or any(key.startswith(domain + ' ') for key in config)):
+            raise ApprovalRequired('This reload layout cannot be compared; request normal approval.')
+        disk = self.read_reload_yaml(root / filename)
+        # Scene state exposes membership, not the saved member values. That is
+        # insufficient to tell whether a definition changed, so never guess.
+        if domain == 'scene':
+            raise ApprovalRequired('Loaded scene values cannot be compared; request normal approval.')
+        if domain == 'automation':
+            if not isinstance(disk, list) or any(not isinstance(row, dict) or not isinstance(row.get('id'), str) for row in disk):
+                raise ApprovalRequired('Automation definitions cannot be compared; request normal approval.')
+            proposed = {row['id']: row for row in disk}
+            if len(proposed) != len(disk):
+                raise ApprovalRequired('Duplicate automation identifiers require normal approval.')
+        else:
+            proposed = disk
+        if not isinstance(proposed, dict) or len(proposed) > 1024:
+            raise ApprovalRequired('Reload definitions are unavailable or oversized; request normal approval.')
+        states = self.rest('GET', 'states')
+        if not isinstance(states, list) or len(states) > 30000:
+            raise ApprovalRequired('Loaded definitions cannot be listed; request normal approval.')
+        loaded = {}
+        for row in states:
+            target = row.get('entity_id', '')
+            if not target.startswith(domain + '.'):
+                continue
+            definition = self.definition(target)
+            identifier = definition.get('id') if domain == 'automation' else target.split('.')[1]
+            if not isinstance(identifier, str) or identifier in loaded:
+                raise ApprovalRequired('Loaded identifiers cannot be compared; request normal approval.')
+            loaded[identifier] = definition
+        return {key: value for key, value in proposed.items() if key not in loaded or value != loaded[key]}
+
+    @staticmethod
+    def read_reload_yaml(path, includes=False):
+        """Read bounded ordinary files; accept only root include markers, never resolve tags."""
+        class Loader(yaml.SafeLoader):
+            pass
+        if includes:
+            Loader.add_constructor('!include', lambda loader, node: {'include': loader.construct_scalar(node)})
+            Loader.add_constructor('!secret', lambda loader, node: {'secret_reference': loader.construct_scalar(node)})
+        try:
+            with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), 'rb') as stream:
+                if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                    raise ValueError()
+                raw = stream.read(524289)
+            if len(raw) > 524288:
+                raise ValueError()
+            node = yaml.compose(raw, Loader=Loader)
+            pending, seen = [node], set()
+            while pending:
+                item = pending.pop()
+                if item is None:
+                    continue
+                if id(item) in seen or len(seen) >= 20000:
+                    raise ValueError()
+                seen.add(id(item))
+                if isinstance(item, yaml.MappingNode):
+                    pending.extend(child for pair in item.value for child in pair)
+                elif isinstance(item, yaml.SequenceNode):
+                    pending.extend(item.value)
+            return yaml.load(raw, Loader=Loader)
+        except (OSError, ValueError, yaml.YAMLError):
+            raise ApprovalRequired('Reload files cannot be safely compared; request normal approval.') from None
 
     def validate_service(self, service, data):
         domain, name = service.split('.')
@@ -288,30 +376,38 @@ class Core:
         for old in retained[20:]:
             old.unlink()
 
+    def execute_flow(self, operation, target, data):
+        if operation == 'flow_start':
+            if data:
+                raise ApprovalRequired('Start the integration form first, then continue its flow.')
+            value = self.rest('POST', 'config/config_entries/flow', {'handler': target})
+        else:
+            current = self.rest('GET', 'config/config_entries/flow/' + target)
+            form = flow_result(current, data)
+            if 'handoff' in form:
+                return form
+            names = {field['name'] for field in form['fields']}
+            if set(data) - names or any(PRIVATE.search(key.lower()) for key in data):
+                raise ApprovalRequired('Submit only described nonsecret fields; finish other inputs in Home Assistant.')
+            value = self.rest('POST', 'config/config_entries/flow/' + target, data)
+        return flow_result(value, data)
+
     def execute(self, plan):
         self.remaining()
         operation, target, data = plan['operation'], plan.get('target'), plan.get('data', {})
         if operation in ('service', 'reload', 'check_config', 'backup', 'restart'):
-            service = (plan['service'] if operation == 'service' else target + '.reload' if operation == 'reload' else
-                       {'check_config': 'homeassistant.check_config', 'backup': 'backup.create', 'restart': 'homeassistant.restart'}[operation])
+            if operation == 'service':
+                service = plan['service']
+            elif operation == 'reload':
+                service = target + '.reload'
+            else:
+                service = {'check_config': 'homeassistant.check_config',
+                           'backup': 'backup.create', 'restart': 'homeassistant.restart'}[operation]
             payload = {**data, **({'entity_id': target} if operation == 'service' and target else {})}
             self.rest('POST', 'services/' + service.replace('.', '/'), payload)
             return {'status': 'request accepted'}
         if operation in ('flow_start', 'flow_continue'):
-            if operation == 'flow_start':
-                if data:
-                    raise ApprovalRequired('Start the integration form first, then continue its flow.')
-                value = self.rest('POST', 'config/config_entries/flow', {'handler': target})
-            else:
-                current = self.rest('GET', 'config/config_entries/flow/' + target)
-                form = flow_result(current, data)
-                if 'handoff' in form:
-                    return form
-                names = {field['name'] for field in form['fields']}
-                if set(data) - names or any(PRIVATE.search(key.lower()) for key in data):
-                    raise ApprovalRequired('Submit only described nonsecret fields; finish other inputs in Home Assistant.')
-                value = self.rest('POST', 'config/config_entries/flow/' + target, data)
-            return flow_result(value, data)
+            return self.execute_flow(operation, target, data)
         if operation in ('update_entity', 'rename_entity', 'delete_entity'):
             kind = 'remove' if operation == 'delete_entity' else 'update'
             self.ws('config/entity_registry/' + kind, entity_id=target, **data)
@@ -351,7 +447,17 @@ class Service:
         """Pin authority to the policy used to launch this exchange, never a later option."""
         policy = self.worker.protected_policy.effective_policy(options, self.worker.protected_policy.load_policy())
         with self.lock:
-            self.turns[task_id] = (capability, Authority(policy['sandbox'], policy['approval_policy'], policy['approvals_reviewer'], 'worker'))
+            source = getattr(self.worker, 'tasks', {}).get(task_id, {}).get('task_source', 'chat')
+            authority = Authority(policy['sandbox'], policy['approval_policy'], policy['approvals_reviewer'],
+                                  'worker' if source in ('chat', None) else 'unattended')
+            try:
+                snapshot = self.rules_snapshot()
+                if snapshot != self.confirmed_rules():
+                    raise ApprovalRequired('House rules need confirmation before a new exchange.')
+            except ApprovalRequired:
+                snapshot = None
+            self.turns[task_id] = {'capability': capability, 'authority': authority,
+                                   'rules': snapshot, 'changed': False}
 
     def end(self, task_id):
         with self.lock:
@@ -360,26 +466,81 @@ class Service:
     def settings(self):
         return Settings(Path(self.worker.DATA_ROOT) / 'codex-home/house-rules/permission-overrides.json')
 
-    def guards(self):
+    def rules_path(self):
+        return Path(self.worker.DATA_ROOT) / 'house-rules/confirmed.json'
+
+    def rules_snapshot(self):
+        """Bound the live file and refuse links, including replacements during the read."""
         path = Path(self.worker.CONFIG_ROOT) / 'AGENTS.md'
         try:
-            if path.is_symlink() or path.stat().st_size > 65536:
+            descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            with os.fdopen(descriptor, 'rb') as stream:
+                info = os.fstat(stream.fileno())
+                if not stat.S_ISREG(info.st_mode):
+                    raise OSError()
+                raw = stream.read(65537)
+            current = path.lstat()
+            if len(raw) > 65536 or (info.st_dev, info.st_ino) != (current.st_dev, current.st_ino):
                 raise OSError()
-            return path.read_text()
+            text = raw.decode('utf-8')
         except FileNotFoundError:
-            return ''
+            text = None
         except (OSError, UnicodeError):
-            raise ApprovalRequired('Owner guard rails are unavailable; request normal approval.') from None
+            raise ApprovalRequired('Owner guard rails could not be verified; request normal approval.') from None
+        digest = hashlib.sha256(json.dumps(text).encode()).hexdigest()
+        return {'text': text, 'sha256': digest}
+
+    def confirmed_rules(self):
+        path = self.rules_path()
+        try:
+            if path.parent.is_symlink() or path.is_symlink() or path.stat().st_size > 400000:
+                raise ValueError()
+            value = json.loads(path.read_text())
+            if (set(value) != {'text', 'sha256'} or value['text'] is not None and not isinstance(value['text'], str)
+                    or hashlib.sha256(json.dumps(value['text']).encode()).hexdigest() != value['sha256']):
+                raise ValueError()
+            return value
+        except FileNotFoundError:
+            # A fresh install with no instructions is a confirmed missing state.
+            if self.rules_snapshot()['text'] is None:
+                return self.rules_snapshot()
+        except (OSError, ValueError, TypeError):
+            pass
+        raise ApprovalRequired('House rules changed since confirmation. Review and confirm them in Settings.')
+
+    def confirm_rules(self, expected_digest=None):
+        snapshot = self.rules_snapshot()
+        if expected_digest is not None and expected_digest != snapshot['sha256']:
+            raise ApprovalRequired('House rules changed during review. Review them again.')
+        path = self.rules_path()
+        if path.parent.is_symlink() or path.is_symlink():
+            raise ApprovalRequired('The confirmed house-rules location is unsafe.')
+        path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+        descriptor, name = tempfile.mkstemp(prefix='.confirmed-', dir=path.parent)
+        try:
+            with os.fdopen(descriptor, 'w') as stream:
+                json.dump(snapshot, stream)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(name, path)
+        finally:
+            Path(name).unlink(missing_ok=True)
+
+    def guards(self):
+        snapshot = self.rules_snapshot()
+        if snapshot != self.confirmed_rules():
+            raise ApprovalRequired('House rules changed since confirmation. Review and confirm them in Settings.')
+        return snapshot['text'] or ''
 
     def guard_note(self):
         try:
-            mentioned = security_mentions_outside(self.guards())
-        except ApprovalRequired:
-            return 'Owner guard rails could not be verified. Actions require normal approval.'
-        if mentioned:
-            return ('Security and people requires normal approval because the instructions file '
-                    'mentions a security target outside the marked guard-rails block. '
-                    'Put selected limits inside the owner-selected agent guard rails block.')
+            text = self.guards()
+            rules = guard_rules(text)
+            lines = [line for line in selected_guard_lines(text) if line in GUARD_LINES]
+            if rules:
+                return 'Selected block limits suspend actions in these domains: ' + ', '.join(sorted(rules)) + '. ' + ' '.join(lines)
+        except ApprovalRequired as error:
+            return str(error)
         return ''
 
     def audit(self, task_id, event):
@@ -418,10 +579,21 @@ class Service:
                     raise ApprovalRequired('The managed launch policy refuses this action.')
                 policy = worker.protected_policy.effective_policy(options, worker.protected_policy.load_policy())
                 current = Authority(policy['sandbox'], policy['approval_policy'], policy['approvals_reviewer'], 'worker')
-                pinned_capability, authority = self.turns.get(task_id, ('', Authority()))
-                if pinned_capability != capability or authority != current:
+                turn = self.turns.get(task_id, {})
+                authority = turn.get('authority', Authority())
+                if turn.get('capability') != capability or authority != current:
                     raise ApprovalRequired('Launch permissions changed; request normal approval.')
-                engine = Engine(self.settings(), Core(worker), self.guards, lambda event: self.audit(task_id, event))
+                def pinned_guards():
+                    try:
+                        live_rules = self.rules_snapshot()
+                    except ApprovalRequired:
+                        turn['changed'] = True
+                        raise
+                    if turn.get('changed') or live_rules != turn.get('rules'):
+                        turn['changed'] = True
+                        raise ApprovalRequired('House rules changed during this exchange; start a new exchange after confirming.')
+                    return self.guards()
+                engine = Engine(self.settings(), Core(worker), pinned_guards, lambda event: self.audit(task_id, event))
                 return engine.dispatch(payload['arguments'], authority, lambda: worker.ha_data.active(task_id, capability))
             except Exception:
                 return {'ok': False, 'approval_required': True, 'reason': 'Action authorization is unavailable; request normal approval.'}
@@ -463,8 +635,14 @@ def register(worker):
                 if request.method == 'POST':
                     if request.content_length is None or request.content_length > 1024:
                         raise ValueError()
-                    service.settings().save(request.get_json(silent=True))
+                    payload = request.get_json(silent=True)
+                    if isinstance(payload, dict) and set(payload) == {'confirm_rules', 'expected_digest'} and payload['confirm_rules'] is True:
+                        service.confirm_rules(payload['expected_digest'])
+                    else:
+                        service.settings().save(payload)
+                        service.confirm_rules()
                 response = jsonify({'ok': True, 'groups': service.settings().read(), 'guard_note': service.guard_note(),
+                                    'rule_digest': service.rules_snapshot()['sha256'],
                                     'remote': 'Remote turns require normal approval in this version.'})
                 response.headers['Cache-Control'] = 'no-store'
                 return response

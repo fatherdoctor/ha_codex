@@ -124,51 +124,24 @@ def bounded_json(value, maximum=65536):
     return text
 
 
-# Match vocabulary, not intent: even a benign mention disables group 5.
-SECURITY_MENTION = re.compile(
-    r'(?<![a-z0-9])(?:locks?|alarms?|garages?|doors?|covers?|cameras?|notify|'
-    r'notifications?|messages?|texts?|alarm_control_panel|persistent_notification|input_text)'
-    r'(?![a-z0-9])', re.I)
-
-
-def outside_guard_text(text):
+def selected_guard_lines(text):
+    """Read only the exact marked block; other prose remains the agent's instructions."""
     first, last = MARKERS
     if first not in text and last not in text:
-        return text
+        return []
     if text.count(first) != 1 or text.count(last) != 1 or text.index(last) < text.index(first):
         raise ApprovalRequired('Owner guard rails could not be verified; request normal approval.')
-    before, body = text.split(first)
-    _selected, after = body.split(last)
-    return before + '\n' + after
-
-
-def security_mentions_outside(text):
-    return bool(SECURITY_MENTION.search(outside_guard_text(text)))
+    selected = text.split(first, 1)[1].split(last, 1)[0]
+    return [line.strip() for line in selected.splitlines() if line.strip()]
 
 
 def guard_rules(text):
-    """Only the kit's exact selected limits are machine-verifiable; custom limits ask."""
-    if not text.strip():
-        return set()
-    outside = outside_guard_text(text)
-    refused = set(SECURITY) if SECURITY_MENTION.search(outside) else set()
-    first, last = MARKERS
-    if first not in text and last not in text:
-        if re.search(r'\b(?:never|do not|must not|ask|approval|guard.?rails)\b', text, re.I):
-            raise ApprovalRequired('Custom owner guard rails require normal approval.')
-        return refused
-    if text.count(first) != 1 or text.count(last) != 1 or text.index(last) < text.index(first):
-        raise ApprovalRequired('Owner guard rails could not be verified; request normal approval.')
-    before, body = text.split(first)
-    selected, after = body.split(last)
-    if re.search(r'\b(?:never|do not|must not|ask|approval|guard.?rails)\b', before + after, re.I):
-        raise ApprovalRequired('Additional custom owner limits require normal approval.')
-    for line in selected.splitlines():
-        if not line.strip():
-            continue
-        if line.strip() not in GUARD_LINES:
-            raise ApprovalRequired('Custom owner guard rails require normal approval.')
-        refused.update(GUARD_LINES[line.strip()])
+    """Only exact selected limits are machine-verifiable; custom block lines ask."""
+    refused = set()
+    for line in selected_guard_lines(text):
+        if line not in GUARD_LINES:
+            raise ApprovalRequired('Custom limits in the guard-rails block require normal approval.')
+        refused.update(GUARD_LINES[line])
     return refused
 
 
@@ -177,10 +150,14 @@ def service_group(service):
         raise ApprovalRequired('Unsupported action; request normal approval.')
     domain, name = service.split('.')
     if domain == 'notify' or (domain == 'script' and name not in ('reload', 'turn_off', 'toggle')):
-        return 'security' if domain == 'notify' else 'bigger'
+        if domain == 'notify':
+            return 'security'
+        return 'bigger'
     if name not in SERVICES.get(domain, set()):
         raise ApprovalRequired('Unsupported action; request normal approval.')
-    return 'security' if domain in SECURITY else 'everyday'
+    if domain in SECURITY:
+        return 'security'
+    return 'everyday'
 
 
 class Engine:
@@ -223,7 +200,9 @@ class Engine:
                 if not still_active() or groups != self.settings.read() or rules != guard_rules(self.guards()):
                     raise ApprovalRequired('Permissions changed or the exchange ended; request normal approval.')
                 for target, digest in checks.items():
-                    if self.definition_digest(self.backend.definition(target)) != digest:
+                    value = (self.backend.reload_changes(target[7:]) if target.startswith('reload:')
+                             else self.backend.definition(target))
+                    if self.definition_digest(value) != digest:
                         raise ApprovalRequired('An indirect action changed during checking; request normal approval.')
                 # A failed audit must stop BEFORE the write. The callback sees no payload or raw target.
                 self.observer(event('requested'))
@@ -254,11 +233,19 @@ class Engine:
         if not groups[group]:
             raise ApprovalRequired('This action group is off; request normal approval.')
 
-    def targets(self, selector):
-        rows = self.backend.resolve(selector)
+    def targets(self, selector, domain=None):
+        rows = self.backend.resolve(selector, service_domain=domain)
         if not isinstance(rows, list) or not rows or len(rows) > 64:
             raise ApprovalRequired('Targets could not be fully resolved; request normal approval.')
-        return list(dict.fromkeys(entity(value) for value in rows))
+        if domain and isinstance(selector, dict) and set(selector) <= {'area_id', 'device_id', 'label_id'}:
+            rows = [value for value in rows if isinstance(value, str) and value.split('.')[0] == domain]
+        targets = list(dict.fromkeys(entity(value) for value in rows))
+        if domain and isinstance(selector, dict) and set(selector) <= {'area_id', 'device_id', 'label_id'}:
+            if not targets:
+                raise ApprovalRequired('No targets of the service domain were found; request normal approval.')
+        for target in targets:
+            self.backend.require_entity(target)
+        return targets
 
     @staticmethod
     def guard_effect(domain, rules):
@@ -274,7 +261,7 @@ class Engine:
         if domain == 'script' and service != 'script.turn_on':
             selector = [service]
         self.guard_effect(domain, rules)
-        targets = [] if domain in ('notify', 'persistent_notification') else self.targets(selector)
+        targets = [] if domain in ('notify', 'persistent_notification') else self.targets(selector, domain)
         if any(target.split('.')[0] != domain for target in targets):
             raise ApprovalRequired('The service and target domains disagree; request normal approval.')
         if domain in ('script', 'scene', 'automation'):
@@ -286,22 +273,24 @@ class Engine:
                     raise ApprovalRequired('An indirect action definition is unavailable; request normal approval.')
                 checks[target] = self.definition_digest(definition)
                 if domain == 'scene':
-                    effects = definition.get('entities')
-                    if not isinstance(effects, dict) or not effects:
-                        raise ApprovalRequired('Scene targets could not be checked; request normal approval.')
-                    for nested in effects:
-                        nested = entity(nested)
-                        nested_domain = nested.split('.')[0]
-                        # Unknown state-to-service behavior (including nested scenes) is not guessed.
-                        nested_group = 'security' if nested_domain in SECURITY else 'everyday'
-                        if nested_domain not in {'light', 'switch', 'input_boolean'} | SECURITY:
-                            raise ApprovalRequired('Scene effects require normal approval.')
-                        self.allowed(nested_group, groups)
-                        self.guard_effect(nested_domain, rules)
+                    self.check_scene(definition, groups, rules)
                 else:
                     sequence = definition.get('sequence' if domain == 'script' else 'actions', definition.get('action'))
                     self.sequence(sequence, groups, rules, checks, trail + (target,))
         return targets
+
+    def check_scene(self, definition, groups, rules):
+        """Every loaded or newly configured member must pass its own group and limit."""
+        effects = definition.get('entities')
+        if not isinstance(effects, dict) or not effects:
+            raise ApprovalRequired('Scene targets could not be checked; request normal approval.')
+        for nested in effects:
+            domain = entity(nested).split('.')[0]
+            if domain not in {'light', 'switch', 'input_boolean'} | SECURITY:
+                raise ApprovalRequired('Scene effects require normal approval.')
+            group = 'security' if domain in SECURITY else 'everyday'
+            self.allowed(group, groups)
+            self.guard_effect(domain, rules)
 
     def sequence(self, sequence, groups, rules, checks, trail):
         if not isinstance(sequence, list) or len(sequence) > 128:
@@ -335,13 +324,31 @@ class Engine:
             else:
                 raise ApprovalRequired('Unknown or dynamic indirect actions require normal approval.')
 
+    def check_reload(self, domain, groups, rules, checks):
+        """Check changed definitions; leave unchanged owner definitions alone."""
+        if domain not in ('automation', 'script', 'scene'):
+            return
+        changes = self.backend.reload_changes(domain)
+        checks['reload:' + domain] = self.definition_digest(changes)
+        for identifier, definition in changes.items():
+            if domain == 'scene':
+                self.check_scene(definition, groups, rules)
+            else:
+                key = 'sequence' if domain == 'script' else 'actions'
+                sequence = definition.get(key, definition.get('action'))
+                self.sequence(sequence, groups, rules, checks, (identifier,))
+
     def plan(self, request, groups, rules, checks):
         operation = request['operation']
         target, data = request.get('target'), request.get('data', {})
         if not isinstance(data, dict):
             raise ApprovalRequired('Action data must be an object; request normal approval.')
-        group = ('apply' if operation in ('reload', 'check_config', 'flow_start', 'flow_continue') else
-                 'organize' if operation in ('update_entity', 'update_device', 'save_dashboard') else 'bigger')
+        if operation in ('reload', 'check_config', 'flow_start', 'flow_continue'):
+            group = 'apply'
+        elif operation in ('update_entity', 'update_device', 'save_dashboard'):
+            group = 'organize'
+        else:
+            group = 'bigger'
         if operation == 'service':
             service = request.get('service')
             targets = self.effect(service, target, data, groups, rules, checks)
@@ -353,8 +360,10 @@ class Engine:
         self.allowed(group, groups)
         if 'external' in rules and operation not in ('reload', 'check_config', 'update_entity', 'update_device'):
             raise ApprovalRequired('The external-publication guard rail requires normal approval.')
-        if operation == 'reload' and (target not in RELOADS or data):
-            raise ApprovalRequired('Unsupported reload request; request normal approval.')
+        if operation == 'reload':
+            if target not in RELOADS or data:
+                raise ApprovalRequired('Unsupported reload request; request normal approval.')
+            self.check_reload(target, groups, rules, checks)
         if operation in ('check_config', 'backup', 'restart') and (target is not None or data):
             raise ApprovalRequired('This operation takes no target or data; request normal approval.')
         if operation in ('flow_start', 'flow_continue'):
@@ -377,8 +386,11 @@ class Engine:
                 if domain in rules or (domain in SECURITY and not groups['security']):
                     raise ApprovalRequired('A device entity requires normal approval.')
         self.backend.validate_operation(operation, target, data)
-        result = {'operation': operation, 'group': group, 'target': target, 'data': data, 'description': operation.replace('_', ' ') + (
-                      ' for ' + (target or 'default dashboard') if target is not None else '')}
+        description = operation.replace('_', ' ')
+        if target is not None:
+            description += ' for ' + (target or 'default dashboard')
+        result = {'operation': operation, 'group': group, 'target': target,
+                  'data': data, 'description': description}
         if operation == 'rename_entity':
             result['description'] += ' to ' + data['new_entity_id']
             result['references'] = self.backend.references(target)

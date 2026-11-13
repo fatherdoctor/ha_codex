@@ -2942,6 +2942,7 @@ function settingsError(error) {
   result.textContent = String(error.message || error);
 }
 let permissionGroups = null;
+let permissionRuleDigest = null;
 const permissionSwitches = () => [...document.querySelectorAll("[data-permission-group]")];
 function permissionTheme() {
   try {
@@ -2961,6 +2962,7 @@ async function loadPermissionOverrides() {
   try {
     const data = await api("permissions-overrides");
     permissionGroups = data.groups;
+    permissionRuleDigest = data.rule_digest;
     $("permissions-overrides-guard-note").textContent = data.guard_note || "";
     $("permissions-overrides-guard-note").hidden = !data.guard_note;
     controls.forEach((input) => {
@@ -2974,6 +2976,17 @@ async function loadPermissionOverrides() {
     $("permissions-overrides-result").textContent = "Permissions overrides are unavailable. Administrator access is required.";
   }
 }
+$("confirm-permission-rules").onclick = async () => {
+  try {
+    const rules = await api("agents");
+    if (!window.confirm("Review these house rules before confirming:\n\n" + (rules.content || "No instructions file."))) return;
+    await api("permissions-overrides", { confirm_rules: true, expected_digest: permissionRuleDigest });
+    await loadPermissionOverrides();
+    $("permissions-overrides-result").textContent = "House rules confirmed. Start a new exchange to use them.";
+  } catch (_error) {
+    $("permissions-overrides-result").textContent = "Could not confirm house rules. Review them again.";
+  }
+};
 permissionSwitches().forEach((input) => input.addEventListener("change", async () => {
   if (!permissionGroups) return;
   const proposed = { ...permissionGroups, [input.dataset.permissionGroup]: input.checked };
@@ -2981,6 +2994,7 @@ permissionSwitches().forEach((input) => input.addEventListener("change", async (
   try {
     const data = await api("permissions-overrides", proposed);
     permissionGroups = data.groups;
+    permissionRuleDigest = data.rule_digest;
     $("permissions-overrides-guard-note").textContent = data.guard_note || "";
     $("permissions-overrides-guard-note").hidden = !data.guard_note;
     $("permissions-overrides-result").textContent = "Permissions overrides saved.";

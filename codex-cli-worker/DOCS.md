@@ -810,18 +810,37 @@ it does not provide shell commands, arbitrary URLs or a Supervisor tool. A succe
 action, and the assistant must name it in its answer. Refusals fall back to normal native approval. Never
 retry an unknown outcome automatically: inspect the affected state before any further attempt.
 
-Groups apply to worker-launched Default exchanges (workspace-write with on-request user approvals).
+Groups apply only to person-started Default exchanges (workspace-write with on-request user approvals).
+Scheduled and lead-channel runs keep normal prompts, even when their launch mode permits writes.
 Read only never pre-approves writes. Remote ChatGPT turns cannot establish exact pinned permission
 metadata in this version and therefore require normal approval. Auto-review and Full access remain
 future modes; this feature does not enable either or change the managed policy.
 
-Owner-selected guard rails in `/config/AGENTS.md` win over every enabled group. Unknown/custom limits,
+Only the exact marked guard-rails block in `/config/AGENTS.md` controls these groups. Other instructions
+remain for the assistant to follow in chat. Settings identifies each selected block line that suspends
+actions; unknown block lines suspend all groups. An administrator saves the groups or reviews and confirms
+the rules in Settings. The worker keeps the confirmed text and SHA-256 under `/data/house-rules/`, outside
+the agent workspace. A missing file is a confirmed state too. Any edit, deletion or symlink since confirmation
+suspends all groups until review and confirmation; a change observed within an exchange suspends that
+exchange permanently, even if the file is restored. Start a new exchange after confirming.
+
+Unknown/custom block limits,
 templates, unresolved or changing indirect definitions, mixed unsupported targets and unavailable Core
-preflight data require normal approval. Scenes and automation/script actions are checked transitively;
+preflight data require normal approval. Automation and script actions come from Core
+`automation/config` and `script/config` loaded snapshots, not disk. Scenes use their loaded state members.
+Scenes and automation/script actions are checked transitively;
 there is no atomic Core transaction preventing another actor changing a definition after the last check.
 The tool cannot change its own settings/policy, access credential entities or invoke Supervisor actions.
 Dashboard edits save a private backup first; an entity-ID change returns Core's related-item report,
-which does not cover arbitrary text or external systems. Configuration flow results omit credentials.
+which does not cover arbitrary text or external systems. Configuration flow results omit credentials;
+only host, port, name, username, title and scan_interval fields may be filled. Any other field, a password
+selector or a secret flag hands the whole step to Home Assistant without submitting values.
+
+Automation/script reloads compare standard YAML includes with loaded definitions and check only new or
+changed definitions; unchanged definitions are the owner’s and are not re-judged. Custom layouts, includes
+that cannot be safely compared and loaded scene values require normal approval. Core exposes scene
+membership but not its loaded member values, so scene reloads cannot be pre-approved in this version.
+Everyday control includes any entity exposed as a switch, including a switch used as a relay.
 
 Settings are private, atomic booleans under `/data/codex-home/house-rules/permission-overrides.json`.
 Only a verified administrator on the Ingress page can read or save them; the worker API token does not
