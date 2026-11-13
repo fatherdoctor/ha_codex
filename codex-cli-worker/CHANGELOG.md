@@ -10,6 +10,7 @@
   and compact in bounded batches to limit storage wear; reuse unchanged credential-file snapshots.
   Leave successful status/progress access polls out while retaining warnings and failed requests;
   recover from bad settings and prevent completed stream lines from crossing Clear.
+- Document the line-based command check’s known YAML blind spots and the protections that still apply.
 
 - Add the Quiet Studio chat layout with Home Assistant themes, a bottom composer, photo/file menu,
   per-chat narrowing permissions, thread status and archive/restore. Separate remote connection and
