@@ -24,9 +24,18 @@ When reporting a bug, please include:
 - Whether you installed through HACS, manually, or from the development branch.
 - Your architecture, such as `amd64` or `aarch64`.
 - Clear steps to reproduce the issue.
-- Relevant logs from Home Assistant or the Codex for Home Assistant app.
+- The date and time of the failed interaction, with your time zone.
+- Relevant logs (see "Getting your logs" below).
 - What you expected to happen.
 - What actually happened.
+
+### Getting your logs
+
+Logs are usually the fastest way to find a bug. On Home Assistant 2026.11, collect whichever of these apply:
+
+- **Worker app log:** go to Settings, Apps, Codex for Home Assistant, then the Log tab. Copy the lines around the time of the failure.
+- **Integration diagnostics:** go to Settings, Devices & services, Codex, open the three-dot menu, and choose Download diagnostics. Attach the downloaded file to the issue.
+- **Home Assistant Core log:** go to Settings, System, Logs and type `codex` in the filter box. Copy the matching lines.
 
 Please remove secrets, tokens, URLs, device codes, personal paths, and private Home Assistant configuration before sharing logs or screenshots.
 

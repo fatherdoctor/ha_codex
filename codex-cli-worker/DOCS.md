@@ -550,6 +550,16 @@ The worker disables Codex update checks at startup. Codex CLI is installed and v
 
 A missing window has an `unknown` sensor state and a `reported: false` attribute. The existing 5-hour entities and worker fields remain in place so upgrades do not break automations on accounts that still report or reference them. Diagnostic excerpts remove account, email, and session identifiers before being exposed.
 
+## Reporting a bug
+
+A report with logs is much easier to fix. On Home Assistant 2026.11:
+
+1. Note the date and time of the failed interaction, with your time zone.
+2. Open the worker app log: Settings, Apps, Codex for Home Assistant, Log tab. Copy the lines around that time.
+3. Download the integration diagnostics: Settings, Devices & services, Codex, three-dot menu, Download diagnostics. Attach the file to the issue.
+4. For problems that may involve Home Assistant Core, open Settings, System, Logs, type `codex` in the filter box, and copy the matching lines.
+5. Remove secrets, tokens, device codes, private URLs, and personal configuration before posting, then [open an issue](https://github.com/fatherdoctor/ha_codex/issues/new/choose).
+
 ## Notifications
 
 Leave `notify_service` unset or empty to use Home Assistant persistent notifications for task completion, failures, questions, and permission requests. If you want push notifications, set it to a Home Assistant notify service such as `notify.mobile_app_your_phone`.
