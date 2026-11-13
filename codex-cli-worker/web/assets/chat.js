@@ -35,6 +35,7 @@ const state = {
   chatSettings: new Map(),
   settingsBusy: false,
   activity: null,
+  permissionModes: new Map(),
 };
 const effortLabels = {
   low: "Low",
@@ -605,6 +606,7 @@ function controls() {
   $("notice").textContent = notice;
   $("notice").hidden = !notice;
   renderPicker();
+  document.dispatchEvent(new Event("chat-view"));
 }
 /** Build the small pin icon shown beside pinned chat titles. */
 function pinIcon() {
@@ -787,7 +789,7 @@ async function loadList(older = false) {
   const count = older ? 20 : Math.max(20, Math.min(500, state.chats.length));
   const offset = older ? state.chats.length : 0;
   const data = await api(
-    `tasks?summary=true&order=pinned_first&limit=${count}&offset=${offset}`,
+    `tasks?summary=true&order=pinned_first&archived=${Boolean(state.archived)}&limit=${count}&offset=${offset}`,
   );
   // A full refresh covers every loaded chat, so drop entries the server no
   // longer returns, such as a chat deleted here or in another tab.
@@ -805,6 +807,14 @@ async function loadList(older = false) {
   // Approval panels in the open chat depend on whether any chat is working.
   if (activeChanged && state.task) renderTask();
   controls();
+}
+/** Keep document ids subject to the same validation as image ids. */
+function messageAttachments(list) {
+  return (Array.isArray(list) ? list : []).filter(item =>
+    item && ['image', 'file'].includes(item.kind) && /^[0-9a-f]{32}$/.test(item.attachment_id));
+}
+function selectedPermissionMode() {
+  return state.permissionModes.get(state.id) || state.task?.permission_mode || 'default';
 }
 /** Return the image attachments in a list that carry a well-formed id. */
 function imageAttachments(list) {
@@ -840,6 +850,13 @@ function renderAttachments(
 ) {
   const list = textNode("div", "", className);
   for (const attachment of attachments) {
+    if (attachment.kind === 'file') {
+      const file = textNode('a', `${attachment.name} · ${sizeLabel(attachment.size)} ↓`, 'document-attachment');
+      file.href = attachmentUrl(taskId, attachment, true);
+      file.download = attachment.name || 'document';
+      list.append(file);
+      continue;
+    }
     const figure = textNode("figure", "", "attachment");
     const link = document.createElement("a");
     link.href = attachmentUrl(taskId, attachment);
@@ -1338,7 +1355,7 @@ function renderTask(force = false) {
   for (const turn of turns) {
     const latest = turn === turns[turns.length - 1];
     const exchange = textNode("section", "", "exchange");
-    const sent = imageAttachments(turn.prompt_attachments);
+    const sent = messageAttachments(turn.prompt_attachments);
     if (sent.length)
       exchange.append(
         renderAttachments(
@@ -1542,7 +1559,7 @@ function renderQueued(taskId, entry) {
   const label = textNode("p", "", "queued-label");
   label.append(queueIcon(), textNode("span", "In queue · not sent yet"));
   exchange.append(label);
-  const sent = imageAttachments(entry.prompt_attachments);
+  const sent = messageAttachments(entry.prompt_attachments);
   if (sent.length) {
     const images = renderAttachments(
       taskId,
@@ -1982,6 +1999,7 @@ async function selectChat(id, restoring = false) {
     $("chat-title").textContent = "New chat";
     $("chat-status").textContent = "Your Home Assistant, with a little help.";
     $("messages").innerHTML = welcome; // Static, application-owned welcome content only.
+    document.dispatchEvent(new Event("chat-view"));
     return;
   }
   $("chat-title").textContent =
@@ -2056,28 +2074,29 @@ function closeChatMenu(focus = false) {
     button.setAttribute("aria-expanded", "false");
   for (const row of $("chat-list").querySelectorAll(".chat-row.menu-open"))
     row.classList.remove("menu-open");
+  trigger?.setAttribute("aria-expanded", "false");
   if (focus && trigger?.isConnected) trigger.focus();
 }
 /** Show the actions for one chat, anchored to its button or as a sheet on phones. */
 function openChatMenu(id, trigger, point = null) {
-  const chat = chatById(id);
-  if (!chat) return;
+  const chat = chatById(id) || (id === state.id ? state.task : null);
+  if (id && !chat) return;
   if (id === menu.id && !$("chat-menu").hidden) return;
   closeChatMenu();
   closePicker();
   menu.id = id;
   menu.trigger =
     trigger ||
-    $("chat-list").querySelector(`[data-menu-for="${CSS.escape(id)}"]`);
+    $("chat-list").querySelector(`[data-menu-for="${CSS.escape(id || "")}"]`);
   menu.point = point;
   const panel = $("chat-menu");
-  $("chat-menu-title").textContent = chat.title || "Untitled chat";
-  panel.querySelector('[data-action="pin"]').textContent = chat.pinned
+  $("chat-menu-title").textContent = chat?.title || "New chat";
+  panel.querySelector('[data-action="pin"]').textContent = chat?.pinned
     ? "Unpin chat"
     : "Pin chat";
   const remove = panel.querySelector('[data-action="delete"]');
   const working =
-    ["queued", "running"].includes(chat.status) || state.active === id;
+    ["queued", "running"].includes(chat?.status) || state.active === id;
   remove.disabled = working;
   remove.title = working ? "Stop this task before deleting it." : "";
   const sheet = matchMedia("(max-width:700px)").matches;
@@ -2088,6 +2107,10 @@ function openChatMenu(id, trigger, point = null) {
   if (!sheet) positionChatMenu();
   menu.trigger?.setAttribute("aria-expanded", "true");
   menu.trigger?.closest(".chat-row")?.classList.add("menu-open");
+  for (const action of ["pin", "rename", "delete", "copy-id", "archive"])
+    panel.querySelector(`[data-action="${action}"]`).disabled = !id ||
+      (["delete", "archive"].includes(action) && (working || Boolean(state.task?.queued_message)));
+  panel.querySelector('[data-action="archive"]').textContent = chat?.archived ? "Restore chat" : "Archive";
   menuItems()[0]?.focus();
 }
 /** Stop a pending long-press timer and forget where the press started. */
@@ -2218,6 +2241,7 @@ $("chat-menu").addEventListener("click", async (event) => {
   if (action === "pin") await togglePin(id);
   else if (action === "rename") openRename(id);
   else if (action === "delete") openDelete(id);
+  else document.dispatchEvent(new CustomEvent("thread-action", {detail: {action, id}}));
 });
 /** Pin or unpin a chat through the worker API and re-sort the list. */
 async function togglePin(id) {
@@ -2325,6 +2349,7 @@ $("composer").addEventListener("submit", async (event) => {
     const attachments = await Promise.all(
       state.files.map(async (upload) => ({
         name: upload.name,
+        kind: upload.kind || "image",
         data: await encodeUpload(upload),
       })),
     );
@@ -2334,6 +2359,7 @@ $("composer").addEventListener("submit", async (event) => {
         ...(id ? { message } : { prompt: message }),
         ...(attachments.length ? { attachments } : {}),
         chat_settings: selectedSettings(),
+        permission_mode: selectedPermissionMode(),
         // If another chat is working, the worker holds this message in its queue.
         queue: true,
       },
@@ -2372,6 +2398,17 @@ function encodeUpload(upload) {
 }
 /** Shrink an image whose longest edge exceeds the limit; other images pass through. */
 async function prepareUpload(file) {
+  if (file.documentUpload) {
+    if (!file.size) {
+      const bytes = await file.arrayBuffer().catch(() => null);
+      if (!bytes?.byteLength) throw new Error('The file is empty or could not be read from the picker.');
+      file = new File([bytes], file.name || 'document.txt', {type:file.type});
+    }
+    if (file.size > UPLOAD_MAX_BYTES) throw new Error('Files must contain 1 byte to 10 MB.');
+    if (!/\.(txt|md|ya?ml|json|csv|log|py|js|html|css|xml|pdf)$/i.test(file.name))
+      throw new Error('Choose a text, source, configuration or PDF file.');
+    return {id: crypto.randomUUID(), name:file.name, size:file.size, blob:file, kind:'file', url:''};
+  }
   const type = file.type === "image/jpg" ? "image/jpeg" : file.type;
   // Drag-and-drop and clipboard sources can omit the type; the worker sniffs the bytes.
   if (type && !UPLOAD_TYPES.includes(type))
@@ -2502,9 +2539,9 @@ function renderPending() {
   strip.replaceChildren();
   for (const upload of state.files) {
     const item = textNode("div", "", "pending-file");
-    const img = document.createElement("img");
-    img.src = upload.url;
-    img.alt = "";
+    const img = document.createElement(upload.kind === 'file' ? 'span' : 'img');
+    if (upload.kind === 'file') img.textContent = '▤';
+    else { img.src = upload.url; img.alt = ''; }
     const name = textNode("span", upload.name, "pending-name");
     name.title = `${upload.name} · ${sizeLabel(upload.size)}`;
     const remove = textNode("button", "×", "pending-remove");
@@ -2526,8 +2563,11 @@ if (
   /Android/.test(navigator.userAgent) &&
   /; wv\)|Home Assistant/.test(navigator.userAgent)
 )
-  $("file-input").removeAttribute("multiple");
-$("attach").onclick = () => $("file-input").click();
+  for (const id of ["file-input", "document-input"]) $(id).removeAttribute("multiple");
+$("attach").onclick = () => {
+  const panel = $('plus-menu'); panel.hidden = !panel.hidden;
+  $('attach').setAttribute('aria-expanded', String(!panel.hidden));
+};
 /** Feed picked, pasted, or dropped files to addUploads and report any surprise. */
 async function acceptFiles(fileList) {
   try {
@@ -2803,6 +2843,7 @@ async function loadPause() {
   renderPause(await api("pause"));
 }
 let remoteTimer;
+let remoteCardKey = "";
 /**
  * Show the remote-control state in the settings dialog: on or off, the
  * machine name, the pairing code as large text and a QR code, and the recent
@@ -2836,7 +2877,11 @@ function renderRemoteControl(rc) {
     $(id).hidden = !text;
   }
   const card = $("remote-control-card");
-  card.replaceChildren();
+  const key = JSON.stringify([name, rc.enabled, rc.pairing_code, rc.pairing_qr, rc.pairing_url]);
+  // Polling must not replace the code while a person copies it or scans its QR.
+  if (key !== remoteCardKey) {
+    remoteCardKey = key;
+    card.replaceChildren();
   if (rc.enabled && rc.pairing_code) {
     card.append(
       textNode("p", `Pairing code for “${name}”:`),
@@ -2849,6 +2894,7 @@ function renderRemoteControl(rc) {
       img.className = "pairing-qr";
       card.append(img);
     }
+  }
   }
   $("remote-control-start").hidden = rc.enabled;
   $("remote-control-start").disabled = !rc.available;
@@ -2868,6 +2914,7 @@ function renderRemoteControl(rc) {
   $("remote-control-findings").hidden = !findings.length;
   $("remote-control-log").textContent = (rc.log || []).join("\n");
   $("remote-control-log-box").hidden = !(rc.log || []).length;
+  document.dispatchEvent(new CustomEvent("remote-view", {detail: rc}));
 }
 for (const [id, action] of [
   ["remote-control-start", "start"],
@@ -2891,7 +2938,8 @@ for (const [id, action] of [
 }
 /** Show an error in the result line of the settings dialog. */
 function settingsError(error) {
-  $("settings-result").textContent = String(error.message || error);
+  const result = $("connection-dialog").open ? $("connection-result") : $("settings-result");
+  result.textContent = String(error.message || error);
 }
 $("settings-button").onclick = async () => {
   try {
@@ -2910,11 +2958,7 @@ $("settings-button").onclick = async () => {
     loadRemoteControl(),
     loadPause(),
     loadBrowserPermissions(),
-    api("agents").then((data) => {
-      $("agents").value = data.content || "";
-      $("agents").disabled = false;
-      $("save-agents").disabled = false;
-    }),
+
   ]);
   for (const result of results)
     if (result.status === "rejected") settingsError(result.reason);
@@ -2959,17 +3003,6 @@ for (const id of ["pause", "resume"]) {
     }
   };
 }
-$("save-agents").onclick = async () => {
-  $("save-agents").disabled = true;
-  try {
-    await api("agents", { content: $("agents").value });
-    $("settings-result").textContent = "Instructions saved.";
-  } catch (error) {
-    settingsError(error);
-  } finally {
-    $("save-agents").disabled = false;
-  }
-};
 let restore = Promise.resolve();
 /** Poll the list and the open chat; the first pass waits for the restored chat. */
 async function refresh() {
