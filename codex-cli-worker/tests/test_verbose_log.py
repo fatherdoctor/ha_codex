@@ -79,6 +79,65 @@ class StoreTests(unittest.TestCase):
         self.assertTrue(result[0].endswith('record-1101'))
         self.assertTrue(result[-1].endswith('new record'))
 
+    def test_inflight_capture_cannot_cross_clear_or_disable_cycle(self):
+        self.enable()
+        for operation in ('clear', 'disable_cycle'):
+            with self.subTest(operation=operation):
+                entered, release = threading.Event(), threading.Event()
+                def credentials():
+                    entered.set()
+                    if not release.wait(5):
+                        raise RuntimeError('Synthetic provider timed out')
+                    return self.secrets
+                self.store.secrets = credentials
+                thread = threading.Thread(target=self.store.capture, args=('stdout', 'OLD_PRIVATE_DATA'))
+                thread.start()
+                try:
+                    self.assertTrue(entered.wait(5))
+                    if operation == 'clear':
+                        self.store.clear()
+                    else:
+                        self.store.configure({'enabled': False, 'lines': 500})
+                        self.enable()
+                finally:
+                    release.set()
+                    thread.join(5)
+                self.assertFalse(thread.is_alive())
+                self.store.secrets = lambda: self.secrets
+                self.assertNotIn(b'OLD_PRIVATE_DATA', self.store.export())
+                self.assertTrue(self.store.status()['enabled'])
+                self.store.clear()
+
+    def test_capture_after_clear_or_disable_cycle_is_retained(self):
+        self.enable()
+        for operation in ('clear', 'disable_cycle'):
+            with self.subTest(operation=operation):
+                self.store.capture('stdout', 'old record')
+                if operation == 'clear':
+                    self.store.clear()
+                else:
+                    self.store.configure({'enabled': False, 'lines': 500})
+                    self.enable()
+                self.store.capture('stdout', 'new record')
+                self.assertIn(b'new record', self.store.export())
+                self.store.clear()
+
+    def test_restart_preserves_unicode_separators_inside_physical_records(self):
+        self.enable(lines=100)
+        for separator in ('\u2028', '\u2029', '\x85', '\v', '\f'):
+            with self.subTest(separator=repr(separator)):
+                self.store.clear()
+                text = separator.join(f'segment-{i:03}' for i in range(150))
+                self.store.capture('stdout', text)
+                before = self.store.export()
+                self.assertEqual(before.count(b'\n'), 1)
+                restored = VerboseLog(self.path, lambda: self.secrets)
+                self.assertEqual(restored.status()['stored_lines'], 1)
+                self.assertEqual(restored.export(), before)
+                self.assertIn(b'segment-000', before)
+                self.assertIn(b'segment-149', before)
+                self.store = restored
+
     def test_byte_cap_never_exceeded_by_destination_or_atomic_write(self):
         self.store = VerboseLog(self.path, lambda: (), max_bytes=4096)
         self.enable(lines=2000)

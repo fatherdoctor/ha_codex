@@ -74,8 +74,9 @@ class VerboseLog:
             raw = private_read(self.path, self.max_bytes, tail=True)
         except FileNotFoundError:
             raw = b''
-        for line in raw.decode('utf-8', errors='replace').splitlines():
-            self._add(line + '\n')
+        # Reuse capture's physical newline boundaries; Unicode separators are content.
+        for line in io.StringIO(raw.decode('utf-8', errors='replace'), newline=None):
+            self._add(line.rstrip('\r\n') + '\n')
         # Re-establish caps and 0600 mode before accepting any new record after restart.
         if raw:
             self._save()
@@ -140,11 +141,13 @@ class VerboseLog:
                 self._load()
                 if not self.settings['enabled']:
                     return
+                epoch = self.epoch
             # Never acquire worker/capability locks while holding the storage lock.
             values = tuple(self.secrets())
             self.remember(values)
             with self.lock:
-                if not self.settings['enabled']:
+                # Clear and off/on cycles invalidate observations already in flight.
+                if not self.settings['enabled'] or self.epoch != epoch:
                     return
                 stamp = datetime.now(timezone.utc).isoformat()
                 prefix = f'[{stamp}] {source}: '
