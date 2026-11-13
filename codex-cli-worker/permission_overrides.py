@@ -124,22 +124,45 @@ def bounded_json(value, maximum=65536):
     return text
 
 
+# Match vocabulary, not intent: even a benign mention disables group 5.
+SECURITY_MENTION = re.compile(
+    r'(?<![a-z0-9])(?:locks?|alarms?|garages?|doors?|covers?|cameras?|notify|'
+    r'notifications?|messages?|texts?|alarm_control_panel|persistent_notification|input_text)'
+    r'(?![a-z0-9])', re.I)
+
+
+def outside_guard_text(text):
+    first, last = MARKERS
+    if first not in text and last not in text:
+        return text
+    if text.count(first) != 1 or text.count(last) != 1 or text.index(last) < text.index(first):
+        raise ApprovalRequired('Owner guard rails could not be verified; request normal approval.')
+    before, body = text.split(first)
+    _selected, after = body.split(last)
+    return before + '\n' + after
+
+
+def security_mentions_outside(text):
+    return bool(SECURITY_MENTION.search(outside_guard_text(text)))
+
+
 def guard_rules(text):
     """Only the kit's exact selected limits are machine-verifiable; custom limits ask."""
     if not text.strip():
         return set()
+    outside = outside_guard_text(text)
+    refused = set(SECURITY) if SECURITY_MENTION.search(outside) else set()
     first, last = MARKERS
     if first not in text and last not in text:
         if re.search(r'\b(?:never|do not|must not|ask|approval|guard.?rails)\b', text, re.I):
             raise ApprovalRequired('Custom owner guard rails require normal approval.')
-        return set()
+        return refused
     if text.count(first) != 1 or text.count(last) != 1 or text.index(last) < text.index(first):
         raise ApprovalRequired('Owner guard rails could not be verified; request normal approval.')
     before, body = text.split(first)
     selected, after = body.split(last)
     if re.search(r'\b(?:never|do not|must not|ask|approval|guard.?rails)\b', before + after, re.I):
         raise ApprovalRequired('Additional custom owner limits require normal approval.')
-    refused = set()
     for line in selected.splitlines():
         if not line.strip():
             continue

@@ -2913,6 +2913,8 @@ async function loadPermissionOverrides() {
   try {
     const data = await api("permissions-overrides");
     permissionGroups = data.groups;
+    $("permissions-overrides-guard-note").textContent = data.guard_note || "";
+    $("permissions-overrides-guard-note").hidden = !data.guard_note;
     controls.forEach((input) => {
       input.checked = permissionGroups[input.dataset.permissionGroup] === true;
       input.disabled = false;
@@ -2920,6 +2922,7 @@ async function loadPermissionOverrides() {
     $("permissions-overrides-result").textContent = "Changes save immediately.";
   } catch (_error) {
     permissionGroups = null;
+    $("permissions-overrides-guard-note").hidden = true;
     $("permissions-overrides-result").textContent = "Permissions overrides are unavailable. Administrator access is required.";
   }
 }
@@ -2930,6 +2933,8 @@ permissionSwitches().forEach((input) => input.addEventListener("change", async (
   try {
     const data = await api("permissions-overrides", proposed);
     permissionGroups = data.groups;
+    $("permissions-overrides-guard-note").textContent = data.guard_note || "";
+    $("permissions-overrides-guard-note").hidden = !data.guard_note;
     $("permissions-overrides-result").textContent = "Permissions overrides saved.";
   } catch (_error) {
     $("permissions-overrides-result").textContent = "Could not save permissions overrides. Check the settings before continuing.";

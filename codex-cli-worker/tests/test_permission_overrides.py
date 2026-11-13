@@ -128,6 +128,68 @@ class OverridePolicyTests(unittest.TestCase):
         self.assertFalse(self.dispatch(operation='service', service='lock.unlock', target=['lock.sample'])['ok'])
         self.assertEqual(self.backend.writes, [])
 
+    def test_review_f1_both_texts_block_lock_without_writes(self):
+        self.enable(security=True)
+        for text in ('Keep locks unchanged.', MARKERS[0] + '\n' + MARKERS[1] + '\nKeep locks unchanged.'):
+            with self.subTest(text=text):
+                self.rules = text
+                self.assertTrue(self.dispatch(operation='service', service='lock.unlock', target=['lock.sample'])['approval_required'])
+        self.assertEqual(self.backend.writes, [])
+
+    def test_benign_security_mentions_disable_the_whole_group(self):
+        self.enable(security=True)
+        mentions = ('lock', 'locks', 'alarm', 'garage', 'door', 'cover', 'camera', 'notify',
+                    'message', 'text', 'LOCKS', 'lock.sample', 'alarm_control_panel.sample',
+                    'cover.sample', 'camera.sample', 'notify.sample', 'persistent_notification.sample', 'text.sample')
+        services = [('lock.unlock', ['lock.sample'], {}),
+                    ('alarm_control_panel.alarm_disarm', ['alarm_control_panel.sample'], {}),
+                    ('cover.open_cover', ['cover.sample'], {}),
+                    ('camera.turn_on', ['camera.sample'], {}),
+                    ('notify.sample', [], {'message': 'synthetic'}),
+                    ('persistent_notification.create', [], {'message': 'synthetic'})]
+        for service, target, data in services:
+            self.assertTrue(self.dispatch(operation='service', service=service, target=target, data=data)['ok'])
+        self.backend.writes.clear()
+        for mention in mentions:
+            for placement in (mention, mention + '\n' + MARKERS[0] + '\n' + MARKERS[1],
+                              MARKERS[0] + '\n' + MARKERS[1] + '\n' + mention):
+                self.rules = 'Documentation example: ' + placement
+                for service, target, data in services:
+                    with self.subTest(mention=mention, service=service, placement=placement):
+                        self.assertTrue(self.dispatch(operation='service', service=service, target=target, data=data)['approval_required'])
+        self.assertEqual(self.backend.writes, [])
+
+    def test_security_mentions_do_not_disable_unrelated_groups(self):
+        self.enable(security=True)
+        self.rules = 'Documentation mentions camera.sample.'
+        self.assertTrue(self.dispatch(operation='check_config')['ok'])
+        self.assertTrue(self.dispatch(operation='service', service='light.turn_on', target=['light.sample'])['ok'])
+        self.rules = 'Clockwork and covered topics.'
+        self.assertTrue(self.dispatch(operation='service', service='lock.unlock', target=['lock.sample'])['ok'])
+
+    def test_selected_block_keeps_domain_specific_limits(self):
+        self.enable(security=True)
+        self.rules = MARKERS[0] + '\n- Do not lock or unlock locks.\n' + MARKERS[1]
+        self.assertTrue(self.dispatch(operation='service', service='cover.open_cover', target=['cover.sample'])['ok'])
+
+    def test_outside_mentions_block_indirect_security_effects(self):
+        self.enable(security=True, bigger=True)
+        self.rules = 'Documentation: cameras.'
+        self.backend.definitions['scene.sample'] = {'entities': {'lock.sample': 'unlocked'}}
+        for domain, key in (('script', 'sequence'), ('automation', 'actions')):
+            self.backend.definitions[domain + '.sample'] = {key: [
+                {'action': 'lock.unlock', 'target': {'entity_id': 'lock.sample'}}]}
+        for service in ('scene.turn_on', 'script.turn_on', 'automation.trigger'):
+            self.assertTrue(self.dispatch(operation='service', service=service,
+                target=[service.split('.')[0] + '.sample'])['approval_required'])
+        self.assertEqual(self.backend.writes, [])
+
+    def test_new_outside_mention_before_dispatch_refuses_write(self):
+        self.enable(security=True)
+        with patch.object(self.engine, 'guards', side_effect=['', 'Keep locks unchanged.']):
+            self.assertTrue(self.dispatch(operation='service', service='lock.unlock', target=['lock.sample'])['approval_required'])
+        self.assertEqual(self.backend.writes, [])
+
     def test_custom_malformed_or_additional_owner_limits_require_approval(self):
         for text in ('Do not change the sample device.', MARKERS[0],
                      MARKERS[0] + '\n- Custom rule\n' + MARKERS[1]):

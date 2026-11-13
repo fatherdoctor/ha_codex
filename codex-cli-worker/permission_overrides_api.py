@@ -13,7 +13,7 @@ import time
 import uuid
 
 from flask import jsonify, request
-from permission_overrides import ApprovalRequired, Authority, Engine, Settings, bounded_json, entity
+from permission_overrides import ApprovalRequired, Authority, Engine, Settings, bounded_json, entity, security_mentions_outside
 
 IDENTIFIER = re.compile(r'[a-z0-9_-]{1,128}')
 
@@ -300,6 +300,17 @@ class Service:
         except (OSError, UnicodeError):
             raise ApprovalRequired('Owner guard rails are unavailable; request normal approval.') from None
 
+    def guard_note(self):
+        try:
+            mentioned = security_mentions_outside(self.guards())
+        except ApprovalRequired:
+            return 'Owner guard rails could not be verified. Actions require normal approval.'
+        if mentioned:
+            return ('Security and people requires normal approval because the instructions file '
+                    'mentions a security target outside the marked guard-rails block. '
+                    'Put selected limits inside the owner-selected agent guard rails block.')
+        return ''
+
     def audit(self, task_id, event):
         recorder = getattr(self.worker, 'diagnostics', None)
         # No alternate logger can substitute for the required diagnostics recorder.
@@ -382,7 +393,7 @@ def register(worker):
                     if request.content_length is None or request.content_length > 1024:
                         raise ValueError()
                     service.settings().save(request.get_json(silent=True))
-                response = jsonify({'ok': True, 'groups': service.settings().read(),
+                response = jsonify({'ok': True, 'groups': service.settings().read(), 'guard_note': service.guard_note(),
                                     'remote': 'Remote turns require normal approval in this version.'})
                 response.headers['Cache-Control'] = 'no-store'
                 return response

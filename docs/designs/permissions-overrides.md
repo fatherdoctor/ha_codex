@@ -31,6 +31,17 @@ after execution, or a bounded error identifying whether any mutation may already
 automatically retry a write after a timeout. Inform the assistant that a pre-approved action must be named
 in its answer; this instruction alone cannot guarantee what the model eventually says.
 
+## Review F1: security mentions outside the block
+
+Any security-target mention outside the marked block disables pre-approval for the entire
+Security and people group, even when its switch is on. This is a vocabulary check, not an
+attempt to interpret intent: both “Keep locks unchanged.” and benign camera documentation
+require normal approval. It includes security entity domains and plural target names.
+Selected limits inside the exact marked block retain their existing domain-specific meaning.
+Settings explains this fallback without exposing the instructions file's contents; unrelated
+groups remain available subject to their existing checks. Indirect security effects are also
+blocked, and the instructions are reread before every action and immediately before a write.
+
 ## Guard rails and indirect targets
 
 Read the owner's marked guard-rail section in `/config/AGENTS.md` on every action; do not cache it across
