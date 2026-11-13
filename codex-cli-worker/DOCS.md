@@ -817,8 +817,9 @@ future modes; this feature does not enable either or change the managed policy.
 
 Only the exact marked guard-rails block in `/config/AGENTS.md` controls these groups. Other instructions
 remain for the assistant to follow in chat. Settings identifies each selected block line that suspends
-actions; unknown block lines suspend all groups. An administrator saves the groups or reviews and confirms
-the rules in Settings. The worker keeps the confirmed text and SHA-256 under `/data/house-rules/`, outside
+actions; unknown block lines suspend all groups. The first save of the groups establishes the initial
+confirmed copy. Later switch saves leave changed rules unconfirmed until an administrator uses Review and
+confirm in Settings, which shows the text and submits its digest. The worker keeps the confirmed text and SHA-256 under `/data/house-rules/`, outside
 the agent workspace. A missing file is a confirmed state too. Any edit, deletion or symlink since confirmation
 suspends all groups until review and confirmation; a change observed within an exchange suspends that
 exchange permanently, even if the file is restored. Start a new exchange after confirming.
@@ -839,6 +840,10 @@ Automation/script reloads compare standard YAML includes with loaded definitions
 changed definitions; unchanged definitions are the owner’s and are not re-judged. Custom layouts, includes
 that cannot be safely compared and loaded scene values require normal approval. Core exposes scene
 membership but not its loaded member values, so scene reloads cannot be pre-approved in this version.
+Template reloads require a plain list with no action or actions block; included or unreadable template sections ask.
+An included or non-mapping homeassistant section, packages, or split reload sections require normal approval.
+Any blueprint reference in a disk row or a loaded automation/script definition makes that reload ask, even when the row is unchanged.
+An automation without an id on disk or in its loaded definition also makes the reload ask.
 Everyday control includes any entity exposed as a switch, including a switch used as a relay.
 
 Settings are private, atomic booleans under `/data/codex-home/house-rules/permission-overrides.json`.

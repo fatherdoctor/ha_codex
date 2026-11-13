@@ -212,15 +212,35 @@ class Core:
                 return {'entities': {entity(member): None for member in members}}
         raise ApprovalRequired('The loaded definition is unavailable; request normal approval.')
 
-    def reload_changes(self, domain):
-        """Compare bounded, standard YAML includes with loaded Core definitions; custom layouts ask."""
-        filenames = {'automation': 'automations.yaml', 'script': 'scripts.yaml', 'scene': 'scenes.yaml'}
-        filename = filenames[domain]
+    def reload_layout(self, domain):
+        """Refuse layouts whose includes or packages can hide additional effects."""
         root = Path(self.worker.CONFIG_ROOT)
         config = self.read_reload_yaml(root / 'configuration.yaml', includes=True)
-        if (not isinstance(config, dict) or config.get(domain) != {'include': filename}
-                or 'packages' in config.get('homeassistant', {})
-                or any(key.startswith(domain + ' ') for key in config)):
+        if not isinstance(config, dict) or any(not isinstance(key, str) for key in config):
+            raise ApprovalRequired('This reload layout cannot be compared; request normal approval.')
+        if 'homeassistant' in config:
+            section = config['homeassistant']
+            if (not isinstance(section, dict)
+                    or {'packages', 'include', 'secret_reference'} & section.keys()):
+                raise ApprovalRequired('Packages or an unreadable homeassistant section require normal approval.')
+        if any(key.startswith(domain + ' ') for key in config):
+            raise ApprovalRequired('Split reload sections require normal approval.')
+        return root, config
+
+    def reload_changes(self, domain):
+        """Compare standard YAML and loaded definitions; refuse hidden reload effects."""
+        root, config = self.reload_layout(domain)
+        if domain == 'template':
+            entries = config.get('template')
+            if (not isinstance(entries, list) or len(entries) > 1024
+                    or any(not isinstance(entry, dict)
+                           or {'action', 'actions', 'include', 'secret_reference'} & entry.keys()
+                           for entry in entries)):
+                raise ApprovalRequired('Template action blocks or unreadable templates require normal approval.')
+            return {str(index): entry for index, entry in enumerate(entries)}
+        filenames = {'automation': 'automations.yaml', 'script': 'scripts.yaml', 'scene': 'scenes.yaml'}
+        filename = filenames[domain]
+        if config.get(domain) != {'include': filename}:
             raise ApprovalRequired('This reload layout cannot be compared; request normal approval.')
         disk = self.read_reload_yaml(root / filename)
         # Scene state exposes membership, not the saved member values. That is
@@ -237,6 +257,8 @@ class Core:
             proposed = disk
         if not isinstance(proposed, dict) or len(proposed) > 1024:
             raise ApprovalRequired('Reload definitions are unavailable or oversized; request normal approval.')
+        if any(not isinstance(value, dict) or 'use_blueprint' in value for value in proposed.values()):
+            raise ApprovalRequired('Blueprint or unreadable reload definitions require normal approval.')
         states = self.rest('GET', 'states')
         if not isinstance(states, list) or len(states) > 30000:
             raise ApprovalRequired('Loaded definitions cannot be listed; request normal approval.')
@@ -246,6 +268,8 @@ class Core:
             if not target.startswith(domain + '.'):
                 continue
             definition = self.definition(target)
+            if 'use_blueprint' in definition:
+                raise ApprovalRequired('Loaded blueprint definitions require normal approval.')
             identifier = definition.get('id') if domain == 'automation' else target.split('.')[1]
             if not isinstance(identifier, str) or identifier in loaded:
                 raise ApprovalRequired('Loaded identifiers cannot be compared; request normal approval.')
@@ -651,7 +675,10 @@ def register(worker):
                         service.confirm_rules(payload['expected_digest'])
                     else:
                         service.settings().save(payload)
-                        service.confirm_rules()
+                        # First-use setup can establish the initial copy. A switch
+                        # change must never approve edits the owner was not shown.
+                        if not service.rules_path().exists() and not service.rules_path().is_symlink():
+                            service.confirm_rules()
                 response = jsonify({'ok': True, 'groups': service.settings().read(), 'guard_note': service.guard_note(),
                                     'rule_digest': service.rules_snapshot()['sha256'],
                                     'remote': 'Remote turns require normal approval in this version.'})

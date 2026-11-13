@@ -151,6 +151,7 @@ class RuntimeOverrides(unittest.TestCase):
         with contextlib.ExitStack() as stack:
             stack.enter_context(patch.object(server, 'DATA_ROOT', self.root))
             stack.enter_context(patch.object(server, 'CONFIG_ROOT', self.config))
+            stack.enter_context(patch.object(server, 'AGENTS_PATH', self.config / 'AGENTS.md'))
             stack.enter_context(patch.object(server, 'ingress_admin', return_value=({'user_id': 'synthetic-admin'}, '')))
             stack.enter_context(patch.object(server, 'is_ingress_request', return_value=True))
             (self.config / 'AGENTS.md').write_text('Synthetic private instructions.')
@@ -159,6 +160,17 @@ class RuntimeOverrides(unittest.TestCase):
             self.assertIn('changed since confirmation', response.json['guard_note'])
             self.assertNotIn('Synthetic private instructions', response.get_data(as_text=True))
             self.assertEqual(client.post('/permissions-overrides', json=DEFAULTS).status_code, 200)
+            self.assertEqual(client.get('/permissions-overrides').json['guard_note'], '')
+            # A later switch save must not silently confirm text the owner never saw.
+            (self.config / 'AGENTS.md').write_text('Changed synthetic private instructions.')
+            digest = client.get('/permissions-overrides').json['rule_digest']
+            self.assertEqual(client.post('/permissions-overrides', json={**DEFAULTS, 'everyday': False}).status_code, 200)
+            self.assertIn('changed since confirmation', client.get('/permissions-overrides').json['guard_note'])
+            self.assertNotIn('Changed synthetic private instructions', client.get('/permissions-overrides').get_data(as_text=True))
+            reviewed = client.get('/agents').json
+            self.assertEqual(reviewed['content'], 'Changed synthetic private instructions.')
+            self.assertEqual(client.post('/permissions-overrides', json={
+                'confirm_rules': True, 'expected_digest': digest}).status_code, 200)
             self.assertEqual(client.get('/permissions-overrides').json['guard_note'], '')
 
     def test_admin_only_get_and_post_fail_closed_with_no_worker_token_bypass(self):

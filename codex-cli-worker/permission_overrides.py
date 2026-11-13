@@ -328,10 +328,13 @@ class Engine:
 
     def check_reload(self, domain, groups, rules, checks):
         """Check changed definitions; leave unchanged owner definitions alone."""
-        if domain not in ('automation', 'script', 'scene'):
+        if domain not in ('automation', 'script', 'scene', 'template'):
             return
         changes = self.backend.reload_changes(domain)
         checks['reload:' + domain] = self.definition_digest(changes)
+        if domain == 'template':
+            # Core accepts only plain template entries without action blocks here.
+            return
         for identifier, definition in changes.items():
             if domain == 'scene':
                 self.check_scene(definition, groups, rules)

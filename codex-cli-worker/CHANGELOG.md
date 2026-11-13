@@ -2,6 +2,8 @@
 
 ## 0.1.81.2 (unreleased)
 
+- Ask before reloading template actions, packages, blueprints or unreadable layouts; keep changed house rules unconfirmed after switch saves.
+
 - Recheck loaded actions and reload comparisons after audit persistence, directly before dispatch; identify affected groups for each selected limit.
 
 - Pin administrator-confirmed house rules for each action exchange; check loaded actions and changed reload
