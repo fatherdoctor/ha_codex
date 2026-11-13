@@ -98,6 +98,20 @@ class ConfirmedRules(unittest.TestCase):
         self.service.begin('task', 'synthetic-cap', self.options)
         self.assertTrue(self.dispatch(operation='check_config')['ok'])
 
+    def test_rule_change_during_audit_refuses_before_the_write(self):
+        path = self.config / 'AGENTS.md'
+        path.write_text('')
+        self.service.confirm_rules()
+        self.service.begin('task', 'synthetic-cap', self.options)
+        audit = self.service.audit
+        def change_after_audit(task_id, event):
+            audit(task_id, event)
+            if event['outcome'] == 'requested':
+                path.write_text(LOCK_RULE)
+        with patch.object(self.service, 'audit', side_effect=change_after_audit):
+            self.assertFalse(self.dispatch(operation='check_config')['ok'])
+        self.assertEqual(self.backend.writes, [])
+
     def test_stale_confirmation_digest_does_not_save(self):
         self.prepare()
         import os

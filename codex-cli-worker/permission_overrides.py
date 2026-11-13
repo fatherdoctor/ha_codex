@@ -206,8 +206,9 @@ class Engine:
                         raise ApprovalRequired('An indirect action changed during checking; request normal approval.')
                 # A failed audit must stop BEFORE the write. The callback sees no payload or raw target.
                 self.observer(event('requested'))
-                if not still_active():
-                    raise ApprovalRequired('The exchange ended; request normal approval.')
+                if (not still_active() or groups != self.settings.read()
+                        or rules != guard_rules(self.guards())):
+                    raise ApprovalRequired('Permissions changed or the exchange ended; request normal approval.')
                 started_write = True
                 result = self.backend.execute(plan)
             except ApprovalRequired as exc:
