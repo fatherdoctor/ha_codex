@@ -443,6 +443,41 @@ async function api(path, body, method) {
     );
   return data;
 }
+
+document.getElementById("export-interaction-logs").addEventListener("click", async () => {
+  const button = document.getElementById("export-interaction-logs");
+  const status = document.getElementById("export-logs-status");
+  button.disabled = true;
+  try {
+    const response = await fetch("diagnostics/export", { cache: "no-store" });
+    if (!response.ok) throw new Error("The export could not be downloaded. Try again.");
+    const data = await response.json();
+    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "codex-interactions.json";
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    status.textContent = "Downloaded. Open the file to review it before attaching it to a bug report. Nothing was sent.";
+  } catch (_error) {
+    status.textContent = "The export could not be downloaded. Try again.";
+  } finally {
+    button.disabled = false;
+  }
+});
+
+document.getElementById("save-diagnostic-retention").addEventListener("click", async () => {
+  const status = document.getElementById("export-logs-status");
+  try {
+    const capacity = Number(document.getElementById("diagnostic-retention").value);
+    if (!Number.isInteger(capacity) || capacity < 10 || capacity > 100)
+      throw new Error("Keep between 10 and 100 interactions.");
+    await api("diagnostics/settings", { capacity });
+    status.textContent = `Keeping up to ${capacity} interactions. Running interactions are retained.`;
+  } catch (error) {
+    status.textContent = error.message;
+  }
+});
 /** Build an error that keeps the HTTP status so callers can tell 404 apart. */
 function workerError(message, status) {
   const error = new Error(message);
@@ -2859,6 +2894,12 @@ function settingsError(error) {
   $("settings-result").textContent = String(error.message || error);
 }
 $("settings-button").onclick = async () => {
+  try {
+    const data = await api("diagnostics/settings");
+    $("diagnostic-retention").value = data.capacity;
+  } catch (_error) {
+    $("export-logs-status").textContent = "Log retention is available to administrators.";
+  }
   sidebar(false);
   $("settings").showModal();
   $("settings-result").textContent = "";

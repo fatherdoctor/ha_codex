@@ -112,8 +112,8 @@ body:
       description: |
         Logs are the fastest way to get a bug fixed. Please include whichever of these apply, after removing sensitive information:
 
-        - **Worker app log:** Settings, Apps, Codex CLI Worker, Log tab. Copy the lines around the time of the failure.
-        - **Integration diagnostics:** Settings, Devices & services, Codex, three-dot menu, Download diagnostics. Attach the downloaded file to this issue.
+        - **Worker app log:** Settings, Apps, Codex for Home Assistant, Log tab. Copy the lines around the time of the failure.
+        - **Integration diagnostics:** Settings, Devices & services, Codex, three-dot menu, Download diagnostics. This box takes text only, so attach the downloaded file under Additional context below.
         - **Home Assistant Core log:** Settings, System, Logs. Type `codex` in the filter box and copy the matching lines.
       render: text
 
