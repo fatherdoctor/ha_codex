@@ -930,7 +930,7 @@ def verbose_secrets():
     values.append(relay_reads.capability)
     values.append(remote_control_supervisor.status.get('pairing_code'))
     values.append(auth_state.get('user_code'))
-    return [value for value in values if isinstance(value, str) and value]
+    return [value.strip() for value in values if isinstance(value, str) and value.strip()]
 
 
 def capture_verbose(source, value):

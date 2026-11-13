@@ -54,15 +54,16 @@ class StoreTests(unittest.TestCase):
             self.assertNotIn(secret.encode(), self.path.read_bytes())
 
     def test_only_exact_values_are_masked_even_short_or_json_escaped(self):
-        self.secrets = ['short', 'quote"slash\\secret', 'SYNTHETIC_🙂_SECRET']
+        self.secrets = ['short', 'quote"slash\\secret', 'SYNTHETIC_🙂_SECRET', '  NORMALIZED_SECRET\n']
         self.enable()
-        self.store.capture('rpc', json.dumps({'token': self.secrets[1], 'value': 'short', 'user_token': 'leave_this_alone', 'unicode': self.secrets[2]}))
+        self.store.capture('rpc', json.dumps({'token': self.secrets[1], 'value': 'short', 'user_token': 'leave_this_alone', 'unicode': self.secrets[2], 'spaced': 'NORMALIZED_SECRET'}))
         result = self.store.export().decode()
         self.assertNotIn('short', result)
         self.assertNotIn('slash', result)
         self.assertIn('leave_this_alone', result)
         self.assertNotIn('SYNTHETIC_', result)
         self.assertNotIn('\\ud83d', result)
+        self.assertNotIn('NORMALIZED_SECRET', result)
 
     def test_line_fifo_long_burst_and_restart(self):
         self.enable(lines=100)
@@ -247,7 +248,7 @@ class WorkerTests(unittest.TestCase):
             'access_token': 'SYNTHETIC_ACCESS', 'refresh_token': 'SYNTHETIC_REFRESH', 'id_token': 'SYNTHETIC_ID'}}))
         token_file = self.root / 'worker_api_token'; token_file.write_text('SYNTHETIC_WORKER')
         with (patch.object(server, 'CODEX_HOME', auth), patch.object(server, 'WORKER_TOKEN_PATH', token_file),
-              patch.object(server, 'read_options', return_value={'HA_TOKEN': 'SYNTHETIC_HA'}),
+              patch.object(server, 'read_options', return_value={'HA_TOKEN': '  SYNTHETIC_HA\n'}),
               patch.dict(os.environ, {'SUPERVISOR_TOKEN': 'SYNTHETIC_SUPERVISOR'}),
               patch.object(server.relay_reads, 'capability', 'SYNTHETIC_RELAY'),
               patch.object(server.verification, 'capabilities', {'sample':'SYNTHETIC_VERIFY'}),

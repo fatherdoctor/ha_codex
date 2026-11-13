@@ -107,7 +107,9 @@ class VerboseLog:
 
     def remember(self, values):
         with self.lock:
-            values = [v for v in values if isinstance(v, str) and v]
+            values = [v.strip() for v in values if isinstance(v, str) and v.strip()]
+            if any('\n' in value or '\r' in value for value in values):
+                raise ValueError('Own credential has an invalid line break')
             if any(len(json.dumps(v).encode()) > 1024 * 1024 for v in values):
                 raise ValueError('Secret exceeds the masking boundary')
             self.known.update(values)
