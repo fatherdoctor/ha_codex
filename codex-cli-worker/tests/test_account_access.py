@@ -143,3 +143,77 @@ class AccountAccessWorkerTests(unittest.TestCase):
             check.successful_turn(signature)
             self.assertFalse(check.snapshot(server.codex_login_status())['needs_sign_in'])
             self.assertEqual(check.snapshot(server.codex_login_status())['state'], 'confirmed_by_turn')
+
+
+def status_from_usage_failure(error, screen_error='Usage unavailable'):
+    """Exercise the real status-triggered usage refresh with synthetic local sign-in."""
+    from contextlib import ExitStack
+    from unittest.mock import patch
+    from test_server import server
+    signature = (100, 200)
+    with ExitStack() as stack:
+        for name, value in (
+            ('_auth_signature', lambda: signature),
+            ('codex_local_login_status', lambda: {'status_ok': True, 'has_auth_file': True}),
+            ('active_task_id', lambda: None), ('codex_binary_path', lambda: 'synthetic-codex'),
+            ('api_token', lambda: 'synthetic-worker-auth'), ('read_options', lambda: {}),
+            ('integration_status', lambda: {}), ('remote_control_summary', lambda: {}),
+            ('auth_status_payload', lambda: {}), ('pause_payload', lambda: {})):
+            stack.enter_context(patch.object(server, name, value))
+        stack.enter_context(patch.object(server, 'tasks', {}))
+        stack.enter_context(patch.object(server, 'message_queue', []))
+        stack.enter_context(patch.dict(server.sign_in_check,
+                                      {'result': '', 'auth_signature': None, 'checked_at': ''}, clear=True))
+        stack.enter_context(patch.dict(server.usage_state, {'_refreshing': False}, clear=True))
+        check = AccountAccess(server.codex_login_status, lambda: {}, server._auth_signature,
+                              server.record_sign_in_check)
+        stack.enter_context(patch.object(server, 'account_access', check))
+        stack.enter_context(patch.object(server, 'read_codex_rate_limits', side_effect=RuntimeError(error)))
+        stack.enter_context(patch.object(server, 'fetch_codex_usage_status',
+                                        return_value={'status': 'error', 'error': screen_error, 'raw_excerpt': screen_error}))
+        stack.enter_context(patch.object(server, 'refresh_usage_status_async',
+                                        side_effect=lambda force=False: server._refresh_usage_worker(force=True)))
+        response = server.app.test_client().get('/status', headers={'Authorization': 'Bearer synthetic-worker-auth'})
+        assert response.status_code == 200
+        return response.get_json()
+
+
+class StatusUsageErrorTests(unittest.TestCase):
+    def test_status_refresh_generic_http_errors_do_not_report_expired_signin(self):
+        for error in ('401 Unauthorized', '403 Forbidden', '429 exhausted', 'network timeout'):
+            with self.subTest(error=error):
+                status = status_from_usage_failure(error)
+                self.assertNotEqual(status['codex_login']['server_check'], 'rejected')
+                self.assertEqual(status['account_access']['state'], 'unconfirmed')
+                self.assertFalse(status['account_access']['needs_sign_in'])
+
+    def test_status_refresh_preserves_explicit_codex_signin_rejections(self):
+        for error in ('token_revoked', 'refresh_token_expired', 'refresh_token_reused',
+                      'refresh_token_invalidated', *PINNED_REFRESH_MESSAGES):
+            with self.subTest(error=error):
+                status = status_from_usage_failure(error)
+                self.assertEqual(status['codex_login']['server_check'], 'rejected')
+                self.assertTrue(status['account_access']['needs_sign_in'])
+
+    def test_complete_status_omits_account_and_token_from_usage_errors(self):
+        import json
+        for category in ('401 Unauthorized', 'network error', 'token_revoked'):
+            with self.subTest(category=category):
+                private_error = category + ' SYNTHETIC_PRIVATE_ACCOUNT SYNTHETIC_PRIVATE_TOKEN'
+                status = status_from_usage_failure(private_error, screen_error=private_error)
+                encoded = json.dumps(status)
+                for marker in ('SYNTHETIC_PRIVATE_ACCOUNT', 'SYNTHETIC_PRIVATE_TOKEN'):
+                    self.assertNotIn(marker, encoded)
+                self.assertIn(status['codex_usage']['rate_limits_error_category'],
+                              ('unavailable', 'sign_in_rejected'))
+
+    def test_cached_usage_errors_are_bounded_before_the_next_refresh(self):
+        import json
+        from unittest.mock import patch
+        from test_server import server
+        private = 'SYNTHETIC_PRIVATE_ACCOUNT SYNTHETIC_PRIVATE_TOKEN'
+        with patch.dict(server.usage_state, {'error': private, 'rate_limits_error': private,
+                                            'rate_limits_error_category': private, 'raw_excerpt': private}, clear=True):
+            payload = server.usage_status_payload()
+        self.assertNotIn('SYNTHETIC_PRIVATE', json.dumps(payload))
+        self.assertEqual(payload['rate_limits_error_category'], 'unavailable')

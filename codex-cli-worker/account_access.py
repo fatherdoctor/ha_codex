@@ -17,6 +17,14 @@ PINNED_REFRESH_MESSAGES = tuple(
     for reason in ('has expired', 'was already used', 'was revoked')
 )
 EXPIRED_SIGN_IN = re.compile(r'\brefresh_token_(?:expired|reused|invalidated)\b', re.IGNORECASE)
+REVOKED_SIGN_IN = re.compile(r'\btoken_revoked\b|invalidated oauth token', re.IGNORECASE)
+
+
+def rejected_sign_in_error(error):
+    """Recognize explicit Codex sign-in failures; an HTTP status alone is ambiguous."""
+    text = str(error)
+    return bool(EXPIRED_SIGN_IN.search(text) or REVOKED_SIGN_IN.search(text)
+                or any(message in text for message in PINNED_REFRESH_MESSAGES))
 
 
 class AccountAccess:
@@ -54,7 +62,7 @@ class AccountAccess:
                 plan = candidate if isinstance(candidate, str) and candidate in PLAN_TYPES else None
         except Exception as error:
             # Never retain or publish the error: it may contain account details.
-            if EXPIRED_SIGN_IN.search(str(error)) or any(text in str(error) for text in PINNED_REFRESH_MESSAGES):
+            if rejected_sign_in_error(error):
                 self.record('rejected', signature)
         finally:
             with self.lock:

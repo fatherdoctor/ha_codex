@@ -48,7 +48,7 @@ import gate_rules
 from core_address import CoreAddress, probe_core
 from relay_reads import RelayReads, ReadError as RelayReadError
 import schedule_api
-from account_access import AccountAccess
+from account_access import AccountAccess, rejected_sign_in_error
 from interaction_diagnostics import RollingDiagnostics, InteractionRecorder
 
 
@@ -976,7 +976,18 @@ def parse_codex_reset_at(reset_text: str, now: datetime | None = None) -> str:
 def usage_status_payload() -> dict[str, Any]:
     """Return a copy of the Codex usage state without the worker's internal fields."""
     with usage_lock:
-        return {k: v for k, v in usage_state.items() if not k.startswith("_")}
+        payload = {k: v for k, v in usage_state.items() if not k.startswith("_")}
+    # Also bound older cached failures before the next asynchronous refresh finishes.
+    if payload.get("rate_limits_error"):
+        category = payload.get("rate_limits_error_category")
+        category = category if category in USAGE_FAILURE_MESSAGES else "unavailable"
+        payload["rate_limits_error_category"] = category
+        payload["rate_limits_error"] = USAGE_FAILURE_MESSAGES[category]
+        payload["raw_excerpt"] = ""
+    if payload.get("error"):
+        payload["error"] = "Codex usage is unavailable."
+        payload["raw_excerpt"] = ""
+    return payload
 
 
 def _update_usage_state(**updates: Any) -> None:
@@ -1384,6 +1395,13 @@ def usage_from_rate_limits(result: dict[str, Any], now: datetime | None = None) 
     return usage
 
 
+USAGE_FAILURE_MESSAGES = {
+    "unavailable": "Codex usage could not be read.",
+    "sign_in_rejected": "Codex reported an expired or revoked sign-in. Sign in again.",
+    "missing_window": "The usage read named no supported usage window.",
+}
+
+
 def fetch_codex_usage() -> dict[str, Any]:
     """Return the usage state from the account's own rate-limit read, or the status screen marked estimated.
 
@@ -1395,7 +1413,8 @@ def fetch_codex_usage() -> dict[str, Any]:
         return fetch_codex_usage_status()
     codex = codex_binary_path()
     if not codex or not codex_login_status().get("status_ok"):
-        return {**fetch_codex_usage_status(), "source": "", "note": "", "rate_limits_error": ""}
+        return {**fetch_codex_usage_status(), "source": "", "note": "", "rate_limits_error": "",
+                "rate_limits_error_category": ""}
     # The sign-in the read is made with; an answer is dropped if auth.json changes before it comes.
     signature = _auth_signature()
     try:
@@ -1405,15 +1424,22 @@ def fetch_codex_usage() -> dict[str, Any]:
         # OpenAI answered with this sign-in, so it is still accepted.
         record_sign_in_check("ok", signature)
         if usage["five_hour_limit"] or usage["weekly_limit"]:
-            return {"status": "ok", "error": "", **usage, "source": "rate_limits", "note": "", "rate_limits_error": ""}
-        failure = "the usage read named no 5-hour or weekly window"
+            return {"status": "ok", "error": "", **usage, "source": "rate_limits", "note": "", "rate_limits_error": "",
+                    "rate_limits_error_category": ""}
+        category = "missing_window"
     except Exception as exc:  # noqa: BLE001 - any failure falls back to the status screen
-        failure = str(exc) or type(exc).__name__
-        if sign_in_rejected(failure) and record_sign_in_check("rejected", signature):
-            return {**fetch_codex_usage_status(), "source": "", "note": "", "rate_limits_error": redact(failure)}
+        # Classify in memory, then discard the upstream text: even a redactor cannot
+        # know every account identifier or future credential spelling.
+        category = "unavailable"
+        if rejected_sign_in_error(exc) and record_sign_in_check("rejected", signature):
+            category = "sign_in_rejected"
     fallback = fetch_codex_usage_status()
-    note = ESTIMATED_NOTE if fallback.get("status") == "ok" else ""
-    return {**fallback, "source": "status_screen", "note": note, "rate_limits_error": failure}
+    if fallback.get("error"):
+        fallback = {**fallback, "error": "Codex usage is unavailable."}
+    rejected = category == "sign_in_rejected"
+    note = ESTIMATED_NOTE if fallback.get("status") == "ok" and not rejected else ""
+    return {**fallback, "raw_excerpt": "", "source": "" if rejected else "status_screen", "note": note,
+            "rate_limits_error": USAGE_FAILURE_MESSAGES[category], "rate_limits_error_category": category}
 
 
 def _refresh_usage_worker(force: bool = False) -> None:

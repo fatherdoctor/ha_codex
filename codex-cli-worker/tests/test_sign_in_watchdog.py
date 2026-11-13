@@ -103,7 +103,8 @@ class SignInStateTests(unittest.TestCase):
             usage = server.fetch_codex_usage()
         self.assertEqual(server.sign_in_server_state()["result"], "rejected")
         self.assertEqual((usage["status"], usage["note"]), ("unavailable", ""))
-        self.assertIn("401", usage["rate_limits_error"])
+        self.assertEqual(usage["rate_limits_error_category"], "sign_in_rejected")
+        self.assertEqual(usage["rate_limits_error"], server.USAGE_FAILURE_MESSAGES["sign_in_rejected"])
 
     def test_usage_read_success_marks_it_accepted(self) -> None:
         with (patch.object(server, "active_task_id", return_value=None),

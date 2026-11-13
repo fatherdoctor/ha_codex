@@ -4,6 +4,24 @@ from homeassistant.helpers import issue_registry as ir
 from test_integration_polling import integration
 
 
+async def test_real_worker_status_http_failure_does_not_raise_but_expiry_does(hass):
+    """Use actual status-triggered usage refresh output, not a hand-written access flag."""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from test_account_access import status_from_usage_failure
+
+    client = AsyncMock()
+    coordinator = integration.CodexCliCoordinator(hass, client)
+    registry = ir.async_get(hass)
+    for error, expected in (('401 Unauthorized', False), ('403 Forbidden', False),
+                            ('refresh_token_expired', True), ('token_revoked', True),
+                            ('network timeout', False)):
+        client.status.return_value = status_from_usage_failure(error)
+        await coordinator._async_update_data()
+        assert (registry.async_get_issue('codex_cli', 'codex_not_signed_in') is not None) is expected
+
+
 async def test_signedout_and_expired_raise_then_good_signin_clears_without_account_data(hass):
     client = AsyncMock()
     coordinator = integration.CodexCliCoordinator(hass, client)
