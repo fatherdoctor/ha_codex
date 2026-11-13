@@ -9,7 +9,7 @@ from datetime import timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -35,7 +35,8 @@ class CodexCliCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             update_interval=timedelta(seconds=DEFAULT_SCAN_INTERVAL_SECONDS),
         )
         self.client = client
-        self._mailbox_store = Store(hass, 1, f"{DOMAIN}_mailbox_seen_{entry_id}")
+        self._mailbox_key = f"{DOMAIN}_mailbox_seen_{entry_id}"
+        self._mailbox_store = Store(hass, 1, self._mailbox_key, atomic_writes=True)
         self._mailbox_seen: set[str] | None = None
 
     async def _async_update_data(self) -> dict[str, Any]:
@@ -85,8 +86,18 @@ class CodexCliCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         current = set(events)
         fresh = current - self._mailbox_seen
         if current != self._mailbox_seen:
-            # Save before firing: a crash cannot replay an event already emitted.
-            await self._mailbox_store.async_save(sorted(current))
+            # HA consumes some write errors inside async_save. Read through a new
+            # Store (not the writer's pending data) before treating IDs as saved.
+            # Saving invalidates HA's shared preload cache, so this reads the file.
+            expected = sorted(current)
+            try:
+                await self._mailbox_store.async_save(expected)
+                saved = await Store(self.hass, 1, self._mailbox_key).async_load()
+            except (HomeAssistantError, OSError, ValueError):
+                saved = None
+            if saved != expected:
+                _LOGGER.warning("Mailbox arrival events deferred: saved IDs could not be verified")
+                return  # Keep the previous set so the next poll retries the save.
             self._mailbox_seen = current
         for message_id, event in events.items():
             if message_id in fresh:

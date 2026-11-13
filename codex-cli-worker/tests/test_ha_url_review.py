@@ -55,7 +55,9 @@ class ReviewTests(unittest.TestCase):
         self.assertIn('From **0.1.68**, a task that has `HA_TOKEN` also gets `HA_URL`,',docs)
         self.assertIn('From **0.1.81.2**',docs)
         paragraph=next(x for x in docs.split('\n\n') if x.startswith('From **0.1.68**'))
-        self.assertEqual(hashlib.sha256(paragraph.encode()).hexdigest(),'ce6cd349231a4d8abbc6a2035c8107f0ca1bb952b00c1fc9f721ed076689884c')
+        self.assertEqual(hashlib.sha256((paragraph + '\n\n' + next(
+            x for x in docs.split('\n\n') if x.startswith('From **0.1.81.2**')
+        )).encode()).hexdigest(), 'a6806005f34bc7047dd7e3de83c8cab174483221c814554a074120183f55dcc5')
         description=yaml.safe_load((ROOT/'translations/en.yaml').read_text())['configuration']['ha_url']['description']
         self.assertEqual(hashlib.sha256(description[:462].encode()).hexdigest(),'00117f07856b0c78a57559b19be64cff20924a20f3db6e98bedb85481bc501d9')
         self.assertEqual(yaml.safe_load((ROOT/'translations/en.yaml').read_text())['configuration']['ha_url']['name'],'Home Assistant API URL')
