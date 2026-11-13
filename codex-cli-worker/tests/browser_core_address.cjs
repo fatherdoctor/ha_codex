@@ -14,12 +14,13 @@ const assert=require('node:assert/strict');
    async function settings() {
     const menu=page.getByRole('button',{name:'Open conversations',exact:true});if(await menu.isVisible())await menu.click();
     await page.getByRole('button',{name:'Open settings',exact:true}).click();
+    await page.getByRole('button',{name:'Manage remote connection',exact:true}).click();
    }
    await page.goto('http://127.0.0.1:9137/preview/');await settings();
    await page.waitForFunction(()=>document.querySelector('#remote-core-address').textContent.includes(':80'));
    assert.ok((await page.locator('#remote-core-address').textContent()).includes('discovery'));
    assert.ok((await page.locator('#remote-read-tools').textContent()).includes('no Core API token'));
-   await page.locator('#close-settings').click();
+   await page.locator('[data-close=connection-dialog]').click();
    address={url:null,source:'unavailable',error:'<img src=x onerror=alert(1)> Discovery unavailable.'};
    await settings();await page.waitForFunction(()=>document.querySelector('#remote-core-address').textContent.includes('unavailable'));
    assert.equal(await page.locator('#remote-core-address img').count(),0);

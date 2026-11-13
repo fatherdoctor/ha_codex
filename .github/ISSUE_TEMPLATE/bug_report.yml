@@ -112,8 +112,9 @@ body:
       description: |
         Logs are the fastest way to get a bug fixed. Please include whichever of these apply, after removing sensitive information:
 
+        - **Export logs file (attach this first):** open the worker app page, choose Settings, then Export logs. It holds anonymized details of the last interactions. Read the whole file before you post it; anonymizing is automatic, but you are the last check. This box takes text only, so attach files under Additional context below.
         - **Worker app log:** Settings, Apps, Codex for Home Assistant, Log tab. Copy the lines around the time of the failure.
-        - **Integration diagnostics:** Settings, Devices & services, Codex, three-dot menu, Download diagnostics. This box takes text only, so attach the downloaded file under Additional context below.
+        - **Integration diagnostics:** Settings, Devices & services, Codex, three-dot menu, Download diagnostics. Attach the downloaded file under Additional context too. It carries the same anonymized interactions as Export logs, so you can send either one; read it before posting.
         - **Home Assistant Core log:** Settings, System, Logs. Type `codex` in the filter box and copy the matching lines.
       render: text
 

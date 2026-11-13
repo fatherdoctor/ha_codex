@@ -227,7 +227,7 @@ function pngBuffer(width = 8, height = 6) {
           .getBoundingClientRect();
         const list = messages.getBoundingClientRect();
         return (
-          Math.abs(line.top - header.bottom) < 1 &&
+          Math.abs(line.top - (document.querySelector(".phone-thread-tools").offsetHeight ? document.querySelector(".phone-thread-tools") : document.querySelector(".connection-strip")).getBoundingClientRect().bottom) < 1 &&
           Math.abs(line.bottom - list.top) < 1 &&
           Math.abs(line.left - header.left) < 1 &&
           Math.abs(line.width - header.width) < 1 &&
@@ -1319,10 +1319,12 @@ function pngBuffer(width = 8, height = 6) {
     await page
       .getByText("Signed in (local preview)", { exact: true })
       .waitFor();
+    await page.locator(".advanced summary").click();
+    await page.locator("#workspace-open").click();
     await page.locator("#agents").fill("Keep edits focused.");
     await page.getByRole("button", { name: "Save instructions" }).click();
     await page.getByText("Instructions saved.").waitFor();
-    await page.getByRole("button", { name: "Close settings" }).click();
+    await page.getByRole("button", { name: "Close workspace rules" }).click();
     // The open chat, here the one created by sending a message above, is
     // remembered across a reload of the panel.
     const openTitle = await page.locator("#chat-title").textContent();

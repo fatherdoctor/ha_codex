@@ -2,11 +2,19 @@
 
 ## 0.1.81.2 (unreleased)
 
+- Mask relay pairing output with the code parsed from that line, even when another pairing request
+  clears the current status before the verbose observer runs.
+
 - Add an opt-in, persistent local verbose log with line/byte FIFO limits, exact own-secret masking,
   administrator-only confirmed export and clearing, separate from anonymized diagnostics. Append records
   and compact in bounded batches to limit storage wear; reuse unchanged credential-file snapshots.
   Leave successful status/progress access polls out while retaining warnings and failed requests;
   recover from bad settings and prevent completed stream lines from crossing Clear.
+
+- Add the Quiet Studio chat layout with Home Assistant themes, a bottom composer, photo/file menu,
+  per-chat narrowing permissions, thread status and archive/restore. Separate remote connection and
+  Advanced workspace-rules views; keep pairing URLs distinct from manual codes and administrator-only.
+  Auto-review and Full access remain unavailable; no managed security policy changes.
 
 - Close diagnostics interrupted by a worker restart as unknown, retaining room for new completed work.
   Create the private entity key without hard links and explain recovery while collecting other metadata.
