@@ -2,6 +2,8 @@
 
 ## 0.1.81.2 (unreleased)
 
+- Document the line-based command check’s known YAML blind spots and the protections that still apply.
+
 - Add the Quiet Studio chat layout with Home Assistant themes, a bottom composer, photo/file menu,
   per-chat narrowing permissions, thread status and archive/restore. Separate remote connection and
   Advanced workspace-rules views; keep pairing URLs distinct from manual codes and administrator-only.
