@@ -32,7 +32,10 @@ $("permission-button").onclick = () => {
 };
 for (const button of document.querySelectorAll("[data-mode]")) {
   button.onclick = async () => {
-    button.disabled = true;
+    if (state.settingsBusy) return;
+    state.settingsBusy = true;
+    for (const choice of document.querySelectorAll('[data-mode]')) choice.disabled = true;
+    controls();
     const id = state.id;
     try {
       let mode = button.dataset.mode;
@@ -41,13 +44,17 @@ for (const button of document.querySelectorAll("[data-mode]")) {
           chat_settings: selectedSettings(), permission_mode: mode,
         });
         mode = data.permission_mode;
-        if (state.task) state.task.permission_mode = mode;
+        if (id === state.id && state.task) state.task.permission_mode = mode;
       }
       state.permissionModes.set(id, mode);
       $("permissions-dialog").close();
       updateStudio();
     } catch (error) { $("permission-result").textContent = error.message; }
-    finally { button.disabled = false; }
+    finally {
+      state.settingsBusy = false;
+      for (const choice of document.querySelectorAll('[data-mode]')) choice.disabled = false;
+      controls();
+    }
   };
 }
 $("upload-photo").onclick = () => { $("plus-menu").hidden = true; $("file-input").click(); };

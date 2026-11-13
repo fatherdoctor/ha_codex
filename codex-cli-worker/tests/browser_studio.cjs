@@ -62,6 +62,18 @@ fs.mkdirSync(output,{recursive:true});
    assert.match(await page.locator('#status-details').textContent(),/Usage and resetUnavailable/);
    await page.locator('[data-close="status-dialog"]').click();
    const taskId = await page.evaluate(()=>state.id);
+   await page.route('**/tasks/*/settings', async route=>{await new Promise(resolve=>setTimeout(resolve,250));await route.continue();});
+   await page.locator('#permission-button').click();
+   await page.locator('[data-mode="read-only"]').click();
+   await page.waitForFunction(()=>state.settingsBusy);
+   assert.equal(await page.locator('#new-chat').isDisabled(),true);
+   assert.equal(await page.locator('[data-mode="default"]').isDisabled(),true);
+   await page.waitForFunction(()=>!document.getElementById('permissions-dialog').open);
+   assert.equal((await (await page.request.get(base+'tasks/'+taskId)).json()).task.permission_mode,'read-only');
+   await page.locator('#permission-button').click();
+   await page.locator('[data-mode="default"]').click();
+   await page.waitForFunction(()=>!document.getElementById('permissions-dialog').open);
+
    const threadId = (await (await page.request.get(base+'tasks/'+taskId)).json()).task.session_id;
    await page.evaluate(()=>{window.studioCopied=null;Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{window.studioCopied=text;}}});});
    await page.locator(width===390?'#phone-thread-actions':'#thread-actions').click();
