@@ -248,9 +248,14 @@ class WorkerTests(unittest.TestCase):
         token_file = self.root / 'worker_api_token'; token_file.write_text('SYNTHETIC_WORKER')
         with (patch.object(server, 'CODEX_HOME', auth), patch.object(server, 'WORKER_TOKEN_PATH', token_file),
               patch.object(server, 'read_options', return_value={'HA_TOKEN': 'SYNTHETIC_HA'}),
-              patch.dict(os.environ, {'SUPERVISOR_TOKEN': 'SYNTHETIC_SUPERVISOR'})):
+              patch.dict(os.environ, {'SUPERVISOR_TOKEN': 'SYNTHETIC_SUPERVISOR'}),
+              patch.object(server.relay_reads, 'capability', 'SYNTHETIC_RELAY'),
+              patch.object(server.verification, 'capabilities', {'sample':'SYNTHETIC_VERIFY'}),
+              patch.object(server.ha_data, 'capabilities', {'sample':'SYNTHETIC_DATA'}),
+              patch.dict(server.auth_state, {'user_code':'SYNTHETIC_CODE'}),
+              patch.dict(server.remote_control_supervisor.status, {'pairing_code':'SYNTHETIC_PAIR'})):
             values = server.verbose_secrets()
-        for value in ('SYNTHETIC_OPENAI','SYNTHETIC_ACCESS','SYNTHETIC_REFRESH','SYNTHETIC_ID','SYNTHETIC_WORKER','SYNTHETIC_HA','SYNTHETIC_SUPERVISOR'):
+        for value in ('SYNTHETIC_OPENAI','SYNTHETIC_ACCESS','SYNTHETIC_REFRESH','SYNTHETIC_ID','SYNTHETIC_WORKER','SYNTHETIC_HA','SYNTHETIC_SUPERVISOR','SYNTHETIC_RELAY','SYNTHETIC_VERIFY','SYNTHETIC_DATA','SYNTHETIC_CODE','SYNTHETIC_PAIR'):
             self.assertIn(value, values)
 
     def test_admin_routes_confirmation_and_anonymized_export_separation(self):
