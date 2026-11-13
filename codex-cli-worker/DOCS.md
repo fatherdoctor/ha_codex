@@ -835,7 +835,9 @@ the owner's enabled setting stays on. Credential files are reread only when thei
 modification/change times or mode changes; environment values and capabilities are checked each capture.
 Corrupt settings fall back to off/500 with a fixed note; Clear still removes the retained text. Exact
 masking includes literal and one JSON-escaped spelling, not arbitrary levels of nested JSON escaping.
-Logging failures cannot change approvals or execution outcomes.
+Logging failures cannot change approvals or execution outcomes. A failed credential lookup drops the new
+observation without reloading or rewriting retained lines. Normal stdout/stderr and Python logging handlers
+keep writing to the add-on log whether verbose capture is on or off; the private copy alone omits polls.
 
 Export verbose log shows the personal-data warning and requires confirmation. Only an authenticated
 Ingress administrator can export or clear it; an API token alone is not enough. Read every export

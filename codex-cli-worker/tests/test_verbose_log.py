@@ -289,6 +289,7 @@ class WorkerTests(unittest.TestCase):
     def test_installed_stdout_stderr_and_logging_handlers_capture_actual_outputs(self):
         root_logger = logging.getLogger()
         original_handlers = list(root_logger.handlers)
+        root_logger.handlers = []
         with patch.object(server.sys, 'stdout', io.StringIO()), patch.object(server.sys, 'stderr', io.StringIO()), patch.object(server.atexit, 'register'):
             try:
                 server.install_verbose_logging()

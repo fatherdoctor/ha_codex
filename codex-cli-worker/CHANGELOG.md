@@ -2,6 +2,10 @@
 
 ## 0.1.81.2 (unreleased)
 
+- Preserve normal stderr logging when verbose capture is installed, omit successful polling lines only
+  from the private copy, and avoid rewriting retained logs while credential lookup is unavailable.
+  Cover bulk masking, newly learned export secrets, append integrity and sign-in-code ordering.
+
 - Mask relay pairing output with the code parsed from that line, even when another pairing request
   clears the current status before the verbose observer runs.
 

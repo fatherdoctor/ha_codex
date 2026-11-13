@@ -19,6 +19,7 @@ TRUNCATED = ' [line truncated]\n'
 
 
 def atomic(path, raw):
+    """Replace a private file atomically and sync the new contents."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, name = tempfile.mkstemp(prefix='.verbose-', suffix='.tmp', dir=path.parent)
     try:
@@ -47,6 +48,7 @@ def private_read(path, maximum, tail=False):
 
 
 class VerboseLog:
+    """Bounded private text storage with explicit owner controls and own-secret masking."""
     def __init__(self, path, secrets=lambda: (), max_bytes=MAX_BYTES):
         self.path = Path(path)
         self.settings_path = self.path.with_suffix('.settings.json')
@@ -181,8 +183,14 @@ class VerboseLog:
                     return
                 epoch = self.epoch
             # Never acquire worker/capability locks while holding the storage lock.
-            values = tuple(self.secrets())
-            self.remember(values)
+            try:
+                values = tuple(self.secrets())
+                self.remember(values)
+            except Exception:
+                # Credential lookup did not change storage; do not reload/rewrite it.
+                with self.lock:
+                    self.available = False
+                return
             with self.lock:
                 # Clear and off/on cycles invalidate observations already in flight.
                 if not self.settings['enabled'] or self.epoch != epoch:
@@ -308,7 +316,7 @@ class Tee:
                     self.truncated = False
         # Secret snapshots and disk I/O must not hold a stream lock.
         for epoch, line in ready:
-            self.store.capture(self.source, line, epoch=epoch)
+            self.observe(line, epoch)
         return result
 
     def finish(self):
@@ -318,6 +326,11 @@ class Tee:
             self.pending = ''
             self.truncated = False
         if line:
+            self.observe(line, epoch)
+
+    def observe(self, line, epoch):
+        # Keep the original stream untouched. Only the optional private copy drops polls.
+        if self.source != 'stderr' or not poll_stderr(line):
             self.store.capture(self.source, line, epoch=epoch)
 
     def flush(self):
@@ -328,6 +341,7 @@ class Tee:
 
 
 class Handler(logging.Handler):
+    """Optional record observer for callers that do not also capture their stderr."""
     def __init__(self, store):
         super().__init__()
         self.store = store
@@ -360,6 +374,21 @@ def poll_access(record: logging.LogRecord) -> bool:
     match = REQUEST_LINE.fullmatch(request_line)
     code = str(record.args[1])
     return bool(match and code.isdecimal() and 200 <= int(code) < 400
+                and POLL_PATH.fullmatch(match[1].split('?', 1)[0]))
+
+
+# The default Werkzeug handler writes its rendered access line to stderr. Logging
+# prefixes and ordinary prose do not match; warnings/errors and failed requests stay.
+STDERR_ACCESS = re.compile(
+    r'^\S+ - - \[[^\]\r\n]+\] "(?:GET|HEAD) ([^ "\t]+) HTTP/[0-9.]+" ([0-9]{3}) \S+[ \t]*\n?$'
+)
+
+
+def poll_stderr(line: str) -> bool:
+    """Recognize successful polling access lines after the normal handler renders them."""
+    plain = re.sub(r'\x1b\[[0-9;]*m', '', line)
+    match = STDERR_ACCESS.fullmatch(plain)
+    return bool(match and 200 <= int(match[2]) < 400
                 and POLL_PATH.fullmatch(match[1].split('?', 1)[0]))
 
 

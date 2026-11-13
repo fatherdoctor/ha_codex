@@ -50,7 +50,7 @@ import gate_rules
 from core_address import CoreAddress, probe_core
 from relay_reads import RelayReads, ReadError as RelayReadError
 import schedule_api
-from verbose_log import VerboseLog, Tee as VerboseTee, Handler as VerboseHandler, CredentialCache
+from verbose_log import VerboseLog, Tee as VerboseTee, CredentialCache
 from interaction_diagnostics import RollingDiagnostics, InteractionRecorder
 
 
@@ -6933,9 +6933,21 @@ def main() -> None:
 
 def install_verbose_logging():
     """Install after module initialization, before the worker's startup checks/logs."""
-    sys.stdout = VerboseTee(sys.stdout, verbose_logs, 'stdout')
-    sys.stderr = VerboseTee(sys.stderr, verbose_logs, 'stderr')
-    logging.getLogger().addHandler(VerboseHandler(verbose_logs))
+    original_stdout, original_stderr = sys.stdout, sys.stderr
+    sys.stdout = VerboseTee(original_stdout, verbose_logs, 'stdout')
+    sys.stderr = VerboseTee(original_stderr, verbose_logs, 'stderr')
+    # Existing handlers may already hold the original streams. Keep their format,
+    # level and propagation; route only those stream references through the tee.
+    loggers = [logging.getLogger(), *logging.Logger.manager.loggerDict.values()]
+    for logger in loggers:
+        if not isinstance(logger, logging.Logger):
+            continue
+        for handler in logger.handlers:
+            if isinstance(handler, logging.StreamHandler):
+                if handler.stream is original_stderr:
+                    handler.setStream(sys.stderr)
+                elif handler.stream is original_stdout:
+                    handler.setStream(sys.stdout)
     atexit.register(sys.stdout.finish)
     atexit.register(sys.stderr.finish)
 

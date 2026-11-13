@@ -24,6 +24,63 @@ class VerboseReviewTests(unittest.TestCase):
         self.store = VerboseLog(self.path)
         self.store.configure({'enabled': True, 'lines': 500})
 
+    def test_provider_failures_keep_loaded_state_and_do_not_rewrite_retained_log(self):
+        self.store.capture('stdout', 'retained before provider failure')
+        before = self.path.read_bytes()
+        with patch.object(self.store, 'secrets', side_effect=OSError('synthetic provider failure')), \
+                patch.object(verbose_log, 'atomic', wraps=verbose_log.atomic) as saved:
+            for _ in range(200):
+                self.store.capture('stdout', 'not stored')
+            self.assertEqual(saved.call_count, 0)
+        self.assertTrue(self.store.loaded)
+        self.assertFalse(self.store.status()['available'])
+        self.assertEqual(self.path.read_bytes(), before)
+        self.store.capture('stdout', 'provider recovered')
+        self.assertTrue(self.store.status()['available'])
+        self.assertIn(b'provider recovered', self.path.read_bytes())
+
+    def test_bulk_capture_masks_every_physical_line_before_export(self):
+        # Both spellings are synthetic credentials deliberately planted in a bulk record.
+        secret = 'SYNTHETIC_OWN_"\\_SECRET'
+        self.store.secrets = lambda: [secret]
+        self.store.capture('stdout', secret + '\n' + json.dumps(secret) + '\nprivate prose')
+        raw = self.path.read_bytes()
+        self.assertNotIn(secret.encode(), raw)
+        self.assertNotIn(json.dumps(secret)[1:-1].encode(), raw)
+        self.assertEqual(raw.count(b'[redacted]'), 2)
+        self.assertIn(b'private prose', raw)
+
+    def test_export_masks_a_secret_learned_after_capture(self):
+        secret = 'SYNTHETIC_LATER_SECRET'
+        self.store.capture('stdout', secret)
+        self.assertIn(secret.encode(), self.path.read_bytes())
+        self.store.secrets = lambda: [secret]
+        exported = self.store.export()
+        self.assertNotIn(secret.encode(), exported)
+        self.assertNotIn(secret.encode(), self.path.read_bytes())
+        self.assertIn(b'[redacted]', exported)
+
+    def test_append_refuses_a_file_changed_outside_the_store(self):
+        self.store.capture('stdout', 'first record')
+        self.path.write_bytes(b'synthetic external replacement\n')
+        self.store.capture('stdout', 'must not append')
+        self.assertEqual(self.path.read_bytes(), b'synthetic external replacement\n')
+        self.assertFalse(self.store.available)
+        self.assertFalse(self.store.loaded)
+
+    def test_signin_code_is_remembered_before_its_line_is_stored(self):
+        code = 'SYNTHETIC_LOGIN_CODE'
+        def stored(task, source, text):
+            self.store.capture(source, text)
+        with (patch.object(server, 'verbose_logs', self.store),
+              patch.object(server, 'parse_login_output', return_value={'code': code, 'url': ''}),
+              patch.object(server, 'update_auth_state'),
+              patch.object(server, 'write_task_log', side_effect=stored)):
+            server.auth_reader_thread(io.StringIO('Sign-in code: ' + code + '\n'))
+        raw = self.path.read_bytes()
+        self.assertNotIn(code.encode(), raw)
+        self.assertIn(b'Sign-in code: [redacted]', raw)
+
     def test_capture_writes_linear_volume_instead_of_one_file_per_line(self):
         sizes = []
         atomic = verbose_log.atomic
