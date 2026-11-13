@@ -159,6 +159,16 @@ class ProtectedPathTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertFalse(approvals.command_names_protected_path(command))
 
+    def test_managed_requirements_path_in_a_command_is_protected(self) -> None:
+        for command in ('cat /etc/codex/requirements.toml',
+                        'sed -i x /etc//codex/"requirements.toml"',
+                        'cat /etc/codex/requirements.toml.example', 'cat /config/requirements.toml'):
+            with self.subTest(command=command):
+                self.assertTrue(approvals.command_names_protected_path(command))
+        for command in ('cat /config/settings.toml',):
+            with self.subTest(command=command):
+                self.assertFalse(approvals.command_names_protected_path(command))
+
 
 if __name__ == "__main__":
     unittest.main()
