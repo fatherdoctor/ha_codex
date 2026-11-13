@@ -2,7 +2,7 @@
 
 ## 0.1.81.2 (unreleased)
 
-- Clarify remote pairing and workspace instructions in the newcomer guide.
+- Clarify remote pairing, Core address discovery, and workspace instructions in the newcomer guide.
 
 - Document the line-based command check’s known YAML blind spots and the protections that still apply.
 
