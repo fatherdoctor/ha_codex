@@ -136,7 +136,7 @@ async def async_discover_worker(hass: HomeAssistant, session: ClientSession) -> 
     """Find the reachable worker app and its generated API token."""
     workers = await _async_worker_addons(session)
     if not workers:
-        raise CodexCliApiError("Codex CLI Worker app is not installed")
+        raise CodexCliApiError("Codex for Home Assistant app is not installed")
 
     last_error: CodexCliApiError | None = None
     for addon in workers:

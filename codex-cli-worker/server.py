@@ -377,7 +377,7 @@ def enforce_ingress_boundary() -> Response | None:
 
     if request.endpoint == "index":
         return Response(
-            "Open the Codex CLI Worker through Home Assistant Ingress.",
+            "Open the Codex for Home Assistant through Home Assistant Ingress.",
             status=403,
             mimetype="text/plain",
         )
