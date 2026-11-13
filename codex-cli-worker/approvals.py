@@ -106,7 +106,7 @@ def _protected_ancestor_operations(command: str, initial_cwd: str = '', depth: i
                 continue
             wrapper = posixpath.basename(word).lower()
             if wrapper not in ('sudo', 'env', 'command', 'nohup', 'timeout', 'nice', 'ionice',
-                               'doas', 'setsid', 'stdbuf', 'xargs'):
+                               'doas', 'setsid', 'stdbuf', 'xargs', 'time', 'exec', 'unbuffer'):
                 break
             index += 1
             while index < len(segment) and segment[index].startswith('-'):
@@ -119,6 +119,8 @@ def _protected_ancestor_operations(command: str, initial_cwd: str = '', depth: i
                       or (wrapper == 'env' and flag in ('-u', '--unset', '-C', '--chdir'))
                       or (wrapper == 'timeout' and flag in ('-s', '--signal', '-k', '--kill-after'))
                       or (wrapper == 'nice' and flag in ('-n', '--adjustment'))
+                      or (wrapper == 'time' and flag in ('-f', '--format', '-o', '--output'))
+                      or (wrapper == 'exec' and flag == '-a')
                       or (wrapper == 'ionice' and flag in ('-c', '--class', '-n', '--classdata', '-p', '-P'))
                       or (wrapper == 'stdbuf' and flag in ('-i', '-o', '-e', '--input', '--output', '--error'))
                       or (wrapper == 'xargs' and flag in ('-I', '-n', '-L', '-P', '-s', '-a', '-E', '-d',
