@@ -2,6 +2,10 @@
 
 ## 0.1.81.2 (unreleased)
 
+- Bound total hook YAML work across all documents before graph allocation, use the safe LibYAML loader
+  where available, limit retained watch graphs by estimated node cost, and reuse unchanged classifications
+  without keeping large graphs. Explain manual repair and name unreadable files in refusals.
+
 - Budget parsed YAML checks by bytes and node visits instead of elapsed time. Retain bounded, hash-keyed
   watch parse results, inspect script body nodes without serializing them again, refuse unparsed script/include
   dependencies in the command check, recognize comma-separated script targets, and report include work limits

@@ -325,6 +325,21 @@ class ConfigWatch:
                 texts[rel] = raw_files[rel].decode("utf-8", errors="replace")
             except (OSError, ValueError):
                 continue
+        # Re-read prior dependencies before reusing classification. This avoids
+        # retaining large node graphs just to discover the same include paths.
+        if self._classification_cache is not None:
+            previous, result = self._classification_cache
+            complete = True
+            for rel, _ in previous[0]:
+                if rel not in raw_files and not rel.lower().endswith(gate_rules.YAML_SUFFIXES):
+                    try:
+                        raw_files[rel] = gate_rules.read_config_bytes(self.root, rel, WATCH_MAX_BYTES)
+                    except (OSError, ValueError):
+                        complete = False
+            current = tuple(sorted((rel, hashlib.sha256(raw).digest())
+                                   for rel, raw in raw_files.items()))
+            if complete and current == previous[0] and json.dumps(rules, sort_keys=True) == previous[1]:
+                return copy.deepcopy(result)
         texts = gate_rules.extend_include_texts(texts, self.root, rules, max_bytes=WATCH_MAX_BYTES, raw_files=raw_files)
         signature = (
             tuple(sorted((rel, hashlib.sha256(raw).digest()) for rel, raw in raw_files.items())),
@@ -597,8 +612,8 @@ class ConfigWatch:
                     texts[rel] = gate_rules.read_config_bytes(self.root, rel).decode("utf-8", errors="replace")
                 except (OSError, ValueError):
                     continue
-            scripts = self.refused_scripts(texts, rules)
             texts = gate_rules.extend_include_texts(texts, self.root, rules, max_bytes=WATCH_MAX_BYTES)
+            scripts = self.refused_scripts(texts, rules)
             definitions = gate_rules.included_definitions(texts, rules)
             copies = saved.get("copies") or {}
             for rel in sorted({item["file"] for item in out}):

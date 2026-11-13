@@ -34,7 +34,6 @@ import re
 import os
 import shlex
 import stat
-import time
 import posixpath
 from functools import wraps
 from contextvars import ContextVar
@@ -147,33 +146,84 @@ YAML_MAX_NODES = 1000000
 INCLUDE_MAX_NODES = 1000000
 INCLUDE_MAX_FILES = 3000
 INCLUDE_MAX_BYTES = 16 * 1024 * 1024
+# One hook process must finish before Codex's 10-second timeout. The event
+# preflight stops before allocating an oversized graph; measure_gate.py measures
+# the total boundary and adversarial inventory with a 6x slow-machine factor.
+HOOK_MAX_NODES = 150000
+HOOK_COMPOSE_MAX_BYTES = 2 * 1024 * 1024
+YAML_CACHE_MAX_COST = 16 * 1024 * 1024
+YAML_CACHE_MAX_BYTES = 2 * 1024 * 1024
+YAML_NODE_COST = 1024
+YAML_LOADER = getattr(yaml, 'CSafeLoader', yaml.SafeLoader)
+
+
+class HookBudgetError(YamlBudgetError):
+    """Stop this whole hook, rather than falling back to incomplete line checks."""
+
 
 
 class YamlCache:
-    """Bound retained parse graphs by source bytes and entries, keyed by content hash."""
-    def __init__(self):
+    """Retain at most 16 MiB of estimated graph cost and 2 MiB of source."""
+    def __init__(self, max_cost=YAML_CACHE_MAX_COST):
+        self.max_cost = max_cost
         self.results = {}
         self.bytes = 0
+        self.cost = 0
 
     def get(self, digest):
         return self.results.get(digest)
 
     def put(self, digest, size, result):
-        if size > 16 * 1024 * 1024:
+        seen, todo = set(), [result[0]]
+        while todo:
+            node = todo.pop()
+            if node is None or id(node) in seen:
+                continue
+            seen.add(id(node))
+            if isinstance(node, yaml.MappingNode):
+                for key, value in node.value:
+                    todo.extend((key, value))
+            elif isinstance(node, yaml.SequenceNode):
+                todo.extend(node.value)
+        cost = size + len(seen) * YAML_NODE_COST
+        previous = self.results.pop(digest, None)
+        if previous is not None:
+            self.bytes -= previous[0]
+            self.cost -= previous[2]
+        if cost > self.max_cost or size > YAML_CACHE_MAX_BYTES:
             return
-        while self.results and (len(self.results) >= 512 or self.bytes + size > 16 * 1024 * 1024):
+        while self.results and (len(self.results) >= 512
+                                or self.bytes + size > YAML_CACHE_MAX_BYTES
+                                or self.cost + cost > self.max_cost):
             oldest = next(iter(self.results))
-            old_size, _ = self.results.pop(oldest)
+            old_size, _, old_cost = self.results.pop(oldest)
             self.bytes -= old_size
-        self.results[digest] = (size, result)
+            self.cost -= old_cost
+        self.results[digest] = (size, result, cost)
         self.bytes += size
+        self.cost += cost
 
 
 class ParseScan:
-    """One deterministic operation; a watch may retain its bounded parse cache."""
-    def __init__(self, cache=None):
-        self.cache = cache if cache is not None else YamlCache()
+    """One deterministic operation; the hook totals every uncached composition."""
+    def __init__(self, cache=None, hook=False):
+        self.cache = cache if cache is not None else YamlCache(
+            max_cost=HOOK_COMPOSE_MAX_BYTES + HOOK_MAX_NODES * YAML_NODE_COST
+            if hook else YAML_CACHE_MAX_COST)
         self.failures = {}
+        self.hook = hook
+        self.nodes = 0
+        self.bytes = 0
+        self.source = 'proposed YAML'
+
+    def charge(self, nodes=0, size=0):
+        if self.hook and (self.nodes + nodes > HOOK_MAX_NODES
+                          or self.bytes + size > HOOK_COMPOSE_MAX_BYTES):
+            raise HookBudgetError(
+                f'{self.source}: file could not be read within the total hook work limit; '
+                'a person must review or repair it outside Codex')
+        self.nodes += nodes
+        self.bytes += size
 
 
 def scan_failures():
@@ -203,7 +253,7 @@ def yaml_scan(function):
         if _scan_nodes.get() is not None:
             return function(*args, **kwargs)
         cache = getattr(args[0], '_yaml_cache', None) if args else None
-        token = _scan_nodes.set(ParseScan(cache))
+        token = _scan_nodes.set(ParseScan(cache, hook=function.__name__ == 'check_tool_call'))
         try:
             return function(*args, **kwargs)
         finally:
@@ -211,8 +261,10 @@ def yaml_scan(function):
     return run
 
 
-def yaml_result(text):
+def yaml_result(text, source=None):
     scan = _scan_nodes.get()
+    if scan is not None and source is not None:
+        scan.source = source
     raw = text.encode('utf-8')
     digest = hashlib.sha256(raw).digest()
     cached = scan.cache.get(digest) if scan is not None else None
@@ -220,6 +272,8 @@ def yaml_result(text):
         return cached[1]
     try:
         result = (_compose_yaml(text), '')
+    except HookBudgetError:
+        raise
     except (YamlBudgetError, RecursionError):
         result = (None, 'YAML exceeds the bounded parsed check; review this file manually')
     if scan is not None:
@@ -227,42 +281,50 @@ def yaml_result(text):
     return result
 
 
-def yaml_node(text: str) -> Any:
-    return yaml_result(text)[0]
+def yaml_node(text: str, source=None) -> Any:
+    return yaml_result(text, source)[0]
 
 
 def _compose_yaml(text: str) -> Any:
     """Compose safe nodes, retaining !include/!secret tags without constructing objects.
 
-    Node visits, nesting and input bytes are bounded independently of clocks. Invalid
-    partial YAML falls back to the existing line rules, not a permissive loader.
+    Node events, nesting and source bytes are bounded independently of clocks.
+    The watch retains line findings for partial YAML; strict hook dependencies
+    refuse unreadable content rather than treating a missing graph as permission.
     """
     if len(text.encode("utf-8")) > YAML_MAX_BYTES:
         raise YamlBudgetError("YAML byte budget exceeded")
-    class Loader(yaml.SafeLoader):
-        def __init__(self, stream):
-            super().__init__(stream)
-            self.visits, self.depth = 0, 0
-
-        def compose_node(self, parent, index):
-            self.visits += 1
-            self.depth += 1
-            try:
-                if self.visits > YAML_MAX_NODES or self.depth > 64:
-                    raise YamlBudgetError("YAML parse budget exceeded")
-                return super().compose_node(parent, index)
-            finally:
-                self.depth -= 1
-    loader = Loader(text)
+    scan = _scan_nodes.get()
+    if scan is not None and scan.hook and YAML_LOADER is yaml.SafeLoader:
+        raise HookBudgetError(
+            f'{scan.source}: file could not be read because the fast safe YAML parser is unavailable; '
+            'a person must review it outside Codex')
+    if scan is not None:
+        scan.charge(size=len(text.encode('utf-8')))
+    visits, depth = 0, 0
     try:
-        return loader.get_single_node()
+        # Count parser events before graph allocation. C and Python loaders use
+        # the same event contract, including aliases and tagged scalar values.
+        for event in yaml.parse(text, Loader=YAML_LOADER):
+            if isinstance(event, (yaml.ScalarEvent, yaml.AliasEvent,
+                                  yaml.SequenceStartEvent, yaml.MappingStartEvent)):
+                if visits >= YAML_MAX_NODES:
+                    raise YamlBudgetError('YAML node budget exceeded')
+                if scan is not None:
+                    scan.charge(nodes=1)
+                visits += 1
+            if isinstance(event, (yaml.SequenceStartEvent, yaml.MappingStartEvent)):
+                depth += 1
+                if depth > 64:
+                    raise YamlBudgetError('YAML nesting budget exceeded')
+            elif isinstance(event, (yaml.SequenceEndEvent, yaml.MappingEndEvent)):
+                depth -= 1
+        return yaml.compose(text, Loader=YAML_LOADER)
     except yaml.YAMLError:
         return None
-    finally:
-        loader.dispose()
 
 
-def yaml_mappings(node: Any):
+def yaml_mappings(node: Any, charge=False):
     """Walk shared/cyclic aliases once, including merge-key mappings."""
     seen, todo = set(), [node]
     while todo:
@@ -270,6 +332,9 @@ def yaml_mappings(node: Any):
         if item is None or id(item) in seen:
             continue
         seen.add(id(item))
+        scan = _scan_nodes.get()
+        if charge and scan is not None:
+            scan.charge(nodes=1)
         if isinstance(item, yaml.MappingNode):
             yield item
             for key, value in item.value:
@@ -312,9 +377,9 @@ def is_definition(key, value, rules):
         or value.tag == 'tag:yaml.org,2002:null' or value.tag.startswith('!'))
 
 
-def node_findings(node, text, rules, scripts):
+def node_findings(node, text, rules, scripts, count_work=False):
     findings, lines = [], text.splitlines()
-    for mapping in yaml_mappings(node):
+    for mapping in yaml_mappings(node, charge=count_work):
         for key, value in mapping.value:
             if not isinstance(key, yaml.ScalarNode):
                 continue
@@ -475,9 +540,10 @@ def refused_scripts(texts: dict[str, str], rules: dict[str, Any], strict: bool =
     blocks = {}
     sources = {rel: 'auto' for rel in texts if rel == 'scripts.yaml' or rel.startswith('scripts/')}
     for source, text in texts.items():
-        node, error = yaml_result(text)
-        if strict and (error or (node is None and re.search(r'\bscript\b', text) and has_yaml_content(text))):
-            raise ValueError(f'{source}: script definitions could not be parsed; calls are refused')
+        node, error = yaml_result(text, source)
+        if strict and (error or (node is None and has_yaml_content(text))):
+            raise ValueError(f'{source}: file could not be read by the check; '
+                             'a person must repair it outside Codex')
         # Inspect composed keys, including quoted/escaped script keys. A text
         # prefilter cannot prove an uncomposed document has no script definitions.
         for mapping in yaml_mappings(node):
@@ -487,7 +553,7 @@ def refused_scripts(texts: dict[str, str], rules: dict[str, Any], strict: bool =
                 if isinstance(value, yaml.MappingNode):
                     for name, body in value.value:
                         if isinstance(name, yaml.ScalarNode):
-                            blocks[name.value] = (body, text)
+                            blocks[name.value] = (body, text, source)
                 elif isinstance(value, yaml.ScalarNode) and value.tag.startswith('!include'):
                     target = include_path(source, value.value)
                     if value.tag == '!include':
@@ -503,14 +569,14 @@ def refused_scripts(texts: dict[str, str], rules: dict[str, Any], strict: bool =
         if isinstance(node, yaml.MappingNode):
             keys = {key.value for key, _ in node.value if isinstance(key, yaml.ScalarNode)}
             if sources[rel] == 'file' or (sources[rel] == 'auto' and rel.startswith('scripts/') and 'sequence' in keys):
-                blocks[Path(rel).stem] = (node, text)
+                blocks[Path(rel).stem] = (node, text, rel)
             else:
                 for key, value in node.value:
                     if isinstance(key, yaml.ScalarNode):
-                        blocks[key.value] = (value, text)
+                        blocks[key.value] = (value, text, rel)
         else:
             if strict and has_yaml_content(text):
-                raise ValueError(f'{rel}: script definitions could not be parsed; calls are refused')
+                raise ValueError(f'{rel}: file could not be read by the check; a person must repair it outside Codex')
             # Preserve the line pass for partially edited script maps.
             current, block = '', []
             for line in text.splitlines() + ['__end__:']:
@@ -527,7 +593,15 @@ def refused_scripts(texts: dict[str, str], rules: dict[str, Any], strict: bool =
         for name, body in blocks.items():
             # Classification needs the node, not source lines. Splitting the full
             # script-map text once per body makes an ordinary map quadratic.
-            findings = node_findings(body[0], '', rules, refused) if isinstance(body, tuple) else find_refused(body, rules, refused)
+            if isinstance(body, tuple):
+                scan = _scan_nodes.get()
+                if scan is not None:
+                    scan.source = body[2]
+                # Transitive resolution may revisit bodies; those repeated walks
+                # must consume the same hook total as composition.
+                findings = node_findings(body[0], '', rules, refused, count_work=True)
+            else:
+                findings = find_refused(body, rules, refused)
             if any(f.kind != "parse_budget" for f in findings):
                 found.add(name)
         if found <= refused:
@@ -554,7 +628,7 @@ def included_definitions(texts: dict[str, str], rules: dict[str, Any], strict: b
     roots = {}
     for rel, text in sorted(texts.items()):
         if '!include' in text and has_yaml_content(text):
-            roots[rel] = yaml_node(text)
+            roots[rel] = yaml_node(text, rel)
             if roots[rel] is None:
                 include_failure(rel, 'include source could not be parsed', strict)
     todo = [(rel, node, frozenset()) for rel, node in roots.items()]
@@ -1210,13 +1284,13 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
             try:
                 added_files = parse_patch(text)
                 versions = patch_versions(text, str(data.get("cwd") or "")) if remote_on else []
-                # Reserve parsing of proposed content before scanning unrelated inventory.
+                # Count proposed content first so inventory work cannot hide its cost.
                 if remote_on:
                     for path, before, after in versions:
-                        yaml_node(before)
-                        yaml_node(after)
+                        yaml_node(before, path)
+                        yaml_node(after, path)
                 for path, added in added_files:
-                    yaml_node(added)
+                    yaml_node(added, path)
                 inventory = extend_include_texts(config_yaml_texts(CONFIG_ROOT), CONFIG_ROOT, rules, strict=remote_on)
                 scripts = refused_scripts(inventory, rules, strict=remote_on)
                 for path, added in added_files:

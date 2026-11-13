@@ -253,7 +253,7 @@ class FurtherRegressions(unittest.TestCase):
 
 class HookBudgetTests(unittest.TestCase):
     def test_clock_speed_does_not_change_an_ordinary_command_decision(self):
-        with patch.object(rules.time, 'monotonic', side_effect=AssertionError('clock-based work limit')):
+        with patch('time.monotonic', side_effect=AssertionError('clock-based work limit')):
             self.assertEqual(rules.check_tool_call('PreToolUse',
                 {'tool_input': {'command': 'ls /config'}}, True, rules.load_rules()), '')
 

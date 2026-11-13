@@ -102,12 +102,13 @@ class ReviewTests(unittest.TestCase):
         result = watch.new_findings(remote_on=True)
         self.assertTrue(any((x.get('undone') == 'removed' for x in result)))
 
-    def test_unrelated_over_parse_cap_file_keeps_line_script_resolution(self):
+    def test_hook_total_refuses_oversized_script_source_but_watch_resolves_it(self):
         self.write('scripts.yaml', 'sample:\n  sequence:\n    - action: shell_command.sample\n' + '# padding\n' * 220000)
         self.assertIn('sample', rules.config_refused_scripts(self.policy))
-        self.assertEqual(self.hook('ordinary.yaml', '# before\n', '# after\n'), '')
-        reason = self.hook('ordinary.yaml', '# before\n', '- action: script.sample\n')
-        self.assertIn('script.sample', reason)
+        for after in ('# after\n', '- action: script.sample\n'):
+            reason = self.hook('ordinary.yaml', '# before\n', after)
+            self.assertIn('scripts.yaml', reason)
+            self.assertIn('total hook work limit', reason)
 
     def test_touched_over_cap_refusal_names_its_file(self):
         text = 'key: value\n' + '# padding\n' * 220000

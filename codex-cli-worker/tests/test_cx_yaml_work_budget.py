@@ -1,6 +1,5 @@
 """Work limits remain stable under load and unknown dependencies cannot approve edits."""
 from pathlib import Path
-import time
 import unittest
 from unittest.mock import patch
 
@@ -8,14 +7,6 @@ import test_cx_yaml as fixtures
 import test_cx_yaml_review as large
 import gate_rules as rules
 import remote_control as rc
-
-
-class ScaledClock:
-    def monotonic(self):
-        return time.monotonic() * 4
-
-    def __getattr__(self, name):
-        return getattr(time, name)
 
 
 class WorkBudgetTests(unittest.TestCase):
@@ -33,7 +24,7 @@ class WorkBudgetTests(unittest.TestCase):
         self.write('commands.txt', 'sample: echo before\n')
         watch = rc.ConfigWatch(self.root, Path(self.tmp.name) / 'baseline')
 
-        with patch.object(rules, 'time', ScaledClock()):
+        with patch('time.monotonic', side_effect=AssertionError('clock-based parsing')):
             watch.take_baseline()
             for _ in range(3):
                 self.assertEqual(watch.new_findings(remote_on=True), [])

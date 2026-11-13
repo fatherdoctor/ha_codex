@@ -397,17 +397,44 @@ adds a safe composed-node pass for quoted keys, flow mappings, action/service va
 anchors and YAML merges. Home Assistant tags remain nodes: `!secret` is never resolved or read.
 The parser constructs no Python objects. Node visits (1,000,000), nesting (64) and input bytes
 (10 MiB per document) bound parsing by work, independently of the machine's clock or load.
-These limits admit five copies of the reference-sized automation and script documents. Include discovery
-also bounds node visits (1,000,000), files (3,000), bytes (16 MiB) and dependency expansion rounds (64).
-Each document, including a failed parse, is cached by its content hash. Hook/exchange caches last only
-for that operation; the watch retains its cache between scans, bounded to 512 entries and 16 MiB of source
-bytes. Parsed graphs use additional memory. An unchanged idle scan composes no documents while its
-working set fits the cache; evicted documents are parsed again. Changed hashes always require a fresh parse.
+These per-document limits admit five copies of the reference-sized automation and script documents;
+they are not the hook's total. A hook run shares one `ParseScan`: at most **150,000 parser node events**
+and **2 MiB of composed source bytes** across all documents, including proposed versions and failed
+parses. Repeated transitive script-body node walks also consume that same node total. Repeated cached content costs no new composition. Parser events are counted before allocating
+a node graph, so a million-item flow list stops early. LibYAML's safe loader is used when installed;
+the slower Python safe loader remains available to the watch. If LibYAML is absent, a hook YAML
+check refuses before parsing and names the missing fast safe parser; it does not attempt the slow fallback
+inside Codex's timeout. LibYAML is part of the declared PyYAML package's normal platform wheels.
+Past either total the hook refuses,
+names the file it could not read, and asks for a person's review or repair outside Codex. It never
+falls back to an incomplete line-only approval. Decisions do not depend on elapsed time. The isolated `tests/measure_gate.py` run measured a
+37,000-entry accepted edit at 148,009 node visits, 1,013,809 composed bytes and at most **1.243 s**.
+With the benchmark's explicit **6x slow-machine assumption**, that projects to **7.456 s**, below the
+10-second hook timeout. The four formerly allowed 242 KiB lists refuse in at most **0.609 s**;
+the million-item inventory refuses in **0.225 s**, both stopping at exactly 150,000 counted visits.
+The factor is a conservative engineering assumption, not a measurement on every supported machine;
+repeat the benchmark when changing the parser or its totals.
+Each document, including a failed parse, is cached by content hash. A hook retains only graphs it has
+already paid for within its total; that temporary cache dies with the operation. The watch's retained
+cache is limited to **16 MiB estimated graph cost**, **2 MiB source bytes** and 512 entries. Cost is source
+bytes plus 1,024 bytes per distinct node, including key/value nodes; aliases are counted once. Large
+graphs are inspected but not retained. This conservative allowance bounds graphs rather than assuming
+a small source implies small memory. Unchanged watch classifications are reused after re-reading all
+ordinary file hashes, prior include dependencies and the active rules, even when a graph was evicted.
+Changed or missing dependencies invalidate that shortcut. The measurement below reports actual process
+RSS as well; the graph estimate does not bound other worker memory or the current temporary parse.
+An eight-copy synthetic reference inventory (6,957,664 source bytes), after a baseline and two idle
+scans, measured **112.4 MiB peak process RSS**, up from 19.1 MiB before scanning: about **14.1 MB of
+incremental process memory per MB of source**. Its large graphs were not retained (0 cache bytes).
+This is a whole-process measurement on the build executor, including baseline snapshots and temporary
+parses, not a claim that every YAML shape has that ratio or that total worker memory is capped there.
+The review's older implementation measured about 30 MB/MB and a 233 MB eight-copy peak on its machine.
 The watch also reuses its last classification only when every scanned file hash, active rule and include
 error is unchanged. It still reads included bytes, so a changed non-YAML dependency invalidates that result.
 A parsed-check budget failure is reported on its file; the line rules continue without raising
-out of script resolution or include discovery. In the hook, a script or include dependency that could not
-be parsed refuses the patch by filename; unrelated large ordinary files do not veto an ordinary patch.
+out of script resolution or include discovery. In the hook, a file that could not be read within the shared total refuses the patch by filename.
+An unreadable nonempty YAML file requires a person to repair it outside Codex, including when a proposed
+patch would repair that file. A comment-only document remains usable.
 Service names and script entity IDs are stripped and lower-cased before matching.
 
 A definition such as `shell_command: !include commands.yaml` protects the entire included file,
@@ -421,7 +448,7 @@ requirement. An earlier file is never presumed absent merely because it had a di
 Include reads stay under the configuration root through no-follow file descriptors. Hidden paths,
 credential-named includes, symlinks and hardlinks are excluded or refused. The hook inventory is bounded
 at 3,000 files/16 MiB (8 MiB per inventory file); include reads at 16 MiB and 64 passes, with a
-four-second graph/read budget. An inventory file beyond the read cap is skipped, while touched
+1,000,000-node include graph limit and the hook composition total above. An inventory file beyond the read cap is skipped, while touched
 source files remain capped and refused by name. Include refusals identify their source or target file.
 A missing, unsafe or over-budget dependency cannot grant a hook approval. Watch findings still require
 review before reload; this does not reverse a command that already ran. These checks do not execute YAML,
