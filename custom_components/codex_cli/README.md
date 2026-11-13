@@ -1,13 +1,13 @@
 # Codex integration
 
-Codex connects Home Assistant to the local Codex CLI Worker app. It lets Home Assistant start Codex tasks against the configuration folder, monitor active work, reply to tasks that need input, and start the Codex sign-in flow.
+Codex connects Home Assistant to the local Codex for Home Assistant app. It lets Home Assistant start Codex tasks against the configuration folder, monitor active work, reply to tasks that need input, and start the Codex sign-in flow.
 
 ## Installation
 
 Use the My Home Assistant buttons in the repository README for the fastest setup.
 
 1. Add `https://github.com/fatherdoctor/ha_codex` as a Home Assistant app repository.
-2. Install and start the Codex CLI Worker app.
+2. Install and start the Codex for Home Assistant app.
 3. Open the app web UI and choose **Settings > Sign in** to sign in to Codex. See the [sign-in prerequisites](../../README.md#3-sign-in-to-codex).
 4. Open HACS, search for **Codex** under **Integrations**, select it, and choose **Download**.
 5. Restart Home Assistant.
@@ -17,7 +17,7 @@ As a manual fallback, copy `custom_components/codex_cli` into `/config/custom_co
 
 ## Configuration
 
-The integration auto-detects the installed Codex CLI Worker app through the local Supervisor API. It also provisions the worker's private API token through Supervisor-managed app stdin, keeps the worker token in memory, and stores only the non-secret worker URL in the Home Assistant config entry.
+The integration auto-detects the installed Codex for Home Assistant app through the local Supervisor API. It also provisions the worker's private API token through Supervisor-managed app stdin, keeps the worker token in memory, and stores only the non-secret worker URL in the Home Assistant config entry.
 
 There is no worker URL or API token to enter.
 
@@ -65,9 +65,9 @@ The integration polls the worker every 30 seconds. Actions that start, cancel, o
 
 ## Troubleshooting
 
-- If entities are unavailable, check that the Codex CLI Worker app is running. The integration discovers its internal URL automatically.
+- If entities are unavailable, check that the Codex for Home Assistant app is running. The integration discovers its internal URL automatically.
 - If the app's web UI says that the integration is not installed, out of date, or not connected, do what the line says: install or update the integration, restart Home Assistant, and add it under **Settings** > **Devices & services**.
-- If setup cannot connect, restart the Codex CLI Worker app, then reload or add the integration again so it can provision a fresh worker API token.
+- If setup cannot connect, restart the Codex for Home Assistant app, then reload or add the integration again so it can provision a fresh worker API token.
 - If Codex is not signed in, run `codex_cli.start_login` or choose **Settings > Sign in** in the app web UI.
 - If a task needs input, use `codex_cli.reply_task` with the task ID and reply text. The answers Codex offered are in the `choices` attribute of the **Last task** sensor and in the `codex_cli_task_result` event.
 - If the worker's `notify_service` is a mobile app service, a question's notification has a button for each of those answers. The integration sends the tapped one to the worker. If the worker does not take it, for example because the question was already answered, a persistent notification says why.
@@ -75,10 +75,10 @@ The integration polls the worker every 30 seconds. Actions that start, cancel, o
 ## Removal
 
 1. Delete the Codex integration from **Settings > Devices & services**.
-2. Stop or uninstall the Codex CLI Worker app if it is no longer needed.
+2. Stop or uninstall the Codex for Home Assistant app if it is no longer needed.
 
 ## Known Limitations
 
-- This integration controls a single local Codex CLI Worker instance.
+- This integration controls a single local Codex for Home Assistant instance.
 - It depends on the worker app for task execution, Codex authentication, and notification delivery.
 - Usage-limit sensors are best-effort values parsed from interactive Codex `/status` output. Reported windows vary by account and plan; omitted windows remain `unknown` with `reported: false`.
