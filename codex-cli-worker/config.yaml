@@ -1,4 +1,4 @@
-name: Codex CLI Worker
+name: Codex for Home Assistant
 description: Run Codex CLI tasks against the Home Assistant config folder.
 version: "0.1.81.2"
 slug: codex_cli_worker
