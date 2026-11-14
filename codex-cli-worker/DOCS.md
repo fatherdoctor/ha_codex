@@ -185,19 +185,27 @@ before the worker starts, the app compares it with `/config/custom_components/co
 | The folder | What the app does |
 |---|---|
 | Missing | Writes the integration, then shows a notification: restart Home Assistant to finish setup. |
-| Written by the app, from another copy | Keeps the old folder in the app's storage (`/data/integration_backup`), writes the new copy next to it and swaps the two by renaming, then asks for a restart. |
-| Written by the app, from this copy | Nothing. |
-| Installed another way (Marketplace, HACS, by hand, or a symbolic link) | Nothing. A notification says so once for each app version. |
+| Written by the app, from another copy, and not changed since | Keeps the old folder in the app's storage (`/data/integration_backup`), writes the new copy and swaps the two by renaming, then asks for a restart. |
+| Written by the app, from this copy, and not changed since | Nothing. |
+| Installed another way (Marketplace, HACS, by hand, or a symbolic link), or changed after the app wrote it | Nothing. A notification says so once for each app version. |
 
 The app knows its own folder by the marker file `.installed_by_app.json` in it, which names the app version and
-the copy that wrote it. To move to the Marketplace or HACS, turn the option below off first, so the two never
-write the same folder. If a copy fails, for example on a full disk, the old folder stays in place
-and a notification says what failed. The step never stops the app from starting. The app log has one line for
-each start, beginning `Integration install:`.
+a digest of the files it wrote. If any file in the folder differs from that digest (another installer copied
+over it, or someone edited or removed a file), the folder is no longer the app's and the app leaves it alone.
+To move to the Marketplace or HACS, turn the option below off first. If a copy fails, for example on a full
+disk, the old folder stays in place and a notification says what failed. If Home Assistant cannot show the
+restart notification (for example while it is starting), the app posts it again at its next start. The step
+never stops the app from starting. The app log has one line for each start, beginning `Integration install:`.
 
-The app writes nothing else in `/config`, except a temporary folder (`.codex_cli.new`) and the old folder
-(`.codex_cli.old`) during the swap; both are removed before the step ends, while Home Assistant is still
-running the integration it loaded at its last start.
+The app writes nothing else in `/config` except its work folder, `/config/.codex_cli_install`. The new copy is
+written there and the old folder is moved there during the swap. It is outside `custom_components`, so Home
+Assistant never loads from it, and the app empties it at every start. If it cannot be emptied, the app log
+says so.
+
+**Going back to the previous version:** the copy the app replaced is kept in the app's own storage
+(`/data/integration_backup/codex_cli`), which every backup of the app includes. To go back, restore the app's
+previous version from the backup Home Assistant offers before an app update. At its next start the app writes
+the integration of that version over its own folder and asks for a restart.
 
 After the restart, the app's Supervisor discovery shows **Discovered: Codex** under **Settings** > **Devices &
 services**. Choose **Add**, then **Submit**; the integration is added only after you confirm.

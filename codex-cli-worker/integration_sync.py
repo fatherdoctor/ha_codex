@@ -4,20 +4,23 @@ The app image carries the integration of the same release under BUNDLED_DIR. At 
 worker's server starts, this script:
 
 - writes that copy to /config/custom_components/codex_cli when the folder is missing, or when the folder
-  carries this app's marker file and the marker names a different bundle;
-- leaves the folder untouched when it was installed another way (no marker file, or a symbolic link),
-  and tells the owner once per app version that it did so;
-- backs up the old folder to the app's private storage, writes the new copy to a temporary folder next
-  to it, and swaps the two by renaming, so a failed copy leaves the old folder in place;
+  carries this app's marker file, still holds exactly the copy the marker names, and the marker names a
+  different bundle;
+- leaves the folder untouched when it was installed another way (no marker file, or a symbolic link), or
+  when its files no longer match the marker (another installer or a hand edit changed them), and tells the
+  owner once per app version that it did so;
+- backs up the old folder to the app's private storage, writes the new copy to a work folder outside
+  custom_components, and swaps the two by renaming, so a failed copy leaves the old folder in place;
 - asks the owner to restart Home Assistant after it writes the folder, because Home Assistant loads an
-  integration's files only when it starts;
+  integration's files only when it starts, and asks again at later starts until the notice is shown;
 - announces the app to Home Assistant through Supervisor discovery, so the integration offers setup
   under Settings > Devices & services once it is loaded.
 
-It writes nothing outside the integration's folder in /config, apart from the temporary folder and the
-old folder during the swap, which it removes. The app option install_integration (default on) turns the
-copy off; discovery is announced either way. The script never stops the app from starting: every
-failure is logged and reported, and the worker starts as before.
+It writes nothing in /config except the integration's folder and its own work folder
+/config/.codex_cli_install, which Home Assistant never loads from and which is emptied at every start.
+The app option install_integration (default on) turns the copy off; discovery is announced either way.
+The script never stops the app from starting: every failure is logged and reported, and the worker
+starts as before.
 """
 
 from __future__ import annotations
@@ -35,6 +38,9 @@ import requests
 
 BUNDLED_DIR = Path("/usr/share/ha_codex/integration/codex_cli")
 TARGET_DIR = Path("/config/custom_components/codex_cli")
+# The work folder is on the same file system as the target, so the renames in swap_in are atomic, but
+# outside custom_components, so Home Assistant's loader never reads a half-written or old copy.
+WORK_DIR = Path("/config/.codex_cli_install")
 BACKUP_DIR = Path("/data/integration_backup/codex_cli")
 OPTIONS_PATH = Path("/data/options.json")
 NOTICE_STATE_PATH = Path("/data/integration_sync.json")
@@ -62,10 +68,12 @@ class SyncResult:
       "disabled"   the install_integration option is off; nothing was read or written;
       "no_bundle"  the image carries no integration (an image built without it); nothing was written;
       "current"    the folder already holds this bundle;
-      "foreign"    the folder was installed another way and was left as it is;
+      "foreign"    the folder was installed another way, or changed after the app wrote it, and was
+                   left as it is;
       "installed"  there was no folder and the bundle was written;
       "updated"    the folder held an older bundle of this app and was replaced;
       "failed"     the copy failed; the old folder, if there was one, is still in place.
+    detail says why, for "foreign" and "failed", or notes a problem that did not stop the sync.
     """
 
     action: str
@@ -123,8 +131,9 @@ def back_up(target: Path, backup: Path) -> None:
 def swap_in(staging: Path, target: Path, old: Path) -> None:
     """Put the staging folder in the target's place by renaming, and restore the old folder on failure.
 
-    All three folders are in the same parent, so each rename is atomic. Between the two renames the
-    target is briefly missing; Home Assistant reads it only when it starts, after the owner restarts it.
+    The work folder and the target are on the same file system, so each rename is atomic. Between the two
+    renames the target is briefly missing; Home Assistant reads it only when it starts, after the owner
+    restarts it. The old folder is left in the work folder; the caller removes it.
     """
     if not target.exists():
         os.rename(staging, target)
@@ -135,50 +144,87 @@ def swap_in(staging: Path, target: Path, old: Path) -> None:
     except OSError:
         os.rename(old, target)
         raise
-    shutil.rmtree(old, ignore_errors=True)
 
 
-def remove_leftover(folder: Path) -> None:
-    """Remove a temporary folder left by an earlier start that stopped part way.
+def clear_work_dir(work: Path) -> None:
+    """Empty the work folder, removing whatever an earlier start that stopped part way left in it.
 
-    shutil.rmtree refuses a symbolic link, so a link planted under that name fails the sync instead of
-    deleting what it points to.
+    shutil.rmtree refuses a symbolic link, so a link planted in place of the work folder fails the sync
+    instead of deleting what it points to. An error is raised, not ignored, so the caller can report it.
     """
-    if folder.exists() or folder.is_symlink():
-        shutil.rmtree(folder)
+    if work.exists() or work.is_symlink():
+        shutil.rmtree(work)
 
 
-def sync(bundled: Path, target: Path, backup: Path, app_version: str) -> SyncResult:
-    """Bring the integration's folder in line with the bundle, unless it was installed another way."""
+def is_outside_config(target: Path) -> bool:
+    """Return whether the target's custom_components folder is a link, or resolves outside the config folder.
+
+    The sync runs as root outside Codex's sandbox, so it writes only inside the real configuration folder.
+    """
+    components = target.parent
+    config = components.parent
+    # A link anywhere in the custom_components path resolves somewhere else, and is caught here.
+    return components.exists() and components.resolve() != config.resolve() / components.name
+
+
+def ownership(target: Path) -> str:
+    """Return who the target folder belongs to: "none" (missing), "app", or why it is another install's.
+
+    The folder is the app's only while it holds exactly the files the app's marker names. A folder with
+    no marker, a linked folder, and a folder whose files were changed after the app wrote them (by
+    another installer copying over it, or by hand) all belong to whoever changed them.
+    """
+    if is_outside_config(target):
+        return "custom_components is a link or lies outside the configuration folder"
+    if target.is_symlink():
+        return "the folder is a symbolic link"
+    if not target.exists():
+        return "none"
+    marker = read_marker(target)
+    if marker is None:
+        return "the folder has no marker from the app"
+    if marker.get("digest") != tree_digest(target):
+        return "the folder was changed after the app wrote it"
+    return "app"
+
+
+def sync(bundled: Path, target: Path, backup: Path, app_version: str, work: Path) -> SyncResult:
+    """Bring the integration's folder in line with the bundle, unless it is another install's."""
     version = manifest_version(bundled)
     if not version:
         return SyncResult("no_bundle", detail=f"no integration manifest under {bundled}")
-
     installed_version = manifest_version(target)
-    if target.is_symlink():
-        return SyncResult("foreign", version, installed_version)
-    marker = read_marker(target) if target.exists() else None
-    if target.exists() and marker is None:
-        return SyncResult("foreign", version, installed_version)
+    try:
+        # Every start empties the work folder first, so nothing an interrupted start left behind stays.
+        clear_work_dir(work)
+    except OSError as exc:
+        return SyncResult("failed", version, installed_version, detail=f"could not empty {work}: {exc}")
 
+    owner = ownership(target)
+    if owner not in ("none", "app"):
+        return SyncResult("foreign", version, installed_version, detail=owner)
     digest = tree_digest(bundled)
-    if marker is not None and marker.get("digest") == digest:
+    if owner == "app" and read_marker(target).get("digest") == digest:
         return SyncResult("current", version, installed_version)
 
-    action = "updated" if target.exists() else "installed"
-    staging = target.with_name(f".{target.name}.new")
-    old = target.with_name(f".{target.name}.old")
+    action = "updated" if owner == "app" else "installed"
+    staging = work / "new"
+    old = work / "old"
     try:
-        remove_leftover(staging)
-        remove_leftover(old)
+        work.mkdir(parents=True)
         target.parent.mkdir(parents=True, exist_ok=True)
         write_bundle(bundled, staging, {"app_version": app_version, "version": version, "digest": digest})
         if action == "updated":
             back_up(target, backup)
         swap_in(staging, target, old)
     except OSError as exc:
-        shutil.rmtree(staging, ignore_errors=True)
+        shutil.rmtree(work, ignore_errors=True)
         return SyncResult("failed", version, installed_version, detail=str(exc))
+    try:
+        clear_work_dir(work)
+    except OSError as exc:
+        # The new folder is in place; the old copy waits outside custom_components for the next start.
+        return SyncResult(action, version, installed_version, detail=f"the old copy was not removed: {exc}")
     return SyncResult(action, version, installed_version)
 
 
@@ -212,8 +258,8 @@ def notice_for(result: SyncResult, app_version: str) -> tuple[str, str, str] | N
             "Codex: integration left as installed",
             (
                 f"The Codex integration in `{folder}` (version {result.installed_version or 'unknown'}) was not "
-                "installed by the Codex app, for example it came from the Marketplace, HACS or a manual copy. "
-                "The app left it as it is. Keep updating it the way you installed it, to the same version as "
+                "installed by the Codex app, or was changed after the app installed it, for example by the "
+                "Marketplace, HACS, a manual copy or an edit. The app left it as it is. Keep updating it the way you installed it, to the same version as "
                 f"the app ({app_version}). To let the app install and update it instead, remove it the way you "
                 "installed it, then restart the Codex app and Home Assistant."
             ),
@@ -223,7 +269,7 @@ def notice_for(result: SyncResult, app_version: str) -> tuple[str, str, str] | N
             NOTICE_FAILED,
             "Codex: the integration could not be installed",
             (
-                f"The Codex app could not write its integration (version {result.version}) to `{folder}`: "
+                f"The Codex app could not write its integration (version {result.version or 'unknown'}) to `{folder}`: "
                 f"{result.detail}. Any earlier version was left in place. Check the free space and the "
                 "permissions of the configuration folder, then restart the Codex app."
             ),
@@ -264,18 +310,55 @@ def show_notice(notice: tuple[str, str, str], token: str) -> bool:
     return False
 
 
-def kept_notice_due(state_path: Path, app_version: str) -> bool:
-    """Return whether the 'left as installed' notice has not yet been shown for this app version."""
+def read_state(state_path: Path) -> dict:
+    """Return what earlier starts recorded about notices, or an empty record when there is none.
+
+    Keys: "kept_notice_version", the app version the 'left as installed' notice was shown for; and
+    "restart_notice", a restart notice [id, title, message] that has not been shown yet.
+    """
     try:
         state = json.loads(state_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return True
-    return not isinstance(state, dict) or state.get("kept_notice_version") != app_version
+        return {}
+    return state if isinstance(state, dict) else {}
 
 
-def record_kept_notice(state_path: Path, app_version: str) -> None:
-    """Remember that the 'left as installed' notice was shown for this app version."""
-    state_path.write_text(json.dumps({"kept_notice_version": app_version}) + "\n", encoding="utf-8")
+def write_state(state_path: Path, state: dict) -> None:
+    """Save the notice record; a failure is logged, and at worst a notice is shown again."""
+    try:
+        state_path.write_text(json.dumps(state) + "\n", encoding="utf-8")
+    except OSError as exc:
+        log(f"could not save {state_path}: {exc}")
+
+
+def notice_due(result: SyncResult, app_version: str, state: dict) -> tuple[str, str, str] | None:
+    """Return the notice this start should show, given what earlier starts already showed.
+
+    A restart notice stays due at later starts until Home Assistant accepts it once, so the owner always
+    learns that Home Assistant runs an older integration than the app. The 'left as installed' notice is
+    shown once for each app version.
+    """
+    notice = notice_for(result, app_version)
+    if result.action == "foreign" and state.get("kept_notice_version") == app_version:
+        return None
+    if notice is None and result.action == "current":
+        owed = state.get("restart_notice")
+        if isinstance(owed, list) and len(owed) == 3 and all(isinstance(part, str) for part in owed):
+            return (owed[0], owed[1], owed[2])
+    return notice
+
+
+def record_notice(result: SyncResult, app_version: str, state: dict, notice, shown: bool) -> dict:
+    """Return the notice record after this start: what was shown, and which restart notice is still owed."""
+    state = dict(state)
+    if result.action == "foreign" and shown:
+        state["kept_notice_version"] = app_version
+    if notice is not None and notice[0] == NOTICE_RESTART:
+        if shown:
+            state.pop("restart_notice", None)
+        else:
+            state["restart_notice"] = list(notice)
+    return state
 
 
 def install_option_on(options_path: Path) -> bool:
@@ -297,17 +380,22 @@ def main() -> int:
     app_version = os.environ.get("ADDON_VERSION", "unknown")
     token = os.environ.get("SUPERVISOR_TOKEN", "")
 
-    if install_option_on(OPTIONS_PATH):
-        result = sync(BUNDLED_DIR, TARGET_DIR, BACKUP_DIR, app_version)
-    else:
+    if not install_option_on(OPTIONS_PATH):
         result = SyncResult("disabled")
+    else:
+        try:
+            result = sync(BUNDLED_DIR, TARGET_DIR, BACKUP_DIR, app_version, WORK_DIR)
+        except OSError as exc:
+            # A read that fails before the copy starts (the manifest, a digest) is reported like a failed copy.
+            result = SyncResult("failed", detail=str(exc))
     log(f"{result.action} {result.version} {result.detail}".rstrip())
 
-    notice = notice_for(result, app_version)
-    if result.action == "foreign" and not kept_notice_due(NOTICE_STATE_PATH, app_version):
-        notice = None
-    if notice and token and show_notice(notice, token) and result.action == "foreign":
-        record_kept_notice(NOTICE_STATE_PATH, app_version)
+    state = read_state(NOTICE_STATE_PATH)
+    notice = notice_due(result, app_version, state)
+    shown = bool(notice and token and show_notice(notice, token))
+    new_state = record_notice(result, app_version, state, notice, shown)
+    if new_state != state:
+        write_state(NOTICE_STATE_PATH, new_state)
 
     if token:
         supervisor_post("/discovery", {"service": DISCOVERY_SERVICE, "config": {}}, token)

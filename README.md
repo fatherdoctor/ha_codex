@@ -47,7 +47,8 @@ with Codex. Before signing in, turn on **Enable device code authorization for Co
 (`install_integration`), then install **Codex** from **Settings** > **Marketplace** > **Add from link** with
 `https://github.com/fatherdoctor/ha_codex` (HACS custom repository on releases before 2026.11), or copy
 `custom_components/codex_cli` to `/config/custom_components/codex_cli`, and restart. The app never changes an
-integration folder that it did not install; it says so once in a notification.
+integration folder that it did not install, or that was changed after it installed it; it says so once in a
+notification.
 
 Every app option is described in [codex-cli-worker/DOCS.md](codex-cli-worker/DOCS.md).
 

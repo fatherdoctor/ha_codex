@@ -6,8 +6,11 @@
   release, carried in the app image, to `/config/custom_components/codex_cli`, then asks for one restart of
   Home Assistant in a notification. It writes only when the folder is missing or was written by the app
   (a marker file in the folder names the copy), keeps the previous copy in the app's own storage, and
-  swaps the new folder in by renaming, so a failed copy leaves the old folder in place. A folder installed
-  another way (Marketplace, HACS or by hand) is never changed; a notification says so once per app version.
+  swaps the new folder in by renaming, so a failed copy leaves the old folder in place. The new copy is
+  written in `/config/.codex_cli_install`, outside `custom_components`, so Home Assistant never loads a
+  partial copy. A folder installed another way (Marketplace, HACS or by hand), or changed after the app wrote
+  it, is never changed; a notification says so once per app version. A restart notice that Home Assistant
+  could not show is posted again at the next start.
   The new `install_integration` option (default on) turns the copy off. Uninstalling the app leaves the
   integration in place.
 - The app announces itself through Supervisor discovery at each start, so after the restart

@@ -30,6 +30,7 @@ class SyncTestCase(unittest.TestCase):
         self.bundled = self.root / "image" / "codex_cli"
         self.target = self.root / "config" / "custom_components" / "codex_cli"
         self.backup = self.root / "data" / "integration_backup" / "codex_cli"
+        self.work = self.root / "config" / ".codex_cli_install"
         self.make_bundle("0.2.0", "new code")
 
     def make_bundle(self, version: str, code: str) -> None:
@@ -45,11 +46,14 @@ class SyncTestCase(unittest.TestCase):
 
     def sync(self, app_version: str = "0.2.0"):
         """Run one sync of the bundle into the target."""
-        return integration_sync.sync(self.bundled, self.target, self.backup, app_version)
+        return integration_sync.sync(self.bundled, self.target, self.backup, app_version, self.work)
 
     def leftovers(self) -> list[str]:
-        """Return the temporary folders a sync left next to the target."""
-        return sorted(p.name for p in self.target.parent.iterdir() if p.name.startswith("."))
+        """Return what a sync left behind: anything in custom_components but the target, and the work folder."""
+        found = [p.name for p in self.target.parent.iterdir() if p != self.target] if self.target.parent.exists() else []
+        if self.work.exists() or self.work.is_symlink():
+            found.append(self.work.name)
+        return sorted(found)
 
 
 class InstallAndUpdateTests(SyncTestCase):
@@ -140,6 +144,43 @@ class OtherInstallTests(SyncTestCase):
         self.assertEqual(self.sync().action, "foreign")
         self.assertEqual((source / "__init__.py").read_text(), "dev code")
 
+    def test_a_folder_written_over_in_place_is_left_alone(self):
+        """Another installer that copies over the app's folder keeps the marker; the app still leaves it."""
+        self.sync()
+        self.write_folder(self.target, "0.5.0", "other installer code")
+        result = self.sync()
+        self.assertEqual((result.action, result.installed_version), ("foreign", "0.5.0"))
+        self.assertIn("changed after the app wrote it", result.detail)
+        self.make_bundle("0.2.1", "app update")
+        self.assertEqual(self.sync("0.2.1").action, "foreign")
+        self.assertEqual((self.target / "__init__.py").read_text(), "other installer code")
+        self.assertFalse(self.backup.exists())
+
+    def test_a_hand_edit_is_kept_through_an_app_update(self):
+        """An owner's edit to a file of the app's folder makes it theirs; the next app update leaves it."""
+        self.sync()
+        (self.target / "__init__.py").write_text("new code # my fix")
+        self.make_bundle("0.2.2", "app update")
+        self.assertEqual(self.sync("0.2.2").action, "foreign")
+        self.assertEqual((self.target / "__init__.py").read_text(), "new code # my fix")
+
+    def test_a_folder_missing_a_file_is_reported_not_current(self):
+        """A damaged folder (a file removed) no longer matches the marker and is reported, not called current."""
+        self.sync()
+        (self.target / "__init__.py").unlink()
+        self.assertEqual(self.sync().action, "foreign")
+
+    def test_a_linked_custom_components_is_left_alone(self):
+        """When custom_components is a link, nothing is written where it points."""
+        elsewhere = self.root / "elsewhere"
+        elsewhere.mkdir()
+        self.target.parent.parent.mkdir(parents=True)
+        self.target.parent.symlink_to(elsewhere)
+        result = self.sync()
+        self.assertEqual(result.action, "foreign")
+        self.assertIn("link", result.detail)
+        self.assertEqual(list(elsewhere.iterdir()), [])
+
     def test_an_unreadable_marker_counts_as_another_install(self):
         """A marker that is not this app's JSON object does not let the app overwrite the folder."""
         self.write_folder(self.target, "0.1.0", "hand-edited code")
@@ -176,7 +217,7 @@ class FailureTests(SyncTestCase):
         real_rename = os.rename
 
         def rename(src, dst):
-            if str(src).endswith(".new"):
+            if Path(src).name == "new":
                 raise OSError(13, "Permission denied")
             return real_rename(src, dst)
 
@@ -184,25 +225,76 @@ class FailureTests(SyncTestCase):
             self.assert_old_folder_kept(self.sync())
 
     def test_leftover_folders_from_a_crash_are_replaced(self):
-        """Temporary folders left by a start that stopped part way do not block the next sync."""
-        for name in (".codex_cli.new", ".codex_cli.old"):
-            leftover = self.target.with_name(name)
-            leftover.mkdir()
+        """Folders left in the work folder by a start that stopped part way do not block the next sync."""
+        for name in ("new", "old"):
+            leftover = self.work / name
+            leftover.mkdir(parents=True)
             (leftover / "junk").write_text("junk")
         self.assertEqual(self.sync().action, "updated")
         self.assertFalse((self.target / "junk").exists())
         self.assertEqual(self.leftovers(), [])
 
-    def test_a_planted_link_in_place_of_a_temporary_folder_is_not_followed(self):
-        """A symbolic link named like the temporary folder fails the sync; what it points to survives."""
+    def test_a_planted_link_in_place_of_the_work_folder_is_not_followed(self):
+        """A symbolic link in place of the work folder fails the sync; what it points to survives."""
         victim = self.root / "data" / "keep"
         victim.mkdir(parents=True)
         (victim / "secret").write_text("keep me")
-        self.target.with_name(".codex_cli.new").symlink_to(victim)
+        self.work.symlink_to(victim)
         result = self.sync()
         self.assertEqual(result.action, "failed")
         self.assertEqual((victim / "secret").read_text(), "keep me")
         self.assertEqual((self.target / "__init__.py").read_text(), "old code")
+
+
+class WorkFolderTests(SyncTestCase):
+    """Copies being written or removed are never in custom_components, where Home Assistant loads from."""
+
+    def test_the_new_and_old_copies_are_made_outside_custom_components(self):
+        """During an update the staging and old folders are in the work folder, not next to the target."""
+        self.sync()
+        self.make_bundle("0.3.0", "newer code")
+        seen = []
+        real_swap = integration_sync.swap_in
+
+        def swap(staging, target, old):
+            seen.append(sorted(p.name for p in target.parent.iterdir()))
+            real_swap(staging, target, old)
+            seen.append(sorted(p.name for p in target.parent.iterdir()))
+            self.assertEqual((old / "__init__.py").read_text(), "new code")
+
+        with patch.object(integration_sync, "swap_in", side_effect=swap):
+            self.assertEqual(self.sync("0.3.0").action, "updated")
+        self.assertEqual(seen, [["codex_cli"], ["codex_cli"]])
+        self.assertEqual(self.leftovers(), [])
+
+    def test_a_start_with_a_current_folder_removes_a_leftover(self):
+        """A copy left by an interrupted start is removed even when there is nothing to write."""
+        self.sync()
+        (self.work / "old").mkdir(parents=True)
+        (self.work / "old" / "manifest.json").write_text("{}")
+        self.assertEqual(self.sync().action, "current")
+        self.assertEqual(self.leftovers(), [])
+
+    def test_an_old_copy_that_cannot_be_removed_is_reported(self):
+        """The update still counts, the result says the old copy stayed, and the next start removes it."""
+        self.sync()
+        self.make_bundle("0.3.0", "newer code")
+        real_clear = integration_sync.clear_work_dir
+        calls = []
+
+        def clear(work):
+            calls.append(work)
+            if len(calls) == 2:
+                raise OSError(16, "Device or resource busy")
+            real_clear(work)
+
+        with patch.object(integration_sync, "clear_work_dir", side_effect=clear):
+            result = self.sync("0.3.0")
+        self.assertEqual(result.action, "updated")
+        self.assertIn("old copy was not removed", result.detail)
+        self.assertEqual(self.leftovers(), [".codex_cli_install"])
+        self.assertEqual(self.sync("0.3.0").action, "current")
+        self.assertEqual(self.leftovers(), [])
 
 
 class NoticeTests(unittest.TestCase):
@@ -249,6 +341,7 @@ class MainTests(SyncTestCase):
             "BACKUP_DIR": self.backup,
             "OPTIONS_PATH": self.options,
             "NOTICE_STATE_PATH": self.state,
+            "WORK_DIR": self.work,
             "NOTICE_RETRY_SECONDS": 0,
         }.items():
             self.enterContext(patch.object(integration_sync, name, value))
@@ -311,11 +404,87 @@ class MainTests(SyncTestCase):
         integration_sync.main()
         self.assertEqual(self.notices(), [integration_sync.NOTICE_KEPT])
 
+    def test_an_unshown_restart_notice_is_posted_at_later_starts(self):
+        """If Core cannot take the restart notice, the next starts post it until it is shown once."""
+        self.accept = False
+        integration_sync.main()
+        self.assertEqual(self.notices(), [integration_sync.NOTICE_RESTART] * integration_sync.NOTICE_ATTEMPTS)
+        self.accept = True
+        self.posts.clear()
+        integration_sync.main()
+        self.assertEqual(self.notices(), [integration_sync.NOTICE_RESTART])
+        self.posts.clear()
+        integration_sync.main()
+        self.assertEqual(self.notices(), [])
+
+    def test_an_io_error_before_the_copy_is_reported(self):
+        """An error reading the bundle or the folder gives the failed notice, and the start goes on."""
+        with patch.object(integration_sync, "tree_digest", side_effect=OSError(5, "Input/output error")):
+            self.assertEqual(integration_sync.main(), 0)
+        self.assertEqual(self.notices(), [integration_sync.NOTICE_FAILED])
+        self.assertIn(("/discovery", {"service": "codex_cli", "config": {}}), self.posts)
+
+    def test_a_notice_record_that_cannot_be_saved_does_not_stop_the_start(self):
+        """When the record cannot be written, the start goes on; at worst a notice is shown again."""
+        self.write_folder(self.target, "0.1.0", "marketplace code")
+        self.state.mkdir()  # writing a file at this path fails
+        self.assertEqual(integration_sync.main(), 0)
+        self.assertEqual(self.notices(), [integration_sync.NOTICE_KEPT])
+
     def test_a_failed_copy_does_not_stop_the_start(self):
         """A failure is reported in a notice and main still returns 0, so run.sh starts the worker."""
         with patch.object(integration_sync.shutil, "copytree", side_effect=OSError(28, "No space left on device")):
             self.assertEqual(integration_sync.main(), 0)
         self.assertEqual(self.notices(), [integration_sync.NOTICE_FAILED])
+
+
+class SupervisorRequestTests(unittest.TestCase):
+    """The only network call goes to the Supervisor, with no proxy and no redirects."""
+
+    def test_no_proxy_and_no_redirects(self):
+        """The session ignores proxy settings from the environment and the request never follows a redirect."""
+        sessions = []
+
+        class Session:
+            def __init__(self):
+                self.trust_env = True
+                self.kwargs = None
+                sessions.append(self)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def post(self, url, **kwargs):
+                self.trust_env_at_post = self.trust_env
+                self.url, self.kwargs = url, kwargs
+                return type("Response", (), {"status_code": 200})()
+
+        with patch.object(integration_sync.requests, "Session", Session):
+            self.assertTrue(integration_sync.supervisor_post("/discovery", {}, "token"))
+        (session,) = sessions
+        self.assertEqual(session.url, "http://supervisor/discovery")
+        self.assertFalse(session.trust_env_at_post)
+        self.assertIs(session.kwargs["allow_redirects"], False)
+
+
+class DigestTests(unittest.TestCase):
+    """What the digest of a folder counts."""
+
+    def test_caches_and_the_marker_do_not_change_the_digest(self):
+        """__pycache__ (written by Home Assistant) and the marker are left out; a code change is not."""
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            (folder / "__init__.py").write_text("code")
+            before = integration_sync.tree_digest(folder)
+            (folder / "__pycache__").mkdir()
+            (folder / "__pycache__" / "x.pyc").write_bytes(b"cache")
+            (folder / MARKER).write_text("{}")
+            self.assertEqual(integration_sync.tree_digest(folder), before)
+            (folder / "__init__.py").write_text("changed")
+            self.assertNotEqual(integration_sync.tree_digest(folder), before)
 
 
 class PackagingTests(unittest.TestCase):
