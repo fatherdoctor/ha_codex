@@ -1,6 +1,7 @@
 """Exercise the real config flow with Home Assistant and synthetic worker discovery."""
 
 import importlib.util
+import json
 import sys
 from collections.abc import Generator
 from pathlib import Path
@@ -10,7 +11,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.data_entry_flow import AbortFlow, FlowResultType
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     MockModule,
@@ -26,7 +27,8 @@ integration = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = integration
 spec.loader.exec_module(integration)
 flow = importlib.import_module(f"{spec.name}.config_flow")
-DOMAIN = "codex_cli"
+MANIFEST = json.loads((ROOT / "manifest.json").read_text())
+DOMAIN = MANIFEST["domain"]
 WORKER_DATA = {"base_url": "http://worker"}
 
 
@@ -38,7 +40,10 @@ def discovery(hass: HomeAssistant) -> Generator[AsyncMock]:
         MockModule(
             DOMAIN,
             async_setup_entry=AsyncMock(return_value=True),
-            partial_manifest={"config_flow": True, "single_config_entry": True},
+            partial_manifest={
+                "config_flow": MANIFEST["config_flow"],
+                "single_config_entry": MANIFEST["single_config_entry"],
+            },
         ),
         top_level_files={"config_flow.py"},
     )
@@ -58,7 +63,9 @@ async def test_discovery_creates_one_entry(
     hass: HomeAssistant, discovery: AsyncMock, source: str
 ) -> None:
     """Both setup entry points discover the worker without requesting credentials."""
-    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": source})
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": source}
+    )
     await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
@@ -71,7 +78,10 @@ async def test_discovery_creates_one_entry(
 
 @pytest.mark.parametrize(
     ("error", "error_key"),
-    [(flow.CodexCliApiError, "cannot_connect"), (flow.CodexCliAuthError, "invalid_auth")],
+    [
+        (flow.CodexCliApiError, "cannot_connect"),
+        (flow.CodexCliAuthError, "invalid_auth"),
+    ],
 )
 async def test_user_error_then_retry(
     hass: HomeAssistant, discovery: AsyncMock, error: type[Exception], error_key: str
@@ -118,7 +128,9 @@ async def test_single_entry_aborts_before_discovery(
     """An existing entry prevents either setup path from contacting the worker."""
     entry = MockConfigEntry(domain=DOMAIN, data=WORKER_DATA, unique_id=DOMAIN)
     entry.add_to_hass(hass)
-    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": source})
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": source}
+    )
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "single_instance_allowed"
     assert hass.config_entries.async_entries(DOMAIN) == [entry]
@@ -126,11 +138,37 @@ async def test_single_entry_aborts_before_discovery(
 
 
 @pytest.mark.parametrize(
+    "source", [config_entries.SOURCE_USER, config_entries.SOURCE_HASSIO]
+)
+async def test_flow_unique_id_guard_also_refuses_duplicate(
+    hass: HomeAssistant, discovery: AsyncMock, source: str
+) -> None:
+    """Exercise the flow's own guard independently of Core's single-entry shortcut."""
+    entry = MockConfigEntry(domain=DOMAIN, data=WORKER_DATA, unique_id=DOMAIN)
+    entry.add_to_hass(hass)
+    handler = flow.CodexCliConfigFlow()
+    handler.hass = hass
+    handler.handler = DOMAIN
+    handler.context = {"source": source}
+    with pytest.raises(AbortFlow) as abort:
+        if source == config_entries.SOURCE_USER:
+            await handler.async_step_user()
+        else:
+            await handler.async_step_hassio({})
+    assert abort.value.reason == "already_configured"
+    discovery.assert_not_awaited()
+    assert hass.config_entries.async_entries(DOMAIN) == [entry]
+
+
+@pytest.mark.parametrize(
     "source", [config_entries.SOURCE_REAUTH, config_entries.SOURCE_RECONFIGURE]
 )
 @pytest.mark.parametrize(
     ("error", "error_key"),
-    [(flow.CodexCliApiError, "cannot_connect"), (flow.CodexCliAuthError, "invalid_auth")],
+    [
+        (flow.CodexCliApiError, "cannot_connect"),
+        (flow.CodexCliAuthError, "invalid_auth"),
+    ],
 )
 async def test_existing_entry_form_error_and_success(
     hass: HomeAssistant,
@@ -146,7 +184,9 @@ async def test_existing_entry_form_error_and_success(
     )
     entry.add_to_hass(hass)
     step = "reauth_confirm" if source == config_entries.SOURCE_REAUTH else "reconfigure"
-    with patch.object(hass.config_entries, "async_reload", return_value=True) as reload_entry:
+    with patch.object(
+        hass.config_entries, "async_reload", return_value=True
+    ) as reload_entry:
         result = await hass.config_entries.flow.async_init(
             DOMAIN,
             context={"source": source, "entry_id": entry.entry_id},
