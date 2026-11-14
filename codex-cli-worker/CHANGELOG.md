@@ -2,6 +2,10 @@
 
 ## 0.1.81.2 (unreleased)
 
+- Document why the pinned CLI cannot supply a ChatGPT sign-in deadline: access tokens refresh and
+  refresh-grant expiry is not exposed. Keep the existing signed-out Repair without a guessed expiry
+  sensor, warning countdown or advance push; test that elapsed time alone does not require sign-in.
+
 - Do not report generic task HTTP errors as expired ChatGPT sign-in; test sign-in recovery through the full task lifecycle.
 
 - Keep generic passive HTTP errors out of the expired-sign-in Repair; expose only fixed usage-error messages and categories, never raw upstream errors.
