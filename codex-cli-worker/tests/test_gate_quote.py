@@ -5,7 +5,8 @@ A heredoc whose body holds an apostrophe leaves an unfinished quote for Python's
 line by line, so the lines it can read keep their quoting, and its always-refused
 Supervisor rule also has a text floor that sees ``ha``, its global flags and a family
 name spelled with quotes or backslashes. The approval check fails closed instead: a
-command it cannot read with its quoting intact is never offered Allow once. A ``#``
+command with a heredoc, a here-string or a backslash-newline, or one it cannot read with
+its quoting intact, is never offered Allow once. A ``#``
 starts a comment only at the start of a word, as it does for the shell.
 """
 
@@ -166,12 +167,67 @@ class ApprovalProtectedWriteTests(unittest.TestCase):
         self.assertTrue(approvals._protected_ancestor_operations(HEREDOC + 'echo "#"; cp x /etc/'))
 
     def test_unreadable_command_counts_as_protected(self) -> None:
-        """Fail closed: after an unfinished quote even an ordinary command is not offered Allow once."""
+        """Fail closed: a heredoc, readable or not, or an unfinished quote, means no Allow once."""
         for command in ("ls -la", "cp a.yaml b.yaml", "tar -xf backup.tar"):
             with self.subTest(command=command):
                 self.assertFalse(approvals.command_names_protected_path(command))
-                self.assertFalse(approvals.command_names_protected_path("cat <<EOF\nit is\nEOF\n" + command))
+                self.assertTrue(approvals.command_names_protected_path("cat <<EOF\nit is\nEOF\n" + command))
                 self.assertTrue(approvals.command_names_protected_path(HEREDOC + command))
+
+
+# A shell comment holding one apostrophe, after the command. Before this rule the splitter
+# paired it with the apostrophe in HEREDOC's body and read the command as heredoc text.
+QUOTED_COMMENT = "\n# don't"
+
+# Cases from an independent review of this check, plus here-string and backslash-newline
+# forms: every write into /etc and every command with << is refused Allow once; readable
+# commands without << keep it.
+REFUSED = {
+    "wrapper": "sh -c 'cp x /etc/'",
+    "wrapper after heredoc": HEREDOC + "sh -c 'cp x /etc/'",
+    "multiline wrapper": "sh -c 'cp x /etc/\n'",
+    "multiline wrapper after heredoc": HEREDOC + "sh -c 'cp x /etc/\n'",
+    "double-quoted multiline wrapper after heredoc": HEREDOC + 'sh -c "cp x /etc/\n"',
+    "plain write after heredoc": HEREDOC + "cp x /etc/",
+    "write joined by backslash-newline": "cp x \\\n/etc/",
+    "multiline wrapper, heredoc, quoted comment": HEREDOC + "sh -c 'cp x /etc/\n'" + QUOTED_COMMENT,
+    "wrapper, heredoc, quoted comment": HEREDOC + "sh -c 'cp x /etc/'" + QUOTED_COMMENT,
+    "double-quoted wrapper, heredoc, quoted comment": HEREDOC + 'sh -c "cp x /etc/\n"' + QUOTED_COMMENT,
+    "write between two heredocs": HEREDOC + "sh -c 'cp x /etc/\n'\n" + HEREDOC,
+    "ordinary copy after an unreadable heredoc": HEREDOC + "cp a.yaml b.yaml",
+    "ordinary copy after a readable heredoc": "cat <<EOF\nit is\nEOF\ncp a.yaml b.yaml",
+    "here-string": "grep -c x <<< 'it is'",
+    "ordinary command joined by backslash-newline": "ls \\\n-la",
+}
+ALLOWED = {
+    "quoted multiline message, then a copy": 'echo "line one\nline two"\ncp a.yaml b.yaml',
+    "multiline wrapper script": "sh -c 'echo one\necho two'",
+    "quoted apostrophe": 'echo "it\'s"',
+    "real comment with an apostrophe": "cp a.yaml b.yaml # don't",
+}
+
+
+class HeredocStructureTests(unittest.TestCase):
+    """The approval check refuses heredocs by structure instead of trying to read their bodies."""
+
+    def test_refused_commands_through_both_predicates(self) -> None:
+        for name, command in REFUSED.items():
+            with self.subTest(name):
+                self.assertTrue(approvals._protected_ancestor_operations(command))
+                self.assertTrue(approvals.command_names_protected_path(command))
+
+    def test_readable_commands_without_heredoc_are_not_protected(self) -> None:
+        for name, command in ALLOWED.items():
+            with self.subTest(name):
+                self.assertFalse(approvals._protected_ancestor_operations(command))
+                self.assertFalse(approvals.command_names_protected_path(command))
+
+    def test_heredoc_is_refused_even_when_the_splitter_succeeds(self) -> None:
+        """The quoted-comment cases split without error, so only the structure rule refuses them."""
+        for name in ("multiline wrapper, heredoc, quoted comment", "write between two heredocs"):
+            with self.subTest(name):
+                approvals._shell_words(REFUSED[name], ";&|()\n<>")  # does not raise
+                self.assertTrue(approvals._protected_ancestor_operations(REFUSED[name]))
 
 
 class ApprovalRecordTests(unittest.TestCase):
@@ -203,8 +259,17 @@ class ApprovalRecordTests(unittest.TestCase):
                 self.assertFalse(record["can_allow"])
                 self.assertIn("permission policy", record["note"])
 
-    def test_readable_ordinary_command_keeps_allow_once(self) -> None:
-        self.assertTrue(self.record("cat <<EOF\nit is\nEOF\ncp a.yaml b.yaml")["can_allow"])
+    def test_matrix_records(self) -> None:
+        for name, command in REFUSED.items():
+            with self.subTest(name):
+                record = self.record(command)
+                self.assertFalse(record["can_allow"])
+                self.assertIn("permission policy", record["note"])
+        for name, command in ALLOWED.items():
+            with self.subTest(name):
+                record = self.record(command)
+                self.assertTrue(record["can_allow"])
+                self.assertIn("Known credentials are hidden", record["note"])
 
 
 if __name__ == "__main__":

@@ -111,18 +111,32 @@ def _shell_words(text: str, punctuation: str) -> list[str]:
     return _split_words(_strip_comments(text), punctuation)
 
 
+def _has_unreadable_structure(command: str) -> bool:
+    """Return whether the text holds shell structure this check does not read: ``<<`` or a backslash-newline.
+
+    A heredoc body is not shell words, but the splitter reads it as words, so a quote in the
+    body can pair with a quote later in the text and hide a command. A heredoc or here-string
+    marker anywhere, and a line joined with a backslash, count as protected before the splitter runs.
+    """
+    return "<<" in command or "\\\n" in command
+
+
 def _protected_ancestor_operations(command: str, initial_cwd: str = '', depth: int = 0) -> bool:
     """Conservatively identify named requirements, root searches and writes into root or /etc.
 
-    Command text that cannot be split with its quoting intact counts as protected.
+    Command text that holds a heredoc, a here-string or a backslash-newline, or that cannot
+    be split with its quoting intact, counts as protected.
 
     This checks command text only; it does not follow aliases, symlinks or computed paths.
     Rare forms such as bsdtar, cpio, 7z, remote rsync, find -O3 and computed Python paths can be missed.
     """
     if depth > 5:
         return False
+    if _has_unreadable_structure(command):
+        # Fail closed by structure, whatever the splitter makes of it.
+        return True
     try:
-        tokens = _shell_words(command.replace('\\\n', ' '), ';&|()\n<>')
+        tokens = _shell_words(command, ';&|()\n<>')
     except ValueError:
         # Fail closed: text whose quoting cannot be read might hide a protected write.
         return True

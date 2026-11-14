@@ -7,9 +7,10 @@
   shell wrapper is still checked; only a line that cannot be read loses its quotes. A `#` now starts a comment
   only at the start of a word, as it does in the shell. Add a text floor, read without quotes or backslashes,
   for `ha` followed by flags and `supervisor` or `su`; it also refuses such a spelling inside a comment.
-- The approval card no longer offers **Allow once** for a command whose quoting it cannot read (a heredoc
-  whose body holds an apostrophe, a quoted script that spans lines), since such text could hide a write to a
-  protected place and an allowed command runs outside the sandbox.
+- The approval card no longer offers **Allow once** for a command with a heredoc or here-string (any `<<`),
+  a line joined with a backslash, or quoting it cannot read, since such text could hide a write to a
+  protected place and an allowed command runs outside the sandbox. The check does not try to read heredoc
+  bodies: a quote in a body could pair with a quote in a later comment and make other text look like it.
 - The command hook now answers within 1.5 seconds of starting. Codex 0.166 runs a tool call whose hook
   passes its 10-second timeout, so a slow check could let a call through. The check now runs in a child
   process that the hook stops at the deadline, refusing the request with a plain reason, even when the check
