@@ -2,6 +2,10 @@
 
 ## 0.1.81.2 (unreleased)
 
+- Add native managed refusals for literal Supervisor, credential, app-policy and full-access commands,
+  alongside the unchanged semantic command hook. Check native rule loading before remote control starts;
+  rule-load warnings stop chat turns and keep remote control unavailable until the app restarts after repair.
+  The shared owner switch is scheduled before v0.3; this delivery keeps the rules on.
 - A scheduling or mailbox tool asked for more than 20 items now gets the first 20 and a `next_offset`,
   instead of a refusal. Codex asked `read_mailbox` for 50 messages when told to summarize the unread mail,
   and the only answer was "Invalid, refused or expired scheduling request.", so it could not correct

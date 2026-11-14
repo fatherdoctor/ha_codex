@@ -31,6 +31,7 @@ import json
 import urllib.parse
 import os
 import re
+import selectors
 import signal
 import socket
 import subprocess
@@ -46,6 +47,150 @@ from typing import Any
 
 import gate_rules
 import websocket
+
+EXEC_RULES_WARNING = "Codex could not load command rules. Fix the rule files and restart the app before turning on remote control."
+_exec_rules_warning = ""
+_exec_rules_lock = threading.Lock()
+
+
+def exec_rules_enabled() -> bool:
+    """Return whether the managed exec-rules kind is on."""
+    # TODO(CX-CHECK-TOGGLES): use its shared saved setting and rebuild requirements
+    # before starting Codex. The named sequencing ruling keeps this kind on now.
+    return True
+
+
+def exec_rules_warning_problem(message: Any) -> str:
+    """Recognize the pinned server's rule-load warnings without exposing details."""
+    if not isinstance(message, dict) or message.get("method") != "configWarning":
+        return ""
+    params = message.get("params")
+    if not isinstance(params, dict) or not isinstance(params.get("summary"), str):
+        return ""
+    # A private pathname containing "rules" does not classify the warning.
+    text = params["summary"].lower()
+    return EXEC_RULES_WARNING if "rules" in text or "execpolicy" in text else ""
+
+
+def record_exec_rules_warning(message: Any) -> str:
+    """Keep a rule warning across tasks and connection attempts in this worker."""
+    problem = exec_rules_warning_problem(message)
+    if problem:
+        global _exec_rules_warning
+        with _exec_rules_lock:
+            _exec_rules_warning = problem
+    return problem
+
+
+def exec_rules_problem() -> str:
+    with _exec_rules_lock:
+        return _exec_rules_warning
+
+
+def managed_exec_rules_problem(data: dict[str, Any]) -> str:
+    """Reject a missing catalogue or a permissive/malformed managed rule."""
+    if not exec_rules_enabled():
+        return ""
+    rules = data.get("rules")
+    prefixes = rules.get("prefix_rules") if isinstance(rules, dict) else None
+    if not isinstance(prefixes, list) or not prefixes:
+        return "the managed command-prefix rules are missing"
+    for rule in prefixes:
+        if not isinstance(rule, dict) or rule.get("decision") not in {"forbidden", "prompt"}:
+            return "a managed command rule has no explicit forbidden or prompt decision"
+        pattern = rule.get("pattern")
+        if not isinstance(pattern, list) or not pattern:
+            return "a managed command rule has an empty pattern"
+        for token in pattern:
+            if not isinstance(token, dict):
+                return "a managed command rule has an invalid token"
+            literal, alternatives = token.get("token"), token.get("any_of")
+            if (set(token) == {"token"} and isinstance(literal, str) and literal
+                    or set(token) == {"any_of"} and isinstance(alternatives, list)
+                    and alternatives and all(isinstance(t, str) and t for t in alternatives)):
+                continue
+            return "a managed command rule has an invalid token"
+    return ""
+
+
+def exec_rules_self_test(binary: str, env: dict[str, str], cwd: str = "/config", *,
+              popen: Any = subprocess.Popen, timeout: float = 15.0) -> str:
+    """Load the actual user/project stack in Codex, with no model request.
+
+    Initialization reports user-rule warnings; thread/start also loads the
+    working directory's trusted project rules. No relay is enabled here.
+    """
+    if not exec_rules_enabled():
+        return ""
+    if exec_rules_problem():
+        return exec_rules_problem()
+    proc = None
+    selector = selectors.DefaultSelector()
+    buffered = b""
+    deadline = time.monotonic() + timeout
+    try:
+        proc = popen([binary, "app-server"], cwd=cwd, env=env, stdin=subprocess.PIPE,
+                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
+        selector.register(proc.stdout, selectors.EVENT_READ)
+
+        def send(message: dict[str, Any]) -> None:
+            proc.stdin.write((json.dumps(message) + "\n").encode())
+            proc.stdin.flush()
+
+        def reply(identifier: int) -> dict[str, Any]:
+            nonlocal buffered
+            while time.monotonic() < deadline:
+                if b"\n" not in buffered:
+                    if not selector.select(max(0, deadline - time.monotonic())):
+                        break
+                    block = os.read(proc.stdout.fileno(), 65536)
+                    if not block:
+                        raise ValueError("closed")
+                    buffered += block
+                    if len(buffered) > 1024 * 1024:
+                        raise ValueError("oversized")
+                    continue
+                line, buffered = buffered.split(b"\n", 1)
+                message = json.loads(line)
+                if record_exec_rules_warning(message):
+                    raise ValueError("rules warning")
+                if message.get("id") == identifier:
+                    if not isinstance(message.get("result"), dict):
+                        raise ValueError("refused")
+                    return message["result"]
+            raise TimeoutError("self-test")
+
+        send({"id": 1, "method": "initialize", "params": {
+            "clientInfo": {"name": "ha_codex_rules_check", "version": "0.166.0"},
+            "capabilities": {"experimentalApi": True}}})
+        reply(1)
+        send({"method": "initialized"})
+        send({"id": 2, "method": "thread/start", "params": {
+            "cwd": cwd, "ephemeral": True, "approvalPolicy": "on-request", "sandbox": "workspace-write"}})
+        result = reply(2)
+        if result.get("approvalPolicy") != "on-request" or not isinstance(result.get("thread"), dict):
+            raise ValueError("unexpected thread")
+        return ""
+    except (OSError, ValueError, TypeError, AttributeError, subprocess.SubprocessError):
+        return exec_rules_problem() or "The Codex command-rules self-test did not complete. Restart the app after checking its rule files."
+    finally:
+        selector.close()
+        if proc is not None:
+            # End the whole fresh probe group, including a CLI shim's children.
+            for sig in (signal.SIGTERM, signal.SIGKILL):
+                try:
+                    os.killpg(proc.pid, sig)
+                except ProcessLookupError:
+                    pass
+                try:
+                    proc.wait(timeout=2)
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
+            for stream in (proc.stdin, proc.stdout):
+                if stream is not None:
+                    stream.close()
+
 
 CONTROL_FOLDER = "remote_control_control"
 DEFAULT_NAME = "Home Assistant"
@@ -146,7 +291,7 @@ def requirements_problem(path: Path) -> str:
         return "the managed requirements do not rule out the never approval policy"
     if data.get("allow_managed_hooks_only") is not True:
         return "the managed requirements do not keep hooks to the managed ones"
-    return ""
+    return managed_exec_rules_problem(data)
 
 
 # What the hook must refuse, and let through, before remote control may start: (event, remote on, input, refused).
@@ -655,6 +800,8 @@ class ControlClient:
                     if not frame or len(frame) > 1024 * 1024:
                         raise ControlError("The Codex control connection closed or returned an oversized response.")
                     message = json.loads(frame)
+                    if record_exec_rules_warning(message):
+                        raise ControlError(EXEC_RULES_WARNING)
                     if not isinstance(message, dict) or message.get("id") != identifier:
                         continue  # Status notifications are not replies to this request.
                     if "error" in message or not isinstance(message.get("result"), dict):
@@ -695,7 +842,7 @@ class Supervisor:
         state_path: Path,
         env_factory: Callable[[], dict[str, str]],
         name_factory: Callable[[], Any],
-        gate: Callable[[], str] = gate_problem,
+        gate: Callable[[], str] | None = None,
         popen: Callable[..., Any] = subprocess.Popen,
         run: Callable[..., Any] = subprocess.run,
         clock: Callable[[], float] = time.monotonic,
@@ -713,7 +860,11 @@ class Supervisor:
         self.state_path = state_path
         self.env_factory = env_factory
         self.name_factory = name_factory
-        self.gate = gate
+        # An injected gate supplies the complete readiness check (fixtures use
+        # it without launching Codex). Production also probes the native loader.
+        self.gate = gate or gate_problem
+        self._native_rules_test = gate is None
+        self._rules_problem = ""
         self.popen = popen
         self.run = run
         self.clock = clock
@@ -751,6 +902,18 @@ class Supervisor:
 
     # Actions ------------------------------------------------------------------------------------
 
+    def _gate_problem(self, probe: bool = False) -> str:
+        problem = self.gate() or self._rules_problem or exec_rules_problem()
+        if not problem and probe and self._native_rules_test:
+            try:
+                environment = remote_env(self.env_factory())
+            except (OSError, ValueError, TypeError):
+                self._rules_problem = "The command-rules self-test could not prepare its environment."
+            else:
+                self._rules_problem = exec_rules_self_test(self.codex_binary, environment)
+            problem = self._rules_problem
+        return problem
+
     def resume(self) -> dict[str, Any]:
         """At app start, run remote control again if the owner left it on and the gate allows it.
 
@@ -763,7 +926,7 @@ class Supervisor:
         self._start_watch()
         if not self.enabled():
             return self.snapshot()
-        problem = self.gate()
+        problem = self._gate_problem(probe=True)
         if problem:
             self.set_status("blocked", problem)
             return self.snapshot()
@@ -771,7 +934,7 @@ class Supervisor:
 
     def start(self) -> tuple[bool, dict[str, Any]]:
         """Turn remote control on; refused, and left off, while the command gate is missing."""
-        problem = self.gate()
+        problem = self._gate_problem(probe=True)
         if problem:
             self.set_status("blocked", problem)
             return False, self.snapshot()
@@ -918,7 +1081,7 @@ class Supervisor:
         """Run the process, read its output, and restart it with a growing delay while remote control stays on."""
         backoff = BACKOFF_START
         while self.enabled() and not self.wake.is_set():
-            problem = self.gate()
+            problem = self._gate_problem(probe=True)
             if problem:
                 self.set_status("blocked", problem)
                 return
@@ -966,6 +1129,11 @@ class Supervisor:
                             r"namespace|hostname|Operation not permitted|Permission denied", line, re.IGNORECASE):
                         namespace_error = True
                     self._parse(line)
+                    if exec_rules_problem():
+                        self.save_enabled(False)
+                        self._terminate(proc)
+                        self.set_status("blocked", exec_rules_problem(), pairing_code="")
+                        break
                 code = proc.wait()
                 done.set()
                 monitor.join(timeout=3.0)
@@ -996,8 +1164,12 @@ class Supervisor:
         enabled = False
         while not cancelled():
             try:
+                if exec_rules_problem():
+                    raise ControlError(exec_rules_problem())
                 client = self.control_factory(path)
                 reply = client.status(cancelled=cancelled) if enabled else client.enable(cancelled=cancelled)
+                if exec_rules_problem():
+                    raise ControlError(exec_rules_problem())
                 enabled = True
                 with self.lock:
                     if cancelled() or self.proc is not proc:
@@ -1012,6 +1184,11 @@ class Supervisor:
                         enabled = False
                         self.set_status("error", "Codex remote control is not connected. Check sign-in and try again.")
             except Exception:
+                if exec_rules_problem():
+                    self.save_enabled(False)
+                    self._terminate(proc)
+                    self.set_status("blocked", exec_rules_problem(), pairing_code="")
+                    return
                 if not cancelled():
                     self.set_status("connecting", "Waiting for this process's Codex control socket…")
             if done.wait(1.0 if not enabled else 5.0):
@@ -1037,6 +1214,15 @@ class Supervisor:
 
     def _parse(self, line: str) -> str:
         """Record one output line and update the state from it; return a pairing code found in it."""
+        # Some launchers print JSON notifications; others print the summary.
+        try:
+            message = json.loads(line)
+        except ValueError:
+            message = {"method": "configWarning", "params": {"summary": line}} if (
+                "rules" in line.lower() and any(word in line.lower() for word in ("warning", "error", "failed"))) else {}
+        if record_exec_rules_warning(message) or exec_rules_problem():
+            self.set_status("blocked", exec_rules_problem(), pairing_code="")
+            return ""
         lower = line.lower()
         policy_downgrade = False
         if "disallowed by requirements" in lower and "falling back to required value" in lower:
@@ -1087,7 +1273,7 @@ class Supervisor:
             status = dict(self.status)
             log = list(self.log)
             findings = list(self.findings)
-        problem = self.gate()
+        problem = self._gate_problem()
         code = status.get("pairing_code") or ""
         return {
             **status,
