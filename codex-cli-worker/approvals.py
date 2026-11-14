@@ -52,6 +52,27 @@ PROTECTED_COMMAND_RES = (
 )
 
 
+def _shell_words(text: str, punctuation: str) -> list[str]:
+    """Split command text into words and shell punctuation, without running it.
+
+    Text the splitter cannot read, such as an unfinished quote from an apostrophe in a
+    heredoc body, is split again with every quote and backslash removed and with ``#``
+    read as an ordinary character. The shell still runs such a command, so it must
+    never be skipped as unreadable. gate_rules.py has the same function for the hook.
+    """
+    def split(source: str, commenters: str) -> list[str]:
+        lexer = shlex.shlex(source, posix=True, punctuation_chars=punctuation)
+        lexer.whitespace = ' \t\r'
+        lexer.whitespace_split = True
+        lexer.commenters = commenters
+        return list(lexer)
+
+    try:
+        return split(text, '#')
+    except ValueError:
+        return split(re.sub(r'[\'"\\]', '', text), '')
+
+
 def _protected_ancestor_operations(command: str, initial_cwd: str = '', depth: int = 0) -> bool:
     """Conservatively identify named requirements, root searches and writes into root or /etc.
 
@@ -60,14 +81,7 @@ def _protected_ancestor_operations(command: str, initial_cwd: str = '', depth: i
     """
     if depth > 5:
         return False
-    lexer = shlex.shlex(command.replace('\\\n', ' '), posix=True, punctuation_chars=';&|()\n<>')
-    lexer.whitespace = ' \t\r'
-    lexer.whitespace_split = True
-    lexer.commenters = '#'
-    try:
-        tokens = list(lexer)
-    except ValueError:
-        return False
+    tokens = _shell_words(command.replace('\\\n', ' '), ';&|()\n<>')
     segments, segment = [], []
     for token in tokens:
         if token and all(ch in ';&|()\n<>' for ch in token):

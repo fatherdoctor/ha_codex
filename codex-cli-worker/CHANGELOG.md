@@ -2,6 +2,10 @@
 
 ## 0.1.81.2 (unreleased)
 
+- Read command text with an unfinished quote again without its quotes in both command checks, so the
+  always-refused Supervisor rule and the protected-write check still apply to it; add a quote-free text floor
+  for `ha` followed by flags and `supervisor` or `su`.
+
 - Do not report generic task HTTP errors as expired ChatGPT sign-in; test sign-in recovery through the full task lifecycle.
 
 - Keep generic passive HTTP errors out of the expired-sign-in Repair; expose only fixed usage-error messages and categories, never raw upstream errors.
