@@ -2,6 +2,9 @@
 
 ## 0.1.81.2 (unreleased)
 
+- Explain the first confirmation needed to use action groups, name disabled groups in refusal diagnostics,
+  and direct entity lookups to the worker's authenticated read tool before changes.
+
 - The command hook now answers within 1.5 seconds of starting. Codex 0.166 runs a tool call whose hook
   passes its 10-second timeout, so a slow check could let a call through. The check now runs in a child
   process that the hook stops at the deadline, refusing the request with a plain reason, even when the check
