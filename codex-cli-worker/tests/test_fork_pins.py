@@ -57,7 +57,7 @@ class ForkPinTests(unittest.TestCase):
         self.assertEqual(yaml_field(config, "image"), "ghcr.io/fatherdoctor/codex-cli-worker")
         self.assertEqual(manifest["codeowners"], ["@fatherdoctor"])
         repository = (ROOT / "repository.yaml").read_text(encoding="utf-8")
-        self.assertEqual(yaml_field(repository, "maintainer"), "David Allison")
+        self.assertEqual(yaml_field(repository, "maintainer"), "The Backshop")
 
 
 if __name__ == "__main__":

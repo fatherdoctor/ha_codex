@@ -176,6 +176,40 @@ The API token protects the worker HTTP API. The app stores it in private app sto
 
 The token is not your OpenAI or ChatGPT credential. Codex authentication is still handled separately with `codex login`.
 
+## Integration install
+
+From **0.1.81.3** the app installs and updates the Codex integration itself, so one install and one restart of
+Home Assistant set up both parts. The app image carries the integration of the same release. At each start,
+before the worker starts, the app compares it with `/config/custom_components/codex_cli`:
+
+| The folder | What the app does |
+|---|---|
+| Missing | Writes the integration, then shows a notification: restart Home Assistant to finish setup. |
+| Written by the app, from another copy | Keeps the old folder in the app's storage (`/data/integration_backup`), writes the new copy next to it and swaps the two by renaming, then asks for a restart. |
+| Written by the app, from this copy | Nothing. |
+| Installed another way (Marketplace, HACS, by hand, or a symbolic link) | Nothing. A notification says so once for each app version. |
+
+The app knows its own folder by the marker file `.installed_by_app.json` in it, which names the app version and
+the copy that wrote it. To move to the Marketplace or HACS, turn the option below off first, so the two never
+write the same folder. If a copy fails, for example on a full disk, the old folder stays in place
+and a notification says what failed. The step never stops the app from starting. The app log has one line for
+each start, beginning `Integration install:`.
+
+The app writes nothing else in `/config`, except a temporary folder (`.codex_cli.new`) and the old folder
+(`.codex_cli.old`) during the swap; both are removed before the step ends, while Home Assistant is still
+running the integration it loaded at its last start.
+
+After the restart, the app's Supervisor discovery shows **Discovered: Codex** under **Settings** > **Devices &
+services**. Choose **Add**, then **Submit**; the integration is added only after you confirm.
+
+**Option:** **Install the Codex integration** (`install_integration`, default on). Turn it off to install and update
+the integration yourself; the app then reads and writes nothing in `custom_components`. Discovery is announced
+either way.
+
+**Uninstalling:** uninstalling the app leaves the integration in place, so that removing the app does not change
+Home Assistant behind your back. Delete the integration entry, uninstall the app, then delete
+`/config/custom_components/codex_cli` and restart Home Assistant.
+
 ## Integration check
 
 The app's web UI works without the **Codex** integration, but some features need it. From **0.1.71**, the web UI shows a line at the top of the chat, above the messages, in three cases:

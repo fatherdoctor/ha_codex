@@ -5,6 +5,10 @@
         "title": "Codex",
         "description": "Codex automatically detects the installed Codex for Home Assistant app and its generated worker API token."
       },
+      "hassio_confirm": {
+        "title": "Codex",
+        "description": "The Codex for Home Assistant app is installed and running. Set up the Codex integration to connect to it."
+      },
       "reauth_confirm": {
         "title": "Codex",
         "description": "Reconnect to the installed Codex for Home Assistant app."

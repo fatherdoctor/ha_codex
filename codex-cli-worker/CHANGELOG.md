@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.81.3 (unreleased)
+
+- The app now installs its own integration. At each start it copies the Codex integration of the same
+  release, carried in the app image, to `/config/custom_components/codex_cli`, then asks for one restart of
+  Home Assistant in a notification. It writes only when the folder is missing or was written by the app
+  (a marker file in the folder names the copy), keeps the previous copy in the app's own storage, and
+  swaps the new folder in by renaming, so a failed copy leaves the old folder in place. A folder installed
+  another way (Marketplace, HACS or by hand) is never changed; a notification says so once per app version.
+  The new `install_integration` option (default on) turns the copy off. Uninstalling the app leaves the
+  integration in place.
+- The app announces itself through Supervisor discovery at each start, so after the restart
+  **Settings** > **Devices & services** shows **Discovered: Codex**. Setup from discovery now asks for
+  confirmation before it adds the integration, and shows a connection error on the form instead of ending.
+- The app repository's maintainer is now The Backshop.
+
 ## 0.1.81.2 (unreleased)
 
 - Document why the pinned CLI cannot supply a ChatGPT sign-in deadline: access tokens refresh and
