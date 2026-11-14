@@ -13,20 +13,11 @@ import tempfile
 import threading
 import time
 import uuid
-import yaml
 
 from flask import jsonify, request
 from permission_overrides import ApprovalRequired, Authority, Engine, Settings, bounded_json, entity, selected_guard_lines, guard_rules, GUARD_LINES, PRIVATE
-from permission_overrides import action_sequence
 
 IDENTIFIER = re.compile(r'[a-z0-9_-]{1,128}')
-
-# These Core device integrations send device commands, not configured HA action
-# sequences. Other platforms need an effect model before they can bypass prompts.
-DIRECT_DEVICE_PLATFORMS = frozenset({'hue', 'zha', 'zwave_js', 'matter', 'esphome', 'homekit_controller',
-                                   'mqtt', 'wled', 'shelly', 'tplink', 'lutron_caseta'})
-DIRECT_HELPERS = frozenset({'input_boolean', 'input_number', 'input_select', 'input_text'})
-
 
 # Core sends a serialized field list. Return its shape only, never defaults/options/values.
 SAFE_FLOW_FIELDS = frozenset(('host', 'port', 'name', 'username', 'title', 'scan_interval'))
@@ -152,42 +143,13 @@ class Core:
         row = self.rest('GET', 'states/' + entity(target))
         if not isinstance(row, dict) or row.get('entity_id') != target:
             raise ApprovalRequired('The entity is unavailable; request normal approval.')
-        row = dict(row)
-        row.pop('_override_members', None)  # Only this adapter supplies verified membership metadata.
         if target.startswith(('input_text.', 'text.')) and row.get('attributes', {}).get('mode') == 'password':
             raise ApprovalRequired('Credential targets are not available through overrides.')
         registry = self.ws('config/entity_registry/get', entity_id=target)
         if isinstance(registry, dict) and registry.get('platform') in ('codex_cli', 'ha_codex', 'hassio'):
             raise ApprovalRequired('The add-on and Supervisor settings cannot be changed through overrides.')
-        domain = target.split('.')[0]
-        if domain not in ('automation', 'script', 'scene'):
-            platform = registry.get('platform') if isinstance(registry, dict) else None
-            direct_helper = domain in DIRECT_HELPERS and platform == domain
-            if platform in ('group', 'switch_as_x'):
-                row['_override_members'] = self.wrapper_members(target, row, registry)
-            elif not isinstance(platform, str) or (not direct_helper and platform not in DIRECT_DEVICE_PLATFORMS):
-                raise ApprovalRequired('Scripted or unverified entity platforms require normal approval.')
         return row
 
-    @staticmethod
-    def wrapper_members(target, row, registry):
-        """Read loaded group members or the source recorded by Core's switch wrapper."""
-        if registry['platform'] == 'group':
-            members = row.get('attributes', {}).get('entity_id')
-            if isinstance(members, list) and any(not isinstance(member, str)
-                    or member.split('.')[0] != target.split('.')[0] for member in members):
-                raise ApprovalRequired('Group members cannot be fully verified; request normal approval.')
-        else:
-            options = registry.get('options', {}).get('switch_as_x')
-            if (not isinstance(options, dict) or set(options) != {'entity_id', 'invert'}
-                    or type(options['invert']) is not bool):
-                raise ApprovalRequired('The switch wrapper source is unavailable; request normal approval.')
-            members = [options['entity_id']]
-            if not isinstance(members[0], str) or not members[0].startswith('switch.'):
-                raise ApprovalRequired('The switch wrapper source cannot be verified; request normal approval.')
-        if not isinstance(members, list) or not members or len(members) > 128:
-            raise ApprovalRequired('Wrapper members are unavailable or oversized; request normal approval.')
-        return [entity(member) for member in members]
 
     def resolve(self, selector, service_domain=None):
         if isinstance(selector, str):
@@ -234,114 +196,6 @@ class Core:
             raise ApprovalRequired('The configuration identifier is unavailable; request normal approval.')
         return identifier
 
-    def definition(self, target):
-        """Inspect loaded actions, never the editable file that a pending reload will replace."""
-        domain = entity(target).split('.')[0]
-        if domain in ('automation', 'script'):
-            self.require_entity(target)
-            response = self.ws(domain + '/config', entity_id=target)
-            if isinstance(response, dict) and isinstance(response.get('config'), dict):
-                return response['config']
-        elif domain == 'scene':
-            row = self.require_entity(target)
-            members = row.get('attributes', {}).get('entity_id')
-            if isinstance(members, list) and members and len(members) <= 128:
-                return {'entities': {entity(member): None for member in members}}
-        raise ApprovalRequired('The loaded definition is unavailable; request normal approval.')
-
-    def reload_layout(self, domain):
-        """Refuse layouts whose includes or packages can hide additional effects."""
-        root = Path(self.worker.CONFIG_ROOT)
-        config = self.read_reload_yaml(root / 'configuration.yaml', includes=True)
-        if not isinstance(config, dict) or any(not isinstance(key, str) for key in config):
-            raise ApprovalRequired('This reload layout cannot be compared; request normal approval.')
-        if 'homeassistant' in config:
-            section = config['homeassistant']
-            if (not isinstance(section, dict)
-                    or {'packages', 'include', 'secret_reference'} & section.keys()):
-                raise ApprovalRequired('Packages or an unreadable homeassistant section require normal approval.')
-        if any(key.startswith(domain + ' ') for key in config):
-            raise ApprovalRequired('Split reload sections require normal approval.')
-        return root, config
-
-    def reload_changes(self, domain):
-        """Compare standard YAML and loaded definitions; refuse hidden reload effects."""
-        if domain == 'template':
-            raise ApprovalRequired('Template reloads require normal approval in this version.')
-        root, config = self.reload_layout(domain)
-        filenames = {'automation': 'automations.yaml', 'script': 'scripts.yaml', 'scene': 'scenes.yaml'}
-        filename = filenames[domain]
-        if config.get(domain) != {'include': filename}:
-            raise ApprovalRequired('This reload layout cannot be compared; request normal approval.')
-        disk = self.read_reload_yaml(root / filename)
-        # Scene state exposes membership, not the saved member values. That is
-        # insufficient to tell whether a definition changed, so never guess.
-        if domain == 'scene':
-            raise ApprovalRequired('Loaded scene values cannot be compared; request normal approval.')
-        if domain == 'automation':
-            if not isinstance(disk, list) or any(not isinstance(row, dict) or not row.get('id')
-                                               or not isinstance(row['id'], str) for row in disk):
-                raise ApprovalRequired('Automation definitions cannot be compared; request normal approval.')
-            proposed = {row['id']: row for row in disk}
-            if len(proposed) != len(disk):
-                raise ApprovalRequired('Duplicate automation identifiers require normal approval.')
-        else:
-            proposed = disk
-        if not isinstance(proposed, dict) or len(proposed) > 1024:
-            raise ApprovalRequired('Reload definitions are unavailable or oversized; request normal approval.')
-        if any(not isinstance(value, dict) or 'use_blueprint' in value for value in proposed.values()):
-            raise ApprovalRequired('Blueprint or unreadable reload definitions require normal approval.')
-        for definition in proposed.values():
-            action_sequence(definition, domain)
-        states = self.rest('GET', 'states')
-        if not isinstance(states, list) or len(states) > 30000:
-            raise ApprovalRequired('Loaded definitions cannot be listed; request normal approval.')
-        loaded = {}
-        for row in states:
-            target = row.get('entity_id', '')
-            if not target.startswith(domain + '.'):
-                continue
-            definition = self.definition(target)
-            if 'use_blueprint' in definition:
-                raise ApprovalRequired('Loaded blueprint definitions require normal approval.')
-            action_sequence(definition, domain)
-            identifier = definition.get('id') if domain == 'automation' else target.split('.')[1]
-            if not isinstance(identifier, str) or not identifier or identifier in loaded:
-                raise ApprovalRequired('Loaded identifiers cannot be compared; request normal approval.')
-            loaded[identifier] = definition
-        return {key: value for key, value in proposed.items() if key not in loaded or value != loaded[key]}
-
-    @staticmethod
-    def read_reload_yaml(path, includes=False):
-        """Read bounded ordinary files; accept only root include markers, never resolve tags."""
-        class Loader(yaml.SafeLoader):
-            pass
-        if includes:
-            Loader.add_constructor('!include', lambda loader, node: {'include': loader.construct_scalar(node)})
-            Loader.add_constructor('!secret', lambda loader, node: {'secret_reference': loader.construct_scalar(node)})
-        try:
-            with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), 'rb') as stream:
-                if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
-                    raise ValueError()
-                raw = stream.read(524289)
-            if len(raw) > 524288:
-                raise ValueError()
-            node = yaml.compose(raw, Loader=Loader)
-            pending, seen = [node], set()
-            while pending:
-                item = pending.pop()
-                if item is None:
-                    continue
-                if id(item) in seen or len(seen) >= 20000:
-                    raise ValueError()
-                seen.add(id(item))
-                if isinstance(item, yaml.MappingNode):
-                    pending.extend(child for pair in item.value for child in pair)
-                elif isinstance(item, yaml.SequenceNode):
-                    pending.extend(item.value)
-            return yaml.load(raw, Loader=Loader)
-        except (OSError, ValueError, yaml.YAMLError):
-            raise ApprovalRequired('Reload files cannot be safely compared; request normal approval.') from None
 
     def validate_service(self, service, data):
         domain, name = service.split('.')
@@ -604,9 +458,8 @@ class Service:
                         affected = ('Security and people; Organize; Bigger changes; '
                                     'Apply checked changes for setup forms')
                     else:
-                        affected = ('Security and people; Organize for matching entities; '
-                                    'Everyday controls, Bigger changes and Apply checked changes '
-                                    'when an indirect action reaches this domain')
+                        affected = ('Security and people for direct services; Organize and Bigger changes '
+                                    'for matching direct entity changes')
                     notes.append(line + ' Suspended groups/actions: ' + affected + '.')
                 return 'Selected block limits (' + ', '.join(sorted(rules)) + '): ' + ' '.join(notes)
         except ApprovalRequired as error:

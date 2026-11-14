@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -160,28 +159,8 @@ def service_group(service):
     return 'everyday'
 
 
-def action_sequence(definition, domain):
-    """Accept one understood action spelling; never choose between competing scripts."""
-    if not isinstance(definition, dict):
-        raise ApprovalRequired('The action definition is unreadable; request normal approval.')
-    common = {'alias', 'description', 'mode', 'max', 'max_exceeded', 'variables', 'trace'}
-    if domain == 'automation':
-        allowed = common | {'id', 'trigger', 'triggers', 'condition', 'conditions',
-                            'action', 'actions', 'initial_state'}
-        keys = set(definition) & {'action', 'actions'}
-    else:
-        allowed = common | {'sequence', 'fields', 'icon'}
-        keys = set(definition) & {'sequence'}
-    if set(definition) - allowed or len(keys) != 1:
-        raise ApprovalRequired('Ambiguous or unsupported action definitions require normal approval.')
-    sequence = definition[next(iter(keys))]
-    if not isinstance(sequence, list):
-        raise ApprovalRequired('The action sequence is unreadable; request normal approval.')
-    return sequence
-
-
 class Engine:
-    """Resolve all explicit effects before a single write; backend failures never auto-retry."""
+    """Verify the direct action before a single write; backend failures never auto-retry."""
     def __init__(self, settings, backend, guards, observer):
         self.settings = settings
         self.backend = backend
@@ -213,10 +192,10 @@ class Engine:
                 bounded_json(request, 1024 * 1024)
                 groups = self.settings.read()
                 rules = guard_rules(self.guards())
-                checks = {}
+                checks = set()
                 plan = self.plan(request, groups, rules, checks)
                 group = plan['group']
-                # Recheck settings, owner rules, definitions and the live turn immediately before dispatch.
+                # Recheck settings, confirmed owner rules and the live turn before dispatch.
                 if not still_active() or groups != self.settings.read() or rules != guard_rules(self.guards()):
                     raise ApprovalRequired('Permissions changed or the exchange ended; request normal approval.')
                 # A failed audit must stop BEFORE the write. The callback sees no payload or raw target.
@@ -224,17 +203,9 @@ class Engine:
                 if (not still_active() or groups != self.settings.read()
                         or rules != guard_rules(self.guards())):
                     raise ApprovalRequired('Permissions changed or the exchange ended; request normal approval.')
-                # Last Core read follows audit persistence and all other preflight work.
-                for target, digest in checks.items():
-                    if target.startswith('entity:'):
-                        row = self.backend.require_entity(target[7:])
-                        if self.definition_digest(row.get('_override_members')) != digest:
-                            raise ApprovalRequired('Wrapper membership changed; request normal approval.')
-                        continue
-                    value = (self.backend.reload_changes(target[7:]) if target.startswith('reload:')
-                             else self.backend.definition(target))
-                    if self.definition_digest(value) != digest:
-                        raise ApprovalRequired('An indirect action changed during checking; request normal approval.')
+                # Verify only the entities directly named by this action after the audit.
+                for target in checks:
+                    self.backend.require_entity(target)
                 started_write = True
                 result = self.backend.execute(plan)
             except ApprovalRequired as exc:
@@ -252,9 +223,6 @@ class Engine:
             return {'ok': True, 'performed': plan['description'], 'result': result,
                     'answer_instruction': 'Name this pre-approved action in your answer.'}
 
-    @staticmethod
-    def definition_digest(value):
-        return hashlib.sha256(bounded_json(value, 1024 * 1024).encode()).hexdigest()
 
     def allowed(self, group, groups):
         if not groups[group]:
@@ -279,7 +247,8 @@ class Engine:
         if domain in rules or ('external' in rules and domain in SECURITY):
             raise ApprovalRequired('Owner guard rails restrict this action; request normal approval.')
 
-    def effect(self, service, selector, data, groups, rules, checks, trail=()):
+    def effect(self, service, selector, data, groups, rules, checks):
+        """Judge this service and its direct targets, never the owner's downstream setup."""
         bounded_json(data)
         group = service_group(service)
         self.allowed(group, groups)
@@ -289,108 +258,10 @@ class Engine:
             selector = [service]
         self.guard_effect(domain, rules)
         targets = [] if domain in ('notify', 'persistent_notification') else self.targets(selector, domain)
-        for target in targets:
-            # Recheck platform eligibility after the audit, including nested effects.
-            row = self.backend.require_entity(target)
-            members = row.get('_override_members')
-            checks['entity:' + target] = self.definition_digest(members)
-            if members is not None:
-                self.check_members(members, groups, rules, checks, trail + (target,))
         if any(target.split('.')[0] != domain for target in targets):
             raise ApprovalRequired('The service and target domains disagree; request normal approval.')
-        if domain in ('script', 'scene', 'automation'):
-            for target in targets:
-                if target in trail or len(trail) >= 16 or len(checks) >= 128:
-                    raise ApprovalRequired('Indirect action resolution exceeds its limit; request normal approval.')
-                definition = self.backend.definition(target)
-                if not isinstance(definition, dict):
-                    raise ApprovalRequired('An indirect action definition is unavailable; request normal approval.')
-                checks[target] = self.definition_digest(definition)
-                if domain == 'scene':
-                    self.check_scene(definition, groups, rules, checks, trail + (target,))
-                else:
-                    sequence = action_sequence(definition, domain)
-                    self.sequence(sequence, groups, rules, checks, trail + (target,))
+        checks.update(targets)
         return targets
-
-    def check_scene(self, definition, groups, rules, checks, trail=()):
-        """Every loaded or newly configured member must pass its own group and limit."""
-        effects = definition.get('entities')
-        if not isinstance(effects, dict) or not effects:
-            raise ApprovalRequired('Scene targets could not be checked; request normal approval.')
-        self.check_members(list(effects), groups, rules, checks, trail)
-
-    def check_members(self, members, groups, rules, checks, trail):
-        """Resolve every loaded scene/wrapper effect and pin it for the final recheck."""
-        if not isinstance(members, list) or not members or len(members) > 128:
-            raise ApprovalRequired('Members cannot be fully verified; request normal approval.')
-        for nested in members:
-            if nested in trail or len(trail) >= 16 or len(checks) >= 128:
-                raise ApprovalRequired('Member resolution exceeds its limit; request normal approval.')
-            domain = entity(nested).split('.')[0]
-            if domain not in {'light', 'switch', 'input_boolean', 'scene'} | SECURITY:
-                raise ApprovalRequired('Scene effects require normal approval.')
-            group = 'security' if domain in SECURITY else 'everyday'
-            self.allowed(group, groups)
-            self.guard_effect(domain, rules)
-            row = self.backend.require_entity(nested)
-            nested_members = row.get('_override_members')
-            checks['entity:' + nested] = self.definition_digest(nested_members)
-            if domain == 'scene':
-                definition = self.backend.definition(nested)
-                if not isinstance(definition, dict):
-                    raise ApprovalRequired('Nested scene members are unavailable; request normal approval.')
-                checks[nested] = self.definition_digest(definition)
-                self.check_scene(definition, groups, rules, checks, trail + (nested,))
-            elif nested_members is not None:
-                self.check_members(nested_members, groups, rules, checks, trail + (nested,))
-
-    def sequence(self, sequence, groups, rules, checks, trail):
-        if not isinstance(sequence, list) or len(sequence) > 128:
-            raise ApprovalRequired('Indirect actions could not be fully checked; request normal approval.')
-        for action in sequence:
-            if not isinstance(action, dict):
-                raise ApprovalRequired('Unknown indirect action; request normal approval.')
-            bounded_json(action)
-            if 'action' in action or 'service' in action:
-                if set(action) - {'action', 'service', 'target', 'data', 'alias', 'enabled', 'continue_on_error'}:
-                    raise ApprovalRequired('Unsupported indirect action fields; request normal approval.')
-                service = action.get('action', action.get('service'))
-                data = dict(action.get('data') or {})
-                selector = action.get('target') or {'entity_id': data.pop('entity_id', [])}
-                self.effect(service, selector, data, groups, rules, checks, trail)
-            elif set(action) <= {'delay', 'wait_template', 'condition', 'alias', 'enabled'} and 'wait_template' not in action:
-                continue
-            elif 'choose' in action:
-                if set(action) - {'choose', 'default', 'alias', 'enabled'} or not isinstance(action['choose'], list):
-                    raise ApprovalRequired('Unknown conditional action; request normal approval.')
-                for branch in action['choose']:
-                    if not isinstance(branch, dict) or set(branch) - {'conditions', 'sequence', 'alias'}:
-                        raise ApprovalRequired('Unknown conditional branch; request normal approval.')
-                    self.sequence(branch.get('sequence'), groups, rules, checks, trail)
-                self.sequence(action.get('default', []), groups, rules, checks, trail)
-            elif 'if' in action:
-                if set(action) - {'if', 'then', 'else', 'alias', 'enabled'}:
-                    raise ApprovalRequired('Unknown conditional action; request normal approval.')
-                self.sequence(action.get('then'), groups, rules, checks, trail)
-                self.sequence(action.get('else', []), groups, rules, checks, trail)
-            else:
-                raise ApprovalRequired('Unknown or dynamic indirect actions require normal approval.')
-
-    def check_reload(self, domain, groups, rules, checks):
-        """Check changed definitions; leave unchanged owner definitions alone."""
-        if domain == 'template':
-            raise ApprovalRequired('Template reloads require normal approval in this version.')
-        if domain not in ('automation', 'script', 'scene'):
-            return
-        changes = self.backend.reload_changes(domain)
-        checks['reload:' + domain] = self.definition_digest(changes)
-        for identifier, definition in changes.items():
-            if domain == 'scene':
-                self.check_scene(definition, groups, rules, checks, (identifier,))
-            else:
-                sequence = action_sequence(definition, domain)
-                self.sequence(sequence, groups, rules, checks, (identifier,))
 
     def plan(self, request, groups, rules, checks):
         operation = request['operation']
@@ -417,7 +288,6 @@ class Engine:
         if operation == 'reload':
             if target not in RELOADS or data:
                 raise ApprovalRequired('Unsupported reload request; request normal approval.')
-            self.check_reload(target, groups, rules, checks)
         if operation in ('check_config', 'backup', 'restart') and (target is not None or data):
             raise ApprovalRequired('This operation takes no target or data; request normal approval.')
         if operation in ('flow_start', 'flow_continue'):

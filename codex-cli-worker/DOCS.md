@@ -824,55 +824,25 @@ the agent workspace. A missing file is a confirmed state too. Any edit, deletion
 suspends all groups until review and confirmation; a change observed within an exchange suspends that
 exchange permanently, even if the file is restored. Start a new exchange after confirming.
 
-Unknown/custom block limits,
-templates, unresolved or changing indirect definitions, mixed unsupported targets and unavailable Core
-preflight data require normal approval. Automation and script actions come from Core
-`automation/config` and `script/config` loaded snapshots, not disk. Scenes use their loaded state members.
-Scenes and automation/script actions are checked transitively;
-there is no atomic Core transaction preventing another actor changing a definition after the last check.
-The tool cannot change its own settings/policy, access credential entities or invoke Supervisor actions.
-Dashboard edits save a private backup first; an entity-ID change returns Core's related-item report,
-which does not cover arbitrary text or external systems. Configuration flow results omit credentials;
-only host, port, name, username, title and scan_interval fields may be filled. Any other field, a password
-selector or a secret flag hands the whole step to Home Assistant without submitting values.
+The groups judge only the service being requested and the entities it directly targets. Area, device
+and label selectors resolve to entities of that service's domain. The group switch, selected house-rules
+lines and the Security and people group apply to those direct targets. A direct lock or alarm action
+still needs its security group and must respect any selected limit.
 
-Automation/script reloads compare standard YAML includes with loaded definitions and check only new or
-changed definitions; unchanged definitions are the owner’s and are not re-judged. Custom layouts, includes
-that cannot be safely compared and loaded scene values require normal approval. Core exposes scene
-membership but not its loaded member values, so scene reloads cannot be pre-approved in this version.
-Template reloads always require normal approval in this version, including plain sensor entries.
-An included or non-mapping homeassistant section, packages, or split reload sections require normal approval.
-Any blueprint reference on disk or in a loaded automation/script makes reload ask, even if unchanged.
-An automation without an id on disk or in its loaded definition also makes the reload ask.
-Competing action spellings or an unsupported automation/script shape require normal approval.
-Template, script-backed and unverified entity platforms require normal approval for controls too.
-Supported device platforms are Hue, ZHA, Z-Wave JS, MQTT, Matter, ESPHome, WLED, Shelly, TP-Link,
-Lutron Caseta and HomeKit Device; direct input helpers also remain supported. This list will grow as
-additional integrations are verified. Other integrations ask; request-supplied platform labels do not count.
-Scene members, including nested scenes, pass the same platform and selected-limit checks as direct targets.
-Groups and switch wrappers are judged recursively by their loaded members; unreadable membership asks.
-The worker rechecks every member and its membership after the audit, immediately before writing.
-A supported ordinary switch can still represent a relay; this does not inspect wiring or device firmware.
+What a scene, script, automation, group, wrapper or template entity does in turn is the owner's own setup.
+The tool does not walk members or downstream actions, check entity platforms, compare file and loaded
+definitions, or judge the actions loaded by a reload. **Apply my changes** permits supported reloads,
+including template and scene reloads, of whatever the owner's files currently hold. Planted commands
+remain the existing command check's and configuration watch's job; those checks are unchanged.
 
-The device-command contracts were checked in Core 2026.10.3 source (not on a live system):
-
-| Registered platform | Device-command implementation |
-| --- | --- |
-| hue | [switch](https://github.com/home-assistant/core/blob/2026.10.3/homeassistant/components/hue/switch.py): bridge controller request |
-| zha | [switch](https://github.com/home-assistant/core/blob/2026.10.3/homeassistant/components/zha/switch.py): ZHA switch entity delegation |
-| zwave_js | [switch](https://github.com/home-assistant/core/blob/2026.10.3/homeassistant/components/zwave_js/switch.py): set device value |
-| mqtt | [light](https://github.com/home-assistant/core/blob/2026.10.3/homeassistant/components/mqtt/light/schema_basic.py): publish configured device command |
-| matter | [switch](https://github.com/home-assistant/core/blob/2026.10.3/homeassistant/components/matter/switch.py): send device command |
-| esphome | [switch](https://github.com/home-assistant/core/blob/2026.10.3/homeassistant/components/esphome/switch.py): client switch command |
-| wled | [light](https://github.com/home-assistant/core/blob/2026.10.3/homeassistant/components/wled/light.py): WLED master command |
-| shelly | [light](https://github.com/home-assistant/core/blob/2026.10.3/homeassistant/components/shelly/light.py): device state/RPC command |
-| tplink | [light](https://github.com/home-assistant/core/blob/2026.10.3/homeassistant/components/tplink/light.py): light-module state command |
-| lutron_caseta | [light](https://github.com/home-assistant/core/blob/2026.10.3/homeassistant/components/lutron_caseta/light.py): smart-bridge value command |
-| homekit_controller | [switch](https://github.com/home-assistant/core/blob/2026.10.3/homeassistant/components/homekit_controller/switch.py): characteristic write |
-
-For wrapper membership, Core's [light group](https://github.com/home-assistant/core/blob/2026.10.3/homeassistant/components/group/light.py)
-exposes loaded entity IDs, while [switch_as_x](https://github.com/home-assistant/core/blob/2026.10.3/homeassistant/components/switch_as_x/entity.py)
-records its source switch in registry options and forwards controls to it. Unknown wrapper shapes ask.
+Unknown/custom block limits, dynamic templates in direct request values, unresolved or mixed-domain
+targets and unavailable Core data still require normal approval. Direct targets are checked again after
+the audit, before writing. The tool cannot change its own settings/policy, access credential entities
+or invoke Supervisor actions. Dashboard edits save a private backup first; an entity-ID change returns
+Core's related-item report, which does not cover arbitrary text or external systems. Configuration flow
+results omit credentials; only host, port, name, username, title and scan_interval fields may be filled.
+Any other field, a password selector or a secret flag hands the whole step to Home Assistant without
+submitting values. This does not inspect wiring or device firmware.
 
 Settings are private, atomic booleans under `/data/codex-home/house-rules/permission-overrides.json`.
 Only a verified administrator on the Ingress page can read or save them; the worker API token does not

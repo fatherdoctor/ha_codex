@@ -2,18 +2,11 @@
 
 ## 0.1.81.2 (unreleased)
 
-- Verify scene and wrapper members before control and after auditing; support the verified common device integrations.
+- Judge pre-approved actions by their direct service and targets only. Remove scene/member walks,
+  platform lists and reload-definition comparisons; downstream behavior belongs to the owner's setup.
+- Keep confirmed house rules, mode checks, direct limits, audit-before-write, receipts and setup-secret
+  handoff. Switch saves after first use still leave changed rules unconfirmed until Review and confirm.
 
-- Require approval for template reloads, scripted or unverified entity platforms, and ambiguous action definitions.
-
-- Ask before reloading template actions, packages, blueprints or unreadable layouts; keep changed house rules unconfirmed after switch saves.
-
-- Recheck loaded actions and reload comparisons after audit persistence, directly before dispatch; identify affected groups for each selected limit.
-
-- Pin administrator-confirmed house rules for each action exchange; check loaded actions and changed reload
-  definitions, keep unattended runs on normal prompts, and hand uncertain setup fields to Home Assistant.
-
-- Add administrator-selected permissions override groups for worker-launched Default exchanges, with a bounded Core action tool, guard-rail checks and shared private audit metadata. Remote turns continue to require normal approval.
 - Do not report generic task HTTP errors as expired ChatGPT sign-in; test sign-in recovery through the full task lifecycle.
 
 - Keep generic passive HTTP errors out of the expired-sign-in Repair; expose only fixed usage-error messages and categories, never raw upstream errors.

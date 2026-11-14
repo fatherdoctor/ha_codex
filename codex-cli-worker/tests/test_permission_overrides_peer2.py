@@ -12,27 +12,19 @@ class PeerPolicy(unittest.TestCase):
     dispatch = policy.OverridePolicyTests.dispatch
     enable = policy.OverridePolicyTests.enable
 
-    def test_selected_external_guard_checks_direct_scene_and_nested_effects(self):
-        self.enable(security=True, bigger=True)
+    def test_selected_external_guard_checks_only_direct_targets(self):
+        self.enable(bigger=True, security=True)
         self.rules = MARKERS[0] + '\n- Do not publish content or changes externally.\n' + MARKERS[1]
         for domain, service in [('camera', 'turn_on'), ('lock', 'unlock'), ('cover', 'open_cover'),
                                 ('alarm_control_panel', 'alarm_disarm')]:
             with self.subTest(domain=domain):
-                target = domain + '.sample'
-                self.backend.definitions['scene.sample'] = {'entities': {target: 'on'}}
-                self.backend.definitions['script.sample'] = {'sequence': [
-                    {'action': 'scene.turn_on', 'target': {'entity_id': 'scene.sample'}}]}
-                self.backend.definitions['automation.sample'] = {'actions': [
-                    {'action': 'script.turn_on', 'target': {'entity_id': 'script.sample'}}]}
-                for call, entity in [(domain + '.' + service, target), ('scene.turn_on', 'scene.sample'),
-                                     ('script.turn_on', 'script.sample'), ('automation.trigger', 'automation.sample')]:
-                    self.assertTrue(self.dispatch(operation='service', service=call, target=[entity]).get('approval_required', False))
+                self.assertTrue(self.dispatch(operation='service', service=domain + '.' + service,
+                    target=[domain + '.sample'])['approval_required'])
         self.assertEqual(self.backend.writes, [])
-        self.backend.definitions['scene.sample'] = {'entities': {'light.sample': 'on'}}
-        self.assertTrue(self.dispatch(operation='service', service='scene.turn_on', target=['scene.sample'])['ok'])
-        self.rules = ''
-        self.backend.definitions['scene.sample'] = {'entities': {'camera.sample': 'on'}}
-        self.assertTrue(self.dispatch(operation='service', service='scene.turn_on', target=['scene.sample'])['ok'])
+        for domain, service in [('scene', 'turn_on'), ('script', 'turn_on'), ('automation', 'trigger')]:
+            with self.subTest(domain=domain):
+                self.assertTrue(self.dispatch(operation='service', service=domain + '.' + service,
+                    target=[domain + '.sample'])['ok'])
 
     def test_receipts_identify_targets_without_private_values_or_audit_targets(self):
         self.enable(bigger=True)

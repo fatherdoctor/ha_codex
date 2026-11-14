@@ -21,7 +21,6 @@ class Backend:
 
     def __init__(self):
         self.writes = []
-        self.definitions = {}
         self.expansion = {'device_id': ['light.sample'], 'area_id': ['light.sample'], 'label_id': ['light.sample']}
 
     def resolve(self, selector, service_domain=None):
@@ -39,11 +38,6 @@ class Backend:
     def require_entity(self, target):
         return {'entity_id': target}
 
-    def reload_changes(self, domain):
-        return {}
-
-    def definition(self, target):
-        return deepcopy(self.definitions.get(target))
 
     def validate_flow(self, operation, target):
         return None
@@ -93,8 +87,8 @@ class OverridePolicyTests(unittest.TestCase):
                           Authority('workspace-write', 'never', 'user', 'worker'),
                           Authority('workspace-write', 'on-request', 'user', 'remote')):
             result = self.engine.dispatch({'operation': 'check_config'}, authority)
-            self.assertTrue(result['approval_required'])
-        self.assertTrue(self.dispatch(operation='check_config', sandbox='workspace-write')['approval_required'])
+            self.assertTrue(result.get('approval_required', False))
+        self.assertTrue(self.dispatch(operation='check_config', sandbox='workspace-write').get('approval_required', False))
         self.assertEqual(self.backend.writes, [])
 
     def test_expired_turn_and_permission_change_stop_before_write(self):
@@ -121,7 +115,7 @@ class OverridePolicyTests(unittest.TestCase):
         for group, request in cases:
             with self.subTest(group=group):
                 self.enable(**{group: False})
-                self.assertTrue(self.engine.dispatch(request, self.authority)['approval_required'])
+                self.assertTrue(self.engine.dispatch(request, self.authority).get('approval_required', False))
                 self.enable(**{group: True})
                 self.assertTrue(self.engine.dispatch(request, self.authority)['ok'])
 
@@ -152,39 +146,6 @@ class OverridePolicyTests(unittest.TestCase):
                 self.assertFalse(self.dispatch(operation='check_config')['ok'])
         self.assertEqual(self.backend.writes, [])
 
-    def test_scene_cannot_reach_disabled_or_restricted_domain(self):
-        self.backend.definitions['scene.sample'] = {'entities': {'light.sample': 'on', 'lock.sample': 'unlocked'}}
-        self.assertFalse(self.dispatch(operation='service', service='scene.turn_on', target=['scene.sample'])['ok'])
-        self.enable(security=True)
-        self.rules = MARKERS[0] + '\n- Do not lock or unlock locks.\n' + MARKERS[1]
-        self.assertFalse(self.dispatch(operation='service', service='scene.turn_on', target=['scene.sample'])['ok'])
-        self.assertEqual(self.backend.writes, [])
-
-    def test_script_and_automation_branches_check_all_indirect_targets(self):
-        self.enable(bigger=True)
-        self.backend.definitions['automation.sample'] = {'actions': [{'action': 'script.sample'}]}
-        self.backend.definitions['script.sample'] = {'sequence': [{'choose': [
-            {'conditions': [], 'sequence': [{'action': 'lock.unlock', 'target': {'entity_id': 'lock.sample'}}]}]}]}
-        with patch.object(self.backend, 'definition', wraps=self.backend.definition) as definition:
-            result = self.dispatch(operation='service', service='automation.trigger', target=['automation.sample'])
-        self.assertFalse(result['ok'])
-        self.assertIn('group is off', result['reason'])
-        self.assertIn(unittest.mock.call('script.sample'), definition.call_args_list)
-        self.assertEqual(self.backend.writes, [])
-
-    def test_recursive_unknown_and_template_actions_require_approval(self):
-        self.enable(bigger=True)
-        for sequence in ([{'action': 'script.sample', 'target': {'entity_id': 'script.sample'}}],
-                         [{'action': '{{ service }}'}], [{'unknown': 'action'}]):
-            self.backend.definitions['script.sample'] = {'sequence': sequence}
-            self.assertFalse(self.dispatch(operation='service', service='script.turn_on', target=['script.sample'])['ok'])
-        self.assertEqual(self.backend.writes, [])
-
-    def test_definition_change_between_check_and_write_is_refused(self):
-        self.backend.definitions['scene.sample'] = {'entities': {'light.sample': 'on'}}
-        with patch.object(self.backend, 'definition', side_effect=[{'entities': {'light.sample': 'on'}}, {'entities': {'lock.sample': 'unlocked'}}]):
-            self.assertFalse(self.dispatch(operation='service', service='scene.turn_on', target=['scene.sample'])['ok'])
-        self.assertEqual(self.backend.writes, [])
 
     def test_device_and_area_expansion_cannot_hide_a_security_target(self):
         self.backend.expansion['area_id'] = ['light.sample', 'lock.sample']
@@ -242,7 +203,7 @@ class PreparedAdapterTests(unittest.TestCase):
         service = api.Service(worker)
         for value in ({'arguments': {'operation': 'check_config'}, 'capability': 'forged'},
                       {'arguments': {'operation': 'check_config'}, 'capability': 'forged', 'mode': 'default'}):
-            self.assertTrue(service.dispatch(value)['approval_required'])
+            self.assertTrue(service.dispatch(value).get('approval_required', False))
 
     def test_dashboard_backup_failure_prevents_save(self):
         core = api.Core(SimpleNamespace())

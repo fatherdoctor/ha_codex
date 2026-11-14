@@ -138,9 +138,9 @@ class ConfirmedRules(unittest.TestCase):
                              '- Do not publish content or changes externally.\n' + MARKERS[1])
         self.service.confirm_rules()
         note = self.service.guard_note()
-        self.assertIn('locks. Suspended groups/actions: Security and people; Organize for matching entities', note)
+        self.assertIn('locks. Suspended groups/actions: Security and people for direct services', note)
         self.assertIn('externally. Suspended groups/actions: Security and people; Organize; Bigger changes', note)
-        self.assertIn('Everyday controls', note)
+        self.assertNotIn('indirect action', note)
         self.assertIn('Apply checked changes', note)
 
     def test_unattended_and_unverified_remote_origins_require_normal_approval(self):
@@ -200,15 +200,6 @@ class GuardAndMutationRegressions(unittest.TestCase):
         with self.assertRaisesRegex(ApprovalRequired, 'Dynamic templates'):
             bounded_json({'value': '{{ synthetic }}'})
 
-    def test_indirect_depth_budget_refuses_before_reading_the_next_definition(self):
-        self.enable(bigger=True)
-        for n in range(18):
-            self.backend.definitions[f'script.s{n}'] = {'sequence': [{'action': f'script.s{n+1}'}]}
-        with patch.object(self.backend, 'definition', wraps=self.backend.definition) as read:
-            result = self.dispatch(operation='service', service='script.turn_on', target=['script.s0'])
-        self.assertFalse(result['ok'])
-        self.assertNotIn(unittest.mock.call('script.s16'), read.call_args_list)
-        self.assertEqual(self.backend.writes, [])
 
     def test_mixed_domain_selectors_keep_only_entities_of_the_service_domain(self):
         for selector in ('area_id', 'device_id', 'label_id'):
@@ -220,59 +211,10 @@ class GuardAndMutationRegressions(unittest.TestCase):
                 self.assertNotIn('lock.sample', result['performed'])
                 self.assertEqual(self.backend.writes[-1]['target'], ['light.sample'])
 
-    def test_definition_change_during_audit_refuses_loaded_action_and_reload(self):
-        safe = {'actions': [{'action': 'light.turn_on', 'target': {'entity_id': 'light.sample'}}]}
-        unsafe = {'actions': [{'action': 'lock.unlock', 'target': {'entity_id': 'lock.sample'}}]}
-        for reload in (False, True):
-            with self.subTest(reload=reload):
-                self.backend.writes.clear()
-                self.backend.definitions['automation.sample'] = deepcopy(safe)
-                changes = {'new': deepcopy(safe)}
-                self.backend.reload_changes = lambda domain: deepcopy(changes)
-                def audit(event):
-                    if event['outcome'] == 'requested':
-                        self.backend.definitions['automation.sample'] = deepcopy(unsafe)
-                        changes['new'] = deepcopy(unsafe)
-                self.engine.observer = audit
-                request = ({'operation': 'reload', 'target': 'automation'} if reload else
-                           {'operation': 'service', 'service': 'automation.trigger', 'target': ['automation.sample']})
-                result = self.dispatch(**request)
-                self.assertFalse(result['ok'])
-                self.assertTrue(result['approval_required'])
-                self.assertEqual(self.backend.writes, [])
-
-    def test_reload_checks_only_new_or_changed_definitions_and_rechecks_them(self):
-        self.backend.reload_changes = Mock(return_value={'new': {'actions': [{'action': 'lock.unlock', 'target': {'entity_id': 'lock.sample'}}]}})
-        self.assertFalse(self.dispatch(operation='reload', target='automation')['ok'])
-        self.assertEqual(self.backend.writes, [])
-        self.backend.reload_changes.return_value = {'new': {'actions': [{'action': 'light.turn_on', 'target': {'entity_id': 'light.sample'}}]}}
-        self.assertTrue(self.dispatch(operation='reload', target='automation')['ok'])
-        self.backend.writes.clear()
-        self.backend.reload_changes.side_effect = [{}, {'new': {'actions': []}}]
-        self.assertFalse(self.dispatch(operation='reload', target='automation')['ok'])
-        self.assertEqual(self.backend.writes, [])
-
 
 class LoadedCore(unittest.TestCase):
     setUp = runtime_tests.CoreEndpoints.setUp
 
-    def test_loaded_automation_and_script_win_over_opposite_disk_definitions(self):
-        for domain in ('automation', 'script'):
-            for loaded_service, allowed in [('lock.unlock', False), ('light.turn_on', True)]:
-                with self.subTest(domain=domain, loaded=loaded_service):
-                    key = 'sequence' if domain == 'script' else 'actions'
-                    target = loaded_service.split('.')[0] + '.sample'
-                    loaded = {key: [{'action': loaded_service, 'target': {'entity_id': target}}]}
-                    self.core.resolve = lambda selector, **_: selector if isinstance(selector, list) else [selector['entity_id']]
-                    writes = []
-                    self.core.execute = lambda plan: writes.append(plan)
-                    with patch.object(self.core, 'require_entity', return_value={}), patch.object(self.core, 'ws', return_value={'config': loaded}) as ws, patch.object(self.core, 'rest', return_value={key: [{'action': 'light.turn_on' if not allowed else 'lock.unlock'}]}) as disk:
-                        engine = Engine(SimpleNamespace(read=lambda: {**DEFAULTS, 'bigger': True}), self.core, lambda: '', lambda _: None)
-                        result = engine.dispatch({'operation': 'service', 'service': domain + '.turn_on', 'target': [domain + '.sample']}, Authority('workspace-write', 'on-request', 'user', 'worker'))
-                    self.assertEqual(result['ok'], allowed)
-                    self.assertEqual(len(writes), int(allowed))
-                    ws.assert_called_with(domain + '/config', entity_id=domain + '.sample')
-                    disk.assert_not_called()
 
     def test_registry_expansion_filters_before_target_checks_and_limits(self):
         rows = [{'entity_id': 'light.sample', 'area_id': 'sample'}]
@@ -283,10 +225,6 @@ class LoadedCore(unittest.TestCase):
             self.assertEqual(self.core.resolve({'area_id': 'sample'}, service_domain='light'), ['light.sample'])
         verify.assert_not_called()  # Engine verifies only the final filtered targets.
 
-    def test_scene_members_come_from_loaded_state(self):
-        with patch.object(self.core, 'require_entity', return_value={'attributes': {'entity_id': ['lock.sample']}}), patch.object(self.core, 'rest') as disk:
-            self.assertEqual(self.core.definition('scene.sample'), {'entities': {'lock.sample': None}})
-        disk.assert_not_called()
 
     def test_password_mode_helper_refuses_before_registry_lookup(self):
         for domain in ('input_text', 'text'):
@@ -312,27 +250,6 @@ class LoadedCore(unittest.TestCase):
                 self.assertIn('handoff', result)
                 self.assertEqual(rest.call_count, 1)
                 self.assertNotIn('SYNTHETIC_PRIVATE', json.dumps(result))
-
-    def test_reload_special_files_are_refused_without_waiting_for_a_writer(self):
-        import os
-        path = self.root / 'synthetic-pipe.yaml'
-        os.mkfifo(path)
-        with self.assertRaises(ApprovalRequired):
-            self.core.read_reload_yaml(path)
-
-    def test_reload_comparison_keeps_unchanged_owner_definitions_and_finds_new_edits(self):
-        self.worker.CONFIG_ROOT = self.root
-        (self.root / 'configuration.yaml').write_text('script: !include scripts.yaml\n')
-        original = {'sequence': [{'action': 'lock.unlock', 'target': {'entity_id': 'lock.sample'}}]}
-        import yaml
-        (self.root / 'scripts.yaml').write_text(yaml.safe_dump({'old': original, 'new': {'sequence': []}}))
-        with patch.object(self.core, 'rest', return_value=[{'entity_id': 'script.old'}]), patch.object(self.core, 'definition', return_value=original):
-            self.assertEqual(self.core.reload_changes('script'), {'new': {'sequence': []}})
-            (self.root / 'scripts.yaml').write_text(yaml.safe_dump({'old': {'sequence': []}}))
-            self.assertEqual(self.core.reload_changes('script'), {'old': {'sequence': []}})
-        (self.root / 'configuration.yaml').write_text('script: !include_dir_merge_named scripts\n')
-        with self.assertRaises(ApprovalRequired):
-            self.core.reload_changes('script')
 
 
 if __name__ == '__main__':
