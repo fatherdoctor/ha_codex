@@ -2,8 +2,10 @@
 
 A heredoc whose body holds an apostrophe leaves an unfinished quote for Python's
 ``shlex``, although the shell runs the whole command. Both command checks read such
-text again with its quotes removed, and the hook's always-refused Supervisor rule
-also has a text floor that sees ``ha``, its global flags and a quoted family name.
+text again line by line, so the lines they can read keep their quoting, and the
+hook's always-refused Supervisor rule also has a text floor that sees ``ha``, its
+global flags and a family name spelled with quotes or backslashes. A ``#`` starts a
+comment only at the start of a word, as it does for the shell.
 """
 
 from __future__ import annotations
@@ -11,6 +13,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -90,6 +93,45 @@ class RemoteFamilyTests(unittest.TestCase):
                 with self.subTest(command=command, remote_on=remote_on):
                     self.assertEqual(refusal(HEREDOC + command, remote_on), "")
         self.assertEqual(refusal(HEREDOC + "ha core info", False), "")
+
+
+class WrapperAndCommentTests(unittest.TestCase):
+    """A quoted script for a shell wrapper and a word holding ``#`` are read as the shell reads them."""
+
+    WRAPPED = "sh -c 'h\\a su info'"
+    HASH_IN_WORD = ("echo a#b; h\\a su info", "echo a\\ #b; h\\a su info")
+
+    def test_wrapped_supervisor_command_after_an_unfinished_quote(self) -> None:
+        self.assertTrue(gate_rules._ha_supervisor_command(HEREDOC + self.WRAPPED))
+        for remote_on in (False, True):
+            with self.subTest(remote_on=remote_on):
+                self.assertIn("Supervisor", refusal(HEREDOC + self.WRAPPED, remote_on))
+
+    def test_wrapped_write_after_an_unfinished_quote(self) -> None:
+        self.assertTrue(approvals._protected_ancestor_operations(HEREDOC + "sh -c 'cp x /etc/'"))
+
+    def test_hash_inside_a_word_does_not_hide_the_rest_of_the_line(self) -> None:
+        for command in self.HASH_IN_WORD:
+            with self.subTest(command=command):
+                self.assertTrue(gate_rules._ha_supervisor_command(command))
+                self.assertTrue(gate_rules._ha_command(command.replace("su info", "core restart"), True))
+        self.assertTrue(approvals._protected_ancestor_operations("echo a#b; cp x /etc/"))
+
+    def test_a_real_comment_is_still_a_comment(self) -> None:
+        for prefix in ("", HEREDOC):
+            with self.subTest(heredoc=bool(prefix)):
+                self.assertFalse(gate_rules._ha_supervisor_command(prefix + "ls # note; h\\a su info"))
+                self.assertFalse(approvals._protected_ancestor_operations(prefix + "ls # note; cp x /etc/"))
+
+    def test_text_floor_reads_through_backslashes(self) -> None:
+        """With both parsers silenced, the floor alone still refuses an escaped spelling."""
+        with (
+            patch.object(gate_rules, "_ha_supervisor_command", return_value=False),
+            patch.object(gate_rules, "_ha_command", return_value=False),
+        ):
+            for remote_on in (False, True):
+                with self.subTest(remote_on=remote_on):
+                    self.assertIn("Supervisor", refusal("h\\a s\\u info", remote_on))
 
 
 class ApprovalProtectedWriteTests(unittest.TestCase):

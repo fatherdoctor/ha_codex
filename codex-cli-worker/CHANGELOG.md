@@ -2,9 +2,11 @@
 
 ## 0.1.81.2 (unreleased)
 
-- Read command text with an unfinished quote again without its quotes in both command checks, so the
-  always-refused Supervisor rule and the protected-write check still apply to it; add a quote-free text floor
-  for `ha` followed by flags and `supervisor` or `su`.
+- Read command text with an unfinished quote again, line by line, in both command checks, so the
+  always-refused Supervisor rule and the protected-write check still apply to it. Lines that can be read keep
+  their quoting, so a quoted script given to a shell wrapper is still checked; only a line that cannot be read
+  loses its quotes. A `#` now starts a comment only at the start of a word, as it does in the shell. Add a
+  text floor, read without quotes or backslashes, for `ha` followed by flags and `supervisor` or `su`.
 - The command hook now answers within 1.5 seconds of starting. Codex 0.166 runs a tool call whose hook
   passes its 10-second timeout, so a slow check could let a call through. The check now runs in a child
   process that the hook stops at the deadline, refusing the request with a plain reason, even when the check

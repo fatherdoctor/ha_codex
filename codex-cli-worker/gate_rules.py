@@ -548,25 +548,72 @@ def _ha_unknown_flag(text: str) -> bool:
     return False
 
 
+# Characters after which a ``#`` starts a word. An escaped character is never one of them.
+WORD_BREAKS = frozenset(" \t\r\n;&|()<>")
+
+
+def _strip_comments(text: str) -> str:
+    """Remove shell comments: from a ``#`` that starts a word outside quotes to the end of its line.
+
+    A ``#`` inside a word, such as ``a#b``, is part of that word, as it is for the shell.
+    """
+    out: list[str] = []
+    quote = ""
+    i = 0
+    while i < len(text):
+        char = text[i]
+        if quote == "'":
+            if char == "'":
+                quote = ""
+        elif char == "\\":
+            # A backslash keeps the next character, except inside single quotes.
+            out.append(text[i:i + 2])
+            i += 2
+            continue
+        elif quote == '"':
+            if char == '"':
+                quote = ""
+        elif char in "'\"":
+            quote = char
+        elif char == "#" and (not out or out[-1] in WORD_BREAKS):
+            end = text.find("\n", i)
+            i = len(text) if end == -1 else end
+            continue
+        out.append(char)
+        i += 1
+    return "".join(out)
+
+
+def _split_words(text: str, punctuation: str) -> list[str]:
+    """Split text the way the shell does, with comments already removed; raise ValueError if unreadable."""
+    lexer = shlex.shlex(text, posix=True, punctuation_chars=punctuation)
+    lexer.whitespace = " \t\r"
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    return list(lexer)
+
+
 def _shell_words(text: str, punctuation: str) -> list[str]:
     """Split command text into words and shell punctuation, without running it.
 
     Text the splitter cannot read, such as an unfinished quote from an apostrophe in a
-    heredoc body, is split again with every quote and backslash removed and with ``#``
-    read as an ordinary character. The shell still runs such a command, so it must
-    never be skipped as unreadable.
+    heredoc body, is read again line by line. A line that still cannot be read is split
+    with its quotes and backslashes removed; the other lines keep their quoting, so a
+    quoted script given to ``sh -c`` stays one word. The shell still runs such a
+    command, so it must never be skipped as unreadable.
     """
-    def split(source: str, commenters: str) -> list[str]:
-        lexer = shlex.shlex(source, posix=True, punctuation_chars=punctuation)
-        lexer.whitespace = " \t\r"
-        lexer.whitespace_split = True
-        lexer.commenters = commenters
-        return list(lexer)
-
     try:
-        return split(text, "#")
+        return _split_words(_strip_comments(text), punctuation)
     except ValueError:
-        return split(re.sub(r"[\"'\\]", "", text), "")
+        pass
+    words = []
+    for line in text.split("\n"):
+        try:
+            words.extend(_split_words(_strip_comments(line), punctuation))
+        except ValueError:
+            words.extend(_split_words(re.sub(r"[\"'\\]", "", line), punctuation))
+        words.append("\n")
+    return words
 
 
 def _shell_substitutions(text: str) -> tuple[str, list[str]]:
@@ -844,7 +891,8 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
         for pattern, why in PROTECTED_COMMAND_RES:
             if pattern.search(text):
                 return f"This command {why}, which is never allowed."
-        plain_ha = re.sub(r"[\"'`]", "", text.replace("\\\n", " "))
+        # Quotes and backslashes only change how a word is spelled, so the floor reads without them.
+        plain_ha = re.sub(r"[\"'`\\]", "", text.replace("\\\n", " "))
         if (_ha_supervisor_command(text)
                 or HA_ALWAYS_TEXT_RE.search(plain_ha)
                 or (remote_on and (HA_REMOTE_TEXT_RE.search(plain_ha) or _ha_unknown_flag(text)))
