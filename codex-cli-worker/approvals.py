@@ -18,7 +18,7 @@ import time
 import uuid
 from typing import Any, Callable, TextIO
 
-import exec_rules
+import remote_control
 
 
 APPROVAL_GONE = "This permission request is no longer waiting for an answer."
@@ -689,8 +689,8 @@ class AppServerSession:
                 raise ValueError("invalid app-server message")
             method = message.get("method")
             params = message.get("params") or {}
-            if exec_rules.record_warning(message):
-                self.fail(exec_rules.RULES_WARNING)
+            if remote_control.record_exec_rules_warning(message):
+                self.fail(remote_control.EXEC_RULES_WARNING)
                 return
             if "id" in message and method:
                 if not self.is_active():

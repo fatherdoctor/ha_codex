@@ -24,7 +24,6 @@ import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-import exec_rules
 import remote_control
 
 
@@ -164,7 +163,7 @@ def main():
                         assert observed and any('SYNTHETIC_ONLY' in out for out in observed), (label, observed)
                     assert len(approvals) == start_approvals, label
                     results.append({'case': label, 'refused': expect_refused, 'approval_requests': 0})
-                warnings = [m for m in messages if exec_rules.warning_problem(m)]
+                warnings = [m for m in messages if remote_control.exec_rules_warning_problem(m)]
                 assert bool(warnings) == expect_warning, ('unexpected warning state', [m.get('params', {}).get('summary') for m in warnings])
             finally:
                 remote_control.Supervisor._terminate(None, proc)
@@ -178,7 +177,7 @@ def main():
             batch([('no managed rules: synthetic read executes', 'cat /config/secrets.yaml')], expect_refused=False)
             (managed / 'requirements.toml').write_text(text)
             requests.clear()
-            assert not exec_rules.self_test(args.codex, env, '/config', popen=launch), 'valid requirements failed self-test'
+            assert not remote_control.exec_rules_self_test(args.codex, env, '/config', popen=launch), 'valid requirements failed self-test'
             assert not requests, 'self-test made a model request'
             patterns = tomllib.loads(text)['rules']['prefix_rules']
             cases = []
@@ -192,8 +191,8 @@ def main():
             # it must prevent the production readiness check from allowing Turn on.
             (home / 'rules').mkdir(); (home / 'rules' / 'invalid.rules').write_text('not_valid_starlark(\n')
             before = len(requests)
-            problem = exec_rules.self_test(args.codex, env, '/config', popen=launch)
-            assert problem == exec_rules.RULES_WARNING, 'malformed ordinary file passed self-test'
+            problem = remote_control.exec_rules_self_test(args.codex, env, '/config', popen=launch)
+            assert problem == remote_control.EXEC_RULES_WARNING, 'malformed ordinary file passed self-test'
             assert len(requests) == before, 'malformed self-test made a model request'
             sup = remote_control.Supervisor('unused', scratch / 'state', dict, lambda: '', gate=lambda: '')
             ok, state = sup.start(); assert not ok and not state['available'] and state['blocked_reason'] == problem
