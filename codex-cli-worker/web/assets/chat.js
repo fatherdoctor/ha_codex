@@ -2948,6 +2948,72 @@ function settingsError(error) {
   const result = $("connection-dialog").open ? $("connection-result") : $("settings-result");
   result.textContent = String(error.message || error);
 }
+let permissionGroups = null;
+let permissionRuleDigest = null;
+const permissionSwitches = () => [...document.querySelectorAll("[data-permission-group]")];
+function permissionTheme() {
+  try {
+    if (window.parent === window) return;
+    const theme = getComputedStyle(window.parent.document.documentElement);
+    const target = $("permission-overrides");
+    for (const key of ["--primary-color", "--primary-text-color", "--secondary-text-color", "--divider-color", "--card-background-color",
+      "--ha-switch-background-color", "--ha-switch-thumb-background-color", "--ha-switch-checked-background-color", "--ha-switch-checked-thumb-background-color",
+      "--ha-color-fill-disabled-quiet-resting", "--ha-color-on-neutral-normal", "--ha-color-fill-primary-normal-resting", "--ha-color-on-primary-normal"])
+      if (theme.getPropertyValue(key).trim()) target.style.setProperty(key, theme.getPropertyValue(key));
+  } catch (_error) { /* Standalone/cross-origin previews use the page theme. */ }
+}
+async function loadPermissionOverrides() {
+  permissionTheme();
+  const controls = permissionSwitches();
+  controls.forEach((input) => { input.disabled = true; });
+  try {
+    const data = await api("permissions-overrides");
+    permissionGroups = data.groups;
+    permissionRuleDigest = data.rule_digest;
+    $("permissions-overrides-guard-note").textContent = data.guard_note || "";
+    $("permissions-overrides-guard-note").hidden = !data.guard_note;
+    controls.forEach((input) => {
+      input.checked = permissionGroups[input.dataset.permissionGroup] === true;
+      input.disabled = false;
+    });
+    $("permissions-overrides-result").textContent = "Changes save immediately.";
+  } catch (_error) {
+    permissionGroups = null;
+    $("permissions-overrides-guard-note").hidden = true;
+    $("permissions-overrides-result").textContent = "Permissions overrides are unavailable. Administrator access is required.";
+  }
+}
+$("confirm-permission-rules").onclick = async () => {
+  try {
+    const rules = await api("agents");
+    if (!window.confirm("Review these house rules before confirming:\n\n" + (rules.content || "No instructions file."))) return;
+    await api("permissions-overrides", { confirm_rules: true, expected_digest: permissionRuleDigest });
+    await loadPermissionOverrides();
+    $("permissions-overrides-result").textContent = "House rules confirmed. Start a new exchange to use them.";
+  } catch (_error) {
+    $("permissions-overrides-result").textContent = "Could not confirm house rules. Review them again.";
+  }
+};
+permissionSwitches().forEach((input) => input.addEventListener("change", async () => {
+  if (!permissionGroups) return;
+  const proposed = { ...permissionGroups, [input.dataset.permissionGroup]: input.checked };
+  permissionSwitches().forEach((control) => { control.disabled = true; });
+  try {
+    const data = await api("permissions-overrides", proposed);
+    permissionGroups = data.groups;
+    permissionRuleDigest = data.rule_digest;
+    $("permissions-overrides-guard-note").textContent = data.guard_note || "";
+    $("permissions-overrides-guard-note").hidden = !data.guard_note;
+    $("permissions-overrides-result").textContent = "Permissions overrides saved.";
+  } catch (_error) {
+    $("permissions-overrides-result").textContent = "Could not save permissions overrides. Check the settings before continuing.";
+  } finally {
+    permissionSwitches().forEach((control) => {
+      control.checked = permissionGroups[control.dataset.permissionGroup] === true;
+      control.disabled = false;
+    });
+  }
+}));
 $("settings-button").onclick = async () => {
   try {
     const data = await api("diagnostics/settings");
@@ -2965,7 +3031,7 @@ $("settings-button").onclick = async () => {
     loadRemoteControl(),
     loadPause(),
     loadBrowserPermissions(),
-
+    loadPermissionOverrides(),
   ]);
   for (const result of results)
     if (result.status === "rejected") settingsError(result.reason);
