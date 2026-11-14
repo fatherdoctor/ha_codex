@@ -51,6 +51,7 @@ from core_address import CoreAddress, probe_core
 from relay_reads import RelayReads, ReadError as RelayReadError
 import schedule_api
 from verbose_log import VerboseLog, Tee as VerboseTee, CredentialCache
+from account_access import AccountAccess, rejected_sign_in_error
 import sqlite3
 from interaction_diagnostics import RollingDiagnostics, InteractionRecorder
 
@@ -1022,7 +1023,18 @@ def parse_codex_reset_at(reset_text: str, now: datetime | None = None) -> str:
 def usage_status_payload() -> dict[str, Any]:
     """Return a copy of the Codex usage state without the worker's internal fields."""
     with usage_lock:
-        return {k: v for k, v in usage_state.items() if not k.startswith("_")}
+        payload = {k: v for k, v in usage_state.items() if not k.startswith("_")}
+    # Also bound older cached failures before the next asynchronous refresh finishes.
+    if payload.get("rate_limits_error"):
+        category = payload.get("rate_limits_error_category")
+        category = category if category in USAGE_FAILURE_MESSAGES else "unavailable"
+        payload["rate_limits_error_category"] = category
+        payload["rate_limits_error"] = USAGE_FAILURE_MESSAGES[category]
+        payload["raw_excerpt"] = ""
+    if payload.get("error"):
+        payload["error"] = "Codex usage is unavailable."
+        payload["raw_excerpt"] = ""
+    return payload
 
 
 def _update_usage_state(**updates: Any) -> None:
@@ -1432,6 +1444,13 @@ def usage_from_rate_limits(result: dict[str, Any], now: datetime | None = None) 
     return usage
 
 
+USAGE_FAILURE_MESSAGES = {
+    "unavailable": "Codex usage could not be read.",
+    "sign_in_rejected": "Codex reported an expired or revoked sign-in. Sign in again.",
+    "missing_window": "The usage read named no supported usage window.",
+}
+
+
 def fetch_codex_usage() -> dict[str, Any]:
     """Return the usage state from the account's own rate-limit read, or the status screen marked estimated.
 
@@ -1443,23 +1462,33 @@ def fetch_codex_usage() -> dict[str, Any]:
         return fetch_codex_usage_status()
     codex = codex_binary_path()
     if not codex or not codex_login_status().get("status_ok"):
-        return {**fetch_codex_usage_status(), "source": "", "note": "", "rate_limits_error": ""}
+        return {**fetch_codex_usage_status(), "source": "", "note": "", "rate_limits_error": "",
+                "rate_limits_error_category": ""}
     # The sign-in the read is made with; an answer is dropped if auth.json changes before it comes.
     signature = _auth_signature()
     try:
-        usage = usage_from_rate_limits(read_codex_rate_limits(codex))
+        metadata = read_codex_rate_limits(codex)
+        usage = usage_from_rate_limits(metadata)
+        account_access.observe_metadata(metadata, signature)
         # OpenAI answered with this sign-in, so it is still accepted.
         record_sign_in_check("ok", signature)
         if usage["five_hour_limit"] or usage["weekly_limit"]:
-            return {"status": "ok", "error": "", **usage, "source": "rate_limits", "note": "", "rate_limits_error": ""}
-        failure = "the usage read named no 5-hour or weekly window"
+            return {"status": "ok", "error": "", **usage, "source": "rate_limits", "note": "", "rate_limits_error": "",
+                    "rate_limits_error_category": ""}
+        category = "missing_window"
     except Exception as exc:  # noqa: BLE001 - any failure falls back to the status screen
-        failure = str(exc) or type(exc).__name__
-        if sign_in_rejected(failure) and record_sign_in_check("rejected", signature):
-            return {**fetch_codex_usage_status(), "source": "", "note": "", "rate_limits_error": redact(failure)}
+        # Classify in memory, then discard the upstream text: even a redactor cannot
+        # know every account identifier or future credential spelling.
+        category = "unavailable"
+        if rejected_sign_in_error(exc) and record_sign_in_check("rejected", signature):
+            category = "sign_in_rejected"
     fallback = fetch_codex_usage_status()
-    note = ESTIMATED_NOTE if fallback.get("status") == "ok" else ""
-    return {**fallback, "source": "status_screen", "note": note, "rate_limits_error": failure}
+    if fallback.get("error"):
+        fallback = {**fallback, "error": "Codex usage is unavailable."}
+    rejected = category == "sign_in_rejected"
+    note = ESTIMATED_NOTE if fallback.get("status") == "ok" and not rejected else ""
+    return {**fallback, "raw_excerpt": "", "source": "" if rejected else "status_screen", "note": note,
+            "rate_limits_error": USAGE_FAILURE_MESSAGES[category], "rate_limits_error_category": category}
 
 
 def _refresh_usage_worker(force: bool = False) -> None:
@@ -3362,12 +3391,11 @@ def save_lovelace_dashboard(ref: dict[str, str]) -> tuple[bool, str]:
 
 
 # `codex login status` only reads the local auth.json, so a sign-in that OpenAI has revoked
-# still reads as signed in. These markers come from a real revoked sign-in (the worker log said
-# `token_revoked`, "Encountered invalidated oauth token for user", and the task failed with
-# "workspace routing discovery unauthorized (401)") and from Codex's refresh-token error codes.
+# still reads as signed in. Task failures share the explicit passive sign-in
+# markers; retain only this exact additional phrase observed on a revoked sign-in.
+# A generic HTTP 401 from the task's own work is not a ChatGPT sign-in signal.
 SIGN_IN_REJECTED_RE = re.compile(
-    r"token_revoked|invalidated oauth token|refresh_token_(?:expired|reused|invalidated)"
-    r"|\b401\b[^\n]{0,80}unauthori[sz]ed|unauthori[sz]ed[^\n]{0,80}\b401\b",
+    r"\bworkspace routing discovery unauthorized \(401\)(?!\w)",
     re.IGNORECASE,
 )
 SIGN_IN_EXPIRED_SUMMARY = "Your ChatGPT sign-in has expired or was revoked. Sign in again from the worker page."
@@ -3380,7 +3408,7 @@ sign_in_check: dict[str, Any] = {"result": "", "auth_signature": None, "checked_
 
 def sign_in_rejected(text: Any) -> bool:
     """Return True when an error text says OpenAI refused the sign-in (revoked or expired), not a network fault."""
-    return bool(SIGN_IN_REJECTED_RE.search(str(text or "")))
+    return rejected_sign_in_error(text) or bool(SIGN_IN_REJECTED_RE.search(str(text or "")))
 
 
 def _auth_signature() -> tuple[int, int] | None:
@@ -3458,6 +3486,28 @@ def codex_local_login_status() -> dict[str, Any]:
         result["message"] = str(exc)
     return result
 
+
+
+account_access = AccountAccess(
+    login=lambda: codex_local_login_status(),
+    read=lambda: read_codex_rate_limits(codex_binary_path()),
+    signature=lambda: _auth_signature(), record=lambda result, signature: record_sign_in_check(result, signature),
+    busy=lambda: bool(active_task_id()),
+)
+
+
+def account_access_loop():
+    """Check at startup and daily; busy checks retry without a model call."""
+    while True:
+        account_access.refresh()
+        time.sleep(60)
+
+
+def record_successful_sign_in(task_id):
+    """Clear a remembered rejection only for the sign-in that started this successful task."""
+    with sign_in_check_lock:
+        signature = task_sign_in_signatures.pop(task_id, None)
+    account_access.successful_turn(signature)
 
 def auth_status_payload() -> dict[str, Any]:
     """Return the sign-in flow's state for the API, with whether its process is running and the Codex login status."""
@@ -5280,6 +5330,8 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     ) is False:
         return
 
+    if task_status == "completed" and returncode == 0:
+        record_successful_sign_in(task_id)
     turn_id = str(tasks.get(task_id, {}).get("current_turn_id") or "")
     event_data = {
         "task_id": task_id,
@@ -5802,6 +5854,7 @@ def status() -> Response:
     Also starts a usage refresh if one is due.
     """
     refresh_usage_status_async(force=False)
+    login = codex_login_status()
     with lock:
         task_values = sorted(tasks.values(), key=lambda task: task.get("updated_at") or task.get("created_at", ""))
         latest = {key: copy.deepcopy(value) for key, value in task_values[-1].items() if key != "turns"} if task_values else None
@@ -5818,7 +5871,8 @@ def status() -> Response:
             "task_count": active_task_count(),
             "total_task_count": len(task_values),
             "latest_task": latest,
-            "codex_login": codex_login_status(),
+            "codex_login": login,
+            "account_access": account_access.snapshot(login),
             "auth_flow": auth_status_payload(),
             "pause": pause_payload(),
             "model_pin": model_pin(read_options()),
@@ -6932,6 +6986,7 @@ def main() -> None:
     prepare_ha_docs()
     threading.Thread(target=ha_docs_refresh_loop, daemon=True).start()
     auto_start_login_if_needed()
+    threading.Thread(target=account_access_loop, daemon=True).start()
     # Remote control runs again only if the owner left it on and the command gate is installed.
     remote_control_supervisor.resume()
     threading.Thread(target=stdin_reader, daemon=True).start()

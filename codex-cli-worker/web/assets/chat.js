@@ -2740,6 +2740,13 @@ let shownLogin = null;
  */
 function signInCard(auth) {
   const card = document.createElement("div");
+  const requirement = textNode("p", "A ChatGPT account with Codex access is required. As of November 13, 2026, this includes Free and Go. ", "muted");
+  const availability = textNode("a", "Check OpenAI’s current availability");
+  availability.href = "https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan";
+  availability.target = "_blank";
+  availability.rel = "noopener noreferrer";
+  requirement.append(availability);
+  card.append(requirement);
   card.className = "signin-card";
   if (auth.user_code) {
     card.append(

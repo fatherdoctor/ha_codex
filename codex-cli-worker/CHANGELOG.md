@@ -15,6 +15,14 @@
   Leave successful status/progress access polls out while retaining warnings and failed requests;
   recover from bad settings and prevent completed stream lines from crossing Clear.
 
+- Do not report generic task HTTP errors as expired ChatGPT sign-in; test sign-in recovery through the full task lifecycle.
+
+- Keep generic passive HTTP errors out of the expired-sign-in Repair; expose only fixed usage-error messages and categories, never raw upstream errors.
+
+- State the Codex account requirement before sign-in, show plan information and uncertain access in Status,
+  and refresh sign-in metadata daily without a model task. Restrict the sign-in Repair to known signed-out
+  or expired state; a good sign-in or successful matching turn clears it.
+
 - Verify atomically saved mailbox event IDs before emission; failed saves or verification reads defer events and retry without replay.
 
 - Add durable unread mailbox counts for lead and owner, an unread-only lead filter, and page acknowledgments.
