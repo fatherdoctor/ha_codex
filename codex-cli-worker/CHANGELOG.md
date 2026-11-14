@@ -2,6 +2,9 @@
 
 ## 0.1.81.2 (unreleased)
 
+- Explain the first confirmation needed to use action groups, name disabled groups in refusal diagnostics,
+  and direct entity lookups to the worker's authenticated read tool before changes.
+
 - Scheduling and mailbox tools work from a chat again. Codex asked for approval of each call to
   `propose_schedule`, `list_schedules`, `read_mailbox` and `post_mailbox`, and the chat page has no card for
   that kind of request, so every call was declined without anything shown. The four tools are now approved
