@@ -392,16 +392,27 @@ explain the possible downgrade. When Codex emits the warning on the supervised o
 that the request was downgraded. Not every relay thread warning is exposed there: absence of that message
 is not evidence that the requested permissions were granted.
 
-**Hook timeout and undo limits.** A synchronous hook that times out can fail open in Codex 0.166: the tool
-call may run after the timeout. The hook checks bounded inputs and refuses an uncertain, oversized or
+**Hook deadline and undo limits.** Codex 0.166 runs a tool call when its hook passes the configured
+10-second timeout, so the hook never lets that happen: it answers within its own deadline of 1.5 seconds
+from the start of its process. The hook's first lines start a child process that does all of the work:
+loading the check, reading files and the request, and checking it. The hook itself only waits for the
+answer and never reads a file, so a stalled disk or a stuck check cannot hold it up. When the deadline
+passes, the hook stops the child and refuses the request with a plain reason (the check did not finish in
+time; ask again, or make the change yourself from the app page), without waiting for the child to exit.
+An answer the hook only finds after the deadline (for example when the machine did not run the hook while
+the check finished) is thrown away and refused the same way, so no answer is ever given late.
+This holds with remote control on or off, and also when the check is stuck inside one long call or the
+request never finishes arriving. Python's own start, before the hook's first line, cannot be interrupted;
+it counts against the 1.5 seconds. The hook also checks bounded inputs and refuses an uncertain, oversized or
 ambiguous YAML patch. Hook-checked source and script files are capped at 512 KiB; larger files are refused before scanning. While remote control is on it reconstructs the whole proposed YAML file, so edits
 beneath an existing `shell_command`, `rest_command` or `command_line` key are also checked. The checked-in
 fixtures use the captured Bash/apply_patch command-string inputs. PermissionRequest is checked for named security
 restrictions; needing network or other ordinary sandbox permission is not itself a refusal. In the outside executor, 30 isolated
 hook-process measurements took at most 0.412 seconds against the configured 10-second timeout, including
 a repetitive 450 KiB YAML file (Codex 0.166 shapes, Python 3.12). Reproduce with
-`python codex-cli-worker/tests/measure_gate.py` in the worker's test environment; this timing is not an HAOS
-latency guarantee.
+`python codex-cli-worker/tests/measure_gate.py` in the worker's test environment; it also prints the hook's
+own time for each call, counted from its process start, next to the 1.5-second deadline. This timing is not an
+HAOS latency guarantee: on a machine slower than that, more requests are refused as too slow, none are let through.
 
 The config watch runs every 30 seconds over at most 3,000 ordinary YAML files, each at most 2 MiB. While remote control is on, a new or changed always-on command,
 platform or template block causes the **whole affected file** to be restored from its hash-verified earlier
@@ -422,8 +433,7 @@ setting. With remote control off the watch reports remaining findings without ch
 
 Whole-file undo can replace other edits made to the same file since Turn on; recover those edits from the copy named in the finding. Review starts a new baseline; it does not
 relax the always-on checks. A watch scan or verified restore cannot reverse a command that already ran,
-prevent a reload before the scan, or guarantee capture of an obfuscated reference. Fast hooks and delayed
-undo reduce exposure; neither removes the upstream timeout risk.
+prevent a reload before the scan, or guarantee capture of an obfuscated reference.
 
 - **Off until you turn it on.** In the app chat, open **Settings** > **Manage remote connection**, then choose **Turn on**. You can also open the connection view from the connection chip. The choice is saved and holds across app restarts.
 - **One supervised process.** The app runs `codex app-server --listen unix://<private socket> --remote-control` in the foreground and starts it again, with a growing delay, if it exits. **Turn off** stops it.
