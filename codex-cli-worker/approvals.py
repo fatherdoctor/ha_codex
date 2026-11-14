@@ -53,22 +53,93 @@ PROTECTED_COMMAND_RES = (
 )
 
 
+# Characters after which a ``#`` starts a word. An escaped character is never one of them.
+WORD_BREAKS = frozenset(" \t\r\n;&|()<>")
+
+
+def _strip_comments(text: str) -> str:
+    """Remove shell comments: from a ``#`` that starts a word outside quotes to the end of its line.
+
+    A ``#`` inside a word, such as ``a#b``, is part of that word, as it is for the shell.
+    """
+    out: list[str] = []
+    quote = ""
+    i = 0
+    while i < len(text):
+        char = text[i]
+        if quote == "'":
+            if char == "'":
+                quote = ""
+        elif char == "\\":
+            # A backslash keeps the next character, except inside single quotes.
+            out.append(text[i:i + 2])
+            i += 2
+            continue
+        elif quote == '"':
+            if char == '"':
+                quote = ""
+        elif char in "'\"":
+            quote = char
+        elif char == "#" and (not out or out[-1] in WORD_BREAKS):
+            end = text.find("\n", i)
+            i = len(text) if end == -1 else end
+            continue
+        out.append(char)
+        i += 1
+    return "".join(out)
+
+
+def _split_words(text: str, punctuation: str) -> list[str]:
+    """Split text the way the shell does, with comments already removed; raise ValueError if unreadable."""
+    lexer = shlex.shlex(text, posix=True, punctuation_chars=punctuation)
+    lexer.whitespace = " \t\r"
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    return list(lexer)
+
+
+def _shell_words(text: str, punctuation: str) -> list[str]:
+    """Split command text into words and shell punctuation, without running it.
+
+    Raise ValueError when the text cannot be read with its quoting intact, such as an
+    unfinished quote from an apostrophe in a heredoc body or a quoted script that spans
+    lines in a way the splitter cannot follow. The caller treats that as touching a
+    protected place: a command allowed once runs outside the sandbox, so a command this
+    check cannot read is never offered Allow once. gate_rules.py reads such text again
+    line by line instead, because its Supervisor rule has a text floor behind it.
+    """
+    return _split_words(_strip_comments(text), punctuation)
+
+
+def _has_unreadable_structure(command: str) -> bool:
+    """Return whether the text holds shell structure this check does not read: ``<<`` or a backslash-newline.
+
+    A heredoc body is not shell words, but the splitter reads it as words, so a quote in the
+    body can pair with a quote later in the text and hide a command. A heredoc or here-string
+    marker anywhere, and a line joined with a backslash, count as protected before the splitter runs.
+    """
+    return "<<" in command or "\\\n" in command
+
+
 def _protected_ancestor_operations(command: str, initial_cwd: str = '', depth: int = 0) -> bool:
     """Conservatively identify named requirements, root searches and writes into root or /etc.
+
+    Command text that holds a heredoc, a here-string or a backslash-newline, or that cannot
+    be split with its quoting intact, counts as protected.
 
     This checks command text only; it does not follow aliases, symlinks or computed paths.
     Rare forms such as bsdtar, cpio, 7z, remote rsync, find -O3 and computed Python paths can be missed.
     """
     if depth > 5:
         return False
-    lexer = shlex.shlex(command.replace('\\\n', ' '), posix=True, punctuation_chars=';&|()\n<>')
-    lexer.whitespace = ' \t\r'
-    lexer.whitespace_split = True
-    lexer.commenters = '#'
+    if _has_unreadable_structure(command):
+        # Fail closed by structure, whatever the splitter makes of it.
+        return True
     try:
-        tokens = list(lexer)
+        tokens = _shell_words(command, ';&|()\n<>')
     except ValueError:
-        return False
+        # Fail closed: text whose quoting cannot be read might hide a protected write.
+        return True
     segments, segment = [], []
     for token in tokens:
         if token and all(ch in ';&|()\n<>' for ch in token):
