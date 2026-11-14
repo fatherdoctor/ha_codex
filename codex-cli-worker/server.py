@@ -4205,6 +4205,12 @@ def data_mcp_args() -> list[str]:
             for argument in ("--config", f"mcp_servers.home_assistant_data.{name}={json.dumps(value)}")]
 
 
+# Each tool is bounded by its own rules (see DOCS.md): a proposal stays disabled until the
+# owner approves it on the page, and mailbox messages are local text that confer no authority.
+# Without an approval mode, Codex asks for each call, and the chat page cannot show that request.
+SCHEDULING_TOOLS = ('propose_schedule', 'list_schedules', 'read_mailbox', 'post_mailbox')
+
+
 def scheduling_mcp_args() -> list[str]:
     """Expose owner-reviewed proposals and the local mailbox, with no approval tool."""
     settings = {
@@ -4213,6 +4219,8 @@ def scheduling_mcp_args() -> list[str]:
         'env_vars': ['HA_DATA_CAPABILITY'],
         'enabled': True, 'required': True, 'startup_timeout_sec': 10, 'tool_timeout_sec': 15,
     }
+    for tool in SCHEDULING_TOOLS:
+        settings[f'tools.{tool}.approval_mode'] = 'approve'
     return [argument for name, value in settings.items()
             for argument in ('--config', f'mcp_servers.codex_scheduling.{name}={json.dumps(value)}')]
 

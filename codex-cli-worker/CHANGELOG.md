@@ -2,6 +2,12 @@
 
 ## 0.1.81.2 (unreleased)
 
+- Scheduling and mailbox tools work from a chat again. Codex asked for approval of each call to
+  `propose_schedule`, `list_schedules`, `read_mailbox` and `post_mailbox`, and the chat page has no card for
+  that kind of request, so every call was declined without anything shown. The four tools are now approved
+  ahead, as the verification and history tools are; each keeps its own limits (proposals stay disabled until
+  an administrator approves them, and mailbox messages confer no authority). Any other tool question the page
+  cannot show is still declined, and the chat now says so.
 - The command hook now answers within 1.5 seconds of starting. Codex 0.166 runs a tool call whose hook
   passes its 10-second timeout, so a slow check could let a call through. The check now runs in a child
   process that the hook stops at the deadline, refusing the request with a plain reason, even when the check
