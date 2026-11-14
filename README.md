@@ -7,6 +7,8 @@ require an approval request. Review each request before allowing it.
 
 The assistant can act on any device the owner confirms. Put limits specific to your installation in `/config/AGENTS.md`. Codex uses its defaults and your workspace instructions; the app bundles no house rules. Its permission policy, approval checks and other enforced safeguards remain in place.
 
+A ChatGPT account with Codex access is required. As of November 13, 2026, OpenAI lists Codex across ChatGPT plans, including Free and Go; limits and workspace access vary. See [OpenAI’s current availability](https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan).
+
 [![License][license-badge]][license-url]
 
 This is a fork of [moryoav/home-assistant-codex](https://github.com/moryoav/home-assistant-codex) (MIT), built on its

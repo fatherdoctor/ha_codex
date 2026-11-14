@@ -851,6 +851,47 @@ The direct **Status** button is available on tablet and desktop. On the phone, o
 Status from the thread menu.
 
 
+### Checking Codex account access
+
+You need a ChatGPT account with Codex access. The app cannot confirm access from a passive check; it warns
+when the sign-in is missing or explicitly expired, and a successful task confirms access for that sign-in.
+
+A ChatGPT account with Codex access is required. OpenAI's [availability page](https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan),
+read November 13, 2026, includes Codex across ChatGPT plans, including Free and Go; usage limits and workspace
+settings still apply. Codex Cloud eligibility is separate from the local CLI used by this app.
+
+The pinned CLI does not expose a documented boolean for account entitlement in `account/read`.
+Its rate-limit reader reports ordinary usage eligibility, which may also reflect exhausted allowance,
+and converts backend failures into a generic RPC error. A denied usage read cannot establish that the
+account lacks Codex access. The worker checks sign-in state on every status read and passively refreshes it at startup and at least
+daily while idle. Busy checks retry on the next minute; signing in also forces the existing passive usage
+read, whose plan enum supplies informational Status text. No task is submitted to check an account.
+
+The existing Home Assistant sign-in Repair appears only for signed-out or known expired/rejected sign-in
+state, and clears on a good sign-in or a successful task using the same credentials. Unknown state raises
+nothing. The passive readers recognize explicit revoked-token markers and the pinned refresh-token expired, reused and invalidated codes and their exact user-facing messages; generic HTTP errors, quota exhaustion and plan names do not imply missing access. No distinct
+task-level entitlement error was verified, so no entitlement mapping is added. Task sign-in failures now use
+the same explicit rejection signals as passive checks, plus the exact observed revocation phrase
+`workspace routing discovery unauthorized (401)`; generic task HTTP failures do not raise the Repair. Status explicitly says when passive reads cannot confirm Codex access.
+
+Passive usage failures treat generic HTTP 401/403, rate exhaustion and network errors as unknown, not expired sign-in. Only explicit Codex sign-in rejection signals can raise the sign-in Repair. Status exposes fixed usage-error messages with `rate_limits_error_category` (`unavailable`, `sign_in_rejected` or `missing_window`); raw upstream errors and failed-read excerpts are omitted, including older cached failures.
+A real successful turn can confirm access for its current sign-in; changing credentials invalidates that
+confirmation and cached plan information. The new metadata cache retains no account email, token or raw error.
+
+Source: [account type at rust-v0.166.0](https://github.com/openai/codex/blob/6ff1e1ca3b30/codex-rs/app-server-protocol/src/protocol/v2/account.rs#L18-L38),
+[rate-limit errors](https://github.com/openai/codex/blob/6ff1e1ca3b30/codex-rs/app-server/src/request_processors/account_processor.rs#L1171-L1218),
+and [usage eligibility](https://github.com/openai/codex/blob/6ff1e1ca3b30/codex-rs/backend-client/src/client/rate_limit_resets.rs#L34-L66).
+
+The daily reader's refresh-code mapping follows
+[login/src/auth/manager.rs:1760](https://github.com/openai/codex/blob/6ff1e1ca3b30/codex-rs/login/src/auth/manager.rs#L1760-L1772).
+Plan labels follow [protocol/src/account.rs](https://github.com/openai/codex/blob/6ff1e1ca3b30/codex-rs/protocol/src/account.rs#L10-L50).
+The [task error enum](https://github.com/openai/codex/blob/6ff1e1ca3b30/codex-rs/protocol/src/protocol.rs#L2052-L2090)
+separates authentication and limits but supplies no verified, distinct missing-Codex-entitlement signal.
+
+The exact user-facing refresh messages are pinned at
+[login/src/auth/manager.rs:224-226](https://github.com/openai/codex/blob/6ff1e1ca3b30/codex-rs/login/src/auth/manager.rs#L224-L226).
+The new daily reader never clears a remembered rejection; a new sign-in or successful matching turn does.
+
 ### Mailbox arrival signals
 
 The integration polls worker status every 30 seconds. Its **Mailbox unread for the lead** sensor counts
