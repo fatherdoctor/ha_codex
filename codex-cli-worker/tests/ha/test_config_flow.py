@@ -102,6 +102,8 @@ async def test_user_error_then_retry(
     await hass.async_block_till_done()
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["data"] == WORKER_DATA
+    assert result["result"].unique_id == DOMAIN
+    assert result["title"] == "Codex"
     assert discovery.await_count == 2
 
 
