@@ -41,9 +41,9 @@ Development and canary testing may happen on the `dev` branch. Older releases ar
 
 Please do not open a public issue with exploit details, working proof-of-concept code, private logs, tokens, device codes, or personal Home Assistant configuration.
 
-If GitHub private vulnerability reporting is available for this repository, use the **Report a vulnerability** button on the Security tab.
+Report a vulnerability privately: open the repository's **Security** tab, choose **Report a vulnerability**, and describe the issue there. Only the maintainers can see the report.
 
-If private vulnerability reporting is not available, open a minimal public issue that says you have a security concern and asks the maintainer to arrange private disclosure. Do not include sensitive details in that issue.
+If the button is missing, open a minimal public issue that says you have a security concern and asks for a private channel. Put no details in that issue.
 
 ## What to Include
 
@@ -75,4 +75,4 @@ Test security reports and fixes only in an environment you own or have permissio
 
 ## Public Disclosure
 
-Please give the maintainer reasonable time to investigate and fix confirmed vulnerabilities before publishing details publicly. Coordinated disclosure helps protect users while a fix is prepared.
+Please give the maintainers reasonable time to investigate and fix confirmed vulnerabilities before publishing details publicly. Coordinated disclosure helps protect users while a fix is prepared.
