@@ -6,6 +6,7 @@
   platform lists and reload-definition comparisons; downstream behavior belongs to the owner's setup.
 - Keep confirmed house rules, mode checks, direct limits, audit-before-write, receipts and setup-secret
   handoff. Switch saves after first use still leave changed rules unconfirmed until Review and confirm.
+  Recheck active authorization, group settings and confirmed rules after the last direct-target read.
 
 - Do not report generic task HTTP errors as expired ChatGPT sign-in; test sign-in recovery through the full task lifecycle.
 

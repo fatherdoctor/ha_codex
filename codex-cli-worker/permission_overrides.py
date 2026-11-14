@@ -206,6 +206,10 @@ class Engine:
                 # Verify only the entities directly named by this action after the audit.
                 for target in checks:
                     self.backend.require_entity(target)
+                # Target reads can block while the task or owner permissions change.
+                if (not still_active() or groups != self.settings.read()
+                        or rules != guard_rules(self.guards())):
+                    raise ApprovalRequired('Permissions changed or the exchange ended; request normal approval.')
                 started_write = True
                 result = self.backend.execute(plan)
             except ApprovalRequired as exc:
