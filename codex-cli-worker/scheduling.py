@@ -175,6 +175,8 @@ class Store:
                 CREATE TABLE IF NOT EXISTS mailbox (
                     id TEXT PRIMARY KEY, parent TEXT, author TEXT NOT NULL,
                     body TEXT NOT NULL, created REAL NOT NULL);
+                CREATE TABLE IF NOT EXISTS mailbox_reads (
+                    message_id TEXT NOT NULL, reader TEXT NOT NULL, PRIMARY KEY(message_id,reader));
                 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS mail_usage (author TEXT NOT NULL, day INTEGER NOT NULL,
                     turn_id TEXT NOT NULL, count INTEGER NOT NULL, PRIMARY KEY(author,day,turn_id));
@@ -367,6 +369,7 @@ class Store:
                 else:
                     db.execute('DELETE FROM mailbox WHERE id IN (SELECT id FROM mailbox WHERE parent=? ORDER BY created,id LIMIT 1)', (parent,))
             message_id = uuid.uuid4().hex
+            db.execute('DELETE FROM mailbox_reads WHERE message_id NOT IN (SELECT id FROM mailbox)')
             db.execute('INSERT INTO mailbox VALUES(?,?,?,?,?)', (message_id, parent, author, body, now))
             return message_id
 
@@ -378,11 +381,44 @@ class Store:
             count = 0
             for root in roots:
                 count += db.execute('DELETE FROM mailbox WHERE id=? OR parent=?', (root, root)).rowcount
+            db.execute('DELETE FROM mailbox_reads WHERE message_id NOT IN (SELECT id FROM mailbox)')
             return count
 
-    def messages(self):
+    def messages(self, reader=None, unread_only=False, mark_read=False):
+        """Return a bounded mailbox snapshot, optionally consuming one reader's unread page."""
+        if reader not in (None, 'lead', 'owner') or (unread_only or mark_read) and reader is None:
+            raise ValueError('Invalid mailbox reader.')
         with self.connect() as db:
-            return [dict(row) for row in db.execute('SELECT * FROM mailbox ORDER BY created,id')]
+            rows = [dict(row) for row in db.execute(
+                'SELECT m.* FROM mailbox m WHERE (?=0 OR (m.author!=? AND NOT EXISTS '
+                '(SELECT 1 FROM mailbox_reads r WHERE r.message_id=m.id AND r.reader=?))) ORDER BY m.created,m.id',
+                (int(unread_only), reader, reader))]
+            if mark_read:
+                db.executemany('INSERT OR IGNORE INTO mailbox_reads VALUES(?,?)', [(row['id'], reader) for row in rows])
+            return rows
+
+    def mark_mail_read(self, reader, ids):
+        """Acknowledge only displayed IDs; concurrent new arrivals remain unread."""
+        if reader not in ('lead', 'owner') or not isinstance(ids, list) or len(ids) > MAX_MESSAGES:
+            raise ValueError('Invalid mailbox acknowledgement.')
+        if any(not isinstance(value, str) or len(value) != 32 for value in ids):
+            raise ValueError('Invalid mailbox message ID.')
+        with self.connect() as db:
+            db.executemany('INSERT OR IGNORE INTO mailbox_reads SELECT id,? FROM mailbox WHERE id=?',
+                           [(reader, value) for value in ids])
+
+    def mail_status(self):
+        """Expose counts and notification metadata only, never message bodies or task authority."""
+        with self.connect() as db:
+            unread = {reader: db.execute(
+                'SELECT count(*) FROM mailbox m WHERE m.author!=? AND NOT EXISTS '
+                '(SELECT 1 FROM mailbox_reads r WHERE r.message_id=m.id AND r.reader=?)',
+                (reader, reader)).fetchone()[0] for reader in ('lead', 'owner')}
+            messages = [{'message_id': row['id'], 'thread_id': row['parent'] or row['id'],
+                         'author': row['author'], 'time': row['created']}
+                        for row in db.execute('SELECT id,parent,author,created FROM mailbox ORDER BY created,id')]
+            return {'unread': unread, 'messages': messages}
+
 
 
 class Engine:

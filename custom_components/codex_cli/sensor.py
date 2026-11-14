@@ -33,6 +33,7 @@ async def async_setup_entry(
             CodexTaskCountSensor(coordinator, entry),
             CodexPromptCountSensor(coordinator, entry),
             CodexAuthSensor(coordinator, entry),
+            CodexMailboxUnreadSensor(coordinator, entry),
             CodexFiveHourLimitSensor(coordinator, entry),
             CodexFiveHourResetSensor(coordinator, entry),
             CodexWeeklyLimitSensor(coordinator, entry),
@@ -362,3 +363,22 @@ class CodexWeeklyResetSensor(_CodexSensor):
             "limit": usage.get("weekly_limit"),
             "percent": usage.get("weekly_percent"),
         }
+
+
+class CodexMailboxUnreadSensor(_CodexSensor):
+    """Count retained messages the lead has not read, excluding its own posts."""
+
+    _attr_icon = "mdi:email-alert-outline"
+    _attr_translation_key = "mailbox_unread_lead"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: CodexCliCoordinator, entry: ConfigEntry) -> None:
+        """Attach the lead's unread count to the Codex device."""
+        super().__init__(coordinator, entry, "mailbox_unread_lead")
+
+    @property
+    def native_value(self) -> int | None:
+        """Return unknown if the worker cannot read the mailbox."""
+        mailbox = (self.coordinator.data or {}).get("mailbox") or {}
+        value = (mailbox.get("unread") or {}).get("lead")
+        return value if type(value) is int and value >= 0 else None
