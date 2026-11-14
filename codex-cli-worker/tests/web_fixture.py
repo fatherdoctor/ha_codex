@@ -45,6 +45,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="codex-chat-preview-") as temp:
         root = Path(temp)
         server.DATA_ROOT = root
+        server.CONFIG_ROOT = root
         from interaction_diagnostics import RollingDiagnostics, InteractionRecorder
         server.interaction_logs = RollingDiagnostics(root / "interaction-diagnostics.json")
         server.diagnostics = InteractionRecorder(server.interaction_logs, "0.1.81.2", "0.166.0")

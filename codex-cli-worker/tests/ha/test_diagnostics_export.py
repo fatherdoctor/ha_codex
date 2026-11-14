@@ -85,3 +85,21 @@ async def test_integration_scrubs_malicious_worker_and_reports_unavailable():
     assert 'CANARY' not in json.dumps(result)
     result = await integration.async_get_config_entry_diagnostics(None, SimpleNamespace())
     assert result['availability'] == 'unavailable'
+
+
+async def test_override_event_survives_integration_boundary_without_payloads(tmp_path):
+    store = RollingDiagnostics(tmp_path / 'interactions.json')
+    store.append({'source': 'addon_page', 'outcome': 'done', 'events': [{
+        'kind': 'override', 'operation': 'service', 'group': 'everyday',
+        'decision': 'preapproved', 'outcome': 'completed', 'duration_seconds': 0.5,
+        'target': 'PRIVATE_TARGET_CANARY', 'data': {'value': 'PRIVATE_PAYLOAD_CANARY'},
+    }]})
+    expected = store.export()
+    client = SimpleNamespace(interaction_diagnostics=AsyncMock(return_value=expected))
+    entry = SimpleNamespace(runtime_data=SimpleNamespace(client=client))
+    result = await integration.async_get_config_entry_diagnostics(None, entry)
+    event = result['interactions'][0]['events'][0]
+    assert event['kind'] == 'override' and event['operation'] == 'service'
+    assert event['group'] == 'everyday' and event['outcome'] == 'completed'
+    assert event['duration_seconds'] == 0.5
+    assert 'CANARY' not in json.dumps(result)

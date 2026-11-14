@@ -10,6 +10,11 @@
   An answer that is ready only after the deadline is refused too, rather than passed on late. A program
   that calls the hook's `main()` repeatedly in one process no longer collects stopped child processes.
   `tests/measure_gate.py` prints the hook's own time for each call.
+- Judge pre-approved actions by their direct service and targets only. Remove scene/member walks,
+  platform lists and reload-definition comparisons; downstream behavior belongs to the owner's setup.
+- Keep confirmed house rules, mode checks, direct limits, audit-before-write, receipts and setup-secret
+  handoff. Switch saves after first use still leave changed rules unconfirmed until Review and confirm.
+  Recheck active authorization, group settings and confirmed rules after the last direct-target read.
 
 - Do not report generic task HTTP errors as expired ChatGPT sign-in; test sign-in recovery through the full task lifecycle.
 
