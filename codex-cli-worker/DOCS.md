@@ -952,6 +952,33 @@ The exact user-facing refresh messages are pinned at
 [login/src/auth/manager.rs:224-226](https://github.com/openai/codex/blob/6ff1e1ca3b30/codex-rs/login/src/auth/manager.rs#L224-L226).
 The new daily reader never clears a remembered rejection; a new sign-in or successful matching turn does.
 
+#### Sign-in expiry notices
+
+The pinned Codex CLI does not provide a reliable end time for the ChatGPT sign-in. An access token's
+`exp` claim is the expiry of a refreshable access token, not the end of the sign-in. At
+[rust-v0.166.0, `token_data.rs:157-161`](https://github.com/openai/codex/blob/6ff1e1ca3b30/codex-rs/login/src/token_data.rs#L157-L161),
+Codex parses that claim; its
+[proactive refresh check](https://github.com/openai/codex/blob/6ff1e1ca3b30/codex-rs/login/src/auth/manager.rs#L3333-L3351)
+requests renewal near that expiry. If no usable expiry is present, `last_refresh` instead schedules
+a refresh after eight days, using the
+[refresh interval constants](https://github.com/openai/codex/blob/6ff1e1ca3b30/codex-rs/login/src/auth/manager.rs#L221-L222).
+Neither value tells us when the owner must sign in again.
+
+The stored [token record](https://github.com/openai/codex/blob/6ff1e1ca3b30/codex-rs/login/src/token_data.rs#L10-L34),
+[auth record](https://github.com/openai/codex/blob/6ff1e1ca3b30/codex-rs/login/src/auth/storage.rs#L48-L61)
+and [refresh response](https://github.com/openai/codex/blob/6ff1e1ca3b30/codex-rs/login/src/auth/manager.rs#L1786-L1791)
+expose no refresh-token lifetime or guaranteed sign-in deadline. A successful refresh
+[persists the renewed tokens](https://github.com/openai/codex/blob/6ff1e1ca3b30/codex-rs/login/src/auth/manager.rs#L3417-L3455).
+An expired, reused or revoked refresh grant is learned from the
+[refresh rejection](https://github.com/openai/codex/blob/6ff1e1ca3b30/codex-rs/login/src/auth/manager.rs#L1735-L1783),
+not from an advance end time.
+
+For that reason, Status has no sign-in expiry timestamp, and the integration provides no expiry
+sensor or guessed 72-hour, 24-hour or 6-hour warning tiers. It retains the existing signed-out or
+explicitly rejected sign-in Repair described above, clearing after renewal is confirmed. The add-on
+sends no advance-expiry push. Expiry estimation adds no credential-file reader, token decoder
+or model task.
+
 ### Mailbox arrival signals
 
 The integration polls worker status every 30 seconds. Its **Mailbox unread for the lead** sensor counts

@@ -2,6 +2,9 @@
 
 ## 0.1.81.2 (unreleased)
 
+- Document why the pinned CLI cannot supply a ChatGPT sign-in deadline: access tokens refresh and
+  refresh-grant expiry is not exposed. Keep the existing signed-out Repair without a guessed expiry
+  sensor, warning countdown or advance push; test that elapsed time alone does not require sign-in.
 - A scheduling or mailbox tool asked for more than 20 items now gets the first 20 and a `next_offset`,
   instead of a refusal. Codex asked `read_mailbox` for 50 messages when told to summarize the unread mail,
   and the only answer was "Invalid, refused or expired scheduling request.", so it could not correct
