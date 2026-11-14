@@ -392,16 +392,27 @@ explain the possible downgrade. When Codex emits the warning on the supervised o
 that the request was downgraded. Not every relay thread warning is exposed there: absence of that message
 is not evidence that the requested permissions were granted.
 
-**Hook timeout and undo limits.** A synchronous hook that times out can fail open in Codex 0.166: the tool
-call may run after the timeout. The hook checks bounded inputs and refuses an uncertain, oversized or
+**Hook deadline and undo limits.** Codex 0.166 runs a tool call when its hook passes the configured
+10-second timeout, so the hook never lets that happen: it answers within its own deadline of 1.5 seconds
+from the start of its process. The hook's first lines start a child process that does all of the work:
+loading the check, reading files and the request, and checking it. The hook itself only waits for the
+answer and never reads a file, so a stalled disk or a stuck check cannot hold it up. When the deadline
+passes, the hook stops the child and refuses the request with a plain reason (the check did not finish in
+time; ask again, or make the change yourself from the app page), without waiting for the child to exit.
+An answer the hook only finds after the deadline (for example when the machine did not run the hook while
+the check finished) is thrown away and refused the same way, so no answer is ever given late.
+This holds with remote control on or off, and also when the check is stuck inside one long call or the
+request never finishes arriving. Python's own start, before the hook's first line, cannot be interrupted;
+it counts against the 1.5 seconds. The hook also checks bounded inputs and refuses an uncertain, oversized or
 ambiguous YAML patch. Hook-checked source and script files are capped at 512 KiB; larger files are refused before scanning. While remote control is on it reconstructs the whole proposed YAML file, so edits
 beneath an existing `shell_command`, `rest_command` or `command_line` key are also checked. The checked-in
 fixtures use the captured Bash/apply_patch command-string inputs. PermissionRequest is checked for named security
 restrictions; needing network or other ordinary sandbox permission is not itself a refusal. In the outside executor, 30 isolated
 hook-process measurements took at most 0.412 seconds against the configured 10-second timeout, including
 a repetitive 450 KiB YAML file (Codex 0.166 shapes, Python 3.12). Reproduce with
-`python codex-cli-worker/tests/measure_gate.py` in the worker's test environment; this timing is not an HAOS
-latency guarantee.
+`python codex-cli-worker/tests/measure_gate.py` in the worker's test environment; it also prints the hook's
+own time for each call, counted from its process start, next to the 1.5-second deadline. This timing is not an
+HAOS latency guarantee: on a machine slower than that, more requests are refused as too slow, none are let through.
 
 The config watch runs every 30 seconds over at most 3,000 ordinary YAML files, each at most 2 MiB. While remote control is on, a new or changed always-on command,
 platform or template block causes the **whole affected file** to be restored from its hash-verified earlier
@@ -422,8 +433,7 @@ setting. With remote control off the watch reports remaining findings without ch
 
 Whole-file undo can replace other edits made to the same file since Turn on; recover those edits from the copy named in the finding. Review starts a new baseline; it does not
 relax the always-on checks. A watch scan or verified restore cannot reverse a command that already ran,
-prevent a reload before the scan, or guarantee capture of an obfuscated reference. Fast hooks and delayed
-undo reduce exposure; neither removes the upstream timeout risk.
+prevent a reload before the scan, or guarantee capture of an obfuscated reference.
 
 - **Off until you turn it on.** In the app chat, open **Settings** > **Manage remote connection**, then choose **Turn on**. You can also open the connection view from the connection chip. The choice is saved and holds across app restarts.
 - **One supervised process.** The app runs `codex app-server --listen unix://<private socket> --remote-control` in the foreground and starts it again, with a growing delay, if it exits. **Turn off** stops it.
@@ -800,6 +810,55 @@ remains able to fetch it. Only an Ingress administrator may change retention.
 An unavailable worker returns an unavailable data section without its exception
 message or connection address.
 
+
+### Permissions overrides
+
+Administrators can open Settings → Permissions overrides to choose five groups. Apply my changes,
+Everyday control and Organize start on; Bigger changes and Security and people start off. Changes save
+immediately. The worker tool `home_assistant_actions.act` performs only the supported fixed Core operations;
+it does not provide shell commands, arbitrary URLs or a Supervisor tool. A successful result names the
+action, and the assistant must name it in its answer. Refusals fall back to normal native approval. Never
+retry an unknown outcome automatically: inspect the affected state before any further attempt.
+
+Groups apply only to person-started Default exchanges (workspace-write with on-request user approvals).
+Scheduled and lead-channel runs keep normal prompts, even when their launch mode permits writes.
+Read only never pre-approves writes. The permission groups apply to chat-page turns; remote threads from the ChatGPT app still use normal approval prompts until Codex supplies a trusted signal identifying who started the turn. Auto-review and Full access remain
+future modes; this feature does not enable either or change the managed policy.
+
+Only the exact marked guard-rails block in `/config/AGENTS.md` controls these groups. Other instructions
+remain for the assistant to follow in chat. Settings identifies each selected block line that suspends
+actions; unknown block lines suspend all groups. The first save of the groups establishes the initial
+confirmed copy. Later switch saves leave changed rules unconfirmed until an administrator uses Review and
+confirm in Settings, which shows the text and submits its digest. The worker keeps the confirmed text and SHA-256 under `/data/house-rules/`, outside
+the agent workspace. A missing file is a confirmed state too. Any edit, deletion or symlink since confirmation
+suspends all groups until review and confirmation; a change observed within an exchange suspends that
+exchange permanently, even if the file is restored. Start a new exchange after confirming.
+
+The groups judge only the service being requested and the entities it directly targets. Area, device
+and label selectors resolve to entities of that service's domain. The group switch, selected house-rules
+lines and the Security and people group apply to those direct targets. A direct lock or alarm action
+still needs its security group and must respect any selected limit.
+
+What a scene, script, automation, group, wrapper or template entity does in turn is the owner's own setup.
+The tool does not walk members or downstream actions, check entity platforms, compare file and loaded
+definitions, or judge the actions loaded by a reload. **Apply my changes** permits supported reloads,
+including template and scene reloads, of whatever the owner's files currently hold. Planted commands
+remain the existing command check's and configuration watch's job; those checks are unchanged.
+
+Unknown/custom block limits, dynamic templates in direct request values, unresolved or mixed-domain
+targets and unavailable Core data still require normal approval. Direct targets are checked again after
+the audit, before writing. The tool cannot change its own settings/policy, access credential entities
+or invoke Supervisor actions. Dashboard edits save a private backup first; an entity-ID change returns
+Core's related-item report, which does not cover arbitrary text or external systems. Configuration flow
+results omit credentials; only host, port, name, username, title and scan_interval fields may be filled.
+Any other field, a password selector or a secret flag hands the whole step to Home Assistant without
+submitting values. This does not inspect wiring or device firmware.
+
+Settings are private, atomic booleans under `/data/codex-home/house-rules/permission-overrides.json`.
+Only a verified administrator on the Ingress page can read or save them; the worker API token does not
+satisfy that check. Corrupt or unreadable settings refuse actions. Every pre-approved operation needs
+an active shared diagnostics recorder and a saved requested event before execution. Exported events
+contain only the operation, group, decision, outcome, timing and duration; no payloads or raw targets.
 
 ### Chat page and attachments
 
