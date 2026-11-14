@@ -2,6 +2,13 @@
 
 ## 0.1.81.2 (unreleased)
 
+- Let the authenticated lead direct worker tasks on its own initiative, including an explicit task attached
+  to a mailbox note. Hold one durable waiting task while busy and report start/result in the same thread;
+  keep native human approval and unattended daily limits. The worker cannot start lead work.
+- Give each reader a 128-message mailbox, retain unread mail across absences, expire only read agent mail
+  after 48 hours, and refuse all-unread full delivery with a visible status. Add per-mailbox clear confirmation,
+  UTC message envelopes, local-time/plain views, due status, source labels and bounded lead mailbox pages.
+
 - Document why the pinned CLI cannot supply a ChatGPT sign-in deadline: access tokens refresh and
   refresh-grant expiry is not exposed. Keep the existing signed-out Repair without a guessed expiry
   sensor, warning countdown or advance push; test that elapsed time alone does not require sign-in.

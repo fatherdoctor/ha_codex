@@ -23,14 +23,14 @@ const assert = require('node:assert/strict');
       });
       await page.route('**/lead-token', route=>{newTokens++;return route.fulfill({json:{ok:true,token:'synthetic-once-only-value'}});});
       await page.route('**/schedule-mailbox**', async route=>{
-        if (route.request().method()==='DELETE') { mailDeletes++; mailbox=[]; return route.fulfill({json:{ok:true}}); }
+        if (route.request().method()==='DELETE') { assert.deepEqual(route.request().postDataJSON(), {confirm:true}); assert.equal(new URL(route.request().url()).searchParams.get('mailbox'), 'owner'); mailDeletes++; mailbox=[]; return route.fulfill({json:{ok:true}}); }
         const data=route.request().postDataJSON();
-        if (route.request().url().endsWith('/read')) {
-          assert.equal(await page.locator('#schedule-mailbox pre').count(), mailbox.length);
+        if (new URL(route.request().url()).pathname.endsWith('/read')) {
+          assert.equal(await page.locator('#schedule-mailbox details').count(), mailbox.length);
           acknowledgements.push(data.ids);
           return route.fulfill({json:{ok:true}});
         }
-        mailbox.push({id:'mail-'+mailbox.length,parent:route.request().url().endsWith('/reply')?'mail-0':null,body:data.body,author:'owner',created:1803859200});
+        mailbox.push({id:'mail-'+mailbox.length,parent:route.request().url().endsWith('/reply')?'mail-0':null,envelope:{to:data.to,from:'owner',sent:'2027-03-01T00:00:00.000Z',last_modified:'2027-03-01T00:00:00.000Z',due:data.due,message:data.message},origin:'lead',text:'To: '+data.to+'\nFrom: owner\nSent: 2027-02-28 18:00:00 (America/Chicago)\nLast modified: 2027-02-28 18:00:00 (America/Chicago)\n\n'+data.message});
         return route.fulfill({json:{ok:true}});
       });
       async function openSettings() {
@@ -39,6 +39,14 @@ const assert = require('node:assert/strict');
         await page.getByRole('button',{name:'Open settings',exact:true}).click();
       }
       await page.goto('http://127.0.0.1:9137/preview/');
+      await page.waitForFunction(() => typeof state !== 'undefined' && document.querySelector('.chat-row'));
+      await page.evaluate(() => {
+        state.task = {task_id:'synthetic-source',status:'completed',task_source:'lead',turns:[
+          {turn_id:'first',message:'Lead request',task_source:'lead'},
+          {turn_id:'second',message:'Human continuation'},
+          {turn_id:'third',message:'Scheduled request',task_source:'schedule'}]}; renderTask(true);
+      });
+      assert.deepEqual(await page.locator('.task-source').allTextContents(), ['Started by lead', 'Scheduled run']);
       await openSettings();
       await page.locator('#schedule-list').getByText('No schedules saved.').waitFor();
       await page.locator('#schedule-name').fill('Sample schedule');
@@ -82,13 +90,23 @@ const assert = require('node:assert/strict');
       await openSettings();
       await page.locator('#schedule-list').getByRole('button',{name:'Approve this proposal',exact:true}).click();
       await page.locator('#schedule-list').getByRole('button',{name:'Pause',exact:true}).waitFor();
+      await page.locator('#schedule-mail-to').selectOption('codex');
+      await page.locator('#schedule-mail-due').fill('2027-03-02T00:00:00Z');
       await page.locator('#schedule-mail-body').fill('<b>Plain sample message</b>');
       await page.locator('#schedule-mail-form button[type=submit]').click();
       await page.locator('#schedule-mailbox').getByText('<b>Plain sample message</b>',{exact:true}).waitFor();
       assert.equal(await page.locator('#schedule-mailbox b').count(),0);
+      assert.deepEqual(await page.locator('#schedule-mailbox > div > strong').allTextContents(), ['Started by lead', 'To', 'From', 'Sent', 'Last modified', 'Due', 'Message']);
+      assert.ok((await page.locator('#schedule-mailbox').innerText()).includes('(America/Chicago)'));
+      await page.locator('#schedule-mailbox details summary').click();
+      assert.ok((await page.locator('#schedule-mailbox details pre').innerText()).startsWith('To: codex\nFrom: owner\nSent:'));
+      await page.locator('#schedule-mail-reader').selectOption('lead');
+      await page.waitForResponse(response => new URL(response.url()).searchParams.get('mailbox') === 'lead');
+      await page.locator('#schedule-mail-reader').selectOption('owner');
+      await page.waitForResponse(response => new URL(response.url()).searchParams.get('mailbox') === 'owner');
       await page.locator('#schedule-mailbox').getByRole('button',{name:'Reply',exact:true}).click();
       await page.locator('#schedule-mail-body').fill('A sample reply');
-      const replyRead = page.waitForResponse(response => response.url().endsWith('/schedule-mailbox/read')
+      const replyRead = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/schedule-mailbox/read')
         && response.request().postDataJSON().ids.length === 2);
       await page.locator('#schedule-mail-form button[type=submit]').click();
       await page.locator('#schedule-mailbox').getByText('A sample reply',{exact:true}).waitFor();
