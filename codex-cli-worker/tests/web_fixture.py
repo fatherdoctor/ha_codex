@@ -45,6 +45,12 @@ def main():
     with tempfile.TemporaryDirectory(prefix="codex-chat-preview-") as temp:
         root = Path(temp)
         server.DATA_ROOT = root
+        from verbose_log import VerboseLog
+        server.verbose_logs = VerboseLog(root / "verbose/worker.log", lambda: ["SYNTHETIC_WEB_SECRET"])
+        @server.app.post("/fixture/verbose-line")
+        def verbose_fixture_line():
+            server.capture_verbose("fixture", "UNFILTERED_BROWSER_CANARY SYNTHETIC_WEB_SECRET")
+            return {"ok": True}
         from interaction_diagnostics import RollingDiagnostics, InteractionRecorder
         server.interaction_logs = RollingDiagnostics(root / "interaction-diagnostics.json")
         server.diagnostics = InteractionRecorder(server.interaction_logs, "0.1.81.2", "0.166.0")

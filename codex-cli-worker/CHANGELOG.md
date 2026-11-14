@@ -2,6 +2,19 @@
 
 ## 0.1.81.2 (unreleased)
 
+- Preserve normal stderr logging when verbose capture is installed, omit successful polling lines only
+  from the private copy, and avoid rewriting retained logs while credential lookup is unavailable.
+  Cover bulk masking, newly learned export secrets, append integrity and sign-in-code ordering.
+
+- Mask relay pairing output with the code parsed from that line, even when another pairing request
+  clears the current status before the verbose observer runs.
+
+- Add an opt-in, persistent local verbose log with line/byte FIFO limits, exact own-secret masking,
+  administrator-only confirmed export and clearing, separate from anonymized diagnostics. Append records
+  and compact in bounded batches to limit storage wear; reuse unchanged credential-file snapshots.
+  Leave successful status/progress access polls out while retaining warnings and failed requests;
+  recover from bad settings and prevent completed stream lines from crossing Clear.
+
 - Do not report generic task HTTP errors as expired ChatGPT sign-in; test sign-in recovery through the full task lifecycle.
 
 - Keep generic passive HTTP errors out of the expired-sign-in Repair; expose only fixed usage-error messages and categories, never raw upstream errors.

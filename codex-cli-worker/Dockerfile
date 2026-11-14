@@ -90,6 +90,7 @@ WORKDIR /data
 COPY run.sh /
 COPY server.py account_access.py /
 COPY interaction_diagnostics.py diagnostics_scrub.py /
+COPY verbose_log.py /
 # The remote-control command check (CX-B6b): managed Codex requirements and hook, read-only, outside
 # /config and outside every sandbox's writable roots. The marker goes last: remote control can be
 # turned on only when it and every file it lists are present and the hook passes its self-test.

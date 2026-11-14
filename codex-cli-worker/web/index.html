@@ -90,6 +90,7 @@
         tabindex="0"
       ></div>
       <main>
+        <p id="verbose-log-indicator" role="status" hidden>Verbose log is on.</p>
         <header class="chat-header">
           <button
             id="menu"
@@ -391,6 +392,17 @@
           ><button id="logout" class="subtle">Sign out</button>
         </div>
         <div id="login-card"></div>
+      </section>
+      <section id="verbose-log-section">
+        <h3>Verbose log</h3>
+        <label class="verbose-setting-row"><span><strong>Verbose log</strong><span class="muted">Keep worker logs and messages locally until you turn this off.</span></span><input id="verbose-log-toggle" type="checkbox" role="switch" aria-label="Verbose log" disabled></label>
+        <label for="verbose-log-lines">Lines to keep (100–2000)</label>
+        <input id="verbose-log-lines" type="number" min="100" max="2000" step="1" value="500" disabled>
+        <button id="verbose-log-save" class="subtle" disabled>Save line limit</button>
+        <p class="muted">Oldest lines are removed first. Storage is capped at 2 MB.</p>
+        <button id="verbose-log-export" class="subtle" disabled>Export verbose log</button>
+        <button id="verbose-log-clear" class="subtle" disabled>Clear verbose log</button>
+        <p id="verbose-log-result" class="muted" role="status">Available to administrators.</p>
       </section>
       <section>
         <h3>Interaction logs</h3>

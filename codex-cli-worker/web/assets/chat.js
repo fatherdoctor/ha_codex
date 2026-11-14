@@ -412,6 +412,7 @@ async function loadUsage() {
     if (!document.hidden) {
       const data = await api("status");
       renderUsage(data.codex_usage);
+      verboseIndicator(data.verbose_log_enabled);
       renderIntegration(data.integration);
       // The quota check also tells the worker which model Codex picks when the add-on names none.
       // Not awaited: the quota shown must not depend on it.
@@ -2948,6 +2949,73 @@ function settingsError(error) {
   const result = $("connection-dialog").open ? $("connection-result") : $("settings-result");
   result.textContent = String(error.message || error);
 }
+let verboseSettings = null;
+function verboseIndicator(enabled) {
+  $("verbose-log-indicator").hidden = enabled === false || enabled === undefined;
+  $("verbose-log-indicator").textContent = enabled === null ? "Verbose log status is unavailable." : "Verbose log is on.";
+}
+function verboseControls(disabled) {
+  for (const id of ["verbose-log-toggle", "verbose-log-lines", "verbose-log-save", "verbose-log-export", "verbose-log-clear"]) $(id).disabled = disabled;
+}
+async function loadVerboseSettings() {
+  try {
+    if (window.parent !== window) {
+      const theme = getComputedStyle(window.parent.document.documentElement);
+      for (const key of ["--primary-color", "--ha-color-border-neutral-normal", "--ha-color-fill-disabled-quiet-resting", "--ha-color-on-neutral-normal", "--ha-color-fill-primary-normal-resting", "--ha-color-border-primary-loud", "--ha-color-on-primary-normal"])
+        if (theme.getPropertyValue(key).trim()) $("verbose-log-section").style.setProperty(key, theme.getPropertyValue(key));
+    }
+  } catch (_error) { /* Standalone or cross-origin frames retain the local theme. */ }
+  verboseControls(true);
+  try {
+    verboseSettings = await api("verbose/settings");
+    $("verbose-log-toggle").checked = verboseSettings.enabled;
+    $("verbose-log-lines").value = verboseSettings.lines;
+    verboseControls(false);
+    verboseIndicator(verboseSettings.enabled);
+    $("verbose-log-result").textContent = verboseSettings.available ? "Saved locally. The log stays on until you turn it off." : "The verbose log is unavailable; no unsafe export is allowed.";
+  } catch (_error) {
+    verboseSettings = null;
+    $("verbose-log-result").textContent = "Verbose log controls require administrator access.";
+  }
+}
+async function saveVerboseSettings() {
+  if (!verboseSettings) return;
+  verboseControls(true);
+  try {
+    const lines = Number($("verbose-log-lines").value);
+    if (!Number.isInteger(lines) || lines < 100 || lines > 2000) throw Error("Choose 100 to 2000 lines.");
+    verboseSettings = await api("verbose/settings", { enabled: $("verbose-log-toggle").checked, lines });
+    verboseIndicator(verboseSettings.enabled);
+    $("verbose-log-result").textContent = "Verbose log settings saved.";
+  } catch (error) {
+    $("verbose-log-result").textContent = error.message || "Could not save verbose log settings.";
+  } finally {
+    $("verbose-log-toggle").checked = verboseSettings.enabled;
+    $("verbose-log-lines").value = verboseSettings.lines;
+    verboseControls(false);
+  }
+}
+$("verbose-log-toggle").addEventListener("change", saveVerboseSettings);
+$("verbose-log-save").addEventListener("click", saveVerboseSettings);
+$("verbose-log-export").addEventListener("click", async () => {
+  if (!window.confirm("Export the verbose log? It can contain prompts, answers, tool calls and outputs, personal details, and anything pasted into a chat. Only the add-on’s own secrets are masked. Read it before sharing.")) return;
+  verboseControls(true);
+  try {
+    const response = await fetch("verbose/export", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({confirmed:true})});
+    if (!response.ok) throw Error("The verbose log could not be exported safely.");
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement("a"); link.href = url; link.download = "codex-verbose.log";
+    link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    $("verbose-log-result").textContent = "Verbose log downloaded. Read it before sharing.";
+  } catch (error) { $("verbose-log-result").textContent = error.message; }
+  finally { verboseControls(false); }
+});
+$("verbose-log-clear").addEventListener("click", async () => {
+  verboseControls(true);
+  try { await api("verbose/clear", {}); $("verbose-log-result").textContent = "Verbose log cleared. New lines continue while it is on."; }
+  catch (error) { $("verbose-log-result").textContent = error.message; }
+  finally { verboseControls(false); }
+});
 $("settings-button").onclick = async () => {
   try {
     const data = await api("diagnostics/settings");
@@ -2965,7 +3033,7 @@ $("settings-button").onclick = async () => {
     loadRemoteControl(),
     loadPause(),
     loadBrowserPermissions(),
-
+    loadVerboseSettings(),
   ]);
   for (const result of results)
     if (result.status === "rejected") settingsError(result.reason);
