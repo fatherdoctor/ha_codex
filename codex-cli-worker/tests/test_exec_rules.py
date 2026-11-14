@@ -195,6 +195,109 @@ for line in sys.stdin:
     def test_timeout_fails_closed_and_reaps_the_probe(self):
         self.assertIn('did not complete', self.probe(timeout=True))
 
+    def test_incomplete_group_cleanup_cannot_report_success(self):
+        stop = rc._stop_exec_rules_probe
+        def clean_but_report_failure(proc):
+            stop(proc)
+            return False
+        with patch.object(rc, '_stop_exec_rules_probe', side_effect=clean_but_report_failure):
+            self.assertIn('could not stop its process group', self.probe())
+
+
+@unittest.skipUnless(sys.platform.startswith('linux'), 'process-group cleanup is Linux-specific')
+class DescendantCleanupTests(unittest.TestCase):
+    SCRIPT = '''import ctypes,json,os,signal,subprocess,sys,time
+from pathlib import Path
+mode,root,outcome,marker=sys.argv[1:]
+marker=Path(marker)
+if mode in ('child','sentry'):
+ signal.signal(signal.SIGTERM,signal.SIG_IGN)
+ marker.write_text(str(os.getpid()))
+ while True: time.sleep(1)
+elif mode=='launcher':
+ subprocess.Popen([sys.executable,__file__,'child',root,outcome,str(marker)],
+                  stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+ deadline=time.monotonic()+3
+ while not marker.exists() and time.monotonic()<deadline: time.sleep(.01)
+ assert marker.exists()
+ if outcome=='exit': sys.exit(0)
+ for line in sys.stdin:
+  message=json.loads(line)
+  if message.get('id')==1:
+   print(json.dumps({'id':1,'result':{}}),flush=True)
+  if message.get('id')==2:
+   if outcome=='timeout': time.sleep(30)
+   if outcome=='warning':
+    print(json.dumps({'method':'configWarning','params':{'summary':'Error parsing rules; custom rules not applied.'}}),flush=True)
+   print(json.dumps({'id':2,'result':{'approvalPolicy':'on-request','thread':{'id':'synthetic'}}}),flush=True)
+elif mode=='driver':
+ # Adoption is limited to this disposable driver, never the worker or test runner.
+ assert ctypes.CDLL(None,use_errno=True).prctl(36,1,0,0,0)==0
+ sys.path.insert(0,root)
+ import remote_control as rc
+ launched=[]
+ sentry=subprocess.Popen([sys.executable,__file__,'sentry',root,outcome,str(marker.with_suffix('.sentry'))],
+                         stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+ def launch(argv,**kwargs):
+  proc=subprocess.Popen([sys.executable,__file__,'launcher',root,outcome,str(marker)],**kwargs)
+  launched.append(proc)
+  return proc
+ def exists(pid,group=False):
+  try:
+   (os.killpg if group else os.kill)(pid,0)
+   return True
+  except ProcessLookupError: return False
+ try:
+  problem=rc.exec_rules_self_test('fixture',{'PATH':os.environ.get('PATH','')},str(marker.parent),
+                                popen=launch,timeout=.7 if outcome=='timeout' else 4)
+  child=int(marker.read_text())
+  record={'problem':problem,'alive':exists(child),'group_exists':exists(launched[0].pid,True),
+          'launcher_exited':launched[0].poll() is not None,'unrelated_alive':exists(sentry.pid)}
+ finally:
+  # Also clean the deliberately failing pre-fix case, so it cannot leak a child.
+  for proc in launched:
+   try: os.killpg(proc.pid,signal.SIGKILL)
+   except ProcessLookupError: pass
+  os.killpg(sentry.pid,signal.SIGKILL)
+  sentry.wait(timeout=3)
+  deadline=time.monotonic()+3
+  while time.monotonic()<deadline:
+   try: pid,_=os.waitpid(-1,os.WNOHANG)
+   except ChildProcessError: break
+   if not pid: time.sleep(.01)
+ print(json.dumps(record))
+'''
+
+    def check_outcome(self, outcome):
+        with tempfile.TemporaryDirectory() as tmp:
+            script = Path(tmp) / 'descendant.py'
+            script.write_text(self.SCRIPT)
+            result = subprocess.run([sys.executable, '-B', str(script), 'driver', str(ROOT),
+                                     outcome, str(Path(tmp) / 'ready')],
+                                    capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            data = json.loads(result.stdout)
+            self.assertEqual(data['problem'], '' if outcome == 'success' else
+                             rc.EXEC_RULES_WARNING if outcome == 'warning' else
+                             'The Codex command-rules self-test did not complete. Restart the app after checking its rule files.')
+            self.assertTrue(data['launcher_exited'])
+            self.assertFalse(data['alive'], 'TERM-resistant descendant survived the preflight')
+            self.assertFalse(data['group_exists'], 'owned process group is not empty')
+            self.assertTrue(data['unrelated_alive'], 'an unrelated process group was stopped')
+
+    def test_success_stops_descendant_after_launcher_exits(self):
+        self.check_outcome('success')
+
+    def test_warning_stops_descendant_after_launcher_exits(self):
+        self.check_outcome('warning')
+
+    def test_timeout_stops_descendant_after_launcher_exits(self):
+        self.check_outcome('timeout')
+
+    def test_early_launcher_exit_stops_descendant(self):
+        self.check_outcome('exit')
+
 
 if __name__ == '__main__':
     unittest.main()

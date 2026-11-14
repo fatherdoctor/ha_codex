@@ -5,6 +5,8 @@
 - Document why the pinned CLI cannot supply a ChatGPT sign-in deadline: access tokens refresh and
   refresh-grant expiry is not exposed. Keep the existing signed-out Repair without a guessed expiry
   sensor, warning countdown or advance push; test that elapsed time alone does not require sign-in.
+- Finish stopping the rule-load probe's process group even when its launcher exits first.
+  Escalate remaining group members after the grace period and refuse startup if cleanup cannot finish.
 - Add native managed refusals for literal Supervisor, credential, app-policy and full-access commands,
   alongside the unchanged semantic command hook. Check native rule loading before remote control starts;
   rule-load warnings stop chat turns and keep remote control unavailable until the app restarts after repair.

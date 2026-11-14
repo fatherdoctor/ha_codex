@@ -113,6 +113,48 @@ def managed_exec_rules_problem(data: dict[str, Any]) -> str:
     return ""
 
 
+def _stop_exec_rules_probe(proc: Any) -> bool:
+    """Stop the owned group, even when its launcher exits before its children.
+
+    Reap only children in that group when this worker is their parent/subreaper.
+    Otherwise the runtime's init reaps them; the group must still disappear
+    before cleanup can report success. Never signal this worker's own group.
+    """
+    group = proc.pid
+    if group <= 1 or group == os.getpgrp():
+        return False
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(group, sig)
+        except ProcessLookupError:
+            proc.poll()
+            return True
+        except PermissionError:
+            return False
+        deadline = time.monotonic() + 2
+        while True:
+            while True:
+                try:
+                    child, status = os.waitpid(-group, os.WNOHANG)
+                except ChildProcessError:
+                    break
+                if not child:
+                    break
+                if child == proc.pid:
+                    proc.returncode = os.waitstatus_to_exitcode(status)
+            try:
+                os.killpg(group, 0)
+            except ProcessLookupError:
+                proc.poll()
+                return True
+            except PermissionError:
+                return False
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.02)
+    return False
+
+
 def exec_rules_self_test(binary: str, env: dict[str, str], cwd: str = "/config", *,
               popen: Any = subprocess.Popen, timeout: float = 15.0) -> str:
     """Load the actual user/project stack in Codex, with no model request.
@@ -128,6 +170,8 @@ def exec_rules_self_test(binary: str, env: dict[str, str], cwd: str = "/config",
     selector = selectors.DefaultSelector()
     buffered = b""
     deadline = time.monotonic() + timeout
+    problem = ""
+    cleaned = True
     try:
         proc = popen([binary, "app-server"], cwd=cwd, env=env, stdin=subprocess.PIPE,
                      stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
@@ -170,26 +214,18 @@ def exec_rules_self_test(binary: str, env: dict[str, str], cwd: str = "/config",
         result = reply(2)
         if result.get("approvalPolicy") != "on-request" or not isinstance(result.get("thread"), dict):
             raise ValueError("unexpected thread")
-        return ""
     except (OSError, ValueError, TypeError, AttributeError, subprocess.SubprocessError):
-        return exec_rules_problem() or "The Codex command-rules self-test did not complete. Restart the app after checking its rule files."
+        problem = exec_rules_problem() or "The Codex command-rules self-test did not complete. Restart the app after checking its rule files."
     finally:
         selector.close()
         if proc is not None:
-            # End the whole fresh probe group, including a CLI shim's children.
-            for sig in (signal.SIGTERM, signal.SIGKILL):
-                try:
-                    os.killpg(proc.pid, sig)
-                except ProcessLookupError:
-                    pass
-                try:
-                    proc.wait(timeout=2)
-                    break
-                except subprocess.TimeoutExpired:
-                    continue
+            cleaned = _stop_exec_rules_probe(proc)
             for stream in (proc.stdin, proc.stdout):
                 if stream is not None:
                     stream.close()
+    if not cleaned:
+        return "The command-rules self-test could not stop its process group. Restart the app before trying again."
+    return problem
 
 
 CONTROL_FOLDER = "remote_control_control"
