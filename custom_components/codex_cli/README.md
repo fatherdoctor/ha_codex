@@ -8,7 +8,7 @@ Use the My Home Assistant buttons in the repository README for the fastest setup
 
 1. Add `https://github.com/fatherdoctor/ha_codex` as a Home Assistant app repository.
 2. Install and start the Codex for Home Assistant app.
-3. Open the app web UI and choose **Settings > Sign in** to sign in to Codex. See the [sign-in prerequisites](../../README.md#3-sign-in-to-codex).
+3. Open the app web UI and choose **Settings > Sign in** to sign in to Codex. See the [sign-in prerequisites](../../README.md#sign-in).
 4. Open HACS, search for **Codex** under **Integrations**, select it, and choose **Download**.
 5. Restart Home Assistant.
 6. Add the **Codex** integration from **Settings** > **Devices & services**.
