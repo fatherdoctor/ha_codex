@@ -48,6 +48,7 @@ Paths are under `codex-cli-worker/` unless they start with `custom_components/`.
 |---|---|---|
 | The hook runs for every tool call and permission request, from every client, and a hook planted in `/config` cannot replace it | `gate/managed_config.toml`, `gate/requirements.toml` (`allow_managed_hooks_only`) | `remote_control.py: requirements_problem`, `hook_problem`, `gate_problem` refuse to start remote control when these are not in place |
 | A request the hook cannot read or judge is refused, not passed | `gate/gate_hook.py: main` | `tests/test_gate.py` |
+| The hook answers before its own deadline, because Codex runs the action if a hook is still working when its timeout passes; an answer found after the deadline is refused | `gate/gate_hook.py: DEADLINE_SECONDS`, `wait_for_child`, `answer_before_deadline`; the Codex-side `timeout` in `gate/managed_config.toml` leaves room beyond it | `tests/test_gate.py` (`test_a_stuck_scan_is_refused_by_the_deadline`, `test_the_deadline_leaves_room_inside_the_codex_timeout` and their neighbors) |
 | Commands that read a process environment, use the Supervisor token, talk to the Supervisor, or read the sign-in store or `secrets.yaml` are refused (*) | `gate_rules.py: check_tool_call`, `PROTECTED_COMMAND_RES`, `_ha_supervisor_command` | `tests/test_gate.py`, `tests/fixtures/gate_tool_calls.json` |
 | Edits that add a command which can reach anything (`shell_command`, `rest_command`, `python_script`, ...), a platform that runs on load, or a templated action are refused | `gate_rules.py: find_refused`, `STRICT_RULES`, `policy/refused-domains.json` (the file can add domains, never remove the built-in ones: `load_rules`) | `tests/test_gate.py` |
 | With remote control on: a patch is rebuilt in memory and refused if the result holds something new that is refused, or if it cannot be rebuilt with certainty | `gate_rules.py: patch_versions`, `new_refused`, `refused_blocks` | `tests/test_gate.py` |
@@ -57,9 +58,9 @@ Paths are under `codex-cli-worker/` unless they start with `custom_components/`.
 The hook reads text. It does not run a shell, so a path or command built while the command runs is out of its
 reach; DOCS.md lists those limits, and layers 1, 3 and 4 are what cover them.
 
-(*) Known weakness: the command check reads shell text with three separate tokenizers (two in `gate_rules.py`,
-one in `approvals.py`) that do not treat unparseable text the same way. Until they are one, check all three when
-you check one.
+(*) Known weakness: the shell text is split by two copies of the same code, `_strip_comments` and `_split_words`,
+one in `gate_rules.py` and one in `approvals.py`. Both refuse quoting they cannot read. Nothing but review keeps
+the copies the same, so check both when you check one.
 
 ### Layer 3: who can approve
 
@@ -68,10 +69,14 @@ you check one.
 | The chat page is reachable only through Home Assistant Ingress; a request that claims to be Ingress from any other address is rejected | `server.py: enforce_ingress_boundary`, `is_ingress_request` | `tests/test_server.py` |
 | Every other route needs the worker's API token, compared in constant time | `server.py: require_auth` | `tests/test_api.py`, `tests/test_server.py` |
 | The API token (held only by the integration) can never answer a permission request; only an active Home Assistant administrator signed in on the chat page can, and a failed lookup refuses | `server.py: ingress_admin`, `lookup_ha_users`, `decide_approval` | `tests/test_approvals.py` |
-| An approval covers one action in the current exchange; it installs no rule and expires with the exchange | `approvals.py`: `AppServerSession.decide` and `.receive` | `tests/test_approvals.py`, `tests/test_approval_smoke.py` |
+| A native approval covers one action in the current exchange; it installs no rule and expires with the exchange. Standing permission exists only as the administrator's pre-approved action groups, in the next rows | `approvals.py`: `AppServerSession.decide` and `.receive` | `tests/test_approvals.py`, `tests/test_approval_smoke.py` |
+| Pre-approved action groups: an administrator can switch on groups of Home Assistant actions (`apply`, `everyday` and `organize` start on; `bigger` and `security` start off), and Codex then performs them through `home_assistant_actions.act` with no per-action approval. The `security` group (locks, alarm, covers, cameras, notifications) is off unless the administrator turns it on | `permission_overrides.py: DEFAULTS`, `SECURITY`, `SERVICES`, `OPERATIONS`; entity targets and action data are bounded (`entity`, `bounded_json`) and templates need normal approval | `tests/test_permission_overrides.py`, `tests/test_permission_overrides_direct.py`, `tests/test_permission_overrides_runtime.py` |
+| Only an exchange the worker itself launched can use the groups: authority is built from the worker's own launch policy and never from MCP input, and anything unknown asks for normal approval. Remote-control turns cannot use the groups in this version | `permission_overrides.py: Authority.mode`; `permission_overrides_api.py` (where `Authority` is built from the launch policy) | `tests/test_permission_overrides_final_authorization.py`, `tests/test_permission_overrides_review.py` |
+| Owner guard-rail lines (no locks, alarm, covers, cameras, messages or external publishing) are read from one marked block in the agent's rules and refuse the matching actions even when the group is on; a custom line or a block that cannot be verified asks for normal approval | `permission_overrides.py: GUARD_LINES`, `selected_guard_lines`, `guard_rules` | `tests/test_permission_overrides_peer2.py`, `tests/test_permission_overrides_review.py` |
+| The groups can be changed only by an administrator on the chat page; the settings file is small, exactly five booleans, and a bad file means normal approval | `permission_overrides_api.py`: the `/permissions-overrides` route (`require_auth`, `require_ingress`, `ingress_admin`); `permission_overrides.py: Settings.read`, `validate` | `tests/test_permission_overrides.py` |
 | A change to the add-on's own policy, rules, options or credentials cannot be approved at all | `approvals.py: touches_protected_path`, `command_names_protected_path`, `PROTECTED_PREFIXES` | `tests/test_approvals.py` |
 | Browser permissions are managed only from the chat page | `server.py: require_ingress` | `tests/test_browser_permissions.py` |
-| Schedules are owner-managed; the local lead channel has its own credential | `schedule_api.py`, `scheduling.py: Store` | `tests/test_scheduling.py` |
+| Schedules and the mailbox are owner-managed: the page routes need the worker's API token and an administrator on the chat page (`owner`). The local lead channel under `/lead/` is separate: it needs its own token, not Ingress, and reads only background work, not people's chats. The scheduling tools a chat-page task can call go through the same two paths | `schedule_api.py: register` (`owner`, `lead`), `scheduling.py: Store.token_ok` | `tests/test_scheduling.py` (`test_lead_requires_separate_token_and_ingress_alone_is_not_a_token`), `tests/test_sched_review.py` |
 
 ### Layer 4: what the worker checks afterwards
 
@@ -81,6 +86,18 @@ you check one.
 | Changed YAML is validated and Home Assistant's own config check is run | `server.py: validate_changed_files`, `check_home_assistant_config` | `tests/test_config_check.py` |
 | A copy of each changed file is kept, without credentials | `server.py: create_snapshot`, `saved_copy`, `drop_credential_backups` | `tests/test_backups.py` |
 | With remote control on, `/config` is watched for refused content that arrived by a route the hook cannot see, and a Home Assistant repair is raised | `remote_control.py: ConfigWatch` | `tests/test_remote_control.py` |
+
+### The browser that inspects dashboards
+
+The worker can open a Home Assistant dashboard in a headless browser to look at it, without giving Codex a login. These are the protections of that one path.
+
+| protection | enforced in | shown by |
+|---|---|---|
+| The browser signs in as a temporary read-only identity that the integration creates, never as a person. A session lasts 180 seconds, only one is issued at a time, it is revoked when it ends or the integration unloads, and only an administrator who also presents the paired worker's token can ask for one (compared in constant time) | `custom_components/codex_cli/browser_auth.py: BrowserSessions`, `SESSION_SECONDS`, `BrowserSessionView.broker` | `tests/ha/test_browser_auth.py` (`test_real_read_only_identity_lease_and_revocation`, `test_broker_rejects_admin_without_pairing_and_read_only_user`, `test_read_only_session_cannot_save_dashboard`) |
+| The page can reach only Home Assistant's own address, with an allow list for HTTP requests and for WebSocket commands. The real access token is held by the controller and sent on the controller's own connection; page scripts see a placeholder, and token replies are replaced before the page reads them | `browser.cjs: allowRequest`, `allowMessage` | `tests/browser_verification.cjs`, `tests/browser_worker_check.py` |
+| A saved browser exception is checked again, by its fingerprint and eligibility, each time it is used, not only when it is saved | `browser_permissions.cjs: validate`, `BrowserPermissions`; `browser_permissions.py` (the save-time check); rules in `browser_permission_policy.json` | `tests/browser_permissions.cjs`, `tests/test_browser_permissions.py` |
+| An outside resource the page asks for (a script, style, font or image from a public site) is fetched by the controller, not the page: the name is checked and resolved, the connection is pinned to the address that was checked, each redirect is checked again, size and time are limited, private addresses are refused, and no credentials are sent | `browser_resources.cjs: ResourcePolicy`, `createExternalFetcher`, `publicAddress`, `publicURL` | `tests/browser_resources.cjs` |
+| Files the chat page serves back (attachments and verification screenshots) carry `X-Content-Type-Options: nosniff` and a Content-Security-Policy of `default-src 'none'; sandbox`, so a served file cannot run as a page | `server.py` (the attachment route; the headers are set at its end) | `tests/test_attachments.py` (the `nosniff` header; the policy header is not asserted, so check it by reading) |
 
 ### Reads that go through the worker instead of Codex
 
