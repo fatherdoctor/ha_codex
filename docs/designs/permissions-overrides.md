@@ -1,7 +1,9 @@
 # Permissions overrides
 
-Status: implemented with fail-closed current-turn authority and shared diagnostics.
-Source baseline: ha_codex main `7e9eb3b`, Codex CLI 0.166.0.
+Status: implemented with direct-target-only checks, fail-closed current-turn authority and shared diagnostics.
+Current behavior: the owner's direct-targets-only ruling, implemented at `11400e28fe69`,
+supersedes the earlier indirect-inspection design. See [Permissions overrides in the user guide](../../codex-cli-worker/DOCS.md#permissions-overrides).
+Codex CLI baseline: 0.166.0.
 
 The worker can perform selected Home Assistant actions without an escalation prompt when an administrator
 has enabled their group. It must establish the calling turn's effective permissions before doing so.
@@ -31,15 +33,16 @@ after execution, or a bounded error identifying whether any mutation may already
 automatically retry a write after a timeout. Inform the assistant that a pre-approved action must be named
 in its answer; this instruction alone cannot guarantee what the model eventually says.
 
-## Confirmed rules and indirect targets
+## Confirmed rules and direct targets
 
 Settings uses the current chat page's Permissions overrides section. Only the exact marked block in
 `/config/AGENTS.md` controls the tool. All other prose, including the kit's Careful start and Direct sets,
 remains for the assistant to follow in chat. Unknown block lines suspend every group; known selected
 lines identify their restricted domains beside the switches.
 
-An administrator's Save or Review and confirm action saves the instructions text and SHA-256 under
-`/data/house-rules/`, outside the writable agent workspace. Missing instructions are a confirmed state.
+The first save of the group switches establishes the initial confirmed instructions text and SHA-256
+under `/data/house-rules/`, outside the writable agent workspace. Later switch saves do not confirm edited
+instructions: Review and confirm shows the text and submits its digest. Missing instructions are a confirmed state.
 Compare the live file against the confirmed copy, pin that snapshot at begin(), and refuse every action
 if it changes or becomes unreadable. Once observed, a change taints the whole exchange, even if restored.
 Confirmation requires a new exchange to use the changed text. The permission adapter protects this
@@ -48,15 +51,17 @@ private folder; no new gate, policy, launcher or hook rules are introduced.
 The add-on's hard refusals always remain: Supervisor/credential access and modification of its own policy
 or settings cannot be enabled by a group. Group 5 is an optional group, not a bundled ban on its domains.
 
-For scenes, inspect every member in the loaded scene state. For automation/script execution,
-recursively inspect supported action branches, scripts and scenes; unsupported parallel sequences refuse.
-Read automation/config and script/config loaded raw_config snapshots, not editable disk definitions. Check both the
-entry action's group and every reachable effect's group and owner restriction. Runtime templates,
-unresolved dynamic targets, integrations with unknown indirect effects, recursion, missing configuration,
-unsupported actions or an exhausted work budget require approval. A scene state proves only membership; loaded member values remain unavailable. Use a bounded configuration snapshot and detect changes before execution; an
-unverifiable snapshot cannot authorize a pre-approved action. A read-only preflight cannot guarantee that
-an external actor will not change a scene between checks and execution; document that limitation rather
-than claiming a transaction Core does not provide.
+Judge only the requested service and its direct targets: the group switch, selected house-rules lines
+for the direct domain or entity, and the Security and people group for direct security actions.
+Area, device and label selectors resolve to entities of the service's domain. A direct lock action
+still requires its security group and must respect a selected lock limit.
+
+What a scene, script, automation, group, wrapper or template entity does in turn is the owner's own setup.
+Do not walk members or downstream actions, classify platforms, compare editable files with loaded
+definitions, or inspect new or changed definitions before reloads. An indirect lock effect does not
+make a direct scene action a lock action. Unknown or template platforms alone do not prevent direct
+control. Dynamic templates in direct request values, unresolved or mixed-domain direct targets and
+unavailable Core data still require approval. This preflight does not promise an atomic Core transaction.
 
 ## Mode ruling and authority
 
@@ -80,9 +85,10 @@ never dispatches. An audit failure before execution refuses the action. After ex
 cannot change the reported execution result.
 
 The prepared Core adapter uses the existing worker's Core authentication, not sandbox-visible credentials.
-It performs one HTTP attempt without redirects; WebSocket commands use fixed types. Definition preflight
-uses Core configuration endpoints, never state attributes alone. Source checks used Home Assistant Core's
-config/automation.py, config/script.py, config/scene.py and config/config_entries.py handlers. Endpoint tests cover all operation mappings, transport bounds, flow filtering, target expansion, registry authority and private dashboard backups.
+It performs one HTTP attempt without redirects; WebSocket commands use fixed types. Direct entity
+checks read current state and registry identity, preserving refusals for credential entities and the
+add-on's own platforms. They do not inspect configured downstream actions. Endpoint tests cover
+operation mappings, transport bounds, flow filtering, target expansion, registry authority and private dashboard backups.
 
 ## Settings and diagnostics
 
@@ -99,8 +105,7 @@ fixtures. Use only synthetic local data and the official frontend component refe
 Record the action kind, group, decision, outcome and duration through the shared diagnostics boundary.
 Apply its scrubber and anonymize targets; never put message bodies, flow credentials, dashboards or raw
 owner instructions in exported diagnostics. Ensure an observer failure cannot change authorization or
-make a completed write look unexecuted. The current main does not yet contain the diagnostics PR, so
-integrate its published interface after merge rather than recreating its delivered implementation.
+make a completed write look unexecuted.
 
 The lead merged CX-DIAG's main into this branch. The shared worker/integration scrubbers now retain
 only allowlisted `override` events: operation, group, decision, outcome and duration. The worker requires
@@ -110,7 +115,9 @@ enter these events. This is an extension of the shared schema, not a second logg
 
 Authority is pinned when the worker launches an exchange; current global options cannot upgrade an
 already-running read-only turn. Capability rotation, end/cancellation and a changed launch policy refuse.
-The worker rechecks activity after the audit and before execution. Core does not provide an atomic
+One authorization helper rechecks active capability/cancellation, current group settings and confirmed
+rules before the audit, after it, and after every direct target's preflight is complete, immediately
+before execution. Core does not provide an atomic
 check-and-write transaction: external configuration changes during dispatch remain a documented limit.
 The returned result names the action; the tool description and worker instructions require naming it in
 the answer, but the model's final wording is not mechanically guaranteed.
@@ -125,9 +132,12 @@ managed policy or CI file is changed. The shell sandbox's writable workspace rem
    resumed threads, Custom read-only, expired/forged/replayed envelopes and missing metadata. Read-only must
    make zero Core write calls. Check chat-page parity and the managed-policy refusals too.
 2. Each group on/off/default, all targets in mixed-domain/area/device/label requests, every guard-rail line,
-   custom wording and unreadable instructions; indirect actions with disabled or restricted targets.
-3. Unknown/template/cyclic actions and changing configuration require approval; no write before approval;
-   denial cannot become a group permission or a reusable blanket approval.
+   custom wording and unreadable instructions. Direct restrictions must refuse the matching direct action,
+   while scene/script/automation and template-entity downstream effects remain uninspected.
+3. Unsupported direct operations, dynamic request values, unresolved targets and unavailable Core data
+   require approval. Supported scene/template reloads do not inspect definitions. Rules changed, group
+   disabled, task cancelled or capability revoked during the last target read must each cause zero writes;
+   unchanged authorization permits one write. Denial cannot become a reusable blanket approval.
 4. Strict schemas and hard refusals; administrator-only settings, atomic persistence and corrupt-file handling;
    no credential/target/message leak in errors or exported diagnostics.
 5. Dashboard backup failure, failed ID-reference enumeration, partial failure and timeout; no automatic retries.
@@ -161,9 +171,10 @@ preserves the backend's own support checks and avoids guessing how to dismantle 
 
 ## Second peer review corrections
 
-Direct services and each scene effect now use one `guard_effect` decision. The selected
-external-publication rule therefore restricts security effects reached through a scene,
-including scenes called by scripts or automations; an enabled group cannot bypass it.
+The earlier scene-effect inspection is superseded by the direct-targets-only ruling.
+`guard_effect` checks the direct domain and selected limits; it never follows scene members,
+scripts or automation branches. The selected external-publication rule still restricts direct
+security actions and the supported direct configuration changes to which it applies.
 
 Integration setup returns at most 64 field descriptors (name, type, required) and bounded
 Core validation error keys. Defaults, choices, labels, descriptions, submitted values and
@@ -182,12 +193,12 @@ receipts, and diagnostics continue to contain only the fixed operation/group/out
 The peer screenshot pair shows a native Home Assistant profile Settings row with an actual
 `ha-switch` beside the add-on rows, in both themes. Both sides use isolated synthetic fixtures.
 
-## Reload comparison and setup inputs
+## Reloads and setup inputs
 
-For automation and script reloads, compare bounded standard YAML includes against loaded snapshots.
-Walk only definitions that are new or changed. Unchanged definitions are the owner’s and are not re-judged.
-Custom packages/includes or unavailable snapshots require approval. Scene reloads require approval because
-Core does not expose loaded member values for comparison. Person-started exchanges alone use the groups;
+Apply my changes permits the supported automation, script, scene, template and group reloads of
+whatever the owner's files currently hold. No loaded snapshots, file-versus-loaded comparisons or
+new/changed-definition walks are used. Planted commands remain the existing command check's and
+configuration watch's job; neither is changed by the groups. Person-started chat-page exchanges alone use the groups;
 scheduled and lead-channel exchanges retain their normal prompts. Remote turns still lack verifiable authority.
 
 Setup fills only host, port, name, username, title and scan_interval. Any other name, secret flag or password

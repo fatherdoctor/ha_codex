@@ -148,9 +148,12 @@ def service_group(service):
     if not isinstance(service, str) or not re.fullmatch(r'[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*', service):
         raise ApprovalRequired('Unsupported action; request normal approval.')
     domain, name = service.split('.')
-    if domain == 'notify' or (domain == 'script' and name not in ('reload', 'turn_off', 'toggle')):
-        if domain == 'notify':
-            return 'security'
+    if domain == 'notify':
+        return 'security'
+    if domain == 'script':
+        # Script execution is supported; these control services are not.
+        if name in ('reload', 'turn_off', 'toggle'):
+            raise ApprovalRequired('Unsupported action; request normal approval.')
         return 'bigger'
     if name not in SERVICES.get(domain, set()):
         raise ApprovalRequired('Unsupported action; request normal approval.')
@@ -195,21 +198,20 @@ class Engine:
                 checks = set()
                 plan = self.plan(request, groups, rules, checks)
                 group = plan['group']
+                def recheck_authorization():
+                    if (not still_active() or groups != self.settings.read()
+                            or rules != guard_rules(self.guards())):
+                        raise ApprovalRequired('Permissions changed or the exchange ended; request normal approval.')
                 # Recheck settings, confirmed owner rules and the live turn before dispatch.
-                if not still_active() or groups != self.settings.read() or rules != guard_rules(self.guards()):
-                    raise ApprovalRequired('Permissions changed or the exchange ended; request normal approval.')
+                recheck_authorization()
                 # A failed audit must stop BEFORE the write. The callback sees no payload or raw target.
                 self.observer(event('requested'))
-                if (not still_active() or groups != self.settings.read()
-                        or rules != guard_rules(self.guards())):
-                    raise ApprovalRequired('Permissions changed or the exchange ended; request normal approval.')
+                recheck_authorization()
                 # Verify only the entities directly named by this action after the audit.
                 for target in checks:
                     self.backend.require_entity(target)
                 # Target reads can block while the task or owner permissions change.
-                if (not still_active() or groups != self.settings.read()
-                        or rules != guard_rules(self.guards())):
-                    raise ApprovalRequired('Permissions changed or the exchange ended; request normal approval.')
+                recheck_authorization()
                 started_write = True
                 result = self.backend.execute(plan)
             except ApprovalRequired as exc:
