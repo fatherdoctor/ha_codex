@@ -82,7 +82,8 @@ This pre-release includes sign-in and recovery controls on the app page and opti
 ## Making contributions
 
 Issues and pull requests are welcome on this fork. Changes that are not specific to the fork belong upstream first;
-see [CONTRIBUTING.md](CONTRIBUTING.md).
+see [CONTRIBUTING.md](CONTRIBUTING.md). To try new versions before they are released to everyone, open an issue and
+ask to join as a beta tester.
 
 ## License
 
