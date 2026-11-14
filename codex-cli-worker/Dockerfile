@@ -88,7 +88,7 @@ RUN pip3 install --no-cache-dir --break-system-packages \
 WORKDIR /data
 
 COPY run.sh /
-COPY server.py /
+COPY server.py account_access.py /
 COPY interaction_diagnostics.py diagnostics_scrub.py /
 COPY permission_overrides.py permission_overrides_api.py permission_overrides_mcp.py /
 # The remote-control command check (CX-B6b): managed Codex requirements and hook, read-only, outside
