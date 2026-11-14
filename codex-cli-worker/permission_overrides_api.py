@@ -17,8 +17,14 @@ import yaml
 
 from flask import jsonify, request
 from permission_overrides import ApprovalRequired, Authority, Engine, Settings, bounded_json, entity, selected_guard_lines, guard_rules, GUARD_LINES, PRIVATE
+from permission_overrides import action_sequence
 
 IDENTIFIER = re.compile(r'[a-z0-9_-]{1,128}')
+
+# These Core device integrations send device commands, not configured HA action
+# sequences. Other platforms need an effect model before they can bypass prompts.
+DIRECT_DEVICE_PLATFORMS = frozenset({'hue', 'zha', 'zwave_js', 'matter', 'esphome', 'homekit_controller'})
+DIRECT_HELPERS = frozenset({'input_boolean', 'input_number', 'input_select', 'input_text'})
 
 
 # Core sends a serialized field list. Return its shape only, never defaults/options/values.
@@ -150,6 +156,12 @@ class Core:
         registry = self.ws('config/entity_registry/get', entity_id=target)
         if isinstance(registry, dict) and registry.get('platform') in ('codex_cli', 'ha_codex', 'hassio'):
             raise ApprovalRequired('The add-on and Supervisor settings cannot be changed through overrides.')
+        domain = target.split('.')[0]
+        if domain not in ('automation', 'script', 'scene'):
+            platform = registry.get('platform') if isinstance(registry, dict) else None
+            direct_helper = domain in DIRECT_HELPERS and platform == domain
+            if not isinstance(platform, str) or (not direct_helper and platform not in DIRECT_DEVICE_PLATFORMS):
+                raise ApprovalRequired('Scripted or unverified entity platforms require normal approval.')
         return row
 
     def resolve(self, selector, service_domain=None):
@@ -229,15 +241,9 @@ class Core:
 
     def reload_changes(self, domain):
         """Compare standard YAML and loaded definitions; refuse hidden reload effects."""
-        root, config = self.reload_layout(domain)
         if domain == 'template':
-            entries = config.get('template')
-            if (not isinstance(entries, list) or len(entries) > 1024
-                    or any(not isinstance(entry, dict)
-                           or {'action', 'actions', 'include', 'secret_reference'} & entry.keys()
-                           for entry in entries)):
-                raise ApprovalRequired('Template action blocks or unreadable templates require normal approval.')
-            return {str(index): entry for index, entry in enumerate(entries)}
+            raise ApprovalRequired('Template reloads require normal approval in this version.')
+        root, config = self.reload_layout(domain)
         filenames = {'automation': 'automations.yaml', 'script': 'scripts.yaml', 'scene': 'scenes.yaml'}
         filename = filenames[domain]
         if config.get(domain) != {'include': filename}:
@@ -248,7 +254,8 @@ class Core:
         if domain == 'scene':
             raise ApprovalRequired('Loaded scene values cannot be compared; request normal approval.')
         if domain == 'automation':
-            if not isinstance(disk, list) or any(not isinstance(row, dict) or not isinstance(row.get('id'), str) for row in disk):
+            if not isinstance(disk, list) or any(not isinstance(row, dict) or not row.get('id')
+                                               or not isinstance(row['id'], str) for row in disk):
                 raise ApprovalRequired('Automation definitions cannot be compared; request normal approval.')
             proposed = {row['id']: row for row in disk}
             if len(proposed) != len(disk):
@@ -259,6 +266,8 @@ class Core:
             raise ApprovalRequired('Reload definitions are unavailable or oversized; request normal approval.')
         if any(not isinstance(value, dict) or 'use_blueprint' in value for value in proposed.values()):
             raise ApprovalRequired('Blueprint or unreadable reload definitions require normal approval.')
+        for definition in proposed.values():
+            action_sequence(definition, domain)
         states = self.rest('GET', 'states')
         if not isinstance(states, list) or len(states) > 30000:
             raise ApprovalRequired('Loaded definitions cannot be listed; request normal approval.')
@@ -270,8 +279,9 @@ class Core:
             definition = self.definition(target)
             if 'use_blueprint' in definition:
                 raise ApprovalRequired('Loaded blueprint definitions require normal approval.')
+            action_sequence(definition, domain)
             identifier = definition.get('id') if domain == 'automation' else target.split('.')[1]
-            if not isinstance(identifier, str) or identifier in loaded:
+            if not isinstance(identifier, str) or not identifier or identifier in loaded:
                 raise ApprovalRequired('Loaded identifiers cannot be compared; request normal approval.')
             loaded[identifier] = definition
         return {key: value for key, value in proposed.items() if key not in loaded or value != loaded[key]}

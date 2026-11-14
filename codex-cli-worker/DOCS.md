@@ -840,11 +840,16 @@ Automation/script reloads compare standard YAML includes with loaded definitions
 changed definitions; unchanged definitions are the owner’s and are not re-judged. Custom layouts, includes
 that cannot be safely compared and loaded scene values require normal approval. Core exposes scene
 membership but not its loaded member values, so scene reloads cannot be pre-approved in this version.
-Template reloads require a plain list with no action or actions block; included or unreadable template sections ask.
+Template reloads always require normal approval in this version, including plain sensor entries.
 An included or non-mapping homeassistant section, packages, or split reload sections require normal approval.
-Any blueprint reference in a disk row or a loaded automation/script definition makes that reload ask, even when the row is unchanged.
+Any blueprint reference on disk or in a loaded automation/script makes reload ask, even if unchanged.
 An automation without an id on disk or in its loaded definition also makes the reload ask.
-Everyday control includes any entity exposed as a switch, including a switch used as a relay.
+Competing action spellings or an unsupported automation/script shape require normal approval.
+Template, script-backed and unverified entity platforms require normal approval for controls too.
+Supported device platforms are Hue, ZHA, Z-Wave JS, Matter, ESPHome and HomeKit Device; direct input helpers
+also remain supported. The worker checks Core's registered platform again immediately before writing.
+Other integrations ask until their effects can be verified; request-supplied platform labels do not count.
+A supported ordinary switch can still represent a relay; this does not inspect wiring or device firmware.
 
 Settings are private, atomic booleans under `/data/codex-home/house-rules/permission-overrides.json`.
 Only a verified administrator on the Ingress page can read or save them; the worker API token does not

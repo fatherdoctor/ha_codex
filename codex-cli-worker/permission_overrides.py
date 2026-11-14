@@ -160,6 +160,26 @@ def service_group(service):
     return 'everyday'
 
 
+def action_sequence(definition, domain):
+    """Accept one understood action spelling; never choose between competing scripts."""
+    if not isinstance(definition, dict):
+        raise ApprovalRequired('The action definition is unreadable; request normal approval.')
+    common = {'alias', 'description', 'mode', 'max', 'max_exceeded', 'variables', 'trace'}
+    if domain == 'automation':
+        allowed = common | {'id', 'trigger', 'triggers', 'condition', 'conditions',
+                            'action', 'actions', 'initial_state'}
+        keys = set(definition) & {'action', 'actions'}
+    else:
+        allowed = common | {'sequence', 'fields', 'icon'}
+        keys = set(definition) & {'sequence'}
+    if set(definition) - allowed or len(keys) != 1:
+        raise ApprovalRequired('Ambiguous or unsupported action definitions require normal approval.')
+    sequence = definition[next(iter(keys))]
+    if not isinstance(sequence, list):
+        raise ApprovalRequired('The action sequence is unreadable; request normal approval.')
+    return sequence
+
+
 class Engine:
     """Resolve all explicit effects before a single write; backend failures never auto-retry."""
     def __init__(self, settings, backend, guards, observer):
@@ -206,6 +226,9 @@ class Engine:
                     raise ApprovalRequired('Permissions changed or the exchange ended; request normal approval.')
                 # Last Core read follows audit persistence and all other preflight work.
                 for target, digest in checks.items():
+                    if target.startswith('entity:'):
+                        self.backend.require_entity(target[7:])
+                        continue
                     value = (self.backend.reload_changes(target[7:]) if target.startswith('reload:')
                              else self.backend.definition(target))
                     if self.definition_digest(value) != digest:
@@ -264,6 +287,9 @@ class Engine:
             selector = [service]
         self.guard_effect(domain, rules)
         targets = [] if domain in ('notify', 'persistent_notification') else self.targets(selector, domain)
+        for target in targets:
+            # Recheck platform eligibility after the audit, including nested effects.
+            checks['entity:' + target] = None
         if any(target.split('.')[0] != domain for target in targets):
             raise ApprovalRequired('The service and target domains disagree; request normal approval.')
         if domain in ('script', 'scene', 'automation'):
@@ -277,7 +303,7 @@ class Engine:
                 if domain == 'scene':
                     self.check_scene(definition, groups, rules)
                 else:
-                    sequence = definition.get('sequence' if domain == 'script' else 'actions', definition.get('action'))
+                    sequence = action_sequence(definition, domain)
                     self.sequence(sequence, groups, rules, checks, trail + (target,))
         return targets
 
@@ -328,19 +354,17 @@ class Engine:
 
     def check_reload(self, domain, groups, rules, checks):
         """Check changed definitions; leave unchanged owner definitions alone."""
-        if domain not in ('automation', 'script', 'scene', 'template'):
+        if domain == 'template':
+            raise ApprovalRequired('Template reloads require normal approval in this version.')
+        if domain not in ('automation', 'script', 'scene'):
             return
         changes = self.backend.reload_changes(domain)
         checks['reload:' + domain] = self.definition_digest(changes)
-        if domain == 'template':
-            # Core accepts only plain template entries without action blocks here.
-            return
         for identifier, definition in changes.items():
             if domain == 'scene':
                 self.check_scene(definition, groups, rules)
             else:
-                key = 'sequence' if domain == 'script' else 'actions'
-                sequence = definition.get(key, definition.get('action'))
+                sequence = action_sequence(definition, domain)
                 self.sequence(sequence, groups, rules, checks, (identifier,))
 
     def plan(self, request, groups, rules, checks):

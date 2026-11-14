@@ -2,6 +2,8 @@
 
 ## 0.1.81.2 (unreleased)
 
+- Require approval for template reloads, scripted or unverified entity platforms, and ambiguous action definitions.
+
 - Ask before reloading template actions, packages, blueprints or unreadable layouts; keep changed house rules unconfirmed after switch saves.
 
 - Recheck loaded actions and reload comparisons after audit persistence, directly before dispatch; identify affected groups for each selected limit.

@@ -53,15 +53,15 @@ class ReloadChecks(unittest.TestCase):
                 self.config('template: ' + section + '\n')
                 self.reload('template')
         self.config('template:\n  - sensor:\n      - name: Sample\n        state: 1\n')
-        self.reload('template', allowed=True)
-
-    def test_template_reload_rechecks_after_audit(self):
-        self.config('template: []\n')
-        def change(event):
-            if event['outcome'] == 'requested':
-                self.config('template:\n  - trigger: []\n    action:\n      - action: lock.unlock\n')
-        self.engine.observer = change
         self.reload('template')
+
+    def test_template_reload_refuses_before_reading_files_or_requesting_an_audit(self):
+        self.config('template: []\n')
+        with patch.object(self.core, 'read_reload_yaml') as read, patch.object(self.engine, 'observer') as audit:
+            self.reload('template')
+        read.assert_not_called()
+        self.assertTrue(audit.called)
+        self.assertTrue(all(call.args[0]['outcome'] == 'refused' for call in audit.call_args_list))
 
     def test_packages_inline_or_behind_homeassistant_include_require_approval(self):
         (self.root / 'automations.yaml').write_text('[]\n')
@@ -141,3 +141,107 @@ class AuditFlush(unittest.TestCase):
         with patch.object(self.recorder, 'flush', side_effect=fail_flush):
             self.assertFalse(self.dispatch(operation='check_config')['ok'])
         self.assertEqual(self.backend.writes, [])
+
+
+class TemplateAndDefinitionRefusals(unittest.TestCase):
+    setUp = ReloadChecks.setUp
+    reload = ReloadChecks.reload
+    config = ReloadChecks.config
+
+    def test_all_template_reload_shapes_require_approval(self):
+        cases = [
+            'template: []\nswitch:\n  - platform: template\n    switches:\n      sample:\n        turn_on:\n          action: lock.unlock\n',
+            'template:\n  - switch:\n      - name: Sample\n        turn_on:\n          action: lock.unlock\n',
+            'template:\n  - light:\n      - name: Sample\n        turn_on:\n          action: lock.unlock\n',
+            'template: []\nlight: !include lights.yaml\n',
+            'template:\n  - use_blueprint: {path: sample.yaml, input: {}}\n',
+            'template:\n  - sensor:\n      - name: Sample\n        state: 1\n',
+        ]
+        for index, text in enumerate(cases):
+            with self.subTest(probe=index):
+                self.config(text)
+                from permission_overrides import ApprovalRequired
+                with self.assertRaises(ApprovalRequired):
+                    self.core.reload_changes('template')
+                self.reload('template')
+
+    def test_inline_automations_require_approval_even_when_standard_file_is_safe(self):
+        self.config('automation:\n  - id: inline\n    actions:\n      - action: lock.unlock\n')
+        (self.root / 'automations.yaml').write_text('[]\n')
+        self.reload('automation')
+
+    def test_ambiguous_and_unknown_action_shapes_require_approval(self):
+        for domain, filename in (('automation', 'automations.yaml'), ('script', 'scripts.yaml')):
+            key = 'actions' if domain == 'automation' else 'sequence'
+            safe = {'id': 'sample', key: []} if domain == 'automation' else {key: []}
+            for extra in ('action', 'actions' if domain == 'script' else 'sequence', 'unknown_action'):
+                for source in ('disk', 'loaded', 'both'):
+                    with self.subTest(domain=domain, extra=extra, source=source):
+                        ambiguous = {**safe, extra: [{'action': 'lock.unlock'}]}
+                        disk = ambiguous if source in ('disk', 'both') else safe
+                        loaded = ambiguous if source in ('loaded', 'both') else safe
+                        self.config(f'{domain}: !include {filename}\n')
+                        value = [disk] if domain == 'automation' else {'sample': disk}
+                        (self.root / filename).write_text(yaml.safe_dump(value))
+                        self.core.rest = lambda *args: [{'entity_id': domain + '.sample'}]
+                        self.core.ws = lambda *args, **kwargs: {'config': deepcopy(loaded)}
+                        self.reload(domain)
+
+    def test_missing_and_duplicate_automation_ids_on_disk_or_loaded_require_approval(self):
+        self.config('automation: !include automations.yaml\n')
+        for disk in ([{'actions': []}], [{'id': '', 'actions': []}],
+                     [{'id': 'sample', 'actions': []}, {'id': 'sample', 'actions': []}]):
+            with self.subTest(disk=disk):
+                (self.root / 'automations.yaml').write_text(yaml.safe_dump(disk))
+                self.reload('automation')
+        (self.root / 'automations.yaml').write_text('[]\n')
+        for loaded in ({'actions': []}, {'id': '', 'actions': []}, {'id': 'same', 'actions': []}):
+            with self.subTest(loaded=loaded):
+                states = [{'entity_id': 'automation.first'}]
+                if loaded.get('id') == 'same':
+                    states.append({'entity_id': 'automation.second'})
+                self.core.rest = lambda *args: states
+                self.core.ws = lambda *args, **kwargs: {'config': deepcopy(loaded)}
+                self.reload('automation')
+
+    def test_scripted_or_unknown_platforms_refuse_and_direct_devices_stay_allowed(self):
+        # Trusted registry replies decide the platform; no request label supplies it.
+        from permission_overrides import ApprovalRequired
+        del self.core.require_entity
+        self.core.rest = lambda method, path: {'entity_id': path.removeprefix('states/')}
+        for domain in ('switch', 'light', 'cover', 'fan', 'lock', 'button'):
+            for platform in ('template', 'command_line', 'pyscript', 'script', 'universal', 'unknown', None, [], {}):
+                with self.subTest(domain=domain, platform=platform):
+                    self.core.ws = lambda *args, **kwargs: {'platform': platform}
+                    with self.assertRaises(ApprovalRequired):
+                        self.core.require_entity(domain + '.sample')
+        for domain, platform in (('switch', 'hue'), ('light', 'zha'), ('input_boolean', 'input_boolean')):
+            with self.subTest(domain=domain, platform=platform):
+                self.core.ws = lambda *args, **kwargs: {'platform': platform}
+                result = self.engine.dispatch({'operation': 'service', 'service': domain + '.turn_on',
+                    'target': [domain + '.sample']}, self.authority)
+                self.assertTrue(result['ok'], result)
+
+    def test_platform_change_during_audit_refuses_before_the_write(self):
+        del self.core.require_entity
+        self.engine.settings.read = lambda: {**DEFAULTS, 'bigger': True}
+        for nested in (False, True):
+            with self.subTest(nested=nested):
+                self.writes.clear()
+                platform = {'name': 'hue'}
+                self.core.rest = lambda method, path: {'entity_id': path.removeprefix('states/')}
+                def ws(kind, **kwargs):
+                    if kind == 'script/config':
+                        return {'config': {'sequence': [{'action': 'switch.turn_on',
+                            'target': {'entity_id': 'switch.sample'}}]}}
+                    return {'platform': platform['name']}
+                self.core.ws = ws
+                def change(event):
+                    if event['outcome'] == 'requested':
+                        platform['name'] = 'template'
+                self.engine.observer = change
+                domain = 'script' if nested else 'switch'
+                result = self.engine.dispatch({'operation': 'service', 'service': domain + '.turn_on',
+                    'target': [domain + '.sample']}, self.authority)
+                self.assertFalse(result['ok'])
+                self.assertEqual(self.writes, [])
