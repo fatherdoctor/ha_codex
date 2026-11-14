@@ -2,6 +2,11 @@
 
 ## 0.1.81.2 (unreleased)
 
+- Add native managed refusals for literal Supervisor, credential, app-policy and full-access commands,
+  alongside the unchanged semantic command hook. Check native rule loading before remote control starts;
+  rule-load warnings stop chat turns and keep remote control unavailable until the app restarts after repair.
+  The shared owner switch is scheduled before v0.3; this delivery keeps the rules on.
+
 - Read command text with an unfinished quote again, line by line, in the command hook, so the always-refused
   Supervisor rule still applies to it. Lines that can be read keep their quoting, so a quoted script given to a
   shell wrapper is still checked; only a line that cannot be read loses its quotes. A `#` now starts a comment

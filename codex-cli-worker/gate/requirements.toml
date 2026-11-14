@@ -11,3 +11,35 @@
 allowed_sandbox_modes = ["read-only", "workspace-write"]
 allowed_approval_policies = ["on-request"]
 allow_managed_hooks_only = true
+
+# Literal command refusals supplement the semantic hook. No ordinary .rules or allow rules.
+
+[[rules.prefix_rules]]
+pattern = [{ token = "ha" }, { any_of = ["supervisor", "su"] }]
+decision = "forbidden"
+justification = "The managed command rule refuses Supervisor access."
+
+[[rules.prefix_rules]]
+pattern = [{ token = "printenv" }, { any_of = ["SUPERVISOR_TOKEN", "HASSIO_TOKEN"] }]
+decision = "forbidden"
+justification = "The managed command rule refuses credential access."
+
+[[rules.prefix_rules]]
+pattern = [{ token = "cat" }, { any_of = ["/proc/1/environ", "/proc/self/environ", "/run/s6/container_environment/SUPERVISOR_TOKEN", "/run/s6/container_environment/HASSIO_TOKEN", "/config/secrets.yaml", "/config/secrets.yml", "/config/.storage/auth", "/config/.storage/auth_provider.homeassistant"] }]
+decision = "forbidden"
+justification = "The managed command rule refuses credential access."
+
+[[rules.prefix_rules]]
+pattern = [{ token = "cat" }, { any_of = ["/data/options.json", "/etc/codex/requirements.toml", "/etc/codex/managed_config.toml", "/usr/share/ha_codex/policy.json", "/data/codex-home/config.toml"] }]
+decision = "forbidden"
+justification = "The managed command rule protects the app settings and policy."
+
+[[rules.prefix_rules]]
+pattern = [{ token = "codex" }, { token = "--dangerously-bypass-approvals-and-sandbox" }]
+decision = "forbidden"
+justification = "The managed command rule refuses full access."
+
+[[rules.prefix_rules]]
+pattern = [{ token = "codex" }, { token = "--sandbox" }, { token = "danger-full-access" }]
+decision = "forbidden"
+justification = "The managed command rule refuses full access."
