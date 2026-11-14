@@ -417,6 +417,8 @@ class Service:
             # A fresh install with no instructions is a confirmed missing state.
             if self.rules_snapshot()['text'] is None:
                 return self.rules_snapshot()
+            raise ApprovalRequired('Review and confirm once to start using these groups, or save a group change. '
+                                   'Later edits need review if the rules have changed since confirmation.') from None
         except (OSError, ValueError, TypeError):
             pass
         raise ApprovalRequired('House rules changed since confirmation. Review and confirm them in Settings.')

@@ -348,6 +348,16 @@ def command_names_protected_path(command: str) -> bool:
 FILE_APPROVAL = "item/fileChange/requestApproval"
 
 
+_SERVER_NAME = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+
+def _elicitation_refusal(params: dict[str, Any]) -> str:
+    """Name the tool server, when it has a plain name, in the refusal shown in the chat."""
+    name = params.get("serverName")
+    source = f"The {name} tool" if isinstance(name, str) and _SERVER_NAME.fullmatch(name) else "A tool"
+    return f"{source} asked a question this page cannot show, so it was declined and nothing was changed."
+
+
 _SERVICE_PATH = re.compile(r"/api/services/([a-z0-9_]+)/([a-z0-9_]+)")
 
 _SERVICE_WORDS = {"turn_on": "turns on", "turn_off": "turns off", "toggle": "toggles"}
@@ -687,7 +697,10 @@ class AppServerSession:
                     self._write({"id": message["id"], "result": {"permissions": {}, "scope": "turn"}})
                     self.on_event({"type": "error", "message": "Broad permission grant denied. Request a single command or file change instead."})
                 elif method == "mcpServer/elicitation/request":
+                    # The page has no card for a tool's own questions, so say so in the chat
+                    # instead of declining where nobody can see it.
                     self._write({"id": message["id"], "result": {"action": "decline"}})
+                    self.on_event({"type": "error", "message": _elicitation_refusal(params)})
                 else:
                     self._write({"id": message["id"], "error": {"code": -32601, "message": "Unsupported worker request"}})
                 return
