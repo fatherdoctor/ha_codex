@@ -23,7 +23,8 @@ IDENTIFIER = re.compile(r'[a-z0-9_-]{1,128}')
 
 # These Core device integrations send device commands, not configured HA action
 # sequences. Other platforms need an effect model before they can bypass prompts.
-DIRECT_DEVICE_PLATFORMS = frozenset({'hue', 'zha', 'zwave_js', 'matter', 'esphome', 'homekit_controller'})
+DIRECT_DEVICE_PLATFORMS = frozenset({'hue', 'zha', 'zwave_js', 'matter', 'esphome', 'homekit_controller',
+                                   'mqtt', 'wled', 'shelly', 'tplink', 'lutron_caseta'})
 DIRECT_HELPERS = frozenset({'input_boolean', 'input_number', 'input_select', 'input_text'})
 
 
@@ -151,6 +152,8 @@ class Core:
         row = self.rest('GET', 'states/' + entity(target))
         if not isinstance(row, dict) or row.get('entity_id') != target:
             raise ApprovalRequired('The entity is unavailable; request normal approval.')
+        row = dict(row)
+        row.pop('_override_members', None)  # Only this adapter supplies verified membership metadata.
         if target.startswith(('input_text.', 'text.')) and row.get('attributes', {}).get('mode') == 'password':
             raise ApprovalRequired('Credential targets are not available through overrides.')
         registry = self.ws('config/entity_registry/get', entity_id=target)
@@ -160,9 +163,31 @@ class Core:
         if domain not in ('automation', 'script', 'scene'):
             platform = registry.get('platform') if isinstance(registry, dict) else None
             direct_helper = domain in DIRECT_HELPERS and platform == domain
-            if not isinstance(platform, str) or (not direct_helper and platform not in DIRECT_DEVICE_PLATFORMS):
+            if platform in ('group', 'switch_as_x'):
+                row['_override_members'] = self.wrapper_members(target, row, registry)
+            elif not isinstance(platform, str) or (not direct_helper and platform not in DIRECT_DEVICE_PLATFORMS):
                 raise ApprovalRequired('Scripted or unverified entity platforms require normal approval.')
         return row
+
+    @staticmethod
+    def wrapper_members(target, row, registry):
+        """Read loaded group members or the source recorded by Core's switch wrapper."""
+        if registry['platform'] == 'group':
+            members = row.get('attributes', {}).get('entity_id')
+            if isinstance(members, list) and any(not isinstance(member, str)
+                    or member.split('.')[0] != target.split('.')[0] for member in members):
+                raise ApprovalRequired('Group members cannot be fully verified; request normal approval.')
+        else:
+            options = registry.get('options', {}).get('switch_as_x')
+            if (not isinstance(options, dict) or set(options) != {'entity_id', 'invert'}
+                    or type(options['invert']) is not bool):
+                raise ApprovalRequired('The switch wrapper source is unavailable; request normal approval.')
+            members = [options['entity_id']]
+            if not isinstance(members[0], str) or not members[0].startswith('switch.'):
+                raise ApprovalRequired('The switch wrapper source cannot be verified; request normal approval.')
+        if not isinstance(members, list) or not members or len(members) > 128:
+            raise ApprovalRequired('Wrapper members are unavailable or oversized; request normal approval.')
+        return [entity(member) for member in members]
 
     def resolve(self, selector, service_domain=None):
         if isinstance(selector, str):

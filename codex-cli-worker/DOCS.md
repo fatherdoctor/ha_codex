@@ -846,10 +846,33 @@ Any blueprint reference on disk or in a loaded automation/script makes reload as
 An automation without an id on disk or in its loaded definition also makes the reload ask.
 Competing action spellings or an unsupported automation/script shape require normal approval.
 Template, script-backed and unverified entity platforms require normal approval for controls too.
-Supported device platforms are Hue, ZHA, Z-Wave JS, Matter, ESPHome and HomeKit Device; direct input helpers
-also remain supported. The worker checks Core's registered platform again immediately before writing.
-Other integrations ask until their effects can be verified; request-supplied platform labels do not count.
+Supported device platforms are Hue, ZHA, Z-Wave JS, MQTT, Matter, ESPHome, WLED, Shelly, TP-Link,
+Lutron Caseta and HomeKit Device; direct input helpers also remain supported. This list will grow as
+additional integrations are verified. Other integrations ask; request-supplied platform labels do not count.
+Scene members, including nested scenes, pass the same platform and selected-limit checks as direct targets.
+Groups and switch wrappers are judged recursively by their loaded members; unreadable membership asks.
+The worker rechecks every member and its membership after the audit, immediately before writing.
 A supported ordinary switch can still represent a relay; this does not inspect wiring or device firmware.
+
+The device-command contracts were checked in Core 2026.10.3 source (not on a live system):
+
+| Registered platform | Device-command implementation |
+| --- | --- |
+| hue | [switch](https://github.com/home-assistant/core/blob/2026.10.3/homeassistant/components/hue/switch.py): bridge controller request |
+| zha | [switch](https://github.com/home-assistant/core/blob/2026.10.3/homeassistant/components/zha/switch.py): ZHA switch entity delegation |
+| zwave_js | [switch](https://github.com/home-assistant/core/blob/2026.10.3/homeassistant/components/zwave_js/switch.py): set device value |
+| mqtt | [light](https://github.com/home-assistant/core/blob/2026.10.3/homeassistant/components/mqtt/light/schema_basic.py): publish configured device command |
+| matter | [switch](https://github.com/home-assistant/core/blob/2026.10.3/homeassistant/components/matter/switch.py): send device command |
+| esphome | [switch](https://github.com/home-assistant/core/blob/2026.10.3/homeassistant/components/esphome/switch.py): client switch command |
+| wled | [light](https://github.com/home-assistant/core/blob/2026.10.3/homeassistant/components/wled/light.py): WLED master command |
+| shelly | [light](https://github.com/home-assistant/core/blob/2026.10.3/homeassistant/components/shelly/light.py): device state/RPC command |
+| tplink | [light](https://github.com/home-assistant/core/blob/2026.10.3/homeassistant/components/tplink/light.py): light-module state command |
+| lutron_caseta | [light](https://github.com/home-assistant/core/blob/2026.10.3/homeassistant/components/lutron_caseta/light.py): smart-bridge value command |
+| homekit_controller | [switch](https://github.com/home-assistant/core/blob/2026.10.3/homeassistant/components/homekit_controller/switch.py): characteristic write |
+
+For wrapper membership, Core's [light group](https://github.com/home-assistant/core/blob/2026.10.3/homeassistant/components/group/light.py)
+exposes loaded entity IDs, while [switch_as_x](https://github.com/home-assistant/core/blob/2026.10.3/homeassistant/components/switch_as_x/entity.py)
+records its source switch in registry options and forwards controls to it. Unknown wrapper shapes ask.
 
 Settings are private, atomic booleans under `/data/codex-home/house-rules/permission-overrides.json`.
 Only a verified administrator on the Ingress page can read or save them; the worker API token does not

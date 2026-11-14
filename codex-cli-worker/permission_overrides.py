@@ -227,7 +227,9 @@ class Engine:
                 # Last Core read follows audit persistence and all other preflight work.
                 for target, digest in checks.items():
                     if target.startswith('entity:'):
-                        self.backend.require_entity(target[7:])
+                        row = self.backend.require_entity(target[7:])
+                        if self.definition_digest(row.get('_override_members')) != digest:
+                            raise ApprovalRequired('Wrapper membership changed; request normal approval.')
                         continue
                     value = (self.backend.reload_changes(target[7:]) if target.startswith('reload:')
                              else self.backend.definition(target))
@@ -289,7 +291,11 @@ class Engine:
         targets = [] if domain in ('notify', 'persistent_notification') else self.targets(selector, domain)
         for target in targets:
             # Recheck platform eligibility after the audit, including nested effects.
-            checks['entity:' + target] = None
+            row = self.backend.require_entity(target)
+            members = row.get('_override_members')
+            checks['entity:' + target] = self.definition_digest(members)
+            if members is not None:
+                self.check_members(members, groups, rules, checks, trail + (target,))
         if any(target.split('.')[0] != domain for target in targets):
             raise ApprovalRequired('The service and target domains disagree; request normal approval.')
         if domain in ('script', 'scene', 'automation'):
@@ -301,24 +307,43 @@ class Engine:
                     raise ApprovalRequired('An indirect action definition is unavailable; request normal approval.')
                 checks[target] = self.definition_digest(definition)
                 if domain == 'scene':
-                    self.check_scene(definition, groups, rules)
+                    self.check_scene(definition, groups, rules, checks, trail + (target,))
                 else:
                     sequence = action_sequence(definition, domain)
                     self.sequence(sequence, groups, rules, checks, trail + (target,))
         return targets
 
-    def check_scene(self, definition, groups, rules):
+    def check_scene(self, definition, groups, rules, checks, trail=()):
         """Every loaded or newly configured member must pass its own group and limit."""
         effects = definition.get('entities')
         if not isinstance(effects, dict) or not effects:
             raise ApprovalRequired('Scene targets could not be checked; request normal approval.')
-        for nested in effects:
+        self.check_members(list(effects), groups, rules, checks, trail)
+
+    def check_members(self, members, groups, rules, checks, trail):
+        """Resolve every loaded scene/wrapper effect and pin it for the final recheck."""
+        if not isinstance(members, list) or not members or len(members) > 128:
+            raise ApprovalRequired('Members cannot be fully verified; request normal approval.')
+        for nested in members:
+            if nested in trail or len(trail) >= 16 or len(checks) >= 128:
+                raise ApprovalRequired('Member resolution exceeds its limit; request normal approval.')
             domain = entity(nested).split('.')[0]
-            if domain not in {'light', 'switch', 'input_boolean'} | SECURITY:
+            if domain not in {'light', 'switch', 'input_boolean', 'scene'} | SECURITY:
                 raise ApprovalRequired('Scene effects require normal approval.')
             group = 'security' if domain in SECURITY else 'everyday'
             self.allowed(group, groups)
             self.guard_effect(domain, rules)
+            row = self.backend.require_entity(nested)
+            nested_members = row.get('_override_members')
+            checks['entity:' + nested] = self.definition_digest(nested_members)
+            if domain == 'scene':
+                definition = self.backend.definition(nested)
+                if not isinstance(definition, dict):
+                    raise ApprovalRequired('Nested scene members are unavailable; request normal approval.')
+                checks[nested] = self.definition_digest(definition)
+                self.check_scene(definition, groups, rules, checks, trail + (nested,))
+            elif nested_members is not None:
+                self.check_members(nested_members, groups, rules, checks, trail + (nested,))
 
     def sequence(self, sequence, groups, rules, checks, trail):
         if not isinstance(sequence, list) or len(sequence) > 128:
@@ -362,7 +387,7 @@ class Engine:
         checks['reload:' + domain] = self.definition_digest(changes)
         for identifier, definition in changes.items():
             if domain == 'scene':
-                self.check_scene(definition, groups, rules)
+                self.check_scene(definition, groups, rules, checks, (identifier,))
             else:
                 sequence = action_sequence(definition, domain)
                 self.sequence(sequence, groups, rules, checks, (identifier,))

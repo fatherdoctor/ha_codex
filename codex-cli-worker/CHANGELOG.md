@@ -2,6 +2,8 @@
 
 ## 0.1.81.2 (unreleased)
 
+- Verify scene and wrapper members before control and after auditing; support the verified common device integrations.
+
 - Require approval for template reloads, scripted or unverified entity platforms, and ambiguous action definitions.
 
 - Ask before reloading template actions, packages, blueprints or unreadable layouts; keep changed house rules unconfirmed after switch saves.
