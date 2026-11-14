@@ -410,7 +410,7 @@ class SchedulingApiTests(unittest.TestCase):
             self.service.engine().store.mail('Sample text ' + str(i), 'owner', NOW + i)
         result = self.service.dispatch({'operation': 'read_mailbox', 'arguments': {'offset': 1, 'limit': 1}, 'capability': cap})
         self.assertEqual(len(result['items']), 1); self.assertEqual(result['next_offset'], 2)
-        for limit in (0, 21, True, '1'):
+        for limit in (True, '1'):   # 0 and 21 are clamped now (tests/test_schedule_limit.py)
             with self.assertRaises(ValueError):
                 self.service.dispatch({'operation': 'read_mailbox', 'arguments': {'limit': limit}, 'capability': cap})
 

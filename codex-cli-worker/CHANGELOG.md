@@ -2,6 +2,12 @@
 
 ## 0.1.81.2 (unreleased)
 
+- A scheduling or mailbox tool asked for more than 20 items now gets the first 20 and a `next_offset`,
+  instead of a refusal. Codex asked `read_mailbox` for 50 messages when told to summarize the unread mail,
+  and the only answer was "Invalid, refused or expired scheduling request.", so it could not correct
+  itself. A limit below 1 reads 1 item. Refusals that remain (an offset out of range, a limit that is not a
+  whole number, an extra argument, an ended exchange, a full proposal list) now say their reason.
+
 - Explain the first confirmation needed to use action groups, name disabled groups in refusal diagnostics,
   and direct entity lookups to the worker's authenticated read tool before changes.
 

@@ -55,6 +55,34 @@ class Worker:
                 raise
 
 
+PAGE_LIMIT = 20
+DEFAULT_PAGE_LIMIT = 10
+
+
+def page_arguments(operation, args):
+    """Return (offset, limit) for a list_schedules or read_mailbox call.
+
+    A limit outside 1-20 is clamped rather than refused, so a model that asks
+    for 50 gets the first 20 and a next_offset to continue from. A value that
+    is not a whole number is refused with its reason, since guessing what the
+    caller meant would be worse.
+    """
+    if set(args) - {'offset', 'limit'}:
+        raise ValueError(f'{operation} accepts only offset and limit.')
+    if operation == 'list_schedules':
+        maximum = scheduling.MAX_SCHEDULES + scheduling.MAX_PROPOSALS
+    else:
+        maximum = scheduling.MAX_MESSAGES
+    offset = args.get('offset', 0)
+    limit = args.get('limit', DEFAULT_PAGE_LIMIT)
+    # bool is a subclass of int; true and false are not page numbers.
+    if type(offset) is not int or not 0 <= offset <= maximum:
+        raise ValueError(f'offset must be a whole number from 0 to {maximum}.')
+    if type(limit) is not int:
+        raise ValueError(f'limit must be a whole number; up to {PAGE_LIMIT} items are returned per page.')
+    return offset, min(max(limit, 1), PAGE_LIMIT)
+
+
 class Service:
     def __init__(self, worker):
         self.worker = worker
@@ -88,7 +116,7 @@ class Service:
     def dispatch(self, payload):
         """Use the existing running-turn capability only for proposals and local text."""
         if not isinstance(payload, dict) or set(payload) != {'operation', 'arguments', 'capability'}:
-            raise ValueError('Invalid scheduling request.')
+            raise ValueError('A scheduling request needs exactly operation, arguments and capability.')
         cap = payload['capability']
         w = self.worker
         # Refresh cached HA metadata before taking the worker lock. Validate the
@@ -107,10 +135,7 @@ class Service:
                 return {'ok': True, 'schedule_id': item['id'], 'approved': False, 'enabled': False,
                         'message': 'Waiting for owner approval on the Codex page.'}
             if operation in ('list_schedules', 'read_mailbox'):
-                maximum = scheduling.MAX_SCHEDULES + scheduling.MAX_PROPOSALS if operation == 'list_schedules' else scheduling.MAX_MESSAGES
-                offset = args.get('offset', 0); limit = args.get('limit', 10)
-                if set(args) - {'offset', 'limit'} or type(offset) is not int or not 0 <= offset <= maximum or type(limit) is not int or not 1 <= limit <= 20:
-                    raise ValueError('Invalid page offset.')
+                offset, limit = page_arguments(operation, args)
                 rows = store.schedules() if operation == 'list_schedules' else store.messages()
                 page = rows[offset:offset + limit]
                 for row in page:
@@ -121,14 +146,40 @@ class Service:
                         row['name'] = w.redact(row['name'])
                 return {'ok': True, 'items': page, 'next_offset': offset + limit if offset + limit < len(rows) else None,
                         'text_limit': 512}
-            if operation == 'post_mailbox' and not set(args) - {'body', 'parent'}:
+            if operation == 'post_mailbox':
+                if set(args) - {'body', 'parent'}:
+                    raise ValueError('post_mailbox accepts only body and parent.')
                 parent = args.get('parent')
                 if parent is not None and (not isinstance(parent, str) or len(parent) != 32):
-                    raise ValueError('Invalid mailbox thread.')
+                    raise ValueError('parent must be the 32-character id of a mailbox message.')
                 turn_id = str(w.tasks[task_id]['current_turn_id'])
                 message_id = store.mail(args.get('body'), 'codex', time.time(), parent, task_id + ':' + turn_id)
                 return {'ok': True, 'message_id': message_id}
             raise ValueError('Unsupported scheduling operation; approvals are owner-only.')
+
+    def answer(self, raw):
+        """Run one socket request and say in plain words why it was refused.
+
+        The ValueError and LookupError messages raised on this path are fixed
+        sentences written for the caller (they never quote request or stored
+        text), so they are passed on; anything else stays generic.
+        """
+        if len(raw) > 65536:
+            return {'ok': False, 'error': 'The request is larger than 64 KiB.'}
+        try:
+            payload = json.loads(raw)
+        except ValueError:
+            return {'ok': False, 'error': 'The request is not valid JSON.'}
+        try:
+            return self.dispatch(payload)
+        except (KeyError, IndexError):
+            # Their message is a key or index, not a sentence for the caller.
+            return {'ok': False, 'error': 'Invalid, refused or expired scheduling request.'}
+        except (ValueError, LookupError) as exc:
+            reason = exc.args[0] if exc.args and isinstance(exc.args[0], str) else ''
+            return {'ok': False, 'error': reason or 'Invalid, refused or expired scheduling request.'}
+        except Exception:
+            return {'ok': False, 'error': 'Invalid, refused or expired scheduling request.'}
 
     def serve(self, path):
         service = self
@@ -136,13 +187,7 @@ class Service:
         class Handler(socketserver.StreamRequestHandler):
             def handle(self):
                 self.request.settimeout(10)
-                try:
-                    raw = self.rfile.readline(65537)
-                    if len(raw) > 65536:
-                        raise ValueError()
-                    result = service.dispatch(json.loads(raw))
-                except Exception:
-                    result = {'ok': False, 'error': 'Invalid, refused or expired scheduling request.'}
+                result = service.answer(self.rfile.readline(65537))
                 encoded = json.dumps(result).encode() + b'\n'
                 if len(encoded) > 65536:
                     encoded = b'{"ok":false,"error":"Response too large; use a smaller page."}\n'
