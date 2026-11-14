@@ -5,6 +5,30 @@
 - Document why the pinned CLI cannot supply a ChatGPT sign-in deadline: access tokens refresh and
   refresh-grant expiry is not exposed. Keep the existing signed-out Repair without a guessed expiry
   sensor, warning countdown or advance push; test that elapsed time alone does not require sign-in.
+- A scheduling or mailbox tool asked for more than 20 items now gets the first 20 and a `next_offset`,
+  instead of a refusal. Codex asked `read_mailbox` for 50 messages when told to summarize the unread mail,
+  and the only answer was "Invalid, refused or expired scheduling request.", so it could not correct
+  itself. A limit below 1 reads 1 item. Refusals that remain (an offset out of range, a limit that is not a
+  whole number, an extra argument, an ended exchange, a full proposal list) now say their reason.
+
+- Read command text with an unfinished quote again, line by line, in the command hook, so the always-refused
+  Supervisor rule still applies to it. Lines that can be read keep their quoting, so a quoted script given to a
+  shell wrapper is still checked; only a line that cannot be read loses its quotes. A `#` now starts a comment
+  only at the start of a word, as it does in the shell. Add a text floor, read without quotes or backslashes,
+  for `ha` followed by flags and `supervisor` or `su`; it also refuses such a spelling inside a comment.
+- The approval card no longer offers **Allow once** for a command with a heredoc or here-string (any `<<`),
+  a line joined with a backslash, or quoting it cannot read, since such text could hide a write to a
+  protected place and an allowed command runs outside the sandbox. The check does not try to read heredoc
+  bodies: a quote in a body could pair with a quote in a later comment and make other text look like it.
+- Explain the first confirmation needed to use action groups, name disabled groups in refusal diagnostics,
+  and direct entity lookups to the worker's authenticated read tool before changes.
+
+- Scheduling and mailbox tools work from a chat again. Codex asked for approval of each call to
+  `propose_schedule`, `list_schedules`, `read_mailbox` and `post_mailbox`, and the chat page has no card for
+  that kind of request, so every call was declined without anything shown. The four tools are now approved
+  ahead, as the verification and history tools are; each keeps its own limits (proposals stay disabled until
+  an administrator approves them, and mailbox messages confer no authority). Any other tool question the page
+  cannot show is still declined, and the chat now says so.
 - The command hook now answers within 1.5 seconds of starting. Codex 0.166 runs a tool call whose hook
   passes its 10-second timeout, so a slow check could let a call through. The check now runs in a child
   process that the hook stops at the deadline, refusing the request with a plain reason, even when the check
