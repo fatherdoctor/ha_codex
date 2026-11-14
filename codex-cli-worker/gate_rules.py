@@ -524,10 +524,13 @@ HA_REMOTE_FAMILIES = frozenset(("addon", "addons", "add-on", "add-ons", "host", 
 HA_ALWAYS_FAMILIES = frozenset(("supervisor", "su"))
 SHELL_ASSIGNMENT_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*=")
 # A conservative text floor also catches shell constructs the parser cannot place.
-# The four documented value-taking global flags may precede the family.
+# It reads the command with its quotes removed. The four documented value-taking
+# global flags, or any other flag, may precede the family.
+HA_TEXT_PREFIX = r"\bha\s+(?:(?:--(?:log-level|api-token|endpoint|config)(?:=\S+|\s+\S+)|-\S+)\s+)*"
 HA_REMOTE_TEXT_RE = re.compile(
-    r"\bha\s+(?:(?:--(?:log-level|api-token|endpoint|config)(?:=\S+|\s+\S+)|-\S+)\s+)*"
-    r"(?:add-?ons?|host|os|core|hardware|network|backups?|apps)\b", re.IGNORECASE)
+    HA_TEXT_PREFIX + r"(?:add-?ons?|host|os|core|hardware|network|backups?|apps)\b", re.IGNORECASE)
+# The always-refused families get the same floor whether or not remote control is on.
+HA_ALWAYS_TEXT_RE = re.compile(HA_TEXT_PREFIX + r"(?:supervisor|su)\b", re.IGNORECASE)
 # Flag values and shell syntax can obscure the exact argument boundaries. The
 # always-refused families remain protected even when they follow such values.
 HA_SHELL_WORD_RE = re.compile(r"\bh[\"'\\]*a\b", re.IGNORECASE)
@@ -543,6 +546,74 @@ def _ha_unknown_flag(text: str) -> bool:
         if word and HA_UNKNOWN_FLAG_RE.search(line, word.end()):
             return True
     return False
+
+
+# Characters after which a ``#`` starts a word. An escaped character is never one of them.
+WORD_BREAKS = frozenset(" \t\r\n;&|()<>")
+
+
+def _strip_comments(text: str) -> str:
+    """Remove shell comments: from a ``#`` that starts a word outside quotes to the end of its line.
+
+    A ``#`` inside a word, such as ``a#b``, is part of that word, as it is for the shell.
+    """
+    out: list[str] = []
+    quote = ""
+    i = 0
+    while i < len(text):
+        char = text[i]
+        if quote == "'":
+            if char == "'":
+                quote = ""
+        elif char == "\\":
+            # A backslash keeps the next character, except inside single quotes.
+            out.append(text[i:i + 2])
+            i += 2
+            continue
+        elif quote == '"':
+            if char == '"':
+                quote = ""
+        elif char in "'\"":
+            quote = char
+        elif char == "#" and (not out or out[-1] in WORD_BREAKS):
+            end = text.find("\n", i)
+            i = len(text) if end == -1 else end
+            continue
+        out.append(char)
+        i += 1
+    return "".join(out)
+
+
+def _split_words(text: str, punctuation: str) -> list[str]:
+    """Split text the way the shell does, with comments already removed; raise ValueError if unreadable."""
+    lexer = shlex.shlex(text, posix=True, punctuation_chars=punctuation)
+    lexer.whitespace = " \t\r"
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    return list(lexer)
+
+
+def _shell_words(text: str, punctuation: str) -> list[str]:
+    """Split command text into words and shell punctuation, without running it.
+
+    Text the splitter cannot read, such as an unfinished quote from an apostrophe in a
+    heredoc body, is read again line by line. A line that still cannot be read is split
+    with its quotes and backslashes removed; the other lines keep their quoting, so a
+    quoted script given to ``sh -c`` stays one word. The shell still runs such a
+    command, so it must never be skipped as unreadable.
+    """
+    try:
+        return _split_words(_strip_comments(text), punctuation)
+    except ValueError:
+        pass
+    words = []
+    for line in text.split("\n"):
+        try:
+            words.extend(_split_words(_strip_comments(line), punctuation))
+        except ValueError:
+            words.extend(_split_words(re.sub(r"[\"'\\]", "", line), punctuation))
+        words.append("\n")
+    return words
 
 
 def _shell_substitutions(text: str) -> tuple[str, list[str]]:
@@ -588,14 +659,7 @@ def _ha_supervisor_command(text: str, depth: int = 0) -> bool:
     masked, nested = _shell_substitutions(text.replace('\\\n', ' '))
     if any(_ha_supervisor_command(item, depth + 1) for item in nested):
         return True
-    lexer = shlex.shlex(masked, posix=True, punctuation_chars=';&|()\n')
-    lexer.whitespace = ' \t\r'
-    lexer.whitespace_split = True
-    lexer.commenters = '#'
-    try:
-        tokens = list(lexer)
-    except ValueError:
-        return False
+    tokens = _shell_words(masked, ';&|()\n')
     segments, segment = [], []
     for token in tokens:
         if token and all(ch in ';&|()\n' for ch in token):
@@ -683,23 +747,7 @@ def _ha_command(text: str, remote_on: bool, depth: int = 0) -> bool:
     """
     if depth > 3:
         return False
-    lexer = shlex.shlex(text.replace("\\\n", " "), posix=True, punctuation_chars=";&|()\n")
-    lexer.whitespace = " \t\r"
-    lexer.whitespace_split = True
-    lexer.commenters = "#"
-    try:
-        tokens = list(lexer)
-    except ValueError:
-        # An unfinished quote must not turn a recognizable command into an escape.
-        lexer = shlex.shlex(text.replace("\\\n", " ").replace('"', '').replace("'", ""),
-                            posix=True, punctuation_chars=";&|()\n")
-        lexer.whitespace = " \t\r"
-        lexer.whitespace_split = True
-        lexer.commenters = "#"
-        try:
-            tokens = list(lexer)
-        except ValueError:
-            return False
+    tokens = _shell_words(text.replace("\\\n", " "), ";&|()\n")
     segments = []
     segment = []
     for token in tokens:
@@ -843,8 +891,10 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
         for pattern, why in PROTECTED_COMMAND_RES:
             if pattern.search(text):
                 return f"This command {why}, which is never allowed."
-        plain_ha = re.sub(r"[\"'`]", "", text.replace("\\\n", " "))
+        # Quotes and backslashes only change how a word is spelled, so the floor reads without them.
+        plain_ha = re.sub(r"[\"'`\\]", "", text.replace("\\\n", " "))
         if (_ha_supervisor_command(text)
+                or HA_ALWAYS_TEXT_RE.search(plain_ha)
                 or (remote_on and (HA_REMOTE_TEXT_RE.search(plain_ha) or _ha_unknown_flag(text)))
                 or _ha_command(text, remote_on)):
             return "This command talks to the Home Assistant Supervisor, which is never allowed."

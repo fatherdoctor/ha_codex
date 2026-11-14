@@ -82,6 +82,36 @@ class OverridePolicyTests(unittest.TestCase):
         self.assertFalse(self.dispatch(operation='reload', target='automation')['ok'])
         self.assertEqual(self.backend.writes, [])
 
+    def test_disabled_groups_are_named_in_refusal_diagnostics(self):
+        cases = (
+            ('apply', {'operation': 'reload', 'target': 'automation'}),
+            ('everyday', {'operation': 'service', 'service': 'light.turn_on', 'target': ['light.sample']}),
+            ('organize', {'operation': 'update_entity', 'target': 'light.sample', 'data': {'name': 'Sample'}}),
+            ('bigger', {'operation': 'backup'}),
+            ('security', {'operation': 'service', 'service': 'lock.unlock', 'target': ['lock.sample']}),
+        )
+        for group, request in cases:
+            with self.subTest(group=group):
+                self.enable(**{group: False})
+                self.audit.clear()
+                result = self.engine.dispatch(request, self.authority)
+                self.assertTrue(result.get('approval_required', False), result)
+                self.assertEqual(self.backend.writes, [])
+                self.assertEqual([(row['group'], row['outcome']) for row in self.audit],
+                                 [(group, 'refused')])
+                self.assertNotIn('light.sample', json.dumps(self.audit))
+                self.assertNotIn('lock.sample', json.dumps(self.audit))
+
+    def test_malformed_requests_keep_unknown_diagnostic_group(self):
+        for request in ({'operation': 'unknown'},
+                        {'operation': 'service', 'service': 'unsupported'},
+                        {'operation': 'service', 'service': 'light.turn_on', 'extra': True}):
+            with self.subTest(request=request):
+                self.audit.clear()
+                self.assertTrue(self.engine.dispatch(request, self.authority).get('approval_required', False))
+                self.assertEqual(self.audit[-1]['group'], 'unknown')
+        self.assertEqual(self.backend.writes, [])
+
     def test_read_only_remote_custom_unknown_and_forged_modes_never_write(self):
         for authority in (Authority(), Authority('read-only', 'on-request', 'user', 'worker'),
                           Authority('workspace-write', 'never', 'user', 'worker'),
@@ -192,6 +222,35 @@ class OverridePolicyTests(unittest.TestCase):
 
 
 class PreparedAdapterTests(unittest.TestCase):
+    def test_first_use_note_explains_confirmation_without_confirming_rules(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = root / 'config'
+            config.mkdir()
+            path = config / 'AGENTS.md'
+            path.write_text('Synthetic owner instructions.')
+            service = api.Service(SimpleNamespace(DATA_ROOT=root, CONFIG_ROOT=config))
+            note = service.guard_note()
+            self.assertIn('start using these groups', note)
+            self.assertIn('Review and confirm', note)
+            self.assertFalse(service.rules_path().exists())
+            with self.assertRaises(ApprovalRequired):
+                service.guards()
+            service.confirm_rules()
+            self.assertEqual(service.guard_note(), '')
+            path.write_text('Changed synthetic owner instructions.')
+            self.assertIn('changed since confirmation', service.guard_note())
+            self.assertNotIn('start using these groups', service.guard_note())
+            with self.assertRaises(ApprovalRequired):
+                service.guards()
+
+    def test_missing_instructions_need_no_first_use_confirmation_note(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            service = api.Service(SimpleNamespace(DATA_ROOT=root, CONFIG_ROOT=root / 'config'))
+            self.assertEqual(service.guard_note(), '')
+            self.assertFalse(service.rules_path().exists())
+
     def test_unavailable_typed_diagnostics_refuses(self):
         service = api.Service(SimpleNamespace(diagnostics=None))
         with self.assertRaises(ApprovalRequired):

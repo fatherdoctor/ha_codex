@@ -162,6 +162,17 @@ def service_group(service):
     return 'everyday'
 
 
+def operation_group(operation, service=None):
+    """Classify the requested action before planning can refuse a disabled group."""
+    if operation == 'service':
+        return service_group(service)
+    if operation in ('reload', 'check_config', 'flow_start', 'flow_continue'):
+        return 'apply'
+    if operation in ('update_entity', 'update_device', 'save_dashboard'):
+        return 'organize'
+    return 'bigger'
+
+
 class Engine:
     """Verify the direct action before a single write; backend failures never auto-retry."""
     def __init__(self, settings, backend, guards, observer):
@@ -193,6 +204,7 @@ class Engine:
                 if not isinstance(request, dict) or set(request) - FIELDS or operation == 'unknown':
                     raise ApprovalRequired('Unsupported action fields; request normal approval.')
                 bounded_json(request, 1024 * 1024)
+                group = operation_group(operation, request.get('service'))
                 groups = self.settings.read()
                 rules = guard_rules(self.guards())
                 checks = set()
@@ -274,12 +286,7 @@ class Engine:
         target, data = request.get('target'), request.get('data', {})
         if not isinstance(data, dict):
             raise ApprovalRequired('Action data must be an object; request normal approval.')
-        if operation in ('reload', 'check_config', 'flow_start', 'flow_continue'):
-            group = 'apply'
-        elif operation in ('update_entity', 'update_device', 'save_dashboard'):
-            group = 'organize'
-        else:
-            group = 'bigger'
+        group = operation_group(operation, request.get('service'))
         if operation == 'service':
             service = request.get('service')
             targets = self.effect(service, target, data, groups, rules, checks)
