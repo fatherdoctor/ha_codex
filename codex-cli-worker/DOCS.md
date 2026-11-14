@@ -801,6 +801,55 @@ An unavailable worker returns an unavailable data section without its exception
 message or connection address.
 
 
+### Permissions overrides
+
+Administrators can open Settings → Permissions overrides to choose five groups. Apply my changes,
+Everyday control and Organize start on; Bigger changes and Security and people start off. Changes save
+immediately. The worker tool `home_assistant_actions.act` performs only the supported fixed Core operations;
+it does not provide shell commands, arbitrary URLs or a Supervisor tool. A successful result names the
+action, and the assistant must name it in its answer. Refusals fall back to normal native approval. Never
+retry an unknown outcome automatically: inspect the affected state before any further attempt.
+
+Groups apply only to person-started Default exchanges (workspace-write with on-request user approvals).
+Scheduled and lead-channel runs keep normal prompts, even when their launch mode permits writes.
+Read only never pre-approves writes. The permission groups apply to chat-page turns; remote threads from the ChatGPT app still use normal approval prompts until Codex supplies a trusted signal identifying who started the turn. Auto-review and Full access remain
+future modes; this feature does not enable either or change the managed policy.
+
+Only the exact marked guard-rails block in `/config/AGENTS.md` controls these groups. Other instructions
+remain for the assistant to follow in chat. Settings identifies each selected block line that suspends
+actions; unknown block lines suspend all groups. The first save of the groups establishes the initial
+confirmed copy. Later switch saves leave changed rules unconfirmed until an administrator uses Review and
+confirm in Settings, which shows the text and submits its digest. The worker keeps the confirmed text and SHA-256 under `/data/house-rules/`, outside
+the agent workspace. A missing file is a confirmed state too. Any edit, deletion or symlink since confirmation
+suspends all groups until review and confirmation; a change observed within an exchange suspends that
+exchange permanently, even if the file is restored. Start a new exchange after confirming.
+
+The groups judge only the service being requested and the entities it directly targets. Area, device
+and label selectors resolve to entities of that service's domain. The group switch, selected house-rules
+lines and the Security and people group apply to those direct targets. A direct lock or alarm action
+still needs its security group and must respect any selected limit.
+
+What a scene, script, automation, group, wrapper or template entity does in turn is the owner's own setup.
+The tool does not walk members or downstream actions, check entity platforms, compare file and loaded
+definitions, or judge the actions loaded by a reload. **Apply my changes** permits supported reloads,
+including template and scene reloads, of whatever the owner's files currently hold. Planted commands
+remain the existing command check's and configuration watch's job; those checks are unchanged.
+
+Unknown/custom block limits, dynamic templates in direct request values, unresolved or mixed-domain
+targets and unavailable Core data still require normal approval. Direct targets are checked again after
+the audit, before writing. The tool cannot change its own settings/policy, access credential entities
+or invoke Supervisor actions. Dashboard edits save a private backup first; an entity-ID change returns
+Core's related-item report, which does not cover arbitrary text or external systems. Configuration flow
+results omit credentials; only host, port, name, username, title and scan_interval fields may be filled.
+Any other field, a password selector or a secret flag hands the whole step to Home Assistant without
+submitting values. This does not inspect wiring or device firmware.
+
+Settings are private, atomic booleans under `/data/codex-home/house-rules/permission-overrides.json`.
+Only a verified administrator on the Ingress page can read or save them; the worker API token does not
+satisfy that check. Corrupt or unreadable settings refuse actions. Every pre-approved operation needs
+an active shared diagnostics recorder and a saved requested event before execution. Exported events
+contain only the operation, group, decision, outcome, timing and duration; no payloads or raw targets.
+
 ### Chat page and attachments
 
 The page follows Home Assistant colors in light and dark when its host exposes them; otherwise it follows
