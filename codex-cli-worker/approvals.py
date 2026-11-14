@@ -101,36 +101,31 @@ def _split_words(text: str, punctuation: str) -> list[str]:
 def _shell_words(text: str, punctuation: str) -> list[str]:
     """Split command text into words and shell punctuation, without running it.
 
-    Text the splitter cannot read, such as an unfinished quote from an apostrophe in a
-    heredoc body, is read again line by line. A line that still cannot be read is split
-    with its quotes and backslashes removed; the other lines keep their quoting, so a
-    quoted script given to ``sh -c`` stays one word. The shell still runs such a
-    command, so it must never be skipped as unreadable. gate_rules.py has the same
-    functions for the hook.
+    Raise ValueError when the text cannot be read with its quoting intact, such as an
+    unfinished quote from an apostrophe in a heredoc body or a quoted script that spans
+    lines in a way the splitter cannot follow. The caller treats that as touching a
+    protected place: a command allowed once runs outside the sandbox, so a command this
+    check cannot read is never offered Allow once. gate_rules.py reads such text again
+    line by line instead, because its Supervisor rule has a text floor behind it.
     """
-    try:
-        return _split_words(_strip_comments(text), punctuation)
-    except ValueError:
-        pass
-    words = []
-    for line in text.split("\n"):
-        try:
-            words.extend(_split_words(_strip_comments(line), punctuation))
-        except ValueError:
-            words.extend(_split_words(re.sub(r"[\"'\\]", "", line), punctuation))
-        words.append("\n")
-    return words
+    return _split_words(_strip_comments(text), punctuation)
 
 
 def _protected_ancestor_operations(command: str, initial_cwd: str = '', depth: int = 0) -> bool:
     """Conservatively identify named requirements, root searches and writes into root or /etc.
+
+    Command text that cannot be split with its quoting intact counts as protected.
 
     This checks command text only; it does not follow aliases, symlinks or computed paths.
     Rare forms such as bsdtar, cpio, 7z, remote rsync, find -O3 and computed Python paths can be missed.
     """
     if depth > 5:
         return False
-    tokens = _shell_words(command.replace('\\\n', ' '), ';&|()\n<>')
+    try:
+        tokens = _shell_words(command.replace('\\\n', ' '), ';&|()\n<>')
+    except ValueError:
+        # Fail closed: text whose quoting cannot be read might hide a protected write.
+        return True
     segments, segment = [], []
     for token in tokens:
         if token and all(ch in ';&|()\n<>' for ch in token):

@@ -2,11 +2,14 @@
 
 ## 0.1.81.2 (unreleased)
 
-- Read command text with an unfinished quote again, line by line, in both command checks, so the
-  always-refused Supervisor rule and the protected-write check still apply to it. Lines that can be read keep
-  their quoting, so a quoted script given to a shell wrapper is still checked; only a line that cannot be read
-  loses its quotes. A `#` now starts a comment only at the start of a word, as it does in the shell. Add a
-  text floor, read without quotes or backslashes, for `ha` followed by flags and `supervisor` or `su`.
+- Read command text with an unfinished quote again, line by line, in the command hook, so the always-refused
+  Supervisor rule still applies to it. Lines that can be read keep their quoting, so a quoted script given to a
+  shell wrapper is still checked; only a line that cannot be read loses its quotes. A `#` now starts a comment
+  only at the start of a word, as it does in the shell. Add a text floor, read without quotes or backslashes,
+  for `ha` followed by flags and `supervisor` or `su`; it also refuses such a spelling inside a comment.
+- The approval card no longer offers **Allow once** for a command whose quoting it cannot read (a heredoc
+  whose body holds an apostrophe, a quoted script that spans lines), since such text could hide a write to a
+  protected place and an allowed command runs outside the sandbox.
 - The command hook now answers within 1.5 seconds of starting. Codex 0.166 runs a tool call whose hook
   passes its 10-second timeout, so a slow check could let a call through. The check now runs in a child
   process that the hook stops at the deadline, refusing the request with a plain reason, even when the check
