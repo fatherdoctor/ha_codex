@@ -8,6 +8,15 @@
   itself. A limit below 1 reads 1 item. Refusals that remain (an offset out of range, a limit that is not a
   whole number, an extra argument, an ended exchange, a full proposal list) now say their reason.
 
+- Read command text with an unfinished quote again, line by line, in the command hook, so the always-refused
+  Supervisor rule still applies to it. Lines that can be read keep their quoting, so a quoted script given to a
+  shell wrapper is still checked; only a line that cannot be read loses its quotes. A `#` now starts a comment
+  only at the start of a word, as it does in the shell. Add a text floor, read without quotes or backslashes,
+  for `ha` followed by flags and `supervisor` or `su`; it also refuses such a spelling inside a comment.
+- The approval card no longer offers **Allow once** for a command with a heredoc or here-string (any `<<`),
+  a line joined with a backslash, or quoting it cannot read, since such text could hide a write to a
+  protected place and an allowed command runs outside the sandbox. The check does not try to read heredoc
+  bodies: a quote in a body could pair with a quote in a later comment and make other text look like it.
 - Explain the first confirmation needed to use action groups, name disabled groups in refusal diagnostics,
   and direct entity lookups to the worker's authenticated read tool before changes.
 
