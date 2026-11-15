@@ -1,9 +1,141 @@
 # Changelog
 
+## 0.1.81.3 (unreleased)
+
+- The app now installs its own integration. At each start it copies the Codex integration of the same
+  release, carried in the app image, to `/config/custom_components/codex_cli`, then asks for one restart of
+  Home Assistant in a notification. It writes only when the folder is missing or was written by the app
+  (a marker file in the folder names the copy), keeps the previous copy in the app's own storage, and
+  swaps the new folder in by renaming, so a failed copy leaves the old folder in place. The new copy is
+  written in `/config/.codex_cli_install`, outside `custom_components`, so Home Assistant never loads a
+  partial copy. A folder installed another way (Marketplace, HACS or by hand), or changed after the app wrote
+  it, is never changed; a notification says so once per app version. A restart notice that Home Assistant
+  could not show is posted again at the next start.
+  The new `install_integration` option (default on) turns the copy off. Uninstalling the app leaves the
+  integration in place.
+- The app announces itself through Supervisor discovery at each start, so after the restart
+  **Settings** > **Devices & services** shows **Discovered: Codex**. Setup from discovery now asks for
+  confirmation before it adds the integration, and shows a connection error on the form instead of ending.
+- The app repository's maintainer is now The Backshop.
+- The app announces itself through Supervisor discovery only once Home Assistant has loaded the integration,
+  so a fresh install no longer logs `Cannot find integration codex_cli` with a traceback before the restart.
+  It checks once a minute in the background and never delays the worker's start.
+- The "integration left as installed" notification is removed once the folder is the app's own again.
+- A restart of the app while Codex is not signed in no longer posts a new one-time code each time. The app
+  starts one sign-in by itself; later starts say to choose **Sign in** instead, until a start finds Codex
+  signed in.
+- Smaller fixes: the install notice no longer says to finish setup for an integration that may already be set
+  up; a file name that cannot be encoded is reported like any failed copy; a damaged notice record is not
+  replayed; the documentation says how to go back to a version before 0.1.81.3.
+
 ## 0.1.81.2 (unreleased)
+
+- Document why the pinned CLI cannot supply a ChatGPT sign-in deadline: access tokens refresh and
+  refresh-grant expiry is not exposed. Keep the existing signed-out Repair without a guessed expiry
+  sensor, warning countdown or advance push; test that elapsed time alone does not require sign-in.
+- A scheduling or mailbox tool asked for more than 20 items now gets the first 20 and a `next_offset`,
+  instead of a refusal. Codex asked `read_mailbox` for 50 messages when told to summarize the unread mail,
+  and the only answer was "Invalid, refused or expired scheduling request.", so it could not correct
+  itself. A limit below 1 reads 1 item. Refusals that remain (an offset out of range, a limit that is not a
+  whole number, an extra argument, an ended exchange, a full proposal list) now say their reason.
+
+- Read command text with an unfinished quote again, line by line, in the command hook, so the always-refused
+  Supervisor rule still applies to it. Lines that can be read keep their quoting, so a quoted script given to a
+  shell wrapper is still checked; only a line that cannot be read loses its quotes. A `#` now starts a comment
+  only at the start of a word, as it does in the shell. Add a text floor, read without quotes or backslashes,
+  for `ha` followed by flags and `supervisor` or `su`; it also refuses such a spelling inside a comment.
+- The approval card no longer offers **Allow once** for a command with a heredoc or here-string (any `<<`),
+  a line joined with a backslash, or quoting it cannot read, since such text could hide a write to a
+  protected place and an allowed command runs outside the sandbox. The check does not try to read heredoc
+  bodies: a quote in a body could pair with a quote in a later comment and make other text look like it.
+- Explain the first confirmation needed to use action groups, name disabled groups in refusal diagnostics,
+  and direct entity lookups to the worker's authenticated read tool before changes.
+
+- Scheduling and mailbox tools work from a chat again. Codex asked for approval of each call to
+  `propose_schedule`, `list_schedules`, `read_mailbox` and `post_mailbox`, and the chat page has no card for
+  that kind of request, so every call was declined without anything shown. The four tools are now approved
+  ahead, as the verification and history tools are; each keeps its own limits (proposals stay disabled until
+  an administrator approves them, and mailbox messages confer no authority). Any other tool question the page
+  cannot show is still declined, and the chat now says so.
+- The command hook now answers within 1.5 seconds of starting. Codex 0.166 runs a tool call whose hook
+  passes its 10-second timeout, so a slow check could let a call through. The check now runs in a child
+  process that the hook stops at the deadline, refusing the request with a plain reason, even when the check
+  is stuck inside one long call. The child also does all of the file reading and module loading, so a stalled
+  disk cannot delay the answer, and the hook does not wait for a stopped child to exit before it answers.
+  An answer that is ready only after the deadline is refused too, rather than passed on late. A program
+  that calls the hook's `main()` repeatedly in one process no longer collects stopped child processes.
+  `tests/measure_gate.py` prints the hook's own time for each call.
+- Judge pre-approved actions by their direct service and targets only. Remove scene/member walks,
+  platform lists and reload-definition comparisons; downstream behavior belongs to the owner's setup.
+- Keep confirmed house rules, mode checks, direct limits, audit-before-write, receipts and setup-secret
+  handoff. Switch saves after first use still leave changed rules unconfirmed until Review and confirm.
+  Recheck active authorization, group settings and confirmed rules after the last direct-target read.
+
+- Do not report generic task HTTP errors as expired ChatGPT sign-in; test sign-in recovery through the full task lifecycle.
+
+- Keep generic passive HTTP errors out of the expired-sign-in Repair; expose only fixed usage-error messages and categories, never raw upstream errors.
+
+- State the Codex account requirement before sign-in, show plan information and uncertain access in Status,
+  and refresh sign-in metadata daily without a model task. Restrict the sign-in Repair to known signed-out
+  or expired state; a good sign-in or successful matching turn clears it.
+
+- Verify atomically saved mailbox event IDs before emission; failed saves or verification reads defer events and retry without replay.
+
+- Add durable unread mailbox counts for lead and owner, an unread-only lead filter, and page acknowledgments.
+  Expose a lead unread sensor and deduplicated, body-free arrival events through the normal status poll.
+  Mail remains data and never starts work by itself.
+- Clarify remote pairing, Core address discovery, and workspace instructions in the newcomer guide.
+
+- Document the line-based command check’s known YAML blind spots and the protections that still apply.
+
+- Add the Quiet Studio chat layout with Home Assistant themes, a bottom composer, photo/file menu,
+  per-chat narrowing permissions, thread status and archive/restore. Separate remote connection and
+  Advanced workspace-rules views; keep pairing URLs distinct from manual codes and administrator-only.
+  Auto-review and Full access remain unavailable; no managed security policy changes.
+
+- Close diagnostics interrupted by a worker restart as unknown, retaining room for new completed work.
+  Create the private entity key without hard links and explain recovery while collecting other metadata.
+  Protect private diagnostic files, retain only the newest corrupt store, distinguish policy causes and
+  clarify privacy-test inputs and backup limits.
+
+- **Anonymized interaction diagnostics.** Add bounded worker metadata and local exports in Settings and Home Assistant diagnostics. Replace the previous integration entry/coordinator snapshot to exclude prompts, titles and connection data. Home Assistant still adds its own system envelope. Use private keyed entity references, administrator-checked downloads, failure-isolated collection and grouped relay reads. Keep 25 interactions by default, configurable from 10 to 100; preserve running work and scale the size cap. Remote ChatGPT thread events remain explicitly excluded.
+
+- The app is now listed as Codex for Home Assistant; the `codex_cli_worker` slug is unchanged, and an installed copy shows the new name after it updates.
+
+- **Core address and first-run relay reads (CX-HA-URL).** Discover Core's actual port and SSL setting from Supervisor at startup and each task/relay launch. Make the address option an empty override and retire old default values. Offer a bounded read-only relay tool using a temporary capability; no hand-made Core token is needed for entity reads and the Supervisor token stays in the worker. Unsupported shell reads still request native network approval; direct commands still need a separately configured credential.
+
+- **ABI and fallback documentation (N8/N9).** Describe domain/stack and network_v8 mediation, the tool-label socket-family restrictions, and the plain relay route's continuing user-namespace requirement. HAOS chat-path acceptance remains the lead's. Under the named lead exception, N10 requires errno 13 on direct proc-denial rows; pinned command/exec rows retain 1, 2 or 13.
+
+- **Scheduled work and local lead channel (CX-SCHED).** Persist owner-approved interval, Home Assistant local-time cron and one-off schedules, bounded run history and a plain-text local mailbox. Agent proposals require owner review; native permissions remain pending human decisions. Add a separately authenticated lead API and turn-scoped proposal/mailbox tools. Preserve existing sandbox and refusal paths. The lead accepted Home Assistant phone permission notification plus the responsive page; no ChatGPT approval mirror. Background outcomes stay in the run log, with only permission-wait pushes. Review fixes protect approved schedules and database sidecars, cap proposals and mailbox writes, allow mailbox clearing, preserve one-offs on busy races and refuse masked-prompt edits.
+
+- **No bundled house rules (CX-NORULES).** Stop packaging and installing house-practice instructions. Preserve owner workspace instructions and all enforced protections. Upgrade cleanup removes only the exact legacy bundled home copy, preserving edited files and symlinks. Documentation points optional house practices to the starter kit.
+
+- **HAOS AppArmor ABI compatibility (CX-RC-EXEC.f3).** Declare ABI 3.0 so HAOS's 3.1.7 parser enables the stack rule instead of applying its legacy untagged-policy defaults. Keep the exact relay-only stack target. Prefer the AppArmor-specific proc attribute, with legacy fallback only when it is absent; access denials still fail closed. Document the intentional same-stack sibling ptrace restriction.
+
+- **Root relay namespace mapping (CX-RC-EXEC.f3, lead ruling).** Both relay launch paths map outside root to inner UID/GID 1000 before dropping all capabilities. The fallback omits UTS setup but keeps the mapping and verifies its non-root IDs, zero capabilities and NNP before exec. Existing kernel file ownership, the private hostname and the exact tool stack remain. CI uses the pinned release CLI to test real-root startup, both loaded profile names, pipe/PTY execution and root-owned `/config` reads/writes under each sandbox policy.
+
+- **NNP-safe relay tools (CX-RC-EXEC.f2).** Add the restrictive tool component to the relay label without removing the relay component, while no_new_privs is already set. An immutable guard verifies the actual stack and NNP before starting native Bubblewrap; a failed transition never launches a tool in only the relay label. Use a minimal fresh device tree plus the shared-memory bind. Loaded-profile diagnostics now require both label components and NNP for pipes and PTYs. Name fixed launcher failure stages, isolate launcher Python, and document version-update profile reload and the HAOS app container name. Actual HAOS enforcement and phone acceptance remain lead checks.
+
+- **Relay execution review fixes (CX-RC-EXEC.f).** Give the relay its own AppArmor label and return tool sandboxes to narrow network rules. Preserve working standard devices in the outer namespace: native failing-first checks reproduce `EACCES` opening `/dev/null` and PTYs without that bind; redundant `/opt` exec rules were not the cause. Drop all capabilities on the plain fallback, create the fixed control-mask anchor at worker startup, and pass fresh relay-only instructions as launch arguments. Preserve the existing SQLite home, saved choice and stable `ha_codex` enrollment client key. Ship an account-free loaded-profile probe runnable through the lead's SSH add-on. HAOS isolation, native phone approval and reconnect after an image update remain lead lab checks.
+
+- **Parity review follow-up (CX-PARITY.u).** Keep normal remote requests in Codex's approval flow while retaining named security refusals. Restore the generic rule to edit automation, script and helper YAML with a backup instead of deleting through the config API. Keep the root-only watch exemption and bounded recovery store from the merged watch fixes.
+
+- **Remote requests keep native approvals (CX-RC-ASK.f).** Normal light, lock, network and checked-file PermissionRequests receive no hook decision, so Codex can ask on the phone; the hook never auto-approves. Keep named refusals for credentials/process environments, full access, app settings/policy/rules and planted command/template definitions. The startup self-test checks normal ASK and security denial. The shipped generic practice and owner-confirmed device actions follow the parity ruling.
 
 Permissions that ask, and only an administrator can answer. Sign-in without a terminal, a pause switch and a model pin.
 
+- **Pairing isolation and administrator access (CX-PAIR.f).** Mask the fixed control-socket parent inside every sandbox. Require a verified administrator for remote-control actions and for code/QR reads; shorten readiness checks and explain a still-starting process honestly.
+- **First remote-control pairing (CX-PAIR).** Ask the supervised app-server for a manual pairing code over its own private control socket. Clear old codes on failure or restart, keep them off logs and the integration and `/status`, and report an unavailable code honestly.
+- **Watch closure fixes (CX-RC-START.f2).** Exempt only the root UI-owned YAML files from automatic undo; matching names in packages or other subfolders remain checked. Reuse verified SHA-256 recovery copies across files and restarts, with a 128-copy/64 MiB store limit. When a new copy will not fit, report without undoing or deleting older recovery copies.
+
+- **Remote-control review fixes (CX-RC-START.f).** Check move destinations for planted YAML; recognize the actual Codex 0.166 downgrade wording. Save and report replaced bytes before watch undo, and report UI-owned YAML without whole-file rollback. Cap hook-checked files at 512 KiB and wait for the watch report in the timing-sensitive test. The container smoke accepts only requirements refusal or a proven restricted fallback.
+
+- **Remote control on HAOS (CX-RC-START).** Use the existing Bubblewrap child profile for the private machine name, without widening the parent; a failed namespace setup starts Codex without the custom name and explains that on the page. Pairing follows the same path. Permit the nested sandbox wrapper in the child profile.
+- Check YAML patches against the complete proposed file, including edits beneath existing shell, REST and command-line definitions. Use the captured Codex 0.166 Bash/apply_patch command-string fixtures. Refuse uncertain or over-budget checks; the upstream hook-timeout fail-open behavior remains a documented limitation.
+- Managed requirements exclude the `never` approval policy. Integration-owned full-access requests fail clearly; relay requests can fall back to read-only. Settings and logs explain that fallback and show an observed downgrade warning without claiming visibility into every relay thread.
+- While remote control is on, undo new or changed always-on configuration blocks using verified earlier bytes or a complete new-file absence manifest. Unsafe or missing backups remain review findings; remote-off scans do not restore files. Keep successful undo results until review, including after restart. Correct masked-file reads to `Permission denied`.
+- Fix closure findings: keep definition, platform and templated-action bodies checked; recognize flow-style script targets; tell the owner to review unchecked edits before any reload or restart.
+- Fix command-check review findings: compare changed files only with verified earlier bytes, restore the remote-control repair text, check indirect script routes to always-on kinds, and allow changed triggers with unchanged always-on calls through normal approval.
 - **No full-access mode.** `danger-full-access` is gone from the app's options. A protected policy inside the image (`/usr/share/ha_codex/policy.json`) lists the allowed sandbox modes and keeps the approval policy at `on-request`; an option it does not allow stops the app at startup, and each task is refused with a "needs support" message instead of asking anyone to approve an escalation. Codex's own configuration no longer says `approval_policy = "never"`.
 - **A policy Codex cannot edit.** The policy and the house rules (`AGENTS.md`) live in the image, outside `/config`. The rules are copied into Codex's home folder at every start, replacing any edited copy. A file change that touches the policy, the rules or the app's settings can only be denied, and so can a command whose text names one of them. A task under a refused sandbox mode now stops before any baseline or backup work.
 - **Approvals need a Home Assistant administrator.** Allow once and Deny are taken only on the Codex page, from the user Home Assistant names for the page, after the worker confirms that user is an active administrator. The integration's API token can no longer answer permission requests. Who answered is recorded on the request.
@@ -17,8 +149,11 @@ Permissions that ask, and only an administrator can answer. Sign-in without a te
 - **Stall watchdog.** A task now stops with a plain message when Codex sends nothing for 10 minutes (`task_stall_seconds`, 0 turns it off) while no permission request is waiting. After a network drop a turn could otherwise hang with no error until the full task timeout.
 - **Starts at boot.** The app now uses `boot: auto`, so it comes back after a reboot, and with it remote control when it was left on.
 - **Usage from the account, not the screen.** The 5-hour and weekly usage sensors now come from Codex's own `account/rateLimits/read`, placed by window length. If that read fails, the old `/status` screen read is used and the sensors say the figures are estimated (`source` and `note` attributes).
-- Remote control from the ChatGPT app can be managed from the app's Settings page: turn on and off, status, machine name (default **Home Assistant**), pairing code as text and QR code, a new pairing code, and recent messages. The app runs `codex remote-control --no-daemon` as one supervised process with restart backoff, without any Home Assistant or Supervisor token. It stays off until turned on, and **Turn on** is refused until a command check outside the model is shipped with the app; this version does not ship it yet.
+- Remote control from the ChatGPT app can be managed from the app's Settings page: turn on and off, status, machine name (default **Home Assistant**), pairing code as text and QR code, a new pairing code, and recent messages. The app owns `codex app-server --listen unix://… --remote-control` as one supervised process with restart backoff, with only the explicitly configured Core API pair and no Supervisor token. It stays off until turned on, and **Turn on** requires the installed command check to pass its self-test.
 - New option **Remote control machine name**.
+- A command check outside the model for remote control: managed Codex requirements, the hook, its self-test and the configuration watch. Credential and explicit full-access checks stay on. Device and message category refusals are removed; planted-command and templated-action checks remain on. The hook fixtures follow the captured Codex 0.166 input format. Every sandboxed command sees masked paths for `secrets.yaml`, Home Assistant's sign-in store and the app's options and API token; reads fail with `Permission denied`. `/run/s6` is an empty tmpfs, and the worker is marked not dumpable, to limit process-environment access; loaded-profile proc-view isolation is a separate lead lab check.
+- **Parity with the Claude add-on.** Remove the category-refusal option and device/message lists. The owner can confirm any device action; limits specific to an installation belong in `/config/AGENTS.md`. Credential, protected-policy and named remote security checks stay on. Definition and platform bodies and templated action names remain checked; templated targets and unchanged call lines follow normal approval.
+- Permission cards show what changes, where and the possible effect. Shipped practice asks an ambiguity question before acting and keeps privacy, backups, the configuration check and honest reporting. This preserves the surviving confirmation guidance from draft #9.
 - **Text size** for the chat page: Normal, Larger (115 %) or Largest (130 %), from the **Aa** button above the chat or under **Settings**. It scales the messages, code, buttons, sign-in text and the list of steps together, is remembered on each device, and still fits a phone screen at Largest.
 
 ## 0.1.81.1

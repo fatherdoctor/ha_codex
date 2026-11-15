@@ -1,0 +1,13 @@
+{
+  "about": "Shipped with the remote-control command check. Remote control can be turned on only when this file and every file it lists are in the image and the check refuses a test request.",
+  "version": 1,
+  "files": [
+    "/etc/codex/requirements.toml",
+    "/etc/codex/managed_config.toml",
+    "/usr/share/ha_codex/gate_hook.py",
+    "/usr/share/ha_codex/gate_rules.py",
+    "/usr/share/ha_codex/refused-domains.json"
+  ],
+  "hook": "/usr/share/ha_codex/gate_hook.py",
+  "requirements": "/etc/codex/requirements.toml"
+}

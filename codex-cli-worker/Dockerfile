@@ -8,6 +8,7 @@ ARG BUILD_ARCH=amd64
 # Codex CLI pinned (fatherdoctor fork, CG-6): the packaged build from OpenAI's GitHub release,
 # checked against these SHA-256 sums. The npm build cannot run `codex remote-control`.
 ARG CODEX_VERSION=0.166.0
+ENV ADDON_VERSION=${BUILD_VERSION} CODEX_VERSION=${CODEX_VERSION}
 ARG CODEX_SHA256_AMD64=1d44b28bc4ac9937d7d3532264baa68a507ce364956a0d4ebb856f331cdee254
 ARG CODEX_SHA256_AARCH64=7821b77dda2e6283fb1f63f3165177a271da8833e857cf673c6ca1c9db3bfcc6
 
@@ -33,14 +34,18 @@ RUN apk add --no-cache \
     py3-pip \
     rsync \
     tar \
-    util-linux-misc
+    util-linux-misc \
+    tzdata
 
-RUN install -D -m 0755 /usr/bin/bwrap /opt/codex-sandbox/bwrap.real
+RUN install -D -m 0755 /usr/bin/bwrap /opt/codex-sandbox/bwrap.exec \
+    && install -m 0755 /usr/bin/bwrap /opt/codex-sandbox/relay-bwrap
 
+COPY relay-launcher /opt/codex-sandbox/relay-launcher
+COPY relay-tool-launcher /opt/codex-sandbox/bwrap.real
 COPY codex-bwrap /opt/codex-sandbox/bwrap
 COPY codex-bwrap-probe.py /opt/codex-sandbox/codex-bwrap-probe.py
 
-RUN chmod 0755 /opt/codex-sandbox/bwrap
+RUN chmod 0555 /opt/codex-sandbox/bwrap /opt/codex-sandbox/relay-launcher /opt/codex-sandbox/bwrap.real /opt/codex-sandbox/bwrap.exec /opt/codex-sandbox/relay-bwrap
 
 ENV PATH="/opt/codex-sandbox:${PATH}"
 
@@ -83,13 +88,27 @@ RUN pip3 install --no-cache-dir --break-system-packages \
 WORKDIR /data
 
 COPY run.sh /
-COPY server.py /
-COPY approvals.py policy.py remote_control.py verification.py verification_mcp.py browser_permissions.py browser_permission_policy.json ha_data.py ha_data_mcp.py browser.cjs browser_resources.cjs browser_permissions.cjs /
+COPY server.py account_access.py /
+COPY interaction_diagnostics.py diagnostics_scrub.py /
+COPY permission_overrides.py permission_overrides_api.py permission_overrides_mcp.py /
+# The remote-control command check (CX-B6b): managed Codex requirements and hook, read-only, outside
+# /config and outside every sandbox's writable roots. The marker goes last: remote control can be
+# turned on only when it and every file it lists are present and the hook passes its self-test.
+COPY gate/requirements.toml gate/managed_config.toml /etc/codex/
+COPY gate/gate_hook.py gate_rules.py policy/refused-domains.json /usr/share/ha_codex/
+COPY gate/remote-control-gate.json /usr/share/ha_codex/remote-control-gate.json
+RUN chmod 0644 /etc/codex/requirements.toml /etc/codex/managed_config.toml /usr/share/ha_codex/* \
+    && chown -R root:root /etc/codex /usr/share/ha_codex
+
+COPY core_address.py relay_reads.py relay_reads_mcp.py scheduling.py schedule_api.py scheduling_mcp.py approvals.py policy.py gate_rules.py remote_control.py relay_diagnostics.py verification.py verification_mcp.py browser_permissions.py browser_permission_policy.json ha_data.py ha_data_mcp.py browser.cjs browser_resources.cjs browser_permissions.cjs /
 COPY web /web
-# The protected permission policy and house rules: read-only, outside /config and every sandbox's writable roots.
+# The Codex integration of the same release, which integration_sync.py installs in /config at start.
+# The build copies custom_components/codex_cli into integration/ first (see integration/README.md).
+COPY integration /usr/share/ha_codex/integration
+COPY integration_sync.py /
+# The protected permission policy: read-only, outside /config and every sandbox's writable roots.
 COPY policy/policy.json /usr/share/ha_codex/policy.json
-COPY policy/house-rules.md /usr/share/ha_codex/AGENTS.md
-RUN chmod 0444 /usr/share/ha_codex/policy.json /usr/share/ha_codex/AGENTS.md
+RUN chmod 0444 /usr/share/ha_codex/policy.json
 
 RUN chmod a+x /run.sh /server.py
 

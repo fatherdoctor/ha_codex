@@ -1,0 +1,6 @@
+{
+  "about": "Always-on command, definition and platform checks shared by the hook, configuration watch and exchange check.",
+  "reaches_anything": ["hassio", "pyscript", "python_script", "rest_command", "shell_command"],
+  "runs_on_load_platforms": ["command_line", "rest", "scrape"],
+  "runs_on_load_keys": ["command_line", "rest", "rest_command", "scrape", "shell_command", "python_script", "pyscript"]
+}

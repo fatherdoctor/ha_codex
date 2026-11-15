@@ -45,6 +45,13 @@ def main():
     with tempfile.TemporaryDirectory(prefix="codex-chat-preview-") as temp:
         root = Path(temp)
         server.DATA_ROOT = root
+        server.CONFIG_ROOT = root
+        from interaction_diagnostics import RollingDiagnostics, InteractionRecorder
+        server.interaction_logs = RollingDiagnostics(root / "interaction-diagnostics.json")
+        server.diagnostics = InteractionRecorder(server.interaction_logs, "0.1.81.2", "0.166.0")
+        server.diagnostics.begin("synthetic", "addon_page", "gpt-6.1-sol")
+        server.diagnostics.event("synthetic", {"kind": "tool", "name": "read", "result": "done"})
+        server.diagnostics.finish("synthetic", "done")
         server.task_root = lambda: root / "tasks"
         server.TASK_STATE_FILE = root / "index.json"
         server.MESSAGE_QUEUE_FILE = root / "queue.json"
@@ -131,6 +138,11 @@ def main():
                                                     "text": json.dumps({"status": "completed", "summary": text, "question": "", "details": ""})}},
             ]
 
+        @server.app.post('/fixture/studio-pairing')
+        def studio_pairing():
+            from remote_control import qr_data_url
+            return {'qr': qr_data_url('https://chatgpt.com/codex/pair?pairing_code=SAMPLE-NOT-VALID')}
+
         release = threading.Event()
 
         def finish(task_id, prompt, session_id=session_id, reply=None):
@@ -211,6 +223,13 @@ def main():
                     session.thread_id, session.turn_id = session_id, "preview-native"
                     file_permission = (reply or prompt).startswith("Request permission to rename")
                     hidden_permission = (reply or prompt).startswith("Request permission with hidden")
+                    if hidden_permission:
+                        command = "tool --password 'private password'"
+                    elif (reply or prompt).startswith("Request permission to read the energy history"):
+                        # The README screenshot shows an ordinary command, without the markup the safety tests use.
+                        command = 'curl "$HA_URL/api/history/period?filter_entity_id=sensor.energy" -H "Authorization: Bearer $HA_TOKEN"'
+                    else:
+                        command = "curl '$HA_URL/api/history/period' -H 'Authorization: Bearer $HA_TOKEN'\n# <img src=x onerror=alert(1)>"
                     if file_permission:
                         session.receive({"method": "item/started", "params": {
                             "threadId": session_id, "turnId": "preview-native", "item": {
@@ -219,7 +238,7 @@ def main():
                                     "kind": {"type": "update", "move_path": "/other/renamed.yaml"}}]}}})
                     session.receive({"id": 0, "method": "item/fileChange/requestApproval" if file_permission else "item/commandExecution/requestApproval", "params": {
                         "threadId": session_id, "turnId": "preview-native", "itemId": "preview-command",
-                        "command": "tool --password 'private password'" if hidden_permission else "curl '$HA_URL/api/history/period' -H 'Authorization: Bearer $HA_TOKEN'\n# <img src=x onerror=alert(1)>",
+                        "command": command,
                         "cwd": "/config", "reason": "Read historical sensor states from Home Assistant", "startedAtMs": 1,
                     }})
                     answered.wait(120)

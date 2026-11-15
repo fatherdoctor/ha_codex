@@ -169,6 +169,7 @@ class DownloadTests(LocalDocsTestCase):
     def test_git_runs_without_home_assistant_credentials_or_prompts(self) -> None:
         """Git gets no Home Assistant token or address and no saved Git settings, cannot prompt, and has a time limit."""
         self.options["HA_TOKEN"] = "long-lived-token"
+        self.options["ha_url"] = server.CORE_URL.rsplit(":", 1)[0] + ":80"
         self.assertIn("HA_URL", server.codex_env())
         completed = subprocess.CompletedProcess([], 0, stdout="abc\n", stderr="")
         with (

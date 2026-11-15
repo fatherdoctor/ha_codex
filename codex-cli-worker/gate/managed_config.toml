@@ -1,0 +1,21 @@
+# Managed Codex configuration for this app (/etc/codex/managed_config.toml, read-only in the image).
+# It names the command check that runs before every tool call and on every permission request,
+# from every client. The check refuses or says nothing; it never asks.
+#
+# The hook table shape follows the Codex CLI 0.166.0 binary and is to be confirmed on a test
+# machine before a release that allows remote control.
+[[hooks.PreToolUse]]
+matcher = ".*"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "/usr/bin/python3 -I /usr/share/ha_codex/gate_hook.py --event PreToolUse"
+timeout = 10
+
+[[hooks.PermissionRequest]]
+matcher = ".*"
+
+[[hooks.PermissionRequest.hooks]]
+type = "command"
+command = "/usr/bin/python3 -I /usr/share/ha_codex/gate_hook.py --event PermissionRequest"
+timeout = 10

@@ -25,5 +25,11 @@ if [ -n "${legacy_token}" ]; then
     bashio::log.info "Removed legacy worker API token from app options."
 fi
 
+# Install or update the bundled Codex integration in /config (integration_sync.py); never blocks the start.
+python3 /integration_sync.py || bashio::log.warning "The integration install step failed; the worker starts anyway."
+# Announce the app through Supervisor discovery once Home Assistant has loaded the integration. It runs in the
+# background because, after a fresh install, that happens only when the owner restarts Home Assistant.
+python3 /integration_sync.py --announce &
+
 echo "Codex CLI Worker starting"
 python3 /server.py
