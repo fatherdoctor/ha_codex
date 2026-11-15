@@ -223,6 +223,8 @@ def main():
                     session.thread_id, session.turn_id = session_id, "preview-native"
                     file_permission = (reply or prompt).startswith("Request permission to rename")
                     hidden_permission = (reply or prompt).startswith("Request permission with hidden")
+                    # The README screenshot shows an ordinary command, without the markup the safety tests use.
+                    plain_permission = (reply or prompt).startswith("Request permission to read the energy history")
                     if file_permission:
                         session.receive({"method": "item/started", "params": {
                             "threadId": session_id, "turnId": "preview-native", "item": {
@@ -231,7 +233,9 @@ def main():
                                     "kind": {"type": "update", "move_path": "/other/renamed.yaml"}}]}}})
                     session.receive({"id": 0, "method": "item/fileChange/requestApproval" if file_permission else "item/commandExecution/requestApproval", "params": {
                         "threadId": session_id, "turnId": "preview-native", "itemId": "preview-command",
-                        "command": "tool --password 'private password'" if hidden_permission else "curl '$HA_URL/api/history/period' -H 'Authorization: Bearer $HA_TOKEN'\n# <img src=x onerror=alert(1)>",
+                        "command": "tool --password 'private password'" if hidden_permission
+                        else "curl \"$HA_URL/api/history/period?filter_entity_id=sensor.energy\" -H \"Authorization: Bearer $HA_TOKEN\"" if plain_permission
+                        else "curl '$HA_URL/api/history/period' -H 'Authorization: Bearer $HA_TOKEN'\n# <img src=x onerror=alert(1)>",
                         "cwd": "/config", "reason": "Read historical sensor states from Home Assistant", "startedAtMs": 1,
                     }})
                     answered.wait(120)
