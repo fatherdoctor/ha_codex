@@ -79,6 +79,10 @@ daily workflow opens one issue when upstream releases something newer.
 
 This pre-release includes sign-in and recovery controls on the app page and optional remote control from the ChatGPT app. The protected policy and other enforced safeguards remain in place; installation-specific limits belong in the owner's workspace instructions. These features are still being reviewed.
 
+## Auditing
+
+[AUDITING.md](AUDITING.md) maps each protection to the code that enforces it and the tests that show it.
+
 ## Making contributions
 
 Issues and pull requests are welcome on this fork. Changes that are not specific to the fork belong upstream first;

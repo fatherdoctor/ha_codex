@@ -31,6 +31,8 @@ approval for shell networking, while `danger-full-access` does not. Review each
 approved command and keep connections short-lived. See [SSH setup and
 limits](codex-cli-worker/DOCS.md#ssh-connections).
 
+To check these protections in the code, see [AUDITING.md](AUDITING.md).
+
 ## Supported Versions
 
 Security fixes are intended for the latest published release and the current `main` branch.
