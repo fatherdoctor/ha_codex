@@ -33,32 +33,40 @@ with Codex. Before signing in, turn on **Enable device code authorization for Co
 
 1. **Add the app repository.** **Settings** > **Apps** > **Install app** > menu (top right) > **Repositories**, then
    add `https://github.com/fatherdoctor/ha_codex`.
-2. **Install and start the app.** Install **Codex for Home Assistant**, review its options, and start it. Choose
-   **Open Web UI** on its app page to open the chat. Optionally turn on **Show in sidebar** on that page.
-3. **Install the integration.** In Home Assistant 2026.11 or later, open **Settings** > **Marketplace**, choose
-   **Add from link**, and add `https://github.com/fatherdoctor/ha_codex` as an integration. Follow the GitHub
-   connection prompt if needed, install **Codex**, and follow its setup prompts. On older releases use HACS, the
-   former community store, and add the same custom repository as an **Integration**. Manual: copy
-   `custom_components/codex_cli` to `/config/custom_components/codex_cli` and restart.
-4. **Add the integration if setup did not open.** **Settings** > **Devices & services** > **Add integration** >
-   **Codex**. It finds the app by itself; there is no address or token to enter. Follow the screen if a restart is requested.
-5. **Sign in.** In the chat’s own Settings, choose **Sign in**; scan the QR code in the notification, or open the
-   link, and enter the code.
+2. **Install and start the app.** Install **Codex for Home Assistant**, review its options, and start it. At start
+   the app installs the Codex integration of the same version in `/config/custom_components/codex_cli`.
+3. **Restart Home Assistant once.** A notification asks for it: **Settings** > **System** > restart.
+4. **Add the integration.** **Settings** > **Devices & services** shows **Discovered: Codex**; choose **Add**. It
+   finds the app by itself; there is no address or token to enter. If nothing is shown, choose **Add integration** >
+   **Codex**.
+5. **Sign in.** Choose **Open Web UI** on the app page to open the chat (optionally turn on **Show in sidebar**).
+   In the chat's own Settings, choose **Sign in**; scan the QR code in the notification, or open the link, and
+   enter the code.
+
+**Installing the integration yourself.** Turn off the app option **Install the Codex integration**
+(`install_integration`), then install **Codex** from **Settings** > **Marketplace** > **Add from link** with
+`https://github.com/fatherdoctor/ha_codex` (HACS custom repository on releases before 2026.11), or copy
+`custom_components/codex_cli` to `/config/custom_components/codex_cli`, and restart. The app never changes an
+integration folder that it did not install, or that was changed after it installed it; it says so once in a
+notification.
 
 Every app option is described in [codex-cli-worker/DOCS.md](codex-cli-worker/DOCS.md).
 
 ## Updating
 
-The app and the integration carry the same version. Update the app from **Settings** > **Apps**, and the
-integration from **Settings** > **Marketplace** (HACS on older releases), then restart Home Assistant. Home Assistant can take a backup of the app before an app update.
+The app and the integration carry the same version. Update the app from **Settings** > **Apps**; at its next start
+it updates the integration it installed and asks for a restart of Home Assistant. An integration you installed
+yourself is updated the same way you installed it, to the app's version. Home Assistant can take a backup of the
+app before an app update.
 How releases are tested and how a bad one is rolled back: [docs/updates-and-rollback.md](docs/updates-and-rollback.md).
 
 ## Uninstalling
 
 1. **Settings** > **Devices & services** > **Codex** > delete the integration entry.
-2. Remove **Codex** in **Settings** > **Marketplace** (HACS on older releases), or delete `/config/custom_components/codex_cli`, and restart Home Assistant.
-3. Uninstall **Codex for Home Assistant** under **Settings** > **Apps**. Task logs stay in `/config/codex_tasks` until you
+2. Uninstall **Codex for Home Assistant** under **Settings** > **Apps**. Task logs stay in `/config/codex_tasks` until you
    delete that folder.
+3. Uninstalling the app does not remove the integration. Delete `/config/custom_components/codex_cli` (or remove
+   **Codex** in **Settings** > **Marketplace** if you installed it there), and restart Home Assistant.
 
 ## Usage
 
@@ -74,6 +82,7 @@ daily workflow opens one issue when upstream releases something newer.
 
 | Version | Changes |
 |---|---|
+| 0.1.81.3 (unreleased) | The app installs and updates its own integration (one install and one restart); setup from discovery asks for confirmation. |
 | 0.1.81.2 (unreleased) | No full-access mode; a protected permission policy in the image, no bundled house rules and owner workspace instructions; permission answers and the integration's actions only from Home Assistant administrators; a permission-prompt sensor. |
 | 0.1.81.1 (unreleased) | Packaged Codex CLI 0.166.0 pinned by checksum, no self-update, base image by digest, links and maintainer for the fork. Details in the [changelog](codex-cli-worker/CHANGELOG.md). |
 

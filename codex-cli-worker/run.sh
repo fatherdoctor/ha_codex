@@ -25,5 +25,8 @@ if [ -n "${legacy_token}" ]; then
     bashio::log.info "Removed legacy worker API token from app options."
 fi
 
+# Install or update the bundled Codex integration in /config (integration_sync.py); never blocks the start.
+python3 /integration_sync.py || bashio::log.warning "The integration install step failed; the worker starts anyway."
+
 echo "Codex CLI Worker starting"
 python3 /server.py

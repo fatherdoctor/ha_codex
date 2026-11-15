@@ -176,6 +176,48 @@ The API token protects the worker HTTP API. The app stores it in private app sto
 
 The token is not your OpenAI or ChatGPT credential. Codex authentication is still handled separately with `codex login`.
 
+## Integration install
+
+From **0.1.81.3** the app installs and updates the Codex integration itself, so one install and one restart of
+Home Assistant set up both parts. The app image carries the integration of the same release. At each start,
+before the worker starts, the app compares it with `/config/custom_components/codex_cli`:
+
+| The folder | What the app does |
+|---|---|
+| Missing | Writes the integration, then shows a notification: restart Home Assistant to finish setup. |
+| Written by the app, from another copy, and not changed since | Keeps the old folder in the app's storage (`/data/integration_backup`), writes the new copy and swaps the two by renaming, then asks for a restart. |
+| Written by the app, from this copy, and not changed since | Nothing. |
+| Installed another way (Marketplace, HACS, by hand, or a symbolic link), or changed after the app wrote it | Nothing. A notification says so once for each app version. |
+
+The app knows its own folder by the marker file `.installed_by_app.json` in it, which names the app version and
+a digest of the files it wrote. If any file in the folder differs from that digest (another installer copied
+over it, or someone edited or removed a file), the folder is no longer the app's and the app leaves it alone.
+To move to the Marketplace or HACS, turn the option below off first. If a copy fails, for example on a full
+disk, the old folder stays in place and a notification says what failed. If Home Assistant cannot show the
+restart notification (for example while it is starting), the app posts it again at its next start. The step
+never stops the app from starting. The app log has one line for each start, beginning `Integration install:`.
+
+The app writes nothing else in `/config` except its work folder, `/config/.codex_cli_install`. The new copy is
+written there and the old folder is moved there during the swap. It is outside `custom_components`, so Home
+Assistant never loads from it, and the app empties it at every start. If it cannot be emptied, the app log
+says so.
+
+**Going back to the previous version:** the copy the app replaced is kept in the app's own storage
+(`/data/integration_backup/codex_cli`), which every backup of the app includes. To go back, restore the app's
+previous version from the backup Home Assistant offers before an app update. At its next start the app writes
+the integration of that version over its own folder and asks for a restart.
+
+After the restart, the app's Supervisor discovery shows **Discovered: Codex** under **Settings** > **Devices &
+services**. Choose **Add**, then **Submit**; the integration is added only after you confirm.
+
+**Option:** **Install the Codex integration** (`install_integration`, default on). Turn it off to install and update
+the integration yourself; the app then reads and writes nothing in `custom_components`. Discovery is announced
+either way.
+
+**Uninstalling:** uninstalling the app leaves the integration in place, so that removing the app does not change
+Home Assistant behind your back. Delete the integration entry, uninstall the app, then delete
+`/config/custom_components/codex_cli` and restart Home Assistant.
+
 ## Integration check
 
 The app's web UI works without the **Codex** integration, but some features need it. From **0.1.71**, the web UI shows a line at the top of the chat, above the messages, in three cases:
