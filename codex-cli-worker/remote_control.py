@@ -49,6 +49,11 @@ import gate_rules
 import websocket
 
 EXEC_RULES_WARNING = "Codex could not load command rules. Fix the rule files and restart the app before turning on remote control."
+EXEC_RULES_LOAD_SUMMARY = "Error parsing rules; custom rules not applied."
+EXEC_RULES_TIMEOUT = "The Codex command-rules self-test did not answer in time. Try turning on remote control again."
+EXEC_RULES_LAUNCH_ERROR = "The Codex command-rules self-test could not start. Try turning on remote control again."
+EXEC_RULES_ENV_ERROR = "The command-rules self-test could not prepare its environment."
+EXEC_RULES_RETRYABLE = frozenset((EXEC_RULES_TIMEOUT, EXEC_RULES_LAUNCH_ERROR, EXEC_RULES_ENV_ERROR))
 _exec_rules_warning = ""
 _exec_rules_lock = threading.Lock()
 
@@ -62,14 +67,15 @@ def exec_rules_enabled() -> bool:
 
 def exec_rules_warning_problem(message: Any) -> str:
     """Recognize the pinned server's rule-load warnings without exposing details."""
-    if not isinstance(message, dict) or message.get("method") != "configWarning":
+    if not exec_rules_enabled() or not isinstance(message, dict) or message.get("method") != "configWarning":
         return ""
     params = message.get("params")
     if not isinstance(params, dict) or not isinstance(params.get("summary"), str):
         return ""
-    # A private pathname containing "rules" does not classify the warning.
-    text = params["summary"].lower()
-    return EXEC_RULES_WARNING if "rules" in text or "execpolicy" in text else ""
+    # rust-v0.166.0 app-server/src/in_process.rs emits this fixed summary.
+    # A path or unrelated message that merely mentions rules is not evidence.
+    summary = params["summary"].strip().casefold()
+    return EXEC_RULES_WARNING if summary == EXEC_RULES_LOAD_SUMMARY.casefold() else ""
 
 
 def record_exec_rules_warning(message: Any) -> str:
@@ -83,6 +89,9 @@ def record_exec_rules_warning(message: Any) -> str:
 
 
 def exec_rules_problem() -> str:
+    """Expose a latched load warning only while this kind is enabled."""
+    if not exec_rules_enabled():
+        return ""
     with _exec_rules_lock:
         return _exec_rules_warning
 
@@ -105,9 +114,10 @@ def managed_exec_rules_problem(data: dict[str, Any]) -> str:
             if not isinstance(token, dict):
                 return "a managed command rule has an invalid token"
             literal, alternatives = token.get("token"), token.get("any_of")
-            if (set(token) == {"token"} and isinstance(literal, str) and literal
-                    or set(token) == {"any_of"} and isinstance(alternatives, list)
-                    and alternatives and all(isinstance(t, str) and t for t in alternatives)):
+            is_literal = set(token) == {"token"} and isinstance(literal, str) and bool(literal)
+            is_choice = (set(token) == {"any_of"} and isinstance(alternatives, list)
+                         and bool(alternatives) and all(isinstance(t, str) and t for t in alternatives))
+            if is_literal or is_choice:
                 continue
             return "a managed command rule has an invalid token"
     return ""
@@ -122,6 +132,14 @@ def _stop_exec_rules_probe(proc: Any) -> bool:
     """
     group = proc.pid
     if group <= 1 or group == os.getpgrp():
+        return False
+    try:
+        if os.getpgid(proc.pid) != group:
+            return False
+    except ProcessLookupError:
+        # The launcher may be gone while its owned descendants remain.
+        pass
+    except OSError:
         return False
     for sig in (signal.SIGTERM, signal.SIGKILL):
         try:
@@ -214,7 +232,11 @@ def exec_rules_self_test(binary: str, env: dict[str, str], cwd: str = "/config",
         result = reply(2)
         if result.get("approvalPolicy") != "on-request" or not isinstance(result.get("thread"), dict):
             raise ValueError("unexpected thread")
-    except (OSError, ValueError, TypeError, AttributeError, subprocess.SubprocessError):
+    except TimeoutError:
+        problem = EXEC_RULES_TIMEOUT
+    except OSError:
+        problem = exec_rules_problem() or EXEC_RULES_LAUNCH_ERROR
+    except (ValueError, TypeError, AttributeError, subprocess.SubprocessError):
         problem = exec_rules_problem() or "The Codex command-rules self-test did not complete. Restart the app after checking its rule files."
     finally:
         selector.close()
@@ -931,20 +953,24 @@ class Supervisor:
 
     def save_enabled(self, value: bool) -> None:
         """Save the owner's choice so it holds across app restarts."""
-        self.state_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.state_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"enabled": bool(value)}), encoding="utf-8")
-        os.replace(tmp, self.state_path)
+        # Output and control warnings can arrive at the same time.
+        with self.lock:
+            self.state_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.state_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"enabled": bool(value)}), encoding="utf-8")
+            os.replace(tmp, self.state_path)
 
     # Actions ------------------------------------------------------------------------------------
 
     def _gate_problem(self, probe: bool = False) -> str:
+        if not exec_rules_enabled() or (probe and self._rules_problem in EXEC_RULES_RETRYABLE):
+            self._rules_problem = ""
         problem = self.gate() or self._rules_problem or exec_rules_problem()
-        if not problem and probe and self._native_rules_test:
+        if not problem and probe and self._native_rules_test and exec_rules_enabled():
             try:
                 environment = remote_env(self.env_factory())
             except (OSError, ValueError, TypeError):
-                self._rules_problem = "The command-rules self-test could not prepare its environment."
+                self._rules_problem = EXEC_RULES_ENV_ERROR
             else:
                 self._rules_problem = exec_rules_self_test(self.codex_binary, environment)
             problem = self._rules_problem
@@ -1250,12 +1276,11 @@ class Supervisor:
 
     def _parse(self, line: str) -> str:
         """Record one output line and update the state from it; return a pairing code found in it."""
-        # Some launchers print JSON notifications; others print the summary.
+        # Accept structured notifications or the pinned loader's exact summary.
         try:
             message = json.loads(line)
         except ValueError:
-            message = {"method": "configWarning", "params": {"summary": line}} if (
-                "rules" in line.lower() and any(word in line.lower() for word in ("warning", "error", "failed"))) else {}
+            message = {"method": "configWarning", "params": {"summary": line}}
         if record_exec_rules_warning(message) or exec_rules_problem():
             self.set_status("blocked", exec_rules_problem(), pairing_code="")
             return ""

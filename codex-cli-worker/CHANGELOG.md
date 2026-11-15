@@ -8,9 +8,12 @@
 - Finish stopping the rule-load probe's process group even when its launcher exits first.
   Escalate remaining group members after the grace period and refuse startup if cleanup cannot finish.
 - Add native managed refusals for literal Supervisor, credential, app-policy and full-access commands,
-  alongside the unchanged semantic command hook. Check native rule loading before remote control starts;
-  rule-load warnings stop chat turns and keep remote control unavailable until the app restarts after repair.
-  The shared owner switch is scheduled before v0.3; this delivery keeps the rules on.
+  alongside the semantic command hook. Include all three Supervisor aliases in both layers.
+  Check the native rules before remote control starts. Rule-load warnings stop chat turns and
+  keep remote control unavailable until the app restarts after repair.
+- Retry a timed-out or failed probe launch after cleanup. Match only the native rule-load summary.
+  Save the concurrent warning updates in order. Document how owner allow rules and prefix limits affect these checks.
+  The rules always apply in this version. A setting to disable each check comes later.
 - A scheduling or mailbox tool asked for more than 20 items now gets the first 20 and a `next_offset`,
   instead of a refusal. Codex asked `read_mailbox` for 50 messages when told to summarize the unread mail,
   and the only answer was "Invalid, refused or expired scheduling request.", so it could not correct

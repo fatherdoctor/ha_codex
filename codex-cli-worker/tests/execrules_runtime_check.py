@@ -186,6 +186,8 @@ def main():
                 for tokens in itertools.product(*options):
                     literal = shlex.join(tokens)
                     cases.extend([(f'rule{n} {literal}', literal), (f'rule{n} pipeline {literal}', 'printf fixture | ' + literal)])
+            assert ('rule1 ha super', 'ha super') in cases, 'Supervisor alias missing from native cases'
+            assert len(cases) == 40, 'expected twenty literal alternatives and their pipelines'
             batch(cases)
             # A malformed ordinary companion cannot erase managed refusals, but
             # it must prevent the production readiness check from allowing Turn on.

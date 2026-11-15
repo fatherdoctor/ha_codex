@@ -12,7 +12,8 @@ import sys
 import tempfile
 import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -21,6 +22,7 @@ import gate_rules
 import remote_control as rc
 import tomllib
 from test_gate import run_hook
+from test_remote_control import FakeProc
 
 WARNING = {"method": "configWarning", "params": {
     "summary": "Error parsing rules; custom rules not applied.", "details": "synthetic private path"}}
@@ -193,7 +195,7 @@ for line in sys.stdin:
         self.assertEqual(self.probe(warning_at=1), rc.EXEC_RULES_WARNING)
 
     def test_timeout_fails_closed_and_reaps_the_probe(self):
-        self.assertIn('did not complete', self.probe(timeout=True))
+        self.assertIn('did not answer in time', self.probe(timeout=True))
 
     def test_incomplete_group_cleanup_cannot_report_success(self):
         stop = rc._stop_exec_rules_probe
@@ -280,6 +282,7 @@ elif mode=='driver':
             data = json.loads(result.stdout)
             self.assertEqual(data['problem'], '' if outcome == 'success' else
                              rc.EXEC_RULES_WARNING if outcome == 'warning' else
+                             rc.EXEC_RULES_TIMEOUT if outcome == 'timeout' else
                              'The Codex command-rules self-test did not complete. Restart the app after checking its rule files.')
             self.assertTrue(data['launcher_exited'])
             self.assertFalse(data['alive'], 'TERM-resistant descendant survived the preflight')
@@ -297,6 +300,214 @@ elif mode=='driver':
 
     def test_early_launcher_exit_stops_descendant(self):
         self.check_outcome('exit')
+
+
+class ExecRulesReviewTests(unittest.TestCase):
+    def setUp(self):
+        """Give each review case a private state file and warning latch."""
+        latch = patch.object(rc, '_exec_rules_warning', '')
+        latch.start()
+        self.addCleanup(latch.stop)
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.state = Path(self.temp.name) / 'state.json'
+
+    def test_all_supervisor_aliases_are_managed(self):
+
+        """Keep all three supported Supervisor names in the native catalogue."""
+        data = tomllib.loads((ROOT / 'gate/requirements.toml').read_text())
+        self.assertEqual(set(data['rules']['prefix_rules'][0]['pattern'][1]['any_of']),
+                         {'supervisor', 'super', 'su'})
+
+    def test_super_alias_is_refused_in_each_command_form_and_mode(self):
+
+        """Refuse the short alias through each hook classifier, with relay on or off."""
+        for remote in (False, True):
+            for command in ('ha super info', 'env MODE=sample ha super info',
+                            'ha --unknown=value super info', 'echo ha super info'):
+                with self.subTest(remote=remote, command=command):
+                    self.assertTrue(gate_rules.check_tool_call('PreToolUse',
+                        {'tool_name': 'Bash', 'tool_input': {'command': command}},
+                        remote, gate_rules.load_rules()))
+
+    def test_unrelated_rules_errors_do_not_latch_or_disable(self):
+
+        """Leave remote control enabled for unrelated plain and structured warnings."""
+        supervisor = rc.Supervisor('unused', self.state, dict, lambda: '', gate=lambda: '')
+        supervisor.save_enabled(True)
+        for line in ('WARN relay: failed to read /synthetic/rules/notes.md',
+                     'error: file automation_rules.yaml not found',
+                     'thread titled house rules failed to sync',
+                     json.dumps({'method': 'configWarning', 'params': {
+                         'summary': 'A rules backup failed', 'details': 'synthetic detail'}})):
+            with self.subTest(line=line), patch.object(rc, '_exec_rules_warning', ''):
+                supervisor._parse(line)
+                self.assertEqual(rc.exec_rules_problem(), '')
+                self.assertTrue(supervisor.enabled())
+
+    def test_process_output_warning_stops_and_saves_off_the_running_process(self):
+
+        """Stop the process and persist off when its output reports a load warning."""
+        proc = FakeProc()
+        proc.stdout.lines.put(WARNING['params']['summary'])
+        supervisor = rc.Supervisor('fixture', self.state, dict, lambda: 'Fixture',
+                                   gate=lambda: '', popen=lambda *args, **kwargs: proc)
+        supervisor._name_supported = False
+        supervisor.save_enabled(True)
+        # Keep the output route independent of the separate control warning route.
+        with patch.object(rc.os, 'killpg', side_effect=ProcessLookupError), \
+                patch.object(supervisor, '_monitor_control'):
+            supervisor._loop()
+        self.assertTrue(proc.done.is_set())
+        self.assertFalse(supervisor.enabled())
+        self.assertEqual(json.loads(self.state.read_text()), {'enabled': False})
+        self.assertEqual(supervisor.snapshot()['state'], 'blocked')
+        self.assertEqual(supervisor.snapshot()['blocked_reason'], rc.EXEC_RULES_WARNING)
+
+    def test_concurrent_warning_saves_do_not_replace_each_others_temporary_file(self):
+
+        """Let simultaneous warning handlers finish their state writes in order."""
+        supervisor = rc.Supervisor('fixture', self.state, dict, lambda: '', gate=lambda: '')
+        entered = threading.Event()
+        release = threading.Event()
+        second_write = threading.Event()
+        errors = []
+        original = Path.write_text
+
+        def write(path, text, **kwargs):
+
+            """Hold the first writer long enough to detect a competing write."""
+            if threading.current_thread().name == 'first-save':
+                entered.set()
+                if not release.wait(2):
+                    raise AssertionError('first writer was not released')
+            else:
+                second_write.set()
+            return original(path, text, **kwargs)
+
+        def save():
+
+            """Capture background errors so the test cannot silently pass."""
+            try:
+                supervisor.save_enabled(False)
+            except Exception as error:
+                errors.append(error)
+
+        first = threading.Thread(target=save, name='first-save')
+        second = threading.Thread(target=save, name='second-save')
+        with patch.object(Path, 'write_text', write):
+            first.start()
+            try:
+                self.assertTrue(entered.wait(2))
+                second.start()
+                overlapped = second_write.wait(0.05)
+            finally:
+                release.set()
+                first.join(2)
+                if second.ident is not None:
+                    second.join(2)
+        self.assertFalse(first.is_alive() or second.is_alive())
+        self.assertFalse(overlapped, 'two warning handlers wrote the same temporary file together')
+        self.assertEqual(errors, [])
+        self.assertEqual(json.loads(self.state.read_text()), {'enabled': False})
+
+    def test_control_warning_stops_and_saves_off_the_running_process(self):
+
+        """Stop and persist off when the control socket reports a load warning."""
+        class Transport:
+            def settimeout(self, _): pass
+            def send(self, _): pass
+            def recv(self): return json.dumps(WARNING)
+            def close(self, **_): pass
+        proc = FakeProc()
+        supervisor = rc.Supervisor('fixture', self.state, dict, lambda: 'Fixture', gate=lambda: '',
+            control_factory=lambda path: rc.ControlClient(path, connector=lambda _: Transport()))
+        supervisor.proc = proc
+        supervisor.save_enabled(True)
+        with patch.object(rc.os, 'killpg', side_effect=ProcessLookupError):
+            supervisor._monitor_control(proc, Path(self.temp.name) / 'unused', threading.Event())
+        self.assertTrue(proc.done.is_set())
+        self.assertFalse(supervisor.enabled())
+        self.assertEqual(json.loads(self.state.read_text()), {'enabled': False})
+        self.assertEqual(supervisor.snapshot()['blocked_reason'], rc.EXEC_RULES_WARNING)
+
+    def test_requirements_entry_point_refuses_a_missing_catalogue(self):
+
+        """Exercise the real requirements entry point with a header-only file."""
+        text = (ROOT / 'gate/requirements.toml').read_text().split('[[rules.prefix_rules]]', 1)[0]
+        path = Path(self.temp.name) / 'requirements.toml'
+        path.write_text(text)
+        self.assertIn('command-prefix rules are missing', rc.requirements_problem(path))
+
+    def test_kind_off_ignores_new_and_cached_rule_warnings(self):
+
+        """Keep a disabled kind from blocking through either warning path."""
+        with patch.object(rc, 'exec_rules_enabled', return_value=False):
+            self.assertEqual(rc.record_exec_rules_warning(WARNING), '')
+            with patch.object(rc, '_exec_rules_warning', rc.EXEC_RULES_WARNING):
+                self.assertEqual(rc.exec_rules_problem(), '')
+
+    def test_cleanup_refuses_a_launcher_in_an_unowned_process_group(self):
+
+        """Do not signal a process group that the probe launcher does not own."""
+        proc = SimpleNamespace(pid=999999, poll=Mock(return_value=None))
+        with patch.object(rc.os, 'getpgid', return_value=os.getpgrp()), \
+                patch.object(rc.os, 'killpg', side_effect=ProcessLookupError) as signal_group:
+            self.assertFalse(rc._stop_exec_rules_probe(proc))
+            signal_group.assert_not_called()
+
+    def test_cleanup_never_signals_the_workers_own_group(self):
+
+        """Keep the worker group safe even if an injected launcher names it."""
+        proc = SimpleNamespace(pid=os.getpgrp(), poll=Mock(return_value=None))
+        with patch.object(rc.os, 'getpgid', return_value=proc.pid), \
+                patch.object(rc.os, 'killpg', side_effect=ProcessLookupError) as signal_group:
+            self.assertFalse(rc._stop_exec_rules_probe(proc))
+            signal_group.assert_not_called()
+
+    def test_timeout_gets_a_retryable_reason_after_cleanup(self):
+
+        """Return a fixed retry reason after a timed-out probe is reaped."""
+        problem = LoaderProbeTests.probe(self, timeout=True)
+        self.assertEqual(problem, 'The Codex command-rules self-test did not answer in time. Try turning on remote control again.')
+
+    def test_launch_error_gets_a_fixed_retryable_reason(self):
+
+        """Hide launch exception details and allow a later explicit retry."""
+        with patch.object(rc, '_stop_exec_rules_probe') as stop:
+            problem = rc.exec_rules_self_test('fixture', {}, self.temp.name,
+                                             popen=Mock(side_effect=OSError('synthetic private detail')))
+        self.assertEqual(problem, 'The Codex command-rules self-test could not start. Try turning on remote control again.')
+        stop.assert_not_called()
+
+    def test_turn_on_retries_transient_probe_failure(self):
+
+        """Preserve the reason until the next Turn on request retries the probe."""
+        reasons = ('The Codex command-rules self-test did not answer in time. Try turning on remote control again.',
+                   'The Codex command-rules self-test could not start. Try turning on remote control again.',
+                   'The command-rules self-test could not prepare its environment.')
+        for reason in reasons:
+            with self.subTest(reason=reason), patch.object(rc, 'gate_problem', return_value=''), \
+                    patch.object(rc, 'exec_rules_self_test', side_effect=[reason, '']) as probe:
+                supervisor = rc.Supervisor('fixture', self.state, dict, lambda: '')
+                supervisor.save_enabled(False)
+                with patch.object(supervisor, '_launch', return_value={}) as launch:
+                    self.assertFalse(supervisor.start()[0])
+                    self.assertEqual(supervisor.snapshot()['blocked_reason'], reason)
+                    self.assertTrue(supervisor.start()[0])
+                    self.assertTrue(supervisor.enabled())
+                    self.assertEqual(probe.call_count, 2)
+                    launch.assert_called_once()
+
+    def test_a_rule_warning_stays_blocked_without_an_automatic_retry(self):
+
+        """Require repair and restart after an actual rule-load warning."""
+        with patch.object(rc, 'gate_problem', return_value=''), \
+                patch.object(rc, 'exec_rules_self_test', return_value=rc.EXEC_RULES_WARNING) as probe:
+            supervisor = rc.Supervisor('fixture', self.state, dict, lambda: '')
+            self.assertFalse(supervisor.start()[0])
+            self.assertFalse(supervisor.start()[0])
+            self.assertEqual(probe.call_count, 1)
 
 
 if __name__ == '__main__':

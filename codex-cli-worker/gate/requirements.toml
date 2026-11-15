@@ -15,7 +15,7 @@ allow_managed_hooks_only = true
 # Literal command refusals supplement the semantic hook. No ordinary .rules or allow rules.
 
 [[rules.prefix_rules]]
-pattern = [{ token = "ha" }, { any_of = ["supervisor", "su"] }]
+pattern = [{ token = "ha" }, { any_of = ["supervisor", "super", "su"] }]
 decision = "forbidden"
 justification = "The managed command rule refuses Supervisor access."
 

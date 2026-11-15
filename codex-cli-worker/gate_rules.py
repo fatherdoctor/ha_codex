@@ -68,7 +68,7 @@ PROTECTED_COMMAND_RES = (
     (re.compile(r"/proc/\S*environ"), "reads a process environment, which can hold the Supervisor token"),
     (re.compile(r"\b(?:SUPERVISOR_TOKEN|HASSIO_TOKEN)\b"), "uses the Supervisor token"),
     (re.compile(r"/run/s6/container_environment"), "reads the app's saved environment, which holds the Supervisor token"),
-    (re.compile(r"https?://supervisor\b|\bsupervisor/|\bha\s+(?:supervisor|su)\b|\bbashio::", re.IGNORECASE),
+    (re.compile(r"https?://supervisor\b|\bsupervisor/|\bha\s+(?:supervisor|super|su)\b|\bbashio::", re.IGNORECASE),
      "talks to the Home Assistant Supervisor"),
     (re.compile(r"\.storage/+auth"), "reads Home Assistant's sign-in store"),
     (re.compile(r"secrets\.ya?ml"), "reads secrets.yaml"),
@@ -521,7 +521,7 @@ FULL_ACCESS_RE = re.compile(r"danger[-_]?full[-_]?access|dangerFullAccess|--dang
 
 HA_REMOTE_FAMILIES = frozenset(("addon", "addons", "add-on", "add-ons", "host", "os", "core",
                                 "hardware", "network", "backup", "backups", "apps"))
-HA_ALWAYS_FAMILIES = frozenset(("supervisor", "su"))
+HA_ALWAYS_FAMILIES = frozenset(("supervisor", "super", "su"))
 SHELL_ASSIGNMENT_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*=")
 # A conservative text floor also catches shell constructs the parser cannot place.
 # It reads the command with its quotes removed. The four documented value-taking
@@ -530,7 +530,7 @@ HA_TEXT_PREFIX = r"\bha\s+(?:(?:--(?:log-level|api-token|endpoint|config)(?:=\S+
 HA_REMOTE_TEXT_RE = re.compile(
     HA_TEXT_PREFIX + r"(?:add-?ons?|host|os|core|hardware|network|backups?|apps)\b", re.IGNORECASE)
 # The always-refused families get the same floor whether or not remote control is on.
-HA_ALWAYS_TEXT_RE = re.compile(HA_TEXT_PREFIX + r"(?:supervisor|su)\b", re.IGNORECASE)
+HA_ALWAYS_TEXT_RE = re.compile(HA_TEXT_PREFIX + r"(?:supervisor|super|su)\b", re.IGNORECASE)
 # Flag values and shell syntax can obscure the exact argument boundaries. The
 # always-refused families remain protected even when they follow such values.
 HA_SHELL_WORD_RE = re.compile(r"\bh[\"'\\]*a\b", re.IGNORECASE)
