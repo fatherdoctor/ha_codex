@@ -13,14 +13,19 @@ worker's server starts, this script:
   custom_components, and swaps the two by renaming, so a failed copy leaves the old folder in place;
 - asks the owner to restart Home Assistant after it writes the folder, because Home Assistant loads an
   integration's files only when it starts, and asks again at later starts until the notice is shown;
-- announces the app to Home Assistant through Supervisor discovery, so the integration offers setup
-  under Settings > Devices & services once it is loaded.
+- removes its 'left as installed' notice once the folder is the app's again.
+
+Run with --announce (run.sh starts it in the background), it announces the app to Home Assistant through
+Supervisor discovery, so the integration offers setup under Settings > Devices & services. It waits until
+Home Assistant has loaded the integration's files: a discovery that arrives before then makes Home
+Assistant log "Cannot find integration codex_cli" with a traceback.
 
 It writes nothing in /config except the integration's folder and its own work folder
-/config/.codex_cli_install, which Home Assistant never loads from and which is emptied at every start.
-The app option install_integration (default on) turns the copy off; discovery is announced either way.
-The script never stops the app from starting: every failure is logged and reported, and the worker
-starts as before.
+/config/.codex_cli_install, which Home Assistant never loads from and which is emptied at every start
+while the copy is on. The app option install_integration (default on) turns the copy off; discovery is
+announced either way, once Home Assistant has loaded the integration, however it was installed. The
+script never stops the app from starting: every failure is logged and reported, and the worker starts as
+before.
 """
 
 from __future__ import annotations
@@ -58,6 +63,12 @@ NOTICE_FAILED = "codex_cli_install_failed"
 REQUEST_TIMEOUT = (3, 10)
 NOTICE_ATTEMPTS = 3
 NOTICE_RETRY_SECONDS = 5
+# Home Assistant lists the custom integrations it loaded at its last start under this path.
+FLOW_HANDLERS_PATH = "/core/api/config/config_entries/flow_handlers"
+ANNOUNCE_POLL_SECONDS = 60
+# After this many reads in a row that fail (Core down for long, or an API that answers differently), the app
+# announces itself anyway: at worst Home Assistant logs one error, and setup still works after a restart.
+ANNOUNCE_UNREAD_LIMIT = 10
 
 
 @dataclass(frozen=True)
@@ -238,8 +249,8 @@ def notice_for(result: SyncResult, app_version: str) -> tuple[str, str, str] | N
             (
                 f"The Codex app installed its integration (version {result.version}) in `{folder}`. "
                 "Restart Home Assistant once to load it: **Settings** > **System** > restart. "
-                "After the restart, **Settings** > **Devices & services** shows **Discovered: Codex**; "
-                "choose **Add** to finish setup."
+                "If Codex is not set up yet, **Settings** > **Devices & services** then shows "
+                "**Discovered: Codex**; choose **Add** to finish setup."
             ),
         )
     if result.action == "updated":
@@ -277,12 +288,16 @@ def notice_for(result: SyncResult, app_version: str) -> tuple[str, str, str] | N
     return None
 
 
-def supervisor_post(path: str, payload: dict, token: str) -> bool:
-    """POST JSON to a fixed Supervisor path with the app's own token; return whether it was accepted."""
+def supervisor_request(method: str, path: str, token: str, payload: dict | None = None):
+    """Send one request to a fixed Supervisor path with the app's own token; return the response, or None.
+
+    None means the request failed or was refused (HTTP 400 or above); the reason is logged.
+    """
     with requests.Session() as client:
         client.trust_env = False
         try:
-            response = client.post(
+            response = client.request(
+                method,
                 SUPERVISOR_URL + path,
                 headers={"Authorization": f"Bearer {token}"},
                 json=payload,
@@ -291,11 +306,59 @@ def supervisor_post(path: str, payload: dict, token: str) -> bool:
             )
         except requests.RequestException as exc:
             log(f"Supervisor request to {path} failed: {exc}")
-            return False
+            return None
     if response.status_code >= 400:
         log(f"Supervisor request to {path} failed: HTTP {response.status_code}")
-        return False
-    return True
+        return None
+    return response
+
+
+def supervisor_post(path: str, payload: dict, token: str) -> bool:
+    """POST JSON to a fixed Supervisor path; return whether it was accepted."""
+    return supervisor_request("POST", path, token, payload) is not None
+
+
+def core_knows_integration(token: str) -> bool | None:
+    """Return whether Home Assistant has loaded the integration's files, or None when it cannot tell.
+
+    Home Assistant reads the custom integrations in /config only when it starts, and lists each one that
+    has a config flow under flow_handlers. A folder the app wrote after that start is not listed until
+    Home Assistant restarts.
+    """
+    response = supervisor_request("GET", FLOW_HANDLERS_PATH, token)
+    if response is None:
+        return None
+    try:
+        handlers = response.json()
+    except ValueError:
+        return None
+    return DISCOVERY_SERVICE in handlers if isinstance(handlers, list) else None
+
+
+def announce(token: str, sleep=time.sleep) -> None:
+    """Post Supervisor discovery once Home Assistant has loaded the integration.
+
+    Checks once a minute, so a restart of Home Assistant hours later is still followed by the announcement.
+    When Home Assistant cannot be read ANNOUNCE_UNREAD_LIMIT times in a row, the app announces itself anyway.
+    """
+    failed_reads = 0
+    waiting_logged = False
+    while True:
+        known = core_knows_integration(token)
+        if known:
+            break
+        if known is None:
+            failed_reads += 1
+            if failed_reads >= ANNOUNCE_UNREAD_LIMIT:
+                log("could not ask Home Assistant whether the integration is loaded; announcing the app anyway")
+                break
+        else:
+            failed_reads = 0
+            if not waiting_logged:
+                log("discovery waits until Home Assistant has loaded the integration (after its next restart)")
+                waiting_logged = True
+        sleep(ANNOUNCE_POLL_SECONDS)
+    supervisor_post("/discovery", {"service": DISCOVERY_SERVICE, "config": {}}, token)
 
 
 def show_notice(notice: tuple[str, str, str], token: str) -> bool:
@@ -308,6 +371,12 @@ def show_notice(notice: tuple[str, str, str], token: str) -> bool:
         if attempt + 1 < NOTICE_ATTEMPTS:
             time.sleep(NOTICE_RETRY_SECONDS)
     return False
+
+
+def dismiss_notice(notification_id: str, token: str) -> bool:
+    """Remove a persistent notification from Home Assistant; return whether the request was accepted."""
+    payload = {"notification_id": notification_id}
+    return supervisor_post("/core/api/services/persistent_notification/dismiss", payload, token)
 
 
 def read_state(state_path: Path) -> dict:
@@ -343,9 +412,20 @@ def notice_due(result: SyncResult, app_version: str, state: dict) -> tuple[str, 
         return None
     if notice is None and result.action == "current":
         owed = state.get("restart_notice")
-        if isinstance(owed, list) and len(owed) == 3 and all(isinstance(part, str) for part in owed):
+        # Only a restart notice is ever owed; any other record is a damaged file and is not shown.
+        if (
+            isinstance(owed, list)
+            and len(owed) == 3
+            and all(isinstance(part, str) for part in owed)
+            and owed[0] == NOTICE_RESTART
+        ):
             return (owed[0], owed[1], owed[2])
     return notice
+
+
+def kept_notice_outdated(result: SyncResult, state: dict) -> bool:
+    """Return whether the 'left as installed' notice was shown but the folder is the app's again."""
+    return result.action in ("current", "installed", "updated") and "kept_notice_version" in state
 
 
 def record_notice(result: SyncResult, app_version: str, state: dict, notice, shown: bool) -> dict:
@@ -375,18 +455,25 @@ def log(message: str) -> None:
     print(f"Integration install: {message}", flush=True)
 
 
-def main() -> int:
-    """Sync the integration, report the result, and announce the app. Always returns 0."""
+def main(argv: list[str] | None = None) -> int:
+    """Sync the integration and report the result, or with --announce announce the app. Always returns 0."""
+    args = sys.argv[1:] if argv is None else argv
     app_version = os.environ.get("ADDON_VERSION", "unknown")
     token = os.environ.get("SUPERVISOR_TOKEN", "")
+
+    if args == ["--announce"]:
+        if token:
+            announce(token)
+        return 0
 
     if not install_option_on(OPTIONS_PATH):
         result = SyncResult("disabled")
     else:
         try:
             result = sync(BUNDLED_DIR, TARGET_DIR, BACKUP_DIR, app_version, WORK_DIR)
-        except OSError as exc:
-            # A read that fails before the copy starts (the manifest, a digest) is reported like a failed copy.
+        except (OSError, ValueError) as exc:
+            # A read that fails before the copy starts (the manifest, a digest), or a file name that cannot be
+            # encoded (ValueError), is reported like a failed copy.
             result = SyncResult("failed", detail=str(exc))
     log(f"{result.action} {result.version} {result.detail}".rstrip())
 
@@ -394,11 +481,10 @@ def main() -> int:
     notice = notice_due(result, app_version, state)
     shown = bool(notice and token and show_notice(notice, token))
     new_state = record_notice(result, app_version, state, notice, shown)
+    if kept_notice_outdated(result, new_state) and token and dismiss_notice(NOTICE_KEPT, token):
+        del new_state["kept_notice_version"]
     if new_state != state:
         write_state(NOTICE_STATE_PATH, new_state)
-
-    if token:
-        supervisor_post("/discovery", {"service": DISCOVERY_SERVICE, "config": {}}, token)
     return 0
 
 

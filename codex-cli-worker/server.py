@@ -182,6 +182,8 @@ AGENTS_MAX_BYTES = 256 * 1024
 SNAPSHOT_MAX_BYTES = 8 * 1024 * 1024
 LOG_TAIL_BYTES = 300_000
 AUTH_NOTIFY_ID = "codex_cli_login"
+# Present while a sign-in the app started by itself has not been followed by a signed-in start.
+AUTO_SIGN_IN_MARK = DATA_ROOT / "auto_sign_in_started"
 AUTH_QR_DIR = CONFIG_ROOT / "www" / "codex_cli_auth"
 INGRESS_PROXY_IP = "172.30.32.2"
 # Where Home Assistant keeps the Codex integration once it is installed.
@@ -3770,12 +3772,33 @@ def logout_codex() -> dict[str, Any]:
 
 
 def auto_start_login_if_needed() -> None:
-    """Start the sign-in flow when Codex is not logged in; otherwise refresh the usage status if it is due."""
+    """At start, sign in by itself once while Codex is not logged in; otherwise refresh the usage status if due.
+
+    A one-time code works only while the sign-in that printed it runs, so every restart used to post a new
+    code, even when nobody had used the last one. The app now starts one sign-in by itself and marks that in
+    its storage. While the mark is there and Codex is still not signed in, later starts replace the code
+    notification with one that points to Sign in. A start that finds Codex signed in removes the mark.
+    """
     status = codex_login_status()
     if status.get("status_ok"):
+        AUTO_SIGN_IN_MARK.unlink(missing_ok=True)
         update_auth_state(status="authenticated", message=status.get("message", ""))
         refresh_usage_status_async(force=False)
         return
+    if AUTO_SIGN_IN_MARK.exists():
+        print("Codex is not authenticated; waiting for Sign in (a code was already posted at an earlier start).", flush=True)
+        create_persistent_notification(
+            "Codex CLI is not signed in",
+            "Codex is not signed in yet. The code posted at an earlier start no longer works. "
+            "Open the Codex app and choose **Sign in** to get a new one-time code.",
+            AUTH_NOTIFY_ID,
+        )
+        return
+    try:
+        AUTO_SIGN_IN_MARK.touch()
+    except OSError as exc:
+        # Without the mark the next start posts a code again, as before; the sign-in still starts now.
+        print(f"Could not record the automatic sign-in: {exc}", flush=True)
     print("Codex is not authenticated; starting device-code login flow.", flush=True)
     start_codex_login_flow(False)
 
