@@ -56,8 +56,11 @@ class ForkReleaseTests(unittest.TestCase):
         self.write(fr.CHANGELOG, f"# Changelog\n\n## {version}\n\n{notes}\n\n{body}")
 
     def commit(self, message: str) -> str:
+        """Commit everything. A commit on main is also pushed, so origin/main follows it as on a real clone."""
         run(self.repo, "add", "-A")
         run(self.repo, "commit", "-q", "-m", message)
+        if run(self.repo, "branch", "--show-current") == "main":
+            run(self.repo, "update-ref", "refs/remotes/origin/main", "HEAD")
         return run(self.repo, "rev-parse", "HEAD")
 
     def record(self, version: str, commit: str, result: str = "pass") -> str:
@@ -190,6 +193,33 @@ class ForkReleaseTests(unittest.TestCase):
         commit, _ = fr.plan_tag("0.2.0", self.repo)
         self.assertEqual(commit, stable)
 
+    def test_stable_version_must_be_on_main(self) -> None:
+        run(self.repo, "checkout", "-q", "-b", "beta")
+        self.write_version("0.1.81.2", code="print('only on beta')\n")
+        on_beta = self.commit("0.1.81.2 on beta")
+        self.record("0.1.81.2", on_beta)
+        with self.assertRaisesRegex(fr.ReleaseError, "not on origin/main: a stable release comes from main"):
+            fr.plan_tag("0.1.81.2", self.repo)
+
+    def test_beta_may_come_from_the_beta_branch(self) -> None:
+        run(self.repo, "checkout", "-q", "-b", "beta")
+        self.write_version("0.2.0-beta.1", code="print('beta')\n")
+        beta = self.commit("0.2.0-beta.1")
+        self.record("0.2.0-beta.1", beta)
+        commit, _ = fr.plan_tag("0.2.0-beta.1", self.repo)
+        self.assertEqual(commit, beta)
+
+    def test_rollback_with_a_beta_version_is_refused(self) -> None:
+        self.make_bad_release()
+        self.write_version("0.2.0-beta.1")
+        rolled = self.commit("a rollback given a beta version")
+        self.write(f"{fr.RECORD_DIR}/v0.2.0-beta.1.json", json.dumps(
+            {"version": "0.2.0-beta.1", "kind": "rollback", "rollback_of": "0.1.81.1", "result": "pass",
+             "commit": rolled}))
+        self.commit("rollback record")
+        with self.assertRaisesRegex(fr.ReleaseError, "a rollback is a stable release"):
+            fr.plan_tag("0.2.0-beta.1", self.repo)
+
     def test_rollback_skips_beta_tags(self) -> None:
         self.make_bad_release()
         self.make_release("0.2.0-beta.1")
@@ -250,6 +280,40 @@ class ForkReleaseTests(unittest.TestCase):
         self.write("codex-cli-worker/server.py", "print('dirty')\n")
         with self.assertRaisesRegex(fr.ReleaseError, "working tree has changes"):
             fr.rollback("0.1.81.1", None, False, self.repo)
+
+
+class VersionRuleTests(unittest.TestCase):
+    """Both release scripts hold the version rule; they must accept and refuse the same versions."""
+
+    GOOD = ("0.1.81", "0.1.81.2", "0.2.0", "0.2.0.1", "0.2.0-beta.1", "0.2.0-beta.10")
+    BAD = ("0.2", "0.1.81.2-beta.1", "0.2.0-beta", "0.2.0-rc.1", "0.2.0-beta.1.1", "v0.2.0", "0.2.0 ")
+
+    def setUp(self) -> None:
+        spec = importlib.util.spec_from_file_location("build_hacs_release", ROOT / "scripts" / "build_hacs_release.py")
+        self.bhr = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.bhr)
+
+    def fork_release_accepts(self, version: str) -> bool:
+        try:
+            fr.check_version_text(version, allow_beta=True)
+        except fr.ReleaseError:
+            return False
+        return True
+
+    def build_accepts(self, version: str) -> bool:
+        return self.bhr.TAG_PATTERN.fullmatch(f"v{version}") is not None
+
+    def test_both_scripts_accept_the_same_versions(self) -> None:
+        for version in self.GOOD:
+            with self.subTest(version=version):
+                self.assertTrue(self.fork_release_accepts(version))
+                self.assertTrue(self.build_accepts(version))
+
+    def test_both_scripts_refuse_the_same_versions(self) -> None:
+        for version in self.BAD:
+            with self.subTest(version=version):
+                self.assertFalse(self.fork_release_accepts(version))
+                self.assertFalse(self.build_accepts(version))
 
 
 class RepositoryLayoutTests(unittest.TestCase):

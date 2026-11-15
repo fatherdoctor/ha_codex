@@ -273,61 +273,6 @@ A daily workflow opens one issue when upstream releases something newer.
 
 The full list is in the [changelog](codex-cli-worker/CHANGELOG.md).
 
-## Stable and beta channels
-
-There are two channels. Use the stable channel unless you want to test new versions.
-
-| | Stable | Beta |
-|---|---|---|
-| App repository | `https://github.com/fatherdoctor/ha_codex` | `https://github.com/fatherdoctor/ha_codex#beta` |
-| App versions | `0.2.0`, `0.1.81.3` | `0.2.0-beta.1`, `0.2.0-beta.2` |
-| Integration | GitHub releases | GitHub pre-releases |
-
-- **App.** Add only one of the two repository addresses. After each stable release, the `beta` branch gets that
-  release too.
-- **Integration.** A beta is a GitHub pre-release. To get it, turn on beta versions for **Codex** on its page in
-  the Marketplace (HACS on older releases). The Marketplace shows a beta only while it is newer than the newest
-  stable release.
-- **Keep the two parts on the same version.** A beta app needs the beta integration of the same number.
-- **Leaving the beta channel.** Remove the `#beta` repository and add the stable one, and turn off beta versions
-  for the integration. Home Assistant does not offer an older version, so you stay on the beta version until the
-  next stable release.
-
-A beta passes the same test on a Home Assistant OS test machine as a stable release before it is published. It can
-still have problems that the test did not find. Report them as an issue and give the version number.
-
-## Publishing images
-
-Home Assistant does not build the app on your system. It pulls a ready image from GitHub Container Registry:
-`ghcr.io/fatherdoctor/codex-cli-worker`, for `amd64` and `aarch64`. The image tag is the app version in
-`codex-cli-worker/config.yaml`. The release workflow publishes the images for each version tag:
-
-- A stable tag (`v0.2.0`) publishes the version tag and moves `latest`.
-- A beta tag (`v0.2.0-beta.1`) publishes the version tag and moves `beta`. It does not move `latest`.
-- A manual build of a branch publishes the version tag and the branch name. It does not move `latest`.
-
-## Releasing
-
-The app and the integration always have the same version. A release is tagged only after it passes on a Home
-Assistant OS test machine. The steps for a stable release and a beta release are in
-[CONTRIBUTING.md](CONTRIBUTING.md#releases). The test record and how to undo a bad release are in
-[docs/updates-and-rollback.md](docs/updates-and-rollback.md).
-
-## Development layout
-
-```text
-.
-├── codex-cli-worker/          the app: config.yaml, Dockerfile, server.py, DOCS.md, CHANGELOG.md, tests/
-├── custom_components/
-│   └── codex_cli/             the integration (manifest.json has the same version as the app)
-├── scripts/                   build_hacs_release.py (HACS ZIP), fork_release.py (tag and rollback)
-├── release/lab-passes/        one test record for each released version
-├── docs/                      updates and rollback, designs
-├── examples/
-├── repository.yaml            makes this repository an app repository
-└── hacs.json                  makes HACS install the integration from the release ZIP
-```
-
 ## Auditing
 
 [AUDITING.md](AUDITING.md) maps each protection to the code that enforces it and the tests that show it.
@@ -341,7 +286,7 @@ Include the app, integration and Home Assistant versions, the steps that cause i
 and the integration diagnostics file. Remove tokens, device codes, private URLs and personal configuration before you
 post. Steps to collect logs: [Reporting a bug](codex-cli-worker/DOCS.md#reporting-a-bug).
 
-To try new versions before they are released to everyone, open an issue and ask to join as a beta tester. To report a
+There is no public beta. Each version is tested on a Home Assistant OS test machine before it is released. To report a
 security problem, use the **Report a vulnerability** button on the Security tab. See [SECURITY.md](SECURITY.md).
 
 ## Credit

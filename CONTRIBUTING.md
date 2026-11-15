@@ -165,12 +165,9 @@ The release workflow builds the HACS ZIP and the app images when a version tag i
 `main` run validation and tests only. They do not make a release or publish images. A change to documentation
 only does not need a new version.
 
-There are two channels (see [Stable and beta channels](README.md#stable-and-beta-channels)):
-
-- **Stable:** versions such as `0.2.0` or `0.1.81.3`, on `main`, tagged `v0.2.0`.
-- **Beta:** versions such as `0.2.0-beta.1`, on the `beta` branch, tagged `v0.2.0-beta.1`. A beta has three
-  numbers, because Home Assistant cannot compare `0.1.81.3-beta.1` with `0.1.81.3`. The release workflow publishes
-  a beta as a GitHub pre-release and moves the `beta` image tag, not `latest`.
+A stable version is released from `main`. A beta is released from the `beta` branch, for the Home Assistant OS
+test machine only; there is no public beta. The version rules, what a beta install is, and how `beta` follows `main`
+are in [Updates and rollback](docs/updates-and-rollback.md#versions).
 
 ### A stable release
 
@@ -181,19 +178,16 @@ There are two channels (see [Stable and beta channels](README.md#stable-and-beta
 4. Install that commit on a Home Assistant OS test machine and test it. Then add the test record
    `release/lab-passes/v<version>.json` on `main`.
 5. Tag and push: `python3 scripts/fork_release.py tag <version> --push`. The script tags the tested commit.
-6. Merge `main` into `beta`, so that beta installs get the release too.
 
-### A beta release
+### A beta for the test machine
 
-1. Start from the `beta` branch. Merge `main` into it first. If the branch does not exist yet, make it from `main`.
+1. Check out `beta` and merge `main` into it. If the branch does not exist yet, make it from `main` and set the
+   name in `repository.yaml` to `Codex for Home Assistant (beta)`.
 2. Do steps 1 to 4 above with a beta version, for example `0.2.0-beta.1`, on `beta` instead of `main`. The test
    record goes on `beta`.
-3. Tag and push from a checkout of `beta`: `python3 scripts/fork_release.py tag 0.2.0-beta.1 --push`.
-4. For the next beta, increase the last number: `0.2.0-beta.2`. The stable release is `0.2.0`.
+3. Tag and push from the `beta` checkout: `python3 scripts/fork_release.py tag 0.2.0-beta.1 --push`.
 
-`fork_release.py` refuses a stable version that is not newer than every stable tag, and a beta version that is not
-newer than every tag. The details, and how to undo a bad release, are in
-[Updates and rollback](docs/updates-and-rollback.md).
+How to undo a bad release is in [Updates and rollback](docs/updates-and-rollback.md).
 
 ## Working together
 

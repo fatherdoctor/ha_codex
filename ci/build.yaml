@@ -44,13 +44,14 @@ jobs:
           fi
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
           # Every build publishes the version tag, which the Supervisor pulls. The second tag says where it came
-          # from: latest for a stable release, beta for a beta release, the branch name for a manual build.
+          # from: latest for a stable release, beta for a beta release, branch-<name> for a manual build. The
+          # prefix means a manual build can never move latest or beta; a "/" is not allowed in an image tag.
           if [ "${PUBLISH_LATEST}" = "true" ]; then
             channel_tag="latest"
           elif [[ "${GITHUB_REF}" == refs/tags/v*-beta.* ]]; then
             channel_tag="beta"
           else
-            channel_tag="${GITHUB_REF_NAME}"
+            channel_tag="branch-${GITHUB_REF_NAME//\//-}"
           fi
           {
             echo "image_tags<<EOF"

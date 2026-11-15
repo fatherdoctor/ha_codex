@@ -39,6 +39,8 @@ MANIFEST = "custom_components/codex_cli/manifest.json"
 CHANGELOG = "codex-cli-worker/CHANGELOG.md"
 CODE_PATHS = ("codex-cli-worker", "custom_components")
 RECORD_DIR = "release/lab-passes"
+# A stable release comes from main. A beta may come from the beta branch, so only stable versions are checked.
+MAIN_REF = "origin/main"
 VERSION_PATTERN = re.compile(r"\d+\.\d+\.\d+(?:\.\d+)?")
 # A beta has three numbers: Home Assistant cannot compare 0.1.81.3-beta.1 with 0.1.81.3, but it can compare
 # 0.2.0-beta.1 with 0.2.0 (the beta comes first).
@@ -235,6 +237,8 @@ def plan_tag(version: str, root: Path = ROOT, base: str = "HEAD") -> tuple[str, 
     commit = resolve_commit(record.commit, root)
     if not is_ancestor(commit, base, root):
         raise ReleaseError(f"{commit[:12]} is not on {base}: tag only merged commits")
+    if not is_beta(version) and not is_ancestor(commit, MAIN_REF, root):
+        raise ReleaseError(f"{commit[:12]} is not on {MAIN_REF}: a stable release comes from main (fetch first?)")
     check_release_files(version, commit, root)
     # A stable install sees only stable releases. A beta install sees the beta branch, which takes every stable
     # release too, so a beta must be newer than all of them.
