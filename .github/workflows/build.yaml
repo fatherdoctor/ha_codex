@@ -49,7 +49,8 @@ jobs:
             if [ "${PUBLISH_LATEST}" = "true" ]; then
               echo "latest"
             else
-              echo "${GITHUB_REF_NAME}"
+              # Image tags cannot hold a slash, so a branch like builder/x becomes builder-x.
+              echo "${GITHUB_REF_NAME//\//-}"
             fi
             echo "EOF"
           } >> "${GITHUB_OUTPUT}"
