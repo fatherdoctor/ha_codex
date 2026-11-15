@@ -149,7 +149,7 @@ The original mode and diagnostics-base questions are resolved by the named lead 
 
 ## Visual evidence
 
-The light and dark comparisons under `screenshots/permissions-overrides-*.png` show the actual local
+The light and dark comparisons made for this design (the images are not kept in the repository) showed the actual local
 Settings controls beside the shipped Home Assistant Settings frontend (Core 2026.10.3, frontend
 20260930.5), rendered by an isolated local HA test fixture with synthetic data and temporary test
 authentication. Neither side pictures an owner installation. The official switch demo was also checked. Settings-row geometry was checked against

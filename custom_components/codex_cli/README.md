@@ -59,6 +59,59 @@ data:
 response_variable: codex_result
 ```
 
+### Action examples
+
+List the 10 most recently active tasks. Optional filters are `limit` (1-500), `offset` (zero-based), `status`, `order` (`created_asc` or `updated_desc`) and `summary`. The response has `tasks`, `total`, `next_offset` and `active_task_id`. With no options, the action returns all tasks, oldest-created first. To read the full conversation, call `codex_cli.get_task` with a `task_id` and read `task.turns`.
+
+```yaml
+action: codex_cli.list_tasks
+data:
+  limit: 10
+  order: updated_desc
+  summary: true
+response_variable: recent_chats
+```
+
+Continue a previous task. Completed, failed, cancelled and waiting tasks can continue if their saved Codex session is available. The task ID stays the same, each message adds an exchange, and the task-level status and result describe the latest exchange. A missing session returns an error; it never starts a new conversation. New tasks do not inherit context from other chats.
+
+```yaml
+action: codex_cli.continue_task
+data:
+  task_id: "YOUR_TASK_ID"
+  message: "Apply the first suggestion from your previous answer."
+response_variable: continued_chat
+```
+
+Answer a waiting question. `reply` is free text. When Codex offered answers, they are in the event's `choices` list, and sending one of them picks it. With `turn_id`, the reply is refused once that question is no longer the one waiting, so a late reply cannot answer a newer question.
+
+```yaml
+action: codex_cli.reply_task
+data:
+  task_id: "{{ trigger.event.data.task_id }}"
+  turn_id: "{{ trigger.event.data.turn_id }}"
+  reply: "Don't change anything"
+```
+
+## Events
+
+When a task completes, fails or needs input, the worker fires the event `codex_cli_task_result`, in addition to the notification. An automation that listens for it can read `task_id`, `turn_id`, `status`, `summary`, `question`, `choices`, `details`, `attachments` and the nested `response` object from `trigger.event.data`.
+
+## Task output
+
+A task returns a structured response with `status`, `summary`, `question`, `details` and `choices`. The first four are plain strings, and the Home Assistant consumer or notification service that receives them decides how they look. `choices` is a list of up to three short answers that Codex offers with a question; it is empty otherwise. The chat page formats Markdown in them (see [Formatted messages](../../codex-cli-worker/DOCS.md#formatted-messages)).
+
+To ask for a preferred style, add an instruction to `/config/AGENTS.md`, which you can edit from the app's web page. Codex treats it as guidance, not as a formatting guarantee. For Markdown-friendly output, add this:
+
+```md
+For the final structured response, use concise Markdown in summary, question,
+and details when it improves readability. Use only short lists, emphasis, inline
+code, and fenced code blocks. Do not use raw HTML, images, or embedded content.
+```
+
+## Assist example
+
+[examples/scripts.yaml](../../examples/scripts.yaml) is a starter script that you can expose to Assist or another LLM integration.
+
 ## Data Updates
 
 The integration polls the worker every 30 seconds. Actions that start, cancel, or reply to tasks request an immediate refresh after the worker responds.
