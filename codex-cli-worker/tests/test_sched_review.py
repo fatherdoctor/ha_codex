@@ -77,7 +77,7 @@ class ReviewStoreTests(unittest.TestCase):
         self.assertEqual(journal.stat().st_mode & 0o777, 0o600)
         with self.store.connect() as db:
             self.assertEqual(db.execute('PRAGMA journal_mode').fetchone()[0], 'persist')
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 2)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 3)
 
     def test_f6_once_uses_home_assistant_wall_time(self):
         item = scheduling.validate(proposal(spec={'kind':'once','at':'2027-03-02T09:00:00'}), NOW, 'America/Chicago')

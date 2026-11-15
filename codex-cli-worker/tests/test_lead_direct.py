@@ -75,8 +75,8 @@ class LeadStoreTests(unittest.TestCase):
             self.assertTrue(self.store.mail_status(NOW + 5)['full']['lead'])
             with self.assertRaises(scheduling.MailboxFull): self.store.mail('No', 'owner', NOW + 5, to='lead')
             ids = [r['id'] for r in self.store.messages(reader='lead', now=NOW + 5)]
-            self.store.mark_mail_read('lead', ids[:2])
-            self.store.mark_mail_read('lead', ids[2:3])
+            self.store.mark_mail_read('lead', ids[:2], now=NOW + 5)
+            self.store.mark_mail_read('lead', ids[2:3], now=NOW + 5)
             self.assertEqual(len(self.store.messages(reader='lead', now=NOW + 5)), 2)
             self.assertEqual(self.store.messages(reader='lead', unread_only=True, now=NOW + 5)[0]['id'], ids[-1])
 
@@ -94,7 +94,7 @@ class LeadStoreTests(unittest.TestCase):
         self.assertEqual(scheduling.MAX_MESSAGES, 128)
         first = self.store.mail('Old unread', 'owner', NOW, to='lead')
         second = self.store.mail('Read later', 'owner', NOW + 1, to='lead')
-        self.store.mark_mail_read('lead', [second])
+        self.store.mark_mail_read('lead', [second], now=NOW + 1)
         with patch.object(scheduling, 'MAX_MESSAGES', 2):
             third = self.store.mail('New', 'owner', NOW + 2, to='lead')
             self.assertEqual([r['id'] for r in self.store.messages(reader='lead', now=NOW + 3)], [first, third])
@@ -106,7 +106,7 @@ class LeadStoreTests(unittest.TestCase):
 
     def test_read_retention_is_per_reader_and_owner_has_no_age_limit(self):
         mid = self.store.mail('Keep owner and unread Codex', 'owner', NOW)
-        self.store.mark_mail_read('lead', [mid])
+        self.store.mark_mail_read('lead', [mid], now=NOW)
         future = NOW + 48 * 3600 + 1
         self.assertEqual(self.store.messages(reader='lead', now=future), [])
         self.assertEqual(self.store.messages(reader='owner', now=future)[0]['id'], mid)
@@ -246,7 +246,8 @@ class LeadApiTests(unittest.TestCase):
 
     def test_worker_mail_can_notify_lead_but_cannot_dispatch_lead_work(self):
         tid = 'synthetic-worker'
-        server.tasks[tid] = {'status': 'running', 'current_turn_id': 'synthetic-turn', 'task_source': 'schedule'}
+        server.tasks[tid] = {'status': 'running', 'current_turn_id': 'synthetic-turn', 'task_source': 'schedule',
+                             'turns': [{'turn_id': 'synthetic-turn', 'task_source': 'schedule'}]}
         cap = server.ha_data.begin(tid); self.addCleanup(lambda: server.ha_data.end(tid))
         request = {'operation': 'post_mailbox', 'capability': cap, 'arguments': {'body': 'Synthetic note', 'to': 'lead'}}
         result = self.service.dispatch(request)

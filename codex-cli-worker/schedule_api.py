@@ -28,9 +28,11 @@ class Worker:
             return w.assistant_paused() or bool(w._active_task_ids_locked()) or bool(w.message_queue)
 
     def paused(self):
+        """Expose the worker's owner-controlled pause state."""
         return self.worker.assistant_paused()
 
     def redact(self, value):
+        """Remove sensitive text before a task result reaches the mailbox."""
         return self.worker.redact(value)
 
     def snapshot(self, task_id):
@@ -165,8 +167,13 @@ class Service:
                 if parent is not None and (not isinstance(parent, str) or len(parent) != 32):
                     raise ValueError('parent must be the 32-character id of a mailbox message.')
                 turn_id = str(w.tasks[task_id]['current_turn_id'])
+                turn = next((row for row in w.tasks[task_id].get('turns') or []
+                             if isinstance(row, dict) and str(row.get('turn_id')) == turn_id), {})
+                origin = turn.get('task_source', '')
+                if origin not in ('schedule', 'lead'):
+                    origin = ''
                 message_id = store.mail(args.get('body'), 'codex', time.time(), parent, task_id + ':' + turn_id,
-                    to=args.get('to', 'all'), due=args.get('due'), origin=w.tasks[task_id].get('task_source', ''))
+                    to=args.get('to', 'all'), due=args.get('due'), origin=origin)
                 return {'ok': True, 'message_id': message_id}
             raise ValueError('Unsupported scheduling operation; approvals are owner-only.')
 
@@ -311,7 +318,8 @@ def register(worker):
         with engine.tick_lock:
             engine.reconcile()
             return jsonify(ok=True, schedules=[schedule_payload(row) for row in engine.store.schedules()], runs=clean(engine.store.runs()),
-                           mailbox=[mail_payload(row, engine.store.timezone) for row in engine.store.messages(reader=mailbox_reader(), limit=scheduling.MAX_MESSAGES)],
+                           mailbox=[mail_payload(row, engine.store.timezone) for row in
+                                    engine.store.messages(reader=mailbox_reader(), limit=scheduling.MAX_MESSAGES)],
                            mailbox_reader=mailbox_reader(), mailbox_status=engine.store.mail_status(), timezone=engine.store.timezone,
                            timezone_error='' if engine.store.timezone else 'Home Assistant time zone unavailable; schedule entry and dispatch are paused.',
                            lead_token_configured=engine.store.has_token(),
@@ -412,7 +420,8 @@ def register(worker):
         pending = service.engine().store.pending_lead()
         if pending and pending['task_id'] == task_id:
             return jsonify(ok=True, task={'task_id': task_id, 'task_source': 'lead', 'status': 'waiting',
-                                         'background_mode': pending['mode'], 'summary': 'Waiting for a free worker slot and the daily run limit.'})
+                                         'background_mode': pending['mode'],
+                                         'summary': 'Waiting for a free worker slot and the daily run limit.'})
         with worker.lock:
             task = worker.tasks.get(task_id)
             if task is None or task.get('task_source') not in {'lead', 'schedule'}:
@@ -424,6 +433,7 @@ def register(worker):
         return jsonify(ok=True, task=clean(result))
 
     def mail_payload(row, zone, *, excerpt=False):
+        """Return a redacted envelope and optional plain-text view."""
         envelope = scheduling.mail_envelope(row)
         envelope['message'] = worker.redact(envelope['message'])[:512] if excerpt else worker.redact(envelope['message'])
         result = {'id': row['id'], 'parent': row['parent'], 'envelope': envelope, 'origin': row['origin']}
@@ -432,13 +442,17 @@ def register(worker):
         return result
 
     def mailbox_reader():
+        """Accept only a named mailbox reader."""
         reader = request.args.get('mailbox', 'owner')
         if reader not in scheduling.READERS:
             raise ValueError('mailbox must name owner, lead or codex.')
         return reader
 
     def mail_page(reader, *, mark_read):
-        allowed = {'offset', 'limit', 'unread_only'} if reader == 'lead' and request.path.startswith('/lead/') else {'offset', 'limit', 'unread_only', 'mailbox'}
+        """Return a bounded reader page and acknowledge only that page when permitted."""
+        allowed = {'offset', 'limit', 'unread_only'}
+        if not (reader == 'lead' and request.path.startswith('/lead/')):
+            allowed.add('mailbox')
         if set(request.args) - allowed:
             raise ValueError('Mailbox reads accept only offset, limit and unread_only (administrators may select mailbox).')
         unread = request.args.get('unread_only', 'false')
@@ -453,7 +467,8 @@ def register(worker):
                     raise ValueError(key+' must be a whole number.') from None
         offset, limit = page_arguments('read_mailbox', args)
         engine = service.engine()
-        # Reading and acknowledging a page share one transaction in Store.messages.
+        # Store.messages acknowledges only the selected page atomically. The
+        # separate count is a continuation hint, not a shared transaction.
         rows = engine.store.messages(reader=reader, unread_only=unread == 'true')
         page = engine.store.messages(reader=reader, unread_only=unread == 'true', mark_read=mark_read, offset=offset, limit=limit)
         following = offset + len(page) < len(rows)
@@ -468,6 +483,7 @@ def register(worker):
         return mail_page('lead', mark_read=True)
 
     def mail_fields(author, parent=None, *, allow_task=False):
+        """Validate message fields and permit attached tasks only on the dedicated lead route."""
         data = body()
         allowed = {'body', 'message', 'to', 'due', 'turn_id'} if author == 'lead' else {'body', 'message', 'to', 'due'}
         if allow_task:
@@ -515,6 +531,7 @@ def register(worker):
     @guarded
     @lead
     def lead_mail_edit(message_id):
+        """Edit only the lead's own message through its authenticated route."""
         data = body()
         if set(data) - {'message', 'due'} or 'message' not in data:
             raise ValueError('An edit needs message and optional due.')
@@ -525,16 +542,19 @@ def register(worker):
     @guarded
     @owner
     def owner_mail_list():
+        """Let an administrator inspect a mailbox without acknowledging its reader copies."""
         return mail_page(mailbox_reader(), mark_read=False)
 
     @app.post('/schedule-mailbox/read')
     @guarded
     @owner
     def owner_mail_read():
+        if mailbox_reader() != 'owner':
+            raise ValueError("Only the owner's mailbox can be acknowledged here.")
         data = body()
         if set(data) != {'ids'}:
             raise ValueError('A mailbox acknowledgement needs ids only.')
-        service.engine().store.mark_mail_read(mailbox_reader(), data['ids'])
+        service.engine().store.mark_mail_read('owner', data['ids'])
         return jsonify(ok=True)
 
     @app.post('/schedule-mailbox')
@@ -553,6 +573,7 @@ def register(worker):
     @guarded
     @owner
     def owner_mail_edit(message_id):
+        """Apply an authenticated administrator edit without executing its body."""
         data = body()
         if set(data) - {'message', 'due'} or 'message' not in data:
             raise ValueError('An edit needs message and optional due.')

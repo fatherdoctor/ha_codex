@@ -152,7 +152,7 @@
         mailbox.append(item);
       }
       if (!data.mailbox.length) mailbox.append(node("p", "No local messages.", "muted"));
-      if (dialog.open && data.mailbox.length) {
+      if (dialog.open && reader === "owner" && data.mailbox.length) {
         await api(mailboxPath("schedule-mailbox/read"), {ids: data.mailbox.map(mail => mail.id)});
       }
     } catch (error) { message(error); }
