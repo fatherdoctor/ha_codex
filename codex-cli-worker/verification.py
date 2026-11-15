@@ -633,12 +633,17 @@ class Verification:
             except (OSError, ValueError, KeyError):
                 self.run(task_id, {"operation": "dashboard", "path": ""})
 
+    def require_dashboard_save_permission(self, task_id):
+        """Worker writes obey the same narrowed mode as the current chat turn."""
+        options = self.worker.task_options(task_id)
+        if options.get("codex_sandbox") == "read-only":
+            raise ValueError("Dashboard saves are disabled in read-only mode")
+        if not options.get("auto_save_lovelace", True):
+            raise ValueError("Dashboard auto-save is disabled; inspect the loaded dashboard without save_pending")
+
     def save_pending_dashboard(self, task_id, path):
         """Save only a dashboard edited in this turn, before the AI views it."""
-        if self.worker.read_options().get("codex_sandbox") == "read-only":
-            raise ValueError("Dashboard saves are disabled in read-only mode")
-        if not self.worker.read_options().get("auto_save_lovelace", True):
-            raise ValueError("Dashboard auto-save is disabled; inspect the loaded dashboard without save_pending")
+        self.require_dashboard_save_permission(task_id)
         manifest = self.worker.get_run_dir(task_id) / "manifest-before.json"
         if not manifest.is_file():
             raise ValueError("The turn has no baseline for a dashboard save")
@@ -652,6 +657,7 @@ class Verification:
             errors = self.worker.validate_changed_files({"added": [], "changed": [ref["storage_file"]], "deleted": []})
             if errors:
                 raise ValueError("The edited dashboard failed JSON validation")
+            self.require_dashboard_save_permission(task_id)
             ok, _ = self.worker.save_lovelace_dashboard(ref)
             if not ok:
                 raise ValueError("Home Assistant did not accept the pending dashboard")

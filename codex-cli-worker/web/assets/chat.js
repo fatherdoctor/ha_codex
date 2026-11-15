@@ -35,6 +35,7 @@ const state = {
   chatSettings: new Map(),
   settingsBusy: false,
   activity: null,
+  permissionModes: new Map(),
 };
 const effortLabels = {
   low: "Low",
@@ -443,6 +444,41 @@ async function api(path, body, method) {
     );
   return data;
 }
+
+document.getElementById("export-interaction-logs").addEventListener("click", async () => {
+  const button = document.getElementById("export-interaction-logs");
+  const status = document.getElementById("export-logs-status");
+  button.disabled = true;
+  try {
+    const response = await fetch("diagnostics/export", { cache: "no-store" });
+    if (!response.ok) throw new Error("The export could not be downloaded. Try again.");
+    const data = await response.json();
+    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "codex-interactions.json";
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    status.textContent = "Downloaded. Open the file to review it before attaching it to a bug report. Nothing was sent.";
+  } catch (_error) {
+    status.textContent = "The export could not be downloaded. Try again.";
+  } finally {
+    button.disabled = false;
+  }
+});
+
+document.getElementById("save-diagnostic-retention").addEventListener("click", async () => {
+  const status = document.getElementById("export-logs-status");
+  try {
+    const capacity = Number(document.getElementById("diagnostic-retention").value);
+    if (!Number.isInteger(capacity) || capacity < 10 || capacity > 100)
+      throw new Error("Keep between 10 and 100 interactions.");
+    await api("diagnostics/settings", { capacity });
+    status.textContent = `Keeping up to ${capacity} interactions. Running interactions are retained.`;
+  } catch (error) {
+    status.textContent = error.message;
+  }
+});
 /** Build an error that keeps the HTTP status so callers can tell 404 apart. */
 function workerError(message, status) {
   const error = new Error(message);
@@ -570,6 +606,7 @@ function controls() {
   $("notice").textContent = notice;
   $("notice").hidden = !notice;
   renderPicker();
+  document.dispatchEvent(new Event("chat-view"));
 }
 /** Build the small pin icon shown beside pinned chat titles. */
 function pinIcon() {
@@ -752,7 +789,7 @@ async function loadList(older = false) {
   const count = older ? 20 : Math.max(20, Math.min(500, state.chats.length));
   const offset = older ? state.chats.length : 0;
   const data = await api(
-    `tasks?summary=true&order=pinned_first&limit=${count}&offset=${offset}`,
+    `tasks?summary=true&order=pinned_first&archived=${Boolean(state.archived)}&limit=${count}&offset=${offset}`,
   );
   // A full refresh covers every loaded chat, so drop entries the server no
   // longer returns, such as a chat deleted here or in another tab.
@@ -770,6 +807,14 @@ async function loadList(older = false) {
   // Approval panels in the open chat depend on whether any chat is working.
   if (activeChanged && state.task) renderTask();
   controls();
+}
+/** Keep document ids subject to the same validation as image ids. */
+function messageAttachments(list) {
+  return (Array.isArray(list) ? list : []).filter(item =>
+    item && ['image', 'file'].includes(item.kind) && /^[0-9a-f]{32}$/.test(item.attachment_id));
+}
+function selectedPermissionMode() {
+  return state.permissionModes.get(state.id) || state.task?.permission_mode || 'default';
 }
 /** Return the image attachments in a list that carry a well-formed id. */
 function imageAttachments(list) {
@@ -805,6 +850,13 @@ function renderAttachments(
 ) {
   const list = textNode("div", "", className);
   for (const attachment of attachments) {
+    if (attachment.kind === 'file') {
+      const file = textNode('a', `${attachment.name} · ${sizeLabel(attachment.size)} ↓`, 'document-attachment');
+      file.href = attachmentUrl(taskId, attachment, true);
+      file.download = attachment.name || 'document';
+      list.append(file);
+      continue;
+    }
     const figure = textNode("figure", "", "attachment");
     const link = document.createElement("a");
     link.href = attachmentUrl(taskId, attachment);
@@ -1303,7 +1355,7 @@ function renderTask(force = false) {
   for (const turn of turns) {
     const latest = turn === turns[turns.length - 1];
     const exchange = textNode("section", "", "exchange");
-    const sent = imageAttachments(turn.prompt_attachments);
+    const sent = messageAttachments(turn.prompt_attachments);
     if (sent.length)
       exchange.append(
         renderAttachments(
@@ -1394,6 +1446,10 @@ function renderApproval(approval, taskId, turnId, active) {
   card.setAttribute("aria-label", "Permission request");
   const statuses = { allowed: "Allowed once", denied: "Denied", expired: "Expired" };
   card.append(textNode("strong", pending ? "Permission needed" : statuses[approval.status] || "Expired"));
+  const plain = approval.confirmation || {};
+  for (const [key, label] of [["what", "What changes"], ["where", "Where"], ["effect", "The effect"]]) {
+    if (plain[key]) card.append(textNode("p", `${label}: ${plain[key]}`, "permission-plain"));
+  }
   if (approval.reason) card.append(textNode("p", approval.reason));
   card.append(textNode("p", approval.scope || "", "permission-scope"));
   if (approval.cwd) card.append(textNode("p", `Working folder: ${approval.cwd}`, "permission-folder"));
@@ -1503,7 +1559,7 @@ function renderQueued(taskId, entry) {
   const label = textNode("p", "", "queued-label");
   label.append(queueIcon(), textNode("span", "In queue · not sent yet"));
   exchange.append(label);
-  const sent = imageAttachments(entry.prompt_attachments);
+  const sent = messageAttachments(entry.prompt_attachments);
   if (sent.length) {
     const images = renderAttachments(
       taskId,
@@ -1943,6 +1999,7 @@ async function selectChat(id, restoring = false) {
     $("chat-title").textContent = "New chat";
     $("chat-status").textContent = "Your Home Assistant, with a little help.";
     $("messages").innerHTML = welcome; // Static, application-owned welcome content only.
+    document.dispatchEvent(new Event("chat-view"));
     return;
   }
   $("chat-title").textContent =
@@ -2017,28 +2074,29 @@ function closeChatMenu(focus = false) {
     button.setAttribute("aria-expanded", "false");
   for (const row of $("chat-list").querySelectorAll(".chat-row.menu-open"))
     row.classList.remove("menu-open");
+  trigger?.setAttribute("aria-expanded", "false");
   if (focus && trigger?.isConnected) trigger.focus();
 }
 /** Show the actions for one chat, anchored to its button or as a sheet on phones. */
 function openChatMenu(id, trigger, point = null) {
-  const chat = chatById(id);
-  if (!chat) return;
+  const chat = chatById(id) || (id === state.id ? state.task : null);
+  if (id && !chat) return;
   if (id === menu.id && !$("chat-menu").hidden) return;
   closeChatMenu();
   closePicker();
   menu.id = id;
   menu.trigger =
     trigger ||
-    $("chat-list").querySelector(`[data-menu-for="${CSS.escape(id)}"]`);
+    $("chat-list").querySelector(`[data-menu-for="${CSS.escape(id || "")}"]`);
   menu.point = point;
   const panel = $("chat-menu");
-  $("chat-menu-title").textContent = chat.title || "Untitled chat";
-  panel.querySelector('[data-action="pin"]').textContent = chat.pinned
+  $("chat-menu-title").textContent = chat?.title || "New chat";
+  panel.querySelector('[data-action="pin"]').textContent = chat?.pinned
     ? "Unpin chat"
     : "Pin chat";
   const remove = panel.querySelector('[data-action="delete"]');
   const working =
-    ["queued", "running"].includes(chat.status) || state.active === id;
+    ["queued", "running"].includes(chat?.status) || state.active === id;
   remove.disabled = working;
   remove.title = working ? "Stop this task before deleting it." : "";
   const sheet = matchMedia("(max-width:700px)").matches;
@@ -2049,6 +2107,10 @@ function openChatMenu(id, trigger, point = null) {
   if (!sheet) positionChatMenu();
   menu.trigger?.setAttribute("aria-expanded", "true");
   menu.trigger?.closest(".chat-row")?.classList.add("menu-open");
+  for (const action of ["pin", "rename", "delete", "copy-id", "archive"])
+    panel.querySelector(`[data-action="${action}"]`).disabled = !id ||
+      (["delete", "archive"].includes(action) && (working || Boolean(state.task?.queued_message)));
+  panel.querySelector('[data-action="archive"]').textContent = chat?.archived ? "Restore chat" : "Archive";
   menuItems()[0]?.focus();
 }
 /** Stop a pending long-press timer and forget where the press started. */
@@ -2179,6 +2241,7 @@ $("chat-menu").addEventListener("click", async (event) => {
   if (action === "pin") await togglePin(id);
   else if (action === "rename") openRename(id);
   else if (action === "delete") openDelete(id);
+  else document.dispatchEvent(new CustomEvent("thread-action", {detail: {action, id}}));
 });
 /** Pin or unpin a chat through the worker API and re-sort the list. */
 async function togglePin(id) {
@@ -2289,6 +2352,7 @@ $("composer").addEventListener("submit", async (event) => {
     const attachments = await Promise.all(
       state.files.map(async (upload) => ({
         name: upload.name,
+        kind: upload.kind || "image",
         data: await encodeUpload(upload),
       })),
     );
@@ -2298,6 +2362,7 @@ $("composer").addEventListener("submit", async (event) => {
         ...(id ? { message } : { prompt: message }),
         ...(attachments.length ? { attachments } : {}),
         chat_settings: selectedSettings(),
+        permission_mode: selectedPermissionMode(),
         // If another chat is working, the worker holds this message in its queue.
         queue: true,
       },
@@ -2336,6 +2401,17 @@ function encodeUpload(upload) {
 }
 /** Shrink an image whose longest edge exceeds the limit; other images pass through. */
 async function prepareUpload(file) {
+  if (file.documentUpload) {
+    if (!file.size) {
+      const bytes = await file.arrayBuffer().catch(() => null);
+      if (!bytes?.byteLength) throw new Error('The file is empty or could not be read from the picker.');
+      file = new File([bytes], file.name || 'document.txt', {type:file.type});
+    }
+    if (file.size > UPLOAD_MAX_BYTES) throw new Error('Files must contain 1 byte to 10 MB.');
+    if (!/\.(txt|md|ya?ml|json|csv|log|py|js|html|css|xml|pdf)$/i.test(file.name))
+      throw new Error('Choose a text, source, configuration or PDF file.');
+    return {id: crypto.randomUUID(), name:file.name, size:file.size, blob:file, kind:'file', url:''};
+  }
   const type = file.type === "image/jpg" ? "image/jpeg" : file.type;
   // Drag-and-drop and clipboard sources can omit the type; the worker sniffs the bytes.
   if (type && !UPLOAD_TYPES.includes(type))
@@ -2466,9 +2542,9 @@ function renderPending() {
   strip.replaceChildren();
   for (const upload of state.files) {
     const item = textNode("div", "", "pending-file");
-    const img = document.createElement("img");
-    img.src = upload.url;
-    img.alt = "";
+    const img = document.createElement(upload.kind === 'file' ? 'span' : 'img');
+    if (upload.kind === 'file') img.textContent = '▤';
+    else { img.src = upload.url; img.alt = ''; }
     const name = textNode("span", upload.name, "pending-name");
     name.title = `${upload.name} · ${sizeLabel(upload.size)}`;
     const remove = textNode("button", "×", "pending-remove");
@@ -2490,8 +2566,11 @@ if (
   /Android/.test(navigator.userAgent) &&
   /; wv\)|Home Assistant/.test(navigator.userAgent)
 )
-  $("file-input").removeAttribute("multiple");
-$("attach").onclick = () => $("file-input").click();
+  for (const id of ["file-input", "document-input"]) $(id).removeAttribute("multiple");
+$("attach").onclick = () => {
+  const panel = $('plus-menu'); panel.hidden = !panel.hidden;
+  $('attach').setAttribute('aria-expanded', String(!panel.hidden));
+};
 /** Feed picked, pasted, or dropped files to addUploads and report any surprise. */
 async function acceptFiles(fileList) {
   try {
@@ -2926,6 +3005,13 @@ let shownLogin = null;
  */
 function signInCard(auth) {
   const card = document.createElement("div");
+  const requirement = textNode("p", "A ChatGPT account with Codex access is required. As of November 13, 2026, this includes Free and Go. ", "muted");
+  const availability = textNode("a", "Check OpenAI’s current availability");
+  availability.href = "https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan";
+  availability.target = "_blank";
+  availability.rel = "noopener noreferrer";
+  requirement.append(availability);
+  card.append(requirement);
   card.className = "signin-card";
   if (auth.user_code) {
     card.append(
@@ -3030,6 +3116,7 @@ async function loadPause() {
   renderPause(await api("pause"));
 }
 let remoteTimer;
+let remoteCardKey = "";
 /**
  * Show the remote-control state in the settings dialog: on or off, the
  * machine name, the pairing code as large text and a QR code, and the recent
@@ -3052,8 +3139,22 @@ function renderRemoteControl(rc) {
   if (!rc.available) status = rc.blocked_reason;
   else if (!rc.enabled) status = `Off. When on, this Home Assistant shows in the ChatGPT app as “${rc.configured_name}”.`;
   $("remote-control-status").textContent = status;
+  const address = rc.core_address;
+  $("remote-core-address").textContent = address ? address.url ? `Core address (${address.source}): ${address.url}` : address.error || "Core address unavailable." : "";
+  $("remote-read-tools").textContent = rc.read_tools || "";
+  for (const [id, text] of [
+    ["remote-control-name-warning", rc.name_warning],
+    ["remote-control-policy-warning", rc.policy_warning],
+  ]) {
+    $(id).textContent = text || "";
+    $(id).hidden = !text;
+  }
   const card = $("remote-control-card");
-  card.replaceChildren();
+  const key = JSON.stringify([name, rc.enabled, rc.pairing_code, rc.pairing_qr, rc.pairing_url]);
+  // Polling must not replace the code while a person copies it or scans its QR.
+  if (key !== remoteCardKey) {
+    remoteCardKey = key;
+    card.replaceChildren();
   if (rc.enabled && rc.pairing_code) {
     card.append(
       textNode("p", `Pairing code for “${name}”:`),
@@ -3067,17 +3168,32 @@ function renderRemoteControl(rc) {
       card.append(img);
     }
   }
+  }
   $("remote-control-start").hidden = rc.enabled;
   $("remote-control-start").disabled = !rc.available;
   $("remote-control-stop").hidden = !rc.enabled;
   $("remote-control-pair").hidden = !rc.enabled;
+  $("remote-control-note").hidden = !rc.available;
+  const findings = rc.config_findings || [];
+  const list = $("remote-control-findings-list");
+  list.replaceChildren(
+    ...findings.map((item) =>
+      textNode("li", `${item.file || "config"}${item.line ? `, line ${item.line}` : ""}: ${item.reason}${item.undone ? ` — ${item.undone}` : item.undo_note ? ` — ${item.undo_note}` : ""}${item.recovery_copy ? ` — replaced version saved at ${item.recovery_copy}` : ""}${item.text ? ` (${item.text})` : ""}`),
+    ),
+  );
+  if ((rc.config_findings_count || 0) > findings.length) {
+    list.append(textNode("li", `… and ${rc.config_findings_count - findings.length} more`));
+  }
+  $("remote-control-findings").hidden = !findings.length;
   $("remote-control-log").textContent = (rc.log || []).join("\n");
   $("remote-control-log-box").hidden = !(rc.log || []).length;
+  document.dispatchEvent(new CustomEvent("remote-view", {detail: rc}));
 }
 for (const [id, action] of [
   ["remote-control-start", "start"],
   ["remote-control-stop", "stop"],
   ["remote-control-pair", "pair"],
+  ["remote-control-review", "review"],
 ]) {
   $(id).onclick = async () => {
     $(id).disabled = true;
@@ -3095,9 +3211,82 @@ for (const [id, action] of [
 }
 /** Show an error in the result line of the settings dialog. */
 function settingsError(error) {
-  $("settings-result").textContent = String(error.message || error);
+  const result = $("connection-dialog").open ? $("connection-result") : $("settings-result");
+  result.textContent = String(error.message || error);
 }
+let permissionGroups = null;
+let permissionRuleDigest = null;
+const permissionSwitches = () => [...document.querySelectorAll("[data-permission-group]")];
+function permissionTheme() {
+  try {
+    if (window.parent === window) return;
+    const theme = getComputedStyle(window.parent.document.documentElement);
+    const target = $("permission-overrides");
+    for (const key of ["--primary-color", "--primary-text-color", "--secondary-text-color", "--divider-color", "--card-background-color",
+      "--ha-switch-background-color", "--ha-switch-thumb-background-color", "--ha-switch-checked-background-color", "--ha-switch-checked-thumb-background-color",
+      "--ha-color-fill-disabled-quiet-resting", "--ha-color-on-neutral-normal", "--ha-color-fill-primary-normal-resting", "--ha-color-on-primary-normal"])
+      if (theme.getPropertyValue(key).trim()) target.style.setProperty(key, theme.getPropertyValue(key));
+  } catch (_error) { /* Standalone/cross-origin previews use the page theme. */ }
+}
+async function loadPermissionOverrides() {
+  permissionTheme();
+  const controls = permissionSwitches();
+  controls.forEach((input) => { input.disabled = true; });
+  try {
+    const data = await api("permissions-overrides");
+    permissionGroups = data.groups;
+    permissionRuleDigest = data.rule_digest;
+    $("permissions-overrides-guard-note").textContent = data.guard_note || "";
+    $("permissions-overrides-guard-note").hidden = !data.guard_note;
+    controls.forEach((input) => {
+      input.checked = permissionGroups[input.dataset.permissionGroup] === true;
+      input.disabled = false;
+    });
+    $("permissions-overrides-result").textContent = "Changes save immediately.";
+  } catch (_error) {
+    permissionGroups = null;
+    $("permissions-overrides-guard-note").hidden = true;
+    $("permissions-overrides-result").textContent = "Permissions overrides are unavailable. Administrator access is required.";
+  }
+}
+$("confirm-permission-rules").onclick = async () => {
+  try {
+    const rules = await api("agents");
+    if (!window.confirm("Review these house rules before confirming:\n\n" + (rules.content || "No instructions file."))) return;
+    await api("permissions-overrides", { confirm_rules: true, expected_digest: permissionRuleDigest });
+    await loadPermissionOverrides();
+    $("permissions-overrides-result").textContent = "House rules confirmed. Start a new exchange to use them.";
+  } catch (_error) {
+    $("permissions-overrides-result").textContent = "Could not confirm house rules. Review them again.";
+  }
+};
+permissionSwitches().forEach((input) => input.addEventListener("change", async () => {
+  if (!permissionGroups) return;
+  const proposed = { ...permissionGroups, [input.dataset.permissionGroup]: input.checked };
+  permissionSwitches().forEach((control) => { control.disabled = true; });
+  try {
+    const data = await api("permissions-overrides", proposed);
+    permissionGroups = data.groups;
+    permissionRuleDigest = data.rule_digest;
+    $("permissions-overrides-guard-note").textContent = data.guard_note || "";
+    $("permissions-overrides-guard-note").hidden = !data.guard_note;
+    $("permissions-overrides-result").textContent = "Permissions overrides saved.";
+  } catch (_error) {
+    $("permissions-overrides-result").textContent = "Could not save permissions overrides. Check the settings before continuing.";
+  } finally {
+    permissionSwitches().forEach((control) => {
+      control.checked = permissionGroups[control.dataset.permissionGroup] === true;
+      control.disabled = false;
+    });
+  }
+}));
 $("settings-button").onclick = async () => {
+  try {
+    const data = await api("diagnostics/settings");
+    $("diagnostic-retention").value = data.capacity;
+  } catch (_error) {
+    $("export-logs-status").textContent = "Log retention is available to administrators.";
+  }
   sidebar(false);
   $("settings").showModal();
   $("settings-result").textContent = "";
@@ -3108,17 +3297,16 @@ $("settings-button").onclick = async () => {
     loadRemoteControl(),
     loadPause(),
     loadBrowserPermissions(),
-    api("agents").then((data) => {
-      $("agents").value = data.content || "";
-      $("agents").disabled = false;
-      $("save-agents").disabled = false;
-    }),
+    loadPermissionOverrides(),
   ]);
   for (const result of results)
     if (result.status === "rejected") settingsError(result.reason);
 };
 $("close-settings").onclick = () => $("settings").close();
-$("settings").addEventListener("close", () => clearTimeout(remoteTimer));
+$("settings").addEventListener("close", () => {
+  clearTimeout(loginTimer);
+  clearTimeout(remoteTimer);
+});
 for (const [id, path] of [
   ["login", "auth/start"],
   ["banner-login", "auth/start"],
@@ -3154,17 +3342,6 @@ for (const id of ["pause", "resume"]) {
     }
   };
 }
-$("save-agents").onclick = async () => {
-  $("save-agents").disabled = true;
-  try {
-    await api("agents", { content: $("agents").value });
-    $("settings-result").textContent = "Instructions saved.";
-  } catch (error) {
-    settingsError(error);
-  } finally {
-    $("save-agents").disabled = false;
-  }
-};
 let restore = Promise.resolve();
 /** Poll the list and the open chat; the first pass waits for the restored chat. */
 async function refresh() {

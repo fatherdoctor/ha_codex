@@ -1,6 +1,6 @@
 # Contributing to Codex for Home Assistant
 
-Thank you for your interest in improving Codex for Home Assistant. I welcome bug reports, documentation updates, and code contributions.
+Thank you for your interest in improving Codex for Home Assistant.
 
 This project has two main parts:
 
@@ -24,9 +24,19 @@ When reporting a bug, please include:
 - Whether you installed through HACS, manually, or from the development branch.
 - Your architecture, such as `amd64` or `aarch64`.
 - Clear steps to reproduce the issue.
-- Relevant logs from Home Assistant or the Codex CLI Worker app.
+- The date and time of the failed interaction, with your time zone.
+- Relevant logs (see "Getting your logs" below).
 - What you expected to happen.
 - What actually happened.
+
+### Getting your logs
+
+Logs are usually the fastest way to find a bug. On Home Assistant 2026.11, collect whichever of these apply:
+
+- **Export logs file (attach this first):** open the worker app page, choose Settings, then Export logs. The file holds anonymized details of the last interactions. It is anonymized automatically, but read the whole file before you post it.
+- **Worker app log:** go to Settings, Apps, Codex for Home Assistant, then the Log tab. Copy the lines around the time of the failure.
+- **Integration diagnostics:** go to Settings, Devices & services, Codex, open the three-dot menu, and choose Download diagnostics. Attach the downloaded file to the issue. It carries the same anonymized interactions as Export logs, so either file will do; read it before posting.
+- **Home Assistant Core log:** go to Settings, System, Logs and type `codex` in the filter box. Copy the matching lines.
 
 Please remove secrets, tokens, URLs, device codes, personal paths, and private Home Assistant configuration before sharing logs or screenshots.
 
@@ -167,6 +177,9 @@ https://github.com/fatherdoctor/ha_codex#dev
 
 To prepare a release, set the same version in `codex-cli-worker/config.yaml` and `custom_components/codex_cli/manifest.json` and add its notes to `codex-cli-worker/CHANGELOG.md`. Until the version is released, its changelog heading reads `## <version> (unreleased)`; validation of branches and pull requests accepts that, but tagging and the release build (a tag, or `build_hacs_release.py --release`) refuse it, so the mark comes off in the commit that is lab-tested and tagged. A release is tagged only after it passes on a Home Assistant OS test machine, with `scripts/fork_release.py`; a bad release is undone by releasing the last good code under the next version. Both are described in [Updates and rollback](docs/updates-and-rollback.md). The release workflow checks version alignment, attaches the HACS ZIP, and publishes worker images. Ordinary pushes to `main` run validation and tests without creating a release or publishing images. Documentation-only changes do not need a version bump.
 
-## Code of Conduct
+## Working together
 
-Please be respectful, constructive, and patient. This project is intended to help Home Assistant users work more safely and effectively with their own configurations, and contributions should support that goal.
+- Be respectful and specific. Say what you saw, what you expected, and what you tried.
+- Never post tokens, device codes, private logs, or personal configuration in an issue, pull request, or comment. Remove them first, and tell a maintainer if you posted one by mistake.
+- Maintainers may close, lock, or limit a thread that harms the project or the people in it.
+- Security problems go through [SECURITY.md](SECURITY.md), not a public issue.

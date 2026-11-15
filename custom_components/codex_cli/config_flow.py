@@ -44,12 +44,27 @@ class CodexCliConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return await _discover_input(self.hass)
 
     async def async_step_hassio(self, discovery_info: dict[str, Any]):
-        """Set up the integration from Supervisor app discovery."""
-        try:
-            data = await self._async_discover_entry_data()
-        except CodexCliApiError:
-            return self.async_abort(reason="cannot_connect")
-        return self.async_create_entry(title="Codex", data=data)
+        """Offer setup when the app announces itself through Supervisor discovery."""
+        await self.async_set_unique_id(DOMAIN)
+        self._abort_if_unique_id_configured()
+        return await self.async_step_hassio_confirm()
+
+    async def async_step_hassio_confirm(self, user_input: dict[str, Any] | None = None):
+        """Set up the discovered app once the owner confirms; nothing is added without that."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            try:
+                data = await self._async_discover_entry_data()
+            except CodexCliApiError as exc:
+                errors["base"] = _error_for_exception(exc)
+            else:
+                return self.async_create_entry(title="Codex", data=data)
+
+        return self.async_show_form(
+            step_id="hassio_confirm",
+            data_schema=_schema(),
+            errors=errors,
+        )
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
         """Set up the integration from the Home Assistant UI."""

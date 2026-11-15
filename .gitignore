@@ -18,10 +18,9 @@ codex_tasks/
 .env.*
 secrets.yaml
 
-# Local agent notes
-AGENTS.md
-agents.md
-
 # Local working files
 /TODO.md
 /.codex-remote-attachments/
+
+# The integration copied into the app image at build time (codex-cli-worker/integration/README.md)
+/codex-cli-worker/integration/codex_cli/

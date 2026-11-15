@@ -79,8 +79,19 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
+      - name: Bundle the integration into the app image
+        # The app installs this copy in /config at start (codex-cli-worker/integration/README.md).
+        run: |
+          rm -rf codex-cli-worker/integration/codex_cli
+          cp -R custom_components/codex_cli codex-cli-worker/integration/codex_cli
       - name: Build without publishing
         run: docker build --build-arg BUILD_ARCH=${{ matrix.arch }} --build-arg BUILD_VERSION=pr-test -t verification-test codex-cli-worker
+      - name: Check the bundled integration matches the app version
+        run: |
+          app="$(grep -E '^version:' codex-cli-worker/config.yaml | sed -E 's/^version:[[:space:]]*"?([^"]+)"?/\1/')"
+          bundled="$(docker run --rm --entrypoint python3 verification-test -c 'import json; print(json.load(open("/usr/share/ha_codex/integration/codex_cli/manifest.json"))["version"])')"
+          test "$app" = "$bundled" || { echo "Bundled integration $bundled does not match app $app" >&2; exit 1; }
+          docker run --rm --entrypoint test verification-test -f /integration_sync.py
       - name: Smoke test packaged Chromium
         run: |
           docker run --rm --entrypoint /usr/bin/chromium-browser verification-test --version
