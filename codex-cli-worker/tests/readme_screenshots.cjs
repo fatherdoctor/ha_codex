@@ -13,9 +13,12 @@ const base = 'http://127.0.0.1:9137/preview/';
 const output = process.env.SCREENSHOT_DIR || path.join(__dirname, '..', '..', 'screenshots');
 const signInMode = process.env.CODEX_FIXTURE_SIGN_IN === 'pending';
 const sizes = {desktop: {width: 1280, height: 800}, phone: {width: 390, height: 844}};
+// Script errors from every page opened in this run; the run fails if any page reported one.
+const pageErrors = [];
 
-// A fixed date keeps the "next run" and mailbox times the same on every refresh.
-const sampleTime = Date.parse('2026-11-16T15:00:00Z') / 1000;
+// A fixed date keeps the "next run" and mailbox times the same on every refresh. 12:00 UTC is 07:00 in
+// New York on that date, so the daily 07:00 proposal shows 07:00 as its next run.
+const sampleTime = Date.parse('2026-11-16T12:00:00Z') / 1000;
 const sampleProposal = {
   id: 'sample-proposal', name: 'Morning battery check', approved: false, enabled: false, revision: 'sample',
   prompt: 'List every battery below 20 percent and say which device it belongs to.', mode: 'read-only',
@@ -52,9 +55,7 @@ async function openPage(browser, size, scheme, chatId = null) {
   const page = await browser.newPage({viewport: sizes[size], colorScheme: scheme});
   // The page reopens the conversation it remembers, as it does for a returning user.
   if (chatId) await page.addInitScript(id => localStorage.setItem('codex-last-chat', id), chatId);
-  const errors = [];
-  page.on('pageerror', error => errors.push(error.message));
-  page.errors = errors;
+  page.on('pageerror', error => pageErrors.push(error.message));
   await sampleScheduling(page);
   await page.goto(base);
   await page.locator('.chat-row').first().waitFor();
@@ -118,12 +119,40 @@ async function confirm(browser, size, scheme) {
   await deny.waitFor();
   assert.equal(await page.locator('.permission-card img').count(), 0);
   await closeSidebarOnPhone(page, size);
-  await page.locator('.permission-card').evaluate(node => node.scrollIntoView({block: 'start'}));
+  // On a phone the card is taller than the space above the message box; end the shot at the buttons instead.
+  const align = size === 'phone' ? 'end' : 'start';
+  await page.locator('.permission-card').evaluate((node, block) => node.scrollIntoView({block}), align);
+  await assertAboveMessageBox(page, deny, 'Deny');
+  await assertAboveMessageBox(page, page.getByRole('button', {name: 'Allow once', exact: true}), 'Allow once');
   await page.screenshot({path: path.join(output, `confirm-${scheme}-${size}.png`), animations: 'disabled'});
-  // Answer it, so the fixture's simulated command ends before the next capture.
+  // Answer it, so the fixture's simulated command ends, then delete the chat, so the next capture shows the
+  // same conversation list as this one.
   await deny.click();
   await page.locator('.permission-card strong').filter({hasText: /^Denied$/}).waitFor();
+  await deleteCurrentChat(page);
   return page;
+}
+
+/** Fail when `button` is not fully visible between the top of the window and the top of the message box. */
+async function assertAboveMessageBox(page, button, name) {
+  const box = await button.boundingBox();
+  const composer = await page.locator('#message').boundingBox();
+  assert.ok(box && composer, `${name} or the message box is not on the page`);
+  assert.ok(box.y >= 0 && box.y + box.height <= composer.y, `${name} is hidden in the confirm shot`);
+}
+
+/** Delete the chat the page has open, retrying while the fixture still counts its command as running. */
+async function deleteCurrentChat(page) {
+  const id = await page.evaluate(() => localStorage.getItem('codex-last-chat'));
+  assert.ok(id, 'the confirm chat has no id');
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const status = await page.evaluate(
+      async taskId => (await fetch(`tasks/${encodeURIComponent(taskId)}`, {method: 'DELETE'})).status, id);
+    if (status === 200) return;
+    assert.equal(status, 409, `deleting the confirm chat returned HTTP ${status}`);
+    await page.waitForTimeout(250);
+  }
+  assert.fail('the confirm chat was still running after 5 seconds');
 }
 
 /** Settings: the five action groups, a schedule proposal waiting for approval, and the local mailbox. */
@@ -153,7 +182,11 @@ async function signIn(browser, size, scheme) {
   const card = page.locator('#login-card');
   await card.locator('.signin-code').waitFor();
   await card.locator('.signin-qr').evaluate(image => image.complete || new Promise(done => { image.onload = done; }));
-  await page.addStyleTag({content: '.signin-code, .signin-qr { filter: blur(9px); }'});
+  // Cover the sample code with a plain block and blur the QR code past reading; both are samples, but a
+  // reader cannot tell that from the picture.
+  await page.addStyleTag({content:
+    '.signin-code { color: transparent !important; background: #8888; border-radius: 4px; }' +
+    ' .signin-qr { filter: blur(16px); }'});
   await shootRange(page, page.locator('#settings h3').filter({hasText: 'ChatGPT account'}), card,
     `sign-in-${scheme}-${size}.png`);
   return page;
@@ -163,16 +196,14 @@ async function signIn(browser, size, scheme) {
   fs.mkdirSync(output, {recursive: true});
   const browser = await chromium.launch({headless: true});
   const shots = signInMode ? [signIn] : [chat, confirm, settings];
-  const errors = [];
   try {
     for (const shoot of shots)
       for (const scheme of ['light', 'dark'])
         for (const size of Object.keys(sizes)) {
           const page = await shoot(browser, size, scheme);
-          errors.push(...page.errors);
           await page.close();
         }
   } finally { await browser.close(); }
-  assert.deepEqual(errors, []);
+  assert.deepEqual(pageErrors, []);
   console.log(`Saved the ${signInMode ? 'sign-in' : 'chat, confirmation and Settings'} screenshots to ${output}`);
 })().catch(error => { console.error(error); process.exitCode = 1; });

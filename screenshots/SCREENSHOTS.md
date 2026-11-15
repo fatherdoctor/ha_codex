@@ -10,7 +10,7 @@ Each screenshot exists in four versions: `light` and `dark` color scheme, `deskt
 | Name | What it shows |
 |---|---|
 | `chat` | The chat page with one saved conversation open: a question about an automation and the answer that explains the change. |
-| `confirm` | A command that waits for one confirmation: what changes, where, the effect, the working folder, the command, and **Allow once** and **Deny**. |
+| `confirm` | A command that waits for one confirmation: what changes, where, the effect, the working folder, the command, and **Allow once** and **Deny**. The phone versions start lower in the card, so that both buttons are in view. |
 | `action-groups` | **Settings** > **Permissions overrides**: the five action groups and their switches. |
 | `schedule-proposal` | **Settings** > **Scheduled runs**: a schedule that an agent proposed, which stays off until you approve it, and an approved schedule. |
 | `mailbox` | **Settings** > **Local mailbox**: a message from the lead agent and the owner's reply. |
@@ -32,8 +32,12 @@ Run the **README screenshots** workflow from the **Actions** tab (it also runs w
 uploads the new files as an artifact named `screenshots`. Compare them with the files here and commit the ones that
 changed.
 
-To take them on your own computer, install the test dependencies (Python: `flask`, `pyyaml`, `requests`, `qrcode`;
-Node.js: `playwright`), then run, from the repository root:
+The `confirm` screenshots change on every run: the chat header and the conversation list show the time at which the
+script sent the request. Commit them only when something else in the picture changed. All other screenshots use a
+fixed sample date and are the same on every run unless the page changed.
+
+To take them on your own computer, install the test dependencies (Python: `flask`, `pyyaml`, `requests`, `qrcode`,
+`websocket-client`; Node.js: `playwright`), then run, from the repository root:
 
 ```sh
 python codex-cli-worker/tests/web_fixture.py &
