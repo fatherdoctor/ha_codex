@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -311,6 +312,9 @@ class NoticeTests(unittest.TestCase):
         self.assertEqual(installed[0], updated[0])
         self.assertIn("Restart Home Assistant once", installed[2])
         self.assertIn("Discovered: Codex", installed[2])
+        # After a stop between the two renames the folder is rewritten as "installed" for an integration that
+        # may already be set up, so the text does not claim it is not.
+        self.assertIn("If Codex is not set up yet", installed[2])
         self.assertIn("from version 0.1.0", updated[2])
 
     def test_another_install_is_explained(self):
@@ -360,20 +364,55 @@ class MainTests(SyncTestCase):
         """Return the ids of the notifications shown."""
         return [p["notification_id"] for path, p in self.posts if path.endswith("persistent_notification/create")]
 
-    def test_fresh_install_shows_the_restart_notice_and_announces_the_app(self):
-        """A first start installs, asks for a restart, and posts Supervisor discovery for codex_cli."""
-        self.assertEqual(integration_sync.main(), 0)
+    def test_fresh_install_shows_the_restart_notice_and_leaves_discovery_to_announce(self):
+        """A first start installs and asks for a restart; it does not post discovery, which --announce does."""
+        self.assertEqual(integration_sync.main([]), 0)
         self.assertTrue((self.target / "manifest.json").exists())
         self.assertEqual(self.notices(), [integration_sync.NOTICE_RESTART])
-        self.assertIn(("/discovery", {"service": "codex_cli", "config": {}}), self.posts)
+        self.assertNotIn("/discovery", [path for path, _ in self.posts])
 
-    def test_option_off_writes_nothing_but_still_announces_the_app(self):
-        """With install_integration false, /config is not touched; discovery still helps a Marketplace install."""
+    def test_option_off_writes_nothing(self):
+        """With install_integration false, /config is not touched and nothing is posted."""
         self.options.write_text(json.dumps({"install_integration": False}))
-        self.assertEqual(integration_sync.main(), 0)
+        self.assertEqual(integration_sync.main([]), 0)
         self.assertFalse(self.target.exists())
+        self.assertEqual(self.posts, [])
+
+    def test_the_kept_notice_is_removed_once_the_folder_is_the_apps_again(self):
+        """After a 'left as installed' notice, a start that finds the app's own folder dismisses it once."""
+        self.write_folder(self.target, "0.1.0", "marketplace code")
+        integration_sync.main([])
+        self.assertEqual(self.notices(), [integration_sync.NOTICE_KEPT])
+        shutil.rmtree(self.target)  # the owner removes the other install
+        integration_sync.main([])  # the app installs its own copy
+        integration_sync.main([])  # and finds it current
+        dismissed = [p["notification_id"] for path, p in self.posts if path.endswith("persistent_notification/dismiss")]
+        self.assertEqual(dismissed, [integration_sync.NOTICE_KEPT])
+        self.assertNotIn("kept_notice_version", json.loads(self.state.read_text()))
+
+    def test_a_kept_notice_that_cannot_be_dismissed_is_tried_again(self):
+        """If Core refuses the dismissal, the record stays and the next start tries again."""
+        self.state.write_text(json.dumps({"kept_notice_version": "0.2.0"}))
+        self.accept = False
+        integration_sync.main([])
+        self.assertEqual(json.loads(self.state.read_text())["kept_notice_version"], "0.2.0")
+        self.accept = True
+        integration_sync.main([])
+        self.assertNotIn("kept_notice_version", json.loads(self.state.read_text()))
+
+    def test_a_damaged_record_is_not_replayed_as_a_notice(self):
+        """Only a restart notice is ever owed; a record holding another id shows nothing."""
+        integration_sync.main([])
+        self.posts.clear()
+        self.state.write_text(json.dumps({"restart_notice": ["something_else", "title", "message"]}))
+        integration_sync.main([])
         self.assertEqual(self.notices(), [])
-        self.assertEqual([path for path, _ in self.posts], ["/discovery"])
+
+    def test_a_file_name_that_cannot_be_encoded_is_reported_not_raised(self):
+        """A ValueError from the copy (a name that cannot be encoded) gives the failed notice, not a traceback."""
+        with patch.object(integration_sync, "tree_digest", side_effect=UnicodeEncodeError("utf-8", "x", 0, 1, "bad")):
+            self.assertEqual(integration_sync.main([]), 0)
+        self.assertEqual(self.notices(), [integration_sync.NOTICE_FAILED])
 
     def test_option_missing_means_on(self):
         """Options written before this version have no install_integration; the default is on."""
@@ -385,57 +424,137 @@ class MainTests(SyncTestCase):
     def test_another_install_is_reported_once_per_app_version(self):
         """The 'left as installed' notice is shown on the first start of each app version only."""
         self.write_folder(self.target, "0.1.0", "marketplace code")
-        integration_sync.main()
-        integration_sync.main()
+        integration_sync.main([])
+        integration_sync.main([])
         self.assertEqual(self.notices(), [integration_sync.NOTICE_KEPT])
         with patch.dict(os.environ, {"ADDON_VERSION": "0.3.0"}):
-            integration_sync.main()
+            integration_sync.main([])
         self.assertEqual(self.notices(), [integration_sync.NOTICE_KEPT] * 2)
 
     def test_an_unshown_notice_is_tried_again_next_start(self):
         """If Core cannot take the notice (still starting), it is retried, and recorded only once shown."""
         self.write_folder(self.target, "0.1.0", "marketplace code")
         self.accept = False
-        integration_sync.main()
+        integration_sync.main([])
         self.assertEqual(self.notices(), [integration_sync.NOTICE_KEPT] * integration_sync.NOTICE_ATTEMPTS)
         self.assertFalse(self.state.exists())
         self.accept = True
         self.posts.clear()
-        integration_sync.main()
+        integration_sync.main([])
         self.assertEqual(self.notices(), [integration_sync.NOTICE_KEPT])
 
     def test_an_unshown_restart_notice_is_posted_at_later_starts(self):
         """If Core cannot take the restart notice, the next starts post it until it is shown once."""
         self.accept = False
-        integration_sync.main()
+        integration_sync.main([])
         self.assertEqual(self.notices(), [integration_sync.NOTICE_RESTART] * integration_sync.NOTICE_ATTEMPTS)
         self.accept = True
         self.posts.clear()
-        integration_sync.main()
+        integration_sync.main([])
         self.assertEqual(self.notices(), [integration_sync.NOTICE_RESTART])
         self.posts.clear()
-        integration_sync.main()
+        integration_sync.main([])
         self.assertEqual(self.notices(), [])
 
     def test_an_io_error_before_the_copy_is_reported(self):
         """An error reading the bundle or the folder gives the failed notice, and the start goes on."""
         with patch.object(integration_sync, "tree_digest", side_effect=OSError(5, "Input/output error")):
-            self.assertEqual(integration_sync.main(), 0)
+            self.assertEqual(integration_sync.main([]), 0)
         self.assertEqual(self.notices(), [integration_sync.NOTICE_FAILED])
-        self.assertIn(("/discovery", {"service": "codex_cli", "config": {}}), self.posts)
 
     def test_a_notice_record_that_cannot_be_saved_does_not_stop_the_start(self):
         """When the record cannot be written, the start goes on; at worst a notice is shown again."""
         self.write_folder(self.target, "0.1.0", "marketplace code")
         self.state.mkdir()  # writing a file at this path fails
-        self.assertEqual(integration_sync.main(), 0)
+        self.assertEqual(integration_sync.main([]), 0)
         self.assertEqual(self.notices(), [integration_sync.NOTICE_KEPT])
 
     def test_a_failed_copy_does_not_stop_the_start(self):
         """A failure is reported in a notice and main still returns 0, so run.sh starts the worker."""
         with patch.object(integration_sync.shutil, "copytree", side_effect=OSError(28, "No space left on device")):
-            self.assertEqual(integration_sync.main(), 0)
+            self.assertEqual(integration_sync.main([]), 0)
         self.assertEqual(self.notices(), [integration_sync.NOTICE_FAILED])
+
+
+class AnnounceTests(unittest.TestCase):
+    """--announce posts discovery only once Home Assistant has loaded the integration."""
+
+    def setUp(self):
+        """Answer flow_handlers reads from self.answers in turn and record posts and waits."""
+        self.answers: list = []
+        self.posts: list[str] = []
+        self.waits = 0
+        self.enterContext(patch.object(integration_sync, "core_knows_integration", side_effect=lambda token: self.answers.pop()))
+        self.enterContext(patch.object(integration_sync, "supervisor_post", side_effect=self.post))
+        self.enterContext(patch("builtins.print"))
+
+    def post(self, path, payload, token):
+        """Record one post and accept it."""
+        self.posts.append(path)
+        return True
+
+    def run_announce(self, *answers):
+        """Run announce with core_knows_integration giving the answers in order; return the waits."""
+        self.answers.extend(reversed(answers))
+
+        def sleep(seconds):
+            self.waits += 1
+
+        integration_sync.announce("token", sleep=sleep)
+        return self.waits
+
+    def test_a_loaded_integration_is_announced_at_once(self):
+        """When Home Assistant already lists codex_cli (an update, a later app start), discovery goes out now."""
+        self.assertEqual(self.run_announce(True), 0)
+        self.assertEqual(self.posts, ["/discovery"])
+
+    def test_a_fresh_install_waits_for_the_restart(self):
+        """Not listed yet (written after Home Assistant started): wait, and announce once it is listed."""
+        self.assertEqual(self.run_announce(False, False, None, False, True), 4)
+        self.assertEqual(self.posts, ["/discovery"])
+
+    def test_an_unreadable_core_announces_after_the_limit(self):
+        """If Home Assistant cannot be read ANNOUNCE_UNREAD_LIMIT times in a row, the app announces anyway."""
+        limit = integration_sync.ANNOUNCE_UNREAD_LIMIT
+        self.assertEqual(self.run_announce(*([None] * limit)), limit - 1)
+        self.assertEqual(self.posts, ["/discovery"])
+
+    def test_main_with_announce_only_announces(self):
+        """main(["--announce"]) does not sync and calls announce with the Supervisor token."""
+        with patch.dict(os.environ, {"SUPERVISOR_TOKEN": "token"}), \
+                patch.object(integration_sync, "announce") as announce, \
+                patch.object(integration_sync, "sync") as sync:
+            self.assertEqual(integration_sync.main(["--announce"]), 0)
+        announce.assert_called_once_with("token")
+        sync.assert_not_called()
+
+
+class CoreKnowsIntegrationTests(unittest.TestCase):
+    """Reading Home Assistant's list of flow handlers."""
+
+    def answer(self, response):
+        """Return what core_knows_integration says when the Supervisor request gives this response."""
+        with patch.object(integration_sync, "supervisor_request", return_value=response) as request:
+            known = integration_sync.core_knows_integration("token")
+        request.assert_called_once_with("GET", integration_sync.FLOW_HANDLERS_PATH, "token")
+        return known
+
+    @staticmethod
+    def response(body):
+        """A response whose json() returns body, or raises ValueError when body is that class."""
+        def json_body():
+            if body is ValueError:
+                raise ValueError("not JSON")
+            return body
+        return type("Response", (), {"json": staticmethod(json_body)})()
+
+    def test_listed_unlisted_and_unreadable(self):
+        """codex_cli in the list is True, a list without it False, anything else None."""
+        self.assertIs(self.answer(self.response(["hue", "codex_cli"])), True)
+        self.assertIs(self.answer(self.response(["hue"])), False)
+        self.assertIsNone(self.answer(None))
+        self.assertIsNone(self.answer(self.response({"message": "unexpected"})))
+        self.assertIsNone(self.answer(self.response(ValueError)))
 
 
 class SupervisorRequestTests(unittest.TestCase):
@@ -457,15 +576,15 @@ class SupervisorRequestTests(unittest.TestCase):
             def __exit__(self, *exc):
                 return False
 
-            def post(self, url, **kwargs):
+            def request(self, method, url, **kwargs):
                 self.trust_env_at_post = self.trust_env
-                self.url, self.kwargs = url, kwargs
+                self.method, self.url, self.kwargs = method, url, kwargs
                 return type("Response", (), {"status_code": 200})()
 
         with patch.object(integration_sync.requests, "Session", Session):
             self.assertTrue(integration_sync.supervisor_post("/discovery", {}, "token"))
         (session,) = sessions
-        self.assertEqual(session.url, "http://supervisor/discovery")
+        self.assertEqual((session.method, session.url), ("POST", "http://supervisor/discovery"))
         self.assertFalse(session.trust_env_at_post)
         self.assertIs(session.kwargs["allow_redirects"], False)
 
@@ -516,6 +635,8 @@ class PackagingTests(unittest.TestCase):
         self.assertIn("COPY integration_sync.py /\n", dockerfile)
         run = (self.REPO / "codex-cli-worker" / "run.sh").read_text(encoding="utf-8")
         self.assertLess(run.index("python3 /integration_sync.py ||"), run.index("python3 /server.py"))
+        # Discovery waits in the background for Home Assistant to load the integration; it must not block.
+        self.assertLess(run.index("python3 /integration_sync.py --announce &\n"), run.index("python3 /server.py"))
 
 
 if __name__ == "__main__":

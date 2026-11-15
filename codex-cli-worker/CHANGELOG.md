@@ -17,6 +17,16 @@
   **Settings** > **Devices & services** shows **Discovered: Codex**. Setup from discovery now asks for
   confirmation before it adds the integration, and shows a connection error on the form instead of ending.
 - The app repository's maintainer is now The Backshop.
+- The app announces itself through Supervisor discovery only once Home Assistant has loaded the integration,
+  so a fresh install no longer logs `Cannot find integration codex_cli` with a traceback before the restart.
+  It checks once a minute in the background and never delays the worker's start.
+- The "integration left as installed" notification is removed once the folder is the app's own again.
+- A restart of the app while Codex is not signed in no longer posts a new one-time code each time. The app
+  starts one sign-in by itself; later starts say to choose **Sign in** instead, until a start finds Codex
+  signed in.
+- Smaller fixes: the install notice no longer says to finish setup for an integration that may already be set
+  up; a file name that cannot be encoded is reported like any failed copy; a damaged notice record is not
+  replayed; the documentation says how to go back to a version before 0.1.81.3.
 
 ## 0.1.81.2 (unreleased)
 
