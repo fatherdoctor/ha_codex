@@ -69,7 +69,9 @@ Not released yet: nothing is tagged or published, and the release and image work
 first release is planned. When one is:
 
 1. Set the same version in `codex-cli-worker/config.yaml` and `custom_components/codex_cli/manifest.json`; a fork
-   version is upstream's version plus one more number, counted from 1 for each upstream release.
+   version is upstream's version plus one more number, counted from 1 for each upstream release. A beta is
+   `<three numbers>-beta.<n>`, made on the `beta` branch for the test machine only
+   ([Versions](docs/updates-and-rollback.md#versions)).
 2. The version passes on a Home Assistant OS test machine, and its lab-pass record is committed.
 3. The commit that removes `(unreleased)` from the changelog heading is the one tagged, by the maintainer, with
    `python scripts/fork_release.py tag <version> --push`; the release workflow then builds the images and the HACS ZIP.

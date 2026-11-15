@@ -32,7 +32,8 @@ newer than every tag, stable or beta. So a stable fix can be released while a ne
 always a stable version.
 
 The release workflow publishes the app image under the version. A stable tag also moves the `latest` image tag, and
-a beta tag moves `beta`. A manual build of a branch gets `branch-<name>` and never moves `latest` or `beta`.
+a beta tag moves `beta`. Any other build, also a manual build of a tag, gets `branch-<name>` and never moves
+`latest` or `beta`. So a manual rebuild of an older beta cannot move `beta` back.
 
 ## Beta builds: for the test machine only
 
@@ -56,10 +57,10 @@ the same version.
 ### How `beta` and `main` relate
 
 - Every code and text change merges to `main` first.
-- The `beta` branch is `main` plus three edits: the beta version in `config.yaml` and `manifest.json`, its
-  changelog heading, and the `(beta)` name in `repository.yaml`.
+- The `beta` branch is `main` plus four differences: the beta version in `config.yaml` and `manifest.json`, its
+  changelog heading, the `(beta)` name in `repository.yaml`, and the beta's lab-pass record.
 - To make the next beta, merge `main` into `beta`. Where they conflict, keep the beta's version lines, its changelog
-  entry and the `(beta)` name. Then set the new beta version.
+  entry, the `(beta)` name and its lab-pass records. Then set the new beta version.
 - A stable fix while a beta is out is released from `main` as usual. A beta install gets it with the next beta,
   because its own version is newer.
 - The stable release that follows a beta (`0.2.0` after `0.2.0-beta.2`) is made on `main`, which already has every

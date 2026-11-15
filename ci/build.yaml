@@ -44,11 +44,13 @@ jobs:
           fi
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
           # Every build publishes the version tag, which the Supervisor pulls. The second tag says where it came
-          # from: latest for a stable release, beta for a beta release, branch-<name> for a manual build. The
-          # prefix means a manual build can never move latest or beta; a "/" is not allowed in an image tag.
+          # from: latest for a stable release, beta for a beta release, branch-<name> for any other build. Only
+          # the release workflow (called on a tag push) gives beta: a manual run on an older beta tag must not
+          # move beta back. The prefix means a manual build can never move latest or beta; a "/" is not allowed
+          # in an image tag.
           if [ "${PUBLISH_LATEST}" = "true" ]; then
             channel_tag="latest"
-          elif [[ "${GITHUB_REF}" == refs/tags/v*-beta.* ]]; then
+          elif [ "${GITHUB_EVENT_NAME}" = "push" ] && [[ "${GITHUB_REF}" == refs/tags/v*-beta.* ]]; then
             channel_tag="beta"
           else
             channel_tag="branch-${GITHUB_REF_NAME//\//-}"
@@ -90,6 +92,11 @@ jobs:
       matrix: ${{ fromJSON(needs.init.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v6
+      - name: Bundle the integration into the app image
+        # The app installs this copy in /config at start (codex-cli-worker/integration/README.md).
+        run: |
+          rm -rf codex-cli-worker/integration/codex_cli
+          cp -R custom_components/codex_cli codex-cli-worker/integration/codex_cli
       - name: Build image
         uses: home-assistant/builder/actions/build-image@2026.03.2
         with:
