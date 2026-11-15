@@ -1,0 +1,57 @@
+name: README screenshots
+
+# Takes the README screenshots from the test fixture (sample data only) and uploads them as a workflow artifact.
+# A maintainer reviews them and commits the ones that changed; the workflow never writes to the repository.
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  screenshots:
+    name: Capture screenshots
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: |
+          pip install flask pyyaml requests qrcode websocket-client
+          npm install --prefix "$RUNNER_TEMP/browser-deps" playwright@1.63.0
+          "$RUNNER_TEMP/browser-deps/node_modules/.bin/playwright" install --with-deps chromium
+          echo "NODE_PATH=$RUNNER_TEMP/browser-deps/node_modules" >> "$GITHUB_ENV"
+      - name: Capture the chat, confirmation, Settings and sign-in screenshots
+        env:
+          SCREENSHOT_DIR: ${{ runner.temp }}/screenshots
+        run: |
+          # Each pass starts a fresh fixture; the second shows a sign-in waiting for its code.
+          for sign_in in "" pending; do
+            log="$RUNNER_TEMP/fixture-${sign_in:-signed-in}.log"
+            CODEX_FIXTURE_SIGN_IN="$sign_in" python codex-cli-worker/tests/web_fixture.py > "$log" 2>&1 &
+            fixture_pid=$!
+            ready=no
+            for attempt in $(seq 1 30); do
+              if curl --silent --fail http://127.0.0.1:9137/preview/ > /dev/null; then ready=yes; break; fi
+              sleep 1
+            done
+            if [ "$ready" != yes ]; then
+              echo "::error::The test fixture did not answer within 30 seconds. Its log follows."
+              cat "$log"
+              exit 1
+            fi
+            CODEX_FIXTURE_SIGN_IN="$sign_in" node codex-cli-worker/tests/readme_screenshots.cjs
+            kill "$fixture_pid"
+            wait "$fixture_pid" || true
+          done
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: screenshots
+          path: ${{ runner.temp }}/screenshots
