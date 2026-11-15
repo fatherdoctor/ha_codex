@@ -64,9 +64,7 @@ rules:
   async-dependency: done
   inject-websession: done
 
-  config-flow-test-coverage:
-    status: todo
-    comment: Add pytest coverage before considering a Core-quality submission.
+  config-flow-test-coverage: done
   test-coverage:
     status: todo
     comment: Add full pytest coverage before considering a Core-quality submission.
