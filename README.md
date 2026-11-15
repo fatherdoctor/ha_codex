@@ -244,9 +244,8 @@ sends a notification when a task finishes or waits for you. Set `notify_service`
 or leave it empty for persistent notifications.
 
 The event `codex_cli_task_result` carries the result for automations. The full list of entities and actions, the task
-output format and an Assist example are in the [integration README](custom_components/codex_cli/README.md) and in
-[docs/upstream-README.md](docs/upstream-README.md). A starter Assist script is in
-[examples/scripts.yaml](examples/scripts.yaml).
+output format and an Assist example are in the [integration README](custom_components/codex_cli/README.md). A
+starter Assist script is in [examples/scripts.yaml](examples/scripts.yaml).
 
 ## Troubleshooting
 
@@ -292,7 +291,7 @@ security problem, use the **Report a vulnerability** button on the Security tab.
 ## Credit
 
 This project is a fork of [moryoav/home-assistant-codex](https://github.com/moryoav/home-assistant-codex) by Yoav Mor
-(MIT). The upstream reference sections are kept in [docs/upstream-README.md](docs/upstream-README.md).
+(MIT).
 
 ## Contributing
 

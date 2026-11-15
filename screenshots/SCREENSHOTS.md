@@ -49,9 +49,3 @@ kill %1
 ```
 
 The script writes to `screenshots/`. Set `SCREENSHOT_DIR` to write somewhere else.
-
-## Other files in this folder
-
-- `permissions-overrides-*.png`, `permissions-guard-note-*.png` and `permissions-peer2-native-*.png` are design
-  comparisons for [docs/designs/permissions-overrides.md](../docs/designs/permissions-overrides.md).
-- `cx-ui/` holds page-state renders from the test fixture that the chat-page changes were reviewed with.
