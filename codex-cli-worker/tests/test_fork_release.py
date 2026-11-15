@@ -129,6 +129,73 @@ class ForkReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(fr.ReleaseError, "not newer"):
             fr.plan_tag("0.1.81.0", self.repo)
 
+    # beta channel
+
+    def make_release(self, version: str) -> str:
+        self.write_version(version, code=f"print({version!r})\n")
+        commit = self.commit(version)
+        self.record(version, commit)
+        self.release(version)
+        return commit
+
+    def test_version_order_puts_a_beta_before_its_release(self) -> None:
+        ordered = ["0.1.81.2", "0.2.0-beta.1", "0.2.0-beta.2", "0.2.0-beta.10", "0.2.0", "0.2.0.1", "0.2.1-beta.1"]
+        self.assertEqual(sorted(reversed(ordered), key=fr.version_key), ordered)
+
+    def test_beta_is_tagged_after_its_lab_pass(self) -> None:
+        self.write_version("0.2.0-beta.1", code="print('beta')\n")
+        beta = self.commit("0.2.0-beta.1")
+        with self.assertRaisesRegex(fr.ReleaseError, "no lab-pass record"):
+            fr.plan_tag("0.2.0-beta.1", self.repo)
+        self.record("0.2.0-beta.1", beta)
+        commit, _ = fr.plan_tag("0.2.0-beta.1", self.repo)
+        self.assertEqual(commit, beta)
+
+    def test_beta_on_four_numbers_is_refused(self) -> None:
+        with self.assertRaisesRegex(fr.ReleaseError, "expected a version like"):
+            fr.plan_tag("0.1.81.2-beta.1", self.repo)
+
+    def test_beta_must_be_newer_than_every_tag(self) -> None:
+        self.make_release("0.2.0")
+        self.write_version("0.2.0-beta.3")
+        late = self.commit("late beta")
+        self.record("0.2.0-beta.3", late)
+        with self.assertRaisesRegex(fr.ReleaseError, "0.2.0-beta.3 is not newer than 0.2.0"):
+            fr.plan_tag("0.2.0-beta.3", self.repo)
+
+    def test_beta_must_be_newer_than_the_last_beta(self) -> None:
+        self.make_release("0.2.0-beta.2")
+        self.write_version("0.2.0-beta.1")
+        older = self.commit("older beta")
+        self.record("0.2.0-beta.1", older)
+        with self.assertRaisesRegex(fr.ReleaseError, "not newer than 0.2.0-beta.2"):
+            fr.plan_tag("0.2.0-beta.1", self.repo)
+
+    def test_stable_fix_is_not_held_back_by_a_newer_beta(self) -> None:
+        self.record("0.1.81.1", self.good)
+        self.release("0.1.81.1")
+        self.make_release("0.2.0-beta.1")
+        self.write_version("0.1.81.2", code="print('fix')\n")
+        fix = self.commit("0.1.81.2")
+        self.record("0.1.81.2", fix)
+        commit, _ = fr.plan_tag("0.1.81.2", self.repo)
+        self.assertEqual(commit, fix)
+
+    def test_stable_after_its_betas(self) -> None:
+        self.make_release("0.2.0-beta.1")
+        self.make_release("0.2.0-beta.2")
+        self.write_version("0.2.0", code="print('stable')\n")
+        stable = self.commit("0.2.0")
+        self.record("0.2.0", stable)
+        commit, _ = fr.plan_tag("0.2.0", self.repo)
+        self.assertEqual(commit, stable)
+
+    def test_rollback_skips_beta_tags(self) -> None:
+        self.make_bad_release()
+        self.make_release("0.2.0-beta.1")
+        run(self.repo, "checkout", "-q", "-b", "rollback", "v0.1.81.2")
+        self.assertEqual(fr.rollback("0.1.81.1", None, False, self.repo), "0.1.81.3")
+
     # rollback
 
     def make_bad_release(self, notes: str = "- Broke something.") -> None:

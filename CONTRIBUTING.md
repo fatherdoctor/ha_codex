@@ -161,21 +161,39 @@ Use plain, direct language and include Home Assistant examples where they make t
 
 ## Releases
 
-Container images for the worker app are built through GitHub Actions and published to GitHub Container Registry.
+The release workflow builds the HACS ZIP and the app images when a version tag is pushed. Ordinary pushes to
+`main` run validation and tests only. They do not make a release or publish images. A change to documentation
+only does not need a new version.
 
-Stable users should use the default repository URL:
+There are two channels (see [Stable and beta channels](README.md#stable-and-beta-channels)):
 
-```text
-https://github.com/fatherdoctor/ha_codex
-```
+- **Stable:** versions such as `0.2.0` or `0.1.81.3`, on `main`, tagged `v0.2.0`.
+- **Beta:** versions such as `0.2.0-beta.1`, on the `beta` branch, tagged `v0.2.0-beta.1`. A beta has three
+  numbers, because Home Assistant cannot compare `0.1.81.3-beta.1` with `0.1.81.3`. The release workflow publishes
+  a beta as a GitHub pre-release and moves the `beta` image tag, not `latest`.
 
-For optional worker development and canary testing, use the `dev` branch:
+### A stable release
 
-```text
-https://github.com/fatherdoctor/ha_codex#dev
-```
+1. Set the same version in `codex-cli-worker/config.yaml` and `custom_components/codex_cli/manifest.json`.
+2. Add the notes under `## <version> (unreleased)` in `codex-cli-worker/CHANGELOG.md`. Validation of branches and
+   pull requests accepts that heading. Tagging and the release build refuse it.
+3. Remove ` (unreleased)` from the heading. Merge to `main` and wait for green CI.
+4. Install that commit on a Home Assistant OS test machine and test it. Then add the test record
+   `release/lab-passes/v<version>.json` on `main`.
+5. Tag and push: `python3 scripts/fork_release.py tag <version> --push`. The script tags the tested commit.
+6. Merge `main` into `beta`, so that beta installs get the release too.
 
-To prepare a release, set the same version in `codex-cli-worker/config.yaml` and `custom_components/codex_cli/manifest.json` and add its notes to `codex-cli-worker/CHANGELOG.md`. Until the version is released, its changelog heading reads `## <version> (unreleased)`; validation of branches and pull requests accepts that, but tagging and the release build (a tag, or `build_hacs_release.py --release`) refuse it, so the mark comes off in the commit that is lab-tested and tagged. A release is tagged only after it passes on a Home Assistant OS test machine, with `scripts/fork_release.py`; a bad release is undone by releasing the last good code under the next version. Both are described in [Updates and rollback](docs/updates-and-rollback.md). The release workflow checks version alignment, attaches the HACS ZIP, and publishes worker images. Ordinary pushes to `main` run validation and tests without creating a release or publishing images. Documentation-only changes do not need a version bump.
+### A beta release
+
+1. Start from the `beta` branch. Merge `main` into it first. If the branch does not exist yet, make it from `main`.
+2. Do steps 1 to 4 above with a beta version, for example `0.2.0-beta.1`, on `beta` instead of `main`. The test
+   record goes on `beta`.
+3. Tag and push from a checkout of `beta`: `python3 scripts/fork_release.py tag 0.2.0-beta.1 --push`.
+4. For the next beta, increase the last number: `0.2.0-beta.2`. The stable release is `0.2.0`.
+
+`fork_release.py` refuses a stable version that is not newer than every stable tag, and a beta version that is not
+newer than every tag. The details, and how to undo a bad release, are in
+[Updates and rollback](docs/updates-and-rollback.md).
 
 ## Working together
 

@@ -20,6 +20,18 @@ soon after the merge. (The release and image workflows are disabled on this fork
 The integration (`custom_components/codex_cli`) carries the same version and updates through HACS from the release's
 `codex_cli.zip`.
 
+## Beta releases
+
+A beta version (`0.2.0-beta.1`) is released from the `beta` branch, and an install that wants betas adds
+`https://github.com/fatherdoctor/ha_codex#beta` instead of the stable address. The Supervisor then reads
+`codex-cli-worker/config.yaml` on `beta`. The integration's beta is a GitHub pre-release, which HACS and the
+Marketplace show only to users who turned on beta versions for this repository.
+
+A beta follows the same rules as a stable release: a test record in `release/lab-passes/` and the tag on the tested
+commit, made with `scripts/fork_release.py` from a checkout of `beta`. A beta must be newer than every tag, stable
+or beta; a stable version must be newer than every stable tag. So a stable fix can be released while a newer beta
+is out. A rollback is always a stable release.
+
 ## On the install: auto-update and a backup first
 
 - **Auto-update:** on the app's page, turn on **Auto update**. The Supervisor then installs a new version by itself.
