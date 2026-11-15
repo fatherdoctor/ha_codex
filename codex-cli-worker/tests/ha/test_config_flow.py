@@ -48,12 +48,33 @@ def discovery(hass: HomeAssistant) -> Generator[AsyncMock]:
         top_level_files={"config_flow.py"},
     )
     mock_platform(hass, f"{DOMAIN}.config_flow", flow)
-    with patch.object(
-        flow,
-        "async_discover_worker",
-        return_value=SimpleNamespace(**WORKER_DATA),
-    ) as discover:
+    # Each test module loads its own copy of the integration, and every copy of
+    # CodexCliConfigFlow registers itself as the handler for the domain. The flow
+    # manager uses whichever copy loaded last, so pin the handler to this module's
+    # copy; otherwise the patch below would not reach the flow under test.
+    with (
+        patch.dict(config_entries.HANDLERS, {DOMAIN: flow.CodexCliConfigFlow}),
+        patch.object(
+            flow,
+            "async_discover_worker",
+            return_value=SimpleNamespace(**WORKER_DATA),
+        ) as discover,
+    ):
         yield discover
+
+
+async def _start_flow(hass: HomeAssistant, source: str) -> dict:
+    """Start a setup flow; a Supervisor discovery first shows its confirm form."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": source}
+    )
+    if source == config_entries.SOURCE_HASSIO:
+        assert result["type"] is FlowResultType.FORM
+        assert result["step_id"] == "hassio_confirm"
+        assert result["errors"] == {}
+        assert hass.config_entries.async_entries(DOMAIN) == []
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+    return result
 
 
 @pytest.mark.parametrize(
@@ -63,9 +84,7 @@ async def test_discovery_creates_one_entry(
     hass: HomeAssistant, discovery: AsyncMock, source: str
 ) -> None:
     """Both setup entry points discover the worker without requesting credentials."""
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": source}
-    )
+    result = await _start_flow(hass, source)
     await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
@@ -107,18 +126,24 @@ async def test_user_error_then_retry(
     assert discovery.await_count == 2
 
 
-@pytest.mark.parametrize("error", [flow.CodexCliApiError, flow.CodexCliAuthError])
-async def test_hassio_discovery_failure_aborts(
-    hass: HomeAssistant, discovery: AsyncMock, error: type[Exception]
+@pytest.mark.parametrize(
+    ("error", "error_key"),
+    [
+        (flow.CodexCliApiError, "cannot_connect"),
+        (flow.CodexCliAuthError, "invalid_auth"),
+    ],
+)
+async def test_hassio_discovery_failure_keeps_confirm_form(
+    hass: HomeAssistant, discovery: AsyncMock, error: type[Exception], error_key: str
 ) -> None:
-    """Supervisor discovery uses its fixed abort key for either API failure."""
+    """A failed confirm after Supervisor discovery shows the error and adds no entry."""
     discovery.side_effect = error("synthetic discovery failure")
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_HASSIO}
-    )
-    assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "cannot_connect"
+    result = await _start_flow(hass, config_entries.SOURCE_HASSIO)
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "hassio_confirm"
+    assert result["errors"] == {"base": error_key}
     assert hass.config_entries.async_entries(DOMAIN) == []
+    discovery.assert_awaited_once()
 
 
 @pytest.mark.parametrize(
