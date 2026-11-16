@@ -195,6 +195,26 @@ $("save-agents").onclick = async () => {
   finally { $("save-agents").disabled = false; }
 };
 
+// A missing /config/AGENTS.md is a setup hint above the chat, shown until it is dismissed in this browser.
+const AGENTS_HINT_KEY = "codex-agents-hint-dismissed";
+function agentsHintDismissed() {
+  try { return Boolean(localStorage.getItem(AGENTS_HINT_KEY)); } catch (_error) { return false; }
+}
+async function loadAgentsHint() {
+  if (agentsHintDismissed()) return;
+  try { $("agents-hint").hidden = (await api("agents")).exists !== false; }
+  catch (_error) { $("agents-hint").hidden = true; }
+}
+$("agents-hint-dismiss").onclick = () => {
+  $("agents-hint").hidden = true;
+  try { localStorage.setItem(AGENTS_HINT_KEY, "1"); } catch (_error) { /* The hint returns on the next visit. */ }
+};
+$("agents-hint-open").onclick = () => {
+  $("agents-hint").hidden = true;
+  $("workspace-open").click();
+};
+loadAgentsHint();
+
 function showStudioStatus() {
   const details = $("status-details");
   details.replaceChildren();
