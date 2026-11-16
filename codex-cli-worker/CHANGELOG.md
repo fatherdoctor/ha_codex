@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.1 (unreleased)
+
+- A repository in `/share` whose name starts with `ha_` can be used again with Remote Control on. The check
+  that keeps Codex out of the app's policy folder `/usr/share/ha_codex` refused every command that named
+  `/share/ha_` anywhere, so even `git -C /share/ha_<name> status` was refused as a policy change. The check now
+  allows the plain absolute `/share/ha_<name>` and its subfolders. Every other way to reach the policy folder is
+  still refused: a relative `share/ha_...` (the text cannot tell whether the command runs in `/usr`),
+  `../share/ha_...`, globs such as `/usr/sh*/ha_*`, braces, quotes, backslashes, and a variable or command
+  substitution before `/share/ha_` or `/ha_codex`. The command check and the approval check use the same rule.
+
 ## 0.3.0 (unreleased)
 
 - GitHub sign-in (release 0.3). **Settings > GitHub**, beside the ChatGPT account, connects GitHub with
