@@ -604,9 +604,7 @@ def _join_shell_continuations(text: str) -> str | None:
             if not quote and text.startswith(("<<", "$'", "<(", ">("), i):
                 return None
         if comment:
-            if text.startswith("\\\n", i):
-                i += 2
-                continue
+            # A backslash inside a comment does not escape its terminating newline.
             if char == "\n":
                 comment = False
         elif char == "\\" and quote != "'":

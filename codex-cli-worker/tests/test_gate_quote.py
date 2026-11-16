@@ -396,5 +396,56 @@ class ShellContinuationTests(unittest.TestCase):
         self.assertEqual(refusal('echo $(printf sample)', False), '')
 
 
+class CommentContinuationTests(unittest.TestCase):
+    """A shell comment ends at its newline even when preceded by a backslash."""
+
+    def test_comment_does_not_hide_a_joined_supervisor_command(self) -> None:
+        command = '# marker\\\nh\\\na su info'
+        for remote in (False, True):
+            with self.subTest(remote=remote):
+                self.assertIn('Supervisor', refusal(command, remote))
+        self.assertEqual(gate_rules._join_shell_continuations(command), '# marker\\\nha su info')
+        self.assertTrue(gate_rules._ha_supervisor_command(command))
+        self.assertTrue(approvals.command_names_protected_path(command))
+
+    def test_comment_boundaries_hold_for_parsers_and_the_text_floor(self) -> None:
+        join = '\\' + '\n'
+        for comment in ('# marker', "# don't", '# $(ignored)', '# <<ignored'):
+            for family in ('su', 'super', 'supervisor'):
+                command = f'{comment}{join}h{join}a {family} info'
+                with self.subTest(comment=comment, family=family):
+                    self.assertTrue(gate_rules._ha_supervisor_command(command))
+                    core = f'{comment}{join}h{join}a co{join}re info'
+                    self.assertTrue(gate_rules._ha_command(core, True))
+                    self.assertFalse(gate_rules._ha_command(core, False))
+                    for remote in (False, True):
+                        with patch.object(gate_rules, '_ha_supervisor_command', return_value=False), \
+                                patch.object(gate_rules, '_ha_command', return_value=False):
+                            self.assertIn('Supervisor', refusal(command, remote))
+
+    def test_print_only_shell_and_normalizer_agree_after_a_comment(self) -> None:
+        join = '\\' + '\n'
+        prelude = 'ha() { printf "<%s>" "$@"; }; emit() { printf "<%s>" "$@"; };\n'
+        for shell in ('/bin/sh', '/bin/bash'):
+            for command, expected in ((f'# marker{join}h{join}a su info', '<su><info>'),
+                                      (f'# marker{join}emit sample{join}text', '<sampletext>'),
+                                      (f'emit first # marker{join}emit second', '<first><second>')):
+                with self.subTest(shell=shell, command=command):
+                    normalized = gate_rules._join_shell_continuations(command)
+                    self.assertIsNotNone(normalized)
+                    for script in (command, normalized):
+                        run = subprocess.run([shell, '-c', prelude + script],
+                                             capture_output=True, text=True, check=True)
+                        self.assertEqual(run.stdout, expected)
+
+    def test_quoted_hash_and_harmless_comments_remain_literal(self) -> None:
+        join = '\\' + '\n'
+        for command in (f"emit '# marker{join}literal'", f'emit "# marker{join}literal"',
+                        f'# marker{join}emit sample{join}text'):
+            for remote in (False, True):
+                with self.subTest(command=command, remote=remote):
+                    self.assertEqual(refusal(command, remote), '')
+
+
 if __name__ == "__main__":
     unittest.main()
