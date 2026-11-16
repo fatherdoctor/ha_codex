@@ -285,7 +285,7 @@ Include the app, integration and Home Assistant versions, the steps that cause i
 and the integration diagnostics file. Remove tokens, device codes, private URLs and personal configuration before you
 post. Steps to collect logs: [Reporting a bug](codex-cli-worker/DOCS.md#reporting-a-bug).
 
-To try new versions before they are released to everyone, open an issue and ask to join as a beta tester. To report a
+There is no public beta. Each version is tested on a Home Assistant OS test machine before it is released. To report a
 security problem, use the **Report a vulnerability** button on the Security tab. See [SECURITY.md](SECURITY.md).
 
 ## Credit
