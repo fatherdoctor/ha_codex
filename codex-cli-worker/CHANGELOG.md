@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.81.3 (unreleased)
+## 0.3.0 (unreleased)
 
 - GitHub sign-in (release 0.3). **Settings > GitHub**, beside the ChatGPT account, connects GitHub with
   buttons only: **Connect GitHub** shows GitHub's device code and the `github.com/login/device` link on the
@@ -42,7 +42,7 @@
   signed in.
 - Smaller fixes: the install notice no longer says to finish setup for an integration that may already be set
   up; a file name that cannot be encoded is reported like any failed copy; a damaged notice record is not
-  replayed; the documentation says how to go back to a version before 0.1.81.3.
+  replayed; the documentation says how to go back to a version before 0.3.0.
 
 ## 0.1.81.2 (unreleased)
 

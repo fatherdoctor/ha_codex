@@ -178,7 +178,7 @@ The token is not your OpenAI or ChatGPT credential. Codex authentication is stil
 
 ## Integration install
 
-From **0.1.81.3** the app installs and updates the Codex integration itself, so one install and one restart of
+From **0.3.0** the app installs and updates the Codex integration itself, so one install and one restart of
 Home Assistant set up both parts. The app image carries the integration of the same release. At each start,
 before the worker starts, the app compares it with `/config/custom_components/codex_cli`:
 
@@ -204,7 +204,7 @@ cannot be emptied, the app log says so.
 
 **Going back to the previous version:** the copy the app replaced is kept in the app's own storage
 (`/data/integration_backup/codex_cli`), which every backup of the app includes. To go back, restore the app's
-previous version from the backup Home Assistant offers before an app update. If that version is 0.1.81.3 or
+previous version from the backup Home Assistant offers before an app update. If that version is 0.3.0 or
 later, at its next start the app writes the integration of that version over its own folder and asks for a
 restart. An earlier version does not install the integration, so the newer integration stays: turn the option
 below off, copy `/data/integration_backup/codex_cli` back to `/config/custom_components/codex_cli` by hand, and
