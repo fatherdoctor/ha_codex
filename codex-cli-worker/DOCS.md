@@ -65,7 +65,7 @@ The separate **Home Assistant data** MCP server lets Codex read state history an
 
 Ask, for example: “Compare my kitchen temperature, humidity and extractor fan history yesterday and suggest activation thresholds. Only analyze the measurements.” Codex finds the relevant entity IDs in the configuration, queries the data, and explains its analysis. These tools do not change configuration, call services, or run automations. Verification remains a separate tool.
 
-Three tools are available under `home_assistant_data`. The third, **`exchange_info`**, takes no arguments and changes nothing: it gives Codex the details of the current message (see [What a chat thread holds](#what-a-chat-thread-holds)). The two data tools are:
+Five tools are available under `home_assistant_data`. **`exchange_info`** takes no arguments and changes nothing: it gives Codex the details of the current message (see [What a chat thread holds](#what-a-chat-thread-holds)). **`ask_owner`** and **`report_failure`** change nothing either: they tell the page that Codex needs an answer or that the task failed (see [Human Input](#human-input)). The two data tools are:
 
 - **`history`** reads `/api/history/period/<start_time>` for explicit `entity_ids`, `start_time`, and `end_time`. It returns timestamped state strings, including `unknown` and `unavailable`, and the initial state at the window boundary. Attributes are omitted; the existing entity verification tool can read units separately. Example: `{"entity_ids":["sensor.kitchen_temperature","fan.extractor"],"start_time":"2026-10-01T00:00:00+03:00","end_time":"2026-10-02T00:00:00+03:00"}`.
 - **`statistics`** reads `recorder/get_statistics_metadata` and `recorder/statistics_during_period` through Home Assistant's WebSocket API, for explicit `statistic_ids`, `start_time`, and `end_time`. `period` is `5minute`, `hour` (default), `day`, `week`, or `month`. Optional `types` selects `mean`, `min`, `max`, `sum`, `state`, `change`, or `last_reset`, where supported. It returns display units and bucket start/end timestamps in UTC. Example: `{"statistic_ids":["sensor.kitchen_temperature"],"start_time":"2026-10-01T00:00:00+03:00","end_time":"2026-10-08T00:00:00+03:00","period":"hour","types":["mean","min","max"]}`.
@@ -285,7 +285,9 @@ A conversation from the chat page is a Codex thread, and the ChatGPT app shows t
 
 Details that change from one message to the next are not part of the rules: the backup folder, the documents and images you attached, and the notes on direct API calls (the `HA_TOKEN` option), the local documentation and GitHub. Codex reads them from the `exchange_info` tool at the start of each message. Codex keeps the developer instructions a thread started with, so an update of this app changes the rules of a new thread; an older thread keeps its rules until Codex compacts it.
 
-A thread that this page did not start has no page rules: a thread started in the ChatGPT app, or one started by 0.3.1 or earlier. A message from the page on such a thread starts with a one-line note that tells Codex to call `exchange_info`, which then also returns the rules. A thread from 0.3.1 also keeps that version's instructions in its history, so it can still answer in the app with the page's JSON format.
+A thread that this page did not start has no page rules: a thread started in the ChatGPT app, or one started by 0.3.1 or earlier. A message from the page on such a thread starts with a one-line note that tells Codex to call `exchange_info`, which then also returns the rules. A thread from 0.3.1 also keeps that version's instructions in its history, so it can still answer in the app with the page's JSON format. The page still reads such a JSON answer.
+
+From 0.3.2 the page asks for no output format, so the thread stores Codex's answer as plain text, as the app shows it. The page's status, question and choices come from the `ask_owner` and `report_failure` tool calls (see [Human Input](#human-input)).
 
 In the ChatGPT app the `exchange_info` tool is not available. The rules tell Codex to make no backup copy there and to say so in its answer. The worker's protections do not depend on these rules: approvals, the sandbox, the policy and the backup check after a page message stay the same.
 
@@ -708,9 +710,18 @@ Home Assistant app configuration schemas do not currently provide a Home Assista
 
 ## Human Input
 
-Tasks run without an interactive terminal. If Codex needs a decision, it returns `needs_input` with a question. The task is marked `waiting_for_input`, and your answer continues it as the next message. Sandbox permission requests use the separate [approval flow](#permission-requests) during the running exchange.
+Tasks run without an interactive terminal. If Codex needs a decision, it calls the `ask_owner` tool with a question, ends its turn and writes the same question as its answer. The task is marked `waiting_for_input`, and your answer continues it as the next message. If the task cannot be done, Codex calls `report_failure` with the reason, and the task is marked failed with that reason. Up to 0.3.1, Codex returned the status `needs_input` or `failed` in a JSON answer instead; the page still reads that answer from an older thread. Sandbox permission requests use the separate [approval flow](#permission-requests) during the running exchange.
 
-From **0.1.69**, Codex can offer up to three short answers with its question, for example **Go ahead** and **Don't change anything**. When it asks whether to go ahead with a change, it is told to say in the summary exactly what it would change.
+The worker reads these calls from the exchange's events and decides the status in this order:
+
+1. A failure that the worker finds itself: no answer, an exit with an error, a timeout, a stall, a configuration that fails its check, or a refused configuration edit. A question is not asked over a broken configuration.
+2. A `report_failure` call.
+3. An `ask_owner` call.
+4. Completed.
+
+Of several calls to one tool, the last counts. Only a call that finished counts, and only one within the limits: a question or reason of 1 to 2,000 characters, and at most three choices of up to 200 characters each. Neither tool asks you for permission. With no output format, a question that Codex writes in its answer without calling `ask_owner` gives a completed exchange with no choice buttons; you can still answer it in the chat.
+
+From **0.1.69**, Codex can offer up to three short answers with its question, for example **Go ahead** and **Don't change anything**. When it asks whether to go ahead with a change, it is told to say in its answer exactly what it would change.
 
 - **In the chat**, the choices are buttons under the question. Picking one sends it as your next message. You can still type a different answer in the message box, and a draft there stays as it is. Once the question is answered the buttons are gone, and the question stays in the history.
 - **In a notification**, a mobile app notify service (`notify.mobile_app_...`) shows a button for each choice, and tapping one sends that answer. The **Codex** integration receives the tap, so it has to be installed and at **0.1.69** or later. Any other notify service, and the persistent notification, lists the choices in the text instead.

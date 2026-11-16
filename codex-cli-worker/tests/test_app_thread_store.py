@@ -1,11 +1,14 @@
 """What a page exchange stores in the Codex thread: the fixed rules as developer instructions, the user's words
-as the message, and this message's details through exchange_info.
+as the message, this message's details through exchange_info, and the answer as plain text, with the page's
+status, question and choices from the ask_owner and report_failure tool calls.
 
 The app-server messages here are written by hand from the Codex 0.166.0 protocol types (thread/start and
-thread/resume take developerInstructions; turn/start takes input). They are not recordings of a real app server.
+thread/resume take developerInstructions; turn/start takes input; an mcpToolCall item carries server, tool, status
+and arguments). They are not recordings of a real app server.
 """
 import json
 from pathlib import Path
+import queue
 import socket
 import tempfile
 import threading
@@ -210,6 +213,264 @@ class ExchangeInfoToolTests(unittest.TestCase):
                 self.assertEqual(len(ha_data_mcp.fetch("exchange_info", {})["rules"]), ha_data_mcp.MAX_RESPONSE_BYTES + 100)
                 with self.assertRaises(ValueError):
                     ha_data_mcp.fetch("history", {})
+
+
+def tool_call(tool, arguments, *, status="completed", server_name="home_assistant_data"):
+    """An item of a finished MCP tool call, as the worker's event handler receives it (written by hand)."""
+    return {"id": f"call-{tool}", "type": "mcp_tool_call", "server": server_name, "tool": tool,
+            "status": status, "arguments": arguments}
+
+
+ASK = tool_call("ask_owner", {"question": "Remove the duplicate automation?", "choices": ["Go ahead", "Keep both"]})
+FAIL = tool_call("report_failure", {"reason": "The entity light.porch does not exist."})
+
+
+class StatusToolBridgeTests(unittest.TestCase):
+    """ask_owner and report_failure in the MCP bridge: answered there, approved, and held to the page's limits."""
+
+    def call(self, name, arguments):
+        """Call a tool through the bridge's JSON-RPC handler, with the worker's socket out of reach."""
+        with patch.object(ha_data_mcp.socket, "socket", side_effect=AssertionError("the socket must not be used")):
+            return ha_data_mcp.respond({"method": "tools/call", "params": {"name": name, "arguments": arguments}})
+
+    def test_a_good_call_is_answered_by_the_bridge_and_tells_codex_to_write_the_question_as_its_answer(self):
+        """F3.2: the result tells Codex to end the turn and put the question, or the reason, in its answer."""
+        result = self.call("ask_owner", ASK["arguments"])
+        self.assertFalse(result["isError"])
+        self.assertIn("write the question, with its choices, as your answer", result["content"][0]["text"])
+        result = self.call("report_failure", FAIL["arguments"])
+        self.assertFalse(result["isError"])
+        self.assertIn("explain the reason in your answer", result["content"][0]["text"])
+
+    def test_a_call_over_the_limits_is_refused_with_the_reason(self):
+        """F3.4: Codex learns which limit it broke, and can call again."""
+        cases = [
+            ("ask_owner", {}),
+            ("ask_owner", {"question": "  "}),
+            ("ask_owner", {"question": "x" * (ha_data_mcp.QUESTION_MAX_LENGTH + 1)}),
+            ("ask_owner", {"question": "Which?", "choices": ["a", "b", "c", "d"]}),
+            ("ask_owner", {"question": "Which?", "choices": ["x" * (ha_data_mcp.CHOICE_MAX_LENGTH + 1)]}),
+            ("ask_owner", {"question": "Which?", "choices": "Go ahead"}),
+            ("ask_owner", {"question": "Which?", "status": "completed"}),
+            ("report_failure", {"reason": 3}),
+            ("report_failure", []),
+        ]
+        for name, arguments in cases:
+            with self.subTest(name=name, arguments=arguments):
+                result = self.call(name, arguments)
+                self.assertTrue(result["isError"])
+                self.assertTrue(result["content"][0]["text"].startswith("Not recorded:"))
+
+    def test_the_status_tools_need_no_approval(self):
+        """F3.1: without an approval mode, each question would first ask the owner for permission to ask."""
+        settings = server.data_mcp_args()
+        for tool in ("ask_owner", "report_failure"):
+            self.assertIn(f'mcp_servers.home_assistant_data.tools.{tool}.approval_mode="approve"', settings)
+        for tool in ha_data_mcp.STATUS_TOOLS:
+            self.assertTrue(tool["annotations"]["readOnlyHint"])
+        self.assertEqual((server.CHOICES_MAX, server.CHOICE_MAX_LENGTH),
+                         (ha_data_mcp.CHOICES_MAX, ha_data_mcp.CHOICE_MAX_LENGTH))
+
+    def test_the_rules_ask_for_plain_text_and_the_tools(self):
+        """The fixed rules name both tools and plain-text answers, and no longer describe the JSON object."""
+        rules = server.PAGE_INSTRUCTIONS
+        self.assertIn("call the home_assistant_data ask_owner tool", rules)
+        self.assertIn("write the same question as your answer", rules)
+        self.assertIn("call the home_assistant_data report_failure tool", rules)
+        self.assertIn("Never answer with a JSON object", rules)
+        self.assertNotIn('status "needs_input"', rules)
+
+
+class StatusCallTests(unittest.TestCase):
+    """Which tool calls the worker uses, and in which order (F3.3, F3.4)."""
+
+    def test_only_a_finished_good_call_to_the_worker_tools_counts(self):
+        """A call in progress or failed, to another server, or over the limits is not used."""
+        self.assertEqual(server.status_call(ASK), {"tool": "ask_owner", "question": "Remove the duplicate automation?",
+                                                   "choices": ["Go ahead", "Keep both"]})
+        self.assertEqual(server.status_call(FAIL), {"tool": "report_failure",
+                                                    "reason": "The entity light.porch does not exist."})
+        ignored = [
+            {**ASK, "status": "in_progress"},
+            {**ASK, "status": "failed"},
+            {**ASK, "server": "home_assistant"},
+            {**ASK, "type": "command_execution"},
+            {**ASK, "tool": "history"},
+            {**ASK, "arguments": {"question": "Which?", "choices": ["a", "b", "c", "d"]}},
+            {**ASK, "arguments": {"question": "x" * (ha_data_mcp.QUESTION_MAX_LENGTH + 1)}},
+            {**ASK, "arguments": "Which?"},
+            {**FAIL, "arguments": {"reason": ""}},
+            None,
+        ]
+        for item in ignored:
+            with self.subTest(item=item):
+                self.assertIsNone(server.status_call(item))
+
+    def test_order_of_precedence(self):
+        """The worker's failure, then report_failure, then ask_owner, then completed; of one tool the last counts."""
+        answer = {"status": "completed", "summary": "Plain answer text.", "details": ""}
+        ask = server.status_call(ASK)
+        other_ask = {**ask, "question": "Which one?", "choices": []}
+        failure = server.status_call(FAIL)
+        worker_failure = {"status": "failed", "summary": "Codex exited before writing the final response file.",
+                          "details": "returncode=1"}
+
+        self.assertEqual(server.apply_status_calls(worker_failure, [failure, ask]), (worker_failure, ""))
+        final, reason = server.apply_status_calls(answer, [ask, failure, other_ask])
+        self.assertEqual((final["status"], reason), ("failed", "The entity light.porch does not exist."))
+        self.assertEqual((final["question"], final["choices"]), ("", []))
+        final, reason = server.apply_status_calls(answer, [ask, other_ask])
+        self.assertEqual((final["status"], final["question"], final["choices"], reason),
+                         ("needs_input", "Which one?", [], ""))
+        self.assertEqual(final["summary"], "Plain answer text.")
+        self.assertEqual(server.apply_status_calls(answer, []), (answer, ""))
+
+    def test_a_plain_answer_is_the_summary_and_an_old_json_answer_still_reads(self):
+        """Plain text, also with a JSON example in it, is the answer; a 0.3.1 JSON answer keeps its fields."""
+        with tempfile.TemporaryDirectory() as folder:
+            final_file = Path(folder) / "final.json"
+            plain = 'Done. The service call was:\n\n```json\n{"entity_id": "light.porch", "status": "on"}\n```'
+            final_file.write_text(plain)
+            self.assertEqual(server.parse_final(final_file, 0), {"status": "completed", "summary": plain, "details": ""})
+            old = {"status": "needs_input", "summary": "Two automations match.", "question": "Remove one?",
+                   "details": "", "choices": ["Yes", "No"]}
+            final_file.write_text(json.dumps(old))
+            self.assertEqual(server.parse_final(final_file, 0), old)
+
+
+class StatusRunTests(unittest.TestCase):
+    """A whole exchange through run_task with a stand-in app server (messages written by hand, see the top)."""
+
+    # The same isolated worker as the approval run tests: temporary storage, no Home Assistant, no notifications.
+    setUp = approvals.ApprovalRunTests.setUp
+
+    def process(self, items, final_text):
+        """A stand-in app server that answers the handshake, then sends the items and the final answer of the turn."""
+        output = queue.Queue()
+        thread_id = "019fc242-910a-7c92-a17d-54c014e19fc4"
+        self.sent = []
+
+        def emit(message):
+            """Queue one protocol line for the worker's reader thread."""
+            output.put(json.dumps(message) + "\n")
+
+        class Output:
+            """The app server's stdout."""
+
+            def readline(self):
+                """Wait for the next line, or EOF."""
+                return output.get(timeout=5)
+
+        sent = self.sent
+
+        class Input(approvals.Transport):
+            """The app server's stdin: answers each request of the worker in turn."""
+
+            def write(self, value):
+                """Reply to initialize, thread/start and turn/start; after turn/start, play the turn."""
+                result = super().write(value)
+                message = json.loads(value)
+                sent.append(message)
+                method = message.get("method")
+                if method == "initialize":
+                    emit({"id": message["id"], "result": {}})
+                elif method in {"thread/start", "thread/resume"}:
+                    emit({"id": message["id"], "result": {"thread": {"id": thread_id},
+                          "approvalPolicy": "on-request", "approvalsReviewer": "user"}})
+                elif method == "turn/start":
+                    emit({"id": message["id"], "result": {"turn": {"id": "native-turn"}}})
+                    for item in items:
+                        emit({"method": "item/completed", "params": {"threadId": thread_id, "turnId": "native-turn",
+                              "item": item}})
+                    emit({"method": "item/completed", "params": {"threadId": thread_id, "turnId": "native-turn",
+                          "item": {"id": "final", "type": "agentMessage", "phase": "final_answer", "text": final_text}}})
+                    emit({"method": "turn/completed", "params": {"threadId": thread_id,
+                          "turn": {"id": "native-turn", "status": "completed"}}})
+                return result
+
+            def close(self):
+                """End the reader at EOF."""
+                output.put("")
+
+        class Process:
+            """The app server process: it exits when the worker closes its stdin."""
+
+            stdin, stdout, stderr = Input(), Output(), approvals.io.StringIO()
+            returncode = None
+
+            def poll(self):
+                """Running until the worker waits for it."""
+                return self.returncode
+
+            def wait(self, timeout=None):
+                """A clean exit."""
+                self.returncode = 0
+                return 0
+
+        return Process()
+
+    def run_exchange(self, items, final_text, *, validation_errors=()):
+        """Run one page exchange and return the stored task."""
+        proc = self.process(items, final_text)
+        self.stack.enter_context(patch.object(server.subprocess, "Popen", return_value=proc))
+        self.stack.enter_context(patch.object(server, "assess_changes", return_value={
+            "validation_errors": list(validation_errors), "recovery_files": [], "lovelace_results": [],
+            "config_check": {"result": "invalid" if validation_errors else "skipped", "errors": "", "warnings": ""}}))
+        server.run_task("task", "Tidy up my automations")
+        return server.tasks["task"]
+
+    def mcp_item(self, call):
+        """The same call as the app server sends it (camel-case type)."""
+        return {**call, "type": "mcpToolCall"}
+
+    def test_completed_the_answer_is_stored_as_plain_text_and_the_turn_had_no_schema(self):
+        """No tool call: the plain answer is the summary, and turn/start carried no output schema."""
+        task = self.run_exchange([], "I renamed the automation to Porch light at sunset.")
+        self.assertEqual(task["status"], "completed")
+        self.assertEqual(task["summary"], "I renamed the automation to Porch light at sunset.")
+        self.assertEqual((task["question"], task["choices"], task["details"], task["error"]), ("", [], "", ""))
+        turn_start = next(message for message in self.sent if message.get("method") == "turn/start")
+        self.assertNotIn("outputSchema", turn_start["params"])
+
+    def test_needs_input_comes_from_ask_owner_with_its_choices(self):
+        """ask_owner sets the question and the choices; the answer text stays the summary."""
+        text = "Two automations turn on the porch light. Remove the duplicate automation? Go ahead, or Keep both."
+        task = self.run_exchange([self.mcp_item(ASK)], text)
+        self.assertEqual(task["status"], "waiting_for_input")
+        self.assertEqual(task["summary"], text)
+        self.assertEqual(task["question"], "Remove the duplicate automation?")
+        self.assertEqual(task["choices"], ["Go ahead", "Keep both"])
+
+    def test_failed_comes_from_report_failure_with_its_reason_as_the_error(self):
+        """report_failure fails the task, and its reason is the task's error."""
+        text = "I could not do this: the entity light.porch does not exist."
+        task = self.run_exchange([self.mcp_item(FAIL)], text)
+        self.assertEqual(task["status"], "failed")
+        self.assertEqual(task["summary"], text)
+        self.assertEqual(task["error"], "The entity light.porch does not exist.")
+
+    def test_an_old_json_answer_still_gives_its_status_and_choices(self):
+        """A thread from 0.3.1 can still answer with the JSON object."""
+        old = {"status": "needs_input", "summary": "Two automations match.", "question": "Remove one?",
+               "details": "", "choices": ["Yes", "No"]}
+        task = self.run_exchange([], json.dumps(old))
+        self.assertEqual((task["status"], task["summary"], task["question"], task["choices"]),
+                         ("waiting_for_input", "Two automations match.", "Remove one?", ["Yes", "No"]))
+
+    def test_a_failed_configuration_check_wins_over_a_question(self):
+        """F3.3: the worker's own failure comes first, so the owner is not asked a question over a broken file.
+
+        The same holds for a question in an old JSON answer, which version 0.3.1 kept.
+        """
+        old_question = json.dumps({"status": "needs_input", "summary": "Edited.", "question": "Remove one?",
+                                   "details": "", "choices": ["Yes"]})
+        for items, text in (([self.mcp_item(ASK)], "Remove the duplicate automation?"), ([], old_question)):
+            with self.subTest(text=text):
+                server.tasks["task"].update(status="queued", question="", choices=[])
+                task = self.run_exchange(items, text, validation_errors=["automations.yaml: invalid YAML"])
+                self.assertEqual(task["status"], "failed")
+                self.assertEqual((task["question"], task["choices"]), ("", []))
+                self.assertIn("automations.yaml", task["error"])
 
 
 if __name__ == "__main__":

@@ -9,6 +9,14 @@
   read-only `exchange_info` tool on the Home Assistant data server. A page message on a thread that the page did
   not start (a ChatGPT app thread, or one from 0.3.1) begins with a one-line note to call that tool, which then
   also returns the rules. Threads from 0.3.1 keep their old instructions in their history.
+- Codex's answers are stored in the thread as plain text, so the ChatGPT app shows the answer and not a JSON
+  object. The page no longer sends an output format. Codex calls two new tools on the Home Assistant data server
+  instead: `ask_owner` with a question and up to three choices, and `report_failure` with a reason. Neither asks
+  for permission. The page takes its status, question and choices from these calls. A failure that the worker
+  finds itself (an exit with an error, a timeout, a stall, a configuration that fails its check) still comes
+  first; it now also wins over a question, so a task that leaves a broken configuration is reported as failed
+  and does not ask a question. A JSON answer from a 0.3.1 thread still shows as before. The page shows a
+  question on its own line only when the answer text does not already hold it.
 - Codex now refuses risky commands in two layers. Managed Codex command rules refuse six literal command
   prefixes: the Supervisor (`ha supervisor`, `ha super`, `ha su`), credentials, the app's policy folder and
   full access. They apply with Remote Control off too. The command hook stays the main check. The app tests

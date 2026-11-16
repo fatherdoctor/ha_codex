@@ -12,6 +12,12 @@ DEFAULT_POINTS = 1000
 MAX_RESPONSE_BYTES = 8 * 1024
 # exchange_info can carry the page's whole rules (see server.PAGE_INSTRUCTIONS), which pass 8 KiB.
 MAX_INFO_RESPONSE_BYTES = 32 * 1024
+# The limits of a question to the owner and a failure reason. The worker holds the calls it reads to the same
+# limits (server.status_call), and the page keeps at most three choices.
+QUESTION_MAX_LENGTH = 2000
+CHOICES_MAX = 3
+CHOICE_MAX_LENGTH = 200
+REASON_MAX_LENGTH = 2000
 PERIODS = ["5minute", "hour", "day", "week", "month"]
 STATISTIC_TYPES = ["mean", "min", "max", "sum", "state", "change", "last_reset"]
 COMMON_PROPERTIES = {
@@ -62,6 +68,33 @@ TOOLS = [
     },
 ]
 
+# ask_owner and report_failure are answered here and never reach the worker's socket. The worker reads each call
+# from the exchange's events and sets the page's status, question and choices from it.
+STATUS_TOOLS = [
+    {
+        "name": "ask_owner",
+        "description": "Ask the user of the Home Assistant page one question and stop. Use it when you need a "
+                       "decision or a fact before you can go on. Give up to three choices when the answer is one of "
+                       "a few options, each a few words of plain text. After the call, end your turn and write the "
+                       "same question, with its choices, as your answer. Changes nothing.",
+        "inputSchema": {"type": "object", "additionalProperties": False,
+                        "properties": {"question": {"type": "string", "minLength": 1, "maxLength": QUESTION_MAX_LENGTH},
+                                       "choices": {"type": "array", "maxItems": CHOICES_MAX, "items": {
+                                           "type": "string", "minLength": 1, "maxLength": CHOICE_MAX_LENGTH}}},
+                        "required": ["question"]},
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
+    },
+    {
+        "name": "report_failure",
+        "description": "Tell the Home Assistant page that this task failed, with the reason. After the call, end "
+                       "your turn and explain the reason in your answer. Changes nothing.",
+        "inputSchema": {"type": "object", "additionalProperties": False,
+                        "properties": {"reason": {"type": "string", "minLength": 1, "maxLength": REASON_MAX_LENGTH}},
+                        "required": ["reason"]},
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
+    },
+]
+
 
 def fetch(name, arguments):
     """Forward an allowlisted operation to the worker using this turn's temporary credential."""
@@ -85,8 +118,56 @@ def fetch(name, arguments):
     return json.loads(raw)
 
 
+def status_text_problem(value, limit):
+    """Return why a text argument is not usable, or an empty string."""
+    if not isinstance(value, str) or not value.strip():
+        return "must be text that is not empty"
+    if len(value) > limit:
+        return f"must be at most {limit} characters"
+    return ""
+
+
+def record_status(name, arguments):
+    """Check an ask_owner or report_failure call and return the text Codex gets back."""
+    if not isinstance(arguments, dict):
+        raise ValueError("The arguments must be an object.")
+    allowed = set(next(tool for tool in STATUS_TOOLS if tool["name"] == name)["inputSchema"]["properties"])
+    if set(arguments) - allowed:
+        raise ValueError("Unknown argument: " + ", ".join(sorted(set(arguments) - allowed)))
+    if name == "report_failure":
+        problem = status_text_problem(arguments.get("reason"), REASON_MAX_LENGTH)
+        if problem:
+            raise ValueError("reason " + problem)
+        return "The failure is recorded. End your turn now, and explain the reason in your answer."
+    problem = status_text_problem(arguments.get("question"), QUESTION_MAX_LENGTH)
+    if problem:
+        raise ValueError("question " + problem)
+    choices = arguments.get("choices", [])
+    if not isinstance(choices, list) or len(choices) > CHOICES_MAX:
+        raise ValueError(f"choices must be a list of at most {CHOICES_MAX} items")
+    for choice in choices:
+        problem = status_text_problem(choice, CHOICE_MAX_LENGTH)
+        if problem:
+            raise ValueError("each choice " + problem)
+    return "The question is recorded. End your turn now, and write the question, with its choices, as your answer."
+
+
+def call_tool(name, arguments):
+    """Answer a status tool here, and forward every other tool to the worker."""
+    if name in {tool["name"] for tool in STATUS_TOOLS}:
+        try:
+            return {"content": [{"type": "text", "text": record_status(name, arguments)}], "isError": False}
+        except ValueError as error:
+            return {"content": [{"type": "text", "text": f"Not recorded: {error}. Call {name} again."}], "isError": True}
+    try:
+        result = fetch(name, arguments)
+    except (OSError, ValueError, TypeError, AttributeError):
+        result = {"status": "unavailable", "message": "Data request failed or the task has ended"}
+    return {"content": [{"type": "text", "text": json.dumps(result)}], "isError": result.get("status") == "unavailable"}
+
+
 def respond(request):
-    """Expose initialization, discovery, the two read-only recorder tools and exchange_info."""
+    """Expose initialization, discovery, the read-only recorder tools, exchange_info and the two status tools."""
     method = request.get("method")
     if method == "initialize":
         return {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}},
@@ -99,18 +180,15 @@ def respond(request):
                                 "Request only relevant IDs and time windows. Truncated results are incomplete; narrow the "
                                 "query or use coarser statistics before analysis. Empty history may be purged or unrecorded. "
                                 "Statistics sum is cumulative, while change describes period consumption. "
-                                "exchange_info gives this message's backup folder, attachments and notes."}
+                                "exchange_info gives this message's backup folder, attachments and notes. "
+                                "ask_owner and report_failure tell the page that you need an answer or that the task failed."}
     if method == "ping":
         return {}
     if method == "tools/list":
-        return {"tools": TOOLS}
+        return {"tools": TOOLS + STATUS_TOOLS}
     if method == "tools/call":
-        try:
-            params = request.get("params", {})
-            result = fetch(params.get("name"), params.get("arguments", {}))
-        except (OSError, ValueError, TypeError, AttributeError):
-            result = {"status": "unavailable", "message": "Data request failed or the task has ended"}
-        return {"content": [{"type": "text", "text": json.dumps(result)}], "isError": result.get("status") == "unavailable"}
+        params = request.get("params") if isinstance(request.get("params"), dict) else {}
+        return call_tool(params.get("name"), params.get("arguments", {}))
     raise ValueError("Method not found")
 
 
