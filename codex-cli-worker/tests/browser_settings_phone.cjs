@@ -75,17 +75,24 @@ async function checkButtonRows(page) {
       };
       await page.goto('http://127.0.0.1:9137/preview/');
       await openSettings();
-      await page.waitForFunction(() => document.querySelector('#github-section .settings-status').textContent !== '');
+      // Each section fills its header status when its data arrives.
+      await page.waitForFunction(() => [...document.querySelectorAll('#settings .settings-status')].every(s => s.textContent !== ''));
 
       // Every section starts collapsed, with its title and status in the header.
       const headers = await page.evaluate(() => [...document.querySelectorAll('#settings .settings-toggle')].map(t => ({
         title: t.querySelector('.settings-title').textContent, status: t.querySelector('.settings-status').textContent,
         open: t.getAttribute('aria-expanded'), attention: t.closest('section').classList.contains('needs-attention')})));
-      assert.ok(headers.length >= 6, `${headers.length} collapsible sections`);
       assert.ok(headers.every(h => h.open === 'false'), 'every section starts collapsed');
-      assert.deepEqual(headers.slice(0, 2), [
-        {title: 'ChatGPT account', status: 'Signing in: enter the code', open: 'false', attention: true},
-        {title: 'GitHub', status: 'Connected as synthetic-owner, 1 repository', open: 'false', attention: false},
+      // Every header has a status. The fixture has no Home Assistant, so the schedules wait for its time zone.
+      assert.deepEqual(headers.map(({title, status, attention}) => ({title, status, attention})), [
+        {title: 'ChatGPT account', status: 'Signing in: enter the code', attention: true},
+        {title: 'GitHub', status: 'Connected as synthetic-owner, 1 repository', attention: false},
+        {title: 'Permissions overrides', status: '3 of 5 on', attention: false},
+        {title: 'Interaction logs', status: 'Keeps 25', attention: false},
+        {title: 'Assistant', status: 'Running', attention: false},
+        {title: 'Browser permissions', status: 'None remembered', attention: false},
+        {title: 'Scheduled runs', status: 'Paused: time zone unavailable', attention: true},
+        {title: 'Appearance', status: 'Follows Home Assistant', attention: false},
       ]);
       assert.equal(await page.locator('#remote-control-section .settings-toggle').count(), 0, 'own dialog stays open');
       await page.screenshot({path: path.join(SHOTS, `settings-collapsed-${colorScheme}-400.png`)});
@@ -94,6 +101,11 @@ async function checkButtonRows(page) {
       for (const id of ['chatgpt-section', 'github-section']) await page.locator(`#${id} .settings-toggle`).click();
       const expiry = page.locator('#login-card .signin-expiry');
       assert.match(await expiry.textContent(), /^The code expires in 1[45]:\d\d\.$/);
+      // A later status reply sets the time again, as when a phone wakes from sleep with the page's count behind.
+      auth = {...waiting, expires_in: 300};
+      await page.waitForFunction(() => /^The code expires in [45]:\d\d\.$/.test(
+        document.querySelector('#login-card .signin-expiry').textContent), null, {timeout: 6000});
+      auth = waiting;
       await checkButtonRows(page);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
       assert.equal(await page.evaluate(() => {

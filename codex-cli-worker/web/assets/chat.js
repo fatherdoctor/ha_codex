@@ -1171,6 +1171,7 @@ async function loadBrowserPermissions() {
     if (load !== browserPermissionLoad) return;
     area.replaceChildren();
     if (!permissions.length) area.append(textNode("p", "No browser permissions remembered.", "muted"));
+    setSectionStatus("browser-permissions-section", permissions.length ? `${permissions.length} remembered` : "None remembered");
     for (const permission of permissions) {
       const row = textNode("div", "", "saved-browser-permission");
       const info = textNode("div", "", "saved-browser-permission-info");
@@ -1198,6 +1199,7 @@ async function loadBrowserPermissions() {
   } catch (error) {
     if (load !== browserPermissionLoad) return;
     area.replaceChildren(textNode("p", String(error.message || error)));
+    setSectionStatus("browser-permissions-section", "Could not be read", true);
     // An unreadable permissions file can only be replaced, never edited here.
     if (error.status === 503) {
       const clear = textNode("button", "Remove all saved permissions", "subtle");
@@ -2776,6 +2778,7 @@ function setSectionStatus(sectionId, text, attention = false) {
   section.classList.toggle("needs-attention", Boolean(attention));
 }
 collapseSettingsSections();
+setSectionStatus("appearance-section", "Follows Home Assistant");
 /*
  * The time left on a sign-in code. The worker sends the seconds left, by its
  * own clock; the page counts down from when that reply arrived, so a phone
@@ -2784,8 +2787,12 @@ collapseSettingsSections();
  */
 const codeDeadlines = new Map();
 let codeCountdownTimer = 0;
-/** Build the expiry line and the hidden "Get a new code" button for a card; nothing when the time is unknown. */
-function codeExpiry(secondsLeft, getNewCode) {
+/**
+ * Build the expiry line and the hidden "Get a new code" button for a card;
+ * nothing when the time is unknown. kind ("chatgpt" or "github") lets a later
+ * status reply set the time again; see followCodeTime.
+ */
+function codeExpiry(secondsLeft, getNewCode, kind) {
   if (typeof secondsLeft !== "number" || !Number.isFinite(secondsLeft)) return [];
   const line = textNode("p", "", "muted signin-expiry");
   const button = textNode("button", "Get a new code");
@@ -2799,11 +2806,24 @@ function codeExpiry(secondsLeft, getNewCode) {
       button.disabled = false;
     }
   };
-  const entry = { deadline: performance.now() + secondsLeft * 1000, button };
+  const entry = { deadline: performance.now() + secondsLeft * 1000, button, kind };
   codeDeadlines.set(line, entry);
   showCodeTime(line, entry);
   if (!codeCountdownTimer) codeCountdownTimer = setInterval(showCodeTimes, 1000);
   return [line, button];
+}
+/**
+ * Set the time left on the shown codes of one kind from the worker's latest
+ * reply. The card is built once per code, and the page's own count can stop
+ * while a phone sleeps, so each status reply corrects it.
+ */
+function followCodeTime(kind, secondsLeft) {
+  if (typeof secondsLeft !== "number" || !Number.isFinite(secondsLeft)) return;
+  for (const [line, entry] of codeDeadlines) {
+    if (entry.kind !== kind) continue;
+    entry.deadline = performance.now() + secondsLeft * 1000;
+    showCodeTime(line, entry);
+  }
 }
 /** Show the time left on one code; an expired code says so and offers a new one. */
 function showCodeTime(line, { deadline, button }) {
@@ -2865,7 +2885,7 @@ function signInCard(auth) {
       "aria-label",
       `Sign-in code ${auth.user_code.split("").join(" ")}`,
     );
-    card.append(code, ...codeExpiry(auth.expires_in, newChatgptCode));
+    card.append(code, ...codeExpiry(auth.expires_in, newChatgptCode, "chatgpt"));
   } else {
     card.append(textNode("p", "Waiting for the sign-in code…", "muted"));
   }
@@ -2908,6 +2928,14 @@ async function loadLogin() {
   }
   renderLogin(auth);
 }
+/** The ChatGPT account header in a few words. */
+function chatgptSectionStatus({ signedIn, pending, failed, lapsed }) {
+  if (signedIn) return "Signed in";
+  if (pending) return "Signing in: enter the code";
+  if (failed) return "Sign-in failed";
+  if (lapsed) return "Sign-in expired";
+  return "Not signed in";
+}
 /** Put the sign-in state on the page; see loadLogin. */
 function renderLogin(auth) {
   const signedIn = Boolean(auth.codex_login?.status_ok);
@@ -2932,11 +2960,7 @@ function renderLogin(auth) {
     : lapsed
       ? "The assistant's ChatGPT sign-in expired or was revoked. Sign in again."
       : "The assistant is not signed in to ChatGPT.";
-  setSectionStatus(
-    "chatgpt-section",
-    signedIn ? "Signed in" : pending ? "Signing in: enter the code" : failed ? "Sign-in failed" : lapsed ? "Sign-in expired" : "Not signed in",
-    !signedIn,
-  );
+  setSectionStatus("chatgpt-section", chatgptSectionStatus({ signedIn, pending, failed, lapsed }), !signedIn);
   for (const id of ["login", "banner-login"]) $(id).textContent = failed ? "Get a new code" : "Sign in";
   const key = JSON.stringify([
     signedIn,
@@ -2952,6 +2976,8 @@ function renderLogin(auth) {
     $("signin-banner-card").replaceChildren(
       ...(pending ? [signInCard(auth)] : []),
     );
+  } else if (pending) {
+    followCodeTime("chatgpt", auth.expires_in);
   }
   for (const id of ["login", "banner-login"]) $(id).hidden = pending;
   // The sign-in card repeats the account requirement, so the section shows it once.
@@ -3036,7 +3062,7 @@ function githubFlowCard(flow) {
   }
   const link = githubLink(flow.verification_uri || "https://github.com/login/device", "Open github.com/login/device");
   if (link) card.append(link);
-  if (flow.user_code) card.append(...codeExpiry(flow.expires_in, newGithubCode));
+  if (flow.user_code) card.append(...codeExpiry(flow.expires_in, newGithubCode, "github"));
   return card;
 }
 /** Replace a waiting GitHub sign-in with a new one, for a code that expired. */
@@ -3050,6 +3076,18 @@ async function newGithubCode() {
   } finally {
     loadGithub().catch(() => {});
   }
+}
+/** The GitHub header in a few words, for example "Connected as owner, 1 repository". */
+function githubSectionStatus({ waiting, connected, bad, state, login, repositoryCount, retry }) {
+  if (waiting) return "Connecting: enter the code";
+  if (connected) {
+    const condition = bad ? (GITHUB_STATE_TEXT[state] || state).replace(/\.$/, "") : "Connected";
+    const account = login ? ` as ${login}` : "";
+    const repositories = repositoryCount === 1 ? "1 repository" : `${repositoryCount} repositories`;
+    return `${condition}${account}, ${repositories}`;
+  }
+  if (retry) return "Sign-in did not finish";
+  return "Not connected";
 }
 /** Put the GitHub status on the card and the banner. Only the contract's fields are read. */
 function renderGithub(github) {
@@ -3097,6 +3135,8 @@ function renderGithub(github) {
     if (flowArea.dataset.key !== key) {
       flowArea.dataset.key = key;
       flowArea.replaceChildren(githubFlowCard(flow));
+    } else {
+      followCodeTime("github", flow.expires_in);
     }
   } else {
     flowArea.dataset.key = "";
@@ -3130,13 +3170,7 @@ function renderGithub(github) {
   const repositoryCount = (github.repositories || []).length;
   setSectionStatus(
     "github-section",
-    waiting
-      ? "Connecting: enter the code"
-      : connected
-        ? `${bad ? (GITHUB_STATE_TEXT[state] || state).replace(/\.$/, "") : "Connected"}${login ? ` as ${login}` : ""}, ${repositoryCount} ${repositoryCount === 1 ? "repository" : "repositories"}`
-        : retry
-          ? "Sign-in did not finish"
-          : "Not connected",
+    githubSectionStatus({ waiting, connected, bad, state, login, repositoryCount, retry }),
     bad || waiting || retry,
   );
   $("github-banner-text").textContent = `The add-on's GitHub sign-in needs attention: ${(GITHUB_STATE_TEXT[state] || state).replace(/\.$/, "")}.`;
@@ -3385,11 +3419,29 @@ async function loadPermissionOverrides() {
       input.disabled = false;
     });
     $("permissions-overrides-result").textContent = "Changes save immediately.";
+    showPermissionSectionStatus(data.guard_note);
   } catch (_error) {
     permissionGroups = null;
     $("permissions-overrides-guard-note").hidden = true;
     $("permissions-overrides-result").textContent = "Permissions overrides are unavailable. Administrator access is required.";
+    setSectionStatus("permission-overrides", "Administrators only");
   }
+}
+/**
+ * The Permissions overrides header: how many groups are on, or that the house
+ * rules changed and wait for the owner's review. While they wait, every group
+ * is suspended, so the header says so instead of a count.
+ */
+function showPermissionSectionStatus(guardNote) {
+  // The worker's text for rules that changed since the owner confirmed them
+  // (permission_overrides_api.py, guards).
+  if (/^House rules changed/.test(guardNote || "")) {
+    setSectionStatus("permission-overrides", "Suspended: review the house rules", true);
+    return;
+  }
+  const switches = permissionSwitches();
+  const on = switches.filter((input) => permissionGroups[input.dataset.permissionGroup] === true).length;
+  setSectionStatus("permission-overrides", `${on} of ${switches.length} on`);
 }
 $("confirm-permission-rules").onclick = async () => {
   try {
@@ -3413,6 +3465,7 @@ permissionSwitches().forEach((input) => input.addEventListener("change", async (
     $("permissions-overrides-guard-note").textContent = data.guard_note || "";
     $("permissions-overrides-guard-note").hidden = !data.guard_note;
     $("permissions-overrides-result").textContent = "Permissions overrides saved.";
+    showPermissionSectionStatus(data.guard_note);
   } catch (_error) {
     $("permissions-overrides-result").textContent = "Could not save permissions overrides. Check the settings before continuing.";
   } finally {
@@ -3426,8 +3479,10 @@ $("settings-button").onclick = async () => {
   try {
     const data = await api("diagnostics/settings");
     $("diagnostic-retention").value = data.capacity;
+    setSectionStatus("interaction-logs-section", `Keeps ${data.capacity}`);
   } catch (_error) {
     $("export-logs-status").textContent = "Log retention is available to administrators.";
+    setSectionStatus("interaction-logs-section", "Administrators only");
   }
   sidebar(false);
   $("settings").showModal();
