@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from test_server import server
 import scheduling
-import wait_notices as W
+W = server
 import test_scheduling
 
 START = '2026-11-16T00:00:00+00:00'

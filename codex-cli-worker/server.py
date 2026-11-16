@@ -41,7 +41,7 @@ from flask import Flask, Response, jsonify, request, send_file
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from verification import DEFAULT_BROWSER_MEMORY_LIMIT_MIB, Verification, public_check
 from approvals import APPROVAL_GONE, AppServerSession
-import wait_notices
+import math
 import policy as protected_policy
 from ha_data import HomeAssistantData
 import remote_control
@@ -1837,6 +1837,53 @@ CHOICE_MAX_LENGTH = 200
 # The Codex integration parses it, so keep the two in step.
 CHOICE_ACTION_PREFIX = "CODEX_CLI_CHOICE_"
 QUESTION_NOT_WAITING = "This question is no longer waiting for an answer."
+
+
+def wait_minutes(value):
+    """Use the shipped default for a damaged or older option."""
+    return value if type(value) is int and 1 <= value <= 10080 else 60
+
+
+def requested_time(value):
+    """Accept only an explicit, timezone-aware request timestamp."""
+    if not isinstance(value, str):
+        return None
+    try:
+        date = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        stamp = date.timestamp() if date.tzinfo is not None else None
+    except (ValueError, OverflowError, OSError):
+        return None
+    return stamp if stamp is not None and math.isfinite(stamp) and stamp >= 0 else None
+
+
+def task_waits(tasks, replied=()):
+    """Describe every active wait, including ones below the notice threshold."""
+    rows = []
+    for task in tasks:
+        task_id = task.get('task_id', '')
+        if (not isinstance(task_id, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', task_id)
+                or task.get('cancellation_requested')
+                or task.get('status') not in ('running', 'waiting_for_input')):
+            continue
+        turn = str(task.get('current_turn_id') or 'legacy')
+
+        def add(kind, identity, requested):
+            since = requested_time(requested)
+            if since is not None:
+                wait_id = hashlib.sha256(f'{task_id}:{turn}:{kind}:{identity}'.encode()).hexdigest()[:32]
+                rows.append({'wait_id': wait_id, 'task_id': task_id, 'kind': kind, 'waiting_since': since})
+
+        if task.get('status') == 'waiting_for_input' and task.get('question'):
+            add('question', str(task['question']), task.get('input_requested_at') or task.get('updated_at'))
+        if task.get('status') == 'running':
+            for approval in task.get('approvals') or []:
+                if isinstance(approval, dict) and approval.get('status') == 'pending':
+                    add('approval', approval.get('approval_id'), approval.get('requested_at'))
+        mail = task.get('mailbox_wait')
+        if (isinstance(mail, dict) and mail.get('turn_id') == task.get('current_turn_id')
+                and mail.get('message_id') not in replied):
+            add('mailbox', mail.get('message_id'), mail.get('requested_at'))
+    return rows
 
 
 def atomic_json_write(path: Path, value: Any) -> None:
@@ -5869,7 +5916,7 @@ def status() -> Response:
             latest["verification"] = [public_check(check) for check in latest["verification"]]
         queued = len(message_queue)
         wait_tasks = copy.deepcopy(task_values)
-    waits = {"available": True, "minutes": wait_notices.wait_minutes(read_options().get("unanswered_wait_minutes"))}
+    waits = {"available": True, "minutes": wait_minutes(read_options().get("unanswered_wait_minutes"))}
     try:
         replied = set()
         for task in wait_tasks:
@@ -5877,7 +5924,7 @@ def status() -> Response:
             if (task.get("status") in ("running", "waiting_for_input") and isinstance(mail, dict)
                     and schedule_service.mailbox_replied(mail.get("message_id"))):
                 replied.add(mail["message_id"])
-        waits["items"] = wait_notices.task_waits(wait_tasks, replied)
+        waits["items"] = task_waits(wait_tasks, replied)
     except (OSError, ValueError, sqlite3.Error):
         # An unavailable mailbox is not proof that its question was answered.
         waits = {"available": False}
