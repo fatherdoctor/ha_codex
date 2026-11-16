@@ -11,16 +11,18 @@ import sys
 
 SOCKET = '/data/github.sock'
 PATH = {'type': 'string', 'maxLength': 4096, 'description': 'The git work tree under /config, for example /config or /config/house_repo.'}
+REPOSITORY = {'type': 'string', 'maxLength': 140, 'description': 'A connected repository, owner/repository.'}
+FOLDER = {'type': 'string', 'maxLength': 100, 'description': 'For clone: one new folder name directly under /config.'}
 BRANCH = {'type': 'string', 'maxLength': 200, 'description': 'A plain branch name; the checked-out branch when left out.'}
 TOOLS = [
     {'name': 'github_git',
-     'description': ('Fetch, pull or push a GitHub repository connected on the add-on page, or list the connected '
-                     'repositories. The worker runs git with the sign-in, outside your sandbox. A push runs the push '
+     'description': ('Clone, link (set origin), fetch, pull or push a GitHub repository connected on the add-on '
+                     'page, or list the connected repositories. The worker runs git with the sign-in, outside your sandbox. A push runs the push '
                      'guard first and is refused when it finds a secret; never force, delete or tag. Read-only chats '
-                     'can use repos and fetch only.'),
+                     'can use repos and fetch only. clone takes repository and folder; link takes repository and path.'),
      'inputSchema': {'type': 'object', 'additionalProperties': False,
-                     'properties': {'operation': {'enum': ['repos', 'fetch', 'pull', 'push']},
-                                    'path': PATH, 'branch': BRANCH},
+                     'properties': {'operation': {'enum': ['repos', 'fetch', 'pull', 'push', 'clone', 'link']},
+                                    'path': PATH, 'branch': BRANCH, 'repository': REPOSITORY, 'folder': FOLDER},
                      'required': ['operation']}},
 ]
 
@@ -28,8 +30,8 @@ TOOLS = [
 def fetch(name, arguments):
     if name != 'github_git':
         raise ValueError('The only tool is github_git.')
-    if not isinstance(arguments, dict) or set(arguments) - {'operation', 'path', 'branch'}:
-        raise ValueError('github_git accepts only operation, path and branch.')
+    if not isinstance(arguments, dict) or set(arguments) - {'operation', 'path', 'branch', 'repository', 'folder'}:
+        raise ValueError('github_git accepts only operation, path, branch, repository and folder.')
     arguments = dict(arguments)
     operation = arguments.pop('operation', None)
     data = json.dumps({'operation': operation, 'arguments': arguments,

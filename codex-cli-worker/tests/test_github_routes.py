@@ -17,7 +17,7 @@ CONTRACT = {"state", "kind", "account", "client_id_source", "repositories", "exp
             "extra", "permissions", "permission_problem", "expires_at", "connected_at", "last_check", "last_test",
             "revoke_url", "flow"}
 WRITES = ("/github/connect", "/github/cancel", "/github/token", "/github/test", "/github/check", "/github/accept",
-          "/github/disconnect")
+          "/github/disconnect", "/github/repos/clone", "/github/repos/link")
 
 
 class GitHubRouteTests(unittest.TestCase):
@@ -115,6 +115,18 @@ class GitHubRouteTests(unittest.TestCase):
         response = self.ingress("POST", "/github/token", body={"token": pasted, "repository": REPO})
         self.assertEqual(response.status_code, 400)
         self.assertNotIn(pasted, response.get_data(as_text=True))
+
+    def test_clone_and_link_refuse_with_a_sentence_and_the_status(self):
+        self.service._complete_app(APP_TOKEN)
+        for path, body in (("/github/repos/clone", {"repository": REPO, "folder": ".."}),
+                           ("/github/repos/link", {"repository": REPO, "path": "/nowhere"}),
+                           ("/github/repos/clone", {"repository": "other-owner/x", "folder": "x"})):
+            with self.subTest(path=path, body=body):
+                response = self.ingress("POST", path, body=body)
+                self.assertEqual(response.status_code, 400)
+                self.assertFalse(response.json["ok"])
+                self.assertIn("github", response.json)
+                self.assertNotIn(APP_TOKEN, response.get_data(as_text=True))
 
     def test_a_state_change_notifies_under_its_own_id(self):
         self.service._complete_app(APP_TOKEN)

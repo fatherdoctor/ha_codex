@@ -44,7 +44,7 @@ GUARD_PATH = "/usr/share/ha_codex/push_guard.py"
 ASKPASS_PATH = "/usr/local/bin/codex-github-askpass"
 CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 ALLOW_MARK = "guard: allow"
-OPERATIONS = ("repos", "fetch", "pull", "push")
+OPERATIONS = ("repos", "fetch", "pull", "push", "clone", "link")
 READ_ONLY_OPERATIONS = ("repos", "fetch")
 BAD_STATES = ("near_expiry", "expired", "revoked", "access_changed", "failed")
 STATE_WORDS = {
@@ -645,6 +645,51 @@ class GitRunner:
                     "now on until they are removed.")
         return ""
 
+    def connected_name(self, repository: Any) -> str:
+        name = valid_repository(repository)
+        connected = {item.lower(): item for item in self.connected()}
+        if name.lower() not in connected:
+            raise GitHubError("That repository is not one of the connected GitHub repositories.")
+        return connected[name.lower()]
+
+    def clone(self, repository: Any, folder: Any) -> dict[str, Any]:
+        """Clone a connected repository into a new folder directly under /config. No credential is written."""
+        name = self.connected_name(repository)
+        target = self.config_root / valid_folder(folder)
+        if os.path.lexists(target):
+            raise GitHubError("That folder already exists; choose a new folder name.")
+        token = self.token_reader()
+        if not token:
+            raise GitHubError("GitHub is not connected on this box; the owner connects it on the add-on page.")
+        try:
+            # --template= gives the new repository no hook files; the overrides cover the rest.
+            proc = subprocess.run(["git", "-C", str(self.config_root), "clone", "--template=", "--origin", "origin",
+                                   "--no-recurse-submodules", "--", f"https://github.com/{name}.git", target.name],
+                                  env=self.env(True), stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                                  timeout=GIT_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            return reply(False, "git clone took too long and was stopped.")
+        text = redact_token((proc.stdout or "") + (proc.stderr or ""), token)
+        if proc.returncode != 0:
+            return reply(False, "git clone failed.\n" + text)
+        self.prepare(str(target))
+        return {**reply(True, f"Cloned {name} into {target}.\n" + text), "path": str(target)}
+
+    def link(self, repository: Any, path: Any) -> dict[str, Any]:
+        """Point an existing work tree's origin at a connected repository. Only the plain https URL is set: no
+        user name, no token and no credential helper are written into the repository."""
+        name = self.connected_name(repository)
+        repo = self.repository_path(path)
+        self.check_config(repo)
+        url = f"https://github.com/{name}.git"
+        has_origin = self._git(repo, "remote", "get-url", "origin").returncode == 0
+        proc = self._git(repo, "remote", "set-url" if has_origin else "add", "origin", url)
+        if proc.returncode != 0:
+            return reply(False, "The origin remote could not be set.")
+        self.check_config(repo)
+        self.origin_repository(repo)
+        return {**reply(True, f"{repo} now uses {name} as origin."), "path": str(repo)}
+
     def fetch(self, path: Any) -> dict[str, Any]:
         repo, _ = self.prepare(path)
         code, text = self._credentialed(repo, "fetch", "--no-recurse-submodules", "--prune", "origin")
@@ -776,7 +821,7 @@ class GitHubService:
     def prompt_note(self) -> str:
         if self.current_state() not in ("ok", "near_expiry"):
             return ""
-        return ("To fetch, pull or push a GitHub repository use the github_git tool; git has no network and no "
+        return ("To clone, link, fetch, pull or push a GitHub repository use the github_git tool; git has no network and no "
                 "credential in your shell.\n\n")
 
     # -- connecting ----------------------------------------------------------------------------------------
@@ -1002,8 +1047,10 @@ class GitHubService:
         operation, args = payload["operation"], payload["arguments"]
         if operation not in OPERATIONS:
             raise GitHubError("The operations are " + ", ".join(OPERATIONS) + ".")
-        allowed = {"repos": set(), "fetch": {"path"}, "pull": {"path", "branch"}, "push": {"path", "branch"}}[operation]
-        if not isinstance(args, dict) or set(args) - allowed or (operation != "repos" and "path" not in args):
+        allowed = {"repos": set(), "fetch": {"path"}, "pull": {"path", "branch"}, "push": {"path", "branch"},
+                   "clone": {"repository", "folder"}, "link": {"repository", "path"}}[operation]
+        required = {"repos": set(), "clone": {"repository", "folder"}, "link": {"repository", "path"}}.get(operation, {"path"})
+        if not isinstance(args, dict) or set(args) - allowed or required - set(args):
             raise GitHubError(f"{operation} takes " + (", ".join(sorted(allowed)) or "no arguments") + ".")
         if operation not in READ_ONLY_OPERATIONS and self.read_only(task_id):
             raise GitHubError("This chat is read only; only repos and fetch are available.")
@@ -1013,6 +1060,8 @@ class GitHubService:
             status = self.status()
             return reply(True, json.dumps({"account": (status["account"] or {}).get("login"),
                                            "repositories": status["repositories"]}))
+        if operation in ("clone", "link"):
+            return self.local(operation, args)
         if not self.git_lock.acquire(blocking=False):
             return reply(False, "Another GitHub operation is running; try again when it ends.")
         try:
@@ -1021,6 +1070,19 @@ class GitHubService:
             if operation == "pull":
                 return self.runner.pull(args["path"], args.get("branch"))
             return self.runner.push(args["path"], args.get("branch"))
+        finally:
+            self.git_lock.release()
+
+    def local(self, operation: str, args: dict[str, Any]) -> dict[str, Any]:
+        """clone or link, for the tool and for the page."""
+        if self.current_state() not in ("ok", "near_expiry"):
+            raise GitHubError("GitHub is not connected on this box; the owner connects it on the add-on page.")
+        if not self.git_lock.acquire(blocking=False):
+            return reply(False, "Another GitHub operation is running; try again when it ends.")
+        try:
+            if operation == "clone":
+                return self.runner.clone(args.get("repository"), args.get("folder"))
+            return self.runner.link(args.get("repository"), args.get("path"))
         finally:
             self.git_lock.release()
 
@@ -1128,6 +1190,22 @@ def register(worker, service: GitHubService) -> GitHubService:
     @admin
     def github_accept():
         return jsonify(ok=True, github=service.accept())
+
+    def local_route(operation, keys):
+        value = body()
+        result = service.local(operation, {key: value.get(key) for key in keys})
+        return jsonify(ok=result["ok"], text=result["text"], path=result.get("path"),
+                       github=service.status()), 200 if result["ok"] else 400
+
+    @app.post("/github/repos/clone", endpoint="github_repos_clone")
+    @admin
+    def github_repos_clone():
+        return local_route("clone", ("repository", "folder"))
+
+    @app.post("/github/repos/link", endpoint="github_repos_link")
+    @admin
+    def github_repos_link():
+        return local_route("link", ("repository", "path"))
 
     @app.post("/github/disconnect", endpoint="github_disconnect")
     @admin

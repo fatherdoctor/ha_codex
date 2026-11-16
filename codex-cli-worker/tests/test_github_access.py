@@ -568,6 +568,52 @@ class PushTests(GitRunnerCase):
         self.assertTrue(self.runner.fetch(str(self.repo))["ok"])
 
 
+class CloneLinkTests(GitRunnerCase):
+    def test_clone_makes_a_new_folder_with_a_plain_origin_and_no_hooks(self):
+        self.assertTrue(self.runner.push(str(self.repo))["ok"])
+        git(self.remote, "symbolic-ref", "HEAD", "refs/heads/main")
+        result = self.runner.clone(REPO, "house_copy")
+        self.assertTrue(result["ok"], result["text"])
+        target = self.config / "house_copy"
+        self.assertEqual(result["path"], str(target))
+        self.assertEqual((target / "README.md").read_text(), "house\n")
+        config = (target / ".git" / "config").read_text()
+        self.assertIn(f"url = https://github.com/{REPO}.git", config)
+        self.assertNotIn(APP_TOKEN, config)
+        self.assertNotIn("helper", config)
+        self.assertEqual(list((target / ".git" / "hooks").glob("*")) if (target / ".git" / "hooks").exists() else [], [])
+        gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO], config_root=self.config).prepare(str(target))
+
+    def test_clone_refuses_bad_names_existing_folders_and_other_repositories(self):
+        for repository, folder in ((REPO, ".."), (REPO, "a/b"), (REPO, "-x"), (REPO, "house"), (OTHER, "new"),
+                                   ("+example-owner/house", "new"), (REPO, "/share/x")):
+            with self.subTest(repository=repository, folder=folder), self.assertRaises(gh.GitHubError):
+                self.runner.clone(repository, folder)
+
+    def test_link_sets_origin_and_writes_no_credential(self):
+        real = gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO, OTHER], config_root=self.config)
+        git(self.repo, "remote", "remove", "origin")
+        result = real.link(OTHER, str(self.repo))
+        self.assertTrue(result["ok"], result["text"])
+        self.assertEqual(git(self.repo, "remote", "get-url", "origin").stdout.strip(), f"https://github.com/{OTHER}.git")
+        result = real.link(REPO, str(self.repo))
+        self.assertTrue(result["ok"], result["text"])
+        self.assertEqual(real.prepare(str(self.repo))[1], REPO)
+        config = (self.repo / ".git" / "config").read_text()
+        self.assertNotIn(APP_TOKEN, config)
+        self.assertNotIn("helper", config)
+
+    def test_link_keeps_the_allowlist_and_the_name_checks(self):
+        real = gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO], config_root=self.config)
+        git(self.repo, "config", "core.fsmonitor", "touch marker")
+        with self.assertRaises(gh.GitHubError):
+            real.link(REPO, str(self.repo))
+        git(self.repo, "config", "--unset", "core.fsmonitor")
+        for repository, path in (("example-owner/other", str(self.repo)), (REPO, "/tmp"), ("../x", str(self.repo))):
+            with self.subTest(repository=repository, path=path), self.assertRaises(gh.GitHubError):
+                real.link(repository, path)
+
+
 class DispatchTests(ServiceCase):
     def payload(self, operation, cap="cap-live", **arguments):
         return {"operation": operation, "arguments": arguments, "capability": cap}
@@ -598,8 +644,10 @@ class DispatchTests(ServiceCase):
                 calls.append(("push", path))
 
         self.service.runner = Runner()
-        for operation in ("push", "pull"):
-            answer = self.service.answer(json.dumps(self.payload(operation, path="/config")).encode())
+        for operation, args in (("push", {"path": "/config"}), ("pull", {"path": "/config"}),
+                                ("clone", {"repository": REPO, "folder": "x"}),
+                                ("link", {"repository": REPO, "path": "/config"})):
+            answer = self.service.answer(json.dumps(self.payload(operation, **args)).encode())
             self.assertFalse(answer["ok"])
             self.assertIn("read only", answer["text"])
         self.assertTrue(self.service.answer(json.dumps(self.payload("repos")).encode())["ok"])
