@@ -25,7 +25,8 @@ from typing import Any, Callable
 
 # The Client ID of the public GitHub App "Codex for Home Assistant". It is public by design (GitHub's device
 # sign-in needs nothing else); the add-on option `github_client_id` overrides it for an owner's own App.
-GITHUB_CLIENT_ID = ""
+# "Codex for Home Assistant", registered under fatherdoctor; no client secret or private key exists.
+GITHUB_CLIENT_ID = "Iv23liyct2Akj5MXK0eF"
 GITHUB_CHECK_SECONDS = 3600
 NEAR_EXPIRY_DAYS = 7
 FAILURES_BEFORE_FAILED = 3

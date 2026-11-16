@@ -179,6 +179,12 @@ class DeviceFlowTests(ServiceCase):
                 self.assertEqual(flow.public["status"], status)
                 self.assertIsNone(self.service.store.read_token())
 
+    def test_the_built_in_client_id_and_the_option_override(self):
+        self.assertEqual(gh.GITHUB_CLIENT_ID, "Iv23liyct2Akj5MXK0eF")
+        self.assertEqual(self.service.client_id_value(), ("Iv23liExampleClient", "option"))
+        self.service.client_id = lambda: ""
+        self.assertEqual(self.service.client_id_value(), ("Iv23liyct2Akj5MXK0eF", "built_in"))
+
     def test_no_client_id_is_a_plain_refusal(self):
         with self.assertRaises(gh.GitHubError):
             gh.DeviceFlow(self.http, "", lambda token: None).start()
