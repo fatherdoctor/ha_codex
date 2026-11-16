@@ -7,6 +7,7 @@ thread/resume take developerInstructions; turn/start takes input; an mcpToolCall
 and arguments). They are not recordings of a real app server.
 """
 import json
+import os
 from pathlib import Path
 import queue
 import socket
@@ -193,6 +194,11 @@ class ExchangeInfoToolTests(unittest.TestCase):
         self.assertGreater(len(server.PAGE_INSTRUCTIONS), ha_data_mcp.MAX_RESPONSE_BYTES // 2)
         self.assertLess(len(json.dumps({"rules": server.PAGE_INSTRUCTIONS}).encode()) + 4096,
                         ha_data_mcp.MAX_INFO_RESPONSE_BYTES)
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            # Match the Home Assistant pytest harness: permit this Unix socket only, with every IP connection
+            # still blocked.
+            import pytest_socket
+            pytest_socket.socket_allow_hosts([], allow_unix_socket=True)
         with tempfile.TemporaryDirectory() as folder:
             path = str(Path(folder) / "data.sock")
             listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -208,11 +214,14 @@ class ExchangeInfoToolTests(unittest.TestCase):
                         connection.makefile("rb").readline()
                         connection.sendall(reply.encode())
 
-            threading.Thread(target=answer_twice, daemon=True).start()
+            answering = threading.Thread(target=answer_twice, daemon=True)
+            answering.start()
             with patch.dict("os.environ", {"HA_DATA_SOCKET": path, "HA_DATA_CAPABILITY": "capability"}):
                 self.assertEqual(len(ha_data_mcp.fetch("exchange_info", {})["rules"]), ha_data_mcp.MAX_RESPONSE_BYTES + 100)
                 with self.assertRaises(ValueError):
                     ha_data_mcp.fetch("history", {})
+            answering.join(timeout=5)
+            self.assertFalse(answering.is_alive())
 
 
 def tool_call(tool, arguments, *, status="completed", server_name="home_assistant_data"):
