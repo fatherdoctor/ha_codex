@@ -54,6 +54,11 @@ from account_access import AccountAccess, rejected_sign_in_error
 import sqlite3
 from interaction_diagnostics import RollingDiagnostics, InteractionRecorder
 
+# Where a workspace-write task may write without an approval. /share is the owner's ruling of 2026-11-16:
+# the add-on gets the same /share access as the Claude add-on (clones live there). /data/github stays
+# masked by codex-bwrap and is never a writable root.
+TASK_WRITABLE_ROOTS = ("/config", "/share")
+
 
 class _ToolWorker:
     """Let worker-owned tools reach this module's functions and state by name."""
@@ -2754,7 +2759,7 @@ def codex_backup_dir(run_dir: Path, options: dict[str, Any]) -> Path | None:
     if mode == "read-only":
         return None
     folder = run_dir / BACKUP_DIR
-    # The workspace-write sandbox only lets Codex write inside /config.
+    # The backup folder stays inside /config, a root the workspace-write sandbox lets Codex write.
     if mode != "danger-full-access" and not folder.resolve().is_relative_to(CONFIG_ROOT.resolve()):
         return None
     return folder
@@ -4522,7 +4527,7 @@ def create_approval_session(
         thread_params["model"] = model
     policy: dict[str, Any] = {"type": "readOnly" if mode == "read-only" else "workspaceWrite", "networkAccess": False}
     if mode == "workspace-write":
-        policy["writableRoots"] = ["/config"]
+        policy["writableRoots"] = list(TASK_WRITABLE_ROOTS)
     return AppServerSession(
         proc.stdin, lock=lock, thread_params=thread_params,
         turn_params={"input": [{"type": "text", "text": prompt},

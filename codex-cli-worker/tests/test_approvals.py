@@ -545,11 +545,21 @@ class ApprovalApiTests(unittest.TestCase):
         self.assertEqual(self.session.thread_params["approvalsReviewer"], "user")
         self.assertEqual(self.session.turn_params["outputSchema"], server.FINAL_RESPONSE_SCHEMA)
         self.assertEqual(self.session.turn_params["sandboxPolicy"], {
-            "type": "workspaceWrite", "networkAccess": False, "writableRoots": ["/config"]})
+            "type": "workspaceWrite", "networkAccess": False, "writableRoots": ["/config", "/share"]})
         self.assertTrue(server.uses_user_approvals({}))
         self.assertTrue(server.uses_user_approvals({"codex_sandbox": "read-only"}))
         # A refused mode never gets the approval-free exec path either: run_task stops it before launch.
         self.assertFalse(server.uses_user_approvals({"codex_sandbox": "danger-full-access"}))
+
+    def test_a_task_can_write_under_share_but_never_the_github_folder(self):
+        """Owner ruling 2026-11-16: /share is writable like /config; /data/github never is, and read-only stays read-only."""
+        roots = self.session.turn_params["sandboxPolicy"]["writableRoots"]
+        self.assertIn("/share", roots)
+        self.assertIn("/config", roots)
+        self.assertFalse([root for root in roots if "/data/github".startswith(root.rstrip("/") + "/") or root.startswith("/data")])
+        reader = server.create_approval_session("task", self.proc, "Read history", Path(self.temp.name) / "final", None, {},
+                                                {**server.DEFAULT_OPTIONS, "codex_sandbox": "read-only"})
+        self.assertEqual(reader.turn_params["sandboxPolicy"], {"type": "readOnly", "networkAccess": False})
 
     def test_restore_marks_pending_audit_expired_and_active_task_failed(self):
         """Restart loads the audit for display while dropping every live grant capability."""
