@@ -806,6 +806,8 @@ def _policy_restriction(text: str) -> str:
         return "accesses the protected schedule database"
     if re.search(r"worker_api_token", plain, re.IGNORECASE):
         return "accesses the add-on's private credential"
+    if re.search(r"/data/+github", plain, re.IGNORECASE):
+        return "accesses the add-on's GitHub sign-in"
     if re.search(r"codex-home/.*(?:AGENTS\.md|house-rules)|ha_codex/.*(?:AGENTS\.md|house-rules)", plain, re.IGNORECASE):
         return "changes the add-on's rules"
     if re.search(r"/share/ha_|ha_codex/(?:policy|agents|house)|codex-home/.*(?:config\.toml|[?*\[])|/etc/codex/(?:requirements|managed_config)", plain, re.IGNORECASE):
