@@ -2,6 +2,12 @@
 
 ## 0.1.81.3 (unreleased)
 
+- Integration actions and browser-session endpoints now require a loaded config entry. The browser broker
+  belongs to that entry and revokes its sessions on unload or failed setup. Initial worker authentication
+  rejection now requests reauthentication instead of retrying as a connection failure.
+- The sign-in action explains its `force` default and how it handles an existing sign-in or a flow already
+  running. The integration quality checklist now distinguishes implemented rules from unfinished work.
+
 - The app now installs its own integration. At each start it copies the Codex integration of the same
   release, carried in the app image, to `/config/custom_components/codex_cli`, then asks for one restart of
   Home Assistant in a notification. It writes only when the folder is missing or was written by the app

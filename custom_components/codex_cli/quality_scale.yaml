@@ -1,15 +1,15 @@
 rules:
   action-setup:
-    status: todo
-    comment: Actions must reject entries that are setting up, retrying or unloading.
+    status: done
+    comment: All actions require a loaded config entry; transition states are covered by regression tests.
   appropriate-polling: done
   brands: done
   common-modules: done
   config-flow: done
   dependency-transparency: done
   docs-actions:
-    status: todo
-    comment: Document the default and existing-session behavior of start_login.force.
+    status: done
+    comment: The README and translated action field explain force defaults, existing sign-in and running flows.
   docs-high-level-description: done
   docs-installation-instructions: done
   docs-removal-instructions: done
@@ -19,12 +19,12 @@ rules:
   entity-unique-id: done
   has-entity-name: done
   runtime-data:
-    status: todo
-    comment: The browser-session broker must move from hass.data into typed entry runtime data.
+    status: done
+    comment: Typed entry runtime owns the client, coordinator and browser-session broker; HTTP views use loaded entries.
   test-before-configure: done
   test-before-setup:
-    status: todo
-    comment: Discovery must preserve authentication rejection so setup can request reauthentication.
+    status: done
+    comment: Setup refreshes before publishing runtime and preserves discovery authentication rejection as ConfigEntryAuthFailed.
   unique-config-entry: done
 
   action-exceptions: done
@@ -40,8 +40,8 @@ rules:
     status: done
     comment: Both entity platforms explicitly set PARALLEL_UPDATES to zero for their shared coordinator.
   reauthentication-flow:
-    status: todo
-    comment: The reauth flow exists, but initial discovery authentication failures must trigger it.
+    status: done
+    comment: Worker authentication rejection reaches Core as ConfigEntryAuthFailed; the existing reauth flow reconnects the entry.
 
   devices: done
   diagnostics: done
