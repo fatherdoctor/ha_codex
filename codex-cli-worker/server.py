@@ -41,6 +41,7 @@ from flask import Flask, Response, jsonify, request, send_file
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from verification import DEFAULT_BROWSER_MEMORY_LIMIT_MIB, Verification, public_check
 from approvals import APPROVAL_GONE, AppServerSession
+import wait_notices
 import policy as protected_policy
 from ha_data import HomeAssistantData
 import remote_control
@@ -135,6 +136,7 @@ DEFAULT_OPTIONS = {
     "notify_service": "",
     "task_timeout_seconds": 3600,
     "task_stall_seconds": 600,
+    "unanswered_wait_minutes": 60,
     "auto_save_lovelace": True,
     "config_check": True,
     "full_snapshot": False,
@@ -2238,6 +2240,13 @@ def _save_task_update(task_id: str, updates: dict[str, Any], *, touch: bool) -> 
         task = tasks.setdefault(task_id, {"task_id": task_id})
         if task.get("cancellation_requested") and updates.get("status") != "cancelled" and updates.get("cancellation_requested") is not False:
             return False
+        status = updates.get("status", task.get("status"))
+        if status == "waiting_for_input":
+            if (task.get("status") != status or updates.get("question", task.get("question")) != task.get("question")
+                    or not task.get("input_requested_at")):
+                updates["input_requested_at"] = utc_now()
+        else:
+            updates["input_requested_at"] = ""
         task.update(updates)
         if touch:
             task["updated_at"] = utc_now()
@@ -5859,6 +5868,19 @@ def status() -> Response:
         if latest is not None and not is_ingress_request() and isinstance(latest.get("verification"), list):
             latest["verification"] = [public_check(check) for check in latest["verification"]]
         queued = len(message_queue)
+        wait_tasks = copy.deepcopy(task_values)
+    waits = {"available": True, "minutes": wait_notices.wait_minutes(read_options().get("unanswered_wait_minutes"))}
+    try:
+        replied = set()
+        for task in wait_tasks:
+            mail = task.get("mailbox_wait")
+            if (task.get("status") in ("running", "waiting_for_input") and isinstance(mail, dict)
+                    and schedule_service.mailbox_replied(mail.get("message_id"))):
+                replied.add(mail["message_id"])
+        waits["items"] = wait_notices.task_waits(wait_tasks, replied)
+    except (OSError, ValueError, sqlite3.Error):
+        # An unavailable mailbox is not proof that its question was answered.
+        waits = {"available": False}
     return jsonify(
         {
             "ok": True,
@@ -5866,6 +5888,7 @@ def status() -> Response:
             "active_task_count": active_task_count(),
             "queued_message_count": queued,
             "mailbox": mailbox_status_payload(),
+            "task_waits": waits,
             "task_count": active_task_count(),
             "total_task_count": len(task_values),
             "latest_task": latest,

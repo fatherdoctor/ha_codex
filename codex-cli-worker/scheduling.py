@@ -481,6 +481,15 @@ class Store:
             ON CONFLICT(author,day,turn_id) DO UPDATE SET count=count+1''', (author, day, turn_id))
         db.execute('DELETE FROM mail_usage WHERE day<?', (day - 32,))
 
+    def mail_replied(self, message_id):
+        """Check a later owner/lead reply without reading or acknowledging any mailbox."""
+        with self.connect() as db:
+            return db.execute('''SELECT 1 FROM mailbox question JOIN mailbox reply
+                ON reply.parent=coalesce(question.parent, question.id)
+                JOIN mailbox_deliveries delivery ON delivery.message_id=reply.id AND delivery.reader='codex'
+                WHERE question.id=? AND reply.author IN ('owner','lead')
+                AND reply.rowid>question.rowid LIMIT 1''', (message_id,)).fetchone() is not None
+
     def _mail(self, db, body, author, now, parent=None, turn_id=None, *, to='all', due=None, origin='', system=False):
         """Validate and save a message and all recipient copies in the caller transaction."""
         body = text(body, 'message', 8000)

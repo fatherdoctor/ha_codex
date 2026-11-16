@@ -1080,3 +1080,34 @@ to `/lead/mailbox`. A worker may send mail back but cannot start lead work. A pl
 never executes a task, grants authority or answers a human permission prompt. This signal
 adds no task dispatch, notification send, permission bypass or new agent connection. An unavailable mailbox
 leaves the sensor unknown and does not create arrival events.
+
+
+## A notice for an unanswered task
+
+The integration raises a Repair when a task waits longer than `unanswered_wait_minutes`.
+Set this option in the app's Configuration tab. The default is 60 minutes; the range is 1 to 10080.
+The next successful integration poll checks the timer, normally within 30 seconds.
+The worker and integration must both be installed and connected.
+This timer is separate from the task execution timeout.
+
+The notice identifies the task by its ID and says whether it needs a question answer, permission decision or mailbox reply.
+It does not include the question, message body, command, permission reason or task title.
+Open that task in Codex to inspect the full request before answering.
+Answer permission cards and chat questions through their usual controls.
+For a mailbox question, reply in the owner mailbox.
+
+A task uses `post_mailbox` with `await_reply: true` only when it needs an owner's reply.
+Ordinary mailbox notes do not start this timer. Only one such mailbox question can be outstanding per task turn.
+A later owner or lead reply in that thread clears the mailbox wait, without marking the agent's mail read.
+New turns, cancellations and completed or failed tasks clear their old waits too.
+A reply never starts a task or supplies an approval automatically.
+
+Each wait produces at most one arrival event, including across integration reloads.
+The Repair remains until the wait ends. Changing the delay does not withdraw an existing notice.
+The event `codex_cli_unanswered_wait` has `active: true`, `wait_id`, `task_id`, `kind` and `waiting_since` (UTC epoch seconds).
+An automation can use that event to send a phone notice through the owner's chosen notification service.
+The integration does not send a phone message on its own.
+When the wait ends, the same event has `active: false` and its `wait_id`.
+Store that ID if an automation must clear its own phone notice.
+If storage fails or the worker supplies no complete wait snapshot, the integration defers the notice or keeps the existing one.
+It does not treat a connection failure as an answer.

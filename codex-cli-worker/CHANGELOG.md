@@ -2,6 +2,10 @@
 
 ## 0.1.81.3 (unreleased)
 
+- Add a Repair and body-free event for task questions, permission requests and explicit mailbox questions that remain unanswered.
+  The app option `unanswered_wait_minutes` defaults to 60. Each wait emits one notice, even after an integration reload.
+  Answers and ended tasks clear the notice; the timer never answers a question or grants permission.
+
 - The app now installs its own integration. At each start it copies the Codex integration of the same
   release, carried in the app image, to `/config/custom_components/codex_cli`, then asks for one restart of
   Home Assistant in a notification. It writes only when the folder is missing or was written by the app
