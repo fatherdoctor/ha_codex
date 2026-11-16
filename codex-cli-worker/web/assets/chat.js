@@ -2732,6 +2732,111 @@ $("divider").addEventListener("keydown", (event) => {
 window.addEventListener("resize", () => {
   if (innerWidth > 700) setWidth($("divider").getAttribute("aria-valuenow"));
 });
+/*
+ * Settings sections start collapsed (add-on 0.3.2). Each section's first
+ * heading becomes a button with the title and a one-line status; the rest of
+ * the section opens under it on tap. A section that needs the owner says so
+ * in its header, so nothing important hides in a closed section.
+ */
+function collapseSettingsSections() {
+  // Sections marked data-own-dialog move to a dialog of their own (studio.js) and stay open there.
+  document.querySelectorAll("#settings > section:not([data-own-dialog])").forEach((section, index) => {
+    const heading = section.querySelector(":scope > h3");
+    if (!heading || heading.querySelector(".settings-toggle")) return;
+    const body = document.createElement("div");
+    body.className = "settings-body";
+    body.id = `${section.id || `settings-section-${index}`}-body`;
+    body.hidden = true;
+    while (heading.nextSibling) body.append(heading.nextSibling);
+    section.append(body);
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "settings-toggle";
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.setAttribute("aria-controls", body.id);
+    toggle.append(textNode("span", heading.textContent.trim(), "settings-title"), textNode("span", "", "settings-status"));
+    toggle.onclick = () => openSettingsSection(section, toggle.getAttribute("aria-expanded") !== "true");
+    heading.replaceChildren(toggle);
+  });
+}
+/** Open or close one settings section. */
+function openSettingsSection(section, open = true) {
+  const toggle = section.querySelector(".settings-toggle");
+  const body = section.querySelector(":scope > .settings-body");
+  if (!toggle || !body) return;
+  toggle.setAttribute("aria-expanded", String(open));
+  body.hidden = !open;
+}
+/** Put a one-line status in a section's header; attention marks one that needs the owner. */
+function setSectionStatus(sectionId, text, attention = false) {
+  const section = $(sectionId);
+  const status = section?.querySelector(".settings-toggle .settings-status");
+  if (!status) return;
+  status.textContent = text;
+  section.classList.toggle("needs-attention", Boolean(attention));
+}
+collapseSettingsSections();
+/*
+ * The time left on a sign-in code. The worker sends the seconds left, by its
+ * own clock; the page counts down from when that reply arrived, so a phone
+ * with a wrong clock still shows the right time. One timer serves every
+ * countdown on the page.
+ */
+const codeDeadlines = new Map();
+let codeCountdownTimer = 0;
+/** Build the expiry line and the hidden "Get a new code" button for a card; nothing when the time is unknown. */
+function codeExpiry(secondsLeft, getNewCode) {
+  if (typeof secondsLeft !== "number" || !Number.isFinite(secondsLeft)) return [];
+  const line = textNode("p", "", "muted signin-expiry");
+  const button = textNode("button", "Get a new code");
+  button.type = "button";
+  button.hidden = true;
+  button.onclick = async () => {
+    button.disabled = true;
+    try {
+      await getNewCode();
+    } finally {
+      button.disabled = false;
+    }
+  };
+  const entry = { deadline: performance.now() + secondsLeft * 1000, button };
+  codeDeadlines.set(line, entry);
+  showCodeTime(line, entry);
+  if (!codeCountdownTimer) codeCountdownTimer = setInterval(showCodeTimes, 1000);
+  return [line, button];
+}
+/** Show the time left on one code; an expired code says so and offers a new one. */
+function showCodeTime(line, { deadline, button }) {
+  const left = Math.max(0, Math.round((deadline - performance.now()) / 1000));
+  const expired = left === 0;
+  const minutes = Math.floor(left / 60);
+  const seconds = String(left % 60).padStart(2, "0");
+  line.textContent = expired ? "This code has expired. Get a new code to sign in." : `The code expires in ${minutes}:${seconds}.`;
+  line.classList.toggle("signin-expired", expired);
+  button.hidden = !expired;
+}
+/** Update every countdown on the page; a card that left the page is forgotten. */
+function showCodeTimes() {
+  for (const [line, entry] of codeDeadlines) {
+    if (line.isConnected) showCodeTime(line, entry);
+    else codeDeadlines.delete(line);
+  }
+  if (!codeDeadlines.size) {
+    clearInterval(codeCountdownTimer);
+    codeCountdownTimer = 0;
+  }
+}
+/** Replace a waiting ChatGPT sign-in with a new one, for a code that expired. */
+async function newChatgptCode() {
+  try {
+    await api("auth/cancel", {});
+    await api("auth/start", {});
+    await loadLogin();
+  } catch (error) {
+    if ($("settings").open) settingsError(error);
+    else showError(error);
+  }
+}
 let loginTimer;
 // What the sign-in card shows now; the card is rebuilt only when this changes,
 // so a code being read or a QR being scanned never jumps under the user's thumb.
@@ -2760,7 +2865,7 @@ function signInCard(auth) {
       "aria-label",
       `Sign-in code ${auth.user_code.split("").join(" ")}`,
     );
-    card.append(code);
+    card.append(code, ...codeExpiry(auth.expires_in, newChatgptCode));
   } else {
     card.append(textNode("p", "Waiting for the sign-in code…", "muted"));
   }
@@ -2810,16 +2915,29 @@ function renderLogin(auth) {
   // The worker reports "rejected" when OpenAI refused the saved sign-in (expired or revoked),
   // although the local sign-in file is still there.
   const lapsed = !signedIn && auth.codex_login?.server_check === "rejected";
+  // The last sign-in ended without signing in; the worker says why when it can.
+  const failed = !signedIn && !pending && auth.status === "failed";
+  const failure = `The last sign-in did not finish. ${auth.error || "Get a new code to try again."}`;
   $("login-status").textContent = signedIn
     ? auth.codex_login.message || "Signed in to ChatGPT."
     : pending
       ? "Signing in. Enter the code below on the ChatGPT sign-in page."
-      : lapsed
-        ? "The ChatGPT sign-in expired or was revoked. Sign in again."
-        : "Not signed in to ChatGPT.";
-  $("signin-banner-text").textContent = lapsed
-    ? "The assistant's ChatGPT sign-in expired or was revoked. Sign in again."
-    : "The assistant is not signed in to ChatGPT.";
+      : failed
+        ? failure
+        : lapsed
+          ? "The ChatGPT sign-in expired or was revoked. Sign in again."
+          : "Not signed in to ChatGPT.";
+  $("signin-banner-text").textContent = failed
+    ? failure
+    : lapsed
+      ? "The assistant's ChatGPT sign-in expired or was revoked. Sign in again."
+      : "The assistant is not signed in to ChatGPT.";
+  setSectionStatus(
+    "chatgpt-section",
+    signedIn ? "Signed in" : pending ? "Signing in: enter the code" : failed ? "Sign-in failed" : lapsed ? "Sign-in expired" : "Not signed in",
+    !signedIn,
+  );
+  for (const id of ["login", "banner-login"]) $(id).textContent = failed ? "Get a new code" : "Sign in";
   const key = JSON.stringify([
     signedIn,
     lapsed,
@@ -2836,6 +2954,8 @@ function renderLogin(auth) {
     );
   }
   for (const id of ["login", "banner-login"]) $(id).hidden = pending;
+  // The sign-in card repeats the account requirement, so the section shows it once.
+  $("login-requirement").hidden = pending;
   for (const id of ["login-cancel", "banner-cancel"]) $(id).hidden = !pending;
   $("signin-banner").hidden = signedIn;
 }
@@ -2916,8 +3036,20 @@ function githubFlowCard(flow) {
   }
   const link = githubLink(flow.verification_uri || "https://github.com/login/device", "Open github.com/login/device");
   if (link) card.append(link);
-  if (flow.expires_at) card.append(textNode("p", `The code works until ${githubDate(flow.expires_at)}.`, "muted"));
+  if (flow.user_code) card.append(...codeExpiry(flow.expires_in, newGithubCode));
   return card;
+}
+/** Replace a waiting GitHub sign-in with a new one, for a code that expired. */
+async function newGithubCode() {
+  githubResult("");
+  try {
+    await githubApi("github/cancel", {});
+    await githubApi("github/connect", {});
+  } catch (error) {
+    githubResult(String(error.message || error), true);
+  } finally {
+    loadGithub().catch(() => {});
+  }
 }
 /** Put the GitHub status on the card and the banner. Only the contract's fields are read. */
 function renderGithub(github) {
@@ -2968,11 +3100,13 @@ function renderGithub(github) {
     }
   } else {
     flowArea.dataset.key = "";
-    const ended = { expired: "The GitHub code expired. Press Connect GitHub for a new one.",
+    const ended = { expired: "The GitHub code expired before it was entered. Get a new code to sign in.",
       canceled: "The GitHub sign-in was canceled.", failed: "The GitHub sign-in failed." }[flow.status];
-    flowArea.replaceChildren(...(ended && !connected ? [textNode("p", flow.error ? `${ended} ${flow.error}` : ended, "muted")] : []));
+    const why = flow.status === "failed" && flow.error ? ` ${flow.error}` : "";
+    flowArea.replaceChildren(...(ended && !connected ? [textNode("p", `${ended}${why}`, "muted")] : []));
   }
-  $("github-connect").textContent = connected ? "Connect again" : "Connect GitHub";
+  const retry = !connected && ["expired", "failed"].includes(flow.status);
+  $("github-connect").textContent = connected ? "Connect again" : retry ? "Get a new code" : "Connect GitHub";
   $("github-connect").hidden = waiting;
   $("github-cancel").hidden = !waiting;
   for (const id of ["github-test", "github-check", "github-disconnect"]) $(id).hidden = !connected;
@@ -2993,6 +3127,18 @@ function renderGithub(github) {
   $("github-local").hidden = !names.length;
   githubDefaultFolder();
   const bad = GITHUB_BAD_STATES.includes(state);
+  const repositoryCount = (github.repositories || []).length;
+  setSectionStatus(
+    "github-section",
+    waiting
+      ? "Connecting: enter the code"
+      : connected
+        ? `${bad ? (GITHUB_STATE_TEXT[state] || state).replace(/\.$/, "") : "Connected"}${login ? ` as ${login}` : ""}, ${repositoryCount} ${repositoryCount === 1 ? "repository" : "repositories"}`
+        : retry
+          ? "Sign-in did not finish"
+          : "Not connected",
+    bad || waiting || retry,
+  );
   $("github-banner-text").textContent = `The add-on's GitHub sign-in needs attention: ${(GITHUB_STATE_TEXT[state] || state).replace(/\.$/, "")}.`;
   $("github-banner").hidden = !bad;
 }
@@ -3005,6 +3151,7 @@ function githubUnavailable() {
   $("github-details").hidden = $("github-repositories").hidden = $("github-local").hidden = true;
   $("github-token").hidden = true;
   $("github-banner").hidden = true;
+  setSectionStatus("github-section", "Not available in this version");
 }
 /** Read the GitHub status. Every 5 seconds while a code waits, else every 5 minutes, so a lost sign-in shows. */
 async function loadGithub() {
@@ -3092,6 +3239,7 @@ $("github-link-form").onsubmit = (event) => {
 };
 $("github-banner-open").onclick = async () => {
   await $("settings-button").onclick();
+  openSettingsSection($("github-section"));
   $("github-section").scrollIntoView({ block: "start" });
 };
 /** Show whether the assistant is paused, in the settings dialog and above the chat. */
@@ -3103,6 +3251,7 @@ function renderPause(pause) {
   $("pause").textContent = paused ? "Resume the assistant" : "Pause the assistant";
   $("pause").dataset.paused = paused ? "1" : "";
   $("paused-banner").hidden = !paused;
+  setSectionStatus("assistant-section", paused ? "Paused" : "Running", paused);
 }
 /** Read the pause state from the worker and show it. */
 async function loadPause() {

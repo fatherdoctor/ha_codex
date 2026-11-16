@@ -134,6 +134,70 @@ class SignInTests(_Worker):
             server.run_codex_device_login("L1")
         server.notify.assert_not_called()
 
+    def test_the_code_lifetime_is_read_and_counted_by_the_worker(self):
+        """The page gets the seconds left from the worker's clock, never the private monotonic deadline."""
+        class Running:
+            def poll(self):
+                return None
+        self.read_login(LOGIN_OUTPUT)
+        with patch.object(server, "auth_process", Running()):
+            auth = self.client.get("/auth/status", headers=self.headers).get_json()["auth"]
+        self.assertTrue(auth["pending"])
+        self.assertTrue(895 <= auth["expires_in"] <= 900, auth["expires_in"])
+        self.assertTrue(auth["expires_at"])
+        self.assertNotIn("code_deadline", auth)
+
+    def test_no_lifetime_in_the_output_gives_no_countdown(self):
+        class Running:
+            def poll(self):
+                return None
+        self.read_login([line.replace("(expires in 15 minutes)", "") for line in LOGIN_OUTPUT])
+        with patch.object(server, "auth_process", Running()):
+            auth = self.client.get("/auth/status", headers=self.headers).get_json()["auth"]
+        self.assertEqual(auth["user_code"], "ABCD-EFGH2")
+        self.assertIsNone(auth["expires_in"])
+
+    def test_a_failed_sign_in_says_why_without_repeating_the_code(self):
+        output = "".join(LOGIN_OUTPUT) + "Error: device code ABCD-EFGH2 was denied by the server\n"
+        with patch.object(server.subprocess, "Popen") as popen:
+            popen.return_value.stdout = io.StringIO(output)
+            popen.return_value.wait.return_value = 1
+            server.auth_state.update({"login_id": "L1"})
+            server.run_codex_device_login("L1")
+        self.assertEqual(server.auth_state["status"], "failed")
+        self.assertIn("was denied by the server", server.auth_state["error"])
+        self.assertNotIn("ABCD-EFGH2", server.auth_state["error"])
+        server.notify.assert_called_once_with("Codex sign-in failed", server.auth_state["error"])
+
+    def test_an_expired_code_is_named_as_the_reason(self):
+        server.auth_state.update({"code_deadline": server.time.monotonic() - 1, "output": "Error: timed out"})
+        self.assertIn("The code expired", server.sign_in_failure_reason(1))
+        server.auth_state.update({"code_deadline": None, "output": "nothing useful"})
+        self.assertIn("exit code 1", server.sign_in_failure_reason(1))
+
+    def test_get_a_new_code_leaves_the_new_sign_in_alone(self):
+        """Cancel then start: the old sign-in's end must not clear the new process or mark the new one failed."""
+        newer = object()
+
+        def replaced_while_waiting(*_args, **_kwargs):
+            server.auth_state.update({"login_id": "L2", "status": "starting"})
+            server.auth_process = newer
+            return -15
+        with patch.object(server.subprocess, "Popen") as popen:
+            popen.return_value.stdout = io.StringIO("")
+            popen.return_value.wait.side_effect = replaced_while_waiting
+            server.auth_state.update({"login_id": "L1"})
+            server.run_codex_device_login("L1")
+        self.assertIs(server.auth_process, newer)
+        self.assertEqual(server.auth_state["status"], "starting")
+        server.notify.assert_not_called()
+
+    def test_the_reader_of_a_replaced_sign_in_stops(self):
+        server.auth_state.update({"login_id": "L2", "status": "starting"})
+        server.auth_reader_thread(io.StringIO("".join(LOGIN_OUTPUT)), "L1")
+        self.assertNotIn("user_code", server.auth_state)
+        server.create_persistent_notification.assert_not_called()
+
     def test_status_reports_the_sign_in_flow_and_pause_for_the_integration(self):
         data = self.client.get("/status", headers=self.headers).get_json()
         self.assertIn("pending", data["auth_flow"])
