@@ -9,6 +9,10 @@
   still refused: a relative `share/ha_...` (the text cannot tell whether the command runs in `/usr`),
   `../share/ha_...`, globs such as `/usr/sh*/ha_*`, braces, quotes, backslashes, and a variable or command
   substitution before `/share/ha_` or `/ha_codex`. The command check and the approval check use the same rule.
+- The credentialed `git fetch` and `git push` now pin the TLS trust: the system CA bundle and CA folder are set
+  for git, and `http.sslCAInfo`, `http.sslCAPath`, `http.proxy`, `http.extraHeader`, `http.cookieFile`,
+  `http.saveCookies` and `http.curloptResolve` are reset for the run. A CA file or folder left in a repository's
+  git settings, in any `http.<url>` form, is never trusted for the GitHub sign-in.
 
 ## 0.3.0 (unreleased)
 
