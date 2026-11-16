@@ -2,6 +2,22 @@
 
 ## 0.1.81.3 (unreleased)
 
+- GitHub sign-in (release 0.3). **Settings > GitHub**, beside the ChatGPT account, connects GitHub with
+  buttons only: **Connect GitHub** shows GitHub's device code and the `github.com/login/device` link on the
+  page, then **Read test**, **Check now**, **Accept this access**, **Disconnect** (with the link to revoke on
+  GitHub) and **Use a token instead** for one fine-grained token. **Clone** and **Link** set up a repository
+  under `/config`. The code and the token are never logged or kept in browser storage.
+- The app keeps the sign-in in `/data/github`, hidden in every Codex sandbox and left out of the app backup.
+  Codex never holds it: the new `github_git` tool (repos, fetch, pull, push, clone, link) asks the app to run
+  git, and every push runs the kit's push guard first. Read-only chats and schedules can only list and fetch.
+  A push that adds a `guard: allow` mark is refused, because an allow mark needs the owner. GitHub refuses
+  changes to `.github/workflows/*` with Contents-only access. A page button for allow marks and a list of the
+  git folders on this box come in 0.3.1.
+- The app checks the sign-in at start, hourly and on **Check now**. A change fires the event
+  `codex_cli_github_access`, sends one notification (`codex_cli_github`), shows a banner above the chat, and
+  the integration raises the repair `github_access_lost` until the check is OK or the sign-in is disconnected.
+  The new option `github_client_id` is for an owner who registered their own GitHub App.
+
 - The app now installs its own integration. At each start it copies the Codex integration of the same
   release, carried in the app image, to `/config/custom_components/codex_cli`, then asks for one restart of
   Home Assistant in a notification. It writes only when the folder is missing or was written by the app
