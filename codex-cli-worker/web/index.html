@@ -426,12 +426,12 @@
           <p class="muted">Git on this box uses the add-on's sign-in only through the add-on. No credential is written into a repository.</p>
           <form id="github-clone-form" class="github-form" autocomplete="off">
             <label>Repository<select id="github-clone-repository" name="repository" required></select></label>
-            <label>New folder under /config<input id="github-clone-folder" name="folder" autocomplete="off" spellcheck="false" placeholder="house" pattern="[A-Za-z0-9][A-Za-z0-9_\-]{0,99}" required></label>
+            <label>New folder under /share<input id="github-clone-folder" name="folder" autocomplete="off" spellcheck="false" placeholder="repository name" pattern="[A-Za-z0-9][A-Za-z0-9_\-]{0,99}" required></label>
             <button id="github-clone" type="submit">Clone</button>
           </form>
           <form id="github-link-form" class="github-form" autocomplete="off">
             <label>Repository<select id="github-link-repository" name="repository" required></select></label>
-            <label>Existing folder under /config<input id="github-link-path" name="path" autocomplete="off" spellcheck="false" placeholder="/config" required></label>
+            <label>Existing folder under /share or /config<input id="github-link-path" name="path" autocomplete="off" spellcheck="false" placeholder="/share/repository" required></label>
             <button id="github-link" type="submit">Link</button>
           </form>
         </details>

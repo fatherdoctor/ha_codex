@@ -2991,6 +2991,7 @@ function renderGithub(github) {
     if (names.includes(chosen)) select.value = chosen;
   }
   $("github-local").hidden = !names.length;
+  githubDefaultFolder();
   const bad = GITHUB_BAD_STATES.includes(state);
   $("github-banner-text").textContent = `The add-on's GitHub sign-in needs attention: ${(GITHUB_STATE_TEXT[state] || state).replace(/\.$/, "")}.`;
   $("github-banner").hidden = !bad;
@@ -3068,6 +3069,15 @@ $("github-token-form").onsubmit = (event) => {
     { token, repository: $("github-token-repository").value.trim() },
     () => { $("github-token").open = false; githubResult("Token accepted."); });
 };
+/** Clone goes to /share/<repository name> unless the owner typed another folder name. */
+function githubDefaultFolder() {
+  const field = $("github-clone-folder");
+  if (field.dataset.edited) return;
+  const name = ($("github-clone-repository").value || "").split("/")[1] || "";
+  field.value = name.replace(/[^A-Za-z0-9_-]/g, "-").replace(/^[^A-Za-z0-9]+/, "").slice(0, 100);
+}
+$("github-clone-repository").onchange = githubDefaultFolder;
+$("github-clone-folder").oninput = () => { $("github-clone-folder").dataset.edited = "1"; };
 $("github-clone-form").onsubmit = (event) => {
   event.preventDefault();
   githubAction($("github-clone"), "github/repos/clone",

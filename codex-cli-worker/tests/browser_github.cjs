@@ -51,7 +51,7 @@ function status(state, extra = {}) {
         disconnect: () => posts.filter(p => p.name === 'disconnect').length === 1
           ? [409, {ok: false, error: 'Wait for the running task to end, then disconnect.', github}]
           : (github = status('disconnected', {revoke_url: REVOKE_APP}), [200, {ok: true, github}]),
-        'repos/clone': (body) => [200, {ok: true, text: `Cloned ${body.repository}.`, path: `/config/${body.folder}`, github}],
+        'repos/clone': (body) => [200, {ok: true, text: `Cloned ${body.repository}.`, path: `/share/${body.folder}`, github}],
         'repos/link': (body) => [200, {ok: true, text: `${body.path} now uses ${body.repository} as origin.`, path: body.path, github}],
       };
       await page.route(/\/github\/(connect|cancel|token|test|check|accept|disconnect|repos\/clone|repos\/link)$/, route => {
@@ -121,16 +121,19 @@ function status(state, extra = {}) {
       await page.locator('#github-check').click();
       await page.waitForFunction(() => document.querySelector('#github-result').textContent.includes('Check finished'));
 
-      // Clone into /config and link an existing folder, by buttons.
+      // Clone into /share/<repository> (the default folder name) and link existing folders, by buttons.
       await page.locator('#github-local summary').click();
-      await page.locator('#github-clone-folder').fill('house');
+      assert.equal(await page.locator('#github-clone-folder').inputValue(), 'house');
       await page.locator('#github-clone').click();
-      await page.waitForFunction(() => document.querySelector('#github-result').textContent === 'Cloned into /config/house.');
+      await page.waitForFunction(() => document.querySelector('#github-result').textContent === 'Cloned into /share/house.');
       assert.deepEqual(posts.at(-1), {name: 'repos/clone', body: {repository: 'synthetic-owner/house', folder: 'house'}});
-      await page.locator('#github-link-path').fill('/config/existing');
-      await page.locator('#github-link').click();
-      await page.waitForFunction(() => document.querySelector('#github-result').textContent.includes('now uses'));
-      assert.deepEqual(posts.at(-1), {name: 'repos/link', body: {repository: 'synthetic-owner/house', path: '/config/existing'}});
+      for (const path of ['/share/existing', '/config/existing']) {
+        await page.locator('#github-link-path').fill(path);
+        await page.locator('#github-link').click();
+        await page.waitForFunction(text => document.querySelector('#github-result').textContent === text,
+          `${path} now uses synthetic-owner/house as origin.`);
+        assert.deepEqual(posts.at(-1), {name: 'repos/link', body: {repository: 'synthetic-owner/house', path}});
+      }
 
       // Disconnect: 409 while a task runs, then the honest revoke link.
       await page.locator('#github-disconnect').click();
