@@ -19,6 +19,8 @@ map:
   - type: homeassistant_config
     read_only: false
     path: /config
+  - type: share
+    read_only: false
 homeassistant_api: true
 hassio_api: true
 backup_exclude:

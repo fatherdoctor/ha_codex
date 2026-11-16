@@ -512,10 +512,13 @@ class GitRunner:
 
     def __init__(self, token_reader: Callable[[], str | None], connected: Callable[[], list[str]],
                  config_root: Path = Path("/config"), askpass: str = ASKPASS_PATH, guard: str = GUARD_PATH,
-                 protected: tuple[str, ...] = (".storage", ".git/hooks"), python: str = sys.executable):
+                 protected: tuple[str, ...] = (".storage", ".git/hooks"), python: str = sys.executable,
+                 share_root: Path = Path("/share"), protected_share: tuple[str, ...] = ("HomeAssistant",)):
         self.token_reader = token_reader
         self.connected = connected
         self.config_root = Path(config_root)
+        self.share_root = Path(share_root)
+        self.protected_share = protected_share
         self.askpass = askpass
         self.guard = guard
         self.protected = protected
@@ -540,18 +543,27 @@ class GitRunner:
         return subprocess.run(["git", "-C", str(repo), *args], env=self.env(credentialed), stdin=subprocess.DEVNULL,
                               capture_output=True, text=True, timeout=timeout)
 
+    def roots(self) -> list[tuple[Path, tuple[str, ...]]]:
+        """The two places git work may happen, each resolved, with its protected folders."""
+        return [(self.share_root.resolve(), self.protected_share), (self.config_root.resolve(), self.protected)]
+
+    def inside(self, resolved: Path) -> Path:
+        """Refuse a resolved path outside /share and /config, or in a protected folder; return its root."""
+        for root, protected in self.roots():
+            if resolved == root or root in resolved.parents:
+                relative = resolved.relative_to(root).as_posix() if resolved != root else ""
+                if any(relative == item or relative.startswith(item + "/") for item in protected):
+                    raise GitHubError("That folder is protected.")
+                return root
+        raise GitHubError("The repository must be under /share or /config.")
+
     def repository_path(self, value: Any) -> Path:
-        """A work tree at or under /config with a real .git folder, not a protected place."""
+        """A work tree under /share or /config (links resolved first) with a real .git folder, not protected."""
         if not isinstance(value, str) or not value or len(value) > 4096 or "\x00" in value:
-            raise GitHubError("Give the path of a git work tree under /config.")
-        root = self.config_root.resolve()
-        candidate = Path(value) if value.startswith("/") else root / value
-        resolved = candidate.resolve()
-        if resolved != root and root not in resolved.parents:
-            raise GitHubError("The repository must be under /config.")
-        relative = resolved.relative_to(root).as_posix() if resolved != root else ""
-        if any(relative == item or relative.startswith(item + "/") for item in self.protected):
-            raise GitHubError("That folder is protected.")
+            raise GitHubError("Give the path of a git work tree under /share or /config.")
+        candidate = Path(value) if value.startswith("/") else self.config_root.resolve() / value
+        resolved = Path(os.path.realpath(candidate))
+        self.inside(resolved)
         dot_git = resolved / ".git"
         if dot_git.is_symlink() or not dot_git.is_dir():
             raise GitHubError("That folder is not a git work tree with its own .git folder.")
@@ -653,18 +665,42 @@ class GitRunner:
             raise GitHubError("That repository is not one of the connected GitHub repositories.")
         return connected[name.lower()]
 
-    def clone(self, repository: Any, folder: Any) -> dict[str, Any]:
-        """Clone a connected repository into a new folder directly under /config. No credential is written."""
-        name = self.connected_name(repository)
-        target = self.config_root / valid_folder(folder)
+    def clone_target(self, name: str, folder: Any) -> Path:
+        """/share/<repository> by default; or a new folder name directly under /share, or /share/<name> or
+        /config/<name>. Nothing else, and never a folder that exists."""
+        if folder is None or folder == "":
+            folder = name.split("/", 1)[1]
+            if not FOLDER_RE.fullmatch(folder):
+                raise GitHubError("Give a folder name: the repository name has characters a folder name cannot use.")
+        if not isinstance(folder, str):
+            raise GitHubError("Use one folder name of letters, digits, dash and underscore.")
+        base = self.share_root
+        for root in (self.share_root, self.config_root):
+            prefix = root.as_posix().rstrip("/") + "/"
+            if folder.startswith(prefix):
+                base, folder = root, folder[len(prefix):]
+                break
+        else:
+            if folder.startswith("/"):
+                raise GitHubError("Clone into /share or /config only.")
+        base_real = Path(os.path.realpath(base))
+        target = base_real / valid_folder(folder)
+        self.inside(target)
         if os.path.lexists(target):
             raise GitHubError("That folder already exists; choose a new folder name.")
+        return target
+
+    def clone(self, repository: Any, folder: Any = None) -> dict[str, Any]:
+        """Clone a connected repository into a new folder under /share (default) or /config. No credential is
+        written into the clone."""
+        name = self.connected_name(repository)
+        target = self.clone_target(name, folder)
         token = self.token_reader()
         if not token:
             raise GitHubError("GitHub is not connected on this box; the owner connects it on the add-on page.")
         try:
             # --template= gives the new repository no hook files; the overrides cover the rest.
-            proc = subprocess.run(["git", "-C", str(self.config_root), "clone", "--template=", "--origin", "origin",
+            proc = subprocess.run(["git", "-C", str(target.parent), "clone", "--template=", "--origin", "origin",
                                    "--no-recurse-submodules", "--", f"https://github.com/{name}.git", target.name],
                                   env=self.env(True), stdin=subprocess.DEVNULL, capture_output=True, text=True,
                                   timeout=GIT_TIMEOUT_SECONDS)
@@ -1053,7 +1089,7 @@ class GitHubService:
             raise GitHubError("The operations are " + ", ".join(OPERATIONS) + ".")
         allowed = {"repos": set(), "fetch": {"path"}, "pull": {"path", "branch"}, "push": {"path", "branch"},
                    "clone": {"repository", "folder"}, "link": {"repository", "path"}}[operation]
-        required = {"repos": set(), "clone": {"repository", "folder"}, "link": {"repository", "path"}}.get(operation, {"path"})
+        required = {"repos": set(), "clone": {"repository"}, "link": {"repository", "path"}}.get(operation, {"path"})
         if not isinstance(args, dict) or set(args) - allowed or required - set(args):
             raise GitHubError(f"{operation} takes " + (", ".join(sorted(allowed)) or "no arguments") + ".")
         if operation not in READ_ONLY_OPERATIONS and self.read_only(task_id):

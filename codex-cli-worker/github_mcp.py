@@ -10,16 +10,16 @@ import socket
 import sys
 
 SOCKET = '/data/github.sock'
-PATH = {'type': 'string', 'maxLength': 4096, 'description': 'The git work tree under /config, for example /config or /config/house_repo.'}
+PATH = {'type': 'string', 'maxLength': 4096, 'description': 'The git work tree under /share or /config, for example /share/house_repo or /config.'}
 REPOSITORY = {'type': 'string', 'maxLength': 140, 'description': 'A connected repository, owner/repository.'}
-FOLDER = {'type': 'string', 'maxLength': 100, 'description': 'For clone: one new folder name directly under /config.'}
+FOLDER = {'type': 'string', 'maxLength': 120, 'description': 'For clone: a new folder, /share/<name> (the default is /share/<repository>) or /config/<name>.'}
 BRANCH = {'type': 'string', 'maxLength': 200, 'description': 'A plain branch name; the checked-out branch when left out.'}
 TOOLS = [
     {'name': 'github_git',
      'description': ('Clone, link (set origin), fetch, pull or push a GitHub repository connected on the add-on '
                      'page, or list the connected repositories. The worker runs git with the sign-in, outside your sandbox. A push runs the push '
                      'guard first and is refused when it finds a secret; never force, delete or tag. pull fetches the branch only; fast-forward it yourself with git merge --ff-only. Read-only chats '
-                     'can use repos and fetch only. clone takes repository and folder; link takes repository and path.'),
+                     'can use repos and fetch only. clone takes repository and an optional folder; link takes repository and path.'),
      'inputSchema': {'type': 'object', 'additionalProperties': False,
                      'properties': {'operation': {'enum': ['repos', 'fetch', 'pull', 'push', 'clone', 'link']},
                                     'path': PATH, 'branch': BRANCH, 'repository': REPOSITORY, 'folder': FOLDER},

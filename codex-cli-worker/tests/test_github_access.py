@@ -363,6 +363,8 @@ class GitRunnerCase(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         root = Path(self.temp.name)
         self.config = root / "config"
+        self.share = root / "share"
+        self.share.mkdir()
         self.repo = self.config / "house"
         self.repo.mkdir(parents=True)
         self.markers = root / "markers"
@@ -396,7 +398,7 @@ class GitRunnerCase(unittest.TestCase):
             def origin_repository(self, repo):
                 return REPO
 
-        return LocalRemote(lambda: APP_TOKEN, lambda: [REPO], config_root=self.config,
+        return LocalRemote(lambda: APP_TOKEN, lambda: [REPO], config_root=self.config, share_root=self.share,
                            askpass="/bin/false", guard=str(WORKER / "push_guard.py"))
 
 
@@ -443,7 +445,7 @@ class GitRunnerTests(GitRunnerCase):
             self.runner.prepare(str(linked))
 
     def test_a_remote_that_is_not_a_connected_github_repository_is_refused(self):
-        real = gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO], config_root=self.config)
+        real = gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO], config_root=self.config, share_root=self.share)
         self.assertEqual(real.prepare(str(self.repo))[1], REPO)
         for url in ("https://example.net/example-owner/house.git", f"https://github.com/{OTHER}.git",
                     f"https://user@github.com/{REPO}.git", f"git@github.com:{REPO}.git"):
@@ -454,7 +456,7 @@ class GitRunnerTests(GitRunnerCase):
 
     def test_planted_repo_config_cannot_run_or_redirect(self):
         """F1: planted settings refuse the operation, and the overrides alone keep them from running."""
-        real = gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO], config_root=self.config)
+        real = gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO], config_root=self.config, share_root=self.share)
         fsmonitor = self.markers / "fsmonitor"
         helper = self.markers / "helper"
         hook = self.markers / "hook"
@@ -494,7 +496,7 @@ class GitRunnerTests(GitRunnerCase):
         self.assertTrue(hook.exists())
 
     def test_push_url_rewrites_includes_and_filters_are_refused(self):
-        real = gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO], config_root=self.config)
+        real = gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO], config_root=self.config, share_root=self.share)
         for key, value in (("remote.origin.pushurl", "https://example.net/collect.git"),
                            ("url.https://example.net/.insteadOf", "https://github.com/"),
                            ("url.https://example.net/.pushInsteadOf", "https://github.com/"),
@@ -652,7 +654,7 @@ class PushTests(GitRunnerCase):
                           .replace('CREDENTIAL = "/data/github/credential.json"', f"CREDENTIAL = {str(credential)!r}")
                           .replace("def main(argv):", f"def main(argv):\n    open({str(log)!r}, 'a').write(repr(argv[1:]) + '\\n')"))
         helper.chmod(0o755)
-        runner = gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO], config_root=self.config, askpass=str(helper))
+        runner = gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO], config_root=self.config, share_root=self.share, askpass=str(helper))
 
         def plant():
             git(self.repo, "config", "url.http://127.0.0.1:9/.insteadOf", "https://github.com/")
@@ -678,49 +680,90 @@ class PushTests(GitRunnerCase):
 
 
 class CloneLinkTests(GitRunnerCase):
-    def test_clone_makes_a_new_folder_with_a_plain_origin_and_no_hooks(self):
+    def published(self):
         self.assertTrue(self.runner.push(str(self.repo))["ok"])
         git(self.remote, "symbolic-ref", "HEAD", "refs/heads/main")
-        result = self.runner.clone(REPO, "house_copy")
+
+    def test_clone_goes_to_share_by_default_with_a_plain_origin_and_no_hooks(self):
+        self.published()
+        result = self.runner.clone(REPO)
         self.assertTrue(result["ok"], result["text"])
-        target = self.config / "house_copy"
-        self.assertEqual(result["path"], str(target))
+        target = self.share / "house"
+        self.assertEqual(result["path"], str(target.resolve()))
         self.assertEqual((target / "README.md").read_text(), "house\n")
         config = (target / ".git" / "config").read_text()
         self.assertIn(f"url = https://github.com/{REPO}.git", config)
         self.assertNotIn(APP_TOKEN, config)
         self.assertNotIn("helper", config)
-        self.assertEqual(list((target / ".git" / "hooks").glob("*")) if (target / ".git" / "hooks").exists() else [], [])
-        gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO], config_root=self.config).prepare(str(target))
+        hooks = target / ".git" / "hooks"
+        self.assertEqual(list(hooks.glob("*")) if hooks.exists() else [], [])
+        real = gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO], config_root=self.config, share_root=self.share)
+        self.assertEqual(real.prepare(str(target))[1], REPO)
 
-    def test_clone_refuses_bad_names_existing_folders_and_other_repositories(self):
-        for repository, folder in ((REPO, ".."), (REPO, "a/b"), (REPO, "-x"), (REPO, "house"), (OTHER, "new"),
-                                   ("+example-owner/house", "new"), (REPO, "/share/x")):
+    def test_clone_into_a_named_folder_under_share_or_config(self):
+        self.published()
+        for folder, target in (("copy_a", self.share / "copy_a"), (f"{self.share}/copy_b", self.share / "copy_b"),
+                               (f"{self.config}/copy_c", self.config / "copy_c")):
+            with self.subTest(folder=folder):
+                result = self.runner.clone(REPO, folder)
+                self.assertTrue(result["ok"], result["text"])
+                self.assertTrue((target / "README.md").exists())
+
+    def test_clone_refuses_bad_names_existing_folders_elsewhere_and_other_repositories(self):
+        outside = Path(self.temp.name) / "outside"
+        outside.mkdir()
+        (self.share / "HomeAssistant").mkdir()
+        (self.share / "escape").symlink_to(outside)
+        (self.share / "taken").mkdir()
+        for repository, folder in ((REPO, ".."), (REPO, "a/b"), (REPO, "-x"), (REPO, "taken"), (OTHER, "new"),
+                                   ("+example-owner/house", "new"), (REPO, "/etc/x"), (REPO, f"{outside}/x"),
+                                   (REPO, f"{self.share}/../outside"), (REPO, "HomeAssistant"),
+                                   (REPO, f"{self.share}/escape"), (REPO, f"{self.share}/escape/x"),
+                                   (REPO, f"{self.config}/house")):
             with self.subTest(repository=repository, folder=folder), self.assertRaises(gh.GitHubError):
                 self.runner.clone(repository, folder)
+        self.assertEqual(list(outside.iterdir()), [])
 
     def test_link_sets_origin_and_writes_no_credential(self):
-        real = gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO, OTHER], config_root=self.config)
+        real = gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO, OTHER], config_root=self.config, share_root=self.share)
         git(self.repo, "remote", "remove", "origin")
         result = real.link(OTHER, str(self.repo))
         self.assertTrue(result["ok"], result["text"])
         self.assertEqual(git(self.repo, "remote", "get-url", "origin").stdout.strip(), f"https://github.com/{OTHER}.git")
-        result = real.link(REPO, str(self.repo))
-        self.assertTrue(result["ok"], result["text"])
+        self.assertTrue(real.link(REPO, str(self.repo))["ok"])
         self.assertEqual(real.prepare(str(self.repo))[1], REPO)
         config = (self.repo / ".git" / "config").read_text()
         self.assertNotIn(APP_TOKEN, config)
         self.assertNotIn("helper", config)
 
-    def test_link_keeps_the_allowlist_and_the_name_checks(self):
-        real = gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO], config_root=self.config)
+    def test_link_works_under_share(self):
+        local = self.share / "notes"
+        local.mkdir()
+        git(local, "init", "-q", "-b", "main")
+        real = gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO], config_root=self.config, share_root=self.share)
+        self.assertTrue(real.link(REPO, str(local))["ok"])
+        self.assertEqual(real.prepare(str(local))[1], REPO)
+
+    def test_link_keeps_the_allowlist_and_refuses_protected_and_escaping_paths(self):
+        real = gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO], config_root=self.config, share_root=self.share)
         git(self.repo, "config", "core.fsmonitor", "touch marker")
         with self.assertRaises(gh.GitHubError):
             real.link(REPO, str(self.repo))
         git(self.repo, "config", "--unset", "core.fsmonitor")
-        for repository, path in (("example-owner/other", str(self.repo)), (REPO, "/tmp"), ("../x", str(self.repo))):
+        house = self.share / "HomeAssistant"
+        house.mkdir()
+        git(house, "init", "-q")
+        outside = Path(self.temp.name) / "outside_repo"
+        outside.mkdir()
+        git(outside, "init", "-q")
+        (self.share / "through_link").symlink_to(outside)
+        before = (house / ".git" / "config").read_text()
+        for repository, path in (("example-owner/other", str(self.repo)), (REPO, "/tmp"), ("../x", str(self.repo)),
+                                 (REPO, str(house)), (REPO, str(self.share / "through_link")), (REPO, str(outside))):
             with self.subTest(repository=repository, path=path), self.assertRaises(gh.GitHubError):
                 real.link(repository, path)
+        self.assertEqual((house / ".git" / "config").read_text(), before)
+        self.assertNotIn("github.com", (outside / ".git" / "config").read_text())
 
 
 class DispatchTests(ServiceCase):
