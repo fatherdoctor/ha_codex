@@ -1,22 +1,30 @@
 rules:
-  action-setup: done
+  action-setup:
+    status: todo
+    comment: Actions must reject entries that are setting up, retrying or unloading.
   appropriate-polling: done
   brands: done
   common-modules: done
   config-flow: done
   dependency-transparency: done
-  docs-actions: done
+  docs-actions:
+    status: todo
+    comment: Document the default and existing-session behavior of start_login.force.
   docs-high-level-description: done
   docs-installation-instructions: done
   docs-removal-instructions: done
   entity-event-setup:
-    status: exempt
-    comment: Entities do not subscribe to external events.
+    status: done
+    comment: CoordinatorEntity owns entity subscriptions; entry callbacks have unload cleanup.
   entity-unique-id: done
   has-entity-name: done
-  runtime-data: done
+  runtime-data:
+    status: todo
+    comment: The browser-session broker must move from hass.data into typed entry runtime data.
   test-before-configure: done
-  test-before-setup: done
+  test-before-setup:
+    status: todo
+    comment: Discovery must preserve authentication rejection so setup can request reauthentication.
   unique-config-entry: done
 
   action-exceptions: done
@@ -25,22 +33,24 @@ rules:
   docs-installation-parameters: done
   entity-unavailable: done
   integration-owner:
-    status: exempt
-    comment: Private custom integration maintained locally, not submitted to Home Assistant Core.
+    status: done
+    comment: The integration manifest lists its code owner.
   log-when-unavailable: done
   parallel-updates:
-    status: exempt
-    comment: Entities share one DataUpdateCoordinator and do not perform platform-level parallel updates.
-  reauthentication-flow: done
+    status: done
+    comment: Both entity platforms explicitly set PARALLEL_UPDATES to zero for their shared coordinator.
+  reauthentication-flow:
+    status: todo
+    comment: The reauth flow exists, but initial discovery authentication failures must trigger it.
 
   devices: done
   diagnostics: done
   discovery:
-    status: exempt
-    comment: The worker is a local add-on API and is not discoverable on the network.
+    status: done
+    comment: The Supervisor flow discovers the worker app.
   discovery-update-info:
-    status: exempt
-    comment: There is no discovery source to update network information from.
+    status: todo
+    comment: Rediscovery aborts a duplicate before updating its connection metadata.
   docs-data-update: done
   docs-examples: done
   docs-known-limitations: done
