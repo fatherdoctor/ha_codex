@@ -114,6 +114,12 @@ class ApprovalNoteTests(unittest.TestCase):
                 self.assertFalse(record["can_allow"])
                 self.assertIn(POLICY_NOTE, record["note"])
 
+    def test_a_command_that_is_not_text_is_read_as_text(self) -> None:
+        """Like command_names_protected_path, the check turns any command into text before it reads it."""
+        self.assertFalse(approvals.command_is_unreadable(["cat /data/options.json", 5]))
+        self.assertTrue(approvals.command_is_unreadable(["cat <<EOF", 5]))
+        self.assertFalse(approvals.command_is_unreadable(None))
+
 
 if __name__ == "__main__":
     unittest.main()

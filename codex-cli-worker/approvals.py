@@ -84,14 +84,18 @@ def _has_unreadable_structure(command: str) -> bool:
 
 
 def command_is_unreadable(command: str) -> bool:
-    """Return whether the approval check refuses this command text only because it cannot read it.
+    """Return whether the top-level command text has a form the approval check cannot read.
 
-    The card then says that, instead of saying the command touches the app's policy.
+    That is a heredoc, a here-string, a backslash-newline, or quoting that does not split.
+    The card then says the text could not be read, instead of saying the command touches the
+    app's policy. Only the top-level text is tested: a heredoc that also names a protected
+    file gets this note, and a readable ``sh -c`` around an unreadable script does not.
     """
-    if _has_unreadable_structure(command):
+    text = str(command or "")
+    if _has_unreadable_structure(text):
         return True
     try:
-        _shell_words(command, ';&|()\n<>')
+        _shell_words(text, ';&|()\n<>')
     except ValueError:
         return True
     return False
