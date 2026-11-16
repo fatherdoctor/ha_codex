@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.3 (unreleased)
+
+- Settings has one **Accounts and connections** section for every sign-in and pairing: ChatGPT account, GitHub,
+  and the ChatGPT app pairing. It starts collapsed. Its header joins the three states ("ChatGPT signed in · GitHub
+  connected · app off"), and when one needs the owner the header names only that one, in red. ChatGPT and GitHub
+  keep their own collapsed headers, codes and countdowns inside it. The app pairing part shows the remote
+  connection state with **Get a pairing code**, **Manage remote connection** and **Turn off**; it replaces the
+  separate **Manage remote connection** row. A pairing code has no countdown: the worker does not know how long
+  Codex keeps it. **Turn off** stops the connection and does not remove the pairing in the ChatGPT app.
+- When a request gets HTTP 401 because the Home Assistant ingress session expired (a tab that slept), the page
+  asks Home Assistant for a new session once, through the parent window as the Home Assistant frontend does, and
+  sends the request again. Requests that fail together share one renewal. If the renewal fails, a banner says the
+  session expired and offers **Reload**; the page no longer shows "The worker returned HTTP 401".
+
 ## 0.3.2 (unreleased)
 
 - Codex now refuses risky commands in two layers. Managed Codex command rules refuse six literal command
@@ -44,17 +58,6 @@
   exists, in chat tasks and in remote-control sessions. Before, a missing file could show in the answer as
   "/config/AGENTS.md was not found". The page now shows a missing `AGENTS.md` once, above the message box, as a
   setup hint that you can dismiss.
-- Settings has one **Accounts and connections** section for every sign-in and pairing: ChatGPT account, GitHub,
-  and the ChatGPT app pairing. It starts collapsed. Its header joins the three states ("ChatGPT signed in · GitHub
-  connected · app off"), and when one needs the owner the header names only that one, in red. ChatGPT and GitHub
-  keep their own collapsed headers, codes and countdowns inside it. The app pairing part shows the remote
-  connection state with **Get a pairing code**, **Manage remote connection** and **Turn off**; it replaces the
-  separate **Manage remote connection** row. A pairing code has no countdown: the worker does not know how long
-  Codex keeps it. **Turn off** stops the connection and does not remove the pairing in the ChatGPT app.
-- When a request gets HTTP 401 because the Home Assistant ingress session expired (a tab that slept), the page
-  asks Home Assistant for a new session once, through the parent window as the Home Assistant frontend does, and
-  sends the request again. Requests that fail together share one renewal. If the renewal fails, a banner says the
-  session expired and offers **Reload**; the page no longer shows "The worker returned HTTP 401".
 
 ## 0.3.1 (unreleased)
 
