@@ -6,18 +6,15 @@ git tests push to a local bare repository that stands in for github.com.
 from __future__ import annotations
 
 import hashlib
-import http.server
 import io
 import json
 import os
 import shutil
-import ssl
 import stat
 import subprocess
 import sys
 import tarfile
 import tempfile
-import threading
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
@@ -689,6 +686,39 @@ class PushTests(GitRunnerCase):
         self.assertEqual(pairs["remote.origin.proxy"], "")
 
 
+PLANTED_SERVER = r"""
+import http.server, ssl, sys
+folder, log = sys.argv[1], sys.argv[2]
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        with open(log, "a") as out:
+            out.write(self.path + "\n")
+        self.send_response(401)
+        self.send_header("WWW-Authenticate", 'Basic realm="planted"')
+        self.end_headers()
+
+    do_POST = do_GET
+
+    def log_message(self, *_args):
+        pass
+
+
+class Server(http.server.ThreadingHTTPServer):
+    def handle_error(self, *_args):  # a refused handshake is the expected outcome
+        pass
+
+
+context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+context.load_cert_chain(folder + "/srv.pem", folder + "/srv.key")
+server = Server(("127.0.0.1", 0), Handler)
+server.socket = context.wrap_socket(server.socket, server_side=True)
+print(server.server_address[1], flush=True)
+server.serve_forever()
+"""
+
+
 class PlantedServer:
     """A local HTTPS server with a github.com certificate signed by a CA a task could plant (SG1)."""
 
@@ -712,35 +742,23 @@ class PlantedServer:
         name = subprocess.run(["openssl", "x509", "-noout", "-subject_hash", "-in", str(self.ca)], check=True,
                               capture_output=True, text=True).stdout.strip()
         (self.capath / f"{name}.0").write_bytes(self.ca.read_bytes())
-        self.requests: list[str] = []
-        requests = self.requests
+        # A child process serves, so a test run that blocks sockets in the test process still works.
+        self.log = folder / "requests.log"
+        self.process = subprocess.Popen([sys.executable, "-I", "-c", PLANTED_SERVER, str(folder), str(self.log)],
+                                        stdout=subprocess.PIPE, text=True)
+        self.port = int(self.process.stdout.readline())
 
-        class Handler(http.server.BaseHTTPRequestHandler):
-            def do_GET(self):  # noqa: N802 - the http.server name
-                requests.append(self.path)
-                self.send_response(401)
-                self.send_header("WWW-Authenticate", 'Basic realm="planted"')
-                self.end_headers()
+    @property
+    def requests(self) -> list[str]:
+        return self.log.read_text().splitlines() if self.log.exists() else []
 
-            do_POST = do_GET
-
-            def log_message(self, *_args):
-                pass
-
-        class Server(http.server.ThreadingHTTPServer):
-            def handle_error(self, *_args):  # a refused handshake is the expected outcome
-                pass
-
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        context.load_cert_chain(str(folder / "srv.pem"), str(folder / "srv.key"))
-        self.server = Server(("127.0.0.1", 0), Handler)
-        self.server.socket = context.wrap_socket(self.server.socket, server_side=True)
-        self.port = self.server.server_address[1]
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+    def clear(self):
+        self.log.unlink(missing_ok=True)
 
     def close(self):
-        self.server.shutdown()
-        self.server.server_close()
+        self.process.kill()
+        self.process.wait()
+        self.process.stdout.close()
 
 
 @unittest.skipUnless(shutil.which("openssl") and os.path.exists(gh.CA_BUNDLE), "needs openssl and the system CA bundle")
@@ -818,7 +836,7 @@ class PlantedTransportTests(GitRunnerCase):
         for name, settings in self.plants().items():
             for operation in ("fetch", "push"):
                 with self.subTest(plant=name, operation=operation):
-                    self.server.requests.clear()
+                    self.server.clear()
                     result = self.run_planted(runner, operation, settings)
                     self.assertFalse(result["ok"], result["text"])
                     self.assertEqual(self.server.requests, [], "git trusted the planted server")
