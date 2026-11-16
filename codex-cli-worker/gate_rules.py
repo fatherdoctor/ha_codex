@@ -584,6 +584,50 @@ def _strip_comments(text: str) -> str:
     return "".join(out)
 
 
+def _join_shell_continuations(text: str) -> str | None:
+    """Remove only shell line joins; return None for forms we cannot read safely.
+
+    Single quotes retain the literal pair. A quoted script for a shell wrapper
+    gets another check when its own command is read.
+    """
+    if "\\\n" not in text:
+        return text
+    out: list[str] = []
+    quote = ""
+    comment = False
+    i = 0
+    while i < len(text):
+        char = text[i]
+        if not comment and quote != "'":
+            if text.startswith(("$(", "`"), i):
+                return None
+            if not quote and text.startswith(("<<", "$'", "<(", ">("), i):
+                return None
+        if comment:
+            if text.startswith("\\\n", i):
+                i += 2
+                continue
+            if char == "\n":
+                comment = False
+        elif char == "\\" and quote != "'":
+            if text.startswith("\\\n", i):
+                i += 2
+                continue
+            out.append(text[i:i + 2])
+            i += 2
+            continue
+        elif quote:
+            if char == quote:
+                quote = ""
+        elif char in "'\"":
+            quote = char
+        elif char == "#" and (not out or out[-1] in WORD_BREAKS):
+            comment = True
+        out.append(char)
+        i += 1
+    return None if quote else "".join(out)
+
+
 def _split_words(text: str, punctuation: str) -> list[str]:
     """Split text the way the shell does, with comments already removed; raise ValueError if unreadable."""
     lexer = shlex.shlex(text, posix=True, punctuation_chars=punctuation)
@@ -653,10 +697,13 @@ def _shell_substitutions(text: str) -> tuple[str, list[str]]:
 
 
 def _ha_supervisor_command(text: str, depth: int = 0) -> bool:
-    """Find ha su/supervisor in a simple command, without executing shell text."""
+    """Find literal Supervisor CLI aliases without executing shell text."""
     if depth > 6:
         return False
-    masked, nested = _shell_substitutions(text.replace('\\\n', ' '))
+    joined = _join_shell_continuations(text)
+    if joined is None:
+        return True
+    masked, nested = _shell_substitutions(joined)
     if any(_ha_supervisor_command(item, depth + 1) for item in nested):
         return True
     tokens = _shell_words(masked, ';&|()\n')
@@ -747,7 +794,10 @@ def _ha_command(text: str, remote_on: bool, depth: int = 0) -> bool:
     """
     if depth > 3:
         return False
-    tokens = _shell_words(text.replace("\\\n", " "), ";&|()\n")
+    joined = _join_shell_continuations(text)
+    if joined is None:
+        return True
+    tokens = _shell_words(joined, ";&|()\n")
     segments = []
     segment = []
     for token in tokens:
@@ -891,8 +941,12 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
         for pattern, why in PROTECTED_COMMAND_RES:
             if pattern.search(text):
                 return f"This command {why}, which is never allowed."
-        # Quotes and backslashes only change how a word is spelled, so the floor reads without them.
-        plain_ha = re.sub(r"[\"'`\\]", "", text.replace("\\\n", " "))
+        # Join literal words before the conservative quote/backslash floor.
+        joined = _join_shell_continuations(text)
+        if joined is None:
+            return ("This command may hide a Home Assistant Supervisor command in a shell line continuation. "
+                    "Write the command on one line so it can be checked.")
+        plain_ha = re.sub(r"[\"'`\\]", "", joined)
         if (_ha_supervisor_command(text)
                 or HA_ALWAYS_TEXT_RE.search(plain_ha)
                 or (remote_on and (HA_REMOTE_TEXT_RE.search(plain_ha) or _ha_unknown_flag(text)))

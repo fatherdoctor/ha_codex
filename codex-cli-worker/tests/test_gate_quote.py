@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import io
 import sys
+import subprocess
 import threading
 import unittest
 from pathlib import Path
@@ -270,6 +271,128 @@ class ApprovalRecordTests(unittest.TestCase):
                 record = self.record(command)
                 self.assertTrue(record["can_allow"])
                 self.assertIn("Known credentials are hidden", record["note"])
+
+
+class SupervisorSpellingRegressionTests(unittest.TestCase):
+    """Audit cases use the gate boundary and a print-only shell function."""
+
+    def test_quote_and_wrapper_controls(self) -> None:
+        """Retain the original malformed-quote protection and ordinary wrapper spellings."""
+        controls = SUPERVISOR_COMMANDS + (
+            'h"a" s"u" info', r'h\a s\u info',
+            'env -u SAMPLE ha supervisor info', 'command -- ha su info',
+            'timeout 1 ha supervisor info', 'busybox sh -c \'ha "su" info\'',
+            '/bin/sh -c \'ha "supervisor" info\'', 'ha --log-level=debug "su" info',
+        )
+        for command in controls:
+            for prefix in ('', HEREDOC):
+                for remote in (False, True):
+                    with self.subTest(command=command, heredoc=bool(prefix), remote=remote):
+                        self.assertIn('Supervisor', refusal(prefix + command, remote))
+
+    def test_super_alias_refused_in_all_contexts(self) -> None:
+        """Use every alias shape from the audit with both relay modes and heredoc contexts."""
+        for command in ('ha super info', 'ha "super" info', 'ha --log-level debug super info',
+                        'env -u SAMPLE ha super info', 'sh -c \'ha "super" info\''):
+            for prefix in ('', HEREDOC):
+                for remote in (False, True):
+                    with self.subTest(command=command, heredoc=bool(prefix), remote=remote):
+                        self.assertIn('Supervisor', refusal(prefix + command, remote))
+
+    def test_line_continuations_refused_in_all_contexts(self) -> None:
+        """Literal continuations inside executable and family words must not conceal them."""
+        for command in ('h\\\na su info', 'ha s\\\nu info', 'ha super\\\nvisor info',
+                        'env -u SAMPLE h\\\na s\\\nu info', 'sh -c \'h\\\na s\\\nu info\''):
+            for prefix in ('', HEREDOC):
+                for remote in (False, True):
+                    with self.subTest(command=command, heredoc=bool(prefix), remote=remote):
+                        self.assertIn('Supervisor', refusal(prefix + command, remote))
+
+    def test_other_layer_and_remote_controls(self) -> None:
+        """The separate approval check and relay-family distinction still hold."""
+        self.assertTrue(approvals.command_names_protected_path('h\\\na s\\\nu info'))
+        self.assertTrue(approvals.command_names_protected_path(HEREDOC + 'ha super info'))
+        self.assertEqual(refusal('ha core info', False), '')
+        self.assertIn('Supervisor', refusal('ha core info', True))
+
+    def test_shell_joins_literal_words_without_spaces(self) -> None:
+        """A local function proves shell argument boundaries without an HA executable."""
+        for command, expected in (('h\\\na s\\\nu info', '<su><info>'),
+                                  ('ha super\\\nvisor info', '<supervisor><info>')):
+            result = subprocess.run(['/bin/sh', '-c', 'ha() { printf "<%s>" "$@"; };\n' + command],
+                                    capture_output=True, text=True, check=True)
+            self.assertEqual(result.stdout, expected)
+
+
+class ShellContinuationTests(unittest.TestCase):
+    """Check lexical joins against the shell without invoking any service."""
+
+    def test_normalized_arguments_match_a_print_only_shell(self) -> None:
+        """Unquoted/double-quoted joins disappear; single-quoted pairs and escapes stay literal."""
+        join = '\\' + '\n'
+        commands = (
+            f'emit h{join}a s{join}u',
+            f'emit "h{join}a" "s{join}u"',
+            f"emit 'h{join}a' 's{join}u'",
+            'emit "h' + '\\' * 2 + '\n' + 'a"',
+            f"emit sample # don't\nemit h{join}a",
+            f'emit sample # comment{join}still comment\nemit done',
+            f'emit literal\\#hash h{join}a',
+        )
+        prelude = 'emit() { printf "<%s>" "$@"; };\n'
+        for command in commands:
+            with self.subTest(command=command):
+                normalized = gate_rules._join_shell_continuations(command)
+                self.assertIsNotNone(normalized)
+                outputs = [subprocess.run(['/bin/sh', '-c', prelude + script],
+                           capture_output=True, text=True, check=True).stdout
+                           for script in (command, normalized)]
+                self.assertEqual(outputs[0], outputs[1])
+
+    def test_both_parsers_and_the_independent_floor_join_literal_words(self) -> None:
+        """Neither a parser nor the floor may replace a word join with a space."""
+        join = '\\' + '\n'
+        self.assertTrue(gate_rules._ha_supervisor_command(f'h{join}a s{join}u info'))
+        self.assertTrue(gate_rules._ha_command(f'h{join}a co{join}re info', True))
+        self.assertFalse(gate_rules._ha_command(f'h{join}a co{join}re info', False))
+        with patch.object(gate_rules, '_ha_supervisor_command', return_value=False), \
+                patch.object(gate_rules, '_ha_command', return_value=False):
+            for family in (f's{join}u', f'su{join}per', f'super{join}visor'):
+                for remote in (False, True):
+                    with self.subTest(family=family, remote=remote):
+                        self.assertIn('Supervisor', refusal(f'h{join}a {family} info', remote))
+
+    def test_single_quoted_data_keeps_its_literal_pairs(self) -> None:
+        """A literal string is not a second shell script or an executable name."""
+        join = '\\' + '\n'
+        for content in (f'h{join}a s{join}u info', f'$(h{join}a s{join}u)',
+                        f'`h{join}a s{join}u`'):
+            command = "emit '" + content + "'"
+            with self.subTest(command=command):
+                self.assertEqual(gate_rules._join_shell_continuations(command), command)
+                for remote in (False, True):
+                    self.assertEqual(refusal(command, remote), '')
+
+    def test_readable_harmless_joins_keep_no_opinion(self) -> None:
+        """Readable continuations must not become a blanket command ban."""
+        join = '\\' + '\n'
+        for command in (f'printf sample{join}text', f'ls {join}-la'):
+            for remote in (False, True):
+                with self.subTest(command=command, remote=remote):
+                    self.assertEqual(refusal(command, remote), '')
+        self.assertEqual(refusal(f'h{join}a co{join}re info', False), '')
+
+    def test_ambiguous_continuations_refuse_and_request_one_line(self) -> None:
+        """Heredocs, substitutions and unreadable quotes require a simpler command."""
+        join = '\\' + '\n'
+        for command in (HEREDOC + f'h{join}a su info', f'echo $(h{join}a su info)',
+                        f'echo `h{join}a su info`', f"echo $'h{join}a'",
+                        f"sh -c 'h{join}a su info", f'cat <(h{join}a su info)'):
+            for remote in (False, True):
+                with self.subTest(command=command, remote=remote):
+                    self.assertIsNone(gate_rules._join_shell_continuations(command))
+                    self.assertIn('one line', refusal(command, remote))
+        self.assertEqual(refusal('echo $(printf sample)', False), '')
 
 
 if __name__ == "__main__":

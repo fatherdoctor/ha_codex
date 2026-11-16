@@ -2,6 +2,11 @@
 
 ## 0.1.81.2 (unreleased)
 
+- Keep remote control saved as off when a rule warning races a Turn on request.
+  Commit the saved choice and warning check as one decision.
+- Join literal shell line continuations without a space, while preserving single-quoted data.
+  Refuse continuations in forms the command check cannot read safely; ask for a one-line command.
+
 - Document why the pinned CLI cannot supply a ChatGPT sign-in deadline: access tokens refresh and
   refresh-grant expiry is not exposed. Keep the existing signed-out Repair without a guessed expiry
   sensor, warning countdown or advance push; test that elapsed time alone does not require sign-in.

@@ -510,5 +510,140 @@ class ExecRulesReviewTests(unittest.TestCase):
             self.assertEqual(probe.call_count, 1)
 
 
+class ExecRulesStartRaceTests(unittest.TestCase):
+    """A warning and Turn on share one decision about the saved choice."""
+
+    def setUp(self):
+        """Keep state and warning data private to each synthetic supervisor."""
+        latch = patch.object(rc, '_exec_rules_warning', '')
+        latch.start()
+        self.addCleanup(latch.stop)
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.supervisor = rc.Supervisor('fixture', Path(self.temp.name) / 'state.json',
+                                        dict, lambda: '', gate=lambda: '')
+
+    def test_warning_between_gate_and_enable_keeps_saved_choice_off(self):
+        """A baseline callback models the review's deterministic warning interleaving."""
+        supervisor = self.supervisor
+
+        def warn_during_baseline():
+            """Publish the real warning and persist off before the enable commit."""
+            rc.record_exec_rules_warning(WARNING)
+            supervisor.save_enabled(False)
+
+        supervisor.watch = SimpleNamespace(take_baseline=warn_during_baseline)
+        with patch.object(supervisor, '_launch') as launch, patch.object(supervisor, '_start_watch'):
+            accepted, state = supervisor.start()
+        self.assertFalse(accepted)
+        self.assertFalse(supervisor.enabled())
+        self.assertEqual(state['blocked_reason'], rc.EXEC_RULES_WARNING)
+        launch.assert_not_called()
+
+    def test_warning_publication_cannot_split_the_enable_commit(self):
+        """A second thread tries to latch and save off while Turn on commits its choice."""
+        supervisor = self.supervisor
+        writing = threading.Event()
+        release = threading.Event()
+        published = threading.Event()
+        errors = []
+        save = supervisor.save_enabled
+
+        def held_save(value):
+            """Hold only the on write at the decision's persistence boundary."""
+            if value:
+                writing.set()
+                if not release.wait(2):
+                    raise AssertionError('enable writer was not released')
+            save(value)
+
+        def start():
+            """Expose thread failures to the parent test."""
+            try:
+                supervisor.start()
+            except Exception as error:
+                errors.append(error)
+
+        def warn():
+            """Run the same latch-then-save order as a warning handler."""
+            try:
+                rc.record_exec_rules_warning(WARNING)
+                published.set()
+                supervisor.save_enabled(False)
+            except Exception as error:
+                errors.append(error)
+
+        starter = threading.Thread(target=start)
+        warning = threading.Thread(target=warn)
+        with patch.object(supervisor, 'save_enabled', held_save), \
+                patch.object(supervisor, '_launch'), patch.object(supervisor, '_start_watch'):
+            starter.start()
+            try:
+                self.assertTrue(writing.wait(2))
+                warning.start()
+                published_early = published.wait(0.05)
+            finally:
+                release.set()
+                starter.join(3)
+                if warning.ident is not None:
+                    warning.join(3)
+        self.assertFalse(starter.is_alive() or warning.is_alive())
+        self.assertEqual(errors, [])
+        self.assertFalse(published_early, 'a warning split the enable decision from its file write')
+        self.assertTrue(published.is_set())
+        self.assertFalse(supervisor.enabled())
+        self.assertEqual(rc.exec_rules_problem(), rc.EXEC_RULES_WARNING)
+
+    def test_warning_after_enable_but_before_launch_saves_off(self):
+        """A late chat warning must persist off even before a control monitor exists."""
+        supervisor = self.supervisor
+        supervisor.popen = Mock(side_effect=AssertionError('a blocked relay must not launch'))
+        with patch.object(supervisor, '_start_watch',
+                          side_effect=lambda: rc.record_exec_rules_warning(WARNING)):
+            accepted, _ = supervisor.start()
+        supervisor.thread.join(2)
+        self.assertTrue(accepted)  # The on decision precedes this warning.
+        self.assertFalse(supervisor.thread.is_alive())
+        supervisor.popen.assert_not_called()
+        self.assertFalse(supervisor.enabled())
+        self.assertEqual(supervisor.snapshot()['blocked_reason'], rc.EXEC_RULES_WARNING)
+
+    def test_disabled_kind_does_not_block_the_enable_commit(self):
+        """A future disabled kind must ignore an earlier latch at this boundary too."""
+        rc.record_exec_rules_warning(WARNING)
+        with patch.object(rc, 'exec_rules_enabled', return_value=False), \
+                patch.object(self.supervisor, '_launch'), patch.object(self.supervisor, '_start_watch'):
+            accepted, _ = self.supervisor.start()
+        self.assertTrue(accepted)
+        self.assertTrue(self.supervisor.enabled())
+
+
+class ExecRulesDocumentationTests(unittest.TestCase):
+    """Preserve the disclosures that define the managed prefix layer's limits."""
+
+    def test_owner_allow_rule_sandbox_and_precedence_are_disclosed(self):
+        """Keep the native allow decision's sandbox and precedence effects explicit."""
+        text = (ROOT / 'DOCS.md').read_text()
+        self.assertIn('A valid owner `allow` rule can let a matching command run outside the sandbox.', text)
+        self.assertIn('An exact-executable allow rule can take precedence over a managed basename refusal.', text)
+        self.assertIn('it does not scan valid owner rules for allow decisions.', text)
+
+    def test_prefix_misses_are_disclosed(self):
+        """Name the syntactic forms that a literal prefix policy cannot cover."""
+        text = (ROOT / 'DOCS.md').read_text()
+        paragraph = text.split('**Prefix limits.**', 1)[1].split('  - **', 1)[0]
+        for phrase in ('Relative paths', 'Redirection', 'command substitution', 'nested shell scripts',
+                       'codex exec --dangerously-bypass-approvals-and-sandbox',
+                       '--sandbox=danger-full-access', '-s danger-full-access'):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, paragraph)
+
+    def test_rules_apply_with_remote_control_off(self):
+        """Do not present the always-on requirements as a relay-only feature."""
+        text = (ROOT / 'DOCS.md').read_text()
+        paragraph = text.split('**Prefix limits.**', 1)[1].split('  - **', 1)[0]
+        self.assertIn('These rules apply with remote control off too.', paragraph)
+
+
 if __name__ == '__main__':
     unittest.main()

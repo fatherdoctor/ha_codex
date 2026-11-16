@@ -1005,7 +1005,14 @@ class Supervisor:
             with self.lock:
                 self.findings = []
         self._name_supported = None
-        self.save_enabled(True)
+        # The saved choice and warning latch form one decision. Warning handlers
+        # release the latch lock before taking this supervisor's lock.
+        with self.lock, _exec_rules_lock:
+            warning = _exec_rules_warning if exec_rules_enabled() else ""
+            self.save_enabled(not warning)
+        if warning:
+            self.set_status("blocked", warning)
+            return False, self.snapshot()
         self._start_watch()
         return True, self._launch()
 
@@ -1145,6 +1152,8 @@ class Supervisor:
         while self.enabled() and not self.wake.is_set():
             problem = self._gate_problem(probe=True)
             if problem:
+                if exec_rules_problem():
+                    self.save_enabled(False)
                 self.set_status("blocked", problem)
                 return
             name = machine_name(self.name_factory())
