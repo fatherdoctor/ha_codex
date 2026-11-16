@@ -69,7 +69,7 @@ class ScheduleLimitTests(unittest.TestCase):
             ('list_schedules', {'offset': -1}, 'offset must be a whole number from 0 to 120.'),
             ('read_mailbox', {'offset': 501}, 'offset must be a whole number from 0 to 500.'),
             ('read_mailbox', {'unread': True}, 'read_mailbox accepts only offset and limit.'),
-            ('post_mailbox', {'body': 'Sample.', 'to': 'x'}, 'post_mailbox accepts only body and parent.'),
+            ('post_mailbox', {'body': 'Sample.', 'to': 'x'}, 'Mailbox to and from must name owner, lead or codex'),
             ('post_mailbox', {'body': 'Sample.', 'parent': 'short'}, 'parent must be the 32-character id'),
             ('post_mailbox', {'body': 'Sample.', 'parent': 'f' * 32}, 'Mailbox thread not found.'),
             ('propose_schedule', {'name': 'Sample'}, 'prompt must be nonempty text'),

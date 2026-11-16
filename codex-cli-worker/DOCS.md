@@ -789,19 +789,47 @@ The API is served by the same worker HTTP listener as the existing local API. Th
 
 | Method and path | Purpose and fields |
 |---|---|
-| `POST /lead/tasks` | `{"prompt":"Inspect the sample configuration.","mode":"read-only"}` starts an ordinary task and returns `task_id`. A busy or paused worker refuses it; it is not silently queued or retried. The daily unattended-run limit applies. |
+| `POST /lead/tasks` | `{"prompt":"Inspect the sample configuration.","mode":"read-only"}` starts an ordinary task and returns `task_id`. A busy worker durably holds one waiting task; a second waiting task returns 409 with a reason. A paused worker refuses new tasks; an already waiting task remains held. The response includes `status: queued` or `waiting`; the waiting handle can be polled below. The daily unattended-run limit applies. |
 | `GET /lead/tasks/<task_id>` | Read a lead-submitted or scheduled task's saved result and pending-approval status. Unrelated human chats return not found. It cannot answer an approval. |
 | `GET /lead/schedules` | Read saved schedules and proposals. |
 | `POST /lead/schedules` | Propose `{"name":"Sample inspection","prompt":"Inspect the sample configuration.","mode":"read-only","spec":{"kind":"interval","seconds":3600}}`. The result has `approved:false` and `enabled:false`. |
 | `PATCH /lead/schedules/<id>` | Replace only a lead-authored, unapproved proposal with those same four fields. Approved schedules and proposals by other authors return 404. Every edit changes the review revision. Other specification shapes are `{"kind":"cron","expression":"0 9 * * 1-5"}` and `{"kind":"once","at":"2027-03-12T09:00:00Z"}`; choose a future time. |
 | `DELETE /lead/schedules/<id>` | Delete only a lead-authored, unapproved proposal. |
-| `GET /lead/mailbox` | Read local plain-text messages and replies. |
-| `POST /lead/mailbox` | Save `{"body":"A local sample message.","turn_id":"unique-lead-turn"}` as a new thread. |
-| `POST /lead/mailbox/<message_id>/reply` | Save `{"body":"A local sample reply.","turn_id":"unique-lead-turn"}` on that root thread. |
+| `GET /lead/mailbox` | Read and acknowledge only the returned page of local messages. Optional `offset` (0–500, including legacy unread mail), `limit` (clamped to 1–20, default 10), `unread_only=true`; follow `next_offset` until null. For consuming unread pages the next offset is 0 because acknowledged rows leave that view. |
+| `POST /lead/mailbox` | Save `{"message":"A local sample message.","to":"codex","turn_id":"unique-lead-turn"}` as a new thread. Optional `due` and `task:{"prompt":"Inspect the sample.","mode":"read-only"}`; an attached task atomically saves the note and accepts the task for immediate dispatch or the single durable waiting slot (202). Invalid/full/second-slot requests save neither. Start and final-result replies appear in this same thread. |
+| `POST /lead/mailbox/<message_id>/reply` | Save `{"message":"A local sample reply.","to":"codex","turn_id":"unique-lead-turn"}` on that root thread. Optional `due`; replies do not accept a task. |
 
-The page shows the same mailbox and can post or reply. Messages remain plain text, confer no authority and never execute themselves or reach an external recipient. A lead explicitly submits a separate task if it wants work performed. The mailbox retains at most 500 messages, pruning the oldest other thread (including replies) when full. If only the current reply thread fills it, its oldest replies are pruned. Lead and Codex each have limits of 20 writes per turn and 64 per UTC day, returning HTTP 429 for lead writes at the limit. The lead supplies a stable `turn_id`; Codex’s turn comes from its verified exchange. Usage counters survive message clearing and app restarts. The owner is not rate limited. `DELETE /lead/mailbox` clears lead-authored root threads and replies; `DELETE /lead/mailbox/<id>` clears one such thread. Administrator page controls can clear all threads or delete one. Clearing does not execute anything or reset write limits. No lead endpoint creates permanent permissions, changes sandbox policy, approves a schedule or answers a native permission request. Owner management and token rotation require authenticated administrator Ingress, including a fresh check of the administrator identity under the existing cache rules.
+The lead-token holder may wake and direct the worker on its own initiative through these authenticated task routes. Codex on the worker may send mail to the lead, but cannot start work on the lead. Mail bodies remain untrusted text with no permission authority. An ordinary note does not execute; the optional `task` object is an explicit, authenticated lead task submission. No lead endpoint creates permanent permissions, changes sandbox policy, approves a schedule or answers a native permission request. The worker uses its ordinary launcher and human approval prompts. A waiting task survives restart, waits through a pause or daily unattended-run limit, and gets priority over due schedules when the ordinary slot is free. A task interrupted after reservation is reported, never automatically executed again.
 
-Schedule prompts containing recognized credentials are masked in responses and marked `prompt_redacted`; Edit is disabled so masked text cannot replace the saved prompt. Create a replacement with a complete prompt instead. All save routes reject the literal `[redacted]` marker. The private database and its journal/WAL/SHM paths are protected like the worker token from tool file access and native permission grants. A persistent SQLite journal is materialized before tasks or remote control start, so its mask remains present across transactions. Schema version 1 adds proposal authorship; legacy proposals without an attributable author remain owner-owned.
+Each reader (owner, lead, Codex) has its own 128-message mailbox. A sender receives a read copy. `to` selects owner, lead, codex or all (the legacy default). Replies also reach the thread's existing participants.
+
+The oldest read copies leave first. Unread copies never expire or leave to make room. A recipient full of unread mail refuses delivery with HTTP 409 and a plain reason. `mailbox.full` on `/status` identifies the affected reader. Delivery to multiple readers and write counters share one transaction.
+
+Legacy mailboxes above 128 keep their unread copies. They refuse new delivery until enough mail is read or cleared. Read copies reduce to the new count limit.
+
+Owner mail has no age cutoff. Lead and Codex copies expire 48 hours after their first read, on the next mailbox operation. A read therefore preserves the other pages of old mail in the same walk. Repeated reads do not restart that clock. Prior read marks without timestamps receive one 48-hour grace period at upgrade. When one reader clears mail or a copy expires, the other readers keep their copies and unread replies.
+
+**Upgrade note:** Legacy messages without a Codex read mark remain unread for Codex. A full Codex mailbox can refuse the default `all` destination. Read those messages through Codex, or clear its mailbox in Settings. Then send more mail to `all`.
+
+This preserves unread history. It does not assume that Codex saw older messages.
+
+The Settings mailbox selector lets an administrator inspect each mailbox without acknowledging another reader's mail. Only the owner mailbox acknowledges the IDs displayed on the page. The lead and Codex acknowledge their own reads. An administrator can clear any selected mailbox with an in-page confirmation. `DELETE /schedule-mailbox?mailbox=owner|lead|codex` requires `{"confirm":true}`. `DELETE /lead/mailbox` requires the same confirmation and clears only the lead's copy, regardless of sender; the lead cannot select another mailbox. The corresponding `/<root-id>` DELETE clears only that reader's thread copies. Clearing never executes a task or resets write limits. Owner management and token rotation require authenticated administrator Ingress, including a fresh administrator check under the existing cache rules.
+
+Responses put the consistent message fields in `envelope`, with delivery metadata (`id`, root `parent`, trusted `origin`) outside it:
+
+```json
+{"id":"message-id","parent":null,"origin":"","envelope":{"to":"codex","from":"lead","sent":"2027-03-01T00:00:00.000Z","last_modified":"2027-03-01T00:00:00.000Z","due":"2027-03-02T00:00:00.000Z","message":"Inspect the sample."}}
+```
+
+`due` is optional and sender-set; submit an ISO 8601 timestamp including a zone. Stored/API dates are normalized to UTC ISO 8601 with `Z`. Legacy mail initializes `last_modified` from `sent`. An edit updates that message. A reply updates the root thread message and retains the other replies' modification times. PATCH `/lead/mailbox/<id>` edits only the lead's own message (`message`, optional `due`); an administrator can edit via `/schedule-mailbox/<id>`. The page shows To, From, Sent, Last modified, Due when set, then Message in that order, using Core's configured time zone or explicitly labeled UTC when unavailable. The `text` plain view has those header labels, a blank line, then the body. `/status` includes unread due timestamps and overdue flags without bodies. Mailbox post labels come from the active turn, rather than its original task. Scheduled and lead-started turns carry their source; ordinary human continuations remain unlabeled.
+
+Lead and Codex ordinary writes remain limited to 20 per turn and 64 per actor per UTC day (HTTP 429 for lead writes). The lead supplies a stable `turn_id`; Codex's comes from its verified exchange. Counters survive clearing and restarts; owner writes are not rate limited. The two typed start/final replies for an accepted task use durable once-only flags and do not consume model write counters. They remain bounded by the 64 unattended tasks/day limit and mailbox capacity. If a recipient is full, the saved reply stage retries when space opens; this never reruns the task. Pending replies retain their run record beyond ordinary history pruning. The legacy `body` request field remains an alias for `message`, but responses use the envelope.
+
+The store removes completed task/thread links after every thread copy is gone. It keeps unfinished reply links for retry. An edit does not mark a message unread again. An accepted task keeps its stored prompt when its mail note changes.
+
+A task note without `to` goes to Codex and the lead. The owner can inspect that thread through the selector. A daily limit holds the single task slot until the next UTC day. Other lead tasks wait for that slot to clear.
+
+Schedule prompts containing recognized credentials are masked in responses and marked `prompt_redacted`; Edit is disabled so masked text cannot replace the saved prompt. Create a replacement with a complete prompt instead. All save routes reject the literal `[redacted]` marker. The private database and its journal/WAL/SHM paths are protected like the worker token from tool file access and native permission grants. A persistent SQLite journal is materialized before tasks or remote control start, so its mask remains present across transactions. Schema version 3 adds first-read retention timestamps. Version 2 added per-reader deliveries, UTC message envelopes and durable lead task/thread records; version 1 added proposal authorship; legacy proposals without an attributable author remain owner-owned.
 
 ## Export logs for a bug report
 
@@ -1031,10 +1059,10 @@ or model task.
 
 The integration polls worker status every 30 seconds. Its **Mailbox unread for the lead** sensor counts
 retained posts from Codex and the owner that the lead has not read. A reader's own posts do not count as
-unread for that reader. The worker reports independent lead and owner counts in `mailbox.unread` on `/status`.
+unread for that reader. The worker reports independent owner, lead and Codex counts in `mailbox.unread` on `/status`.
 The lead reads and acknowledges its snapshot with `GET /lead/mailbox`; `?unread_only=true` returns only its
 unread messages and marks those returned IDs read. Owner reads are acknowledged only after the Settings
-page renders those message IDs. A message arriving after that snapshot remains unread. Reading never starts a task.
+page renders those message IDs in the owner mailbox. Viewing the lead or Codex mailbox does not acknowledge that reader's copies. A message arriving after that snapshot remains unread. Reading never starts a task.
 
 For each first-observed retained message or reply, the integration fires `codex_cli_mailbox_message` with
 only `message_id`, `thread_id`, `author` (`codex`, `lead` or `owner`) and `time` (Unix seconds). It never includes
@@ -1043,12 +1071,12 @@ If the saved IDs cannot be verified, no event fires and the next poll retries wi
 A restart reads the saved set, preventing replay after a failed write. A crash between saving and firing
 can still lose that event. The first connection also reports retained messages not observed previously. Normal delay
 is up to one 30-second poll plus request time. Messages removed or evicted before a poll cannot produce an event;
-use the sensor and unread filter to recover retained unread mail. Existing 500-message, 20-per-turn and
-64-per-actor-per-UTC-day limits remain unchanged.
+use the sensor and unread filter to recover retained unread mail. Per-reader 128-message retention protects unread mail; the 20-per-turn and
+64-per-actor-per-UTC-day model write limits still apply.
 
 Another local agent can watch the sensor's state, or an automation can listen for this event and tell it to
-read `GET /lead/mailbox?unread_only=true` with its existing lead credential. **A message never starts work by
-itself.** An agent woken by mail may reply, but starts a task on the other agent only with a person or an
-approved schedule behind it. Bodies are untrusted text, never executable instructions or authority. This signal
+read `GET /lead/mailbox?unread_only=true` with its existing lead credential. The lead-token holder may independently direct the worker through `/lead/tasks` or an explicit task attached
+to `/lead/mailbox`. A worker may send mail back but cannot start lead work. A plain arrival signal or body
+never executes a task, grants authority or answers a human permission prompt. This signal
 adds no task dispatch, notification send, permission bypass or new agent connection. An unavailable mailbox
 leaves the sensor unknown and does not create arrival events.

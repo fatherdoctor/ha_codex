@@ -1320,6 +1320,7 @@ function renderTask(force = false) {
       : `${task.permission_required ? "Permission needed" : labels[task.status] || task.status} · ${dateLabel(task.updated_at, true)}${queued ? " · next message in queue" : ""}`;
   const signature = JSON.stringify([
     task.turns,
+    task.task_source,
     task.history_incomplete,
     task.status,
     queued && [queued.queue_id, queued.message, queued.prompt_attachments],
@@ -1355,6 +1356,9 @@ function renderTask(force = false) {
   for (const turn of turns) {
     const latest = turn === turns[turns.length - 1];
     const exchange = textNode("section", "", "exchange");
+    const source = turn.task_source || (turn === turns[0] ? task.task_source : null);
+    if (source === "schedule" || source === "lead")
+      exchange.append(textNode("p", source === "schedule" ? "Scheduled run" : "Started by lead", "muted task-source"));
     const sent = messageAttachments(turn.prompt_attachments);
     if (sent.length)
       exchange.append(

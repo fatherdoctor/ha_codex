@@ -30,6 +30,20 @@
 
 ## 0.1.81.2 (unreleased)
 
+- Expire agent copies 48 hours after their first read so old mailbox pages keep stable positions.
+  Settings acknowledges only the owner mailbox; agent labels follow the active turn.
+  Prior read marks receive a one-time upgrade grace period.
+- Upgrade note: legacy messages without a Codex read mark remain unread. If its mailbox is full,
+  read those messages through Codex or clear its mailbox in Settings. Then send more mail to `all`.
+  This preserves unread history without an assumed read date.
+
+- Let the authenticated lead direct worker tasks on its own initiative, including an explicit task attached
+  to a mailbox note. Hold one durable waiting task while busy and report start/result in the same thread;
+  keep native human approval and unattended daily limits. The worker cannot start lead work.
+- Give each reader a 128-message mailbox, retain unread mail across absences, expire only read agent mail
+  after 48 hours, and refuse all-unread full delivery with a visible status. Add per-mailbox clear confirmation,
+  UTC message envelopes, local-time/plain views, due status, source labels and bounded lead mailbox pages.
+
 - Document why the pinned CLI cannot supply a ChatGPT sign-in deadline: access tokens refresh and
   refresh-grant expiry is not exposed. Keep the existing signed-out Repair without a guessed expiry
   sensor, warning countdown or advance push; test that elapsed time alone does not require sign-in.
