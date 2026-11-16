@@ -69,9 +69,9 @@ function status(state, extra = {}) {
       await page.getByRole('button', {name: 'Open settings', exact: true}).click();
       const card = page.locator('#github-section');
       await card.waitFor({state: 'visible'});
-      // The GitHub card sits right after the ChatGPT account card.
-      assert.equal(await page.evaluate(() => document.querySelector('#github-section').previousElementSibling
-        .querySelector('h3').textContent), 'ChatGPT account');
+      // The GitHub card is the next settings section after the ChatGPT account card.
+      assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('#settings > section')].slice(0, 2)
+        .map(section => section.querySelector('h3')?.textContent)), ['ChatGPT account', 'GitHub']);
       await page.waitForFunction(() => document.querySelector('#github-status').textContent === 'Not connected to GitHub.');
       for (const id of ['github-test', 'github-check', 'github-accept', 'github-disconnect'])
         assert.equal(await page.locator('#' + id).isHidden(), true, id);
