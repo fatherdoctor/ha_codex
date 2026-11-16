@@ -587,6 +587,28 @@ When the state changes, and only then:
 - The integration raises the repair **The Codex add-on's GitHub sign-in needs attention** (`github_access_lost`). It is an error for expired, revoked and cannot be checked, and a warning for expires soon and access changed. It clears when the check is OK or you disconnect. If you never connected, there is no repair.
 - A banner above the chat offers **Open GitHub settings**.
 
+### GitHub connected sensor
+
+The integration's **GitHub connected** binary sensor is on only when the worker reports `ok`. It is off for other states, including a disconnected account, expiry soon, expired or revoked access, changed access, or a failed GitHub check. Its attributes are `state` (the worker's status), `account` (the GitHub login), and `repository_count` (the number of accessible repositories). An older worker without GitHub status gives an off sensor with `state: unknown`. If the integration cannot poll the worker, the sensor becomes unavailable instead.
+
+This automation creates a local notice in Home Assistant's Notifications panel when the sensor changes from on to off. Replace the example entity ID with the sensor's ID from your Codex device. The notice stays until you dismiss it; this example sends no phone push and does not trigger on unavailable states.
+
+```yaml
+alias: GitHub connection needs attention
+triggers:
+  - trigger: state
+    entity_id: binary_sensor.codex_github_connected
+    from: "on"
+    to: "off"
+actions:
+  - action: persistent_notification.create
+    data:
+      notification_id: codex_github_connection
+      title: GitHub connection needs attention
+      message: Open Codex for Home Assistant, then Settings > GitHub, to check the sign-in.
+mode: single
+```
+
 ### Backups
 
 `/data/github` is not in the app backup. After a restore, the card shows **Not connected**; press **Connect GitHub** again.
