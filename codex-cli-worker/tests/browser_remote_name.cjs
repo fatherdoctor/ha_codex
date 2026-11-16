@@ -32,6 +32,11 @@ const off = {enabled: false, available: true, state: 'off', configured_name: 'Ho
       const hint = page.locator('#agents-hint');
       await hint.waitFor({state: 'visible', timeout: 5000});
       assert.equal(await page.locator('#messages').getByText('AGENTS.md').count(), 0, 'the hint is not in the chat');
+      assert.equal(await page.evaluate(() => {
+        const hint = document.getElementById('agents-hint').getBoundingClientRect();
+        const list = document.getElementById('messages').getBoundingClientRect();
+        return hint.top >= list.bottom - 1;
+      }), true, 'the hint sits below the message list, so the integration notice stays next to the list');
       await hint.screenshot({path: path.join(SHOTS, `agents-hint-${colorScheme}-400.png`)});
       await hint.getByRole('button', {name: 'Dismiss', exact: true}).click();
       assert.equal(await hint.isVisible(), false);

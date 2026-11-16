@@ -1966,6 +1966,14 @@ dialog h3:has(> .settings-toggle) {
   border: 1px solid var(--line);
   border-radius: 8px;
 }
+#agents-hint {
+  margin: 0 0 10px;
+}
+#remote-control-name {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+}
 .signin-card {
   display: grid;
   justify-items: start;

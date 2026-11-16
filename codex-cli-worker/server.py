@@ -4214,8 +4214,9 @@ def home_assistant_api_instructions(options: dict[str, Any]) -> str:
 def remote_control_instructions(options: dict[str, Any]) -> str:
     """Offer token-free observational reads and keep native command decisions intact."""
     return (
-        "You are running in the Home Assistant add-on. Workspace: /config. Owner workspace instructions: /config/AGENTS.md. "
-        "Use the home_assistant_relay.read tool for entity listings and state readback; it needs no hand-made HA_TOKEN. "
+        "You are running in the Home Assistant add-on. Workspace: /config. "
+        + ("Owner workspace instructions: /config/AGENTS.md. " if AGENTS_PATH.is_file() else "")
+        + "Use the home_assistant_relay.read tool for entity listings and state readback; it needs no hand-made HA_TOKEN. "
         "Use operation states with a domain and bounded page, or state with an exact entity_id. It is read-only: "
         "no service calls, reloads or credential access. A state read does not prove automation behavior. "
         "The chat page's per-turn verification/history capabilities are separate and must not be reused. "
@@ -4276,7 +4277,7 @@ Use the separate home_assistant_data MCP history and statistics tools for read-o
 
 {api}{docs}{github}At the end, return only an object matching the provided JSON schema:
 - status: "completed", "needs_input", or "failed"
-- summary: concise result, written to the user as your reply. Answer a greeting, a test message or a question directly. Do not describe this worker, and do not mention files that were not found unless the user asked about them.
+- summary: concise result, written to the user as your reply. Answer a greeting, a test message or a question directly. Do not describe this worker, and do not report that an optional instruction file is absent.
 - question: use an empty string unless status is "needs_input"
 - details: use an empty string unless there are useful implementation/test notes
 - choices: use an empty list unless status is "needs_input" and the answer is one of a few options
@@ -6708,20 +6709,23 @@ def get_remote_control() -> Response:
 
 
 SUPERVISOR_SELF_URL = "http://supervisor/addons/self"
-REMOTE_CONTROL_NAME_MAX_CHARS = 200
 
 
-def save_remote_control_name(value: Any) -> str:
+def save_remote_control_name(value: Any) -> bool:
     """Save the remote_control_name option, as the app's Configuration tab would, and return the name the app shows.
 
     Supervisor replaces every option on a save, so the saved options are read from Supervisor first and only the
     name changes. Those are the options as written, with any !secret reference kept; options.json holds resolved
     values and must not be sent back. Supervisor rewrites options.json only when the app starts, so the worker's
     copy gets the new name as well. Raises ValueError for a value that is not a name and RuntimeError when
-    Supervisor cannot be reached or refuses.
+    Supervisor cannot be reached or refuses. Returns False when Supervisor saved the name but the worker's copy could
+    not be updated; the name then shows after the app restarts.
+
+    One limit: the name the app shows is cut to remote_control.MAX_NAME_BYTES, so a longer value is refused rather
+    than cut without a word. Other characters are not refused; machine_name turns them into spaces.
     """
-    if not isinstance(value, str) or len(value) > REMOTE_CONTROL_NAME_MAX_CHARS:
-        raise ValueError(f"Enter a name of up to {remote_control.MAX_NAME_BYTES} letters, digits or spaces.")
+    if not isinstance(value, str) or len(value.strip()) > remote_control.MAX_NAME_BYTES:
+        raise ValueError(f"Enter a name of up to {remote_control.MAX_NAME_BYTES} characters.")
     name = value.strip()
     headers = {"Authorization": f"Bearer {ha_token()}"}
     try:
@@ -6734,8 +6738,11 @@ def save_remote_control_name(value: Any) -> str:
     except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
         raise RuntimeError("Home Assistant did not save the name. Try again, or change it in the app's "
                            "Configuration tab.") from exc
-    write_local_option("remote_control_name", name)
-    return remote_control.machine_name(name)
+    try:
+        write_local_option("remote_control_name", name)
+    except (OSError, ValueError):
+        return False
+    return True
 
 
 def write_local_option(key: str, value: Any) -> None:
@@ -6757,12 +6764,15 @@ def rename_remote_control() -> Response | tuple[Response, int]:
     if not isinstance(payload, dict) or set(payload) != {"name"}:
         return jsonify({"ok": False, "error": "Enter a name."}), 400
     try:
-        save_remote_control_name(payload["name"])
+        applied = save_remote_control_name(payload["name"])
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
     except RuntimeError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 502
-    return jsonify({"ok": True, "remote_control": remote_control_supervisor.snapshot()})
+    reply = {"ok": True, "remote_control": remote_control_supervisor.snapshot()}
+    if not applied:
+        reply["notice"] = "The name is saved. It shows here after the app restarts."
+    return jsonify(reply)
 
 
 @app.post("/remote-control/<action>")

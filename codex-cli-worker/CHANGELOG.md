@@ -37,11 +37,13 @@
 - The name the ChatGPT app shows for this Home Assistant can be changed on the page, under remote control,
   while remote control is off. The page saves it as the **Remote control machine name** option through
   Supervisor, so the app's Configuration tab shows the same name. Only that option changes; the other options are
-  sent back as Supervisor stored them, with any `!secret` reference kept.
+  sent back as Supervisor reports them (defaults merged with the stored values, as Save in the Configuration tab
+  does), with any `!secret` reference kept. A name can have up to 63 characters.
 - A first message such as "Test" now gets a normal reply. The task prompt asks Codex to write its summary as a
   reply to the person, not as a report from the worker, and it names `/config/AGENTS.md` only when that file
-  exists. Before, a missing file could show in the answer as "/config/AGENTS.md was not found". The page now
-  shows a missing `AGENTS.md` once, above the chat, as a setup hint that you can dismiss.
+  exists, in chat tasks and in remote-control sessions. Before, a missing file could show in the answer as
+  "/config/AGENTS.md was not found". The page now shows a missing `AGENTS.md` once, above the message box, as a
+  setup hint that you can dismiss.
 
 ## 0.3.1 (unreleased)
 

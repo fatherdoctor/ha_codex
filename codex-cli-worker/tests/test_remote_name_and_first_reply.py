@@ -89,10 +89,25 @@ class RenameRoute(unittest.TestCase):
         self.post.assert_not_called()
 
     def test_refuses_a_value_that_is_not_a_name(self):
-        for body in ({"name": 7}, {"name": "x" * 201}, {"name": "ok", "extra": 1}, {}):
+        for body in ({"name": 7}, {"name": "x" * 64}, {"name": "ok", "extra": 1}, {}):
             with self.subTest(body=body):
                 self.assertEqual(self.rename(body).status_code, 400)
         self.post.assert_not_called()
+
+    def test_one_limit_and_an_error_that_names_it(self):
+        refused = self.rename({"name": "x" * 64}).get_json()["error"]
+        self.assertEqual(refused, "Enter a name of up to 63 characters.")
+        self.assertEqual(self.rename({"name": "  " + "x" * 63 + "  "}).status_code, 200)
+        self.assertEqual(self.rename({"name": "Lake/house"}).status_code, 200)
+
+    def test_local_write_failure_after_supervisor_saved_says_the_name_is_saved(self):
+        self.options.write_text("not json")
+        response = self.rename({"name": "Lake house"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["notice"], "The name is saved. It shows here after the app restarts.")
+        self.post.assert_called_once()
+        with patch.object(server, "write_local_option", side_effect=OSError("read-only")):
+            self.assertIn("notice", self.rename({"name": "Other"}).get_json())
 
     def test_supervisor_refusal_leaves_options_unchanged(self):
         before = self.options.read_text()
@@ -136,7 +151,17 @@ class FirstReplyPrompt(unittest.TestCase):
         self.assertIn("written to the user as your reply", line)
         self.assertIn("Answer a greeting, a test message or a question directly", line)
         self.assertIn("Do not describe this worker", line)
-        self.assertIn("files that were not found", line)
+        self.assertIn("do not report that an optional instruction file is absent", line)
+        self.assertNotIn("files that were not found", line)
+
+    def test_remote_control_instructions_name_agents_file_only_when_it_exists(self):
+        with tempfile.TemporaryDirectory() as folder:
+            agents = Path(folder) / "AGENTS.md"
+            with patch.object(server, "AGENTS_PATH", agents):
+                self.assertNotIn("AGENTS.md", server.remote_control_instructions({}))
+                agents.write_text("Synthetic owner rules")
+                self.assertIn("Owner workspace instructions: /config/AGENTS.md. ",
+                              server.remote_control_instructions({}))
 
 
 class PageControls(unittest.TestCase):
@@ -154,7 +179,10 @@ class PageControls(unittest.TestCase):
         html = (WEB / "index.html").read_text()
         studio = (WEB / "assets" / "studio.js").read_text()
         hint = html.index('id="agents-hint"')
-        self.assertLess(hint, html.index('id="messages"'))
+        # Below the message list and above the composer, so the integration notice stays next to the list.
+        self.assertLess(html.index('id="messages"'), hint)
+        self.assertLess(html.index('class="compose-area"'), hint)
+        self.assertLess(hint, html.index('id="composer"'))
         self.assertIn('id="agents-hint-dismiss"', html)
         self.assertIn('(await api("agents")).exists !== false', studio)
         self.assertIn("localStorage.setItem(AGENTS_HINT_KEY", studio)

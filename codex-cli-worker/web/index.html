@@ -133,11 +133,6 @@
           <p><strong id="github-banner-text">The add-on's GitHub sign-in needs attention.</strong></p>
           <div class="settings-actions"><button id="github-banner-open">Open GitHub settings</button></div>
         </section>
-        <section id="agents-hint" class="page-banner" role="status" hidden>
-          <p><strong>No workspace instructions yet.</strong> Codex works without /config/AGENTS.md. Write one to tell it the rules of your home.</p>
-          <div class="settings-actions"><button id="agents-hint-open">Write instructions</button
-            ><button id="agents-hint-dismiss" class="subtle">Dismiss</button></div>
-        </section>
         <section id="paused-banner" class="page-banner" role="status" hidden>
           <p><strong>The assistant is paused.</strong> New messages are refused until you resume it.</p>
           <div class="settings-actions"><button id="resume">Resume the assistant</button></div>
@@ -151,6 +146,12 @@
           <div class="welcome"><h2 id="greeting">Good evening</h2></div>
         </div>
         <div class="compose-area">
+          <!-- The hint sits above the composer, not above the chat: the integration notice stays next to the list. -->
+          <section id="agents-hint" class="page-banner" role="status" hidden>
+            <p><strong>No workspace instructions yet.</strong> Codex works without /config/AGENTS.md. Write one to tell it the rules of your home.</p>
+            <div class="settings-actions"><button id="agents-hint-open">Write instructions</button
+              ><button id="agents-hint-dismiss" class="subtle">Dismiss</button></div>
+          </section>
           <p id="notice" role="status" hidden></p>
           <p id="error" role="alert" hidden></p>
           <form id="composer">
