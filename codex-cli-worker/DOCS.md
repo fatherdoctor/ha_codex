@@ -860,7 +860,7 @@ Each reader (owner, lead, Codex) has its own 128-message mailbox. A sender recei
 
 The oldest read copies leave first. Unread copies never expire or leave to make room. A recipient full of unread mail refuses delivery with HTTP 409 and a plain reason. `mailbox.full` on `/status` identifies the affected reader. Delivery to multiple readers and write counters share one transaction.
 
-Legacy mailboxes above 128 keep their unread copies. They refuse new delivery until enough mail is read or cleared. Read copies reduce to the new count limit.
+Legacy mailboxes above 128 keep their unread copies. They refuse new delivery until enough mail is read or cleared. Read copies reduce to the new count limit only when a new message arrives. Reads and status checks do not trim copies by count, so a page walk can reach every legacy message. Settings shows unread owner copies first while its mailbox remains above the limit; acknowledging one page lets the next refresh show the remaining unread mail without deleting read history.
 
 Owner mail has no age cutoff. Lead and Codex copies expire 48 hours after their first read, on the next mailbox operation. A read therefore preserves the other pages of old mail in the same walk. Repeated reads do not restart that clock. Prior read marks without timestamps receive one 48-hour grace period at upgrade. When one reader clears mail or a copy expires, the other readers keep their copies and unread replies.
 

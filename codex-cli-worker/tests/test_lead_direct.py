@@ -77,8 +77,11 @@ class LeadStoreTests(unittest.TestCase):
             ids = [r['id'] for r in self.store.messages(reader='lead', now=NOW + 5)]
             self.store.mark_mail_read('lead', ids[:2], now=NOW + 5)
             self.store.mark_mail_read('lead', ids[2:3], now=NOW + 5)
-            self.assertEqual(len(self.store.messages(reader='lead', now=NOW + 5)), 2)
+            self.assertEqual(len(self.store.messages(reader='lead', now=NOW + 5)), 4)
             self.assertEqual(self.store.messages(reader='lead', unread_only=True, now=NOW + 5)[0]['id'], ids[-1])
+            newest = self.store.mail('New arrival', 'owner', NOW + 6, to='lead')
+            remaining = self.store.messages(reader='lead', now=NOW + 6)
+            self.assertEqual([r['id'] for r in remaining], [ids[-1], newest])
 
     def test_concurrent_submitters_share_single_waiting_slot(self):
         self.worker.blocked = True
@@ -243,6 +246,10 @@ class LeadApiTests(unittest.TestCase):
             following = self.request_owner('GET', '/schedules').json['mailbox']
             self.assertEqual(len(following), 2)
             self.assertEqual(following[-1]['envelope']['message'], 'Legacy 3')
+            self.assertEqual(len(store.messages(reader='owner')), 4)
+            self.assertEqual(self.request_owner('POST', '/schedule-mailbox/read',
+                                               {'ids': [r['id'] for r in following]}).status_code, 200)
+            self.assertEqual(store.mail_status()['unread']['owner'], 0)
 
     def test_worker_mail_can_notify_lead_but_cannot_dispatch_lead_work(self):
         tid = 'synthetic-worker'

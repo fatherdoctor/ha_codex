@@ -44,8 +44,8 @@
   up; a file name that cannot be encoded is reported like any failed copy; a damaged notice record is not
   replayed; the documentation says how to go back to a version before 0.3.0.
 
-## 0.1.81.2 (unreleased)
-
+- A legacy mailbox above 128 messages now keeps stable page offsets during a read.
+  Read copies leave to make room only when a new message arrives.
 - Expire agent copies 48 hours after their first read so old mailbox pages keep stable positions.
   Settings acknowledges only the owner mailbox; agent labels follow the active turn.
   Prior read marks receive a one-time upgrade grace period.
@@ -59,6 +59,8 @@
 - Give each reader a 128-message mailbox, retain unread mail across absences, expire only read agent mail
   after 48 hours, and refuse all-unread full delivery with a visible status. Add per-mailbox clear confirmation,
   UTC message envelopes, local-time/plain views, due status, source labels and bounded lead mailbox pages.
+
+## 0.1.81.2 (unreleased)
 
 - Document why the pinned CLI cannot supply a ChatGPT sign-in deadline: access tokens refresh and
   refresh-grant expiry is not exposed. Keep the existing signed-out Repair without a guessed expiry

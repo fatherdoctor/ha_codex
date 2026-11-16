@@ -317,10 +317,18 @@ def register(worker):
         # refresh must not mark that tiny in-flight gap interrupted.
         with engine.tick_lock:
             engine.reconcile()
+            reader = mailbox_reader()
+            mailbox = engine.store.messages(reader=reader, limit=scheduling.MAX_MESSAGES + 1)
+            if reader == 'owner' and len(mailbox) > scheduling.MAX_MESSAGES:
+                # Settings acknowledges its visible owner page. Prefer unread
+                # legacy copies so that refresh reaches the next page without
+                # deleting read history to advance it.
+                unread = engine.store.messages(reader=reader, unread_only=True, limit=scheduling.MAX_MESSAGES)
+                mailbox = unread or mailbox
             return jsonify(ok=True, schedules=[schedule_payload(row) for row in engine.store.schedules()], runs=clean(engine.store.runs()),
                            mailbox=[mail_payload(row, engine.store.timezone) for row in
-                                    engine.store.messages(reader=mailbox_reader(), limit=scheduling.MAX_MESSAGES)],
-                           mailbox_reader=mailbox_reader(), mailbox_status=engine.store.mail_status(), timezone=engine.store.timezone,
+                                    mailbox[:scheduling.MAX_MESSAGES]],
+                           mailbox_reader=reader, mailbox_status=engine.store.mail_status(), timezone=engine.store.timezone,
                            timezone_error='' if engine.store.timezone else 'Home Assistant time zone unavailable; schedule entry and dispatch are paused.',
                            lead_token_configured=engine.store.has_token(),
                            limits={'proposals': scheduling.MAX_PROPOSALS, 'mail_per_turn': scheduling.MAX_MAIL_PER_TURN,
