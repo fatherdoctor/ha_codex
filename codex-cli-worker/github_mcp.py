@@ -18,7 +18,7 @@ TOOLS = [
     {'name': 'github_git',
      'description': ('Clone, link (set origin), fetch, pull or push a GitHub repository connected on the add-on '
                      'page, or list the connected repositories. The worker runs git with the sign-in, outside your sandbox. A push runs the push '
-                     'guard first and is refused when it finds a secret; never force, delete or tag. Read-only chats '
+                     'guard first and is refused when it finds a secret; never force, delete or tag. pull fetches the branch only; fast-forward it yourself with git merge --ff-only. Read-only chats '
                      'can use repos and fetch only. clone takes repository and folder; link takes repository and path.'),
      'inputSchema': {'type': 'object', 'additionalProperties': False,
                      'properties': {'operation': {'enum': ['repos', 'fetch', 'pull', 'push', 'clone', 'link']},

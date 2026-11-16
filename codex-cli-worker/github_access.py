@@ -82,6 +82,7 @@ CONFIG_OVERRIDES = (
     ("fetch.recurseSubmodules", "false"),
     ("push.recurseSubmodules", "no"),
     ("core.pager", "cat"),
+    ("remote.origin.proxy", ""),
 )
 GUARD_ADVICE_RE = re.compile(r"^push_guard: \d+ finding\(s\); push refused\..*$", re.M)
 GITHUB_TOKEN_RE = re.compile(r"gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{60,}")
@@ -696,13 +697,16 @@ class GitRunner:
         return reply(code == 0, text or ("Fetched." if code == 0 else "git fetch failed."))
 
     def pull(self, path: Any, branch: Any = None) -> dict[str, Any]:
+        """A credentialed fetch of the branch only. The worker never checks out or merges: a work-tree update runs
+        filters and other repository settings as the worker, so the agent fast-forwards in its own sandbox."""
         repo, _ = self.prepare(path)
         name = valid_branch(branch) if branch is not None else self.current_branch(repo)
-        code, text = self._credentialed(repo, "pull", "--ff-only", "--no-rebase", "--no-recurse-submodules",
-                                        "origin", "refs/heads/" + name)
-        if code != 0 and "Not possible to fast-forward" in text:
-            text += "\nThe branch has diverged; the worker never merges or rebases for you."
-        return reply(code == 0, text or ("Up to date." if code == 0 else "git pull failed."))
+        code, text = self._credentialed(repo, "fetch", "--no-recurse-submodules", "origin",
+                                        f"+refs/heads/{name}:refs/remotes/origin/{name}")
+        if code != 0:
+            return reply(False, text or "git fetch failed.")
+        return reply(True, (text + "\n" if text else "") + f"Fetched origin/{name}. The worker does not update the "
+                     f"work tree; run `git merge --ff-only origin/{name}` in your own shell to fast-forward.")
 
     def push(self, path: Any, branch: Any = None) -> dict[str, Any]:
         """Guard, then push: the commit is pinned by id, an added allow mark refuses, then the guard's --push route."""
@@ -992,7 +996,7 @@ class GitHubService:
                 "state": last.get("state"), "previous_state": previous, "reason": last.get("reason") or "",
                 "account": account.get("login") or "", "missing": list(state.get("missing") or []),
                 "extra": list(state.get("extra") or []), "permission_problem": state.get("permission_problem"),
-                "expires_at": state.get("expires_at"), "addon": "codex_cli_worker"})
+                "expires_at": state.get("expires_at"), "addon": "codex_cli_worker", "source": "worker"})
         except Exception:
             self.log("Could not fire the GitHub access event.")
 

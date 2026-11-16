@@ -218,6 +218,7 @@ class CheckTests(ServiceCase):
                 self.assertEqual(self.events[0][0], "codex_cli_github_access")
                 self.assertEqual(self.events[0][1]["state"], state)
                 self.assertEqual(self.events[0][1]["previous_state"], "ok")
+                self.assertEqual(self.events[0][1]["source"], "worker")
                 self.assertEqual(len(self.notices), 1)
                 self.assertNotIn(APP_TOKEN, json.dumps(self.events) + json.dumps(self.notices))
                 # The same state again: no second event, no second notice (one cause, one warning).
@@ -562,10 +563,118 @@ class PushTests(GitRunnerCase):
         self.assertIn("refused", result["text"])
         self.assertEqual(self.remote_heads(), "")
 
-    def test_pull_is_fast_forward_only(self):
+    def test_pull_never_checks_out(self):
+        """C1: pull is a credentialed fetch only; a filter planted in the repository never runs in the worker."""
         self.assertTrue(self.runner.push(str(self.repo))["ok"])
-        self.assertTrue(self.runner.pull(str(self.repo))["ok"])
-        self.assertTrue(self.runner.fetch(str(self.repo))["ok"])
+        git(self.remote, "symbolic-ref", "HEAD", "refs/heads/main")
+        other = Path(self.temp.name) / "other"
+        subprocess.run(["git", "clone", "-q", str(self.remote), str(other)], check=True, capture_output=True)
+        (other / ".gitattributes").write_text("*.txt filter=planted\n")
+        (other / "new.txt").write_text("upstream\n")
+        git(other, "add", ".gitattributes", "new.txt")
+        git(other, "commit", "-q", "-m", "upstream change")
+        git(other, "push", "-q", "origin", "HEAD:main")
+        marker = self.markers / "smudge"
+        before = git(self.repo, "rev-parse", "HEAD").stdout
+        runner = self.runner
+        real_check = runner.check_config
+        planted = []
+
+        def plant_after_check(repo):
+            real_check(repo)
+            if not planted:  # the race: settings written after the check passed
+                planted.append(True)
+                git(self.repo, "config", "filter.planted.smudge", f"touch {marker}; cat")
+
+        with patch.object(runner, "check_config", side_effect=plant_after_check):
+            result = runner.pull(str(self.repo))
+        self.assertTrue(result["ok"], result["text"])
+        self.assertIn("git merge --ff-only origin/main", result["text"])
+        self.assertFalse(marker.exists(), "a planted filter ran in the worker")
+        self.assertFalse((self.repo / "new.txt").exists())
+        self.assertEqual(git(self.repo, "rev-parse", "HEAD").stdout, before)
+        self.assertEqual(git(self.repo, "rev-parse", "origin/main").stdout,
+                         git(other, "rev-parse", "HEAD").stdout)
+        self.assertIn("settings changed while git ran", result["text"])
+        with self.assertRaises(gh.GitHubError):  # and from now on the planted setting refuses the repository
+            self.runner.fetch(str(self.repo))
+
+    def plant_after_check(self, runner, plant):
+        real_check = runner.check_config
+        done = []
+
+        def check(repo):
+            real_check(repo)
+            if not done:
+                done.append(True)
+                plant()
+
+        return patch.object(runner, "check_config", side_effect=check)
+
+    def test_settings_planted_after_the_check_never_run_in_fetch_or_push(self):
+        """The overrides, not the check, keep a hook, fsmonitor or ssh command planted in the gap from running."""
+        hook_marker, fsmonitor, ssh = (self.markers / name for name in ("hook", "fsmonitor", "ssh"))
+
+        def plant():
+            hooks = self.repo / ".git" / "hooks"
+            hooks.mkdir(exist_ok=True)
+            for name in ("reference-transaction", "pre-push", "post-checkout"):
+                (hooks / name).write_text(f"#!/bin/sh\ntouch {hook_marker}\n")
+                (hooks / name).chmod(0o755)
+            git(self.repo, "config", "core.fsmonitor", f"touch {fsmonitor}; false")
+            git(self.repo, "config", "core.sshCommand", f"touch {ssh}; false")
+
+        for operation in ("fetch", "push"):
+            with self.subTest(operation=operation):
+                for name in ("core.fsmonitor", "core.sshCommand"):
+                    git(self.repo, "config", "--unset-all", name, check=False)
+                for name in ("reference-transaction", "pre-push", "post-checkout"):
+                    (self.repo / ".git" / "hooks" / name).unlink(missing_ok=True)
+                (self.repo / "change.md").write_text(operation + "\n")
+                git(self.repo, "add", "change.md")
+                git(self.repo, "commit", "-q", "-m", operation)
+                with self.plant_after_check(self.runner, plant):
+                    result = getattr(self.runner, operation)(str(self.repo))
+                self.assertTrue(result["ok"], result["text"])
+                self.assertIn("settings changed while git ran", result["text"])
+                self.assertFalse(hook_marker.exists(), "a hook ran")
+                self.assertFalse(fsmonitor.exists(), "fsmonitor ran")
+                self.assertFalse(ssh.exists(), "the ssh command ran")
+
+    def test_a_redirect_planted_after_the_check_gets_no_token(self):
+        """A URL rewrite planted in the gap cannot be undone by the environment; the askpass helper answers
+        only github.com, so the redirected request gets no token (see the askpass test), and the run fails."""
+        credential = Path(self.temp.name) / "credential.json"
+        credential.write_text(json.dumps({"kind": "app", "token": APP_TOKEN}))
+        log = self.markers / "asked"
+        helper = Path(self.temp.name) / "askpass"
+        helper.write_text(f"#!{sys.executable} -I\n" + (WORKER / "github_askpass.py").read_text()
+                          .replace('CREDENTIAL = "/data/github/credential.json"', f"CREDENTIAL = {str(credential)!r}")
+                          .replace("def main(argv):", f"def main(argv):\n    open({str(log)!r}, 'a').write(repr(argv[1:]) + '\\n')"))
+        helper.chmod(0o755)
+        runner = gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO], config_root=self.config, askpass=str(helper))
+
+        def plant():
+            git(self.repo, "config", "url.http://127.0.0.1:9/.insteadOf", "https://github.com/")
+
+        real_origin = runner.origin_repository
+
+        def origin(repo):  # planted after the effective-URL check too, the last check before git runs
+            name = real_origin(repo)
+            plant()
+            return name
+
+        with patch.object(runner, "origin_repository", side_effect=origin):
+            result = runner.fetch(str(self.repo))
+        self.assertFalse(result["ok"])
+        self.assertNotIn(APP_TOKEN, result["text"])
+        if log.exists():
+            self.assertNotIn("github.com", log.read_text())  # never asked as GitHub, so never given the token
+
+    def test_the_overrides_clear_a_remote_proxy(self):
+        env = gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO]).env()
+        pairs = {env[f"GIT_CONFIG_KEY_{i}"]: env[f"GIT_CONFIG_VALUE_{i}"] for i in range(int(env["GIT_CONFIG_COUNT"]))}
+        self.assertEqual(pairs["remote.origin.proxy"], "")
 
 
 class CloneLinkTests(GitRunnerCase):
