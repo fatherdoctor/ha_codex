@@ -18,6 +18,7 @@ import time
 import uuid
 from typing import Any, Callable, TextIO
 
+import remote_control
 from gate_rules import names_image_folder
 
 
@@ -691,6 +692,9 @@ class AppServerSession:
                 raise ValueError("invalid app-server message")
             method = message.get("method")
             params = message.get("params") or {}
+            if remote_control.record_exec_rules_warning(message):
+                self.fail(remote_control.EXEC_RULES_WARNING)
+                return
             if "id" in message and method:
                 if not self.is_active():
                     self.close()

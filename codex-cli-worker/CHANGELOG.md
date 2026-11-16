@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.2 (unreleased)
+
+- Codex now refuses risky commands in two layers. Managed Codex command rules refuse six literal command
+  prefixes: the Supervisor (`ha supervisor`, `ha super`, `ha su`), credentials, the app's policy folder and
+  full access. They apply with Remote Control off too. The command hook stays the main check. The app tests
+  that Codex loads the rules before Remote Control starts. A rules warning stops chat turns and keeps Remote
+  Control off until the app restarts after a repair. A failed or timed-out rule test is tried again on the next
+  **Turn on**. The probe's process group is always stopped. DOCS says how an owner allow rule and the prefix
+  limits change these checks.
+- A Turn on request that races a rules warning now leaves Remote Control saved as off.
+- The command hook joins a backslash and newline inside a word, as the shell does, so `h\` on one line and
+  `a su info` on the next is read as `ha su info`. Continuations it cannot read (in a heredoc, a substitution or
+  unreadable quoting) are refused with a request for a one-line command. Its text floor also reads the command
+  with every backslash and newline removed, in any quote or comment state. So a Supervisor command spelled
+  across lines is refused also in single quotes, after a carriage return, inside `${...}`, and in a shell or
+  wrapper that the parser does not open (`dash -c`, `setsid sh -c`, `bash --norc -c`).
+
 ## 0.3.1 (unreleased)
 
 - A repository in `/share` whose name starts with `ha_` can be used again with Remote Control on. The check

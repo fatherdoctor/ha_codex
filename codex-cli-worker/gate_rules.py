@@ -69,7 +69,7 @@ PROTECTED_COMMAND_RES = (
     (re.compile(r"/proc/\S*environ"), "reads a process environment, which can hold the Supervisor token"),
     (re.compile(r"\b(?:SUPERVISOR_TOKEN|HASSIO_TOKEN)\b"), "uses the Supervisor token"),
     (re.compile(r"/run/s6/container_environment"), "reads the app's saved environment, which holds the Supervisor token"),
-    (re.compile(r"https?://supervisor\b|\bsupervisor/|\bha\s+(?:supervisor|su)\b|\bbashio::", re.IGNORECASE),
+    (re.compile(r"https?://supervisor\b|\bsupervisor/|\bha\s+(?:supervisor|super|su)\b|\bbashio::", re.IGNORECASE),
      "talks to the Home Assistant Supervisor"),
     (re.compile(r"\.storage/+auth"), "reads Home Assistant's sign-in store"),
     (re.compile(r"secrets\.ya?ml"), "reads secrets.yaml"),
@@ -522,7 +522,7 @@ FULL_ACCESS_RE = re.compile(r"danger[-_]?full[-_]?access|dangerFullAccess|--dang
 
 HA_REMOTE_FAMILIES = frozenset(("addon", "addons", "add-on", "add-ons", "host", "os", "core",
                                 "hardware", "network", "backup", "backups", "apps"))
-HA_ALWAYS_FAMILIES = frozenset(("supervisor", "su"))
+HA_ALWAYS_FAMILIES = frozenset(("supervisor", "super", "su"))
 SHELL_ASSIGNMENT_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*=")
 # A conservative text floor also catches shell constructs the parser cannot place.
 # It reads the command with its quotes removed. The four documented value-taking
@@ -531,7 +531,7 @@ HA_TEXT_PREFIX = r"\bha\s+(?:(?:--(?:log-level|api-token|endpoint|config)(?:=\S+
 HA_REMOTE_TEXT_RE = re.compile(
     HA_TEXT_PREFIX + r"(?:add-?ons?|host|os|core|hardware|network|backups?|apps)\b", re.IGNORECASE)
 # The always-refused families get the same floor whether or not remote control is on.
-HA_ALWAYS_TEXT_RE = re.compile(HA_TEXT_PREFIX + r"(?:supervisor|su)\b", re.IGNORECASE)
+HA_ALWAYS_TEXT_RE = re.compile(HA_TEXT_PREFIX + r"(?:supervisor|super|su)\b", re.IGNORECASE)
 # Flag values and shell syntax can obscure the exact argument boundaries. The
 # always-refused families remain protected even when they follow such values.
 HA_SHELL_WORD_RE = re.compile(r"\bh[\"'\\]*a\b", re.IGNORECASE)
@@ -583,6 +583,62 @@ def _strip_comments(text: str) -> str:
         out.append(char)
         i += 1
     return "".join(out)
+
+
+def _join_shell_continuations(text: str) -> str | None:
+    """Remove only shell line joins; return None for forms we cannot read safely.
+
+    Single quotes retain the literal pair. A quoted script for a shell wrapper
+    gets another check when its own command is read.
+    """
+    if "\\\n" not in text:
+        return text
+    out: list[str] = []
+    quote = ""
+    comment = False
+    i = 0
+    while i < len(text):
+        char = text[i]
+        if not comment and quote != "'":
+            if text.startswith(("$(", "`"), i):
+                return None
+            if not quote and text.startswith(("<<", "$'", "<(", ">("), i):
+                return None
+        if comment:
+            # A backslash inside a comment does not escape its terminating newline.
+            if char == "\n":
+                comment = False
+        elif char == "\\" and quote != "'":
+            if text.startswith("\\\n", i):
+                i += 2
+                continue
+            out.append(text[i:i + 2])
+            i += 2
+            continue
+        elif quote:
+            if char == quote:
+                quote = ""
+        elif char in "'\"":
+            quote = char
+        elif char == "#" and (not out or out[-1] in WORD_BREAKS):
+            comment = True
+        out.append(char)
+        i += 1
+    return None if quote else "".join(out)
+
+
+def _floor_texts(text: str, joined: str) -> tuple[str, str]:
+    """Return the two readings of a command that the text floor checks, without quotes or backslashes.
+
+    The first reading joins continuations as the shell does. The second removes every
+    backslash-newline pair, in any quote or comment state. The second reading does not depend on
+    where this module thinks a comment, a quote or a nested shell script starts, so an error in
+    that model cannot hide a Supervisor command. The cost is a refusal of a single-quoted literal
+    pair that spells one; the floor already refuses such a spelling in a comment.
+    """
+    unquoted = r"[\"'`\\]"
+    unjoined = text.replace("\\\n", "")
+    return re.sub(unquoted, "", joined), re.sub(unquoted, "", unjoined)
 
 
 def _split_words(text: str, punctuation: str) -> list[str]:
@@ -654,10 +710,13 @@ def _shell_substitutions(text: str) -> tuple[str, list[str]]:
 
 
 def _ha_supervisor_command(text: str, depth: int = 0) -> bool:
-    """Find ha su/supervisor in a simple command, without executing shell text."""
+    """Find literal Supervisor CLI aliases without executing shell text."""
     if depth > 6:
         return False
-    masked, nested = _shell_substitutions(text.replace('\\\n', ' '))
+    joined = _join_shell_continuations(text)
+    if joined is None:
+        return True
+    masked, nested = _shell_substitutions(joined)
     if any(_ha_supervisor_command(item, depth + 1) for item in nested):
         return True
     tokens = _shell_words(masked, ';&|()\n')
@@ -748,7 +807,10 @@ def _ha_command(text: str, remote_on: bool, depth: int = 0) -> bool:
     """
     if depth > 3:
         return False
-    tokens = _shell_words(text.replace("\\\n", " "), ";&|()\n")
+    joined = _join_shell_continuations(text)
+    if joined is None:
+        return True
+    tokens = _shell_words(joined, ";&|()\n")
     segments = []
     segment = []
     for token in tokens:
@@ -948,11 +1010,16 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
         for pattern, why in PROTECTED_COMMAND_RES:
             if pattern.search(text):
                 return f"This command {why}, which is never allowed."
-        # Quotes and backslashes only change how a word is spelled, so the floor reads without them.
-        plain_ha = re.sub(r"[\"'`\\]", "", text.replace("\\\n", " "))
+        # Join literal words before the conservative quote/backslash floor.
+        joined = _join_shell_continuations(text)
+        if joined is None:
+            return ("This command may hide a Home Assistant Supervisor command in a shell line continuation. "
+                    "Write the command on one line so it can be checked.")
+        floor = _floor_texts(text, joined)
         if (_ha_supervisor_command(text)
-                or HA_ALWAYS_TEXT_RE.search(plain_ha)
-                or (remote_on and (HA_REMOTE_TEXT_RE.search(plain_ha) or _ha_unknown_flag(text)))
+                or any(HA_ALWAYS_TEXT_RE.search(plain) for plain in floor)
+                or (remote_on and (any(HA_REMOTE_TEXT_RE.search(plain) for plain in floor)
+                                   or _ha_unknown_flag(text)))
                 or _ha_command(text, remote_on)):
             return "This command talks to the Home Assistant Supervisor, which is never allowed."
     return ""
