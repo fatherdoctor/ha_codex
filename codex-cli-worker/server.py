@@ -3529,11 +3529,19 @@ def login_qr_svg(url: str) -> bytes:
 
 
 def cancel_codex_login() -> dict[str, Any]:
-    """Stop a running sign-in, clear its code and link, and return the sign-in state."""
+    """Stop a running sign-in, clear its code and link, and return the sign-in state.
+
+    The sign-in is marked canceled before its process stops. The sign-in thread wakes when the process
+    exits, and it must already see the cancel, or it reports a failure that did not happen.
+    """
     global auth_process
     with auth_lock:
         proc = auth_process if auth_process is not None and auth_process.poll() is None else None
         auth_process = None
+        auth_state.update(
+            status="canceled", canceled_login_id=auth_state.get("login_id"), completed_at=utc_now(),
+            updated_at=utc_now(), **CLEARED_SIGN_IN_CODE,
+        )
     if proc is not None:
         proc.terminate()
         try:
@@ -3541,11 +3549,14 @@ def cancel_codex_login() -> dict[str, Any]:
         except subprocess.TimeoutExpired:
             proc.kill()
     dismiss_persistent_notification(AUTH_NOTIFY_ID)
-    update_auth_state(
-        status="canceled", completed_at=utc_now(), verification_url="", user_code="", qr_url="", output="", error="",
-        expires_at="", code_deadline=None,
-    )
     return auth_status_payload()
+
+
+# The sign-in state fields that hold a code, its link and its lifetime, cleared when a sign-in ends.
+CLEARED_SIGN_IN_CODE = {
+    "verification_url": "", "user_code": "", "qr_url": "", "output": "", "error": "", "expires_at": "",
+    "code_deadline": None,
+}
 
 
 def parse_login_output(text: str) -> dict[str, str]:
@@ -3658,7 +3669,7 @@ def auth_reader_thread(handle, login_id: str | None = None) -> None:
             break
         if login_id is not None:
             with auth_lock:
-                if auth_state.get("login_id") != login_id:
+                if auth_state.get("login_id") != login_id or auth_state.get("canceled_login_id") == login_id:
                     return
         cleaned = clean_cli_text(line)
         buffer += cleaned
@@ -3733,29 +3744,35 @@ def run_codex_device_login(login_id: str) -> None:
     reader.start()
     returncode = proc.wait()
     reader.join(timeout=5)
+    signed_in = returncode == 0 and codex_login_status().get("status_ok")
+    # Decide and record the outcome under one lock, so a Cancel or a new sign-in cannot slip in between.
     with auth_lock:
         # "Get a new code" cancels this sign-in and starts the next at once; that one's process and
         # state are left alone.
         if auth_process is proc:
             auth_process = None
-        replaced = auth_state.get("login_id") != login_id
-    if replaced:
-        return
+        if auth_state.get("login_id") != login_id:
+            return
+        if auth_state.get("canceled_login_id") == login_id:
+            # The user pressed Cancel; that is not a failure to report. A line the reader wrote just
+            # before the cancel may have put the code back, so it is cleared again.
+            if auth_state.get("status") in SIGN_IN_PENDING:
+                auth_state.update(status="canceled", updated_at=utc_now(), **CLEARED_SIGN_IN_CODE)
+            return
+        if signed_in:
+            auth_state.update(status="completed", completed_at=utc_now(), updated_at=utc_now(), returncode=returncode)
+        else:
+            reason = sign_in_failure_reason(returncode)
+            auth_state.update(
+                status="failed", completed_at=utc_now(), updated_at=utc_now(), returncode=returncode, error=reason,
+            )
 
-    if returncode == 0 and codex_login_status().get("status_ok"):
-        update_auth_state(status="completed", completed_at=utc_now(), returncode=returncode)
+    if signed_in:
         dismiss_persistent_notification(AUTH_NOTIFY_ID)
         forget_default_model()
         notify("Codex sign-in complete", "Codex CLI is now authenticated for the Home Assistant worker.")
         refresh_usage_status_async(force=True)
     else:
-        with auth_lock:
-            canceled = auth_state.get("status") == "canceled" and auth_state.get("login_id") == login_id
-        if canceled:
-            # The user pressed Cancel; that is not a failure to report.
-            return
-        reason = sign_in_failure_reason(returncode)
-        update_auth_state(status="failed", completed_at=utc_now(), returncode=returncode, error=reason)
         notify("Codex sign-in failed", reason)
 
 

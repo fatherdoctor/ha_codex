@@ -129,10 +129,41 @@ class SignInTests(_Worker):
         with patch.object(server.subprocess, "Popen") as popen, patch.object(server, "update_auth_state") as update:
             popen.return_value.stdout = io.StringIO("")
             popen.return_value.wait.return_value = -15
-            server.auth_state.update({"status": "canceled", "login_id": "L1"})
+            server.auth_state.update({"status": "canceled", "login_id": "L1", "canceled_login_id": "L1"})
             update.side_effect = lambda **kw: None
             server.run_codex_device_login("L1")
         server.notify.assert_not_called()
+
+    def test_cancel_of_a_real_sign_in_process_raises_no_failure_notice(self):
+        """A real child process stands in for `codex login`, so the sign-in thread wakes when Cancel stops it.
+
+        Cancel must be recorded before the process stops; otherwise the thread sees a stopped sign-in that is
+        not canceled and reports a failure.
+        """
+        fixture = Path(__file__).resolve().parent / "fixtures" / "codex-login-device-auth.txt"
+        child = [sys.executable, "-c",
+                 "import sys, time; sys.stdout.write(open(sys.argv[1]).read()); sys.stdout.flush(); time.sleep(30)",
+                 str(fixture)]
+        real_popen = server.subprocess.Popen
+
+        def start_child(*_args, **kwargs):
+            return real_popen(child, stdout=kwargs["stdout"], stderr=kwargs["stderr"], text=True)
+        for attempt in range(3):
+            with self.subTest(attempt=attempt), patch.object(server.subprocess, "Popen", side_effect=start_child):
+                server.notify.reset_mock()
+                before = set(server.threading.enumerate())
+                server.start_codex_login_flow()
+                for _ in range(250):
+                    if server.auth_state.get("user_code"):
+                        break
+                    server.time.sleep(0.02)
+                self.assertEqual(server.auth_state.get("user_code"), "ABCD-EFGH2")
+                server.cancel_codex_login()
+                for started in set(server.threading.enumerate()) - before:
+                    started.join(timeout=10)
+                server.notify.assert_not_called()
+                self.assertEqual(server.auth_state["status"], "canceled")
+                self.assertEqual(server.auth_state["user_code"], "")
 
     def test_the_code_lifetime_is_read_and_counted_by_the_worker(self):
         """The page gets the seconds left from the worker's clock, never the private monotonic deadline."""
