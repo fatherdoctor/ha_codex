@@ -1,6 +1,6 @@
 name: Codex for Home Assistant
 description: Run Codex CLI tasks against the Home Assistant config folder.
-version: "0.1.81.2"
+version: "0.3.1"
 slug: codex_cli_worker
 url: https://github.com/fatherdoctor/ha_codex
 image: ghcr.io/fatherdoctor/codex-cli-worker
@@ -19,12 +19,16 @@ map:
   - type: homeassistant_config
     read_only: false
     path: /config
+  - type: share
+    read_only: false
 homeassistant_api: true
 hassio_api: true
 backup_exclude:
   - "*/ha-docs*"
   - "*/ha-data*"
   - "*/.ssh"
+  - "*/github"
+  - "*/github.sock"
 discovery:
   - codex_cli
 options:
@@ -45,6 +49,7 @@ options:
   local_docs: true
   ha_url: ""
   remote_control_name: Home Assistant
+  install_integration: true
 schema:
   codex_model: list(default|gpt-6-astra|gpt-6.1-sol|gpt-6.1-terra|gpt-6-sol|gpt-6-luna|gpt-5.6-sol|gpt-5.6-terra|gpt-5.6-luna|gpt-5.5)
   model_pin: str?
@@ -53,6 +58,7 @@ schema:
   codex_sandbox: list(workspace-write|read-only)
   task_root: str
   notify_service: str?
+  github_client_id: str?
   task_timeout_seconds: int
   task_stall_seconds: int(0,86400)
   auto_save_lovelace: bool
@@ -65,3 +71,4 @@ schema:
   ha_url: str?
   HA_TOKEN: password?
   remote_control_name: str?
+  install_integration: bool

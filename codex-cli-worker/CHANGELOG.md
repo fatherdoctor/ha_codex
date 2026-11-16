@@ -1,24 +1,94 @@
 # Changelog
 
+## 0.3.1 (unreleased)
+
+- A repository in `/share` whose name starts with `ha_` can be used again with Remote Control on. The check
+  that keeps Codex out of the app's policy folder `/usr/share/ha_codex` refused every command that named
+  `/share/ha_` anywhere, so even `git -C /share/ha_<name> status` was refused as a policy change. The check now
+  allows the plain absolute `/share/ha_<name>` and its subfolders. Every other way to reach the policy folder is
+  still refused: a relative `share/ha_...` (the text cannot tell whether the command runs in `/usr`),
+  `../share/ha_...`, globs such as `/usr/sh*/ha_*`, braces, quotes, backslashes, and a variable or command
+  substitution before `/share/ha_` or `/ha_codex`. The command check and the approval check use the same rule.
+- The credentialed `git fetch` and `git push` now pin the TLS trust: the system CA bundle and CA folder are set
+  for git, and `http.sslCAInfo`, `http.sslCAPath`, `http.proxy`, `http.extraHeader`, `http.cookieFile`,
+  `http.saveCookies` and `http.curloptResolve` are reset for the run. A CA file or folder left in a repository's
+  git settings, in any `http.<url>` form, is never trusted for the GitHub sign-in.
+
+- Codex now refuses risky commands in two layers. Managed Codex command rules refuse six literal command
+  prefixes: the Supervisor (`ha supervisor`, `ha super`, `ha su`), credentials, the app's policy folder and
+  full access. They apply with Remote Control off too. The command hook stays the main check. The app tests
+  that Codex loads the rules before Remote Control starts. A rules warning stops chat turns and keeps Remote
+  Control off until the app restarts after a repair. A failed or timed-out rule test is tried again on the next
+  **Turn on**. The probe's process group is always stopped. DOCS says how an owner allow rule and the prefix
+  limits change these checks.
+- A Turn on request that races a rules warning now leaves Remote Control saved as off.
+- The command hook joins a backslash and newline inside a word, as the shell does, so `h\` on one line and
+  `a su info` on the next is read as `ha su info`. Continuations it cannot read (in a heredoc, a substitution or
+  unreadable quoting) are refused with a request for a one-line command.
+
+## 0.3.0 (unreleased)
+
+- GitHub sign-in (release 0.3). **Settings > GitHub**, beside the ChatGPT account, connects GitHub with
+  buttons only: **Connect GitHub** shows GitHub's device code and the `github.com/login/device` link on the
+  page, then **Read test**, **Check now**, **Accept this access**, **Disconnect** (with the link to revoke on
+  GitHub) and **Use a token instead** for one fine-grained token. **Clone** (into `/share/<repository>`) and **Link**
+  (a folder under `/share` or `/config`) set up a repository. The code and the token are never logged or kept in browser storage.
+- The app keeps the sign-in in `/data/github`, hidden in every Codex sandbox and left out of the app backup.
+  Codex never holds it: the new `github_git` tool (repos, fetch, pull, push, clone, link) asks the app to run
+  git, and every push runs the kit's push guard first. Read-only chats and schedules can only list and fetch.
+  A push that adds a `guard: allow` mark is refused, because an allow mark needs the owner. GitHub refuses
+  changes to `.github/workflows/*` with Contents-only access. A page button for allow marks and a list of the
+  git folders on this box come in 0.3.1.
+- The app checks the sign-in at start, hourly and on **Check now**. A change fires the event
+  `codex_cli_github_access`, sends one notification (`codex_cli_github`), shows a banner above the chat, and
+  the integration raises the repair `github_access_lost` until the check is OK or the sign-in is disconnected.
+  The new option `github_client_id` is for an owner who registered their own GitHub App.
+
+- The app now installs its own integration. At each start it copies the Codex integration of the same
+  release, carried in the app image, to `/config/custom_components/codex_cli`, then asks for one restart of
+  Home Assistant in a notification. It writes only when the folder is missing or was written by the app
+  (a marker file in the folder names the copy), keeps the previous copy in the app's own storage, and
+  swaps the new folder in by renaming, so a failed copy leaves the old folder in place. The new copy is
+  written in `/config/.codex_cli_install`, outside `custom_components`, so Home Assistant never loads a
+  partial copy. A folder installed another way (Marketplace, HACS or by hand), or changed after the app wrote
+  it, is never changed; a notification says so once per app version. A restart notice that Home Assistant
+  could not show is posted again at the next start.
+  The new `install_integration` option (default on) turns the copy off. Uninstalling the app leaves the
+  integration in place.
+- The app announces itself through Supervisor discovery at each start, so after the restart
+  **Settings** > **Devices & services** shows **Discovered: Codex**. Setup from discovery now asks for
+  confirmation before it adds the integration, and shows a connection error on the form instead of ending.
+- The app repository's maintainer is now The Backshop.
+- The app announces itself through Supervisor discovery only once Home Assistant has loaded the integration,
+  so a fresh install no longer logs `Cannot find integration codex_cli` with a traceback before the restart.
+  It checks once a minute in the background and never delays the worker's start.
+- The "integration left as installed" notification is removed once the folder is the app's own again.
+- A restart of the app while Codex is not signed in no longer posts a new one-time code each time. The app
+  starts one sign-in by itself; later starts say to choose **Sign in** instead, until a start finds Codex
+  signed in.
+- Smaller fixes: the install notice no longer says to finish setup for an integration that may already be set
+  up; a file name that cannot be encoded is reported like any failed copy; a damaged notice record is not
+  replayed; the documentation says how to go back to a version before 0.3.0.
+
 ## 0.1.81.2 (unreleased)
 
-- Keep remote control saved as off when a rule warning races a Turn on request.
-  Commit the saved choice and warning check as one decision.
-- Join literal shell line continuations without a space, while preserving single-quoted data.
-  Refuse continuations in forms the command check cannot read safely; ask for a one-line command.
+- Expire agent copies 48 hours after their first read so old mailbox pages keep stable positions.
+  Settings acknowledges only the owner mailbox; agent labels follow the active turn.
+  Prior read marks receive a one-time upgrade grace period.
+- Upgrade note: legacy messages without a Codex read mark remain unread. If its mailbox is full,
+  read those messages through Codex or clear its mailbox in Settings. Then send more mail to `all`.
+  This preserves unread history without an assumed read date.
+
+- Let the authenticated lead direct worker tasks on its own initiative, including an explicit task attached
+  to a mailbox note. Hold one durable waiting task while busy and report start/result in the same thread;
+  keep native human approval and unattended daily limits. The worker cannot start lead work.
+- Give each reader a 128-message mailbox, retain unread mail across absences, expire only read agent mail
+  after 48 hours, and refuse all-unread full delivery with a visible status. Add per-mailbox clear confirmation,
+  UTC message envelopes, local-time/plain views, due status, source labels and bounded lead mailbox pages.
 
 - Document why the pinned CLI cannot supply a ChatGPT sign-in deadline: access tokens refresh and
   refresh-grant expiry is not exposed. Keep the existing signed-out Repair without a guessed expiry
   sensor, warning countdown or advance push; test that elapsed time alone does not require sign-in.
-- Finish stopping the rule-load probe's process group even when its launcher exits first.
-  Escalate remaining group members after the grace period and refuse startup if cleanup cannot finish.
-- Add native managed refusals for literal Supervisor, credential, app-policy and full-access commands,
-  alongside the semantic command hook. Include all three Supervisor aliases in both layers.
-  Check the native rules before remote control starts. Rule-load warnings stop chat turns and
-  keep remote control unavailable until the app restarts after repair.
-- Retry a timed-out or failed probe launch after cleanup. Match only the native rule-load summary.
-  Save the concurrent warning updates in order. Document how owner allow rules and prefix limits affect these checks.
-  The rules always apply in this version. A setting to disable each check comes later.
 - A scheduling or mailbox tool asked for more than 20 items now gets the first 20 and a `next_offset`,
   instead of a refusal. Codex asked `read_mailbox` for 50 messages when told to summarize the unread mail,
   and the only answer was "Invalid, refused or expired scheduling request.", so it could not correct

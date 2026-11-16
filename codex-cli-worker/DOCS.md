@@ -176,6 +176,52 @@ The API token protects the worker HTTP API. The app stores it in private app sto
 
 The token is not your OpenAI or ChatGPT credential. Codex authentication is still handled separately with `codex login`.
 
+## Integration install
+
+From **0.3.0** the app installs and updates the Codex integration itself, so one install and one restart of
+Home Assistant set up both parts. The app image carries the integration of the same release. At each start,
+before the worker starts, the app compares it with `/config/custom_components/codex_cli`:
+
+| The folder | What the app does |
+|---|---|
+| Missing | Writes the integration, then shows a notification: restart Home Assistant to finish setup. |
+| Written by the app, from another copy, and not changed since | Keeps the old folder in the app's storage (`/data/integration_backup`), writes the new copy and swaps the two by renaming, then asks for a restart. |
+| Written by the app, from this copy, and not changed since | Nothing. |
+| Installed another way (Marketplace, HACS, by hand, or a symbolic link), or changed after the app wrote it | Nothing. A notification says so once for each app version; the app removes it once the folder is its own again. |
+
+The app knows its own folder by the marker file `.installed_by_app.json` in it, which names the app version and
+a digest of the files it wrote. If any file in the folder differs from that digest (another installer copied
+over it, or someone edited or removed a file), the folder is no longer the app's and the app leaves it alone.
+To move to the Marketplace or HACS, turn the option below off first. If a copy fails, for example on a full
+disk, the old folder stays in place and a notification says what failed. If Home Assistant cannot show the
+restart notification (for example while it is starting), the app posts it again at its next start. The step
+never stops the app from starting. The app log has one line for each start, beginning `Integration install:`.
+
+The app writes nothing else in `/config` except its work folder, `/config/.codex_cli_install`. The new copy is
+written there and the old folder is moved there during the swap. It is outside `custom_components`, so Home
+Assistant never loads from it, and the app empties it at every start while the option below is on. If it
+cannot be emptied, the app log says so.
+
+**Going back to the previous version:** the copy the app replaced is kept in the app's own storage
+(`/data/integration_backup/codex_cli`), which every backup of the app includes. To go back, restore the app's
+previous version from the backup Home Assistant offers before an app update. If that version is 0.3.0 or
+later, at its next start the app writes the integration of that version over its own folder and asks for a
+restart. An earlier version does not install the integration, so the newer integration stays: turn the option
+below off, copy `/data/integration_backup/codex_cli` back to `/config/custom_components/codex_cli` by hand, and
+restart Home Assistant.
+
+After the restart, the app's Supervisor discovery shows **Discovered: Codex** under **Settings** > **Devices &
+services**. The app announces itself only once Home Assistant has loaded the integration, so a fresh install
+logs no `Cannot find integration codex_cli` error before the restart. Choose **Add**, then **Submit**; the integration is added only after you confirm.
+
+**Option:** **Install the Codex integration** (`install_integration`, default on). Turn it off to install and update
+the integration yourself; the app then reads and writes nothing in `custom_components`. Discovery is announced
+either way, once Home Assistant has loaded the integration.
+
+**Uninstalling:** uninstalling the app leaves the integration in place, so that removing the app does not change
+Home Assistant behind your back. Delete the integration entry, uninstall the app, then delete
+`/config/custom_components/codex_cli` and restart Home Assistant.
+
 ## Integration check
 
 The app's web UI works without the **Codex** integration, but some features need it. From **0.1.71**, the web UI shows a line at the top of the chat, above the messages, in three cases:
@@ -257,7 +303,7 @@ Codex needs to be able to write to the backup folder. In `workspace-write` mode 
 ## Sandbox
 
 - `read-only`: Codex can inspect files. Writes and shell networking require permission for the specific action.
-- `workspace-write`: Codex can edit the mounted `/config` workspace. Shell networking and writes outside the workspace require permission. This remains the default setting.
+- `workspace-write`: Codex can edit the mounted `/config` workspace and the shared `/share` folder, the same `/share` access the Claude add-on has. Shell networking and writes elsewhere require permission. This remains the default setting.
 
 This fork has no `danger-full-access` mode. The upstream app's full-access mode turned the permission requests off; here the protected policy (below) refuses it, and an older setting that still names it stops the app at startup with a log line saying so.
 
@@ -474,6 +520,8 @@ Before starting sign-in, enable **Enable device code authorization for Codex** i
 
 For a managed workspace, an administrator may need to enable device-code login in the workspace permissions. See [Codex authentication](https://learn.chatgpt.com/docs/auth#preferred-device-code-authentication-beta).
 
+When the app starts and Codex is not signed in, it starts one sign-in by itself. If you restart the app before signing in, it does not post a new code at each start; the notification then says to choose **Sign in**. Once a start finds Codex signed in, a later sign-out or expiry gets one automatic sign-in again.
+
 The app posts a Home Assistant persistent notification containing a QR code, link, and one-time device code. The QR code opens the OpenAI device page; type the code from the same notification into that page. The app refreshes the notification when the code appears and detects completion automatically. You do not need to run `docker exec`.
 
 While the app is not signed in, a banner above the chat offers **Sign in**. During a sign-in, the banner and **Settings** show the one-time code in large letters, a QR code of the sign-in page served by the app itself, and the link. The code stays on screen, unchanged, until the sign-in completes or you press **Cancel**; pressing **Sign in** again keeps the running sign-in and its code. When a saved sign-in expires or is revoked, the banner returns and the integration raises a Home Assistant repair; the integration's **Signed in** binary sensor turns off.
@@ -485,6 +533,61 @@ Use **Settings > Sign out** in the app web UI or the Home Assistant action `code
 The app uses the built-in Supervisor token for Home Assistant notifications and dashboard saves through the Home Assistant Core API proxy. No Home Assistant long-lived access token is required.
 
 Sign-in uses your ChatGPT account and its Codex allowance. Availability and usage limits depend on your plan and workspace permissions. The worker does not provide an OpenAI API-key option for Codex tasks.
+
+## GitHub sign-in
+
+Release 0.3 lets the assistant fetch, pull, push, clone and link the GitHub repositories you choose. You do every step with a button in the app page: **Settings > GitHub**, just below **ChatGPT account**. No step needs a shell, and nothing about GitHub is typed into chat.
+
+The app keeps the sign-in in its own private folder, `/data/github`. That folder is hidden in every Codex sandbox, so a task cannot read it. Codex never holds the token. It calls one tool, `github_git`, and the app runs git for it. Every push goes through the kit's push guard first.
+
+### Connect
+
+1. Install the **Codex for Home Assistant** GitHub App on the repositories of your choice. Use GitHub's own page for this. You can change the set there later.
+2. In **Settings > GitHub**, press **Connect GitHub**. The card shows a code in large letters and a link to `github.com/login/device`.
+3. Open the link, type the code and approve the App. The card checks every 5 seconds and shows your account, the repositories it reaches and their access as soon as GitHub confirms. Press **Cancel** to stop a sign-in that is waiting. The code works for 15 minutes; after that, press **Connect GitHub** again for a new code.
+
+The App asks for Contents read and write only (GitHub adds Metadata read). The sign-in reaches only what you can reach and what the App was installed on. An App sign-in does not expire. It lasts until you revoke it on GitHub or uninstall the App.
+
+The code appears only on the page. The app does not write it to a log, and the page does not keep it in browser storage.
+
+### Use a token instead
+
+If you cannot install the App (for example, an organization forbids third-party Apps), open **Use a token instead**. Make a fine-grained token on github.com: **Settings > Developer settings > Fine-grained tokens**. Choose **Only select repositories** with one repository, **Contents: Read and write**, and an expiry of 90 days or less. Paste the token and the `owner/repository` name, then press **Use this token**. The app accepts a token only when it reaches that one repository and nothing more. The page clears the field at once and never shows the token again.
+
+### The card
+
+- **Read test** reads each connected repository once and shows the result.
+- **Check now** runs the access check at once (see below).
+- **Accept this access** appears when the repositories changed on GitHub but the access is still exactly Contents read and write. It makes the current set the one the check expects. If the access itself changed, change it back on GitHub instead.
+- **Disconnect** forgets the sign-in on this box. It cannot revoke it on GitHub, because that needs a secret the app does not carry. So the card then shows the link to revoke it: `https://github.com/settings/apps/authorizations` for the App, `https://github.com/settings/tokens` for a token. Disconnect waits while a task runs.
+- **Repositories on this box**: **Clone** copies a connected repository into a new folder directly under `/share`; the folder name starts as the repository's name, so a clone goes to `/share/<repository>`. **Link** points an existing git folder under `/share` or `/config` at a connected repository (it sets `origin`). Release 0.3 maps Home Assistant's `/share` folder read-write into the app for this. Neither writes a credential into the repository, so git on this box reaches GitHub with the sign-in only through the app. A list of the git folders on this box, with menus, comes in 0.3.1.
+
+You can also ask the assistant in chat to clone or link a connected repository. It uses the same `github_git` tool.
+
+### The `github_git` tool
+
+Codex can call `repos`, `fetch`, `pull`, `push`, `clone` and `link`, for connected repositories only and only during a chat or scheduled run. A read-only chat or schedule can only use `repos` and `fetch`. A pull fetches only; the assistant then fast-forwards the work tree in its own shell (`git merge --ff-only`), so the app never checks files out into a folder a task can change. A push never forces, deletes or pushes tags.
+
+Limits of a push:
+
+- **Workflow files.** GitHub refuses a push that changes `.github/workflows/*` with Contents-only access. Change workflow files on GitHub or from another computer.
+- **Allow marks.** When the push guard refuses a push, a line can be marked `guard: allow <reason>` to pass it. That mark needs the owner. The app refuses a push that adds such a mark, so a task cannot undo a refusal by itself. Add the mark yourself, outside the assistant. A page button for it is planned for 0.3.1.
+- **Names check.** The guard's household names check is off in 0.3.
+
+### Monitoring
+
+The app checks the sign-in at start, every hour, and when you press **Check now**. The states are: OK, expires within 7 days, expired, revoked, access changed (repositories missing or added, or access other than Contents read and write), and cannot be checked (GitHub unreachable three times in a row).
+
+When the state changes, and only then:
+
+- The app fires the Home Assistant event `codex_cli_github_access` with the state, the previous state, the reason, the account login, the missing and added repositories, the permission problem and the expiry. It never sends a token or a code. The integration fires the same event, with `source: integration`, when it sees the change, so an automation still works if the app's own call failed. An automation can route it to your notify service.
+- The app sends one notification through its `notify_service` option, or a persistent notification (`codex_cli_github`) without one.
+- The integration raises the repair **The Codex add-on's GitHub sign-in needs attention** (`github_access_lost`). It is an error for expired, revoked and cannot be checked, and a warning for expires soon and access changed. It clears when the check is OK or you disconnect. If you never connected, there is no repair.
+- A banner above the chat offers **Open GitHub settings**.
+
+### Backups
+
+`/data/github` is not in the app backup. After a restore, the card shows **Not connected**; press **Connect GitHub** again.
 
 ## Pausing the assistant
 
@@ -563,7 +666,7 @@ This feature does not add a per-operation policy engine or a preview transaction
 
 ### Storage, backups, and removal
 
-`/data/.ssh` is private to this worker app and persists across restarts and updates, but Codex tasks can read it. Never print private keys or paste them into chat, task prompts, logs, or `/config`. The app excludes the entire `.ssh` directory from Home Assistant app backups, including keys, connection configuration, and trusted host keys. After restoring a backup, set up connections again and revoke replaced public keys on the remote servers. These exclusions do not remove credentials already copied elsewhere or included in older backups.
+`/data/.ssh` is private to this worker app and persists across restarts and updates, but Codex tasks can read it. Never print private keys or paste them into chat, task prompts, logs, or `/config`. The app excludes the entire `.ssh` directory from Home Assistant app backups, including keys, connection configuration, and trusted host keys. The GitHub sign-in folder, `/data/github`, is excluded too (see [GitHub sign-in](#github-sign-in)). After restoring a backup, set up connections again and revoke replaced public keys on the remote servers. These exclusions do not remove credentials already copied elsewhere or included in older backups.
 
 To remove a connection, revoke its dedicated public key on the remote server, then remove its `Host` entry, local key files, and unused known-hosts entry through chat. Connections use only an SSH client; this feature does not start an SSH server or open an inbound worker port.
 
@@ -646,7 +749,7 @@ Messages are treated as untrusted text:
 - Images are never loaded from a message, because a remote image would tell its server that the message was read. They appear as links. Images that Codex generates or that you attach are shown as before.
 - A message longer than 50,000 characters, or one that takes unusually long to format, is shown as plain text.
 
-The Markdown parser, [marked](https://github.com/markedjs/marked) 18.0.14, is bundled with the app under `web/assets/vendor/` with its MIT license, so the chat does not load scripts from another server. Codex decides how it writes its answers; to ask for Markdown, add an instruction to `/config/AGENTS.md` as described under [Task Output](../docs/upstream-README.md#task-output).
+The Markdown parser, [marked](https://github.com/markedjs/marked) 18.0.14, is bundled with the app under `web/assets/vendor/` with its MIT license, so the chat does not load scripts from another server. Codex decides how it writes its answers; to ask for Markdown, add an instruction to `/config/AGENTS.md` as described under [Task output](../custom_components/codex_cli/README.md#task-output).
 
 ### Queueing messages while another chat works
 
@@ -755,19 +858,47 @@ The API is served by the same worker HTTP listener as the existing local API. Th
 
 | Method and path | Purpose and fields |
 |---|---|
-| `POST /lead/tasks` | `{"prompt":"Inspect the sample configuration.","mode":"read-only"}` starts an ordinary task and returns `task_id`. A busy or paused worker refuses it; it is not silently queued or retried. The daily unattended-run limit applies. |
+| `POST /lead/tasks` | `{"prompt":"Inspect the sample configuration.","mode":"read-only"}` starts an ordinary task and returns `task_id`. A busy worker durably holds one waiting task; a second waiting task returns 409 with a reason. A paused worker refuses new tasks; an already waiting task remains held. The response includes `status: queued` or `waiting`; the waiting handle can be polled below. The daily unattended-run limit applies. |
 | `GET /lead/tasks/<task_id>` | Read a lead-submitted or scheduled task's saved result and pending-approval status. Unrelated human chats return not found. It cannot answer an approval. |
 | `GET /lead/schedules` | Read saved schedules and proposals. |
 | `POST /lead/schedules` | Propose `{"name":"Sample inspection","prompt":"Inspect the sample configuration.","mode":"read-only","spec":{"kind":"interval","seconds":3600}}`. The result has `approved:false` and `enabled:false`. |
 | `PATCH /lead/schedules/<id>` | Replace only a lead-authored, unapproved proposal with those same four fields. Approved schedules and proposals by other authors return 404. Every edit changes the review revision. Other specification shapes are `{"kind":"cron","expression":"0 9 * * 1-5"}` and `{"kind":"once","at":"2027-03-12T09:00:00Z"}`; choose a future time. |
 | `DELETE /lead/schedules/<id>` | Delete only a lead-authored, unapproved proposal. |
-| `GET /lead/mailbox` | Read local plain-text messages and replies. |
-| `POST /lead/mailbox` | Save `{"body":"A local sample message.","turn_id":"unique-lead-turn"}` as a new thread. |
-| `POST /lead/mailbox/<message_id>/reply` | Save `{"body":"A local sample reply.","turn_id":"unique-lead-turn"}` on that root thread. |
+| `GET /lead/mailbox` | Read and acknowledge only the returned page of local messages. Optional `offset` (0–500, including legacy unread mail), `limit` (clamped to 1–20, default 10), `unread_only=true`; follow `next_offset` until null. For consuming unread pages the next offset is 0 because acknowledged rows leave that view. |
+| `POST /lead/mailbox` | Save `{"message":"A local sample message.","to":"codex","turn_id":"unique-lead-turn"}` as a new thread. Optional `due` and `task:{"prompt":"Inspect the sample.","mode":"read-only"}`; an attached task atomically saves the note and accepts the task for immediate dispatch or the single durable waiting slot (202). Invalid/full/second-slot requests save neither. Start and final-result replies appear in this same thread. |
+| `POST /lead/mailbox/<message_id>/reply` | Save `{"message":"A local sample reply.","to":"codex","turn_id":"unique-lead-turn"}` on that root thread. Optional `due`; replies do not accept a task. |
 
-The page shows the same mailbox and can post or reply. Messages remain plain text, confer no authority and never execute themselves or reach an external recipient. A lead explicitly submits a separate task if it wants work performed. The mailbox retains at most 500 messages, pruning the oldest other thread (including replies) when full. If only the current reply thread fills it, its oldest replies are pruned. Lead and Codex each have limits of 20 writes per turn and 64 per UTC day, returning HTTP 429 for lead writes at the limit. The lead supplies a stable `turn_id`; Codex’s turn comes from its verified exchange. Usage counters survive message clearing and app restarts. The owner is not rate limited. `DELETE /lead/mailbox` clears lead-authored root threads and replies; `DELETE /lead/mailbox/<id>` clears one such thread. Administrator page controls can clear all threads or delete one. Clearing does not execute anything or reset write limits. No lead endpoint creates permanent permissions, changes sandbox policy, approves a schedule or answers a native permission request. Owner management and token rotation require authenticated administrator Ingress, including a fresh check of the administrator identity under the existing cache rules.
+The lead-token holder may wake and direct the worker on its own initiative through these authenticated task routes. Codex on the worker may send mail to the lead, but cannot start work on the lead. Mail bodies remain untrusted text with no permission authority. An ordinary note does not execute; the optional `task` object is an explicit, authenticated lead task submission. No lead endpoint creates permanent permissions, changes sandbox policy, approves a schedule or answers a native permission request. The worker uses its ordinary launcher and human approval prompts. A waiting task survives restart, waits through a pause or daily unattended-run limit, and gets priority over due schedules when the ordinary slot is free. A task interrupted after reservation is reported, never automatically executed again.
 
-Schedule prompts containing recognized credentials are masked in responses and marked `prompt_redacted`; Edit is disabled so masked text cannot replace the saved prompt. Create a replacement with a complete prompt instead. All save routes reject the literal `[redacted]` marker. The private database and its journal/WAL/SHM paths are protected like the worker token from tool file access and native permission grants. A persistent SQLite journal is materialized before tasks or remote control start, so its mask remains present across transactions. Schema version 1 adds proposal authorship; legacy proposals without an attributable author remain owner-owned.
+Each reader (owner, lead, Codex) has its own 128-message mailbox. A sender receives a read copy. `to` selects owner, lead, codex or all (the legacy default). Replies also reach the thread's existing participants.
+
+The oldest read copies leave first. Unread copies never expire or leave to make room. A recipient full of unread mail refuses delivery with HTTP 409 and a plain reason. `mailbox.full` on `/status` identifies the affected reader. Delivery to multiple readers and write counters share one transaction.
+
+Legacy mailboxes above 128 keep their unread copies. They refuse new delivery until enough mail is read or cleared. Read copies reduce to the new count limit.
+
+Owner mail has no age cutoff. Lead and Codex copies expire 48 hours after their first read, on the next mailbox operation. A read therefore preserves the other pages of old mail in the same walk. Repeated reads do not restart that clock. Prior read marks without timestamps receive one 48-hour grace period at upgrade. When one reader clears mail or a copy expires, the other readers keep their copies and unread replies.
+
+**Upgrade note:** Legacy messages without a Codex read mark remain unread for Codex. A full Codex mailbox can refuse the default `all` destination. Read those messages through Codex, or clear its mailbox in Settings. Then send more mail to `all`.
+
+This preserves unread history. It does not assume that Codex saw older messages.
+
+The Settings mailbox selector lets an administrator inspect each mailbox without acknowledging another reader's mail. Only the owner mailbox acknowledges the IDs displayed on the page. The lead and Codex acknowledge their own reads. An administrator can clear any selected mailbox with an in-page confirmation. `DELETE /schedule-mailbox?mailbox=owner|lead|codex` requires `{"confirm":true}`. `DELETE /lead/mailbox` requires the same confirmation and clears only the lead's copy, regardless of sender; the lead cannot select another mailbox. The corresponding `/<root-id>` DELETE clears only that reader's thread copies. Clearing never executes a task or resets write limits. Owner management and token rotation require authenticated administrator Ingress, including a fresh administrator check under the existing cache rules.
+
+Responses put the consistent message fields in `envelope`, with delivery metadata (`id`, root `parent`, trusted `origin`) outside it:
+
+```json
+{"id":"message-id","parent":null,"origin":"","envelope":{"to":"codex","from":"lead","sent":"2027-03-01T00:00:00.000Z","last_modified":"2027-03-01T00:00:00.000Z","due":"2027-03-02T00:00:00.000Z","message":"Inspect the sample."}}
+```
+
+`due` is optional and sender-set; submit an ISO 8601 timestamp including a zone. Stored/API dates are normalized to UTC ISO 8601 with `Z`. Legacy mail initializes `last_modified` from `sent`. An edit updates that message. A reply updates the root thread message and retains the other replies' modification times. PATCH `/lead/mailbox/<id>` edits only the lead's own message (`message`, optional `due`); an administrator can edit via `/schedule-mailbox/<id>`. The page shows To, From, Sent, Last modified, Due when set, then Message in that order, using Core's configured time zone or explicitly labeled UTC when unavailable. The `text` plain view has those header labels, a blank line, then the body. `/status` includes unread due timestamps and overdue flags without bodies. Mailbox post labels come from the active turn, rather than its original task. Scheduled and lead-started turns carry their source; ordinary human continuations remain unlabeled.
+
+Lead and Codex ordinary writes remain limited to 20 per turn and 64 per actor per UTC day (HTTP 429 for lead writes). The lead supplies a stable `turn_id`; Codex's comes from its verified exchange. Counters survive clearing and restarts; owner writes are not rate limited. The two typed start/final replies for an accepted task use durable once-only flags and do not consume model write counters. They remain bounded by the 64 unattended tasks/day limit and mailbox capacity. If a recipient is full, the saved reply stage retries when space opens; this never reruns the task. Pending replies retain their run record beyond ordinary history pruning. The legacy `body` request field remains an alias for `message`, but responses use the envelope.
+
+The store removes completed task/thread links after every thread copy is gone. It keeps unfinished reply links for retry. An edit does not mark a message unread again. An accepted task keeps its stored prompt when its mail note changes.
+
+A task note without `to` goes to Codex and the lead. The owner can inspect that thread through the selector. A daily limit holds the single task slot until the next UTC day. Other lead tasks wait for that slot to clear.
+
+Schedule prompts containing recognized credentials are masked in responses and marked `prompt_redacted`; Edit is disabled so masked text cannot replace the saved prompt. Create a replacement with a complete prompt instead. All save routes reject the literal `[redacted]` marker. The private database and its journal/WAL/SHM paths are protected like the worker token from tool file access and native permission grants. A persistent SQLite journal is materialized before tasks or remote control start, so its mask remains present across transactions. Schema version 3 adds first-read retention timestamps. Version 2 added per-reader deliveries, UTC message envelopes and durable lead task/thread records; version 1 added proposal authorship; legacy proposals without an attributable author remain owner-owned.
 
 ## Export logs for a bug report
 
@@ -997,10 +1128,10 @@ or model task.
 
 The integration polls worker status every 30 seconds. Its **Mailbox unread for the lead** sensor counts
 retained posts from Codex and the owner that the lead has not read. A reader's own posts do not count as
-unread for that reader. The worker reports independent lead and owner counts in `mailbox.unread` on `/status`.
+unread for that reader. The worker reports independent owner, lead and Codex counts in `mailbox.unread` on `/status`.
 The lead reads and acknowledges its snapshot with `GET /lead/mailbox`; `?unread_only=true` returns only its
 unread messages and marks those returned IDs read. Owner reads are acknowledged only after the Settings
-page renders those message IDs. A message arriving after that snapshot remains unread. Reading never starts a task.
+page renders those message IDs in the owner mailbox. Viewing the lead or Codex mailbox does not acknowledge that reader's copies. A message arriving after that snapshot remains unread. Reading never starts a task.
 
 For each first-observed retained message or reply, the integration fires `codex_cli_mailbox_message` with
 only `message_id`, `thread_id`, `author` (`codex`, `lead` or `owner`) and `time` (Unix seconds). It never includes
@@ -1009,12 +1140,12 @@ If the saved IDs cannot be verified, no event fires and the next poll retries wi
 A restart reads the saved set, preventing replay after a failed write. A crash between saving and firing
 can still lose that event. The first connection also reports retained messages not observed previously. Normal delay
 is up to one 30-second poll plus request time. Messages removed or evicted before a poll cannot produce an event;
-use the sensor and unread filter to recover retained unread mail. Existing 500-message, 20-per-turn and
-64-per-actor-per-UTC-day limits remain unchanged.
+use the sensor and unread filter to recover retained unread mail. Per-reader 128-message retention protects unread mail; the 20-per-turn and
+64-per-actor-per-UTC-day model write limits still apply.
 
 Another local agent can watch the sensor's state, or an automation can listen for this event and tell it to
-read `GET /lead/mailbox?unread_only=true` with its existing lead credential. **A message never starts work by
-itself.** An agent woken by mail may reply, but starts a task on the other agent only with a person or an
-approved schedule behind it. Bodies are untrusted text, never executable instructions or authority. This signal
+read `GET /lead/mailbox?unread_only=true` with its existing lead credential. The lead-token holder may independently direct the worker through `/lead/tasks` or an explicit task attached
+to `/lead/mailbox`. A worker may send mail back but cannot start lead work. A plain arrival signal or body
+never executes a task, grants authority or answers a human permission prompt. This signal
 adds no task dispatch, notification send, permission bypass or new agent connection. An unavailable mailbox
 leaves the sensor unknown and does not create arrival events.

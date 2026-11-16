@@ -1943,3 +1943,55 @@ dialog label {
 .permission-row input:checked + .ha-permission-switch::after { transform:translateX(24px); background:var(--ha-switch-checked-thumb-background-color,var(--ha-color-on-primary-normal,var(--switch-checked-button-color,var(--card-background-color,#fff)))); }
 .permission-row input:focus-visible + .ha-permission-switch { outline:2px solid var(--primary-color,#03a9f4); outline-offset:4px; }
 .permission-row input:disabled + .ha-permission-switch { opacity:var(--ha-switch-disabled-opacity,.3); }
+
+/* GitHub sign-in card: beside the ChatGPT account, same code style. */
+.github-details {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 8px 0;
+  font-size: 12px;
+}
+.github-details dt {
+  color: var(--muted);
+}
+.github-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.github-repositories {
+  margin: 4px 0 8px;
+  padding-left: 1.25rem;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.github-repositories .github-extra,
+.github-repositories .github-missing {
+  font-weight: 600;
+}
+.github-repositories .github-missing {
+  color: var(--error);
+}
+.github-form {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0;
+}
+.github-form input,
+.github-form select {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+#github-section details summary {
+  cursor: pointer;
+  font-size: 13px;
+  margin-top: 8px;
+}
+#github-result.error {
+  color: var(--error);
+}
+#github-result {
+  overflow-wrap: anywhere;
+}

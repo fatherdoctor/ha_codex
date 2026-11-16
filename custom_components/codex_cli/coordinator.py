@@ -15,12 +15,26 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import CodexCliApiClient, CodexCliApiError, CodexCliAuthError
-from .const import DEFAULT_SCAN_INTERVAL_SECONDS, DOMAIN
+from .const import (
+    DEFAULT_SCAN_INTERVAL_SECONDS,
+    DOMAIN,
+    EVENT_GITHUB_ACCESS,
+    GITHUB_ERROR_STATES,
+    GITHUB_WARNING_STATES,
+    ISSUE_GITHUB_ACCESS_LOST,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 ISSUE_NOT_SIGNED_IN = "codex_not_signed_in"
 ISSUE_REMOTE_CONTROL_CHANGE = "remote_control_config_change"
+GITHUB_STATE_WORDS = {
+    "near_expiry": "expires within 7 days",
+    "expired": "expired",
+    "revoked": "refused by GitHub (revoked)",
+    "access_changed": "reaches different repositories or access",
+    "failed": "cannot be checked",
+}
 
 
 class CodexCliCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -38,6 +52,7 @@ class CodexCliCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._mailbox_key = f"{DOMAIN}_mailbox_seen_{entry_id}"
         self._mailbox_store = Store(hass, 1, self._mailbox_key, atomic_writes=True)
         self._mailbox_seen: set[str] | None = None
+        self._github_state: str | None = None
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch the worker status and update the sign-in repair issue.
@@ -56,6 +71,7 @@ class CodexCliCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._async_update_mailbox(data)
         self._update_repair_issue(data)
         self._update_remote_control_issue(data)
+        self._update_github_issue(data)
         return data
 
     async def _async_update_mailbox(self, data: dict[str, Any]) -> None:
@@ -142,5 +158,55 @@ class CodexCliCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "where": where,
                 "what": str(first.get("reason") or "a refused action"),
                 "text": str(first.get("text") or ""),
+            },
+        )
+
+    def _update_github_issue(self, data: dict[str, Any]) -> None:
+        """Raise a repair while the add-on's GitHub sign-in is lost or changed, and fire one event per change.
+
+        A worker without the GitHub sign-in (no "github" key) changes nothing. An owner who never connected gets
+        no repair. Only names and states are copied; the worker never reports a token or a device code here.
+        """
+        github = data.get("github")
+        if not isinstance(github, dict):
+            return
+        state = github.get("state")
+        if not isinstance(state, str) or not state:
+            return
+        previous, self._github_state = self._github_state, state
+        account = github.get("account")
+        login = str(account.get("login") or "") if isinstance(account, dict) else ""
+        last = github.get("last_check")
+        reason = str(last.get("reason") or "") if isinstance(last, dict) else ""
+        if previous is not None and previous != state:
+            # The worker fires the same event through the Core API; this copy, marked by its source, still
+            # reaches house automations when that call failed. Names only, never a token.
+            self.hass.bus.async_fire(EVENT_GITHUB_ACCESS, {
+                "state": state, "previous_state": previous, "reason": reason, "account": login,
+                "missing": [str(item) for item in github.get("missing") or [] if isinstance(item, str)][:50],
+                "extra": [str(item) for item in github.get("extra") or [] if isinstance(item, str)][:50],
+                "permission_problem": github.get("permission_problem") if isinstance(github.get("permission_problem"), str) else None,
+                "expires_at": github.get("expires_at") if isinstance(github.get("expires_at"), str) else None,
+                "addon": "codex_cli_worker", "source": "integration",
+            })
+        if state in GITHUB_ERROR_STATES:
+            severity = ir.IssueSeverity.ERROR
+        elif state in GITHUB_WARNING_STATES:
+            severity = ir.IssueSeverity.WARNING
+        else:
+            # ok, disconnected, connecting: nothing to repair.
+            ir.async_delete_issue(self.hass, DOMAIN, ISSUE_GITHUB_ACCESS_LOST)
+            return
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            ISSUE_GITHUB_ACCESS_LOST,
+            is_fixable=False,
+            severity=severity,
+            translation_key=ISSUE_GITHUB_ACCESS_LOST,
+            translation_placeholders={
+                "state": GITHUB_STATE_WORDS.get(state, state),
+                "reason": reason or "no reason given",
+                "account": login or "the connected account",
             },
         )

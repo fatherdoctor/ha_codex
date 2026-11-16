@@ -49,7 +49,8 @@ jobs:
             if [ "${PUBLISH_LATEST}" = "true" ]; then
               echo "latest"
             else
-              echo "${GITHUB_REF_NAME}"
+              # Image tags cannot hold a slash, so a branch like builder/x becomes builder-x.
+              echo "${GITHUB_REF_NAME//\//-}"
             fi
             echo "EOF"
           } >> "${GITHUB_OUTPUT}"
@@ -84,6 +85,11 @@ jobs:
       matrix: ${{ fromJSON(needs.init.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v6
+      - name: Bundle the integration into the app image
+        # The app installs this copy in /config at start (codex-cli-worker/integration/README.md).
+        run: |
+          rm -rf codex-cli-worker/integration/codex_cli
+          cp -R custom_components/codex_cli codex-cli-worker/integration/codex_cli
       - name: Build image
         uses: home-assistant/builder/actions/build-image@2026.03.2
         with:

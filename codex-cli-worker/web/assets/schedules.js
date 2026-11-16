@@ -4,6 +4,27 @@
   const el = (id) => document.getElementById(id);
   const dialog = el("settings");
   let timer;
+  let reader = "owner";
+  const selector = node("select", ""); selector.id = "schedule-mail-reader";
+  selector.setAttribute("aria-label", "Mailbox");
+  for (const role of ["owner", "lead", "codex"]) {
+    const option = node("option", role); option.value = role; selector.append(option);
+  }
+  selector.onchange = () => { reader = selector.value; cancelMailClear(); refresh(); };
+  el("schedule-mailbox").before(selector);
+  const recipient = node("select", ""); recipient.id = "schedule-mail-to";
+  recipient.setAttribute("aria-label", "To");
+  for (const role of ["all", "owner", "lead", "codex"]) {
+    const option = node("option", role); option.value = role; recipient.append(option);
+  }
+  const due = node("input", ""); due.id = "schedule-mail-due"; due.type = "text";
+  due.placeholder = "Optional ISO 8601 due time, including zone";
+  due.setAttribute("aria-label", "Due (optional, include time zone)");
+  el("schedule-mail-body").before(node("label", "To"), recipient, node("label", "Due (optional)"), due);
+  const mailboxPath = path => `${path}?mailbox=${reader}`;
+  function mailWhen(value) {
+    return `${new Intl.DateTimeFormat(undefined, {timeZone: zone || "UTC", dateStyle: "medium", timeStyle: "medium"}).format(new Date(value))} (${zone || "UTC"})`;
+  }
   let zone = null;
   let refreshing = false;
   let clearConfirmation = false;
@@ -64,7 +85,7 @@
     if (refreshing || !dialog.open) return;
     refreshing = true;
     try {
-      const data = await api("schedules");
+      const data = await api(mailboxPath("schedules"));
       zone = data.timezone || null; format();
       el("schedule-timezone").textContent = zone ? `Home Assistant time zone: ${zone}` : data.timezone_error;
       const list = el("schedule-list"); list.replaceChildren();
@@ -91,17 +112,19 @@
       if (!data.runs.length) runs.append(node("p", "No runs yet.", "muted"));
       el("lead-token-status").textContent = data.lead_token_configured ? "A lead token is configured." : "No lead token is configured.";
       const mailbox = el("schedule-mailbox"); mailbox.replaceChildren();
+      const mailboxStatus = data.mailbox_status;
+      if (mailboxStatus?.full[reader]) mailbox.append(node("p", "Mailbox full of unread messages. Read or clear it before sending more.", "muted"));
       if (data.mailbox.length) {
         if (clearConfirmation) {
           const confirmation = node("div", "");
           confirmation.id = "schedule-mail-clear-confirmation";
           confirmation.setAttribute("role", "group");
           confirmation.setAttribute("aria-label", "Clear mailbox confirmation");
-          confirmation.append(node("p", "Delete all mailbox threads and replies? This cannot be undone."));
+          confirmation.append(node("p", "Delete every message in this mailbox? Other mailbox copies remain. This cannot be undone."));
           const actions = node("div", "", "settings-actions");
           const cancel = button("Cancel", cancelMailClear);
           actions.append(cancel, button("Clear all messages", async () => {
-            await api("schedule-mailbox", undefined, "DELETE");
+            await api(mailboxPath("schedule-mailbox"), {confirm: true}, "DELETE");
             cancelMailClear();
             el("schedule-mail-parent").value = "";
             el("schedule-mail-target").textContent = "New message";
@@ -114,14 +137,23 @@
       } else cancelMailClear();
       for (const mail of data.mailbox) {
         const item = node("div", "");
-        item.append(node("strong", `${mail.author} · ${when(mail.created)}${mail.parent ? " · reply" : ""}`), node("pre", mail.body));
+        const envelope = mail.envelope;
+        if (mail.origin) item.append(node("strong", mail.origin === "schedule" ? "Scheduled run" : "Started by lead"));
+        for (const key of ["to", "from", "sent", "last_modified", "due", "message"]) {
+          if (envelope[key] == null) continue;
+          const label = {to: "To", from: "From", sent: "Sent", last_modified: "Last modified", due: "Due", message: "Message"}[key];
+          const value = ["sent", "last_modified", "due"].includes(key) ? mailWhen(envelope[key]) : envelope[key];
+          item.append(node("strong", label), node(key === "message" ? "pre" : "p", value));
+        }
+        if (envelope.due && Date.parse(envelope.due) <= Date.now()) item.append(node("p", "Due / overdue", "muted"));
+        const plain = node("details", ""); plain.append(node("summary", "Plain text"), node("pre", mail.text)); item.append(plain);
         item.append(button("Reply", () => { el("schedule-mail-parent").value = mail.parent || mail.id; el("schedule-mail-target").textContent = "Reply to selected thread"; el("schedule-mail-body").focus(); }));
-        if (!mail.parent) item.append(button("Delete thread", () => api(`schedule-mailbox/${mail.id}`, undefined, "DELETE")));
+        if (!mail.parent) item.append(button("Delete thread", () => api(mailboxPath(`schedule-mailbox/${mail.id}`), undefined, "DELETE")));
         mailbox.append(item);
       }
       if (!data.mailbox.length) mailbox.append(node("p", "No local messages.", "muted"));
-      if (dialog.open && data.mailbox.length) {
-        await api("schedule-mailbox/read", {ids: data.mailbox.map(mail => mail.id)});
+      if (dialog.open && reader === "owner" && data.mailbox.length) {
+        await api(mailboxPath("schedule-mailbox/read"), {ids: data.mailbox.map(mail => mail.id)});
       }
     } catch (error) { message(error); }
     finally { refreshing = false; }
@@ -161,7 +193,7 @@
   el("schedule-mail-form").onsubmit = async (event) => {
     event.preventDefault();
     const parent = el("schedule-mail-parent").value;
-    try { await api(parent ? `schedule-mailbox/${parent}/reply` : "schedule-mailbox", {body: el("schedule-mail-body").value}); el("schedule-mail-body").value = ""; message("Message saved locally."); await refresh(); }
+    try { await api(parent ? `schedule-mailbox/${parent}/reply` : "schedule-mailbox", {message: el("schedule-mail-body").value, to: recipient.value, due: due.value.trim() || null}); el("schedule-mail-body").value = ""; message("Message saved locally."); await refresh(); }
     catch (error) { message(error); }
   };
   new MutationObserver(() => {

@@ -11,6 +11,8 @@ Commands (run from a clone of fatherdoctor/ha_codex):
       commit. A rollback release (see below) needs no new lab pass: its record names the version it restores,
       this script proves the code is that version's code, and the tag goes on the commit that added the record. --push sends the tag to origin, which starts the
       release workflow when it is enabled.
+      A beta version (0.2.0-beta.1) follows the same rules, run from a checkout of the beta branch; it must be
+      newer than every tag, stable or beta. A stable version must be newer than every stable tag.
 
   fork_release.py rollback <good-version> [--to <new-version>] [--accept-stored-data]
       Prepare a roll-forward rollback in the working tree: the app (codex-cli-worker/) and the integration
@@ -37,7 +39,12 @@ MANIFEST = "custom_components/codex_cli/manifest.json"
 CHANGELOG = "codex-cli-worker/CHANGELOG.md"
 CODE_PATHS = ("codex-cli-worker", "custom_components")
 RECORD_DIR = "release/lab-passes"
+# A stable release comes from main. A beta may come from the beta branch, so only stable versions are checked.
+MAIN_REF = "origin/main"
 VERSION_PATTERN = re.compile(r"\d+\.\d+\.\d+(?:\.\d+)?")
+# A beta has three numbers: Home Assistant cannot compare 0.1.81.3-beta.1 with 0.1.81.3, but it can compare
+# 0.2.0-beta.1 with 0.2.0 (the beta comes first).
+BETA_PATTERN = re.compile(r"(?P<base>\d+\.\d+\.\d+)-beta\.(?P<number>\d+)")
 CONFIG_VERSION = re.compile(r'^version:\s*"?(?P<version>[^"\n]+?)"?\s*$', re.MULTILINE)
 MANIFEST_VERSION = re.compile(r'^(?P<lead>\s*"version":\s*")(?P<version>[^"]+)(?P<trail>")', re.MULTILINE)
 # A changelog bullet that starts this way marks a release whose stored data an older build may not read.
@@ -62,13 +69,35 @@ def show(rev: str, path: str, root: Path = ROOT) -> str:
     return result.stdout
 
 
-def check_version_text(version: str) -> None:
-    if VERSION_PATTERN.fullmatch(version) is None:
-        raise ReleaseError(f"expected a version like 0.1.81.2, got {version!r}")
+def is_beta(version: str) -> bool:
+    return BETA_PATTERN.fullmatch(version) is not None
 
 
-def version_key(version: str) -> tuple[int, ...]:
-    return tuple(int(part) for part in version.split("."))
+def check_version_text(version: str, allow_beta: bool = False) -> None:
+    if VERSION_PATTERN.fullmatch(version) is not None:
+        return
+    if allow_beta and is_beta(version):
+        return
+    expected = "0.1.81.2 or a beta such as 0.2.0-beta.1" if allow_beta else "0.1.81.2"
+    raise ReleaseError(f"expected a version like {expected}, got {version!r}")
+
+
+def version_key(version: str) -> tuple[tuple[int, ...], int, int]:
+    """Sort key: the numbers, then a beta before the stable release of the same numbers."""
+    beta = BETA_PATTERN.fullmatch(version)
+    if beta is not None:
+        return tuple(int(part) for part in beta.group("base").split(".")), 0, int(beta.group("number"))
+    return tuple(int(part) for part in version.split(".")), 1, 0
+
+
+def released_versions(root: Path = ROOT, include_beta: bool = False) -> list[str]:
+    """The versions of the v* tags in this clone; beta tags only when asked."""
+    versions = []
+    for tag in git("tag", "--list", "v*", root=root).split():
+        version = tag[1:]
+        if VERSION_PATTERN.fullmatch(version) or (include_beta and is_beta(version)):
+            versions.append(version)
+    return versions
 
 
 def next_version(current: str) -> str:
@@ -193,7 +222,7 @@ def check_same_code(good_rev: str, new_rev: str, root: Path = ROOT) -> None:
 
 def plan_tag(version: str, root: Path = ROOT, base: str = "HEAD") -> tuple[str, str]:
     """Return (commit to tag, why it may be tagged), or raise ReleaseError."""
-    check_version_text(version)
+    check_version_text(version, allow_beta=True)
     tag = f"v{version}"
     if tag_exists(tag, root):
         raise ReleaseError(f"{tag} already exists; a release is never re-tagged (release the next version)")
@@ -208,11 +237,16 @@ def plan_tag(version: str, root: Path = ROOT, base: str = "HEAD") -> tuple[str, 
     commit = resolve_commit(record.commit, root)
     if not is_ancestor(commit, base, root):
         raise ReleaseError(f"{commit[:12]} is not on {base}: tag only merged commits")
+    if not is_beta(version) and not is_ancestor(commit, MAIN_REF, root):
+        raise ReleaseError(f"{commit[:12]} is not on {MAIN_REF}: a stable release comes from main (fetch first?)")
     check_release_files(version, commit, root)
-    newest = max((t[1:] for t in git("tag", "--list", "v*", root=root).split() if VERSION_PATTERN.fullmatch(t[1:])),
-                 key=version_key, default=None)
+    # A stable install sees only stable releases. A beta install sees the beta branch, which takes every stable
+    # release too, so a beta must be newer than all of them.
+    newest = max(released_versions(root, include_beta=is_beta(version)), key=version_key, default=None)
     if newest is not None and version_key(version) <= version_key(newest):
         raise ReleaseError(f"{version} is not newer than {newest}; Home Assistant would not offer it as an update")
+    if record.kind == "rollback" and is_beta(version):
+        raise ReleaseError("a rollback is a stable release; give it a stable version")
     if record.kind == "lab-pass":
         return commit, f"lab pass recorded in {RECORD_DIR}/v{version}.json"
     good = record.rollback_of
@@ -269,8 +303,7 @@ def rollback(good: str, new: str | None, accept_stored_data: bool, root: Path = 
     if good_record.kind != "lab-pass" or good_record.result != "pass":
         raise ReleaseError(f"{good} has no lab pass of its own; roll back only to a build that passed")
     current, _ = versions_at("HEAD", root)
-    newest_tag = max((t[1:] for t in git("tag", "--list", "v*", root=root).split() if VERSION_PATTERN.fullmatch(t[1:])),
-                     key=version_key)
+    newest_tag = max(released_versions(root), key=version_key)
     new = new or next_version(max(current, newest_tag, key=version_key))
     check_version_text(new)
     if version_key(new) <= max(version_key(current), version_key(newest_tag)):

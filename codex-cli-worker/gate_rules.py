@@ -27,6 +27,7 @@ configuration watch remain separate defenses.
 from __future__ import annotations
 
 import ast
+import fnmatch
 import hashlib
 import json
 import re
@@ -840,6 +841,60 @@ def _ha_command(text: str, remote_on: bool, depth: int = 0) -> bool:
     return False
 
 
+# The image folder /usr/share/ha_codex as a command may spell it. Every "share" folder followed by an "ha_" name
+# counts, globbed, braced or behind a variable, except the plain absolute /share/ha_<name> (the Home Assistant share
+# folder, where the owner's repositories live). A relative share/ha_<name> stays refused: the text cannot tell
+# whether the command runs in /usr. Best effort on the text: it cannot see a path a command builds at run time.
+# Where a new path can start. A closing ``)`` or a backtick is not one: ``$(echo /usr)/share`` stays one word.
+_IMAGE_WORD_BREAKS = re.compile(r"[\s;&|(<>=:]+")
+_IMAGE_WILD = re.compile(r"[*?\[]")
+
+
+def _brace_choices(word: str, limit: int = 64) -> list[str] | None:
+    """Expand shell braces in one word; None when there are too many choices to list."""
+    out, todo = [], [word]
+    while todo:
+        item = todo.pop()
+        match = re.search(r"\{([^{}]*)\}", item)
+        if not match:
+            out.append(item)
+        else:
+            todo.extend(item[:match.start()] + choice + item[match.end():] for choice in match[1].split(","))
+        if len(out) + len(todo) > limit:
+            return None
+    return out
+
+
+def _part_could_be(part: str, name: str, prefix: str = "") -> bool:
+    """Return whether one path part, read as a shell glob, can name ``name``."""
+    part = part.lower()
+    return (part == name or bool(prefix and part.startswith(prefix))
+            or bool(_IMAGE_WILD.search(part) and fnmatch.fnmatchcase(name, part)))
+
+
+def names_image_folder(text: str) -> bool:
+    """Return whether command text can name /usr/share/ha_codex, after quotes and backslashes are removed."""
+    plain = re.sub(r"/{2,}", "/", re.sub(r"[\\'\"]", "", str(text or "")))
+    for word in _IMAGE_WORD_BREAKS.split(plain):
+        choices = _brace_choices(word)
+        if choices is None:
+            # Too many choices to read: refuse any that could hold an ha_ name.
+            if re.search(r"h|[*?\[]", word, re.IGNORECASE):
+                return True
+            continue
+        for choice in choices:
+            parts = re.sub(r"/{2,}", "/", choice).split("/")
+            for index in range(len(parts) - 1):
+                share, name = parts[index], parts[index + 1]
+                if not _part_could_be(name, "ha_codex", "ha_"):
+                    continue
+                if "$" in share or "`" in share or ")" in share or _part_could_be(share, "share"):
+                    # Allowed: only the literal absolute /share/ha_<name>.
+                    if index == 1 and parts[0] == "" and share.lower() == "share":
+                        continue
+                    return True
+    return False
+
 def _policy_restriction(text: str) -> str:
     """Name protected app settings/rules/policy in either a patch path or command text.
 
@@ -854,9 +909,11 @@ def _policy_restriction(text: str) -> str:
         return "accesses the protected schedule database"
     if re.search(r"worker_api_token", plain, re.IGNORECASE):
         return "accesses the add-on's private credential"
+    if re.search(r"/data/+github", plain, re.IGNORECASE):
+        return "accesses the add-on's GitHub sign-in"
     if re.search(r"codex-home/.*(?:AGENTS\.md|house-rules)|ha_codex/.*(?:AGENTS\.md|house-rules)", plain, re.IGNORECASE):
         return "changes the add-on's rules"
-    if re.search(r"/share/ha_|ha_codex/(?:policy|agents|house)|codex-home/.*(?:config\.toml|[?*\[])|/etc/codex/(?:requirements|managed_config)", plain, re.IGNORECASE):
+    if names_image_folder(text) or re.search(r"ha_codex/(?:policy|agents|house)|codex-home/.*(?:config\.toml|[?*\[])|/etc/codex/(?:requirements|managed_config)", plain, re.IGNORECASE):
         return "changes the add-on's permission policy"
     return ""
 

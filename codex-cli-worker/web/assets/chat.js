@@ -1320,6 +1320,7 @@ function renderTask(force = false) {
       : `${task.permission_required ? "Permission needed" : labels[task.status] || task.status} · ${dateLabel(task.updated_at, true)}${queued ? " · next message in queue" : ""}`;
   const signature = JSON.stringify([
     task.turns,
+    task.task_source,
     task.history_incomplete,
     task.status,
     queued && [queued.queue_id, queued.message, queued.prompt_attachments],
@@ -1355,6 +1356,9 @@ function renderTask(force = false) {
   for (const turn of turns) {
     const latest = turn === turns[turns.length - 1];
     const exchange = textNode("section", "", "exchange");
+    const source = turn.task_source || (turn === turns[0] ? task.task_source : null);
+    if (source === "schedule" || source === "lead")
+      exchange.append(textNode("p", source === "schedule" ? "Scheduled run" : "Started by lead", "muted task-source"));
     const sent = messageAttachments(turn.prompt_attachments);
     if (sent.length)
       exchange.append(
@@ -2835,6 +2839,261 @@ function renderLogin(auth) {
   for (const id of ["login-cancel", "banner-cancel"]) $(id).hidden = !pending;
   $("signin-banner").hidden = signedIn;
 }
+/*
+ * GitHub sign-in (add-on 0.3). The worker holds the sign-in; this page only
+ * shows its status and sends button presses. The device code is shown on the
+ * page while a sign-in waits and nowhere else: it is never logged, never kept
+ * in browser storage, and the pasted token is cleared from its field at once.
+ */
+let githubTimer;
+let githubStatus = null;
+let githubRevokeUrl = "";
+const GITHUB_BAD_STATES = ["expired", "revoked", "access_changed", "failed"];
+const GITHUB_STATE_TEXT = {
+  disconnected: "Not connected to GitHub.",
+  connecting: "Connecting. Enter the code below on GitHub.",
+  ok: "Connected to GitHub.",
+  near_expiry: "Connected, but the sign-in expires within 7 days. Connect again or make a new token.",
+  expired: "The GitHub sign-in expired. Connect again.",
+  revoked: "GitHub refused the stored sign-in (revoked). Connect again.",
+  access_changed: "The GitHub sign-in reaches different repositories or access than you connected.",
+  failed: "The GitHub sign-in cannot be checked.",
+};
+/** Send a GitHub request; every reply carries the status, also a refusal's, so the card stays true. */
+async function githubApi(path, body) {
+  const response = await fetch(path, {
+    method: body === undefined ? "GET" : "POST",
+    headers: body === undefined ? {} : { "Content-Type": "application/json" },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  const data = await response.json().catch(() => null);
+  if (data && data.github && typeof data.github === "object") renderGithub(data.github);
+  if (!data) throw workerError(`The worker returned HTTP ${response.status}.`, response.status);
+  if (!response.ok || !data.ok)
+    throw workerError(
+      data.error || data.text || `The worker returned HTTP ${response.status}.`,
+      response.status,
+    );
+  return data;
+}
+/** An https link on github.com only; anything else is not shown as a link. */
+function githubLink(href, text) {
+  try {
+    const url = new URL(href);
+    if (url.protocol !== "https:" || url.hostname !== "github.com") return null;
+    const link = textNode("a", text);
+    link.href = url.href;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    return link;
+  } catch (_) {
+    return null;
+  }
+}
+function githubDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleString();
+}
+function githubExpiry(github) {
+  if (!github.expires_at)
+    return github.kind === "app" ? "Does not expire; revoke it on GitHub." : "No expiry reported.";
+  const days = Math.floor((new Date(github.expires_at).getTime() - Date.now()) / 86400000);
+  if (Number.isNaN(days)) return "";
+  return `${githubDate(github.expires_at)} (${days < 0 ? "expired" : days === 0 ? "today" : `in ${days} day${days === 1 ? "" : "s"}`})`;
+}
+/** The device-sign-in card: the code in large letters and GitHub's own page. */
+function githubFlowCard(flow) {
+  const card = document.createElement("div");
+  card.className = "signin-card github-flow-card";
+  if (flow.user_code) {
+    card.append(textNode("p", "Enter this code on GitHub's device sign-in page, then approve Codex for Home Assistant:", "muted"));
+    const code = textNode("p", flow.user_code, "signin-code");
+    code.setAttribute("aria-label", `GitHub code ${flow.user_code.split("").join(" ")}`);
+    card.append(code);
+  } else {
+    card.append(textNode("p", "Waiting for the GitHub code…", "muted"));
+  }
+  const link = githubLink(flow.verification_uri || "https://github.com/login/device", "Open github.com/login/device");
+  if (link) card.append(link);
+  if (flow.expires_at) card.append(textNode("p", `The code works until ${githubDate(flow.expires_at)}.`, "muted"));
+  return card;
+}
+/** Put the GitHub status on the card and the banner. Only the contract's fields are read. */
+function renderGithub(github) {
+  githubStatus = github;
+  const state = String(github.state || "disconnected");
+  const flow = github.flow && typeof github.flow === "object" ? github.flow : { status: "idle" };
+  const waiting = flow.status === "waiting_for_user";
+  const connected = !["disconnected", "connecting"].includes(state);
+  const login = github.account?.login || "";
+  if (connected && github.revoke_url) githubRevokeUrl = github.revoke_url;
+  $("github-status").textContent =
+    connected && login ? `${GITHUB_STATE_TEXT[state] || state} Signed in as ${login}.` : GITHUB_STATE_TEXT[state] || state;
+  const details = $("github-details");
+  const rows = [];
+  if (connected) {
+    rows.push(["Sign-in", github.kind === "token" ? "Fine-grained token" : "GitHub App"]);
+    if (github.connected_at) rows.push(["Connected", githubDate(github.connected_at)]);
+    rows.push(["Expiry", githubExpiry(github)]);
+    rows.push(["Access", github.permission_problem
+      ? String(github.permission_problem)
+      : github.permissions ? "Contents read and write, Metadata read" : "Unknown"]);
+    if (github.last_check?.at)
+      rows.push(["Last check", `${githubDate(github.last_check.at)}${github.last_check.reason ? `: ${github.last_check.reason}` : ""}`]);
+  }
+  details.replaceChildren(...rows.flatMap(([term, value]) => [textNode("dt", term), textNode("dd", value)]));
+  details.hidden = !rows.length;
+  const list = $("github-repositories");
+  const items = [];
+  if (connected) {
+    for (const repo of github.repositories || []) {
+      if (!repo || typeof repo.full_name !== "string") continue;
+      const extra = (github.extra || []).includes(repo.full_name);
+      const item = textNode("li", `${repo.private ? "🔒 " : ""}${repo.full_name} · ${repo.push ? "read and write" : "read only"}${extra ? " · new, not accepted" : ""}`);
+      if (extra) item.className = "github-extra";
+      items.push(item);
+    }
+    for (const name of github.missing || [])
+      if (typeof name === "string") items.push(textNode("li", `${name} · no longer reached`, "github-missing"));
+  }
+  list.replaceChildren(...items);
+  list.hidden = !items.length;
+  const flowArea = $("github-flow");
+  if (waiting) {
+    const key = JSON.stringify([flow.user_code, flow.verification_uri, flow.expires_at]);
+    if (flowArea.dataset.key !== key) {
+      flowArea.dataset.key = key;
+      flowArea.replaceChildren(githubFlowCard(flow));
+    }
+  } else {
+    flowArea.dataset.key = "";
+    const ended = { expired: "The GitHub code expired. Press Connect GitHub for a new one.",
+      canceled: "The GitHub sign-in was canceled.", failed: "The GitHub sign-in failed." }[flow.status];
+    flowArea.replaceChildren(...(ended && !connected ? [textNode("p", flow.error ? `${ended} ${flow.error}` : ended, "muted")] : []));
+  }
+  $("github-connect").textContent = connected ? "Connect again" : "Connect GitHub";
+  $("github-connect").hidden = waiting;
+  $("github-cancel").hidden = !waiting;
+  for (const id of ["github-test", "github-check", "github-disconnect"]) $(id).hidden = !connected;
+  $("github-accept").hidden = !(state === "access_changed" && !github.permission_problem);
+  if (!connected) $("github-test-result").hidden = true;
+  else if (github.last_test?.text) {
+    $("github-test-result").textContent = github.last_test.text;
+    $("github-test-result").hidden = false;
+  }
+  const usable = ["ok", "near_expiry"].includes(state);
+  const names = usable ? (github.repositories || []).filter((repo) => repo?.push && typeof repo.full_name === "string").map((repo) => repo.full_name) : [];
+  for (const id of ["github-clone-repository", "github-link-repository"]) {
+    const select = $(id);
+    const chosen = select.value;
+    select.replaceChildren(...names.map((name) => { const option = textNode("option", name); option.value = name; return option; }));
+    if (names.includes(chosen)) select.value = chosen;
+  }
+  $("github-local").hidden = !names.length;
+  githubDefaultFolder();
+  const bad = GITHUB_BAD_STATES.includes(state);
+  $("github-banner-text").textContent = `The add-on's GitHub sign-in needs attention: ${(GITHUB_STATE_TEXT[state] || state).replace(/\.$/, "")}.`;
+  $("github-banner").hidden = !bad;
+}
+/** Show that this worker has no GitHub sign-in (an add-on before 0.3). */
+function githubUnavailable() {
+  githubStatus = null;
+  $("github-status").textContent = "Not available in this version of the add-on.";
+  for (const id of ["github-connect", "github-cancel", "github-test", "github-check", "github-accept", "github-disconnect"])
+    $(id).hidden = true;
+  $("github-details").hidden = $("github-repositories").hidden = $("github-local").hidden = true;
+  $("github-token").hidden = true;
+  $("github-banner").hidden = true;
+}
+/** Read the GitHub status. Every 5 seconds while a code waits, else every 5 minutes, so a lost sign-in shows. */
+async function loadGithub() {
+  clearTimeout(githubTimer);
+  let waiting = false;
+  try {
+    const response = await fetch("github");
+    if (response.status === 404) return githubUnavailable();
+    const data = await response.json().catch(() => null);
+    if (!data?.ok || !data.github) throw workerError(data?.error || `The worker returned HTTP ${response.status}.`, response.status);
+    $("github-token").hidden = false;
+    renderGithub(data.github);
+    waiting = data.github.flow?.status === "waiting_for_user";
+  } finally {
+    githubTimer = setTimeout(() => loadGithub().catch(() => {}), waiting ? 5000 : 300000);
+  }
+}
+function githubResult(text, isError) {
+  const result = $("github-result");
+  result.textContent = text || "";
+  result.classList.toggle("error", Boolean(isError));
+}
+/** Run one GitHub button: disable it while the worker works, then show the outcome on the card. */
+async function githubAction(button, path, body, done) {
+  button.disabled = true;
+  githubResult("");
+  try {
+    const data = await githubApi(path, body);
+    if (done) done(data);
+  } catch (error) {
+    githubResult(String(error.message || error), true);
+  } finally {
+    button.disabled = false;
+    loadGithub().catch(() => {});
+  }
+}
+$("github-connect").onclick = () => githubAction($("github-connect"), "github/connect", {});
+$("github-cancel").onclick = () => githubAction($("github-cancel"), "github/cancel", {});
+$("github-test").onclick = () => githubAction($("github-test"), "github/test", {});
+$("github-check").onclick = () => githubAction($("github-check"), "github/check", {}, (data) =>
+  githubResult(`Check finished: ${GITHUB_STATE_TEXT[data.github?.state] || data.github?.state || "done"}`));
+$("github-accept").onclick = () => githubAction($("github-accept"), "github/accept", {}, () =>
+  githubResult("The current repositories are now the ones the check expects."));
+$("github-disconnect").onclick = () => {
+  const revoke = githubRevokeUrl || githubStatus?.revoke_url || "";
+  if (!window.confirm("Disconnect GitHub? The assistant can no longer fetch, pull or push until you connect again.")) return;
+  githubAction($("github-disconnect"), "github/disconnect", {}, () => {
+    const result = $("github-result");
+    result.classList.remove("error");
+    result.replaceChildren(textNode("span", "Disconnect forgets the sign-in on this box. To revoke it on GitHub, open this link: "));
+    const link = githubLink(revoke, revoke.replace(/^https:\/\//, ""));
+    if (link) result.append(link);
+  });
+};
+$("github-token-form").onsubmit = (event) => {
+  event.preventDefault();
+  const field = $("github-token-value");
+  const token = field.value;
+  // The token leaves the page once, in this request body, and is not kept anywhere on the page.
+  field.value = "";
+  githubAction($("github-token-save"), "github/token",
+    { token, repository: $("github-token-repository").value.trim() },
+    () => { $("github-token").open = false; githubResult("Token accepted."); });
+};
+/** Clone goes to /share/<repository name> unless the owner typed another folder name. */
+function githubDefaultFolder() {
+  const field = $("github-clone-folder");
+  if (field.dataset.edited) return;
+  const name = ($("github-clone-repository").value || "").split("/")[1] || "";
+  field.value = name.replace(/[^A-Za-z0-9_-]/g, "-").replace(/^[^A-Za-z0-9]+/, "").slice(0, 100);
+}
+$("github-clone-repository").onchange = githubDefaultFolder;
+$("github-clone-folder").oninput = () => { $("github-clone-folder").dataset.edited = "1"; };
+$("github-clone-form").onsubmit = (event) => {
+  event.preventDefault();
+  githubAction($("github-clone"), "github/repos/clone",
+    { repository: $("github-clone-repository").value, folder: $("github-clone-folder").value.trim() },
+    (data) => githubResult(data.path ? `Cloned into ${data.path}.` : data.text || "Cloned."));
+};
+$("github-link-form").onsubmit = (event) => {
+  event.preventDefault();
+  githubAction($("github-link"), "github/repos/link",
+    { repository: $("github-link-repository").value, path: $("github-link-path").value.trim() },
+    (data) => githubResult(data.text || "Linked."));
+};
+$("github-banner-open").onclick = async () => {
+  await $("settings-button").onclick();
+  $("github-section").scrollIntoView({ block: "start" });
+};
 /** Show whether the assistant is paused, in the settings dialog and above the chat. */
 function renderPause(pause) {
   const paused = Boolean(pause?.paused);
@@ -3028,6 +3287,7 @@ $("settings-button").onclick = async () => {
   $("save-agents").disabled = true;
   const results = await Promise.allSettled([
     loadLogin(),
+    loadGithub(),
     loadRemoteControl(),
     loadPause(),
     loadBrowserPermissions(),
@@ -3040,6 +3300,7 @@ $("close-settings").onclick = () => $("settings").close();
 $("settings").addEventListener("close", () => {
   clearTimeout(loginTimer);
   clearTimeout(remoteTimer);
+  $("github-result").textContent = "";
 });
 for (const [id, path] of [
   ["login", "auth/start"],
@@ -3098,5 +3359,6 @@ restore = reopenLastChat();
 refresh();
 loadUsage();
 loadLogin().catch(() => {});
+loadGithub().catch(() => {});
 loadPause().catch(() => {});
 setInterval(tickElapsed, 1000);
