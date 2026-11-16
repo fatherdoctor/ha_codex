@@ -51,6 +51,7 @@ Paths are under `codex-cli-worker/` unless they start with `custom_components/`.
 | A request the hook cannot read or judge is refused, not passed | `gate/gate_hook.py: main` | `tests/test_gate.py` |
 | The hook answers before its own deadline, because Codex runs the action if a hook is still working when its timeout passes; an answer found after the deadline is refused | `gate/gate_hook.py: DEADLINE_SECONDS`, `wait_for_child`, `answer_before_deadline`; the Codex-side `timeout` in `gate/managed_config.toml` leaves room beyond it | `tests/test_gate.py` (`test_a_stuck_scan_is_refused_by_the_deadline`, `test_the_deadline_leaves_room_inside_the_codex_timeout` and their neighbors) |
 | Commands that read a process environment, use the Supervisor token, talk to the Supervisor, or read the sign-in store or `secrets.yaml` are refused (*) | `gate_rules.py: check_tool_call`, `PROTECTED_COMMAND_RES`, `_ha_supervisor_command` | `tests/test_gate.py`, `tests/fixtures/gate_tool_calls.json` |
+| A second layer, in Codex itself: managed command rules refuse literal `ha supervisor`, `ha super` and `ha su`, `printenv` of the two Supervisor-token names, `cat` of the credential and app-policy paths, and the two full-access spellings, with remote control off too. They match literal prefixes only; DOCS.md "Prefix limits" lists what they miss | `gate/requirements.toml` (`rules.prefix_rules`); `remote_control.py: managed_exec_rules_problem` checks the shipped rules, `exec_rules_self_test` makes Codex load them before remote control starts, and `record_exec_rules_warning` keeps remote control off after a rule-load warning until the app restarts | `tests/test_exec_rules.py`, `tests/execrules_runtime_check.py` (the pinned Codex binary) |
 | Edits that add a command which can reach anything (`shell_command`, `rest_command`, `python_script`, ...), a platform that runs on load, or a templated action are refused | `gate_rules.py: find_refused`, `STRICT_RULES`, `policy/refused-domains.json` (the file can add domains, never remove the built-in ones: `load_rules`) | `tests/test_gate.py` |
 | With remote control on: a patch is rebuilt in memory and refused if the result holds something new that is refused, or if it cannot be rebuilt with certainty | `gate_rules.py: patch_versions`, `new_refused`, `refused_blocks` | `tests/test_gate.py` |
 | With remote control on: the add-on's settings, rules, policy files, schedule database and API token cannot be named in a command | `gate_rules.py: _policy_restriction` | `tests/test_gate.py` |
@@ -58,6 +59,15 @@ Paths are under `codex-cli-worker/` unless they start with `custom_components/`.
 
 The hook reads text. It does not run a shell, so a path or command built while the command runs is out of its
 reach; DOCS.md lists those limits, and layers 1, 3 and 4 are what cover them.
+
+Before it splits a command, the hook joins each backslash-newline pair the way the shell does
+(`gate_rules.py: _join_shell_continuations`), so a command name split across lines is read whole. The join has
+its own model of quotes and comments. Where that model is not sure (a heredoc, a substitution, quoting it cannot
+read) the command is refused with a request for one line. The model can still be wrong, so the Supervisor text
+floor in `check_tool_call` reads a second form with every backslash-newline pair removed, whatever the quotes
+(`_floor_texts`). That second form does not depend on the join, and it also covers shells and wrappers that
+the parser does not open. Tests: `tests/test_gate_quote.py` (`ContinuationFloorTests` runs each form through a
+print-only shell).
 
 (*) Known weakness: the shell text is split by two copies of the same code, `_strip_comments` and `_split_words`,
 one in `gate_rules.py` and one in `approvals.py`. Both refuse quoting they cannot read. Nothing but review keeps

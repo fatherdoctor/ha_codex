@@ -627,6 +627,20 @@ def _join_shell_continuations(text: str) -> str | None:
     return None if quote else "".join(out)
 
 
+def _floor_texts(text: str, joined: str) -> tuple[str, str]:
+    """Return the two readings of a command that the text floor checks, without quotes or backslashes.
+
+    The first reading joins continuations as the shell does. The second removes every
+    backslash-newline pair, in any quote or comment state. The second reading does not depend on
+    where this module thinks a comment, a quote or a nested shell script starts, so an error in
+    that model cannot hide a Supervisor command. The cost is a refusal of a single-quoted literal
+    pair that spells one; the floor already refuses such a spelling in a comment.
+    """
+    unquoted = r"[\"'`\\]"
+    unjoined = text.replace("\\\n", "")
+    return re.sub(unquoted, "", joined), re.sub(unquoted, "", unjoined)
+
+
 def _split_words(text: str, punctuation: str) -> list[str]:
     """Split text the way the shell does, with comments already removed; raise ValueError if unreadable."""
     lexer = shlex.shlex(text, posix=True, punctuation_chars=punctuation)
@@ -1001,10 +1015,11 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
         if joined is None:
             return ("This command may hide a Home Assistant Supervisor command in a shell line continuation. "
                     "Write the command on one line so it can be checked.")
-        plain_ha = re.sub(r"[\"'`\\]", "", joined)
+        floor = _floor_texts(text, joined)
         if (_ha_supervisor_command(text)
-                or HA_ALWAYS_TEXT_RE.search(plain_ha)
-                or (remote_on and (HA_REMOTE_TEXT_RE.search(plain_ha) or _ha_unknown_flag(text)))
+                or any(HA_ALWAYS_TEXT_RE.search(plain) for plain in floor)
+                or (remote_on and (any(HA_REMOTE_TEXT_RE.search(plain) for plain in floor)
+                                   or _ha_unknown_flag(text)))
                 or _ha_command(text, remote_on)):
             return "This command talks to the Home Assistant Supervisor, which is never allowed."
     return ""

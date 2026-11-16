@@ -13,8 +13,10 @@ starts a comment only at the start of a word, as it does for the shell.
 from __future__ import annotations
 
 import io
+import os
 import sys
 import subprocess
+import tempfile
 import threading
 import unittest
 from pathlib import Path
@@ -363,8 +365,8 @@ class ShellContinuationTests(unittest.TestCase):
                     with self.subTest(family=family, remote=remote):
                         self.assertIn('Supervisor', refusal(f'h{join}a {family} info', remote))
 
-    def test_single_quoted_data_keeps_its_literal_pairs(self) -> None:
-        """A literal string is not a second shell script or an executable name."""
+    def test_single_quoted_pairs_keep_their_text_but_the_floor_refuses_a_supervisor_spelling(self) -> None:
+        """The join keeps single-quoted pairs; the floor's second reading refuses a Supervisor spelling in them."""
         join = '\\' + '\n'
         for content in (f'h{join}a s{join}u info', f'$(h{join}a s{join}u)',
                         f'`h{join}a s{join}u`'):
@@ -372,7 +374,10 @@ class ShellContinuationTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(gate_rules._join_shell_continuations(command), command)
                 for remote in (False, True):
-                    self.assertEqual(refusal(command, remote), '')
+                    self.assertIn('Supervisor', refusal(command, remote))
+        for command in (f"emit 'sample{join}text'", f"emit 'h{join}a co{join}re info'"):
+            with self.subTest(command=command):
+                self.assertEqual(refusal(command, False), '')
 
     def test_readable_harmless_joins_keep_no_opinion(self) -> None:
         """Readable continuations must not become a blanket command ban."""
@@ -445,6 +450,61 @@ class CommentContinuationTests(unittest.TestCase):
             for remote in (False, True):
                 with self.subTest(command=command, remote=remote):
                     self.assertEqual(refusal(command, remote), '')
+
+
+class ContinuationFloorTests(unittest.TestCase):
+    """Continued forms that the join or the parser reads differently from the shell.
+
+    Each form runs a print-only ``ha`` stub with a Supervisor family under bash and dash, so the
+    shell control proves the command would reach the Supervisor. The hook must refuse it with
+    remote control off and on, and the text floor must refuse it alone.
+    """
+
+    JOIN = '\\' + '\n'
+    FORMS = (
+        ('true \r# ; h' + JOIN + 'a su info', 'su'),
+        ('true \r# ; ha s' + JOIN + 'u info', 'su'),
+        ('true \r# ; ha sup' + JOIN + 'er info', 'super'),
+        ('echo ${x- #}; h' + JOIN + 'a su info', 'su'),
+        ('echo ${x:- #}; ha s' + JOIN + 'u info', 'su'),
+        ("dash -c 'h" + JOIN + "a su info'", 'su'),
+        ("setsid sh -c 'h" + JOIN + "a su info'", 'su'),
+        ("bash --norc -c 'h" + JOIN + "a su info'", 'su'),
+    )
+
+    def test_print_only_shell_runs_each_form(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            stub = Path(folder) / 'ha'
+            stub.write_text('#!/bin/sh\nprintf "<%s>" "$@"\n', encoding='utf-8')
+            stub.chmod(0o755)
+            env = {**os.environ, 'PATH': folder + os.pathsep + os.environ.get('PATH', '')}
+            for shell in ('bash', 'dash'):
+                for command, family in self.FORMS:
+                    with self.subTest(shell=shell, command=command):
+                        run = subprocess.run([shell, '-c', command], capture_output=True, text=True,
+                                             env=env, timeout=10, check=False)
+                        self.assertIn(f'<{family}><info>', run.stdout)
+
+    def test_hook_refuses_each_form(self) -> None:
+        for command, _family in self.FORMS:
+            for remote in (False, True):
+                with self.subTest(command=command, remote=remote):
+                    self.assertIn('Supervisor', refusal(command, remote))
+
+    def test_text_floor_alone_refuses_each_form(self) -> None:
+        with patch.object(gate_rules, '_ha_supervisor_command', return_value=False), \
+                patch.object(gate_rules, '_ha_command', return_value=False):
+            for command, _family in self.FORMS:
+                for remote in (False, True):
+                    with self.subTest(command=command, remote=remote):
+                        self.assertIn('Supervisor', refusal(command, remote))
+
+    def test_protected_command_pattern_names_every_alias(self) -> None:
+        """The first command check names all three Supervisor aliases, independent of the floor."""
+        for family in sorted(gate_rules.HA_ALWAYS_FAMILIES):
+            with self.subTest(family=family):
+                self.assertTrue(any(pattern.search(f'ha {family} info')
+                                    for pattern, _why in gate_rules.PROTECTED_COMMAND_RES))
 
 
 if __name__ == "__main__":

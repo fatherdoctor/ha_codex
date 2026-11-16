@@ -24,7 +24,10 @@
 - A Turn on request that races a rules warning now leaves Remote Control saved as off.
 - The command hook joins a backslash and newline inside a word, as the shell does, so `h\` on one line and
   `a su info` on the next is read as `ha su info`. Continuations it cannot read (in a heredoc, a substitution or
-  unreadable quoting) are refused with a request for a one-line command.
+  unreadable quoting) are refused with a request for a one-line command. Its text floor also reads the command
+  with every backslash and newline removed, in any quote or comment state. So a Supervisor command spelled
+  across lines is refused also in single quotes, after a carriage return, inside `${...}`, and in a shell or
+  wrapper that the parser does not open (`dash -c`, `setsid sh -c`, `bash --norc -c`).
 
 ## 0.3.0 (unreleased)
 
