@@ -571,6 +571,19 @@ When the state changes, and only then:
 - The integration raises the repair **The Codex add-on's GitHub sign-in needs attention** (`github_access_lost`). It is an error for expired, revoked and cannot be checked, and a warning for expires soon and access changed. It clears when the check is OK or you disconnect. If you never connected, there is no repair.
 - A banner above the chat offers **Open GitHub settings**.
 
+### When GitHub stops working
+
+Open **Settings > GitHub** in the app page. The card shows the state and, when available, the last check's reason.
+
+- **Not connected to GitHub:** No sign-in is saved, or the app was restored from a backup. Press **Connect GitHub** to connect the App. If you use a fine-grained token, open **Use a token instead**.
+- **Connecting:** The App is waiting for you to finish on GitHub. Follow the link on the card. If the code expires or you want to start over, press **Cancel**, then **Connect GitHub**.
+- **Connected to GitHub:** The access check is OK. If a repository operation still fails, press **Read test** to check the connected repositories.
+- **Connected, but the sign-in expires within 7 days:** The saved token is close to its expiry. Open **Use a token instead** and save a new fine-grained token, or press **Connect again** to use the App.
+- **The GitHub sign-in expired:** The saved sign-in is past its expiry. Press **Connect again** for the App, or open **Use a token instead** to save a new token.
+- **GitHub refused the stored sign-in (revoked):** GitHub no longer accepts the saved sign-in. Press **Connect again** for the App, or open **Use a token instead** to save a new token.
+- **The GitHub sign-in reaches different repositories or access than you connected:** GitHub reports a changed repository list or permissions. Check the list and access shown on the card. If the repository change is intended and **Accept this access** is available, press it. If permissions changed, restore Contents read and write on GitHub, then press **Check now**.
+- **The GitHub sign-in cannot be checked:** GitHub could not be reached repeatedly, or the check found another error. Check the last-check reason and your connection, then press **Check now**.
+
 ### Backups
 
 `/data/github` is not in the app backup. After a restore, the card shows **Not connected**; press **Connect GitHub** again.
