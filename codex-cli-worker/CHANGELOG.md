@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.3 (unreleased)
+
+- The approval card and the remote-control hook now read command text with one shared copy of the comment
+  and word code (`shell_words.py`), so a later fix cannot leave the two checks reading a command differently.
+  Each still answers unreadable text its own way. No command is judged differently.
+- When the approval card refuses **Allow once** because it cannot read a command's heredoc or quoting, it now
+  says that, instead of saying the command touches the app's permission policy.
+- A scheduling or mailbox request whose text holds a character that cannot be stored (a lone surrogate) is now
+  refused with a sentence that says so, instead of the bare word `utf-8`.
+
 ## 0.3.2 (unreleased)
 
 - Codex now refuses risky commands in two layers. Managed Codex command rules refuse six literal command
@@ -44,13 +54,6 @@
   exists, in chat tasks and in remote-control sessions. Before, a missing file could show in the answer as
   "/config/AGENTS.md was not found". The page now shows a missing `AGENTS.md` once, above the message box, as a
   setup hint that you can dismiss.
-- The approval card and the remote-control hook now read command text with one shared copy of the comment
-  and word code (`shell_words.py`), so a later fix cannot leave the two checks reading a command differently.
-  Each still answers unreadable text its own way. No command is judged differently.
-- When the approval card refuses **Allow once** because it cannot read a command's heredoc or quoting, it now
-  says that, instead of saying the command touches the app's permission policy.
-- A scheduling or mailbox request whose text holds a character that cannot be stored (a lone surrogate) is now
-  refused with a sentence that says so, instead of the bare word `utf-8`.
 
 ## 0.3.1 (unreleased)
 
