@@ -332,6 +332,7 @@ class ShellContinuationTests(unittest.TestCase):
         join = '\\' + '\n'
         commands = (
             f'emit h{join}a s{join}u',
+            f'emit ha{join}core stop',
             f'emit "h{join}a" "s{join}u"',
             f"emit 'h{join}a' 's{join}u'",
             'emit "h' + '\\' * 2 + '\n' + 'a"',
