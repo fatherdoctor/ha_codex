@@ -1,0 +1,20 @@
+Image exploration, 2026-11-16
+
+One image draft explored a 2 by 2 sheet of four original flat marks on warm white.
+The palette was navy and deep teal, with bold ribbons and clear negative spaces.
+
+A: two interlinked house-shaped loops with alternating over/under breaks.
+B: an open square spiral around a roof and small courtyard window.
+C: two soft cloud ribbons around a house opening.
+D: two offset capsule loops around a roof and window.
+
+The prompt required different silhouettes and construction, not color variants.
+It excluded any copy or trace of an existing logo, a sixfold knot, a rosette,
+a hexagonal swirl, vendor branding, prompt symbols, text, gradients and glow.
+
+The image draft supplied visual exploration only. Its pixels are not shipped.
+The final SVGs use independently drawn paths in build_marks.py. The wide logo
+compositions are redrawn, rather than stretched square marks. Transparent SVG
+masks create the weave gaps. Inkscape renders the PNGs; ImageMagick makes the
+native small samples and removes metadata. build_comparison.py composes the
+one-page sheet from those actual exported assets, in the first sheet's layout.
