@@ -40,6 +40,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+# The hook and its tests know the join step by its old private name.
+from shell_words import join_shell_continuations as _join_shell_continuations
+from shell_words import split_words, strip_comments
+
 IMAGE_DIR = Path("/usr/share/ha_codex")
 SOURCE_DIR = Path(__file__).resolve().parent / "policy"
 CONFIG_ROOT = Path("/config")
@@ -549,84 +553,6 @@ def _ha_unknown_flag(text: str) -> bool:
     return False
 
 
-# Characters after which a ``#`` starts a word. An escaped character is never one of them.
-WORD_BREAKS = frozenset(" \t\r\n;&|()<>")
-
-
-def _strip_comments(text: str) -> str:
-    """Remove shell comments: from a ``#`` that starts a word outside quotes to the end of its line.
-
-    A ``#`` inside a word, such as ``a#b``, is part of that word, as it is for the shell.
-    """
-    out: list[str] = []
-    quote = ""
-    i = 0
-    while i < len(text):
-        char = text[i]
-        if quote == "'":
-            if char == "'":
-                quote = ""
-        elif char == "\\":
-            # A backslash keeps the next character, except inside single quotes.
-            out.append(text[i:i + 2])
-            i += 2
-            continue
-        elif quote == '"':
-            if char == '"':
-                quote = ""
-        elif char in "'\"":
-            quote = char
-        elif char == "#" and (not out or out[-1] in WORD_BREAKS):
-            end = text.find("\n", i)
-            i = len(text) if end == -1 else end
-            continue
-        out.append(char)
-        i += 1
-    return "".join(out)
-
-
-def _join_shell_continuations(text: str) -> str | None:
-    """Remove only shell line joins; return None for forms we cannot read safely.
-
-    Single quotes retain the literal pair. A quoted script for a shell wrapper
-    gets another check when its own command is read.
-    """
-    if "\\\n" not in text:
-        return text
-    out: list[str] = []
-    quote = ""
-    comment = False
-    i = 0
-    while i < len(text):
-        char = text[i]
-        if not comment and quote != "'":
-            if text.startswith(("$(", "`"), i):
-                return None
-            if not quote and text.startswith(("<<", "$'", "<(", ">("), i):
-                return None
-        if comment:
-            # A backslash inside a comment does not escape its terminating newline.
-            if char == "\n":
-                comment = False
-        elif char == "\\" and quote != "'":
-            if text.startswith("\\\n", i):
-                i += 2
-                continue
-            out.append(text[i:i + 2])
-            i += 2
-            continue
-        elif quote:
-            if char == quote:
-                quote = ""
-        elif char in "'\"":
-            quote = char
-        elif char == "#" and (not out or out[-1] in WORD_BREAKS):
-            comment = True
-        out.append(char)
-        i += 1
-    return None if quote else "".join(out)
-
-
 def _floor_texts(text: str, joined: str) -> tuple[str, str]:
     """Return the two readings of a command that the text floor checks, without quotes or backslashes.
 
@@ -641,15 +567,6 @@ def _floor_texts(text: str, joined: str) -> tuple[str, str]:
     return re.sub(unquoted, "", joined), re.sub(unquoted, "", unjoined)
 
 
-def _split_words(text: str, punctuation: str) -> list[str]:
-    """Split text the way the shell does, with comments already removed; raise ValueError if unreadable."""
-    lexer = shlex.shlex(text, posix=True, punctuation_chars=punctuation)
-    lexer.whitespace = " \t\r"
-    lexer.whitespace_split = True
-    lexer.commenters = ""
-    return list(lexer)
-
-
 def _shell_words(text: str, punctuation: str) -> list[str]:
     """Split command text into words and shell punctuation, without running it.
 
@@ -657,18 +574,19 @@ def _shell_words(text: str, punctuation: str) -> list[str]:
     heredoc body, is read again line by line. A line that still cannot be read is split
     with its quotes and backslashes removed; the other lines keep their quoting, so a
     quoted script given to ``sh -c`` stays one word. The shell still runs such a
-    command, so it must never be skipped as unreadable.
+    command, so it must never be skipped as unreadable. approvals.py reads words with
+    the same code, in shell_words.py, but fails closed on such text instead.
     """
     try:
-        return _split_words(_strip_comments(text), punctuation)
+        return split_words(strip_comments(text), punctuation)
     except ValueError:
         pass
     words = []
     for line in text.split("\n"):
         try:
-            words.extend(_split_words(_strip_comments(line), punctuation))
+            words.extend(split_words(strip_comments(line), punctuation))
         except ValueError:
-            words.extend(_split_words(re.sub(r"[\"'\\]", "", line), punctuation))
+            words.extend(split_words(re.sub(r"[\"'\\]", "", line), punctuation))
         words.append("\n")
     return words
 

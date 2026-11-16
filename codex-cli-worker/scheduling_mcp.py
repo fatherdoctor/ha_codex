@@ -60,10 +60,12 @@ def respond(request):
             result = fetch(params.get('name'), params.get('arguments', {}))
         except OSError:
             result = {'ok': False, 'error': 'The scheduling service is not reachable; the add-on may be restarting.'}
+        except json.JSONDecodeError:
+            # A JSONDecodeError is a ValueError, so it is caught first.
+            result = {'ok': False, 'error': 'The scheduling service sent no usable answer.'}
         except ValueError as exc:
-            # fetch() raises only the fixed sentences above, or a JSON error on a bad answer.
-            reason = str(exc) if not isinstance(exc, json.JSONDecodeError) else 'The scheduling service sent no usable answer.'
-            result = {'ok': False, 'error': reason}
+            # fetch() raises only the fixed sentences above.
+            result = {'ok': False, 'error': str(exc)}
         except (TypeError, AttributeError):
             result = {'ok': False, 'error': 'A tool call needs params with a name and an arguments object.'}
         return {'content': [{'type': 'text', 'text': json.dumps(result)}], 'isError': not result.get('ok')}
