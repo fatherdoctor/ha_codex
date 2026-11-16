@@ -520,6 +520,61 @@ The app uses the built-in Supervisor token for Home Assistant notifications and 
 
 Sign-in uses your ChatGPT account and its Codex allowance. Availability and usage limits depend on your plan and workspace permissions. The worker does not provide an OpenAI API-key option for Codex tasks.
 
+## GitHub sign-in
+
+Release 0.3 lets the assistant fetch, pull, push, clone and link the GitHub repositories you choose. You do every step with a button in the app page: **Settings > GitHub**, just below **ChatGPT account**. No step needs a shell, and nothing about GitHub is typed into chat.
+
+The app keeps the sign-in in its own private folder, `/data/github`. That folder is hidden in every Codex sandbox, so a task cannot read it. Codex never holds the token. It calls one tool, `github_git`, and the app runs git for it. Every push goes through the kit's push guard first.
+
+### Connect
+
+1. Install the **Codex for Home Assistant** GitHub App on the repositories of your choice. Use GitHub's own page for this. You can change the set there later.
+2. In **Settings > GitHub**, press **Connect GitHub**. The card shows a code in large letters and a link to `github.com/login/device`.
+3. Open the link, type the code and approve the App. The card checks every 5 seconds and shows your account, the repositories it reaches and their access as soon as GitHub confirms. Press **Cancel** to stop a sign-in that is waiting. The code works for 15 minutes; after that, press **Connect GitHub** again for a new code.
+
+The App asks for Contents read and write only (GitHub adds Metadata read). The sign-in reaches only what you can reach and what the App was installed on. An App sign-in does not expire. It lasts until you revoke it on GitHub or uninstall the App.
+
+The code appears only on the page. The app does not write it to a log, and the page does not keep it in browser storage.
+
+### Use a token instead
+
+If you cannot install the App (for example, an organization forbids third-party Apps), open **Use a token instead**. Make a fine-grained token on github.com: **Settings > Developer settings > Fine-grained tokens**. Choose **Only select repositories** with one repository, **Contents: Read and write**, and an expiry of 90 days or less. Paste the token and the `owner/repository` name, then press **Use this token**. The app accepts a token only when it reaches that one repository and nothing more. The page clears the field at once and never shows the token again.
+
+### The card
+
+- **Read test** reads each connected repository once and shows the result.
+- **Check now** runs the access check at once (see below).
+- **Accept this access** appears when the repositories changed on GitHub but the access is still exactly Contents read and write. It makes the current set the one the check expects. If the access itself changed, change it back on GitHub instead.
+- **Disconnect** forgets the sign-in on this box. It cannot revoke it on GitHub, because that needs a secret the app does not carry. So the card then shows the link to revoke it: `https://github.com/settings/apps/authorizations` for the App, `https://github.com/settings/tokens` for a token. Disconnect waits while a task runs.
+- **Repositories on this box**: **Clone** copies a connected repository into a new folder directly under `/share`; the folder name starts as the repository's name, so a clone goes to `/share/<repository>`. **Link** points an existing git folder under `/share` or `/config` at a connected repository (it sets `origin`). Release 0.3 maps Home Assistant's `/share` folder read-write into the app for this. Neither writes a credential into the repository, so git on this box reaches GitHub with the sign-in only through the app. A list of the git folders on this box, with menus, comes in 0.3.1.
+
+You can also ask the assistant in chat to clone or link a connected repository. It uses the same `github_git` tool.
+
+### The `github_git` tool
+
+Codex can call `repos`, `fetch`, `pull`, `push`, `clone` and `link`, for connected repositories only and only during a chat or scheduled run. A read-only chat or schedule can only use `repos` and `fetch`. A pull fetches only; the assistant then fast-forwards the work tree in its own shell (`git merge --ff-only`), so the app never checks files out into a folder a task can change. A push never forces, deletes or pushes tags.
+
+Limits of a push:
+
+- **Workflow files.** GitHub refuses a push that changes `.github/workflows/*` with Contents-only access. Change workflow files on GitHub or from another computer.
+- **Allow marks.** When the push guard refuses a push, a line can be marked `guard: allow <reason>` to pass it. That mark needs the owner. The app refuses a push that adds such a mark, so a task cannot undo a refusal by itself. Add the mark yourself, outside the assistant. A page button for it is planned for 0.3.1.
+- **Names check.** The guard's household names check is off in 0.3.
+
+### Monitoring
+
+The app checks the sign-in at start, every hour, and when you press **Check now**. The states are: OK, expires within 7 days, expired, revoked, access changed (repositories missing or added, or access other than Contents read and write), and cannot be checked (GitHub unreachable three times in a row).
+
+When the state changes, and only then:
+
+- The app fires the Home Assistant event `codex_cli_github_access` with the state, the previous state, the reason, the account login, the missing and added repositories, the permission problem and the expiry. It never sends a token or a code. The integration fires the same event, with `source: integration`, when it sees the change, so an automation still works if the app's own call failed. An automation can route it to your notify service.
+- The app sends one notification through its `notify_service` option, or a persistent notification (`codex_cli_github`) without one.
+- The integration raises the repair **The Codex add-on's GitHub sign-in needs attention** (`github_access_lost`). It is an error for expired, revoked and cannot be checked, and a warning for expires soon and access changed. It clears when the check is OK or you disconnect. If you never connected, there is no repair.
+- A banner above the chat offers **Open GitHub settings**.
+
+### Backups
+
+`/data/github` is not in the app backup. After a restore, the card shows **Not connected**; press **Connect GitHub** again.
+
 ## Pausing the assistant
 
 **Settings > Pause the assistant** stops the app from taking new messages: new chats and replies are refused, and queued messages wait. A banner above the chat says so and offers **Resume the assistant**, which also starts the oldest queued message. A running task is not stopped; use **Stop task** for that. The pause is kept across app restarts.
@@ -597,7 +652,7 @@ This feature does not add a per-operation policy engine or a preview transaction
 
 ### Storage, backups, and removal
 
-`/data/.ssh` is private to this worker app and persists across restarts and updates, but Codex tasks can read it. Never print private keys or paste them into chat, task prompts, logs, or `/config`. The app excludes the entire `.ssh` directory from Home Assistant app backups, including keys, connection configuration, and trusted host keys. After restoring a backup, set up connections again and revoke replaced public keys on the remote servers. These exclusions do not remove credentials already copied elsewhere or included in older backups.
+`/data/.ssh` is private to this worker app and persists across restarts and updates, but Codex tasks can read it. Never print private keys or paste them into chat, task prompts, logs, or `/config`. The app excludes the entire `.ssh` directory from Home Assistant app backups, including keys, connection configuration, and trusted host keys. The GitHub sign-in folder, `/data/github`, is excluded too (see [GitHub sign-in](#github-sign-in)). After restoring a backup, set up connections again and revoke replaced public keys on the remote servers. These exclusions do not remove credentials already copied elsewhere or included in older backups.
 
 To remove a connection, revoke its dedicated public key on the remote server, then remove its `Host` entry, local key files, and unused known-hosts entry through chat. Connections use only an SSH client; this feature does not start an SSH server or open an inbound worker port.
 

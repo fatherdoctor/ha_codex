@@ -129,6 +129,10 @@
             ><button id="banner-cancel" class="subtle" hidden>Cancel</button>
           </div>
         </section>
+        <section id="github-banner" class="page-banner" role="status" hidden>
+          <p><strong id="github-banner-text">The add-on's GitHub sign-in needs attention.</strong></p>
+          <div class="settings-actions"><button id="github-banner-open">Open GitHub settings</button></div>
+        </section>
         <section id="paused-banner" class="page-banner" role="status" hidden>
           <p><strong>The assistant is paused.</strong> New messages are refused until you resume it.</p>
           <div class="settings-actions"><button id="resume">Resume the assistant</button></div>
@@ -391,6 +395,47 @@
           ><button id="logout" class="subtle">Sign out</button>
         </div>
         <div id="login-card"></div>
+      </section>
+      <section id="github-section" aria-labelledby="github-title">
+        <h3 id="github-title">GitHub</h3>
+        <p id="github-status" class="muted">Loading GitHub status…</p>
+        <p class="muted">Lets the assistant fetch, pull and push the GitHub repositories you choose. The add-on keeps the sign-in; the assistant never sees it, and every push goes through the push guard first.</p>
+        <dl id="github-details" class="github-details" hidden></dl>
+        <ul id="github-repositories" class="github-repositories" hidden></ul>
+        <div id="github-flow"></div>
+        <div class="settings-actions">
+          <button id="github-connect">Connect GitHub</button
+          ><button id="github-cancel" class="subtle" hidden>Cancel</button
+          ><button id="github-test" class="subtle" hidden>Read test</button
+          ><button id="github-check" class="subtle" hidden>Check now</button
+          ><button id="github-accept" class="subtle" hidden>Accept this access</button
+          ><button id="github-disconnect" class="subtle" hidden>Disconnect</button>
+        </div>
+        <p id="github-test-result" class="muted" role="status" hidden></p>
+        <details id="github-token">
+          <summary>Use a token instead</summary>
+          <p class="muted">For an account that cannot install the GitHub App. On github.com open Settings, Developer settings, Fine-grained tokens. Choose Only select repositories with one repository, Contents: Read and write, and an expiry of 90 days or less. Paste it here once. It is not shown again.</p>
+          <form id="github-token-form" class="github-form" autocomplete="off">
+            <label>Repository (owner/name)<input id="github-token-repository" name="repository" autocomplete="off" spellcheck="false" placeholder="owner/repository" required></label>
+            <label>Token<input id="github-token-value" name="token" type="password" autocomplete="off" spellcheck="false" required></label>
+            <button id="github-token-save" type="submit">Use this token</button>
+          </form>
+        </details>
+        <details id="github-local" hidden>
+          <summary>Repositories on this box</summary>
+          <p class="muted">Git on this box uses the add-on's sign-in only through the add-on. No credential is written into a repository.</p>
+          <form id="github-clone-form" class="github-form" autocomplete="off">
+            <label>Repository<select id="github-clone-repository" name="repository" required></select></label>
+            <label>New folder under /share<input id="github-clone-folder" name="folder" autocomplete="off" spellcheck="false" placeholder="repository name" pattern="[A-Za-z0-9][A-Za-z0-9_\-]{0,99}" required></label>
+            <button id="github-clone" type="submit">Clone</button>
+          </form>
+          <form id="github-link-form" class="github-form" autocomplete="off">
+            <label>Repository<select id="github-link-repository" name="repository" required></select></label>
+            <label>Existing folder under /share or /config<input id="github-link-path" name="path" autocomplete="off" spellcheck="false" placeholder="/share/repository" required></label>
+            <button id="github-link" type="submit">Link</button>
+          </form>
+        </details>
+        <p id="github-result" role="alert"></p>
       </section>
       <section id="permission-overrides">
         <h3>Permissions overrides</h3>
