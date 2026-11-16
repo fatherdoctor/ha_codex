@@ -146,6 +146,12 @@
           <div class="welcome"><h2 id="greeting">Good evening</h2></div>
         </div>
         <div class="compose-area">
+          <!-- The hint sits above the composer, not above the chat: the integration notice stays next to the list. -->
+          <section id="agents-hint" class="page-banner" role="status" hidden>
+            <p><strong>No workspace instructions yet.</strong> Codex works without /config/AGENTS.md. Write one to tell it the rules of your home.</p>
+            <div class="settings-actions"><button id="agents-hint-open">Write instructions</button
+              ><button id="agents-hint-dismiss" class="subtle">Dismiss</button></div>
+          </section>
           <p id="notice" role="status" hidden></p>
           <p id="error" role="alert" hidden></p>
           <form id="composer">
@@ -491,6 +497,12 @@
           thread warning reaches this page; a missing warning does not prove
           the requested permissions were granted.
         </p>
+        <form id="remote-control-name-form">
+          <label for="remote-control-name">Name in the ChatGPT app</label>
+          <input id="remote-control-name" maxlength="63" autocomplete="off" spellcheck="false">
+          <div class="settings-actions"><button id="remote-control-name-save" type="submit" class="subtle">Save name</button></div>
+          <p id="remote-control-name-note" class="muted" role="status"></p>
+        </form>
         <div class="settings-actions">
           <button id="remote-control-start">Turn on</button
           ><button id="remote-control-pair" class="subtle">New pairing code</button

@@ -3345,6 +3345,7 @@ function renderRemoteControl(rc) {
     }
   }
   }
+  renderRemoteControlName(rc);
   $("remote-control-start").hidden = rc.enabled;
   $("remote-control-start").disabled = !rc.available;
   $("remote-control-stop").hidden = !rc.enabled;
@@ -3365,6 +3366,38 @@ function renderRemoteControl(rc) {
   $("remote-control-log-box").hidden = !(rc.log || []).length;
   document.dispatchEvent(new CustomEvent("remote-view", {detail: rc}));
 }
+/**
+ * Show the configured machine name in its field. Codex reads the name when
+ * remote control starts, so the field is locked while it is on. Polling never
+ * replaces a name the person is still typing.
+ */
+function renderRemoteControlName(rc) {
+  const input = $("remote-control-name");
+  if (!input.dataset.edited) input.value = rc.configured_name || "";
+  input.disabled = Boolean(rc.enabled);
+  $("remote-control-name-save").disabled = Boolean(rc.enabled);
+  $("remote-control-name-note").textContent = rc.enabled
+    ? "Turn remote control off to change the name."
+    : "Pairing is kept, so the app should show the new name the next time remote control connects. If it still shows the old name, choose New pairing code.";
+}
+$("remote-control-name").oninput = () => {
+  $("remote-control-name").dataset.edited = "1";
+};
+$("remote-control-name-form").onsubmit = async (event) => {
+  event.preventDefault();
+  const input = $("remote-control-name");
+  $("remote-control-name-save").disabled = true;
+  try {
+    const data = await api("remote-control/name", { name: input.value });
+    delete input.dataset.edited;
+    renderRemoteControl(data.remote_control);
+    $("remote-control-name-note").textContent = data.notice
+      || `Saved. The ChatGPT app will show “${data.remote_control.configured_name}”.`;
+  } catch (error) {
+    settingsError(error);
+    $("remote-control-name-save").disabled = false;
+  }
+};
 for (const [id, action] of [
   ["remote-control-start", "start"],
   ["remote-control-stop", "stop"],
