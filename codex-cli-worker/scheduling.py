@@ -235,6 +235,8 @@ class Store:
                     body TEXT NOT NULL, created REAL NOT NULL);
                 CREATE TABLE IF NOT EXISTS mailbox_reads (
                     message_id TEXT NOT NULL, reader TEXT NOT NULL, PRIMARY KEY(message_id,reader));
+                CREATE TABLE IF NOT EXISTS mailbox_replies (
+                    message_id TEXT PRIMARY KEY, reply_to TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS mail_usage (author TEXT NOT NULL, day INTEGER NOT NULL,
                     turn_id TEXT NOT NULL, count INTEGER NOT NULL, PRIMARY KEY(author,day,turn_id));
@@ -450,6 +452,7 @@ class Store:
         db.execute('''DELETE FROM mailbox_reads WHERE NOT EXISTS (SELECT 1 FROM mailbox_deliveries d
             WHERE d.message_id=mailbox_reads.message_id AND d.reader=mailbox_reads.reader)''')
         db.execute('DELETE FROM mailbox WHERE NOT EXISTS (SELECT 1 FROM mailbox_deliveries d WHERE d.message_id=mailbox.id)')
+        db.execute('DELETE FROM mailbox_replies WHERE NOT EXISTS (SELECT 1 FROM mailbox m WHERE m.id=mailbox_replies.message_id)')
         db.execute('''DELETE FROM mailbox_threads WHERE NOT EXISTS
             (SELECT 1 FROM mailbox m WHERE coalesce(m.parent,m.id)=mailbox_threads.id)
             AND NOT EXISTS (SELECT 1 FROM lead_threads t WHERE t.thread_id=mailbox_threads.id AND t.finished=0)''')
@@ -481,6 +484,16 @@ class Store:
             ON CONFLICT(author,day,turn_id) DO UPDATE SET count=count+1''', (author, day, turn_id))
         db.execute('DELETE FROM mail_usage WHERE day<?', (day - 32,))
 
+    def mail_replied(self, message_id):
+        """Check a reply to this exact question, without acknowledging any mailbox."""
+        with self.connect() as db:
+            return db.execute('''SELECT 1 FROM mailbox question
+                JOIN mailbox_replies link ON link.reply_to=question.id
+                JOIN mailbox reply ON reply.id=link.message_id
+                JOIN mailbox_deliveries delivery ON delivery.message_id=reply.id AND delivery.reader='codex'
+                WHERE question.id=? AND reply.author IN ('owner','lead')
+                AND reply.rowid>question.rowid LIMIT 1''', (message_id,)).fetchone() is not None
+
     def _mail(self, db, body, author, now, parent=None, turn_id=None, *, to='all', due=None, origin='', system=False):
         """Validate and save a message and all recipient copies in the caller transaction."""
         body = text(body, 'message', 8000)
@@ -490,6 +503,11 @@ class Store:
         if origin not in ('', 'schedule', 'lead'):
             raise ValueError('Invalid message source.')
         self._prune_mail(db, now)
+        reply_to = parent
+        if parent:
+            target = db.execute('SELECT id,parent FROM mailbox WHERE id=?', (parent,)).fetchone()
+            if target is not None:
+                parent = target['parent'] or target['id']
         thread = db.execute('SELECT participants FROM mailbox_threads WHERE id=?', (parent,)).fetchone() if parent else None
         if parent and (thread is None or author != 'owner' and author not in json.loads(thread[0])):
             raise LookupError('Mailbox thread not found.')
@@ -503,6 +521,8 @@ class Store:
         stamp = mail_time(now)
         db.execute('INSERT INTO mailbox(id,parent,author,body,created,recipient,sent,last_modified,due,origin) VALUES(?,?,?,?,?,?,?,?,?,?)',
                    (message_id, parent, author, body, now, to, stamp, stamp, due, origin))
+        if reply_to:
+            db.execute('INSERT INTO mailbox_replies VALUES(?,?)', (message_id, reply_to))
         root = parent or message_id
         db.execute('INSERT OR REPLACE INTO mailbox_threads VALUES(?,?)', (root, json.dumps(sorted(recipients))))
         db.executemany('INSERT INTO mailbox_deliveries VALUES(?,?)', [(message_id, r) for r in recipients])

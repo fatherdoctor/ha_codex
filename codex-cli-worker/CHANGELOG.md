@@ -2,6 +2,9 @@
 
 ## 0.3.2 (unreleased)
 
+- Add a Repair and body-free event for unanswered task, approval and mailbox requests.
+  The reminder comes no later than half the task timeout. Answers and ended tasks clear it; it never answers automatically.
+
 - Codex now refuses risky commands in two layers. Managed Codex command rules refuse six literal command
   prefixes: the Supervisor (`ha supervisor`, `ha super`, `ha su`), credentials, the app's policy folder and
   full access. They apply with Remote Control off too. The command hook stays the main check. The app tests

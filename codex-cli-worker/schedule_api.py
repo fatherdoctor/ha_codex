@@ -122,6 +122,13 @@ class Service:
             store = self._engine.store if self._path == path else scheduling.Store(path)
             return store.mail_status()
 
+    def mailbox_replied(self, message_id):
+        """Observe reply metadata without marking a message read."""
+        path = Path(self.worker.DATA_ROOT) / 'schedules.sqlite3'
+        with self._lock:
+            store = self._engine.store if self._path == path else scheduling.Store(path)
+            return store.mail_replied(message_id)
+
     def dispatch(self, payload):
         """Use the existing running-turn capability only for proposals and local text."""
         if not isinstance(payload, dict) or set(payload) != {'operation', 'arguments', 'capability'}:
@@ -161,11 +168,23 @@ class Service:
                 return {'ok': True, 'items': page, 'next_offset': offset + limit if offset + limit < len(rows) else None,
                         'text_limit': 512}
             if operation == 'post_mailbox':
-                if set(args) - {'body', 'parent', 'to', 'due'}:
-                    raise ValueError('post_mailbox accepts only body, parent, to and due.')
+                if set(args) - {'body', 'parent', 'to', 'due', 'await_reply'}:
+                    raise ValueError('post_mailbox accepts only body, parent, to, due and await_reply.')
+                if type(args.get('await_reply', False)) is not bool:
+                    raise ValueError('await_reply must be true or false.')
+                if args.get('await_reply') and args.get('to', 'all') not in ('owner', 'all'):
+                    raise ValueError('Only a question sent to the owner can wait for a reply.')
+                previous_wait = w.tasks[task_id].get('mailbox_wait')
+                if (args.get('await_reply') and isinstance(previous_wait, dict)
+                        and previous_wait.get('turn_id') == w.tasks[task_id].get('current_turn_id')
+                        and not store.mail_replied(previous_wait.get('message_id'))):
+                    raise ValueError('This task already waits for a mailbox reply. Resolve that question first.')
                 parent = args.get('parent')
                 if parent is not None and (not isinstance(parent, str) or len(parent) != 32):
                     raise ValueError('parent must be the 32-character id of a mailbox message.')
+                if args.get('await_reply') and parent is not None:
+                    # The owner's page replies to a thread. Give each awaited question its own thread.
+                    raise ValueError('Post an awaited question as a new mailbox thread, without parent.')
                 turn_id = str(w.tasks[task_id]['current_turn_id'])
                 turn = next((row for row in w.tasks[task_id].get('turns') or []
                              if isinstance(row, dict) and str(row.get('turn_id')) == turn_id), {})
@@ -174,6 +193,9 @@ class Service:
                     origin = ''
                 message_id = store.mail(args.get('body'), 'codex', time.time(), parent, task_id + ':' + turn_id,
                     to=args.get('to', 'all'), due=args.get('due'), origin=origin)
+                if args.get('await_reply'):
+                    w.update_task(task_id, mailbox_wait={'message_id': message_id, 'turn_id': turn_id,
+                                                       'requested_at': w.utc_now()})
                 return {'ok': True, 'message_id': message_id}
             raise ValueError('Unsupported scheduling operation; approvals are owner-only.')
 

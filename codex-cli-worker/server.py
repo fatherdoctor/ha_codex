@@ -41,6 +41,7 @@ from flask import Flask, Response, jsonify, request, send_file
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from verification import DEFAULT_BROWSER_MEMORY_LIMIT_MIB, Verification, public_check
 from approvals import APPROVAL_GONE, AppServerSession
+import math
 import policy as protected_policy
 from ha_data import HomeAssistantData
 import remote_control
@@ -141,6 +142,7 @@ DEFAULT_OPTIONS = {
     "notify_service": "",
     "task_timeout_seconds": 3600,
     "task_stall_seconds": 600,
+    "unanswered_wait_minutes": 60,
     "auto_save_lovelace": True,
     "config_check": True,
     "full_snapshot": False,
@@ -1851,6 +1853,65 @@ CHOICE_ACTION_PREFIX = "CODEX_CLI_CHOICE_"
 QUESTION_NOT_WAITING = "This question is no longer waiting for an answer."
 
 
+def wait_minutes(value):
+    """Use the shipped default for a damaged or older option."""
+    return value if type(value) is int and 1 <= value <= 10080 else 60
+
+
+def wait_seconds(minutes, timeout):
+    """Cap notices at half the existing task timeout, without changing that timeout."""
+    timeout = timeout if type(timeout) is int and timeout > 0 else 3600
+    return min(wait_minutes(minutes) * 60, timeout / 2)
+
+
+def requested_time(value):
+    """Accept only an explicit, timezone-aware request timestamp."""
+    if not isinstance(value, str):
+        return None
+    try:
+        date = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        stamp = date.timestamp() if date.tzinfo is not None else None
+    except (ValueError, OverflowError, OSError):
+        return None
+    return stamp if stamp is not None and math.isfinite(stamp) and stamp >= 0 else None
+
+
+def task_waits(tasks, replied=(), *, notice_seconds=1800):
+    """Describe every active wait, including ones below the notice threshold."""
+    rows = []
+    for task in tasks:
+        task_id = task.get('task_id', '')
+        if (not isinstance(task_id, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', task_id)
+                or task.get('cancellation_requested')
+                or task.get('status') not in ('running', 'waiting_for_input')):
+            continue
+        turn = str(task.get('current_turn_id') or 'legacy')
+
+        def add(kind, identity, requested):
+            since = requested_time(requested)
+            if since is not None:
+                wait_id = hashlib.sha256(f'{task_id}:{turn}:{kind}:{identity}'.encode()).hexdigest()[:32]
+                notice_at = since + notice_seconds
+                started = requested_time(task.get('started_at'))
+                if task.get('status') == 'running' and started is not None:
+                    # A late permission request must not start a fresh half-timeout clock.
+                    notice_at = min(notice_at, started + notice_seconds)
+                rows.append({'wait_id': wait_id, 'task_id': task_id, 'kind': kind,
+                             'waiting_since': since, 'notice_at': notice_at})
+
+        if task.get('status') == 'waiting_for_input' and task.get('question'):
+            add('question', str(task['question']), task.get('input_requested_at') or task.get('updated_at'))
+        if task.get('status') == 'running':
+            for approval in task.get('approvals') or []:
+                if isinstance(approval, dict) and approval.get('status') == 'pending':
+                    add('approval', approval.get('approval_id'), approval.get('requested_at'))
+        mail = task.get('mailbox_wait')
+        if (isinstance(mail, dict) and mail.get('turn_id') == task.get('current_turn_id')
+                and mail.get('message_id') not in replied):
+            add('mailbox', mail.get('message_id'), mail.get('requested_at'))
+    return rows
+
+
 def atomic_json_write(path: Path, value: Any) -> None:
     """Replace metadata only after the complete new document has been written."""
     temporary = path.with_suffix(".tmp")
@@ -2252,6 +2313,13 @@ def _save_task_update(task_id: str, updates: dict[str, Any], *, touch: bool) -> 
         task = tasks.setdefault(task_id, {"task_id": task_id})
         if task.get("cancellation_requested") and updates.get("status") != "cancelled" and updates.get("cancellation_requested") is not False:
             return False
+        status = updates.get("status", task.get("status"))
+        if status == "waiting_for_input":
+            if (task.get("status") != status or updates.get("question", task.get("question")) != task.get("question")
+                    or not task.get("input_requested_at")):
+                updates["input_requested_at"] = utc_now()
+        else:
+            updates["input_requested_at"] = ""
         task.update(updates)
         if touch:
             task["updated_at"] = utc_now()
@@ -5962,6 +6030,21 @@ def status() -> Response:
         if latest is not None and not is_ingress_request() and isinstance(latest.get("verification"), list):
             latest["verification"] = [public_check(check) for check in latest["verification"]]
         queued = len(message_queue)
+        wait_tasks = copy.deepcopy(task_values)
+    options = read_options()
+    delay = wait_seconds(options.get("unanswered_wait_minutes"), options.get("task_timeout_seconds"))
+    waits = {"available": True, "minutes": wait_minutes(options.get("unanswered_wait_minutes")), "seconds": delay}
+    try:
+        replied = set()
+        for task in wait_tasks:
+            mail = task.get("mailbox_wait")
+            if (task.get("status") in ("running", "waiting_for_input") and isinstance(mail, dict)
+                    and schedule_service.mailbox_replied(mail.get("message_id"))):
+                replied.add(mail["message_id"])
+        waits["items"] = task_waits(wait_tasks, replied, notice_seconds=delay)
+    except (OSError, ValueError, sqlite3.Error):
+        # An unavailable mailbox is not proof that its question was answered.
+        waits = {"available": False}
     return jsonify(
         {
             "ok": True,
@@ -5969,6 +6052,7 @@ def status() -> Response:
             "active_task_count": active_task_count(),
             "queued_message_count": queued,
             "mailbox": mailbox_status_payload(),
+            "task_waits": waits,
             "task_count": active_task_count(),
             "total_task_count": len(task_values),
             "latest_task": latest,

@@ -70,6 +70,18 @@
     }
   },
   "issues": {
+    "unanswered_wait_question": {
+      "title": "Codex task {task} waits for your answer",
+      "description": "Answer the question in the task's chat. Open Codex to review the task. This notice clears when the request is answered or the task ends. Codex does not answer it automatically."
+    },
+    "unanswered_wait_approval": {
+      "title": "Codex task {task} waits for your answer",
+      "description": "Review the permission request in the task's chat. Open Codex to review the task. This notice clears when the request is answered or the task ends. Codex does not answer it automatically."
+    },
+    "unanswered_wait_mailbox": {
+      "title": "Codex task {task} waits for your answer",
+      "description": "Reply to the task's question in the owner mailbox. Open Codex to review the task. This notice clears when the request is answered or the task ends. Codex does not answer it automatically."
+    },
     "remote_control_config_change": {
       "title": "Review a change made while remote control was on",
       "description": "{count} change(s) to your configuration since remote control from the ChatGPT app was turned on add actions that Codex may not add on its own. The first is {what} in {where}: `{text}`. Review it before you reload or restart Home Assistant. Then open the Codex app page, Settings, Remote control, and choose Mark reviewed."
