@@ -100,6 +100,14 @@ COPY gate/remote-control-gate.json /usr/share/ha_codex/remote-control-gate.json
 RUN chmod 0644 /etc/codex/requirements.toml /etc/codex/managed_config.toml /usr/share/ha_codex/* \
     && chown -R root:root /etc/codex /usr/share/ha_codex
 
+# The GitHub sign-in (CX-GITHUB): the worker side, the stdio tool Codex calls, git's askpass helper, and the
+# kit's push guard, read-only beside the gate. Every push the worker makes for Codex runs that guard first.
+COPY github_access.py github_mcp.py /
+COPY github_askpass.py /usr/local/bin/codex-github-askpass
+COPY push_guard.py /usr/share/ha_codex/push_guard.py
+RUN chmod 0555 /usr/local/bin/codex-github-askpass && chmod 0444 /usr/share/ha_codex/push_guard.py \
+    && chown root:root /usr/local/bin/codex-github-askpass /usr/share/ha_codex/push_guard.py
+
 COPY core_address.py relay_reads.py relay_reads_mcp.py scheduling.py schedule_api.py scheduling_mcp.py approvals.py policy.py gate_rules.py remote_control.py relay_diagnostics.py verification.py verification_mcp.py browser_permissions.py browser_permission_policy.json ha_data.py ha_data_mcp.py browser.cjs browser_resources.cjs browser_permissions.cjs /
 COPY web /web
 # The Codex integration of the same release, which integration_sync.py installs in /config at start.

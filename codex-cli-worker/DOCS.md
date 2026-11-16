@@ -303,7 +303,7 @@ Codex needs to be able to write to the backup folder. In `workspace-write` mode 
 ## Sandbox
 
 - `read-only`: Codex can inspect files. Writes and shell networking require permission for the specific action.
-- `workspace-write`: Codex can edit the mounted `/config` workspace. Shell networking and writes outside the workspace require permission. This remains the default setting.
+- `workspace-write`: Codex can edit the mounted `/config` workspace and the shared `/share` folder, the same `/share` access the Claude add-on has. Shell networking and writes elsewhere require permission. This remains the default setting.
 
 This fork has no `danger-full-access` mode. The upstream app's full-access mode turned the permission requests off; here the protected policy (below) refuses it, and an older setting that still names it stops the app at startup with a log line saying so.
 

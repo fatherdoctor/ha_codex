@@ -28,7 +28,9 @@ PROTECTED_PREFIXES = ("/usr/share/ha_codex", "/data/codex-home/AGENTS.md", "/dat
                       "/data/options.json", "/data/worker_api_token", "/data/schedules.sqlite3",
                       "/data/schedules.sqlite3-journal", "/data/schedules.sqlite3-wal", "/data/schedules.sqlite3-shm",
                       "/data/interaction-diagnostics.json", "/data/interaction-diagnostics.key",
-                      "/data/house-rules", "/data/interaction-diagnostics.settings.json", "/data/codex-home/house-rules")
+                      "/data/house-rules", "/data/interaction-diagnostics.settings.json", "/data/codex-home/house-rules",
+                      # The GitHub sign-in and its socket: only the worker reads or changes them.
+                      "/data/github", "/data/github.sock")
 
 
 def touches_protected_path(path: str) -> bool:

@@ -38,6 +38,7 @@ Paths are under `codex-cli-worker/` unless they start with `custom_components/`.
 | The remote-control process gets an environment without the Supervisor token or per-exchange capabilities | `remote_control.py: STRIPPED_ENV`, `remote_env` | `tests/test_remote_control.py` |
 | A sandboxed command cannot see `secrets.yaml`, Home Assistant's sign-in store, the add-on's options, its API token, the schedule database or the container's saved environment | `codex-bwrap: HIDDEN_DIRS`, `HIDDEN_FILES` | `tests/test_bwrap.py`, `tests/apparmor_317_check.py` |
 | The one case where the wrapper changes Bubblewrap's arguments (Codex's own `/bin/true` probe) | `codex-bwrap: is_codex_proc_probe`, `codex-bwrap-probe.py`; explained in `SANDBOX_TESTING.md` | `tests/test_bwrap.py`, `tests/test_proc_assertion.py` |
+| A sandboxed command cannot see the add-on's GitHub sign-in (`/data/github`); the token is never in an environment the worker builds, never in a git argument, remote URL or log, and the folder is left out of the add-on backup | `codex-bwrap: HIDDEN_DIRS`; `github_access.py: GitRunner.env`, `Store`; `github_askpass.py`; `config.yaml: backup_exclude` | `tests/test_bwrap.py` (`test_the_github_folder_is_hidden_in_every_sandbox`), `tests/test_github_access.py` |
 | The relay runs under its own AppArmor label with all capabilities dropped, entered only through one fixed launcher | `apparmor.txt`, `relay-launcher`, `relay-tool-launcher` | `tests/apparmor_317_check.py`, `.github/workflows/apparmor-317.yaml` |
 | The worker's memory cannot be read by a process it starts | `server.py: make_worker_undumpable` | `tests/test_gate.py` (`test_the_flag_is_set`) |
 | Full access is not available, whatever a client or an option asks for | `gate/requirements.toml` (Codex's managed requirements) and `policy.py: load_policy`, `policy_problem`; checked before each exchange at the top of `server.py: run_task` | `tests/test_policy.py` |
@@ -76,6 +77,8 @@ the copies the same, so check both when you check one.
 | The groups can be changed only by an administrator on the chat page; the settings file is small, exactly five booleans, and a bad file means normal approval | `permission_overrides_api.py`: the `/permissions-overrides` route (`require_auth`, `require_ingress`, `ingress_admin`); `permission_overrides.py: Settings.read`, `validate` | `tests/test_permission_overrides.py` |
 | A change to the add-on's own policy, rules, options or credentials cannot be approved at all | `approvals.py: touches_protected_path`, `command_names_protected_path`, `PROTECTED_PREFIXES` | `tests/test_approvals.py` |
 | Browser permissions are managed only from the chat page | `server.py: require_ingress` | `tests/test_browser_permissions.py` |
+| The GitHub sign-in can be connected, tested, accepted or disconnected only by an administrator on the chat page; the worker's API token can read its status and nothing else | `github_access.py: register` (the `/github` routes) | `tests/test_github_routes.py` |
+| A push Codex asks for runs the kit's push guard first, from the read-only copy in the image, and pushes only the commit it checked; a push that adds a `guard: allow` mark is refused, since an allow mark needs the owner; no force, delete or tag push; read-only chats and schedules can only list and fetch | `github_access.py: GitRunner.push`, `valid_branch`, `GitHubService.dispatch`; `push_guard.py` (byte-identical to the kit's) | `tests/test_github_access.py` |
 | Schedules and the mailbox are owner-managed: the page routes need the worker's API token and an administrator on the chat page (`owner`). The local lead channel under `/lead/` is separate: it needs its own token, not Ingress, and reads only background work, not people's chats. The scheduling tools a chat-page task can call use a third path: a Unix socket (mode 0600) where each request must carry the exchange's running-turn capability, which ends with the exchange; a proposal is saved disabled until an administrator approves it | `schedule_api.py: register` (`owner`, `lead`), `schedule_api.py: Service.dispatch`, `Service.serve`, `scheduling.py: Store.token_ok` | `tests/test_scheduling.py` (`test_lead_requires_separate_token_and_ingress_alone_is_not_a_token`, `test_tool_transport_roundtrip_and_expired_capability`), `tests/test_sched_review.py` |
 
 ### Layer 4: what the worker checks afterwards
@@ -107,6 +110,7 @@ Codex holds no Home Assistant credential for these; it holds a short-lived capab
 |---|---|---|
 | Relay state reads: listed entities and attributes only, no password-mode text entities, no credential-like names, bounded size, valid only while the relay that was given the capability is alive | `relay_reads.py`: `RelayReads._dispatch`, `PRIVATE`, `ATTRIBUTES`, `password_state` | `tests/test_relay_read_filters.py`, `tests/test_relay_request_shapes.py` |
 | Recorder history: read-only, per exchange, limited in count | `ha_data.py`: `HomeAssistantData.dispatch` | `tests/test_ha_data.py` |
+| GitHub: clone (into a new folder `/share/<folder>`, one name with no slash, `..` or leading dot; links are resolved first and nothing outside the two is accepted; `/share/HomeAssistant` is never touched), link (sets a plain https origin; no credential is written into the repository), fetch, pull (a fetch only: the worker never updates a work tree, so a filter planted in the repository never runs in the worker) and push for a repository the owner connected, per exchange; git runs in the worker with an askpass helper that answers only GitHub's own prompt, with repository settings limited to a short allowlist and hooks, fsmonitor, credential helpers and other transports switched off for every git child, and the effective push URL checked. A sandboxed shell can reach `/data/github.sock`, but it offers only this same tool, needs the running exchange's capability, and has no operation that returns the token | `github_access.py`: `GitHubService.dispatch`, `GitRunner.check_config`, `CONFIG_OVERRIDES`, `origin_repository`; `github_askpass.py`; `github_mcp.py` | `tests/test_github_access.py` (`test_planted_repo_config_cannot_run_or_redirect`) |
 | Diagnostics export: an allowlisted schema, nothing else leaves | `diagnostics_scrub.py` | `tests/test_interaction_diagnostics.py`, `tests/ha/test_diagnostics_export.py` |
 
 `diagnostics_scrub.py` exists twice, in `codex-cli-worker/` and in `custom_components/codex_cli/`, because the
@@ -124,8 +128,9 @@ two are packaged separately. The copies must be byte-identical and a worker test
     | python3 -I codex-cli-worker/gate/gate_hook.py --state /nonexistent
   ```
 
-- Compare the protected names. `codex-bwrap` (`HIDDEN_FILES`), `approvals.py` (`PROTECTED_PREFIXES`) and
-  `gate_rules.py` (`_policy_restriction`) each list them in their own notation for their own layer.
+- Compare the protected names. `codex-bwrap` (`HIDDEN_FILES`, `HIDDEN_DIRS`), `approvals.py` (`PROTECTED_PREFIXES`)
+  and `gate_rules.py` (`_policy_restriction`) each list them in their own notation for their own layer; the GitHub
+  sign-in (`/data/github`) is in all three.
 - The image places the hook, the rules and the policy read-only under `/usr/share/ha_codex` and `/etc/codex`;
   the `Dockerfile` is where to confirm that.
 
