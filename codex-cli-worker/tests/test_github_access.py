@@ -172,6 +172,13 @@ class DeviceFlowTests(ServiceCase):
         posted = [call for call in self.http.calls if call[0] == "POST"]
         self.assertTrue(all("client_secret" not in call[2] for call in posted))
 
+    def test_status_gives_the_seconds_left_on_a_waiting_code_only(self):
+        """The page counts down from the worker's clock; an ended flow has no countdown."""
+        self.service.flow = self.flow()
+        self.assertTrue(895 <= self.service.status()["flow"]["expires_in"] <= 900)
+        self.service.flow.finish("expired", "The code expired before it was entered on GitHub.")
+        self.assertNotIn("expires_in", self.service.status()["flow"])
+
     def test_expired_and_denied_store_nothing(self):
         for error, status in (("expired_token", "expired"), ("access_denied", "failed")):
             with self.subTest(error=error):

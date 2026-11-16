@@ -188,7 +188,7 @@ AGENTS_MAX_BYTES = 256 * 1024
 SNAPSHOT_MAX_BYTES = 8 * 1024 * 1024
 LOG_TAIL_BYTES = 300_000
 AUTH_NOTIFY_ID = "codex_cli_login"
-# Present while a sign-in the app started by itself has not been followed by a signed-in start.
+# Left by app versions before 0.3.2, which started one sign-in by themselves; removed at start.
 AUTO_SIGN_IN_MARK = DATA_ROOT / "auto_sign_in_started"
 AUTH_QR_DIR = CONFIG_ROOT / "www" / "codex_cli_auth"
 INGRESS_PROXY_IP = "172.30.32.2"
@@ -237,6 +237,10 @@ UUID_RE = re.compile(
 )
 URL_RE = re.compile(r"https?://[^\s<>)\"']+")
 DEVICE_CODE_RE = re.compile(r"\b[A-Z0-9]{4,}(?:-[A-Z0-9]{4,})+\b")
+# How long the one-time code works, as `codex login --device-auth` prints it: "(expires in 15 minutes)".
+CODE_LIFETIME_RE = re.compile(r"\bexpires in (\d{1,3}) minutes?\b", re.IGNORECASE)
+# A line of `codex login` output that says why a sign-in stopped.
+SIGN_IN_ERROR_LINE_RE = re.compile(r"\b(?:error|denied|expired|failed|refused|timed out)\b", re.IGNORECASE)
 EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
 SENSITIVE_USAGE_LABEL_RE = re.compile(
     r"(?i)\b(?:account|e-?mail|session(?:\s+id)?|organization|workspace(?:\s+id)?)\s*:"
@@ -3493,6 +3497,11 @@ def auth_status_payload() -> dict[str, Any]:
         f"auth/qr.svg?login={state.get('login_id') or ''}" if state.get("verification_url") else ""
     )
     state["pending"] = bool(state["process_running"]) and state.get("status") in SIGN_IN_PENDING
+    # Seconds the shown code still works, counted by the worker so the browser's clock does not matter.
+    deadline = state.pop("code_deadline", None)
+    state["expires_in"] = (
+        max(0, int(deadline - time.monotonic())) if state["pending"] and isinstance(deadline, float) else None
+    )
     state["codex_login"] = codex_login_status()
     if state["codex_login"].get("server_check") == "rejected" and not state["process_running"]:
         state["status"] = "expired"
@@ -3520,11 +3529,19 @@ def login_qr_svg(url: str) -> bytes:
 
 
 def cancel_codex_login() -> dict[str, Any]:
-    """Stop a running sign-in, clear its code and link, and return the sign-in state."""
+    """Stop a running sign-in, clear its code and link, and return the sign-in state.
+
+    The sign-in is marked canceled before its process stops. The sign-in thread wakes when the process
+    exits, and it must already see the cancel, or it reports a failure that did not happen.
+    """
     global auth_process
     with auth_lock:
         proc = auth_process if auth_process is not None and auth_process.poll() is None else None
         auth_process = None
+        auth_state.update(
+            status="canceled", canceled_login_id=auth_state.get("login_id"), completed_at=utc_now(),
+            updated_at=utc_now(), **CLEARED_SIGN_IN_CODE,
+        )
     if proc is not None:
         proc.terminate()
         try:
@@ -3532,21 +3549,57 @@ def cancel_codex_login() -> dict[str, Any]:
         except subprocess.TimeoutExpired:
             proc.kill()
     dismiss_persistent_notification(AUTH_NOTIFY_ID)
-    update_auth_state(
-        status="canceled", completed_at=utc_now(), verification_url="", user_code="", qr_url="", output="", error="",
-    )
     return auth_status_payload()
 
 
+# The sign-in state fields that hold a code, its link and its lifetime, cleared when a sign-in ends.
+CLEARED_SIGN_IN_CODE = {
+    "verification_url": "", "user_code": "", "qr_url": "", "output": "", "error": "", "expires_at": "",
+    "code_deadline": None,
+}
+
+
 def parse_login_output(text: str) -> dict[str, str]:
-    """Return the first URL and the first device code in `codex login` output, each empty when not found."""
+    """Return the first URL, device code and code lifetime in minutes in `codex login` output, each empty when not found."""
     cleaned = clean_cli_text(text)
     urls = [url.rstrip(".,;") for url in URL_RE.findall(cleaned)]
     codes = DEVICE_CODE_RE.findall(cleaned)
+    lifetime = CODE_LIFETIME_RE.search(cleaned)
     return {
         "url": urls[0] if urls else "",
         "code": codes[0] if codes else "",
+        "minutes": lifetime.group(1) if lifetime else "",
     }
+
+
+def code_expiry_updates(minutes: str) -> dict[str, Any]:
+    """Return the sign-in state fields for a code that works for this many minutes from now; none when unknown.
+
+    The deadline is kept on the monotonic clock, so a change of the system clock cannot stretch or cut it;
+    expires_at is only for people to read.
+    """
+    if not minutes or int(minutes) <= 0:
+        return {}
+    seconds = int(minutes) * 60
+    return {
+        "code_deadline": time.monotonic() + seconds,
+        "expires_at": (datetime.now(timezone.utc) + timedelta(seconds=seconds)).isoformat(timespec="seconds"),
+    }
+
+
+def sign_in_failure_reason(returncode: int) -> str:
+    """Say why a sign-in stopped without signing in: the code expired, or the error line Codex printed."""
+    with auth_lock:
+        deadline = auth_state.get("code_deadline")
+        output = str(auth_state.get("output") or "")
+    if isinstance(deadline, float) and time.monotonic() >= deadline:
+        return "The code expired before the sign-in was approved. Get a new code and enter it within its time."
+    error_lines = [line.strip() for line in clean_cli_text(output).splitlines() if SIGN_IN_ERROR_LINE_RE.search(line)]
+    if error_lines:
+        # The code in a failed sign-in no longer works, but it is still not repeated in a notice.
+        reason = DEVICE_CODE_RE.sub("[code]", error_lines[-1])[:300]
+        return f"Codex stopped the sign-in: {reason}"
+    return f"Codex stopped the sign-in (exit code {returncode}) without saying why. Get a new code to try again."
 
 
 def write_login_qr(login_id: str, url: str) -> str:
@@ -3602,14 +3655,22 @@ def notify_codex_login_ready(login_id: str, url: str, code: str) -> str:
     return qr_url
 
 
-def auth_reader_thread(handle) -> None:
-    """Follow `codex login` output: log it, update the sign-in state, and notify the user when the link or code appears."""
+def auth_reader_thread(handle, login_id: str | None = None) -> None:
+    """Follow `codex login` output: log it, update the sign-in state, and notify the user when the link or code appears.
+
+    With a login_id, the reader stops once another sign-in has replaced that one, so the output of a
+    canceled sign-in never lands in the state of the next.
+    """
     buffer = ""
     notified = False
     notified_code = ""
     for line in iter(handle.readline, ""):
         if not line:
             break
+        if login_id is not None:
+            with auth_lock:
+                if auth_state.get("login_id") != login_id or auth_state.get("canceled_login_id") == login_id:
+                    return
         cleaned = clean_cli_text(line)
         buffer += cleaned
         write_task_log("auth", "codex-login", cleaned)
@@ -3625,6 +3686,7 @@ def auth_reader_thread(handle) -> None:
                 user_code=parsed["code"],
                 qr_url=qr_url,
                 output=redact(buffer)[-4000:],
+                **(code_expiry_updates(parsed["minutes"]) if parsed["code"] else {}),
             )
             notified = True
             notified_code = parsed["code"]
@@ -3639,6 +3701,7 @@ def auth_reader_thread(handle) -> None:
                 updates["verification_url"] = parsed["url"]
             if parsed["code"] and not shown_code:
                 updates["user_code"] = parsed["code"]
+                updates.update(code_expiry_updates(parsed["minutes"]))
             update_auth_state(**updates)
 
 
@@ -3655,6 +3718,8 @@ def run_codex_device_login(login_id: str) -> None:
         qr_url="",
         output="",
         error="",
+        expires_at="",
+        code_deadline=None,
     )
     try:
         proc = subprocess.Popen(
@@ -3675,27 +3740,40 @@ def run_codex_device_login(login_id: str) -> None:
         auth_process = proc
 
     assert proc.stdout is not None
-    reader = threading.Thread(target=auth_reader_thread, args=(proc.stdout,), daemon=True)
+    reader = threading.Thread(target=auth_reader_thread, args=(proc.stdout, login_id), daemon=True)
     reader.start()
     returncode = proc.wait()
     reader.join(timeout=5)
+    signed_in = returncode == 0 and codex_login_status().get("status_ok")
+    # Decide and record the outcome under one lock, so a Cancel or a new sign-in cannot slip in between.
     with auth_lock:
-        auth_process = None
+        # "Get a new code" cancels this sign-in and starts the next at once; that one's process and
+        # state are left alone.
+        if auth_process is proc:
+            auth_process = None
+        if auth_state.get("login_id") != login_id:
+            return
+        if auth_state.get("canceled_login_id") == login_id:
+            # The user pressed Cancel; that is not a failure to report. A line the reader wrote just
+            # before the cancel may have put the code back, so it is cleared again.
+            if auth_state.get("status") in SIGN_IN_PENDING:
+                auth_state.update(status="canceled", updated_at=utc_now(), **CLEARED_SIGN_IN_CODE)
+            return
+        if signed_in:
+            auth_state.update(status="completed", completed_at=utc_now(), updated_at=utc_now(), returncode=returncode)
+        else:
+            reason = sign_in_failure_reason(returncode)
+            auth_state.update(
+                status="failed", completed_at=utc_now(), updated_at=utc_now(), returncode=returncode, error=reason,
+            )
 
-    if returncode == 0 and codex_login_status().get("status_ok"):
-        update_auth_state(status="completed", completed_at=utc_now(), returncode=returncode)
+    if signed_in:
         dismiss_persistent_notification(AUTH_NOTIFY_ID)
         forget_default_model()
         notify("Codex sign-in complete", "Codex CLI is now authenticated for the Home Assistant worker.")
         refresh_usage_status_async(force=True)
     else:
-        with auth_lock:
-            canceled = auth_state.get("status") == "canceled" and auth_state.get("login_id") == login_id
-        if canceled:
-            # The user pressed Cancel; that is not a failure to report.
-            return
-        update_auth_state(status="failed", completed_at=utc_now(), returncode=returncode)
-        notify("Codex sign-in failed", f"Device login exited with code {returncode}.")
+        notify("Codex sign-in failed", reason)
 
 
 def start_codex_login_flow(force: bool = False) -> dict[str, Any]:
@@ -3723,6 +3801,8 @@ def start_codex_login_flow(force: bool = False) -> dict[str, Any]:
                 "qr_url": "",
                 "output": "",
                 "error": "",
+                "expires_at": "",
+                "code_deadline": None,
             }
         )
     thread = threading.Thread(target=run_codex_device_login, args=(login_id,), daemon=True)
@@ -3783,35 +3863,28 @@ def logout_codex() -> dict[str, Any]:
 
 
 def auto_start_login_if_needed() -> None:
-    """At start, sign in by itself once while Codex is not logged in; otherwise refresh the usage status if due.
+    """At start, refresh the usage status when signed in; otherwise point to Sign in without starting a sign-in.
 
-    A one-time code works only while the sign-in that printed it runs, so every restart used to post a new
-    code, even when nobody had used the last one. The app now starts one sign-in by itself and marks that in
-    its storage. While the mark is there and Codex is still not signed in, later starts replace the code
-    notification with one that points to Sign in. A start that finds Codex signed in removes the mark.
+    A one-time code works for a few minutes and only while the sign-in that printed it runs, so a code made
+    at start was often stale before anyone opened the app. The owner starts a sign-in with Sign in when ready.
     """
+    try:
+        AUTO_SIGN_IN_MARK.unlink(missing_ok=True)
+    except OSError as exc:
+        # The old mark no longer changes anything; a file that cannot be removed only stays.
+        print(f"Could not remove the old automatic sign-in mark: {exc}", flush=True)
     status = codex_login_status()
     if status.get("status_ok"):
-        AUTO_SIGN_IN_MARK.unlink(missing_ok=True)
         update_auth_state(status="authenticated", message=status.get("message", ""))
         refresh_usage_status_async(force=False)
         return
-    if AUTO_SIGN_IN_MARK.exists():
-        print("Codex is not authenticated; waiting for Sign in (a code was already posted at an earlier start).", flush=True)
-        create_persistent_notification(
-            "Codex CLI is not signed in",
-            "Codex is not signed in yet. The code posted at an earlier start no longer works. "
-            "Open the Codex app and choose **Sign in** to get a new one-time code.",
-            AUTH_NOTIFY_ID,
-        )
-        return
-    try:
-        AUTO_SIGN_IN_MARK.touch()
-    except OSError as exc:
-        # Without the mark the next start posts a code again, as before; the sign-in still starts now.
-        print(f"Could not record the automatic sign-in: {exc}", flush=True)
-    print("Codex is not authenticated; starting device-code login flow.", flush=True)
-    start_codex_login_flow(False)
+    print("Codex is not authenticated; waiting for Sign in.", flush=True)
+    create_persistent_notification(
+        "Codex CLI is not signed in",
+        "Codex is not signed in. Open the Codex app and choose **Sign in** when you are ready. "
+        "The app then shows a one-time code and how long it works.",
+        AUTH_NOTIFY_ID,
+    )
 
 
 def ha_docs_enabled() -> bool:

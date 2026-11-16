@@ -75,6 +75,8 @@ async function task(page) {
     await page.reload();
     await page.setViewportSize({width: 1440, height: 1000});
     await page.getByRole('button', {name: 'Open settings', exact: true}).click();
+    // Settings sections start collapsed; this one stays open once opened.
+    await page.locator('#browser-permissions-section .settings-toggle').click();
     const list = page.locator('#browser-permissions');
     await list.getByRole('button').first().waitFor();
     assert.equal(await list.getByRole('button').count(), 4);

@@ -90,7 +90,11 @@ retryConnection.onclick = async () => {
 $("connection-content").append(retryConnection);
 const remoteLink = textNode("button", "Manage remote connection", "subtle");
 remoteLink.type = "button";
-$("settings").querySelector("section").after(remoteLink);
+// Its own row under the ChatGPT account section, so it does not read as part of that section.
+const remoteRow = document.createElement("div");
+remoteRow.className = "settings-link-row";
+remoteRow.append(remoteLink);
+$("settings").querySelector("section").after(remoteRow);
 let connectionTimer;
 let lastRemoteState = null;
 function connectionLabel(rc) {

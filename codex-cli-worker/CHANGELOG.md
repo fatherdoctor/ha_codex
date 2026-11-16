@@ -16,6 +16,24 @@
   with every backslash and newline removed, in any quote or comment state. So a Supervisor command spelled
   across lines is refused also in single quotes, after a carriage return, inside `${...}`, and in a shell or
   wrapper that the parser does not open (`dash -c`, `setsid sh -c`, `bash --norc -c`).
+- The app no longer makes a ChatGPT sign-in code by itself at start. A code works for 15 minutes and only
+  while its sign-in runs, so a code made at start was often stale before anyone used it. While Codex is not
+  signed in, the Home Assistant notification now points to **Sign in**, and the owner starts a sign-in there
+  when ready. A mark file that older versions left in the app's storage is removed at start.
+- The ChatGPT and GitHub sign-in codes show how long they still work, with a live countdown. The worker sends
+  the seconds left by its own clock, so a phone with a wrong clock still shows the right time, and the page sets
+  the time again from each status reply, so a phone that slept catches up. When a code runs out, the page says so and offers **Get a new code**, which cancels the old sign-in and starts a new one.
+- A ChatGPT sign-in that stops without signing in now says why when it can: the code expired, or the error line
+  that Codex printed (with any code in it replaced). The page shows the reason, and **Sign in** becomes
+  **Get a new code**. A canceled sign-in can no longer mark the next one as failed or clear its process.
+- **Cancel** on a ChatGPT sign-in no longer raises a false "Codex sign-in failed" notification. The app now
+  marks the sign-in canceled before it stops the sign-in process.
+- Settings on a phone: every settings section starts collapsed, with a one-line status in its header (for
+  example "Connected as owner, 1 repository" or "3 of 5 on"); a section that needs attention says so in red:
+  a sign-in that waits or failed, house rules that wait for review, a schedule that waits for approval, or
+  schedules paused without the Home Assistant time zone. Tap a header to
+  open its section. Button rows wrap, and at phone width the buttons of a row share it in equal columns, so the
+  ChatGPT buttons no longer render tall and narrow and the GitHub buttons no longer run past the edge.
 
 ## 0.3.1 (unreleased)
 
