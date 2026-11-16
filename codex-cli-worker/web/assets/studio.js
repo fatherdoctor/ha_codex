@@ -88,13 +88,6 @@ retryConnection.onclick = async () => {
   finally { retryConnection.disabled = false; }
 };
 $("connection-content").append(retryConnection);
-const remoteLink = textNode("button", "Manage remote connection", "subtle");
-remoteLink.type = "button";
-// Its own row under the ChatGPT account section, so it does not read as part of that section.
-const remoteRow = document.createElement("div");
-remoteRow.className = "settings-link-row";
-remoteRow.append(remoteLink);
-$("settings").querySelector("section").after(remoteRow);
 let connectionTimer;
 let lastRemoteState = null;
 function connectionLabel(rc) {
@@ -169,7 +162,12 @@ $("strip-pair").onclick = () => {
   openConnection();
   $("remote-control-pair").click();
 };
-remoteLink.onclick = openConnection;
+// The ChatGPT app pairing part of Accounts and connections in Settings opens the same window.
+$("remote-connection-open").onclick = openConnection;
+$("app-pairing-new").onclick = () => {
+  openConnection();
+  $("remote-control-pair").click();
+};
 $("connection-dialog").addEventListener("close", () => clearTimeout(remoteTimer));
 
 // Workspace rules are loaded only when Advanced opens their dedicated editor.

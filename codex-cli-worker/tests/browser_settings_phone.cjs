@@ -84,7 +84,9 @@ async function checkButtonRows(page) {
         open: t.getAttribute('aria-expanded'), attention: t.closest('section').classList.contains('needs-attention')})));
       assert.ok(headers.every(h => h.open === 'false'), 'every section starts collapsed');
       // Every header has a status. The fixture has no Home Assistant, so the schedules wait for its time zone.
+      // Accounts and connections names only the part that needs the owner: ChatGPT waits for its code.
       assert.deepEqual(headers.map(({title, status, attention}) => ({title, status, attention})), [
+        {title: 'Accounts and connections', status: 'ChatGPT signing in: enter the code', attention: true},
         {title: 'ChatGPT account', status: 'Signing in: enter the code', attention: true},
         {title: 'GitHub', status: 'Connected as synthetic-owner, 1 repository', attention: false},
         {title: 'Permissions overrides', status: '3 of 5 on', attention: false},
@@ -97,7 +99,11 @@ async function checkButtonRows(page) {
       assert.equal(await page.locator('#remote-control-section .settings-toggle').count(), 0, 'own dialog stays open');
       await page.screenshot({path: path.join(SHOTS, `settings-collapsed-${colorScheme}-400.png`)});
 
-      // Open ChatGPT and GitHub: the code shows its countdown, and the button rows fit the phone.
+      // Open Accounts and connections, then ChatGPT and GitHub: the code shows its countdown, and the button rows
+      // fit the phone. The app pairing part is short and has no header of its own to open.
+      await page.locator('#accounts-section > h3 .settings-toggle').click();
+      assert.equal(await page.locator('#app-pairing-section .settings-toggle').count(), 0);
+      assert.equal(await page.getByRole('button', {name: 'Manage remote connection', exact: true}).isVisible(), true);
       for (const id of ['chatgpt-section', 'github-section']) await page.locator(`#${id} .settings-toggle`).click();
       const expiry = page.locator('#login-card .signin-expiry');
       assert.match(await expiry.textContent(), /^The code expires in 1[45]:\d\d\.$/);
@@ -115,6 +121,7 @@ async function checkButtonRows(page) {
       await page.screenshot({path: path.join(SHOTS, `settings-open-${colorScheme}-400.png`), fullPage: true});
       await page.locator('#github-section').screenshot({path: path.join(SHOTS, `settings-github-${colorScheme}-400.png`)});
       await page.locator('#chatgpt-section').screenshot({path: path.join(SHOTS, `settings-chatgpt-${colorScheme}-400.png`)});
+      await page.locator('#accounts-section').screenshot({path: path.join(SHOTS, `settings-accounts-${colorScheme}-400.png`)});
 
       // A failed sign-in says why in the section and its header, and the button offers a new code.
       auth = failed;
