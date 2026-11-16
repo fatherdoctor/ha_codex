@@ -9,6 +9,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -683,6 +684,183 @@ class PushTests(GitRunnerCase):
         env = gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO]).env()
         pairs = {env[f"GIT_CONFIG_KEY_{i}"]: env[f"GIT_CONFIG_VALUE_{i}"] for i in range(int(env["GIT_CONFIG_COUNT"]))}
         self.assertEqual(pairs["remote.origin.proxy"], "")
+
+
+PLANTED_SERVER = r"""
+import http.server, ssl, sys
+folder, log = sys.argv[1], sys.argv[2]
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        with open(log, "a") as out:
+            out.write(self.path + "\n")
+        self.send_response(401)
+        self.send_header("WWW-Authenticate", 'Basic realm="planted"')
+        self.end_headers()
+
+    do_POST = do_GET
+
+    def log_message(self, *_args):
+        pass
+
+
+class Server(http.server.ThreadingHTTPServer):
+    def handle_error(self, *_args):  # a refused handshake is the expected outcome
+        pass
+
+
+context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+context.load_cert_chain(folder + "/srv.pem", folder + "/srv.key")
+server = Server(("127.0.0.1", 0), Handler)
+server.socket = context.wrap_socket(server.socket, server_side=True)
+print(server.server_address[1], flush=True)
+server.serve_forever()
+"""
+
+
+class PlantedServer:
+    """A local HTTPS server with a github.com certificate signed by a CA a task could plant (SG1)."""
+
+    def __init__(self, folder: Path):
+        self.folder = folder
+        self.ca = folder / "planted-ca.pem"
+        self.capath = folder / "planted-capath"
+        self.capath.mkdir(parents=True)
+        ext = folder / "ext"
+        ext.write_text("subjectAltName=DNS:github.com,DNS:localhost\n")
+
+        def ssl_cmd(*args):
+            subprocess.run(["openssl", *args], check=True, capture_output=True, cwd=folder)
+
+        ssl_cmd("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", "ca.key", "-out", str(self.ca), "-days",
+                "2", "-subj", "/CN=Planted CA", "-addext", "basicConstraints=critical,CA:TRUE",
+                "-addext", "keyUsage=critical,keyCertSign")
+        ssl_cmd("req", "-newkey", "rsa:2048", "-nodes", "-keyout", "srv.key", "-out", "srv.csr", "-subj", "/CN=github.com")
+        ssl_cmd("x509", "-req", "-in", "srv.csr", "-CA", str(self.ca), "-CAkey", "ca.key", "-CAcreateserial",
+                "-out", "srv.pem", "-days", "2", "-extfile", str(ext))
+        name = subprocess.run(["openssl", "x509", "-noout", "-subject_hash", "-in", str(self.ca)], check=True,
+                              capture_output=True, text=True).stdout.strip()
+        (self.capath / f"{name}.0").write_bytes(self.ca.read_bytes())
+        # A child process serves, so a test run that blocks sockets in the test process still works.
+        self.log = folder / "requests.log"
+        self.process = subprocess.Popen([sys.executable, "-I", "-c", PLANTED_SERVER, str(folder), str(self.log)],
+                                        stdout=subprocess.PIPE, text=True)
+        self.port = int(self.process.stdout.readline())
+
+    @property
+    def requests(self) -> list[str]:
+        return self.log.read_text().splitlines() if self.log.exists() else []
+
+    def clear(self):
+        self.log.unlink(missing_ok=True)
+
+    def close(self):
+        self.process.kill()
+        self.process.wait()
+        self.process.stdout.close()
+
+
+@unittest.skipUnless(shutil.which("openssl") and os.path.exists(gh.CA_BUNDLE), "needs openssl and the system CA bundle")
+class PlantedTransportTests(GitRunnerCase):
+    """SG1: transport settings planted after the check never make git trust another server with the token."""
+
+    def setUp(self):
+        super().setUp()
+        self.server = PlantedServer(Path(self.temp.name) / "tls")
+        self.addCleanup(self.server.close)
+
+    def https_runner(self, pinned=True):
+        port = self.server.port
+
+        class PortRemote(gh.GitRunner):
+            """github.com as the test server: a test-only rewrite to localhost on its port, standing in for a
+            planted http.curloptResolve (which newer git resets with the empty override)."""
+
+            def env(self, credentialed=True):
+                env = super().env(credentialed)
+                pairs = [(env[f"GIT_CONFIG_KEY_{i}"], env[f"GIT_CONFIG_VALUE_{i}"])
+                         for i in range(int(env["GIT_CONFIG_COUNT"]))]
+                if not pinned:  # the 0.3.0 settings, to show the planted folder would be trusted without the pin
+                    pairs = [pair for pair in pairs if pair[0] not in ("http.sslCAInfo", "http.sslCAPath")]
+                    env.pop("GIT_SSL_CAPATH", None)
+                pairs.append((f"url.https://localhost:{port}/.insteadOf", "https://github.com/"))
+                for key in [key for key in env if key.startswith("GIT_CONFIG_")]:
+                    del env[key]
+                for index, (key, value) in enumerate(pairs):
+                    env[f"GIT_CONFIG_KEY_{index}"], env[f"GIT_CONFIG_VALUE_{index}"] = key, value
+                env["GIT_CONFIG_COUNT"] = str(len(pairs))
+                env.update(GIT_ID)
+                return env
+
+            def origin_repository(self, repo):
+                return REPO
+
+        return PortRemote(lambda: APP_TOKEN, lambda: [REPO], config_root=self.config, share_root=self.share,
+                          askpass="/bin/false", guard=str(WORKER / "push_guard.py"))
+
+    def plants(self):
+        url = f"https://localhost:{self.server.port}/"
+        ca, capath = str(self.server.ca), str(self.server.capath)
+        resolve = ("http.curloptResolve", f"github.com:{self.server.port}:127.0.0.1")
+        return {
+            "sslCAInfo": [resolve, ("http.sslCAInfo", ca)],
+            "sslCAPath": [resolve, ("http.sslCAPath", capath)],
+            "url sslCAInfo": [resolve, (f"http.{url}.sslCAInfo", ca)],
+            "url sslCAPath": [resolve, (f"http.{url}{REPO}.git.sslCAPath", capath)],
+            "sslVerify": [resolve, ("http.sslVerify", "false")],
+            "all": [resolve, ("http.sslCAInfo", ca), ("http.sslCAPath", capath), ("http.extraHeader", "X-Planted: 1"),
+                    ("http.cookieFile", str(self.server.ca)), ("http.saveCookies", "true")],
+        }
+
+    def run_planted(self, runner, operation, settings):
+        done = []
+        real_check = runner.check_config
+
+        def check(repo):
+            real_check(repo)
+            if not done:  # the race: settings written after the check passed
+                done.append(True)
+                for key, value in settings:
+                    git(self.repo, "config", "--add", key, value)
+
+        try:
+            with patch.object(runner, "check_config", side_effect=check):
+                return getattr(runner, operation)(str(self.repo))
+        finally:
+            for key, _ in settings:
+                git(self.repo, "config", "--unset-all", key, check=False)
+
+    def test_planted_trust_and_resolve_settings_fail_on_the_certificate(self):
+        runner = self.https_runner()
+        for name, settings in self.plants().items():
+            for operation in ("fetch", "push"):
+                with self.subTest(plant=name, operation=operation):
+                    self.server.clear()
+                    result = self.run_planted(runner, operation, settings)
+                    self.assertFalse(result["ok"], result["text"])
+                    self.assertEqual(self.server.requests, [], "git trusted the planted server")
+                    self.assertNotIn(APP_TOKEN, result["text"])
+                    if operation == "fetch":  # the push guard's own ls-remote fails first and keeps git's message
+                        self.assertIn("certificate", result["text"].lower())
+                    self.assertIn("settings changed while git ran", result["text"])
+
+    def test_without_the_pin_the_planted_folder_is_trusted(self):
+        """The control: the same plant reaches the server on the 0.3.0 settings, so the test above can fail."""
+        result = self.run_planted(self.https_runner(pinned=False), "fetch", self.plants()["sslCAPath"])
+        self.assertFalse(result["ok"])
+        self.assertNotEqual(self.server.requests, [])
+
+    def test_the_overrides_pin_the_transport(self):
+        env = gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO]).env()
+        pairs = {env[f"GIT_CONFIG_KEY_{i}"]: env[f"GIT_CONFIG_VALUE_{i}"] for i in range(int(env["GIT_CONFIG_COUNT"]))}
+        for key in ("http.sslCAInfo", "http.sslCAPath", "http.proxy", "http.extraHeader", "http.cookieFile"):
+            self.assertEqual(pairs[key], "", key)
+        self.assertEqual(pairs["http.sslVerify"], "true")
+        self.assertEqual(pairs["http.saveCookies"], "false")
+        self.assertEqual(env["GIT_SSL_CAINFO"], gh.CA_BUNDLE)
+        if os.path.isdir(gh.CA_DIR):
+            self.assertEqual(env["GIT_SSL_CAPATH"], gh.CA_DIR)
 
 
 class CloneLinkTests(GitRunnerCase):

@@ -44,6 +44,7 @@ REPLY_LIMIT = 8000
 GUARD_PATH = "/usr/share/ha_codex/push_guard.py"
 ASKPASS_PATH = "/usr/local/bin/codex-github-askpass"
 CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
+CA_DIR = "/etc/ssl/certs"
 ALLOW_MARK = "guard: allow"
 OPERATIONS = ("repos", "fetch", "pull", "push", "clone", "link")
 READ_ONLY_OPERATIONS = ("repos", "fetch")
@@ -84,6 +85,17 @@ CONFIG_OVERRIDES = (
     ("push.recurseSubmodules", "no"),
     ("core.pager", "cat"),
     ("remote.origin.proxy", ""),
+    # SG1: a transport setting planted in the task's .git/config after the check. The trust anchor is the one that
+    # matters: GIT_SSL_CAINFO and GIT_SSL_CAPATH (env) are applied after every config form, http.<url>.* included,
+    # so a planted CA file or folder is never trusted and a redirected connection cannot pass as github.com.
+    ("http.sslCAInfo", ""),
+    ("http.sslCAPath", ""),
+    ("http.proxy", ""),
+    ("http.extraHeader", ""),  # an empty value resets the list
+    ("http.cookieFile", ""),
+    ("http.saveCookies", "false"),
+    # Resets a planted list on newer git only (git 2.43 keeps it); the CA pin above is what is relied on.
+    ("http.curloptResolve", ""),
 )
 GUARD_ADVICE_RE = re.compile(r"^push_guard: \d+ finding\(s\); push refused\..*$", re.M)
 GITHUB_TOKEN_RE = re.compile(r"gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{60,}")
@@ -532,6 +544,8 @@ class GitRunner:
         env["GIT_HTTP_LOW_SPEED_TIME"] = str(GIT_STALL_SECONDS)
         if os.path.exists(CA_BUNDLE):
             env["GIT_SSL_CAINFO"] = CA_BUNDLE
+        if os.path.isdir(CA_DIR):
+            env["GIT_SSL_CAPATH"] = CA_DIR
         if credentialed:
             env["GIT_ASKPASS"] = self.askpass
             env["SSH_ASKPASS"] = self.askpass
@@ -750,7 +764,7 @@ class GitRunner:
             return reply(False, "The push check took too long and was stopped; nothing was pushed.")
         if scan.returncode != 0 or not scan.stdout.strip().isdigit():
             return reply(False, "The push could not be checked; nothing was pushed.\n"
-                         + redact_token(scan.stderr[-2000:], token))
+                         + redact_token(scan.stderr[-2000:], token) + self.recheck(repo))
         if int(scan.stdout.strip()):
             return reply(False, "An allow mark needs the owner; this push is refused. Nothing was pushed.")
         try:

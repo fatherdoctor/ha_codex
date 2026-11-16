@@ -18,6 +18,8 @@ import time
 import uuid
 from typing import Any, Callable, TextIO
 
+from gate_rules import names_image_folder
+
 
 APPROVAL_GONE = "This permission request is no longer waiting for an answer."
 DISPLAY_LIMIT = 32000
@@ -42,12 +44,12 @@ def touches_protected_path(path: str) -> bool:
 
 
 # The same places as a command spells them: quotes, backslashes and doubled slashes are removed first, and the
-# names are matched loosely (a glob such as /usr/share/ha_c* still names the image folder). Best effort on the
-# text, like the file-path check: it cannot see a path a command builds at run time.
+# names are matched loosely (a glob such as /usr/share/ha_c* still names the image folder). The image folder itself
+# is gate_rules.names_image_folder, shared with the hook, so the absolute /share/ha_<name> stays usable. Best
+# effort on the text, like the file-path check: it cannot see a path a command builds at run time.
 PROTECTED_COMMAND_RES = (
     re.compile(r"codex-home/+house-rules(?:\b|[*?\[])", re.IGNORECASE),
     re.compile(r"/data/+interaction-diagnostics(?:\b|[*?\[])", re.IGNORECASE),
-    re.compile(r"/share/+ha_", re.IGNORECASE),
     re.compile(r"ha_codex/+(policy|agents|house)", re.IGNORECASE),
     re.compile(r"codex-home/+[^\s/]*[*?\[]", re.IGNORECASE),
     re.compile(r"codex-home.*(agents\.md|config\.toml)|(agents\.md|config\.toml).*codex-home", re.IGNORECASE | re.DOTALL),
@@ -288,7 +290,7 @@ def command_names_protected_path(command: str) -> bool:
         return True
     text = re.sub(r"[\'\"\\]", "", str(command or ""))
     text = re.sub(r"/{2,}", "/", text)
-    if (any(pattern.search(text) for pattern in PROTECTED_COMMAND_RES)
+    if (any(pattern.search(text) for pattern in PROTECTED_COMMAND_RES) or names_image_folder(text)
             or re.search(r"/etc/codex/requirements\.toml(?![\w./-])", text, re.IGNORECASE)):
         return True
     # Match per path component: a shell wildcard cannot cross a slash.
