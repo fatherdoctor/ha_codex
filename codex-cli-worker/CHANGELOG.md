@@ -2,6 +2,13 @@
 
 ## 0.3.2 (unreleased)
 
+- A thread started from the chat page no longer shows the page's instructions as your message in the ChatGPT app.
+  The page sends its fixed rules as Codex developer instructions, and the message holds only your text, so the
+  app shows your words as the message and the title. The details of each message (the backup folder, attached
+  documents and images, and the notes on direct API calls, the local documentation and GitHub) come from a new
+  read-only `exchange_info` tool on the Home Assistant data server. A page message on a thread that the page did
+  not start (a ChatGPT app thread, or one from 0.3.1) begins with a one-line note to call that tool, which then
+  also returns the rules. Threads from 0.3.1 keep their old instructions in their history.
 - Codex now refuses risky commands in two layers. Managed Codex command rules refuse six literal command
   prefixes: the Supervisor (`ha supervisor`, `ha super`, `ha su`), credentials, the app's policy folder and
   full access. They apply with Remote Control off too. The command hook stays the main check. The app tests

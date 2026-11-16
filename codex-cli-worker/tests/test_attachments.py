@@ -308,7 +308,7 @@ class AttachmentTests(unittest.TestCase):
         self.assertEqual(server.image_generation_items(""), [])
         self.assertIsNone(server.sniff_image(b"plain text"))
         self.assertEqual(server.sniff_image(b"RIFF\x00\x00\x00\x00WEBPVP8 "), ("image/webp", ".webp"))
-        prompt = server.build_prompt("Draw a sheep", "task")
+        prompt = server.PAGE_INSTRUCTIONS
         self.assertIn("image generation tool", prompt)
         self.assertIn("attached to this conversation", prompt)
 
@@ -355,9 +355,9 @@ class AttachmentTests(unittest.TestCase):
         self.assertEqual([item["attachment_id"] for item in payload["turns"][0]["prompt_attachments"]],
                          [item["attachment_id"] for item in sent])
         self.assertEqual(payload["attachments"], [])
-        # The prompt names the images and the CLI receives them ahead of the other exec flags.
-        prompt = server.build_prompt("Fix the card in this screenshot", task_id)
-        self.assertIn("attached 2 image(s) to this message: Screen shot.PNG, photo.jpg", prompt)
+        # exchange_info names the images and the CLI receives them ahead of the other exec flags.
+        info = server.exchange_info(task_id, None)
+        self.assertIn("attached 2 image(s) to this message: Screen shot.PNG, photo.jpg", info["attachments"])
         with patch.object(server, "read_options", return_value={"codex_sandbox": "workspace-write"}):
             args = server.build_codex_args(task_id, Path("prompt"), Path("final"), None)
         paths = [str((server.get_task_dir(task_id) / item["path"]).resolve()) for item in sent]
@@ -374,7 +374,7 @@ class AttachmentTests(unittest.TestCase):
         second = server.tasks[task_id]["turns"][1]["prompt_attachments"]
         self.assertEqual([item["name"] for item in second], ["second.png"])
         self.assertEqual(server.tasks[task_id]["turns"][0]["prompt_attachments"], sent)
-        self.assertIn("attached 1 image(s) to this message: second.png", server.build_prompt("x", task_id, reply="And this one?"))
+        self.assertIn("attached 1 image(s) to this message: second.png", server.exchange_info(task_id, None)["attachments"])
         with patch.object(server, "read_options", return_value={"codex_sandbox": "workspace-write"}):
             args = server.build_codex_args(task_id, Path("prompt"), Path("final"), SESSION_ID)
         second_path = str((server.get_task_dir(task_id) / second[0]["path"]).resolve())
@@ -394,7 +394,7 @@ class AttachmentTests(unittest.TestCase):
         with patch.object(server, "read_options", return_value={"codex_sandbox": "workspace-write"}):
             args = server.build_codex_args(task_id, Path("prompt"), Path("final"), SESSION_ID)
         self.assertNotIn("--image", args)
-        self.assertNotIn("The user attached", server.build_prompt("x", task_id, reply="Thanks"))
+        self.assertNotIn("attachments", server.exchange_info(task_id, None))
 
     def test_attached_image_validation(self):
         """Bad attachments are rejected with HTTP 400 before any task is created."""

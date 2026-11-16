@@ -1103,7 +1103,7 @@ class TaskCancellationTests(unittest.TestCase):
                 patch.object(server, "get_task_dir", return_value=Path(temp_dir) / task_id),
                 patch.object(server, "save_task_index"),
                 patch.object(server, "api_token", return_value="test-token"),
-                patch.object(server, "build_prompt", return_value="prompt"),
+                patch.object(server, "page_message", return_value="prompt"),
                 patch.object(
                     server,
                     "read_options",
@@ -1207,7 +1207,7 @@ class TaskCancellationTests(unittest.TestCase):
                 patch.object(server, "get_task_dir", return_value=Path(temp_dir) / task_id),
                 patch.object(server, "save_task_index"),
                 patch.object(server, "api_token", return_value="test-token"),
-                patch.object(server, "build_prompt", return_value="prompt"),
+                patch.object(server, "page_message", return_value="prompt"),
                 patch.object(
                     server,
                     "read_options",

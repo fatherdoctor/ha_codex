@@ -108,7 +108,7 @@ class ChoiceTests(unittest.TestCase):
         schema = server.FINAL_RESPONSE_SCHEMA
         self.assertEqual(sorted(schema["properties"]), sorted(schema["required"]))
         self.assertEqual(schema["properties"]["choices"], {"type": "array", "items": {"type": "string"}})
-        self.assertIn("choices", server.build_prompt("Tidy up", "task"))
+        self.assertIn("choices", server.PAGE_INSTRUCTIONS)
 
     def test_question_with_choices_is_stored_and_published_with_its_turn(self):
         """A question's choices are saved on the task and its turn, and go out in the event and the notification."""
