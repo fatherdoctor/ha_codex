@@ -61,7 +61,7 @@ The hook reads text. It does not run a shell, so a path or command built while t
 reach; DOCS.md lists those limits, and layers 1, 3 and 4 are what cover them.
 
 Before it splits a command, the hook joins each backslash-newline pair the way the shell does
-(`gate_rules.py: _join_shell_continuations`), so a command name split across lines is read whole. The join has
+(`shell_words.py: join_shell_continuations`), so a command name split across lines is read whole. The join has
 its own model of quotes and comments. Where that model is not sure (a heredoc, a substitution, quoting it cannot
 read) the command is refused with a request for one line. The model can still be wrong, so the Supervisor text
 floor in `check_tool_call` reads a second form with every backslash-newline pair removed, whatever the quotes
@@ -69,9 +69,11 @@ floor in `check_tool_call` reads a second form with every backslash-newline pair
 the parser does not open. Tests: `tests/test_gate_quote.py` (`ContinuationFloorTests` runs each form through a
 print-only shell).
 
-(*) Known weakness: the shell text is split by two copies of the same code, `_strip_comments` and `_split_words`,
-one in `gate_rules.py` and one in `approvals.py`. Both refuse quoting they cannot read. Nothing but review keeps
-the copies the same, so check both when you check one.
+(*) The shell text is split by one copy of the code, `shell_words.py` (`strip_comments`, `split_words`), which
+`gate_rules.py` and `approvals.py` both import. The hook's continuation join is in the same file. Each check keeps
+its own `_shell_words` for text it cannot read: the hook reads it again line by line, the approval card refuses
+it. `tests/test_shell_words.py` checks that both use the shared code and that the image ships it next to the hook
+and the worker.
 
 ### Layer 3: who can approve
 
