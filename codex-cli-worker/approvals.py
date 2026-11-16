@@ -20,6 +20,7 @@ from typing import Any, Callable, TextIO
 
 import remote_control
 from gate_rules import names_image_folder
+from shell_words import split_words, strip_comments
 
 
 APPROVAL_GONE = "This permission request is no longer waiting for an answer."
@@ -58,51 +59,6 @@ PROTECTED_COMMAND_RES = (
 )
 
 
-# Characters after which a ``#`` starts a word. An escaped character is never one of them.
-WORD_BREAKS = frozenset(" \t\r\n;&|()<>")
-
-
-def _strip_comments(text: str) -> str:
-    """Remove shell comments: from a ``#`` that starts a word outside quotes to the end of its line.
-
-    A ``#`` inside a word, such as ``a#b``, is part of that word, as it is for the shell.
-    """
-    out: list[str] = []
-    quote = ""
-    i = 0
-    while i < len(text):
-        char = text[i]
-        if quote == "'":
-            if char == "'":
-                quote = ""
-        elif char == "\\":
-            # A backslash keeps the next character, except inside single quotes.
-            out.append(text[i:i + 2])
-            i += 2
-            continue
-        elif quote == '"':
-            if char == '"':
-                quote = ""
-        elif char in "'\"":
-            quote = char
-        elif char == "#" and (not out or out[-1] in WORD_BREAKS):
-            end = text.find("\n", i)
-            i = len(text) if end == -1 else end
-            continue
-        out.append(char)
-        i += 1
-    return "".join(out)
-
-
-def _split_words(text: str, punctuation: str) -> list[str]:
-    """Split text the way the shell does, with comments already removed; raise ValueError if unreadable."""
-    lexer = shlex.shlex(text, posix=True, punctuation_chars=punctuation)
-    lexer.whitespace = " \t\r"
-    lexer.whitespace_split = True
-    lexer.commenters = ""
-    return list(lexer)
-
-
 def _shell_words(text: str, punctuation: str) -> list[str]:
     """Split command text into words and shell punctuation, without running it.
 
@@ -111,9 +67,10 @@ def _shell_words(text: str, punctuation: str) -> list[str]:
     lines in a way the splitter cannot follow. The caller treats that as touching a
     protected place: a command allowed once runs outside the sandbox, so a command this
     check cannot read is never offered Allow once. gate_rules.py reads such text again
-    line by line instead, because its Supervisor rule has a text floor behind it.
+    line by line instead, because its Supervisor rule has a text floor behind it. Both
+    read words with the same code, in shell_words.py; only this answer differs.
     """
-    return _split_words(_strip_comments(text), punctuation)
+    return split_words(strip_comments(text), punctuation)
 
 
 def _has_unreadable_structure(command: str) -> bool:
@@ -124,6 +81,20 @@ def _has_unreadable_structure(command: str) -> bool:
     marker anywhere, and a line joined with a backslash, count as protected before the splitter runs.
     """
     return "<<" in command or "\\\n" in command
+
+
+def command_is_unreadable(command: str) -> bool:
+    """Return whether the approval check refuses this command text only because it cannot read it.
+
+    The card then says that, instead of saying the command touches the app's policy.
+    """
+    if _has_unreadable_structure(command):
+        return True
+    try:
+        _shell_words(command, ';&|()\n<>')
+    except ValueError:
+        return True
+    return False
 
 
 def _protected_ancestor_operations(command: str, initial_cwd: str = '', depth: int = 0) -> bool:
@@ -629,7 +600,12 @@ class AppServerSession:
                 for change in record["changes"])
         if clipped or protected:
             record["can_allow"] = False
-        if protected:
+        if protected and method == COMMAND_APPROVAL and command_is_unreadable(params.get("command") or ""):
+            record["note"] = (
+                "The check could not read this command's quoting or heredoc safely, so it cannot rule out a change "
+                "to the app's permission policy or settings. Deny it and ask for the command without a heredoc, "
+                "for example with the text written to a file first.")
+        elif protected:
             record["note"] = "This request touches the app's permission policy or settings, which Codex may not edit. Deny it."
         elif request_kind == "writeStdin":
             record["note"] = "Input to a running command cannot be allowed here. Deny it and ask for the whole action as one command."
