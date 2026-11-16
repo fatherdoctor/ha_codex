@@ -22,7 +22,13 @@ async def async_setup_entry(
 ) -> None:
     """Set up Codex CLI binary sensors."""
     coordinator: CodexCliCoordinator = entry.runtime_data.coordinator
-    async_add_entities([CodexRunningBinarySensor(coordinator, entry), CodexSignedInBinarySensor(coordinator, entry)])
+    async_add_entities(
+        [
+            CodexRunningBinarySensor(coordinator, entry),
+            CodexSignedInBinarySensor(coordinator, entry),
+            CodexGitHubConnectedBinarySensor(coordinator, entry),
+        ]
+    )
 
 
 class CodexRunningBinarySensor(CoordinatorEntity[CodexCliCoordinator], BinarySensorEntity):
@@ -74,3 +80,34 @@ class CodexSignedInBinarySensor(CoordinatorEntity[CodexCliCoordinator], BinarySe
         """Return whether a sign-in is waiting for its code to be entered."""
         flow = (self.coordinator.data or {}).get("auth_flow") or {}
         return {"sign_in_waiting": bool(flow.get("pending"))}
+
+
+class CodexGitHubConnectedBinarySensor(CoordinatorEntity[CodexCliCoordinator], BinarySensorEntity):
+    """Show whether the worker reports healthy GitHub access."""
+
+    _attr_has_entity_name = True
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_translation_key = "github_connected"
+
+    def __init__(self, coordinator: CodexCliCoordinator, entry: ConfigEntry) -> None:
+        """Attach the sensor to the entry's existing Codex device."""
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_github_connected"
+        self._attr_device_info = {"identifiers": {(DOMAIN, entry.entry_id)}}
+
+    @property
+    def is_on(self) -> bool:
+        """Return true only when the worker reports GitHub access as OK."""
+        github = (self.coordinator.data or {}).get("github") or {}
+        return github.get("state") == "ok"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        """Expose a summary without copying sign-in data or repository details."""
+        github = (self.coordinator.data or {}).get("github") or {}
+        return {
+            "state": github.get("state", "unknown"),
+            "account": (github.get("account") or {}).get("login"),
+            "repository_count": len(github.get("repositories") or []),
+        }
