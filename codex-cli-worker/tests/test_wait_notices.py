@@ -26,9 +26,13 @@ class Waits(unittest.TestCase):
             question = store.mail('An owner question', 'codex', 11, parent=root, turn_id='task:turn', to='owner')
             store.mail('Unrelated progress update', 'lead', 12, parent=root, turn_id='lead-turn')
             self.assertFalse(store.mail_replied(question))
-            store.mail('The answer', 'owner', 13, parent=question, to='codex')
+            with self.assertRaises(LookupError):
+                store.mail('A child is not a reply target', 'owner', 13, parent=question, to='codex')
+            direct_question = store.mail('A separate question', 'codex', 14, turn_id='task:turn', to='owner')
+            store.mail('The answer', 'owner', 15, parent=direct_question, to='codex')
             restarted = scheduling.Store(store.path)
-            self.assertTrue(restarted.mail_replied(question))
+            self.assertFalse(restarted.mail_replied(question))
+            self.assertTrue(restarted.mail_replied(direct_question))
 
     def test_a_live_thread_can_still_receive_replies_after_its_root_expires(self):
         with tempfile.TemporaryDirectory() as directory:
