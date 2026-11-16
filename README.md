@@ -197,8 +197,8 @@ Codex uses your ChatGPT account.
    managed workspace, an administrator may need to allow device-code sign-in; see
    [Codex Sign-In](codex-cli-worker/DOCS.md#codex-sign-in).
 2. In the chat, open **Settings** and choose **Sign in**.
-3. Scan the QR code, or open the link, and enter the one-time code. The code stays on screen until the sign-in ends or
-   you cancel it.
+3. Scan the QR code, or open the link, and enter the one-time code. The code stays on screen, with the time it still
+   works, until the sign-in ends or you cancel it. If it runs out, choose **Get a new code**.
 
 When the sign-in is missing, ended or rejected, a banner returns above the chat, the integration raises a Home
 Assistant repair, and the **Signed in** sensor turns off. A good sign-in clears all three. The Codex program does not

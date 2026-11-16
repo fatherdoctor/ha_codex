@@ -36,8 +36,11 @@ class AccountAccessTests(unittest.TestCase):
         self.assertTrue(self.check.refresh())
         self.assertEqual(self.read.call_count, 3)
 
-    def test_elapsed_time_does_not_invent_a_signin_expiry(self):
-        # Access-token refresh and the metadata check cadence are not a sign-in lifetime.
+    def test_elapsed_time_does_not_invent_a_signin_expiry(self) -> None:
+        """However much time passes, the access state stays unconfirmed and asks for no new sign-in.
+
+        Access-token refresh and the metadata check cadence are not a sign-in lifetime.
+        """
         for hours in (0, 6, 24, 72, 8 * 24, 30 * 24):
             with self.subTest(hours=hours):
                 self.now = 1.0 + hours * 3600

@@ -146,6 +146,12 @@
           <div class="welcome"><h2 id="greeting">Good evening</h2></div>
         </div>
         <div class="compose-area">
+          <!-- The hint sits above the composer, not above the chat: the integration notice stays next to the list. -->
+          <section id="agents-hint" class="page-banner" role="status" hidden>
+            <p><strong>No workspace instructions yet.</strong> Codex works without /config/AGENTS.md. Write one to tell it the rules of your home.</p>
+            <div class="settings-actions"><button id="agents-hint-open">Write instructions</button
+              ><button id="agents-hint-dismiss" class="subtle">Dismiss</button></div>
+          </section>
           <p id="notice" role="status" hidden></p>
           <p id="error" role="alert" hidden></p>
           <form id="composer">
@@ -385,11 +391,11 @@
           ✕
         </button>
       </div>
-      <section>
+      <section id="chatgpt-section">
         <h3>ChatGPT account</h3>
         <p id="login-status" class="muted">Loading account status…</p>
+        <p id="login-requirement" class="muted">A ChatGPT account with Codex access is required. As of November 13, 2026, OpenAI includes Codex across plans, including Free and Go; limits and workspace access vary. <a href="https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan" target="_blank" rel="noopener noreferrer">Check current availability</a>.</p>
         <div class="settings-actions">
-          <p class="muted">A ChatGPT account with Codex access is required. As of November 13, 2026, OpenAI includes Codex across plans, including Free and Go; limits and workspace access vary. <a href="https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan" target="_blank" rel="noopener noreferrer">Check current availability</a>.</p>
           <button id="login">Sign in</button
           ><button id="login-cancel" class="subtle" hidden>Cancel</button
           ><button id="logout" class="subtle">Sign out</button>
@@ -450,7 +456,7 @@
         <p id="permissions-overrides-guard-note" role="status" class="muted" hidden></p>
         <p id="permissions-overrides-result" role="status" class="muted">Available to administrators.</p>
       </section>
-      <section>
+      <section id="interaction-logs-section">
         <h3>Interaction logs</h3>
         <p class="muted">Export recent worker metadata. Remote ChatGPT threads are not recorded. Review the file before sharing it.</p>
         <label for="diagnostic-retention">Interactions to keep (10–100)</label>
@@ -459,7 +465,7 @@
         <button id="export-interaction-logs" class="subtle">Export logs</button>
         <p id="export-logs-status" class="muted" role="status"></p>
       </section>
-      <section id="remote-control-section">
+      <section id="remote-control-section" data-own-dialog>
         <h3>Remote control from the ChatGPT app</h3>
         <p class="muted">
           Lets the ChatGPT app on your phone or iPad work on this Home
@@ -491,6 +497,12 @@
           thread warning reaches this page; a missing warning does not prove
           the requested permissions were granted.
         </p>
+        <form id="remote-control-name-form">
+          <label for="remote-control-name">Name in the ChatGPT app</label>
+          <input id="remote-control-name" maxlength="63" autocomplete="off" spellcheck="false">
+          <div class="settings-actions"><button id="remote-control-name-save" type="submit" class="subtle">Save name</button></div>
+          <p id="remote-control-name-note" class="muted" role="status"></p>
+        </form>
         <div class="settings-actions">
           <button id="remote-control-start">Turn on</button
           ><button id="remote-control-pair" class="subtle">New pairing code</button
@@ -501,14 +513,14 @@
           <pre id="remote-control-log"></pre>
         </details>
       </section>
-      <section>
+      <section id="assistant-section">
         <h3>Assistant</h3>
         <p id="pause-status" class="muted">Loading…</p>
         <div class="settings-actions">
           <button id="pause">Pause the assistant</button>
         </div>
       </section>
-      <section>
+      <section id="browser-permissions-section">
         <h3>Browser permissions</h3>
         <p class="muted">Requests you chose to remember for a dashboard. Revoking a permission stops captures using saved access.</p>
         <div id="browser-permissions"></div>
@@ -540,7 +552,7 @@
         <form id="schedule-mail-form"><input id="schedule-mail-parent" type="hidden" /><p id="schedule-mail-target" class="muted">New message</p><label for="schedule-mail-body">Message</label><textarea id="schedule-mail-body" rows="3" maxlength="8000" required></textarea><div class="settings-actions"><button type="submit">Save message</button><button id="schedule-mail-reset" type="button" class="subtle">New thread</button></div></form>
         <p id="schedule-result" role="status"></p>
       </section>
-      <section id="workspace-section">
+      <section id="workspace-section" data-own-dialog>
         <h3>Workspace instructions</h3>
         <p class="muted">
           Codex follows these instructions when working in your Home Assistant
@@ -550,7 +562,7 @@
         ><textarea id="agents" rows="12" spellcheck="false"></textarea
         ><button id="save-agents">Save instructions</button>
       </section>
-      <section><h3>Appearance</h3><p class="muted">Follow Home Assistant</p></section>
+      <section id="appearance-section"><h3>Appearance</h3><p class="muted">Follow Home Assistant</p></section>
       <details class="advanced"><summary>Advanced</summary><button id="workspace-open" class="subtle">Workspace rules</button></details>
       <p id="settings-result" role="status"></p>
     </dialog>

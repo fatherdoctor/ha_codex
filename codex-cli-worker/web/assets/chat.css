@@ -1728,7 +1728,65 @@ dialog label {
 }
 .settings-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
+}
+/* On a phone the buttons of a row share it in equal columns and never run past the edge. */
+@media (max-width: 480px) {
+  .settings-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  }
+  .settings-actions > button {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+}
+/* A collapsed settings section: the header button shows the title and a one-line status. */
+dialog h3:has(> .settings-toggle) {
+  margin: 0;
+}
+.settings-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+  width: 100%;
+  padding: 10px 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+}
+.settings-title::before {
+  content: "▸ ";
+}
+.settings-toggle[aria-expanded="true"] .settings-title::before {
+  content: "▾ ";
+}
+.settings-status {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+.needs-attention .settings-status {
+  color: var(--error);
+  font-weight: 600;
+}
+.needs-attention .settings-status:not(:empty)::before {
+  content: "⚠ ";
+}
+.signin-expired {
+  color: var(--error);
+}
+.settings-link-row {
+  border-top: 1px solid var(--line);
+  margin-top: 22px;
+  padding-top: 12px;
 }
 #login-card img {
   max-width: 220px;
@@ -1907,6 +1965,14 @@ dialog label {
   padding: 0.75rem 1rem;
   border: 1px solid var(--line);
   border-radius: 8px;
+}
+#agents-hint {
+  margin: 0 0 10px;
+}
+#remote-control-name {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
 }
 .signin-card {
   display: grid;

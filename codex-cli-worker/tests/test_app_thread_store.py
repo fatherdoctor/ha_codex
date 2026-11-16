@@ -6,6 +6,7 @@ The app-server messages here are written by hand from the Codex 0.166.0 protocol
 thread/resume take developerInstructions; turn/start takes input; an mcpToolCall item carries server, tool, status
 and arguments). They are not recordings of a real app server.
 """
+import io
 import json
 import os
 from pathlib import Path
@@ -120,7 +121,10 @@ class ExchangeRecordTests(unittest.TestCase):
         self.assertNotIn("rules", info)
 
     def test_a_thread_the_page_did_not_start_gets_a_pointer_and_the_rules_through_exchange_info(self):
-        """A thread from the ChatGPT app or from 0.3.1 has no record: the message points to exchange_info, which has the rules."""
+        """A thread from the ChatGPT app or from 0.3.2 or earlier has no record.
+
+        The message points to exchange_info, which has the rules.
+        """
         task_id = self.create(OWNER_TEXT)
         server.update_task(task_id, session_id=attachments.SESSION_ID)
         self.assertNotIn("page_instructions", server.tasks[task_id])
@@ -335,7 +339,10 @@ class StatusCallTests(unittest.TestCase):
         self.assertEqual(server.apply_status_calls(answer, []), (answer, ""))
 
     def test_a_plain_answer_is_the_summary_and_an_old_json_answer_still_reads(self):
-        """Plain text, also with a JSON example in it, is the answer; a 0.3.1 JSON answer keeps its fields."""
+        """Plain text, also with a JSON example in it, is the answer.
+
+        A JSON answer of 0.3.2 or earlier keeps its fields, also inside one code fence.
+        """
         with tempfile.TemporaryDirectory() as folder:
             final_file = Path(folder) / "final.json"
             plain = 'Done. The service call was:\n\n```json\n{"entity_id": "light.porch", "status": "on"}\n```'
@@ -345,6 +352,16 @@ class StatusCallTests(unittest.TestCase):
                    "details": "", "choices": ["Yes", "No"]}
             final_file.write_text(json.dumps(old))
             self.assertEqual(server.parse_final(final_file, 0), old)
+            final_file.write_text("```json\n" + json.dumps(old) + "\n```")
+            self.assertEqual(server.parse_final(final_file, 0), old)
+
+    def test_an_example_of_the_old_answer_inside_a_plain_answer_stays_plain(self):
+        """Only a whole answer is read as an old JSON answer, so an example of one does not set the status."""
+        with tempfile.TemporaryDirectory() as folder:
+            final_file = Path(folder) / "final.json"
+            plain = 'Done. Example of the old answer:\n\n```json\n{"status": "failed", "summary": "example"}\n```'
+            final_file.write_text(plain)
+            self.assertEqual(server.parse_final(final_file, 0), {"status": "completed", "summary": plain, "details": ""})
 
 
 class StatusRunTests(unittest.TestCase):
@@ -459,7 +476,7 @@ class StatusRunTests(unittest.TestCase):
         self.assertEqual(task["error"], "The entity light.porch does not exist.")
 
     def test_an_old_json_answer_still_gives_its_status_and_choices(self):
-        """A thread from 0.3.1 can still answer with the JSON object."""
+        """A thread from 0.3.2 or earlier can still answer with the JSON object."""
         old = {"status": "needs_input", "summary": "Two automations match.", "question": "Remove one?",
                "details": "", "choices": ["Yes", "No"]}
         task = self.run_exchange([], json.dumps(old))
@@ -469,7 +486,7 @@ class StatusRunTests(unittest.TestCase):
     def test_a_failed_configuration_check_wins_over_a_question(self):
         """F3.3: the worker's own failure comes first, so the owner is not asked a question over a broken file.
 
-        The same holds for a question in an old JSON answer, which version 0.3.1 kept.
+        The same holds for a question in an old JSON answer, which version 0.3.2 and earlier kept.
         """
         old_question = json.dumps({"status": "needs_input", "summary": "Edited.", "question": "Remove one?",
                                    "details": "", "choices": ["Yes"]})
@@ -481,6 +498,45 @@ class StatusRunTests(unittest.TestCase):
                 self.assertEqual((task["question"], task["choices"]), ("", []))
                 self.assertIn("automations.yaml", task["error"])
 
+    def test_a_non_zero_exit_wins_over_a_question_in_an_old_json_answer(self):
+        """A Codex run that exits with an error fails the task, also when an old JSON answer asks a question.
+
+        Only the exec path (codex exec, no user approvals) has an exit code of its own; the app server path
+        reports a failed turn as a connection error, which other tests cover.
+        """
+        old_question = json.dumps({"status": "needs_input", "summary": "Edited.", "question": "Remove one?",
+                                   "details": "", "choices": ["Yes"]})
+
+        class ExecProcess:
+            """codex exec: it writes the old JSON answer, then exits with code 1."""
+
+            def __init__(self, args, **kwargs):
+                """Remember where codex exec writes its last message."""
+                del kwargs
+                self.output = Path(args[args.index("--output-last-message") + 1])
+                self.stdin, self.stdout, self.stderr = io.StringIO(), io.StringIO(""), io.StringIO("")
+                self.returncode = None
+
+            def poll(self):
+                """Running until the worker waits for it."""
+                return self.returncode
+
+            def wait(self, timeout=None):
+                """Write the answer and exit with an error."""
+                self.output.write_text(old_question, encoding="utf-8")
+                self.returncode = 1
+                return 1
+
+        self.stack.enter_context(patch.object(server, "uses_user_approvals", return_value=False))
+        self.stack.enter_context(patch.object(server.subprocess, "Popen", side_effect=ExecProcess))
+        self.stack.enter_context(patch.object(server, "assess_changes", return_value={
+            "validation_errors": [], "recovery_files": [], "lovelace_results": [],
+            "config_check": {"result": "skipped", "errors": "", "warnings": ""}}))
+        server.run_task("task", "Tidy up my automations")
+        task = server.tasks["task"]
+        self.assertEqual(task["status"], "failed")
+        self.assertEqual(task["question"], "")
+        self.assertIn("Codex exited with 1.", task["details"])
 
 if __name__ == "__main__":
     unittest.main()

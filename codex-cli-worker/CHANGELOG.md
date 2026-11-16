@@ -1,22 +1,32 @@
 # Changelog
 
-## 0.3.2 (unreleased)
+## 0.3.3 (unreleased)
 
+- The approval card and the remote-control hook now read command text with one shared copy of the comment
+  and word code (`shell_words.py`), so a later fix cannot leave the two checks reading a command differently.
+  Each still answers unreadable text its own way. No command is judged differently.
+- When the approval card refuses **Allow once** because it cannot read a command's heredoc or quoting, it now
+  says that, instead of saying the command touches the app's permission policy.
+- A scheduling or mailbox request whose text holds a character that cannot be stored (a lone surrogate) is now
+  refused with a sentence that says so, instead of the bare word `utf-8`.
 - A thread started from the chat page no longer shows the page's instructions as your message in the ChatGPT app.
   The page sends its fixed rules as Codex developer instructions, and the message holds only your text, so the
   app shows your words as the message and the title. The details of each message (the backup folder, attached
   documents and images, and the notes on direct API calls, the local documentation and GitHub) come from a new
   read-only `exchange_info` tool on the Home Assistant data server. A page message on a thread that the page did
-  not start (a ChatGPT app thread, or one from 0.3.1) begins with a one-line note to call that tool, which then
-  also returns the rules. Threads from 0.3.1 keep their old instructions in their history.
+  not start (a ChatGPT app thread, or one from 0.3.2 or earlier) begins with a one-line note to call that tool,
+  which then also returns the rules. Threads from 0.3.2 or earlier keep their old instructions in their history.
 - Codex's answers are stored in the thread as plain text, so the ChatGPT app shows the answer and not a JSON
   object. The page no longer sends an output format. Codex calls two new tools on the Home Assistant data server
   instead: `ask_owner` with a question and up to three choices, and `report_failure` with a reason. Neither asks
   for permission. The page takes its status, question and choices from these calls. A failure that the worker
   finds itself (an exit with an error, a timeout, a stall, a configuration that fails its check) still comes
-  first; it now also wins over a question, so a task that leaves a broken configuration is reported as failed
-  and does not ask a question. A JSON answer from a 0.3.1 thread still shows as before. The page shows a
+  first; it now also wins over a question, so a task that leaves a broken configuration is reported as failed and
+  does not ask a question. A JSON answer from a thread of 0.3.2 or earlier still shows as before. The page shows a
   question on its own line only when the answer text does not already hold it.
+
+## 0.3.2 (unreleased)
+
 - Codex now refuses risky commands in two layers. Managed Codex command rules refuse six literal command
   prefixes: the Supervisor (`ha supervisor`, `ha super`, `ha su`), credentials, the app's policy folder and
   full access. They apply with Remote Control off too. The command hook stays the main check. The app tests
@@ -31,6 +41,34 @@
   with every backslash and newline removed, in any quote or comment state. So a Supervisor command spelled
   across lines is refused also in single quotes, after a carriage return, inside `${...}`, and in a shell or
   wrapper that the parser does not open (`dash -c`, `setsid sh -c`, `bash --norc -c`).
+- The app no longer makes a ChatGPT sign-in code by itself at start. A code works for 15 minutes and only
+  while its sign-in runs, so a code made at start was often stale before anyone used it. While Codex is not
+  signed in, the Home Assistant notification now points to **Sign in**, and the owner starts a sign-in there
+  when ready. A mark file that older versions left in the app's storage is removed at start.
+- The ChatGPT and GitHub sign-in codes show how long they still work, with a live countdown. The worker sends
+  the seconds left by its own clock, so a phone with a wrong clock still shows the right time, and the page sets
+  the time again from each status reply, so a phone that slept catches up. When a code runs out, the page says so and offers **Get a new code**, which cancels the old sign-in and starts a new one.
+- A ChatGPT sign-in that stops without signing in now says why when it can: the code expired, or the error line
+  that Codex printed (with any code in it replaced). The page shows the reason, and **Sign in** becomes
+  **Get a new code**. A canceled sign-in can no longer mark the next one as failed or clear its process.
+- **Cancel** on a ChatGPT sign-in no longer raises a false "Codex sign-in failed" notification. The app now
+  marks the sign-in canceled before it stops the sign-in process.
+- Settings on a phone: every settings section starts collapsed, with a one-line status in its header (for
+  example "Connected as owner, 1 repository" or "3 of 5 on"); a section that needs attention says so in red:
+  a sign-in that waits or failed, house rules that wait for review, a schedule that waits for approval, or
+  schedules paused without the Home Assistant time zone. Tap a header to
+  open its section. Button rows wrap, and at phone width the buttons of a row share it in equal columns, so the
+  ChatGPT buttons no longer render tall and narrow and the GitHub buttons no longer run past the edge.
+- The name the ChatGPT app shows for this Home Assistant can be changed on the page, under remote control,
+  while remote control is off. The page saves it as the **Remote control machine name** option through
+  Supervisor, so the app's Configuration tab shows the same name. Only that option changes; the other options are
+  sent back as Supervisor reports them (defaults merged with the stored values, as Save in the Configuration tab
+  does), with any `!secret` reference kept. A name can have up to 63 characters.
+- A first message such as "Test" now gets a normal reply. The task prompt asks Codex to write its summary as a
+  reply to the person, not as a report from the worker, and it names `/config/AGENTS.md` only when that file
+  exists, in chat tasks and in remote-control sessions. Before, a missing file could show in the answer as
+  "/config/AGENTS.md was not found". The page now shows a missing `AGENTS.md` once, above the message box, as a
+  setup hint that you can dismiss.
 
 ## 0.3.1 (unreleased)
 
