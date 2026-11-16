@@ -320,7 +320,7 @@ class NameTests(unittest.TestCase):
                      "owner/repo.git"):
             with self.subTest(name=name), self.assertRaises(gh.GitHubError):
                 gh.valid_repository(name)
-        for name in ("..", ".", "a/b", "-x", "a.b"):
+        for name in ("..", ".", "a/b", "-x", ".git", "a..b", ""):
             with self.subTest(folder=name), self.assertRaises(gh.GitHubError):
                 gh.valid_folder(name)
 
@@ -700,14 +700,13 @@ class CloneLinkTests(GitRunnerCase):
         real = gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO], config_root=self.config, share_root=self.share)
         self.assertEqual(real.prepare(str(target))[1], REPO)
 
-    def test_clone_into_a_named_folder_under_share_or_config(self):
+    def test_clone_into_a_named_folder_under_share(self):
         self.published()
-        for folder, target in (("copy_a", self.share / "copy_a"), (f"{self.share}/copy_b", self.share / "copy_b"),
-                               (f"{self.config}/copy_c", self.config / "copy_c")):
+        for folder in ("copy_a", "copy.b", "_c"):
             with self.subTest(folder=folder):
                 result = self.runner.clone(REPO, folder)
                 self.assertTrue(result["ok"], result["text"])
-                self.assertTrue((target / "README.md").exists())
+                self.assertTrue((self.share / folder / "README.md").exists())
 
     def test_clone_refuses_bad_names_existing_folders_elsewhere_and_other_repositories(self):
         outside = Path(self.temp.name) / "outside"
@@ -715,11 +714,10 @@ class CloneLinkTests(GitRunnerCase):
         (self.share / "HomeAssistant").mkdir()
         (self.share / "escape").symlink_to(outside)
         (self.share / "taken").mkdir()
-        for repository, folder in ((REPO, ".."), (REPO, "a/b"), (REPO, "-x"), (REPO, "taken"), (OTHER, "new"),
-                                   ("+example-owner/house", "new"), (REPO, "/etc/x"), (REPO, f"{outside}/x"),
-                                   (REPO, f"{self.share}/../outside"), (REPO, "HomeAssistant"),
-                                   (REPO, f"{self.share}/escape"), (REPO, f"{self.share}/escape/x"),
-                                   (REPO, f"{self.config}/house")):
+        for repository, folder in ((REPO, ".."), (REPO, "a/b"), (REPO, ".hidden"), (REPO, "a..b"), (REPO, "-x"),
+                                   (REPO, "taken"), (OTHER, "new"), ("+example-owner/house", "new"),
+                                   (REPO, "/etc/x"), (REPO, f"{outside}/x"), (REPO, f"{self.share}/x"),
+                                   (REPO, f"{self.config}/x"), (REPO, "HomeAssistant"), (REPO, "escape"), (REPO, 7)):
             with self.subTest(repository=repository, folder=folder), self.assertRaises(gh.GitHubError):
                 self.runner.clone(repository, folder)
         self.assertEqual(list(outside.iterdir()), [])

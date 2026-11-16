@@ -56,7 +56,7 @@ STATE_WORDS = {
 # F4: names Codex passes are checked before they reach git.
 REPOSITORY_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$")
 BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$")
-FOLDER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$")
+FOLDER_RE = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9._-]{0,99}$")
 TOKEN_RE = re.compile(r"^github_pat_[A-Za-z0-9_]{20,255}$")
 
 # F1: the only repository settings a credentialed git command runs with. Anything else (a hook path, a filter,
@@ -161,8 +161,9 @@ def valid_branch(value: Any) -> str:
 
 
 def valid_folder(value: Any) -> str:
-    if not isinstance(value, str) or not FOLDER_RE.fullmatch(value):
-        raise GitHubError("Use one folder name of letters, digits, dash and underscore.")
+    if not isinstance(value, str) or not FOLDER_RE.fullmatch(value) or ".." in value or value.startswith("-"):
+        raise GitHubError("Use one folder name: letters, digits, dot, dash and underscore; no slash, no .., "
+                          "and no leading dot.")
     return value
 
 
@@ -666,33 +667,17 @@ class GitRunner:
         return connected[name.lower()]
 
     def clone_target(self, name: str, folder: Any) -> Path:
-        """/share/<repository> by default; or a new folder name directly under /share, or /share/<name> or
-        /config/<name>. Nothing else, and never a folder that exists."""
+        """/share/<folder>: one folder name (the repository name when none is given), never one that exists."""
         if folder is None or folder == "":
             folder = name.split("/", 1)[1]
-            if not FOLDER_RE.fullmatch(folder):
-                raise GitHubError("Give a folder name: the repository name has characters a folder name cannot use.")
-        if not isinstance(folder, str):
-            raise GitHubError("Use one folder name of letters, digits, dash and underscore.")
-        base = self.share_root
-        for root in (self.share_root, self.config_root):
-            prefix = root.as_posix().rstrip("/") + "/"
-            if folder.startswith(prefix):
-                base, folder = root, folder[len(prefix):]
-                break
-        else:
-            if folder.startswith("/"):
-                raise GitHubError("Clone into /share or /config only.")
-        base_real = Path(os.path.realpath(base))
-        target = base_real / valid_folder(folder)
+        target = Path(os.path.realpath(self.share_root)) / valid_folder(folder)
         self.inside(target)
         if os.path.lexists(target):
             raise GitHubError("That folder already exists; choose a new folder name.")
         return target
 
     def clone(self, repository: Any, folder: Any = None) -> dict[str, Any]:
-        """Clone a connected repository into a new folder under /share (default) or /config. No credential is
-        written into the clone."""
+        """Clone a connected repository into a new folder /share/<folder>. No credential is written into it."""
         name = self.connected_name(repository)
         target = self.clone_target(name, folder)
         token = self.token_reader()
