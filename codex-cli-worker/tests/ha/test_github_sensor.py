@@ -99,3 +99,10 @@ def test_the_source_and_english_catalogs_name_the_sensor():
     for relative in ("strings.json", "translations/en.json"):
         catalog = json.loads((root / relative).read_text())
         assert catalog["entity"]["binary_sensor"]["github_connected"]["name"] == "GitHub connected"
+
+
+def test_the_source_and_english_catalogs_match():
+    root = Path(__file__).resolve().parents[3] / "custom_components" / "codex_cli"
+    source = json.loads((root / "strings.json").read_text())
+    english = json.loads((root / "translations/en.json").read_text())
+    assert source == english
