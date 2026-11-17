@@ -71,4 +71,5 @@ schema:
   ha_url: str?
   HA_TOKEN: password?
   remote_control_name: str?
+  interactions_to_keep: int(10,100)?
   install_integration: bool

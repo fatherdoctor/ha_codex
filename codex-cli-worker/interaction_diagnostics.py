@@ -32,7 +32,7 @@ def nonfatal(method):
 class RollingDiagnostics:
     """One worker process owns this private store and its installation HMAC key."""
 
-    def __init__(self, path, capacity=MAX_INTERACTIONS):
+    def __init__(self, path, capacity=MAX_INTERACTIONS, repair=True):
         self.path = Path(path)
         self.key_path = self.path.with_suffix('.key')
         self.settings_path = self.path.with_suffix('.settings.json')
@@ -52,6 +52,15 @@ class RollingDiagnostics:
             pass
         except Exception:
             self.unavailable = True
+        if repair:
+            self.close_abandoned()
+
+    def close_abandoned(self):
+        """Mark rows left running by an earlier process as ended by a restart.
+
+        Only startup calls this; reads never close this process's live rows. The rows are written back at the
+        current capacity, so the worker passes repair=False and calls this after it applies the capacity option.
+        """
         try:
             self._close_abandoned()
         except Exception:
@@ -60,7 +69,6 @@ class RollingDiagnostics:
             _LOGGER.warning('Interrupted diagnostic rows could not be closed at startup.')
 
     def _close_abandoned(self):
-        """Only startup closes persisted work; reads never close this process's live rows."""
         with self.lock:
             rows = self._read()
             ended = time.time()

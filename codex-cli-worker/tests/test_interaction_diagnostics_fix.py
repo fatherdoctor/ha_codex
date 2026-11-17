@@ -1,6 +1,7 @@
 """Review regressions: synthetic stores and identities, never runtime data."""
 from contextlib import ExitStack
 import hashlib
+import inspect
 import json
 from pathlib import Path
 import tempfile
@@ -156,24 +157,78 @@ class DiagnosticsReviewTests(unittest.TestCase):
             'full_access',
         )
 
-    def test_settings_require_an_admin_validate_bounds_and_survive_restart(self):
+    def test_settings_are_read_by_an_admin_and_set_by_the_option_only(self):
+        # 0.3.5: the number is the interactions_to_keep option; the page reads it and cannot save it.
         with (
             patch.object(server, 'interaction_logs', self.store),
             patch.object(server, 'is_ingress_request', return_value=True),
             patch.object(server, 'ingress_admin', return_value=(None, 'Administrator required')),
         ):
             client = server.app.test_client()
-            self.assertEqual(client.post('/diagnostics/settings', json={'capacity': 50}).status_code, 403)
+            self.assertEqual(client.get('/diagnostics/settings').status_code, 403)
         with (
             patch.object(server, 'interaction_logs', self.store),
             patch.object(server, 'is_ingress_request', return_value=True),
             patch.object(server, 'ingress_admin', return_value=({'id': 'synthetic-admin'}, '')),
         ):
             client = server.app.test_client()
-            self.assertEqual(client.post('/diagnostics/settings', json={'capacity': 50}).status_code, 200)
+            self.assertEqual(client.post('/diagnostics/settings', json={'capacity': 50}).status_code, 405)
+            server.apply_interaction_limit({'interactions_to_keep': 50})
             self.assertEqual(client.get('/diagnostics/settings').json['capacity'], 50)
-            self.assertEqual(client.post('/diagnostics/settings', json={'capacity': 101}).status_code, 400)
-        self.assertEqual(RollingDiagnostics(self.store.path).capacity, 50)
+
+    def test_option_wins_and_an_unset_option_keeps_the_saved_number(self):
+        # An install that saved 60 on the page before 0.3.5 and never set the option keeps 60.
+        self.store.configure(60)
+        with patch.object(server, 'interaction_logs', RollingDiagnostics(self.store.path)) as store:
+            server.apply_interaction_limit({})
+            self.assertEqual(store.capacity, 60)
+            server.apply_interaction_limit({'interactions_to_keep': None})
+            self.assertEqual(store.capacity, 60)
+            for bad in (101, 9, '50', True):
+                with self.subTest(bad=bad):
+                    server.apply_interaction_limit({'interactions_to_keep': bad})
+                    self.assertEqual(store.capacity, 60)
+            server.apply_interaction_limit({'interactions_to_keep': 10})
+            self.assertEqual(store.capacity, 10)
+        # The option is applied at each start and is not written over the number saved earlier.
+        self.assertEqual(RollingDiagnostics(self.store.path).capacity, 60)
+
+    def test_a_new_install_keeps_25(self):
+        with patch.object(server, 'interaction_logs', RollingDiagnostics(self.store.path.with_name('new.json'))) as store:
+            server.apply_interaction_limit({})
+            self.assertEqual(store.capacity, 25)
+
+    def test_a_restart_after_an_interrupted_task_keeps_the_option_number(self):
+        # Review CX-FB2-ALL.pr F1: 80 finished rows and one left running, the option says 100, no number saved on
+        # the page. The startup repair wrote the rows back at 25 before the option applied, so 56 rows were lost.
+        path = self.root / 'restart.json'
+        with patch.object(server, 'interaction_logs', RollingDiagnostics(path, repair=False)) as store:
+            server.apply_interaction_limit({'interactions_to_keep': 100})
+            recorder = InteractionRecorder(store)
+            for index in range(80):
+                recorder.begin(f'done-{index}', 'addon_page')
+                recorder.finish(f'done-{index}', 'done')
+            recorder.begin('interrupted', 'addon_page')
+            recorder.flush()
+        saved = json.loads(path.read_text())
+        self.assertEqual((len(saved), sum(row['outcome'] == 'running' for row in saved)), (81, 1))
+        # The same steps as main(): a store that does not repair, the option, then the repair.
+        with patch.object(server, 'interaction_logs', RollingDiagnostics(path, repair=False)) as store:
+            server.apply_interaction_limit({'interactions_to_keep': 100})
+            store.close_abandoned()
+            rows = store.export()['interactions']
+        self.assertEqual(len(rows), 81)
+        self.assertEqual(sum(row['outcome'] == 'unknown (restart)' for row in rows), 1)
+
+    def test_the_worker_repairs_the_store_only_after_it_applies_the_option(self):
+        source = inspect.getsource(server)
+        self.assertIn(
+            'interaction_logs = RollingDiagnostics(DATA_ROOT / "interaction-diagnostics.json", repair=False)\n', source
+        )
+        main = inspect.getsource(server.main)
+        self.assertLess(
+            main.index('apply_interaction_limit(read_options())'), main.index('interaction_logs.close_abandoned()')
+        )
 
     def test_legacy_bare_hashes_are_removed_from_disk_during_migration(self):
         # Synthetic privacy canary representing entity identifier.
