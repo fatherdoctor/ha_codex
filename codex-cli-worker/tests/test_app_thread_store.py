@@ -538,9 +538,6 @@ class StatusRunTests(unittest.TestCase):
         self.assertEqual(task["question"], "")
         self.assertIn("Codex exited with 1.", task["details"])
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class OwnerNoticeTests(unittest.TestCase):
     """A turn sends a Home Assistant notification only when it needs the owner.
@@ -583,3 +580,17 @@ class OwnerNoticeTests(unittest.TestCase):
         withdrawn = threading.Event()
         server.notify_permission("task", {"kind": "command", "reason": "List the configuration folder"}, withdrawn)
         self.assertEqual(self.titles(), ["Codex needs permission"])
+
+    def test_a_canceled_task_sends_no_notification(self):
+        """The owner cancels a chat task on purpose: the result event goes out, a notification does not."""
+        events = []
+        server.fire_ha_event.side_effect = lambda name, data: events.append((name, data)) or (True, "")
+        accepted, _process, error = server.request_task_cancellation("task")
+        self.assertTrue(accepted, error)
+        self.assertTrue(server.publish_cancelled_task_outcome("task"))
+        self.assertEqual([(name, data["status"]) for name, data in events], [("codex_cli_task_result", "cancelled")])
+        self.assertEqual(self.titles(), [])
+
+
+if __name__ == "__main__":
+    unittest.main()

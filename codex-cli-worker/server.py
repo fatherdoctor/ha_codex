@@ -4920,8 +4920,7 @@ def publish_cancelled_task_outcome(task_id: str, returncode: int | None = None) 
     ok, detail = fire_ha_event("codex_cli_task_result", event_data)
     if not ok:
         print(f"Codex task result event failed: {detail}", flush=True)
-    if not background_task(task_id):
-        notify("Codex task cancelled", f"{CANCELLED_TASK_SUMMARY}. Task: {task_id}")
+    # No notification: the owner cancels a task on purpose, so the cancel does not need the owner.
     refresh_usage_status_async(force=True)
     return True
 
