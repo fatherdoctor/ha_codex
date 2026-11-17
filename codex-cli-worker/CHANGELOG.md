@@ -14,6 +14,21 @@
   whether the file exists and when it last changed. A change to the file still reaches an open chat on its next
   message, and a removed file stops applying. The guard-rails block is still read by the worker before every
   pre-approved action. No approval, sandbox or permission rule changed.
+- "Set the light to 100%" works again without an approval. A pre-approved light action now accepts
+  `brightness_pct` and Home Assistant's other common light fields: `brightness_step`, `brightness_step_pct`,
+  `hs_color`, `xy_color`, `color_name` and `flash`, next to `brightness`, `color_temp_kelvin`, `transition` and
+  `rgb_color`. Each value must have the right type and stay in the range Home Assistant's light service accepts;
+  a value outside it is refused.
+- When a device action is refused only because its permission group is off or because its data has a field
+  that is not on the list, the `act` tool now shows the owner an **Allow once** / **Deny** request in the chat
+  and waits up to three minutes. Allow once runs that one action after every check runs again; it turns on no
+  group and allows no later action. Deny, or no answer, leaves everything unchanged. Before, the refusal asked
+  for an approval that the page could not show, so the exchange ended with nothing done. The owner is
+  asked only when every other check passes. Security and people actions (locks, alarm, covers, cameras,
+  notifications) never ask, because their data can hold a code; while that group is off, the refusal tells the
+  owner how to turn it on in Settings → Permissions overrides. A target in the action data (`entity_id`,
+  `device_id`, `area_id`, `floor_id`, `label_id`) is refused and never asks, so Allow once can only reach the
+  target the request names. Guard rails, templates, unknown targets and the other refusals are unchanged.
 - A task that ends with a plain answer no longer sends a Home Assistant notification; the answer is in the
   chat. A notification still goes out when a task asks a question, waits for a permission decision, or fails.
   Before, every completed chat task sent a **Codex task completed** notification with its answer.

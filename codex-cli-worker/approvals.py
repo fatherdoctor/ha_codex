@@ -26,6 +26,9 @@ from shell_words import split_words, strip_comments
 APPROVAL_GONE = "This permission request is no longer waiting for an answer."
 DISPLAY_LIMIT = 32000
 REQUEST_LIMIT = 50
+# How long an Allow once request from the act tool waits for the owner. It stays under the
+# tool's own limits: 230 seconds in permission_overrides_mcp.py, 240 in Codex's MCP settings.
+ACTION_ANSWER_SECONDS = 180
 COMMAND_APPROVAL = "item/commandExecution/requestApproval"
 # The app's permission policy, its house rules and Codex's own configuration: a change there is never allowed here.
 PROTECTED_PREFIXES = ("/usr/share/ha_codex", "/data/codex-home/AGENTS.md", "/data/codex-home/config.toml",
@@ -467,6 +470,8 @@ class AppServerSession:
         self._pending: dict[str, Any] = {}
         self._pending_files: dict[str, str] = {}
         self._records: list[dict[str, Any]] = []
+        # Allow once requests from the act tool: the answer goes back to that tool, not to Codex.
+        self._actions: dict[str, dict[str, Any]] = {}
         self._file_changes: dict[str, list[dict[str, Any]]] = {}
         self._final_text = ""
 
@@ -533,6 +538,9 @@ class AppServerSession:
                     pass
             self._pending.clear()
             self._pending_files.clear()
+            for answer in self._actions.values():
+                answer["event"].set()
+            self._actions.clear()
             for record in self._records:
                 if record["status"] == "pending":
                     record["status"] = "expired"
@@ -630,7 +638,44 @@ class AppServerSession:
     def waiting_for_user(self) -> bool:
         """Return True while a permission request waits for the user, when silence from Codex is expected."""
         with self.lock:
-            return bool(self._pending) and not self._closed
+            return bool(self._pending or self._actions) and not self._closed
+
+    def ask_owner_action(self, question: dict[str, str], timeout: float = ACTION_ANSWER_SECONDS) -> bool | None:
+        """Show one Home Assistant action that the act tool may run once, and wait for the owner's answer.
+
+        The act tool calls this from its own thread when a permission group or the service data
+        allow-list refused the action. Nothing is sent to Codex: the answer goes back to the tool,
+        which checks the action again in full before it runs it. Returns True for Allow once,
+        False for Deny, and None when nobody answered in time or the exchange ended.
+        """
+        with self.lock:
+            if self._closed or not self.is_active() or len(self._records) >= REQUEST_LIMIT:
+                return None
+            detail, clipped = self._display(question.get("detail"))
+            what, _ = self._display(question.get("what"))
+            where, _ = self._display(question.get("where"))
+            record: dict[str, Any] = {
+                "approval_id": uuid.uuid4().hex, "status": "pending", "reason": "",
+                "kind": "action", "prompt_kind": "other", "can_allow": bool(detail) and not clipped,
+                "command": "", "cwd": "", "changes": [], "action": detail,
+                "scope": "Allow this one Home Assistant action once. It does not turn on a permission group "
+                         "or allow any later action.",
+                "note": ("The action is shown in full above. Your permission groups did not cover it."
+                         if detail and not clipped else
+                         "The complete action is missing, too large, or redacted. Deny it and ask for a smaller action."),
+                "confirmation": {"what": what, "where": where,
+                                 "effect": "Home Assistant runs this action once, with the data shown."},
+            }
+            answer = {"event": threading.Event(), "allowed": None}
+            self._records.append(record)
+            self._actions[record["approval_id"]] = answer
+            self.on_approvals(copy.deepcopy(self._records))
+        answered = answer["event"].wait(timeout)
+        with self.lock:
+            if not answered and self._actions.pop(record["approval_id"], None) is not None:
+                record["status"] = "expired"
+                self.on_approvals(copy.deepcopy(self._records))
+            return answer["allowed"]
 
     def decide(self, approval_id: str, decision: str, decided_by: dict[str, str] | None = None) -> None:
         """Apply exactly one allow/deny response to a still-live request.
@@ -641,12 +686,30 @@ class AppServerSession:
         if decision not in {"allow", "deny"}:
             raise ValueError("decision must be allow or deny")
         with self.lock:
-            if self._closed or not self.is_active() or approval_id not in self._pending:
+            if self._closed or not self.is_active() or approval_id not in (*self._pending, *self._actions):
                 raise LookupError(APPROVAL_GONE)
             record = next(item for item in self._records if item["approval_id"] == approval_id)
             if decision == "allow" and not record["can_allow"]:
                 # The note already says why this request can only be denied.
                 raise ValueError(record["note"])
+            if approval_id in self._actions:
+                # An act tool request: record the answer, then wake the tool, which runs or drops the action.
+                answer = self._actions.pop(approval_id)
+                self.last_activity = time.monotonic()
+                record["status"] = "allowed" if decision == "allow" else "denied"
+                if decided_by:
+                    record["decided_by"] = dict(decided_by)
+                try:
+                    self.on_approvals(copy.deepcopy(self._records))
+                except (OSError, ValueError):
+                    # Not saved, so not allowed: the tool reports that nothing was done, as for a native request.
+                    record["status"] = "expired"
+                    answer["event"].set()
+                    self.fail("Could not deliver the permission decision. The exchange was stopped.")
+                    raise OSError(self.error) from None
+                answer["allowed"] = decision == "allow"
+                answer["event"].set()
+                return
             request_id = self._pending.pop(approval_id)
             self._pending_files.pop(approval_id, None)
             # The stall clock starts again from the answer, not from when the request arrived.
