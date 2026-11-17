@@ -39,7 +39,7 @@ env:
   # ---- the only part a new fork edits ----
   UPSTREAM_REPO: moryoav/home-assistant-codex                    # owner/repo of the upstream
   TAG_PREFIX: "v"                                                # upstream tags look like v0.1.81
-  PATCHES_BRANCH: main                                           # a full fork: main carries our changes; its version file names our base
+  PATCHES_BRANCH: main                                           # a full fork: main carries our changes
   VERSION_FILE: custom_components/codex_cli/manifest.json        # JSON file with a "version" field on PATCHES_BRANCH (shown in the report only)
   UPSTREAM_BASE: "0.1.81"                                        # the upstream release this fork started from (README); raise it when upstream's changes are taken
   PATCH_BRANCHES: ""                                             # no separate patch branches: only the merge of the tag into main is tried
