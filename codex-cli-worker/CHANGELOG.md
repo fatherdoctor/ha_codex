@@ -2,6 +2,9 @@
 
 ## 0.3.4 (unreleased)
 
+- A permission request that waits for you now shows at the bottom of the chat, below the "Working" lines, and the
+  chat scrolls to it once when it first appears. Before, it sat above those lines and was easy to miss. A request
+  you already answered stays where it was. No approval or permission rule changed.
 - A plain device command such as "set the office overhead to 50%" is faster. On 0.3.3 Codex had no tool on the
   chat page that finds an entity by name, so it searched `.storage/core.entity_registry` with shell commands, and
   the page's rules told it to look for `/config/AGENTS.md` in every message. The `home_assistant` `verify` tool
