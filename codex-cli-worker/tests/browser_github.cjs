@@ -67,11 +67,14 @@ function status(state, extra = {}) {
       const conversations = page.getByRole('button', {name: 'Open conversations', exact: true});
       if (await conversations.isVisible()) await conversations.click();
       await page.getByRole('button', {name: 'Open settings', exact: true}).click();
+      // The GitHub card follows the ChatGPT account card inside Accounts and connections; all start collapsed.
+      assert.equal(await page.locator('#settings > section h3 .settings-title').first().textContent(), 'Accounts and connections');
+      await page.locator('#accounts-section > h3 .settings-toggle').click();
       const card = page.locator('#github-section');
       await card.waitFor({state: 'visible'});
-      // The GitHub card is the next settings section after the ChatGPT account card; both start collapsed.
-      assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('#settings > section')].slice(0, 2)
-        .map(section => section.querySelector('h3 .settings-title')?.textContent)), ['ChatGPT account', 'GitHub']);
+      assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('#accounts-section-body > section')]
+        .map(section => (section.querySelector('h4 .settings-title') || section.querySelector('h4')).textContent)),
+        ['ChatGPT account', 'GitHub', 'ChatGPT app pairing']);
       const toggle = card.locator('.settings-toggle');
       assert.equal(await toggle.getAttribute('aria-expanded'), 'false');
       assert.equal(await page.locator('#github-status').isHidden(), true);
