@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.4 (unreleased)
+
+- A task that ends with a plain answer no longer sends a Home Assistant notification; the answer is in the
+  chat. A notification still goes out when a task asks a question, waits for a permission decision, or fails.
+  Before, every completed chat task sent a **Codex task completed** notification with its answer.
+
 ## 0.3.3 (unreleased)
 
 - The approval card and the remote-control hook now read command text with one shared copy of the comment
