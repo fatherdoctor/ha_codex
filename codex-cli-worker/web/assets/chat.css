@@ -662,22 +662,6 @@ h1 {
   margin-top: 14px;
   font-weight: 500;
 }
-.response-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 14px;
-}
-.copy-response {
-  min-height: 44px;
-  padding: 8px 12px;
-  font-size: 12px;
-}
-.copy-status {
-  color: var(--accent);
-  font-size: 12px;
-}
 .copy-buffer {
   position: fixed;
   top: 0;
@@ -1266,7 +1250,6 @@ textarea {
   outline: none;
   resize: none;
   max-height: 180px;
-  min-height: 52px;
   padding: 0 3px;
   display: block;
 }
@@ -1660,16 +1643,6 @@ dialog::backdrop {
   line-height: 1.6;
   overflow-wrap: anywhere;
 }
-.copy-dialog {
-  width: min(650px, calc(100% - 28px));
-}
-#copy-text {
-  margin-top: 16px;
-  max-height: 45dvh;
-  white-space: pre;
-  font-family: ui-monospace, monospace;
-  font-size: 12px;
-}
 #rename-input {
   width: 100%;
   padding: 10px 12px;
@@ -1746,14 +1719,47 @@ dialog label {
 dialog :is(h3, h4):has(> .settings-toggle) {
   margin: 0;
 }
-/* The three parts of Accounts and connections sit inside it, indented, with a lighter rule. */
-#accounts-section section {
-  margin: 0 0 0 12px;
+/*
+ * Every settings section, and each part of Accounts and connections, is a
+ * divider line and a header of the same height. An open section adds its
+ * body with the same space below it, so the gap from each divider to the
+ * next header or button is the same throughout.
+ */
+#settings section {
+  margin: 0;
   padding: 0;
   border-top: 1px solid var(--line);
 }
+#settings > section:last-of-type {
+  border-bottom: 1px solid var(--line);
+}
+/* The three parts of Accounts and connections sit inside it, indented. */
+#accounts-section section {
+  margin-left: 12px;
+}
 #accounts-section h4 .settings-toggle {
   font-size: 13px;
+}
+.settings-body {
+  padding: 2px 0 16px;
+}
+.settings-body > :first-child {
+  margin-top: 0;
+}
+.settings-body > :last-child,
+.settings-body > :last-child > :last-child {
+  margin-bottom: 0;
+}
+/* A status line with nothing to say yet takes no space, so it does not widen the gap above the next divider. */
+.settings-body p:empty {
+  margin: 0;
+}
+/* Accounts and connections holds only the headers of its parts; each open part adds its own space below. */
+#accounts-section > .settings-body {
+  padding: 0;
+}
+#settings > .dialog-header {
+  margin-bottom: 16px;
 }
 .settings-toggle {
   display: flex;
@@ -1770,11 +1776,15 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   font-weight: 600;
   text-align: left;
 }
+/* One arrow size for every header, whatever the size of its title. */
 .settings-title::before {
-  content: "▸ ";
+  content: "▸";
+  display: inline-block;
+  width: 16px;
+  font-size: 12px;
 }
 .settings-toggle[aria-expanded="true"] .settings-title::before {
-  content: "▾ ";
+  content: "▾";
 }
 .settings-status {
   color: var(--muted);
@@ -1784,12 +1794,12 @@ dialog :is(h3, h4):has(> .settings-toggle) {
 }
 /* Only the section's own header: a marked Accounts and connections must not mark the parts inside it. */
 .needs-attention > :is(h3, h4) .settings-status,
-.needs-attention > #app-pairing-status {
+.needs-attention > .settings-body > #app-pairing-status {
   color: var(--error);
   font-weight: 600;
 }
 .needs-attention > :is(h3, h4) .settings-status:not(:empty)::before,
-.needs-attention > #app-pairing-status:not(:empty)::before {
+.needs-attention > .settings-body > #app-pairing-status:not(:empty)::before {
   content: "⚠ ";
 }
 .signin-expired {

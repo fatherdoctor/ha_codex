@@ -14,7 +14,7 @@ const assert=require('node:assert/strict');
    async function settings() {
     const menu=page.getByRole('button',{name:'Open conversations',exact:true});if(await menu.isVisible())await menu.click();
     await page.getByRole('button',{name:'Open settings',exact:true}).click();
-    if(await page.locator('#accounts-section > h3 .settings-toggle').getAttribute('aria-expanded')!=='true')await page.locator('#accounts-section > h3 .settings-toggle').click();await page.getByRole('button',{name:'Manage remote connection',exact:true}).click();
+    if(await page.locator('#accounts-section > h3 .settings-toggle').getAttribute('aria-expanded')!=='true')await page.locator('#accounts-section > h3 .settings-toggle').click();if(await page.locator('#app-pairing-section .settings-toggle').getAttribute('aria-expanded')!=='true')await page.locator('#app-pairing-section .settings-toggle').click();await page.getByRole('button',{name:'Manage remote connection',exact:true}).click();
    }
    await page.goto('http://127.0.0.1:9137/preview/');await settings();
    await page.waitForFunction(()=>document.querySelector('#remote-core-address').textContent.includes(':80'));

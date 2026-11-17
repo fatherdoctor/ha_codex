@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.4 (unreleased)
+
+- The **Copy response** button under each answer is gone, with its manual copy dialog. **Copy thread ID** in the
+  thread menu still copies.
+- The message box starts at one line of text above the control row, as in the ChatGPT desktop app, and grows as you
+  type, up to 180 pixels.
+- The **Settings** window keeps one size. Opening a section scrolls inside the window instead of making it taller.
+- **ChatGPT app pairing** has its own collapsed header inside **Accounts and connections**, like **ChatGPT account**
+  and **GitHub**. Its header shows the state in one word, for example "Off", in red when the connection failed.
+- **Advanced** is a section like the others, with the same arrow and a status line.
+- Every section header in **Settings** has the same arrow size and the same space to the divider above and below it.
+  An open section has the same space between its last line or button and the next divider.
+- The GitHub sign-in notice in Home Assistant names the new place: **Settings > Accounts and connections > GitHub**.
+
 ## 0.3.3 (unreleased)
 
 - The approval card and the remote-control hook now read command text with one shared copy of the comment

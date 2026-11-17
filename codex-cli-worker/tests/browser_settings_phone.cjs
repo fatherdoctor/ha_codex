@@ -1,5 +1,5 @@
 // Settings on a phone (400 px) in light and dark: collapsed sections with a status line, button rows that fit,
-// and the ChatGPT code countdown. Run with tests/web_fixture.py serving the page. Every code and name is synthetic.
+// and the ChatGPT code countdown. On a phone and a desktop: one window size, one arrow size, even spacing. Run with tests/web_fixture.py serving the page. Every code and name is synthetic.
 // Screenshots go to SETTINGS_SHOTS (default /tmp/codex-settings-qa).
 const {chromium} = require('playwright');
 const assert = require('node:assert/strict');
@@ -53,6 +53,53 @@ async function checkButtonRows(page) {
   }
 }
 
+/** The settings window's size, to compare before and after a section opens. */
+const windowSize = page => page.evaluate(() => {
+  const r = document.querySelector('#settings').getBoundingClientRect();
+  return [Math.round(r.width), Math.round(r.height)];
+});
+
+/**
+ * Every arrow has one size, and the space from each divider line to the header under it is the same. A closed
+ * header has that same space down to the next divider; an open section's last element has 16 px. Sizes are in
+ * CSS pixels, to 1 px.
+ */
+async function checkLayout(page) {
+  const layout = await page.evaluate(() => {
+    const arrows = [...document.querySelectorAll('#settings .settings-title')].filter(t => t.offsetParent).map(t => {
+      const style = getComputedStyle(t, '::before');
+      return `${style.fontSize} ${style.width}`;
+    });
+    const sections = [...document.querySelectorAll('#settings section')].filter(s => s.offsetParent);
+    // A divider is a section's top border; the last section also has one at its bottom.
+    const dividers = [...sections.map(s => s.getBoundingClientRect().top), sections.at(-1).getBoundingClientRect().bottom];
+    const above = [];
+    const closed = [];
+    const below = [];
+    for (const section of sections) {
+      const toggle = section.querySelector(':scope > :is(h3, h4) > .settings-toggle');
+      if (!toggle) continue;
+      const header = toggle.getBoundingClientRect();
+      above.push(Math.round(header.top - section.getBoundingClientRect().top));
+      const body = section.querySelector(':scope > .settings-body');
+      if (body.hidden) {
+        closed.push(Math.round(Math.min(...dividers.filter(d => d >= header.bottom - 0.5)) - header.bottom));
+        continue;
+      }
+      if (section.id === 'accounts-section') continue;
+      const last = [...body.children].filter(c => c.offsetParent && c.getBoundingClientRect().height).at(-1);
+      // Space from the last thing in the open section to the section's end, where the next divider is.
+      below.push([section.id, Math.round(section.getBoundingClientRect().bottom - last.getBoundingClientRect().bottom)]);
+    }
+    return {arrows, above, closed, below};
+  });
+  assert.equal(new Set(layout.arrows).size, 1, `one arrow size: ${layout.arrows}`);
+  assert.ok(layout.above.every(gap => Math.abs(gap - layout.above[0]) <= 1), `divider to header: ${layout.above}`);
+  assert.ok(layout.closed.every(gap => Math.abs(gap - layout.above[0]) <= 1),
+    `closed header to the next divider: ${layout.closed}, divider to header: ${layout.above[0]}`);
+  for (const [id, gap] of layout.below) assert.ok(Math.abs(gap - 16) <= 1, `${id}: ${gap} px above the next divider`);
+}
+
 (async () => {
   fs.mkdirSync(SHOTS, {recursive: true});
   const browser = await chromium.launch({headless: true});
@@ -89,22 +136,32 @@ async function checkButtonRows(page) {
         {title: 'Accounts and connections', status: 'ChatGPT signing in: enter the code', attention: true},
         {title: 'ChatGPT account', status: 'Signing in: enter the code', attention: true},
         {title: 'GitHub', status: 'Connected as synthetic-owner, 1 repository', attention: false},
+        {title: 'ChatGPT app pairing', status: 'Unavailable', attention: false},
         {title: 'Permissions overrides', status: '3 of 5 on', attention: false},
         {title: 'Interaction logs', status: 'Keeps 25', attention: false},
         {title: 'Assistant', status: 'Running', attention: false},
         {title: 'Browser permissions', status: 'None remembered', attention: false},
         {title: 'Scheduled runs', status: 'Paused: time zone unavailable', attention: true},
         {title: 'Appearance', status: 'Follows Home Assistant', attention: false},
+        {title: 'Advanced', status: 'Workspace rules', attention: false},
       ]);
       assert.equal(await page.locator('#remote-control-section .settings-toggle').count(), 0, 'own dialog stays open');
       await page.screenshot({path: path.join(SHOTS, `settings-collapsed-${colorScheme}-400.png`)});
 
-      // Open Accounts and connections, then ChatGPT and GitHub: the code shows its countdown, and the button rows
-      // fit the phone. The app pairing part is short and has no header of its own to open.
+      const collapsedSize = await windowSize(page);
+      await checkLayout(page);
+
+      // Open Accounts and connections, then its three parts: the code shows its countdown, and the button rows
+      // fit the phone. The app pairing part has its own collapsed header, like the other two.
       await page.locator('#accounts-section > h3 .settings-toggle').click();
-      assert.equal(await page.locator('#app-pairing-section .settings-toggle').count(), 0);
+      assert.equal(await page.getByRole('button', {name: 'Manage remote connection', exact: true}).isVisible(), false);
+      for (const id of ['chatgpt-section', 'github-section', 'app-pairing-section'])
+        await page.locator(`#${id} .settings-toggle`).click();
       assert.equal(await page.getByRole('button', {name: 'Manage remote connection', exact: true}).isVisible(), true);
-      for (const id of ['chatgpt-section', 'github-section']) await page.locator(`#${id} .settings-toggle`).click();
+      // The window keeps its size and scrolls inside.
+      assert.deepEqual(await windowSize(page), collapsedSize);
+      assert.equal(await page.locator('#settings').evaluate(d => d.scrollHeight > d.clientHeight), true);
+      await checkLayout(page);
       const expiry = page.locator('#login-card .signin-expiry');
       assert.match(await expiry.textContent(), /^The code expires in 1[45]:\d\d\.$/);
       // A later status reply sets the time again, as when a phone wakes from sleep with the page's count behind.
@@ -136,6 +193,27 @@ async function checkButtonRows(page) {
       await page.close();
     }
 
+    // A desktop window: one size whatever opens, one arrow size, even spacing, in light and dark.
+    for (const colorScheme of ['light', 'dark']) {
+      const page = await browser.newPage({viewport: {width: 1280, height: 860}, colorScheme});
+      const errors = []; page.on('pageerror', e => errors.push(e.message));
+      await page.route('**/github', route => route.fulfill({json: {ok: true, github}}));
+      await page.goto('http://127.0.0.1:9137/preview/');
+      await page.getByRole('button', {name: 'Open settings', exact: true}).click();
+      await page.waitForFunction(() => [...document.querySelectorAll('#settings .settings-status')].every(s => s.textContent !== ''));
+      const size = await windowSize(page);
+      await checkLayout(page);
+      await page.screenshot({path: path.join(SHOTS, `settings-collapsed-${colorScheme}-1280.png`)});
+      for (const id of ['accounts-section', 'app-pairing-section', 'assistant-section', 'advanced-section']) {
+        await page.locator(`#${id} > :is(h3, h4) .settings-toggle`).click();
+        assert.deepEqual(await windowSize(page), size, `the window keeps its size after ${id} opens`);
+      }
+      await checkLayout(page);
+      await page.screenshot({path: path.join(SHOTS, `settings-open-${colorScheme}-1280.png`)});
+      assert.deepEqual(errors, []);
+      await page.close();
+    }
+
     // An expired ChatGPT code says so and Get a new code cancels the old sign-in and starts a new one.
     const page = await browser.newPage({viewport: {width: 400, height: 860}});
     const posts = [];
@@ -156,7 +234,7 @@ async function checkButtonRows(page) {
     await page.waitForFunction(() => /expires in/.test(document.querySelector('#signin-banner .signin-expiry')?.textContent || ''));
     assert.deepEqual(posts, ['cancel', 'start']);
     await page.close();
-    console.log(`PASS: settings at 400 px in light and dark: collapsed sections with status headers, button rows that fit, code countdown, expiry and a new code. Screenshots: ${SHOTS}`);
+    console.log(`PASS: settings at 400 px in light and dark: collapsed sections with status headers, button rows that fit, code countdown, expiry and a new code; at 400 and 1280 px one window size, one arrow size and even spacing. Screenshots: ${SHOTS}`);
   } finally {
     await browser.close();
   }
