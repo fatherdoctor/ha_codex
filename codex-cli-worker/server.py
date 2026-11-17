@@ -9,6 +9,7 @@ import copy
 import hashlib
 import hmac
 import json
+import math
 import os
 import queue
 import re
@@ -41,7 +42,6 @@ from flask import Flask, Response, jsonify, request, send_file
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from verification import DEFAULT_BROWSER_MEMORY_LIMIT_MIB, Verification, public_check
 from approvals import APPROVAL_GONE, AppServerSession
-import math
 import policy as protected_policy
 from ha_data import HomeAssistantData
 import remote_control
