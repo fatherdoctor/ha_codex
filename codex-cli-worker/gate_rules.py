@@ -27,6 +27,7 @@ configuration watch remain separate defenses.
 from __future__ import annotations
 
 import ast
+import fnmatch
 import hashlib
 import json
 import re
@@ -38,6 +39,10 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+# The hook and its tests know the join step by its old private name.
+from shell_words import join_shell_continuations as _join_shell_continuations
+from shell_words import split_words, strip_comments
 
 IMAGE_DIR = Path("/usr/share/ha_codex")
 SOURCE_DIR = Path(__file__).resolve().parent / "policy"
@@ -68,7 +73,7 @@ PROTECTED_COMMAND_RES = (
     (re.compile(r"/proc/\S*environ"), "reads a process environment, which can hold the Supervisor token"),
     (re.compile(r"\b(?:SUPERVISOR_TOKEN|HASSIO_TOKEN)\b"), "uses the Supervisor token"),
     (re.compile(r"/run/s6/container_environment"), "reads the app's saved environment, which holds the Supervisor token"),
-    (re.compile(r"https?://supervisor\b|\bsupervisor/|\bha\s+(?:supervisor|su)\b|\bbashio::", re.IGNORECASE),
+    (re.compile(r"https?://supervisor\b|\bsupervisor/|\bha\s+(?:supervisor|super|su)\b|\bbashio::", re.IGNORECASE),
      "talks to the Home Assistant Supervisor"),
     (re.compile(r"\.storage/+auth"), "reads Home Assistant's sign-in store"),
     (re.compile(r"secrets\.ya?ml"), "reads secrets.yaml"),
@@ -521,7 +526,7 @@ FULL_ACCESS_RE = re.compile(r"danger[-_]?full[-_]?access|dangerFullAccess|--dang
 
 HA_REMOTE_FAMILIES = frozenset(("addon", "addons", "add-on", "add-ons", "host", "os", "core",
                                 "hardware", "network", "backup", "backups", "apps"))
-HA_ALWAYS_FAMILIES = frozenset(("supervisor", "su"))
+HA_ALWAYS_FAMILIES = frozenset(("supervisor", "super", "su"))
 SHELL_ASSIGNMENT_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*=")
 # A conservative text floor also catches shell constructs the parser cannot place.
 # It reads the command with its quotes removed. The four documented value-taking
@@ -530,7 +535,7 @@ HA_TEXT_PREFIX = r"\bha\s+(?:(?:--(?:log-level|api-token|endpoint|config)(?:=\S+
 HA_REMOTE_TEXT_RE = re.compile(
     HA_TEXT_PREFIX + r"(?:add-?ons?|host|os|core|hardware|network|backups?|apps)\b", re.IGNORECASE)
 # The always-refused families get the same floor whether or not remote control is on.
-HA_ALWAYS_TEXT_RE = re.compile(HA_TEXT_PREFIX + r"(?:supervisor|su)\b", re.IGNORECASE)
+HA_ALWAYS_TEXT_RE = re.compile(HA_TEXT_PREFIX + r"(?:supervisor|super|su)\b", re.IGNORECASE)
 # Flag values and shell syntax can obscure the exact argument boundaries. The
 # always-refused families remain protected even when they follow such values.
 HA_SHELL_WORD_RE = re.compile(r"\bh[\"'\\]*a\b", re.IGNORECASE)
@@ -548,49 +553,18 @@ def _ha_unknown_flag(text: str) -> bool:
     return False
 
 
-# Characters after which a ``#`` starts a word. An escaped character is never one of them.
-WORD_BREAKS = frozenset(" \t\r\n;&|()<>")
+def _floor_texts(text: str, joined: str) -> tuple[str, str]:
+    """Return the two readings of a command that the text floor checks, without quotes or backslashes.
 
-
-def _strip_comments(text: str) -> str:
-    """Remove shell comments: from a ``#`` that starts a word outside quotes to the end of its line.
-
-    A ``#`` inside a word, such as ``a#b``, is part of that word, as it is for the shell.
+    The first reading joins continuations as the shell does. The second removes every
+    backslash-newline pair, in any quote or comment state. The second reading does not depend on
+    where this module thinks a comment, a quote or a nested shell script starts, so an error in
+    that model cannot hide a Supervisor command. The cost is a refusal of a single-quoted literal
+    pair that spells one; the floor already refuses such a spelling in a comment.
     """
-    out: list[str] = []
-    quote = ""
-    i = 0
-    while i < len(text):
-        char = text[i]
-        if quote == "'":
-            if char == "'":
-                quote = ""
-        elif char == "\\":
-            # A backslash keeps the next character, except inside single quotes.
-            out.append(text[i:i + 2])
-            i += 2
-            continue
-        elif quote == '"':
-            if char == '"':
-                quote = ""
-        elif char in "'\"":
-            quote = char
-        elif char == "#" and (not out or out[-1] in WORD_BREAKS):
-            end = text.find("\n", i)
-            i = len(text) if end == -1 else end
-            continue
-        out.append(char)
-        i += 1
-    return "".join(out)
-
-
-def _split_words(text: str, punctuation: str) -> list[str]:
-    """Split text the way the shell does, with comments already removed; raise ValueError if unreadable."""
-    lexer = shlex.shlex(text, posix=True, punctuation_chars=punctuation)
-    lexer.whitespace = " \t\r"
-    lexer.whitespace_split = True
-    lexer.commenters = ""
-    return list(lexer)
+    unquoted = r"[\"'`\\]"
+    unjoined = text.replace("\\\n", "")
+    return re.sub(unquoted, "", joined), re.sub(unquoted, "", unjoined)
 
 
 def _shell_words(text: str, punctuation: str) -> list[str]:
@@ -600,18 +574,19 @@ def _shell_words(text: str, punctuation: str) -> list[str]:
     heredoc body, is read again line by line. A line that still cannot be read is split
     with its quotes and backslashes removed; the other lines keep their quoting, so a
     quoted script given to ``sh -c`` stays one word. The shell still runs such a
-    command, so it must never be skipped as unreadable.
+    command, so it must never be skipped as unreadable. approvals.py reads words with
+    the same code, in shell_words.py, but fails closed on such text instead.
     """
     try:
-        return _split_words(_strip_comments(text), punctuation)
+        return split_words(strip_comments(text), punctuation)
     except ValueError:
         pass
     words = []
     for line in text.split("\n"):
         try:
-            words.extend(_split_words(_strip_comments(line), punctuation))
+            words.extend(split_words(strip_comments(line), punctuation))
         except ValueError:
-            words.extend(_split_words(re.sub(r"[\"'\\]", "", line), punctuation))
+            words.extend(split_words(re.sub(r"[\"'\\]", "", line), punctuation))
         words.append("\n")
     return words
 
@@ -653,10 +628,13 @@ def _shell_substitutions(text: str) -> tuple[str, list[str]]:
 
 
 def _ha_supervisor_command(text: str, depth: int = 0) -> bool:
-    """Find ha su/supervisor in a simple command, without executing shell text."""
+    """Find literal Supervisor CLI aliases without executing shell text."""
     if depth > 6:
         return False
-    masked, nested = _shell_substitutions(text.replace('\\\n', ' '))
+    joined = _join_shell_continuations(text)
+    if joined is None:
+        return True
+    masked, nested = _shell_substitutions(joined)
     if any(_ha_supervisor_command(item, depth + 1) for item in nested):
         return True
     tokens = _shell_words(masked, ';&|()\n')
@@ -747,7 +725,10 @@ def _ha_command(text: str, remote_on: bool, depth: int = 0) -> bool:
     """
     if depth > 3:
         return False
-    tokens = _shell_words(text.replace("\\\n", " "), ";&|()\n")
+    joined = _join_shell_continuations(text)
+    if joined is None:
+        return True
+    tokens = _shell_words(joined, ";&|()\n")
     segments = []
     segment = []
     for token in tokens:
@@ -792,6 +773,60 @@ def _ha_command(text: str, remote_on: bool, depth: int = 0) -> bool:
     return False
 
 
+# The image folder /usr/share/ha_codex as a command may spell it. Every "share" folder followed by an "ha_" name
+# counts, globbed, braced or behind a variable, except the plain absolute /share/ha_<name> (the Home Assistant share
+# folder, where the owner's repositories live). A relative share/ha_<name> stays refused: the text cannot tell
+# whether the command runs in /usr. Best effort on the text: it cannot see a path a command builds at run time.
+# Where a new path can start. A closing ``)`` or a backtick is not one: ``$(echo /usr)/share`` stays one word.
+_IMAGE_WORD_BREAKS = re.compile(r"[\s;&|(<>=:]+")
+_IMAGE_WILD = re.compile(r"[*?\[]")
+
+
+def _brace_choices(word: str, limit: int = 64) -> list[str] | None:
+    """Expand shell braces in one word; None when there are too many choices to list."""
+    out, todo = [], [word]
+    while todo:
+        item = todo.pop()
+        match = re.search(r"\{([^{}]*)\}", item)
+        if not match:
+            out.append(item)
+        else:
+            todo.extend(item[:match.start()] + choice + item[match.end():] for choice in match[1].split(","))
+        if len(out) + len(todo) > limit:
+            return None
+    return out
+
+
+def _part_could_be(part: str, name: str, prefix: str = "") -> bool:
+    """Return whether one path part, read as a shell glob, can name ``name``."""
+    part = part.lower()
+    return (part == name or bool(prefix and part.startswith(prefix))
+            or bool(_IMAGE_WILD.search(part) and fnmatch.fnmatchcase(name, part)))
+
+
+def names_image_folder(text: str) -> bool:
+    """Return whether command text can name /usr/share/ha_codex, after quotes and backslashes are removed."""
+    plain = re.sub(r"/{2,}", "/", re.sub(r"[\\'\"]", "", str(text or "")))
+    for word in _IMAGE_WORD_BREAKS.split(plain):
+        choices = _brace_choices(word)
+        if choices is None:
+            # Too many choices to read: refuse any that could hold an ha_ name.
+            if re.search(r"h|[*?\[]", word, re.IGNORECASE):
+                return True
+            continue
+        for choice in choices:
+            parts = re.sub(r"/{2,}", "/", choice).split("/")
+            for index in range(len(parts) - 1):
+                share, name = parts[index], parts[index + 1]
+                if not _part_could_be(name, "ha_codex", "ha_"):
+                    continue
+                if "$" in share or "`" in share or ")" in share or _part_could_be(share, "share"):
+                    # Allowed: only the literal absolute /share/ha_<name>.
+                    if index == 1 and parts[0] == "" and share.lower() == "share":
+                        continue
+                    return True
+    return False
+
 def _policy_restriction(text: str) -> str:
     """Name protected app settings/rules/policy in either a patch path or command text.
 
@@ -806,9 +841,11 @@ def _policy_restriction(text: str) -> str:
         return "accesses the protected schedule database"
     if re.search(r"worker_api_token", plain, re.IGNORECASE):
         return "accesses the add-on's private credential"
+    if re.search(r"/data/+github", plain, re.IGNORECASE):
+        return "accesses the add-on's GitHub sign-in"
     if re.search(r"codex-home/.*(?:AGENTS\.md|house-rules)|ha_codex/.*(?:AGENTS\.md|house-rules)", plain, re.IGNORECASE):
         return "changes the add-on's rules"
-    if re.search(r"/share/ha_|ha_codex/(?:policy|agents|house)|codex-home/.*(?:config\.toml|[?*\[])|/etc/codex/(?:requirements|managed_config)", plain, re.IGNORECASE):
+    if names_image_folder(text) or re.search(r"ha_codex/(?:policy|agents|house)|codex-home/.*(?:config\.toml|[?*\[])|/etc/codex/(?:requirements|managed_config)", plain, re.IGNORECASE):
         return "changes the add-on's permission policy"
     return ""
 
@@ -891,11 +928,16 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
         for pattern, why in PROTECTED_COMMAND_RES:
             if pattern.search(text):
                 return f"This command {why}, which is never allowed."
-        # Quotes and backslashes only change how a word is spelled, so the floor reads without them.
-        plain_ha = re.sub(r"[\"'`\\]", "", text.replace("\\\n", " "))
+        # Join literal words before the conservative quote/backslash floor.
+        joined = _join_shell_continuations(text)
+        if joined is None:
+            return ("This command may hide a Home Assistant Supervisor command in a shell line continuation. "
+                    "Write the command on one line so it can be checked.")
+        floor = _floor_texts(text, joined)
         if (_ha_supervisor_command(text)
-                or HA_ALWAYS_TEXT_RE.search(plain_ha)
-                or (remote_on and (HA_REMOTE_TEXT_RE.search(plain_ha) or _ha_unknown_flag(text)))
+                or any(HA_ALWAYS_TEXT_RE.search(plain) for plain in floor)
+                or (remote_on and (any(HA_REMOTE_TEXT_RE.search(plain) for plain in floor)
+                                   or _ha_unknown_flag(text)))
                 or _ha_command(text, remote_on)):
             return "This command talks to the Home Assistant Supervisor, which is never allowed."
     return ""

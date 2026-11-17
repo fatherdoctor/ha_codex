@@ -1171,6 +1171,7 @@ async function loadBrowserPermissions() {
     if (load !== browserPermissionLoad) return;
     area.replaceChildren();
     if (!permissions.length) area.append(textNode("p", "No browser permissions remembered.", "muted"));
+    setSectionStatus("browser-permissions-section", permissions.length ? `${permissions.length} remembered` : "None remembered");
     for (const permission of permissions) {
       const row = textNode("div", "", "saved-browser-permission");
       const info = textNode("div", "", "saved-browser-permission-info");
@@ -1198,6 +1199,7 @@ async function loadBrowserPermissions() {
   } catch (error) {
     if (load !== browserPermissionLoad) return;
     area.replaceChildren(textNode("p", String(error.message || error)));
+    setSectionStatus("browser-permissions-section", "Could not be read", true);
     // An unreadable permissions file can only be replaced, never edited here.
     if (error.status === 503) {
       const clear = textNode("button", "Remove all saved permissions", "subtle");
@@ -2732,6 +2734,129 @@ $("divider").addEventListener("keydown", (event) => {
 window.addEventListener("resize", () => {
   if (innerWidth > 700) setWidth($("divider").getAttribute("aria-valuenow"));
 });
+/*
+ * Settings sections start collapsed (add-on 0.3.2). Each section's first
+ * heading becomes a button with the title and a one-line status; the rest of
+ * the section opens under it on tap. A section that needs the owner says so
+ * in its header, so nothing important hides in a closed section.
+ */
+function collapseSettingsSections() {
+  // Sections marked data-own-dialog move to a dialog of their own (studio.js) and stay open there.
+  document.querySelectorAll("#settings > section:not([data-own-dialog])").forEach((section, index) => {
+    const heading = section.querySelector(":scope > h3");
+    if (!heading || heading.querySelector(".settings-toggle")) return;
+    const body = document.createElement("div");
+    body.className = "settings-body";
+    body.id = `${section.id || `settings-section-${index}`}-body`;
+    body.hidden = true;
+    while (heading.nextSibling) body.append(heading.nextSibling);
+    section.append(body);
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "settings-toggle";
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.setAttribute("aria-controls", body.id);
+    toggle.append(textNode("span", heading.textContent.trim(), "settings-title"), textNode("span", "", "settings-status"));
+    toggle.onclick = () => openSettingsSection(section, toggle.getAttribute("aria-expanded") !== "true");
+    heading.replaceChildren(toggle);
+  });
+}
+/** Open or close one settings section. */
+function openSettingsSection(section, open = true) {
+  const toggle = section.querySelector(".settings-toggle");
+  const body = section.querySelector(":scope > .settings-body");
+  if (!toggle || !body) return;
+  toggle.setAttribute("aria-expanded", String(open));
+  body.hidden = !open;
+}
+/** Put a one-line status in a section's header; attention marks one that needs the owner. */
+function setSectionStatus(sectionId, text, attention = false) {
+  const section = $(sectionId);
+  const status = section?.querySelector(".settings-toggle .settings-status");
+  if (!status) return;
+  status.textContent = text;
+  section.classList.toggle("needs-attention", Boolean(attention));
+}
+collapseSettingsSections();
+setSectionStatus("appearance-section", "Follows Home Assistant");
+/*
+ * The time left on a sign-in code. The worker sends the seconds left, by its
+ * own clock; the page counts down from when that reply arrived, so a phone
+ * with a wrong clock still shows the right time. One timer serves every
+ * countdown on the page.
+ */
+const codeDeadlines = new Map();
+let codeCountdownTimer = 0;
+/**
+ * Build the expiry line and the hidden "Get a new code" button for a card;
+ * nothing when the time is unknown. kind ("chatgpt" or "github") lets a later
+ * status reply set the time again; see followCodeTime.
+ */
+function codeExpiry(secondsLeft, getNewCode, kind) {
+  if (typeof secondsLeft !== "number" || !Number.isFinite(secondsLeft)) return [];
+  const line = textNode("p", "", "muted signin-expiry");
+  const button = textNode("button", "Get a new code");
+  button.type = "button";
+  button.hidden = true;
+  button.onclick = async () => {
+    button.disabled = true;
+    try {
+      await getNewCode();
+    } finally {
+      button.disabled = false;
+    }
+  };
+  const entry = { deadline: performance.now() + secondsLeft * 1000, button, kind };
+  codeDeadlines.set(line, entry);
+  showCodeTime(line, entry);
+  if (!codeCountdownTimer) codeCountdownTimer = setInterval(showCodeTimes, 1000);
+  return [line, button];
+}
+/**
+ * Set the time left on the shown codes of one kind from the worker's latest
+ * reply. The card is built once per code, and the page's own count can stop
+ * while a phone sleeps, so each status reply corrects it.
+ */
+function followCodeTime(kind, secondsLeft) {
+  if (typeof secondsLeft !== "number" || !Number.isFinite(secondsLeft)) return;
+  for (const [line, entry] of codeDeadlines) {
+    if (entry.kind !== kind) continue;
+    entry.deadline = performance.now() + secondsLeft * 1000;
+    showCodeTime(line, entry);
+  }
+}
+/** Show the time left on one code; an expired code says so and offers a new one. */
+function showCodeTime(line, { deadline, button }) {
+  const left = Math.max(0, Math.round((deadline - performance.now()) / 1000));
+  const expired = left === 0;
+  const minutes = Math.floor(left / 60);
+  const seconds = String(left % 60).padStart(2, "0");
+  line.textContent = expired ? "This code has expired. Get a new code to sign in." : `The code expires in ${minutes}:${seconds}.`;
+  line.classList.toggle("signin-expired", expired);
+  button.hidden = !expired;
+}
+/** Update every countdown on the page; a card that left the page is forgotten. */
+function showCodeTimes() {
+  for (const [line, entry] of codeDeadlines) {
+    if (line.isConnected) showCodeTime(line, entry);
+    else codeDeadlines.delete(line);
+  }
+  if (!codeDeadlines.size) {
+    clearInterval(codeCountdownTimer);
+    codeCountdownTimer = 0;
+  }
+}
+/** Replace a waiting ChatGPT sign-in with a new one, for a code that expired. */
+async function newChatgptCode() {
+  try {
+    await api("auth/cancel", {});
+    await api("auth/start", {});
+    await loadLogin();
+  } catch (error) {
+    if ($("settings").open) settingsError(error);
+    else showError(error);
+  }
+}
 let loginTimer;
 // What the sign-in card shows now; the card is rebuilt only when this changes,
 // so a code being read or a QR being scanned never jumps under the user's thumb.
@@ -2760,7 +2885,7 @@ function signInCard(auth) {
       "aria-label",
       `Sign-in code ${auth.user_code.split("").join(" ")}`,
     );
-    card.append(code);
+    card.append(code, ...codeExpiry(auth.expires_in, newChatgptCode, "chatgpt"));
   } else {
     card.append(textNode("p", "Waiting for the sign-in code…", "muted"));
   }
@@ -2803,6 +2928,14 @@ async function loadLogin() {
   }
   renderLogin(auth);
 }
+/** The ChatGPT account header in a few words. */
+function chatgptSectionStatus({ signedIn, pending, failed, lapsed }) {
+  if (signedIn) return "Signed in";
+  if (pending) return "Signing in: enter the code";
+  if (failed) return "Sign-in failed";
+  if (lapsed) return "Sign-in expired";
+  return "Not signed in";
+}
 /** Put the sign-in state on the page; see loadLogin. */
 function renderLogin(auth) {
   const signedIn = Boolean(auth.codex_login?.status_ok);
@@ -2810,16 +2943,25 @@ function renderLogin(auth) {
   // The worker reports "rejected" when OpenAI refused the saved sign-in (expired or revoked),
   // although the local sign-in file is still there.
   const lapsed = !signedIn && auth.codex_login?.server_check === "rejected";
+  // The last sign-in ended without signing in; the worker says why when it can.
+  const failed = !signedIn && !pending && auth.status === "failed";
+  const failure = `The last sign-in did not finish. ${auth.error || "Get a new code to try again."}`;
   $("login-status").textContent = signedIn
     ? auth.codex_login.message || "Signed in to ChatGPT."
     : pending
       ? "Signing in. Enter the code below on the ChatGPT sign-in page."
-      : lapsed
-        ? "The ChatGPT sign-in expired or was revoked. Sign in again."
-        : "Not signed in to ChatGPT.";
-  $("signin-banner-text").textContent = lapsed
-    ? "The assistant's ChatGPT sign-in expired or was revoked. Sign in again."
-    : "The assistant is not signed in to ChatGPT.";
+      : failed
+        ? failure
+        : lapsed
+          ? "The ChatGPT sign-in expired or was revoked. Sign in again."
+          : "Not signed in to ChatGPT.";
+  $("signin-banner-text").textContent = failed
+    ? failure
+    : lapsed
+      ? "The assistant's ChatGPT sign-in expired or was revoked. Sign in again."
+      : "The assistant is not signed in to ChatGPT.";
+  setSectionStatus("chatgpt-section", chatgptSectionStatus({ signedIn, pending, failed, lapsed }), !signedIn);
+  for (const id of ["login", "banner-login"]) $(id).textContent = failed ? "Get a new code" : "Sign in";
   const key = JSON.stringify([
     signedIn,
     lapsed,
@@ -2834,11 +2976,306 @@ function renderLogin(auth) {
     $("signin-banner-card").replaceChildren(
       ...(pending ? [signInCard(auth)] : []),
     );
+  } else if (pending) {
+    followCodeTime("chatgpt", auth.expires_in);
   }
   for (const id of ["login", "banner-login"]) $(id).hidden = pending;
+  // The sign-in card repeats the account requirement, so the section shows it once.
+  $("login-requirement").hidden = pending;
   for (const id of ["login-cancel", "banner-cancel"]) $(id).hidden = !pending;
   $("signin-banner").hidden = signedIn;
 }
+/*
+ * GitHub sign-in (add-on 0.3). The worker holds the sign-in; this page only
+ * shows its status and sends button presses. The device code is shown on the
+ * page while a sign-in waits and nowhere else: it is never logged, never kept
+ * in browser storage, and the pasted token is cleared from its field at once.
+ */
+let githubTimer;
+let githubStatus = null;
+let githubRevokeUrl = "";
+const GITHUB_BAD_STATES = ["expired", "revoked", "access_changed", "failed"];
+const GITHUB_STATE_TEXT = {
+  disconnected: "Not connected to GitHub.",
+  connecting: "Connecting. Enter the code below on GitHub.",
+  ok: "Connected to GitHub.",
+  near_expiry: "Connected, but the sign-in expires within 7 days. Connect again or make a new token.",
+  expired: "The GitHub sign-in expired. Connect again.",
+  revoked: "GitHub refused the stored sign-in (revoked). Connect again.",
+  access_changed: "The GitHub sign-in reaches different repositories or access than you connected.",
+  failed: "The GitHub sign-in cannot be checked.",
+};
+/** Send a GitHub request; every reply carries the status, also a refusal's, so the card stays true. */
+async function githubApi(path, body) {
+  const response = await fetch(path, {
+    method: body === undefined ? "GET" : "POST",
+    headers: body === undefined ? {} : { "Content-Type": "application/json" },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  const data = await response.json().catch(() => null);
+  if (data && data.github && typeof data.github === "object") renderGithub(data.github);
+  if (!data) throw workerError(`The worker returned HTTP ${response.status}.`, response.status);
+  if (!response.ok || !data.ok)
+    throw workerError(
+      data.error || data.text || `The worker returned HTTP ${response.status}.`,
+      response.status,
+    );
+  return data;
+}
+/** An https link on github.com only; anything else is not shown as a link. */
+function githubLink(href, text) {
+  try {
+    const url = new URL(href);
+    if (url.protocol !== "https:" || url.hostname !== "github.com") return null;
+    const link = textNode("a", text);
+    link.href = url.href;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    return link;
+  } catch (_) {
+    return null;
+  }
+}
+function githubDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleString();
+}
+function githubExpiry(github) {
+  if (!github.expires_at)
+    return github.kind === "app" ? "Does not expire; revoke it on GitHub." : "No expiry reported.";
+  const days = Math.floor((new Date(github.expires_at).getTime() - Date.now()) / 86400000);
+  if (Number.isNaN(days)) return "";
+  return `${githubDate(github.expires_at)} (${days < 0 ? "expired" : days === 0 ? "today" : `in ${days} day${days === 1 ? "" : "s"}`})`;
+}
+/** The device-sign-in card: the code in large letters and GitHub's own page. */
+function githubFlowCard(flow) {
+  const card = document.createElement("div");
+  card.className = "signin-card github-flow-card";
+  if (flow.user_code) {
+    card.append(textNode("p", "Enter this code on GitHub's device sign-in page, then approve Codex for Home Assistant:", "muted"));
+    const code = textNode("p", flow.user_code, "signin-code");
+    code.setAttribute("aria-label", `GitHub code ${flow.user_code.split("").join(" ")}`);
+    card.append(code);
+  } else {
+    card.append(textNode("p", "Waiting for the GitHub code…", "muted"));
+  }
+  const link = githubLink(flow.verification_uri || "https://github.com/login/device", "Open github.com/login/device");
+  if (link) card.append(link);
+  if (flow.user_code) card.append(...codeExpiry(flow.expires_in, newGithubCode, "github"));
+  return card;
+}
+/** Replace a waiting GitHub sign-in with a new one, for a code that expired. */
+async function newGithubCode() {
+  githubResult("");
+  try {
+    await githubApi("github/cancel", {});
+    await githubApi("github/connect", {});
+  } catch (error) {
+    githubResult(String(error.message || error), true);
+  } finally {
+    loadGithub().catch(() => {});
+  }
+}
+/** The GitHub header in a few words, for example "Connected as owner, 1 repository". */
+function githubSectionStatus({ waiting, connected, bad, state, login, repositoryCount, retry }) {
+  if (waiting) return "Connecting: enter the code";
+  if (connected) {
+    const condition = bad ? (GITHUB_STATE_TEXT[state] || state).replace(/\.$/, "") : "Connected";
+    const account = login ? ` as ${login}` : "";
+    const repositories = repositoryCount === 1 ? "1 repository" : `${repositoryCount} repositories`;
+    return `${condition}${account}, ${repositories}`;
+  }
+  if (retry) return "Sign-in did not finish";
+  return "Not connected";
+}
+/** Put the GitHub status on the card and the banner. Only the contract's fields are read. */
+function renderGithub(github) {
+  githubStatus = github;
+  const state = String(github.state || "disconnected");
+  const flow = github.flow && typeof github.flow === "object" ? github.flow : { status: "idle" };
+  const waiting = flow.status === "waiting_for_user";
+  const connected = !["disconnected", "connecting"].includes(state);
+  const login = github.account?.login || "";
+  if (connected && github.revoke_url) githubRevokeUrl = github.revoke_url;
+  $("github-status").textContent =
+    connected && login ? `${GITHUB_STATE_TEXT[state] || state} Signed in as ${login}.` : GITHUB_STATE_TEXT[state] || state;
+  const details = $("github-details");
+  const rows = [];
+  if (connected) {
+    rows.push(["Sign-in", github.kind === "token" ? "Fine-grained token" : "GitHub App"]);
+    if (github.connected_at) rows.push(["Connected", githubDate(github.connected_at)]);
+    rows.push(["Expiry", githubExpiry(github)]);
+    rows.push(["Access", github.permission_problem
+      ? String(github.permission_problem)
+      : github.permissions ? "Contents read and write, Metadata read" : "Unknown"]);
+    if (github.last_check?.at)
+      rows.push(["Last check", `${githubDate(github.last_check.at)}${github.last_check.reason ? `: ${github.last_check.reason}` : ""}`]);
+  }
+  details.replaceChildren(...rows.flatMap(([term, value]) => [textNode("dt", term), textNode("dd", value)]));
+  details.hidden = !rows.length;
+  const list = $("github-repositories");
+  const items = [];
+  if (connected) {
+    for (const repo of github.repositories || []) {
+      if (!repo || typeof repo.full_name !== "string") continue;
+      const extra = (github.extra || []).includes(repo.full_name);
+      const item = textNode("li", `${repo.private ? "🔒 " : ""}${repo.full_name} · ${repo.push ? "read and write" : "read only"}${extra ? " · new, not accepted" : ""}`);
+      if (extra) item.className = "github-extra";
+      items.push(item);
+    }
+    for (const name of github.missing || [])
+      if (typeof name === "string") items.push(textNode("li", `${name} · no longer reached`, "github-missing"));
+  }
+  list.replaceChildren(...items);
+  list.hidden = !items.length;
+  const flowArea = $("github-flow");
+  if (waiting) {
+    const key = JSON.stringify([flow.user_code, flow.verification_uri, flow.expires_at]);
+    if (flowArea.dataset.key !== key) {
+      flowArea.dataset.key = key;
+      flowArea.replaceChildren(githubFlowCard(flow));
+    } else {
+      followCodeTime("github", flow.expires_in);
+    }
+  } else {
+    flowArea.dataset.key = "";
+    const ended = { expired: "The GitHub code expired before it was entered. Get a new code to sign in.",
+      canceled: "The GitHub sign-in was canceled.", failed: "The GitHub sign-in failed." }[flow.status];
+    const why = flow.status === "failed" && flow.error ? ` ${flow.error}` : "";
+    flowArea.replaceChildren(...(ended && !connected ? [textNode("p", `${ended}${why}`, "muted")] : []));
+  }
+  const retry = !connected && ["expired", "failed"].includes(flow.status);
+  $("github-connect").textContent = connected ? "Connect again" : retry ? "Get a new code" : "Connect GitHub";
+  $("github-connect").hidden = waiting;
+  $("github-cancel").hidden = !waiting;
+  for (const id of ["github-test", "github-check", "github-disconnect"]) $(id).hidden = !connected;
+  $("github-accept").hidden = !(state === "access_changed" && !github.permission_problem);
+  if (!connected) $("github-test-result").hidden = true;
+  else if (github.last_test?.text) {
+    $("github-test-result").textContent = github.last_test.text;
+    $("github-test-result").hidden = false;
+  }
+  const usable = ["ok", "near_expiry"].includes(state);
+  const names = usable ? (github.repositories || []).filter((repo) => repo?.push && typeof repo.full_name === "string").map((repo) => repo.full_name) : [];
+  for (const id of ["github-clone-repository", "github-link-repository"]) {
+    const select = $(id);
+    const chosen = select.value;
+    select.replaceChildren(...names.map((name) => { const option = textNode("option", name); option.value = name; return option; }));
+    if (names.includes(chosen)) select.value = chosen;
+  }
+  $("github-local").hidden = !names.length;
+  githubDefaultFolder();
+  const bad = GITHUB_BAD_STATES.includes(state);
+  const repositoryCount = (github.repositories || []).length;
+  setSectionStatus(
+    "github-section",
+    githubSectionStatus({ waiting, connected, bad, state, login, repositoryCount, retry }),
+    bad || waiting || retry,
+  );
+  $("github-banner-text").textContent = `The add-on's GitHub sign-in needs attention: ${(GITHUB_STATE_TEXT[state] || state).replace(/\.$/, "")}.`;
+  $("github-banner").hidden = !bad;
+}
+/** Show that this worker has no GitHub sign-in (an add-on before 0.3). */
+function githubUnavailable() {
+  githubStatus = null;
+  $("github-status").textContent = "Not available in this version of the add-on.";
+  for (const id of ["github-connect", "github-cancel", "github-test", "github-check", "github-accept", "github-disconnect"])
+    $(id).hidden = true;
+  $("github-details").hidden = $("github-repositories").hidden = $("github-local").hidden = true;
+  $("github-token").hidden = true;
+  $("github-banner").hidden = true;
+  setSectionStatus("github-section", "Not available in this version");
+}
+/** Read the GitHub status. Every 5 seconds while a code waits, else every 5 minutes, so a lost sign-in shows. */
+async function loadGithub() {
+  clearTimeout(githubTimer);
+  let waiting = false;
+  try {
+    const response = await fetch("github");
+    if (response.status === 404) return githubUnavailable();
+    const data = await response.json().catch(() => null);
+    if (!data?.ok || !data.github) throw workerError(data?.error || `The worker returned HTTP ${response.status}.`, response.status);
+    $("github-token").hidden = false;
+    renderGithub(data.github);
+    waiting = data.github.flow?.status === "waiting_for_user";
+  } finally {
+    githubTimer = setTimeout(() => loadGithub().catch(() => {}), waiting ? 5000 : 300000);
+  }
+}
+function githubResult(text, isError) {
+  const result = $("github-result");
+  result.textContent = text || "";
+  result.classList.toggle("error", Boolean(isError));
+}
+/** Run one GitHub button: disable it while the worker works, then show the outcome on the card. */
+async function githubAction(button, path, body, done) {
+  button.disabled = true;
+  githubResult("");
+  try {
+    const data = await githubApi(path, body);
+    if (done) done(data);
+  } catch (error) {
+    githubResult(String(error.message || error), true);
+  } finally {
+    button.disabled = false;
+    loadGithub().catch(() => {});
+  }
+}
+$("github-connect").onclick = () => githubAction($("github-connect"), "github/connect", {});
+$("github-cancel").onclick = () => githubAction($("github-cancel"), "github/cancel", {});
+$("github-test").onclick = () => githubAction($("github-test"), "github/test", {});
+$("github-check").onclick = () => githubAction($("github-check"), "github/check", {}, (data) =>
+  githubResult(`Check finished: ${GITHUB_STATE_TEXT[data.github?.state] || data.github?.state || "done"}`));
+$("github-accept").onclick = () => githubAction($("github-accept"), "github/accept", {}, () =>
+  githubResult("The current repositories are now the ones the check expects."));
+$("github-disconnect").onclick = () => {
+  const revoke = githubRevokeUrl || githubStatus?.revoke_url || "";
+  if (!window.confirm("Disconnect GitHub? The assistant can no longer fetch, pull or push until you connect again.")) return;
+  githubAction($("github-disconnect"), "github/disconnect", {}, () => {
+    const result = $("github-result");
+    result.classList.remove("error");
+    result.replaceChildren(textNode("span", "Disconnect forgets the sign-in on this box. To revoke it on GitHub, open this link: "));
+    const link = githubLink(revoke, revoke.replace(/^https:\/\//, ""));
+    if (link) result.append(link);
+  });
+};
+$("github-token-form").onsubmit = (event) => {
+  event.preventDefault();
+  const field = $("github-token-value");
+  const token = field.value;
+  // The token leaves the page once, in this request body, and is not kept anywhere on the page.
+  field.value = "";
+  githubAction($("github-token-save"), "github/token",
+    { token, repository: $("github-token-repository").value.trim() },
+    () => { $("github-token").open = false; githubResult("Token accepted."); });
+};
+/** Clone goes to /share/<repository name> unless the owner typed another folder name. */
+function githubDefaultFolder() {
+  const field = $("github-clone-folder");
+  if (field.dataset.edited) return;
+  const name = ($("github-clone-repository").value || "").split("/")[1] || "";
+  field.value = name.replace(/[^A-Za-z0-9_-]/g, "-").replace(/^[^A-Za-z0-9]+/, "").slice(0, 100);
+}
+$("github-clone-repository").onchange = githubDefaultFolder;
+$("github-clone-folder").oninput = () => { $("github-clone-folder").dataset.edited = "1"; };
+$("github-clone-form").onsubmit = (event) => {
+  event.preventDefault();
+  githubAction($("github-clone"), "github/repos/clone",
+    { repository: $("github-clone-repository").value, folder: $("github-clone-folder").value.trim() },
+    (data) => githubResult(data.path ? `Cloned into ${data.path}.` : data.text || "Cloned."));
+};
+$("github-link-form").onsubmit = (event) => {
+  event.preventDefault();
+  githubAction($("github-link"), "github/repos/link",
+    { repository: $("github-link-repository").value, path: $("github-link-path").value.trim() },
+    (data) => githubResult(data.text || "Linked."));
+};
+$("github-banner-open").onclick = async () => {
+  await $("settings-button").onclick();
+  openSettingsSection($("github-section"));
+  $("github-section").scrollIntoView({ block: "start" });
+};
 /** Show whether the assistant is paused, in the settings dialog and above the chat. */
 function renderPause(pause) {
   const paused = Boolean(pause?.paused);
@@ -2848,6 +3285,7 @@ function renderPause(pause) {
   $("pause").textContent = paused ? "Resume the assistant" : "Pause the assistant";
   $("pause").dataset.paused = paused ? "1" : "";
   $("paused-banner").hidden = !paused;
+  setSectionStatus("assistant-section", paused ? "Paused" : "Running", paused);
 }
 /** Read the pause state from the worker and show it. */
 async function loadPause() {
@@ -2907,6 +3345,7 @@ function renderRemoteControl(rc) {
     }
   }
   }
+  renderRemoteControlName(rc);
   $("remote-control-start").hidden = rc.enabled;
   $("remote-control-start").disabled = !rc.available;
   $("remote-control-stop").hidden = !rc.enabled;
@@ -2927,6 +3366,38 @@ function renderRemoteControl(rc) {
   $("remote-control-log-box").hidden = !(rc.log || []).length;
   document.dispatchEvent(new CustomEvent("remote-view", {detail: rc}));
 }
+/**
+ * Show the configured machine name in its field. Codex reads the name when
+ * remote control starts, so the field is locked while it is on. Polling never
+ * replaces a name the person is still typing.
+ */
+function renderRemoteControlName(rc) {
+  const input = $("remote-control-name");
+  if (!input.dataset.edited) input.value = rc.configured_name || "";
+  input.disabled = Boolean(rc.enabled);
+  $("remote-control-name-save").disabled = Boolean(rc.enabled);
+  $("remote-control-name-note").textContent = rc.enabled
+    ? "Turn remote control off to change the name."
+    : "Pairing is kept, so the app should show the new name the next time remote control connects. If it still shows the old name, choose New pairing code.";
+}
+$("remote-control-name").oninput = () => {
+  $("remote-control-name").dataset.edited = "1";
+};
+$("remote-control-name-form").onsubmit = async (event) => {
+  event.preventDefault();
+  const input = $("remote-control-name");
+  $("remote-control-name-save").disabled = true;
+  try {
+    const data = await api("remote-control/name", { name: input.value });
+    delete input.dataset.edited;
+    renderRemoteControl(data.remote_control);
+    $("remote-control-name-note").textContent = data.notice
+      || `Saved. The ChatGPT app will show “${data.remote_control.configured_name}”.`;
+  } catch (error) {
+    settingsError(error);
+    $("remote-control-name-save").disabled = false;
+  }
+};
 for (const [id, action] of [
   ["remote-control-start", "start"],
   ["remote-control-stop", "stop"],
@@ -2981,11 +3452,29 @@ async function loadPermissionOverrides() {
       input.disabled = false;
     });
     $("permissions-overrides-result").textContent = "Changes save immediately.";
+    showPermissionSectionStatus(data.guard_note);
   } catch (_error) {
     permissionGroups = null;
     $("permissions-overrides-guard-note").hidden = true;
     $("permissions-overrides-result").textContent = "Permissions overrides are unavailable. Administrator access is required.";
+    setSectionStatus("permission-overrides", "Administrators only");
   }
+}
+/**
+ * The Permissions overrides header: how many groups are on, or that the house
+ * rules changed and wait for the owner's review. While they wait, every group
+ * is suspended, so the header says so instead of a count.
+ */
+function showPermissionSectionStatus(guardNote) {
+  // The worker's text for rules that changed since the owner confirmed them
+  // (permission_overrides_api.py, guards).
+  if (/^House rules changed/.test(guardNote || "")) {
+    setSectionStatus("permission-overrides", "Suspended: review the house rules", true);
+    return;
+  }
+  const switches = permissionSwitches();
+  const on = switches.filter((input) => permissionGroups[input.dataset.permissionGroup] === true).length;
+  setSectionStatus("permission-overrides", `${on} of ${switches.length} on`);
 }
 $("confirm-permission-rules").onclick = async () => {
   try {
@@ -3009,6 +3498,7 @@ permissionSwitches().forEach((input) => input.addEventListener("change", async (
     $("permissions-overrides-guard-note").textContent = data.guard_note || "";
     $("permissions-overrides-guard-note").hidden = !data.guard_note;
     $("permissions-overrides-result").textContent = "Permissions overrides saved.";
+    showPermissionSectionStatus(data.guard_note);
   } catch (_error) {
     $("permissions-overrides-result").textContent = "Could not save permissions overrides. Check the settings before continuing.";
   } finally {
@@ -3022,8 +3512,10 @@ $("settings-button").onclick = async () => {
   try {
     const data = await api("diagnostics/settings");
     $("diagnostic-retention").value = data.capacity;
+    setSectionStatus("interaction-logs-section", `Keeps ${data.capacity}`);
   } catch (_error) {
     $("export-logs-status").textContent = "Log retention is available to administrators.";
+    setSectionStatus("interaction-logs-section", "Administrators only");
   }
   sidebar(false);
   $("settings").showModal();
@@ -3032,6 +3524,7 @@ $("settings-button").onclick = async () => {
   $("save-agents").disabled = true;
   const results = await Promise.allSettled([
     loadLogin(),
+    loadGithub(),
     loadRemoteControl(),
     loadPause(),
     loadBrowserPermissions(),
@@ -3044,6 +3537,7 @@ $("close-settings").onclick = () => $("settings").close();
 $("settings").addEventListener("close", () => {
   clearTimeout(loginTimer);
   clearTimeout(remoteTimer);
+  $("github-result").textContent = "";
 });
 for (const [id, path] of [
   ["login", "auth/start"],
@@ -3102,5 +3596,6 @@ restore = reopenLastChat();
 refresh();
 loadUsage();
 loadLogin().catch(() => {});
+loadGithub().catch(() => {});
 loadPause().catch(() => {});
 setInterval(tickElapsed, 1000);

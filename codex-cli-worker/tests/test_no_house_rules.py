@@ -50,11 +50,14 @@ class NoHouseRules(unittest.TestCase):
                 self.assertEqual(server.read_agents_file(), 'Owner workspace instructions')
 
     def test_task_context_keeps_owner_pointer_and_original_upstream_guidance(self):
-        with patch.object(server, 'attached_image_note', return_value=''), \
+        with tempfile.TemporaryDirectory() as folder, \
+             patch.object(server, 'AGENTS_PATH', Path(folder) / 'AGENTS.md'), \
+             patch.object(server, 'attached_image_note', return_value=''), \
              patch.object(server, 'backup_instructions', return_value=''), \
              patch.object(server, 'home_assistant_api_instructions', return_value=''), \
              patch.object(server, 'ha_docs_note', return_value=''), \
              patch.object(server, 'read_options', return_value={}):
+            server.AGENTS_PATH.write_text('Synthetic owner rules')
             text = server.build_prompt('Inspect the configuration', 'synthetic')
         self.assertIn('Owner workspace instructions: /config/AGENTS.md.', text)
         self.assertIn('Follow /config/AGENTS.md. Treat this as a live Home Assistant config tree. Make focused edits, do not expose secrets, and validate changed YAML/JSON when practical. After you finish, the worker asks Home Assistant to check its configuration whenever YAML files changed; if that check fails, the task is reported as failed, so prefer a change you are confident is valid over a speculative one.', text)

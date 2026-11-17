@@ -178,7 +178,7 @@ The token is not your OpenAI or ChatGPT credential. Codex authentication is stil
 
 ## Integration install
 
-From **0.1.81.3** the app installs and updates the Codex integration itself, so one install and one restart of
+From **0.3.0** the app installs and updates the Codex integration itself, so one install and one restart of
 Home Assistant set up both parts. The app image carries the integration of the same release. At each start,
 before the worker starts, the app compares it with `/config/custom_components/codex_cli`:
 
@@ -204,7 +204,7 @@ cannot be emptied, the app log says so.
 
 **Going back to the previous version:** the copy the app replaced is kept in the app's own storage
 (`/data/integration_backup/codex_cli`), which every backup of the app includes. To go back, restore the app's
-previous version from the backup Home Assistant offers before an app update. If that version is 0.1.81.3 or
+previous version from the backup Home Assistant offers before an app update. If that version is 0.3.0 or
 later, at its next start the app writes the integration of that version over its own folder and asks for a
 restart. An earlier version does not install the integration, so the newer integration stays: turn the option
 below off, copy `/data/integration_backup/codex_cli` back to `/config/custom_components/codex_cli` by hand, and
@@ -303,7 +303,7 @@ Codex needs to be able to write to the backup folder. In `workspace-write` mode 
 ## Sandbox
 
 - `read-only`: Codex can inspect files. Writes and shell networking require permission for the specific action.
-- `workspace-write`: Codex can edit the mounted `/config` workspace. Shell networking and writes outside the workspace require permission. This remains the default setting.
+- `workspace-write`: Codex can edit the mounted `/config` workspace and the shared `/share` folder, the same `/share` access the Claude add-on has. Shell networking and writes elsewhere require permission. This remains the default setting.
 
 This fork has no `danger-full-access` mode. The upstream app's full-access mode turned the permission requests off; here the protected policy (below) refuses it, and an older setting that still names it stops the app at startup with a log line saying so.
 
@@ -483,15 +483,32 @@ prevent a reload before the scan, or guarantee capture of an obfuscated referenc
 
 - **Off until you turn it on.** In the app chat, open **Settings** > **Manage remote connection**, then choose **Turn on**. You can also open the connection view from the connection chip. The choice is saved and holds across app restarts.
 - **One supervised process.** The app runs `codex app-server --listen unix://<private socket> --remote-control` in the foreground and starts it again, with a growing delay, if it exits. **Turn off** stops it.
-- **Machine name.** The ChatGPT app lists this machine as **Home Assistant** unless you change the **Remote control machine name** option. Codex has no name setting, so the app starts it with that name as its host name inside a private namespace. If the private name namespace is unavailable, the page explains that Codex is using its existing host name.
+- **Machine name.** The ChatGPT app lists this machine as **Home Assistant** unless you change the **Remote control machine name** option, either in the app's Configuration tab or with **Name in the ChatGPT app** on the page while remote control is off. The page saves the same option through Supervisor. Pairing is kept with the Codex sign-in, so the app should show the new name the next time remote control connects; if it still shows the old name, choose **New pairing code**. Codex has no name setting, so the app starts it with that name as its host name inside a private namespace. If the private name namespace is unavailable, the page explains that Codex is using its existing host name.
 - **Pairing.** The manual code is shown as large text. A QR for the app link appears only when an app-link code is available; otherwise type the manual code or request a new code. Pairing is kept in the app's private storage with the Codex sign-in, so a restart does not ask for it again. **New pairing code** asks Codex for a fresh one when the ChatGPT app has lost this machine.
 - **Automatic Core address and first-run reads.** Relay commands receive the discovered or explicitly overridden `HA_URL`; an owner-configured `HA_TOKEN` remains optional. The separate observational read tool needs no hand-made token. Relay processes never receive the Supervisor token or a chat turn's private MCP capabilities. Never print credentials; approval does not create them.
 - **The command check.** Commands from the ChatGPT app do not pass through this app's Allow and Deny buttons, so the app ships a check that holds outside the model, for every client:
   - Codex's managed requirements (`/etc/codex/requirements.toml`, read-only) rule out the full-access sandbox and any hook other than the app's own.
+  - **Managed command prefixes.** The same read-only requirements file forbids literal `ha supervisor`, `ha super` and `ha su` commands. It forbids `printenv` of the two Supervisor-token variable names. It forbids `cat` of the catalogued credential and app-policy paths, and the two explicit Codex full-access spellings. These six rules have 20 literal alternatives. Recognized shell pipelines check each segment.
+
+    A native forbidden decision raises no approval request. Auto-review cannot override it. This layer ships no ordinary `.rules` file or allow rule.
+  - **Rule-load self-test.** Before remote control starts or restarts, the worker initializes the pinned CLI. It opens a fresh ephemeral thread for `/config`. It does not start a turn, enroll a relay or make a model request. This checks the user and current trusted project rules. A failed probe or rule-load warning disables **Turn on** with a plain reason.
+
+    After a timeout or a temporary launch failure, choose **Turn on** to retry. The probe must complete cleanup before a retry. Rule warnings from chat turns, the control connection or process output also block further starts. An active process that reports a rule warning stops and saves remote control as off. A chat turn that reports one stops too. The app hides raw warning details because they can name private files.
+
+    Fix the bad rule file, then restart the app before a retry. Other remote work folders can have their own project rules. The worker does not inspect an owner's remote threads to see their warnings. Managed refusals survive the pinned CLI's ordinary-rule parse fallback independently.
+  - **Owner rules.** A valid owner `allow` rule can let a matching command run outside the sandbox. An exact-executable allow rule can take precedence over a managed basename refusal. The readiness check validates the shipped catalogue and checks for native rule-load warnings; it does not scan valid owner rules for allow decisions. Codex evaluates those rules. The app does not add a second interpreter for their language. Review owner rules with this effect in mind.
+  - **Prefix limits.** These rules apply with remote control off too. They cover only the listed literal prefixes, not a full shell or filesystem policy. Relative paths, computed paths and options before a protected path can miss them. Redirection or command substitution can prevent per-segment checks. The rules do not open nested shell scripts.
+
+    Other Codex spellings, such as `codex exec --dangerously-bypass-approvals-and-sandbox`, `--sandbox=danger-full-access` and `-s danger-full-access`, are not in the catalogue. Wrappers, interpreters, built-in patch tools, MCP calls and YAML content still need the semantic hook, sandbox and config watch. These layers have their own limits. There is no blanket interpreter or device-category ban.
+  - **Settings.** These rules always apply in this version. A setting to disable each check comes later.
   - With remote control on, the managed hook leaves normal light, lock, network and checked-file requests to Codex's native approval flow. It says nothing (exit 0), never auto-approves. Credential access, explicit full-access requests, the app's own settings/policy/rules and planted command or template definitions remain refused with a named reason. There are no device-category refusals.
   - A config watch compares YAML with the baseline from when remote control was turned on. While remote control is on, it undoes new planted commands and templated actions using verified earlier copies, saves replaced bytes privately, and retains undo results until review. Review its findings in Settings before reloading or restarting.
   - **What the scan reads.** The hook, exchange check and config watch share a line-based scan. It can miss flow-style structures such as `{shell_command: {x: ...}}`, quoted keys such as `"shell_command":`, actions inside flow lists, a script named only in a flow-style `data: {entity_id: ...}` (the block form is checked), and edits to definitions in files brought in by `!include` or `!include_dir_named`. An unquoted `shell_command:` at the start of a line is checked even when its value is inline. The sandbox, owner instructions and normal approval flow still apply; the owner must review changes.
-  - **What the command check reads.** It reads a command as text without running it. In the hook, text it cannot split, such as a heredoc with an unmatched quote, is read again line by line, with quotes removed only from a line it still cannot split, and a text floor refuses `ha` with `supervisor` or `su` however it is quoted or escaped. That floor does not know shell comments, so it also refuses a command whose comment names that spelling (for example `echo hi # h\a su info`); this over-refusal is kept on purpose. The approval card fails closed instead: a command with a heredoc or here-string (any `<<`, even inside quotes), a line joined with a backslash, or text it cannot split with its quoting intact (a quoted script that spans lines in a way it cannot follow) is treated as touching the app's policy, so it never gets **Allow once**; deny it and ask for the command without the heredoc, for example writing the text to a file first. Neither check can see a program or path the command builds while it runs (a variable, an alias, a symlink), which the sandbox and the missing Supervisor token cover.
+  - **What the command check reads.** Both checks below read a command as text, without running it, with the same code for comments and words. Neither can see a program or path the command builds while it runs (a variable, an alias, a symlink), which the sandbox and the missing Supervisor token cover.
+  - **In the hook.** Text the hook cannot split, such as a heredoc with an unmatched quote, is read again line by line. Quotes are removed only from a line it still cannot split. A text floor refuses `ha` with `supervisor`, `super` or `su`, however it is quoted or escaped. That floor does not know shell comments, so it also refuses a command whose comment names that spelling (for example `echo hi # h\a su info`); this over-refusal is kept on purpose.
+  - **On the approval card.** The card fails closed instead. A command with a heredoc or here-string (any `<<`, even inside quotes), a line joined with a backslash, or text it cannot split with its quoting intact never gets **Allow once**. The card says that it could not read the command safely. Deny it and ask for the command without the heredoc, for example with the text written to a file first.
+    The card does not unwrap `eval` or a script in the `$'...'` quote form, so it can miss a write to a protected place given that way. Read such a command yourself before you allow it once: Allow once runs it outside the sandbox.
+  - **Continued command words.** The hook joins a backslash/newline pair without a space outside single quotes. Single-quoted text keeps the pair. A `-c` script for `sh`, `bash` or `zsh` gets its own check, also through `busybox` or a wrapper the hook knows. Other shells (`dash`, `ash`, `ksh`), other wrappers (`setsid`) and a long option before `-c` (`bash --norc -c`) can keep the script from that check. Continuations in heredocs, substitutions or unreadable quoting are refused. Rewrite that command on one line. The Supervisor check also reads the command with every backslash/newline pair removed, in any quotes. So `ha supervisor`, `ha super` or `ha su` split across lines is refused in every one of these cases, also in single-quoted text. This conservative refusal can include harmless commands.
   - **Python definitions.** The always-on definition checks include `python_script:` and `pyscript:`. A `python_script:` definition enables scripts that run when called; it does not run them on load. Its finding in Settings keeps the older wording "runs on its own once loaded" so findings saved before an update still match. The YAML scan does not read `.py` files; while remote control is on, a request that names a path under `python_scripts/` or `pyscript/` is refused.
   - The phone uses Codex's own approval card, not this page's buttons: review what will change, where and the effect, then allow or deny that request. A hook no-opinion result leaves the native request waiting; it never grants permission. Actual phone presentation still needs the owner's phone test.
 - **Why Turn on can be unavailable.** Missing command-check files or a failed self-test disable **Turn on** with a reason; the chat page remains available.
@@ -506,11 +523,13 @@ Before starting sign-in, enable **Enable device code authorization for Codex** i
 
 For a managed workspace, an administrator may need to enable device-code login in the workspace permissions. See [Codex authentication](https://learn.chatgpt.com/docs/auth#preferred-device-code-authentication-beta).
 
-When the app starts and Codex is not signed in, it starts one sign-in by itself. If you restart the app before signing in, it does not post a new code at each start; the notification then says to choose **Sign in**. Once a start finds Codex signed in, a later sign-out or expiry gets one automatic sign-in again.
+The app never starts a sign-in by itself. When it starts and Codex is not signed in, it posts a Home Assistant notification that says to choose **Sign in** when you are ready. A one-time code works for 15 minutes only, so you get it at the moment you use it.
 
-The app posts a Home Assistant persistent notification containing a QR code, link, and one-time device code. The QR code opens the OpenAI device page; type the code from the same notification into that page. The app refreshes the notification when the code appears and detects completion automatically. You do not need to run `docker exec`.
+After you choose **Sign in**, the app posts a Home Assistant persistent notification containing a QR code, link, and one-time device code. The QR code opens the OpenAI device page; type the code from the same notification into that page. The app refreshes the notification when the code appears and detects completion automatically. You do not need to run `docker exec`.
 
-While the app is not signed in, a banner above the chat offers **Sign in**. During a sign-in, the banner and **Settings** show the one-time code in large letters, a QR code of the sign-in page served by the app itself, and the link. The code stays on screen, unchanged, until the sign-in completes or you press **Cancel**; pressing **Sign in** again keeps the running sign-in and its code. When a saved sign-in expires or is revoked, the banner returns and the integration raises a Home Assistant repair; the integration's **Signed in** binary sensor turns off.
+While the app is not signed in, a banner above the chat offers **Sign in**. During a sign-in, the banner and **Settings** show the one-time code in large letters, a QR code of the sign-in page served by the app itself, and the link. The code stays on screen, unchanged, until the sign-in completes or you press **Cancel**; pressing **Sign in** again keeps the running sign-in and its code. Under the code, a countdown shows how long it still works (Codex 0.166.0 gives codes 15 minutes); each status reply from the app sets it again, so it stays right after the phone sleeps. When it runs out, the page says so and offers **Get a new code**. If a sign-in stops without signing in, **Settings** says why when it can, and **Sign in** becomes **Get a new code**. The GitHub code in **Settings > GitHub** has the same countdown and button.
+
+Every section of **Settings** starts collapsed. Its header shows a one-line status, such as **Signed in**, **Connected as owner, 1 repository**, **3 of 5 on** or **Keeps 25**. A section that needs attention shows its status in red: a sign-in that waits or failed, house rules that wait for your review in **Permissions overrides**, a schedule that waits for your approval, or schedules paused because the Home Assistant time zone is unknown. Tap a header to open the section. When a saved sign-in expires or is revoked, the banner returns and the integration raises a Home Assistant repair; the integration's **Signed in** binary sensor turns off.
 
 When opened through Home Assistant Ingress, the app web UI can start the login flow without entering the worker API token because Home Assistant already authenticated the session. Direct HTTP/API calls still require the worker API token.
 
@@ -520,13 +539,68 @@ The app uses the built-in Supervisor token for Home Assistant notifications and 
 
 Sign-in uses your ChatGPT account and its Codex allowance. Availability and usage limits depend on your plan and workspace permissions. The worker does not provide an OpenAI API-key option for Codex tasks.
 
+## GitHub sign-in
+
+Release 0.3 lets the assistant fetch, pull, push, clone and link the GitHub repositories you choose. You do every step with a button in the app page: **Settings > GitHub**, just below **ChatGPT account**. No step needs a shell, and nothing about GitHub is typed into chat.
+
+The app keeps the sign-in in its own private folder, `/data/github`. That folder is hidden in every Codex sandbox, so a task cannot read it. Codex never holds the token. It calls one tool, `github_git`, and the app runs git for it. Every push goes through the kit's push guard first.
+
+### Connect
+
+1. Install the **Codex for Home Assistant** GitHub App on the repositories of your choice. Use GitHub's own page for this. You can change the set there later.
+2. In **Settings > GitHub**, press **Connect GitHub**. The card shows a code in large letters and a link to `github.com/login/device`.
+3. Open the link, type the code and approve the App. The card checks every 5 seconds and shows your account, the repositories it reaches and their access as soon as GitHub confirms. Press **Cancel** to stop a sign-in that is waiting. The code works for 15 minutes; after that, press **Connect GitHub** again for a new code.
+
+The App asks for Contents read and write only (GitHub adds Metadata read). The sign-in reaches only what you can reach and what the App was installed on. An App sign-in does not expire. It lasts until you revoke it on GitHub or uninstall the App.
+
+The code appears only on the page. The app does not write it to a log, and the page does not keep it in browser storage.
+
+### Use a token instead
+
+If you cannot install the App (for example, an organization forbids third-party Apps), open **Use a token instead**. Make a fine-grained token on github.com: **Settings > Developer settings > Fine-grained tokens**. Choose **Only select repositories** with one repository, **Contents: Read and write**, and an expiry of 90 days or less. Paste the token and the `owner/repository` name, then press **Use this token**. The app accepts a token only when it reaches that one repository and nothing more. The page clears the field at once and never shows the token again.
+
+### The card
+
+- **Read test** reads each connected repository once and shows the result.
+- **Check now** runs the access check at once (see below).
+- **Accept this access** appears when the repositories changed on GitHub but the access is still exactly Contents read and write. It makes the current set the one the check expects. If the access itself changed, change it back on GitHub instead.
+- **Disconnect** forgets the sign-in on this box. It cannot revoke it on GitHub, because that needs a secret the app does not carry. So the card then shows the link to revoke it: `https://github.com/settings/apps/authorizations` for the App, `https://github.com/settings/tokens` for a token. Disconnect waits while a task runs.
+- **Repositories on this box**: **Clone** copies a connected repository into a new folder directly under `/share`; the folder name starts as the repository's name, so a clone goes to `/share/<repository>`. **Link** points an existing git folder under `/share` or `/config` at a connected repository (it sets `origin`). Release 0.3 maps Home Assistant's `/share` folder read-write into the app for this. Neither writes a credential into the repository, so git on this box reaches GitHub with the sign-in only through the app. A list of the git folders on this box, with menus, comes in 0.3.1.
+
+You can also ask the assistant in chat to clone or link a connected repository. It uses the same `github_git` tool.
+
+### The `github_git` tool
+
+Codex can call `repos`, `fetch`, `pull`, `push`, `clone` and `link`, for connected repositories only and only during a chat or scheduled run. A read-only chat or schedule can only use `repos` and `fetch`. A pull fetches only; the assistant then fast-forwards the work tree in its own shell (`git merge --ff-only`), so the app never checks files out into a folder a task can change. A push never forces, deletes or pushes tags.
+
+Limits of a push:
+
+- **Workflow files.** GitHub refuses a push that changes `.github/workflows/*` with Contents-only access. Change workflow files on GitHub or from another computer.
+- **Allow marks.** When the push guard refuses a push, a line can be marked `guard: allow <reason>` to pass it. That mark needs the owner. The app refuses a push that adds such a mark, so a task cannot undo a refusal by itself. Add the mark yourself, outside the assistant. A page button for it is planned for 0.3.1.
+- **Names check.** The guard's household names check is off in 0.3.
+
+### Monitoring
+
+The app checks the sign-in at start, every hour, and when you press **Check now**. The states are: OK, expires within 7 days, expired, revoked, access changed (repositories missing or added, or access other than Contents read and write), and cannot be checked (GitHub unreachable three times in a row).
+
+When the state changes, and only then:
+
+- The app fires the Home Assistant event `codex_cli_github_access` with the state, the previous state, the reason, the account login, the missing and added repositories, the permission problem and the expiry. It never sends a token or a code. The integration fires the same event, with `source: integration`, when it sees the change, so an automation still works if the app's own call failed. An automation can route it to your notify service.
+- The app sends one notification through its `notify_service` option, or a persistent notification (`codex_cli_github`) without one.
+- The integration raises the repair **The Codex add-on's GitHub sign-in needs attention** (`github_access_lost`). It is an error for expired, revoked and cannot be checked, and a warning for expires soon and access changed. It clears when the check is OK or you disconnect. If you never connected, there is no repair.
+- A banner above the chat offers **Open GitHub settings**.
+
+### Backups
+
+`/data/github` is not in the app backup. After a restore, the card shows **Not connected**; press **Connect GitHub** again.
+
 ## Pausing the assistant
 
 **Settings > Pause the assistant** stops the app from taking new messages: new chats and replies are refused, and queued messages wait. A banner above the chat says so and offers **Resume the assistant**, which also starts the oldest queued message. A running task is not stopped; use **Stop task** for that. The pause is kept across app restarts.
 
 ## AGENTS.md and HA_TOKEN
 
-The app web UI includes an editor for `/config/AGENTS.md` under **Settings** > **Advanced** > **Workspace rules**. This file remains the source of truth for shared Codex project instructions.
+The app web UI includes an editor for `/config/AGENTS.md` under **Settings** > **Advanced** > **Workspace rules**. This file remains the source of truth for shared Codex project instructions. When the file does not exist, the task prompt does not mention it, and the page shows a setup hint above the message box until you write the file or choose **Dismiss** (the choice is kept in that browser).
 
 The optional `HA_TOKEN` app option is passed to Codex subprocesses as the `HA_TOKEN` environment variable. Configure it only if you want Codex tasks to call Home Assistant APIs directly. A Home Assistant long-lived access token inherits its user's permissions; use a dedicated user with permissions appropriate for the intended work.
 
@@ -597,7 +671,7 @@ This feature does not add a per-operation policy engine or a preview transaction
 
 ### Storage, backups, and removal
 
-`/data/.ssh` is private to this worker app and persists across restarts and updates, but Codex tasks can read it. Never print private keys or paste them into chat, task prompts, logs, or `/config`. The app excludes the entire `.ssh` directory from Home Assistant app backups, including keys, connection configuration, and trusted host keys. After restoring a backup, set up connections again and revoke replaced public keys on the remote servers. These exclusions do not remove credentials already copied elsewhere or included in older backups.
+`/data/.ssh` is private to this worker app and persists across restarts and updates, but Codex tasks can read it. Never print private keys or paste them into chat, task prompts, logs, or `/config`. The app excludes the entire `.ssh` directory from Home Assistant app backups, including keys, connection configuration, and trusted host keys. The GitHub sign-in folder, `/data/github`, is excluded too (see [GitHub sign-in](#github-sign-in)). After restoring a backup, set up connections again and revoke replaced public keys on the remote servers. These exclusions do not remove credentials already copied elsewhere or included in older backups.
 
 To remove a connection, revoke its dedicated public key on the remote server, then remove its `Host` entry, local key files, and unused known-hosts entry through chat. Connections use only an SSH client; this feature does not start an SSH server or open an inbound worker port.
 

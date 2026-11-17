@@ -1728,7 +1728,65 @@ dialog label {
 }
 .settings-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
+}
+/* On a phone the buttons of a row share it in equal columns and never run past the edge. */
+@media (max-width: 480px) {
+  .settings-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  }
+  .settings-actions > button {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+}
+/* A collapsed settings section: the header button shows the title and a one-line status. */
+dialog h3:has(> .settings-toggle) {
+  margin: 0;
+}
+.settings-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+  width: 100%;
+  padding: 10px 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+}
+.settings-title::before {
+  content: "▸ ";
+}
+.settings-toggle[aria-expanded="true"] .settings-title::before {
+  content: "▾ ";
+}
+.settings-status {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+.needs-attention .settings-status {
+  color: var(--error);
+  font-weight: 600;
+}
+.needs-attention .settings-status:not(:empty)::before {
+  content: "⚠ ";
+}
+.signin-expired {
+  color: var(--error);
+}
+.settings-link-row {
+  border-top: 1px solid var(--line);
+  margin-top: 22px;
+  padding-top: 12px;
 }
 #login-card img {
   max-width: 220px;
@@ -1908,6 +1966,14 @@ dialog label {
   border: 1px solid var(--line);
   border-radius: 8px;
 }
+#agents-hint {
+  margin: 0 0 10px;
+}
+#remote-control-name {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+}
 .signin-card {
   display: grid;
   justify-items: start;
@@ -1943,3 +2009,55 @@ dialog label {
 .permission-row input:checked + .ha-permission-switch::after { transform:translateX(24px); background:var(--ha-switch-checked-thumb-background-color,var(--ha-color-on-primary-normal,var(--switch-checked-button-color,var(--card-background-color,#fff)))); }
 .permission-row input:focus-visible + .ha-permission-switch { outline:2px solid var(--primary-color,#03a9f4); outline-offset:4px; }
 .permission-row input:disabled + .ha-permission-switch { opacity:var(--ha-switch-disabled-opacity,.3); }
+
+/* GitHub sign-in card: beside the ChatGPT account, same code style. */
+.github-details {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 8px 0;
+  font-size: 12px;
+}
+.github-details dt {
+  color: var(--muted);
+}
+.github-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.github-repositories {
+  margin: 4px 0 8px;
+  padding-left: 1.25rem;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.github-repositories .github-extra,
+.github-repositories .github-missing {
+  font-weight: 600;
+}
+.github-repositories .github-missing {
+  color: var(--error);
+}
+.github-form {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0;
+}
+.github-form input,
+.github-form select {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+#github-section details summary {
+  cursor: pointer;
+  font-size: 13px;
+  margin-top: 8px;
+}
+#github-result.error {
+  color: var(--error);
+}
+#github-result {
+  overflow-wrap: anywhere;
+}

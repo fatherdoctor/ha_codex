@@ -197,8 +197,8 @@ Codex uses your ChatGPT account.
    managed workspace, an administrator may need to allow device-code sign-in; see
    [Codex Sign-In](codex-cli-worker/DOCS.md#codex-sign-in).
 2. In the chat, open **Settings** and choose **Sign in**.
-3. Scan the QR code, or open the link, and enter the one-time code. The code stays on screen until the sign-in ends or
-   you cancel it.
+3. Scan the QR code, or open the link, and enter the one-time code. The code stays on screen, with the time it still
+   works, until the sign-in ends or you cancel it. If it runs out, choose **Get a new code**.
 
 When the sign-in is missing, ended or rejected, a banner returns above the chat, the integration raises a Home
 Assistant repair, and the **Signed in** sensor turns off. A good sign-in clears all three. The Codex program does not
@@ -266,7 +266,7 @@ A daily workflow opens one issue when upstream releases something newer.
 
 | Version | Changes |
 |---|---|
-| 0.1.81.3 (unreleased) | The app installs and updates its own integration (one install and one restart); setup from discovery asks for confirmation. |
+| 0.3.0 (unreleased) | GitHub sign-in on the page (device sign-in, clone and link under /share or /config, every push through the push guard, a Repairs issue when access changes). The app installs and updates its own integration (one install and one restart); setup from discovery asks for confirmation. |
 | 0.1.81.2 (unreleased) | No full-access mode; a protected permission policy in the image, no bundled house rules and owner workspace instructions; permission answers and the integration's actions only from Home Assistant administrators; a permission-prompt sensor. |
 | 0.1.81.1 (unreleased) | Codex CLI 0.166.0 pinned by checksum, no self-update, base image pinned by digest, links and maintainer for the fork. |
 

@@ -18,6 +18,10 @@ import time
 import uuid
 from typing import Any, Callable, TextIO
 
+import remote_control
+from gate_rules import names_image_folder
+from shell_words import split_words, strip_comments
+
 
 APPROVAL_GONE = "This permission request is no longer waiting for an answer."
 DISPLAY_LIMIT = 32000
@@ -28,7 +32,9 @@ PROTECTED_PREFIXES = ("/usr/share/ha_codex", "/data/codex-home/AGENTS.md", "/dat
                       "/data/options.json", "/data/worker_api_token", "/data/schedules.sqlite3",
                       "/data/schedules.sqlite3-journal", "/data/schedules.sqlite3-wal", "/data/schedules.sqlite3-shm",
                       "/data/interaction-diagnostics.json", "/data/interaction-diagnostics.key",
-                      "/data/house-rules", "/data/interaction-diagnostics.settings.json", "/data/codex-home/house-rules")
+                      "/data/house-rules", "/data/interaction-diagnostics.settings.json", "/data/codex-home/house-rules",
+                      # The GitHub sign-in and its socket: only the worker reads or changes them.
+                      "/data/github", "/data/github.sock")
 
 
 def touches_protected_path(path: str) -> bool:
@@ -40,62 +46,17 @@ def touches_protected_path(path: str) -> bool:
 
 
 # The same places as a command spells them: quotes, backslashes and doubled slashes are removed first, and the
-# names are matched loosely (a glob such as /usr/share/ha_c* still names the image folder). Best effort on the
-# text, like the file-path check: it cannot see a path a command builds at run time.
+# names are matched loosely (a glob such as /usr/share/ha_c* still names the image folder). The image folder itself
+# is gate_rules.names_image_folder, shared with the hook, so the absolute /share/ha_<name> stays usable. Best
+# effort on the text, like the file-path check: it cannot see a path a command builds at run time.
 PROTECTED_COMMAND_RES = (
     re.compile(r"codex-home/+house-rules(?:\b|[*?\[])", re.IGNORECASE),
     re.compile(r"/data/+interaction-diagnostics(?:\b|[*?\[])", re.IGNORECASE),
-    re.compile(r"/share/+ha_", re.IGNORECASE),
     re.compile(r"ha_codex/+(policy|agents|house)", re.IGNORECASE),
     re.compile(r"codex-home/+[^\s/]*[*?\[]", re.IGNORECASE),
     re.compile(r"codex-home.*(agents\.md|config\.toml)|(agents\.md|config\.toml).*codex-home", re.IGNORECASE | re.DOTALL),
     re.compile(r"/data/+options\.json|worker_api_token|schedules\.sqlite3(?:-(?:journal|wal|shm))?|/data/+sched[^/\s]*[*?\[]", re.IGNORECASE),
 )
-
-
-# Characters after which a ``#`` starts a word. An escaped character is never one of them.
-WORD_BREAKS = frozenset(" \t\r\n;&|()<>")
-
-
-def _strip_comments(text: str) -> str:
-    """Remove shell comments: from a ``#`` that starts a word outside quotes to the end of its line.
-
-    A ``#`` inside a word, such as ``a#b``, is part of that word, as it is for the shell.
-    """
-    out: list[str] = []
-    quote = ""
-    i = 0
-    while i < len(text):
-        char = text[i]
-        if quote == "'":
-            if char == "'":
-                quote = ""
-        elif char == "\\":
-            # A backslash keeps the next character, except inside single quotes.
-            out.append(text[i:i + 2])
-            i += 2
-            continue
-        elif quote == '"':
-            if char == '"':
-                quote = ""
-        elif char in "'\"":
-            quote = char
-        elif char == "#" and (not out or out[-1] in WORD_BREAKS):
-            end = text.find("\n", i)
-            i = len(text) if end == -1 else end
-            continue
-        out.append(char)
-        i += 1
-    return "".join(out)
-
-
-def _split_words(text: str, punctuation: str) -> list[str]:
-    """Split text the way the shell does, with comments already removed; raise ValueError if unreadable."""
-    lexer = shlex.shlex(text, posix=True, punctuation_chars=punctuation)
-    lexer.whitespace = " \t\r"
-    lexer.whitespace_split = True
-    lexer.commenters = ""
-    return list(lexer)
 
 
 def _shell_words(text: str, punctuation: str) -> list[str]:
@@ -106,9 +67,10 @@ def _shell_words(text: str, punctuation: str) -> list[str]:
     lines in a way the splitter cannot follow. The caller treats that as touching a
     protected place: a command allowed once runs outside the sandbox, so a command this
     check cannot read is never offered Allow once. gate_rules.py reads such text again
-    line by line instead, because its Supervisor rule has a text floor behind it.
+    line by line instead, because its Supervisor rule has a text floor behind it. Both
+    read words with the same code, in shell_words.py; only this answer differs.
     """
-    return _split_words(_strip_comments(text), punctuation)
+    return split_words(strip_comments(text), punctuation)
 
 
 def _has_unreadable_structure(command: str) -> bool:
@@ -119,6 +81,24 @@ def _has_unreadable_structure(command: str) -> bool:
     marker anywhere, and a line joined with a backslash, count as protected before the splitter runs.
     """
     return "<<" in command or "\\\n" in command
+
+
+def command_is_unreadable(command: str) -> bool:
+    """Return whether the top-level command text has a form the approval check cannot read.
+
+    That is a heredoc, a here-string, a backslash-newline, or quoting that does not split.
+    The card then says the text could not be read, instead of saying the command touches the
+    app's policy. Only the top-level text is tested: a heredoc that also names a protected
+    file gets this note, and a readable ``sh -c`` around an unreadable script does not.
+    """
+    text = str(command or "")
+    if _has_unreadable_structure(text):
+        return True
+    try:
+        _shell_words(text, ';&|()\n<>')
+    except ValueError:
+        return True
+    return False
 
 
 def _protected_ancestor_operations(command: str, initial_cwd: str = '', depth: int = 0) -> bool:
@@ -286,7 +266,7 @@ def command_names_protected_path(command: str) -> bool:
         return True
     text = re.sub(r"[\'\"\\]", "", str(command or ""))
     text = re.sub(r"/{2,}", "/", text)
-    if (any(pattern.search(text) for pattern in PROTECTED_COMMAND_RES)
+    if (any(pattern.search(text) for pattern in PROTECTED_COMMAND_RES) or names_image_folder(text)
             or re.search(r"/etc/codex/requirements\.toml(?![\w./-])", text, re.IGNORECASE)):
         return True
     # Match per path component: a shell wildcard cannot cross a slash.
@@ -624,7 +604,12 @@ class AppServerSession:
                 for change in record["changes"])
         if clipped or protected:
             record["can_allow"] = False
-        if protected:
+        if protected and method == COMMAND_APPROVAL and command_is_unreadable(params.get("command") or ""):
+            record["note"] = (
+                "The check could not read this command's quoting or heredoc safely, so it cannot rule out a change "
+                "to the app's permission policy or settings. Deny it and ask for the command without a heredoc, "
+                "for example with the text written to a file first.")
+        elif protected:
             record["note"] = "This request touches the app's permission policy or settings, which Codex may not edit. Deny it."
         elif request_kind == "writeStdin":
             record["note"] = "Input to a running command cannot be allowed here. Deny it and ask for the whole action as one command."
@@ -687,6 +672,9 @@ class AppServerSession:
                 raise ValueError("invalid app-server message")
             method = message.get("method")
             params = message.get("params") or {}
+            if remote_control.record_exec_rules_warning(message):
+                self.fail(remote_control.EXEC_RULES_WARNING)
+                return
             if "id" in message and method:
                 if not self.is_active():
                     self.close()

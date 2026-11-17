@@ -37,6 +37,9 @@ const assert = require('node:assert/strict');
         const conversations=page.getByRole('button',{name:'Open conversations',exact:true});
         if(await conversations.isVisible()) await conversations.click();
         await page.getByRole('button',{name:'Open settings',exact:true}).click();
+        // Settings sections start collapsed; a section stays open once opened.
+        const toggle=page.locator('#scheduled-work .settings-toggle');
+        if(await toggle.getAttribute('aria-expanded')==='false') await toggle.click();
       }
       await page.goto('http://127.0.0.1:9137/preview/');
       await page.waitForFunction(() => typeof state !== 'undefined' && document.querySelector('.chat-row'));

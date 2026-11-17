@@ -22,7 +22,7 @@ class ReviewCases(unittest.TestCase):
     def test_command_position_and_flags(self):
         for command in ('ha --log-level debug core restart', 'ha --raw-json os info',
                         'ha -v host info', '"ha" core restart', 'ha "core" restart',
-                        "ha 'addons' list", 'ha\\\ncore stop', 'ha  addons',
+                        "ha 'addons' list", 'ha \\\ncore stop', 'ha  addons',
                         'ha\taddons', 'ha\naddons', '/usr/bin/ha core restart',
                         'env ha core restart', 'sudo ha core restart', 'command ha core restart',
                         'xargs ha core restart', 'VAR=1 ha core restart',
@@ -35,7 +35,7 @@ class ReviewCases(unittest.TestCase):
 
     def test_non_commands_are_not_ha_invocations(self):
         for command in ('cat ha-notes', 'sha256sum x', 'sha core', 'chain addons', 'ha-core restart',
-                        'ha_host info', 'ls /ha/core', 'ha.os', 'ha hostname',
+                        'ha_host info', 'ha\\\ncore stop', 'ls /ha/core', 'ha.os', 'ha hostname',
                         'ha -h', 'ha --help', 'ha info', 'ha states list'):
             with self.subTest(command=command):
                 self.assertFalse(self.denied(command))

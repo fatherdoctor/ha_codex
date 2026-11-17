@@ -190,11 +190,16 @@ class Service:
             payload = json.loads(raw)
         except ValueError:
             return {'ok': False, 'error': 'The request is not valid JSON.'}
+        # The order of these branches matters. KeyError and IndexError are LookupErrors, and
+        # UnicodeError is a ValueError; their first argument is a key, an index or a codec
+        # name, not a sentence, so they are caught before the branch that passes it on.
         try:
             return self.dispatch(payload)
         except (KeyError, IndexError):
-            # Their message is a key or index, not a sentence for the caller.
             return {'ok': False, 'error': 'Invalid, refused or expired scheduling request.'}
+        except UnicodeError:
+            # A lone surrogate, such as JSON "\ud800", cannot be encoded for storage.
+            return {'ok': False, 'error': 'The text holds a character that cannot be stored.'}
         except (ValueError, LookupError) as exc:
             reason = exc.args[0] if exc.args and isinstance(exc.args[0], str) else ''
             return {'ok': False, 'error': reason or 'Invalid, refused or expired scheduling request.'}

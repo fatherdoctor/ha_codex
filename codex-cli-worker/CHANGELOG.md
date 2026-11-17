@@ -1,6 +1,91 @@
 # Changelog
 
-## 0.1.81.3 (unreleased)
+## 0.3.3 (unreleased)
+
+- The approval card and the remote-control hook now read command text with one shared copy of the comment
+  and word code (`shell_words.py`), so a later fix cannot leave the two checks reading a command differently.
+  Each still answers unreadable text its own way. No command is judged differently.
+- When the approval card refuses **Allow once** because it cannot read a command's heredoc or quoting, it now
+  says that, instead of saying the command touches the app's permission policy.
+- A scheduling or mailbox request whose text holds a character that cannot be stored (a lone surrogate) is now
+  refused with a sentence that says so, instead of the bare word `utf-8`.
+
+## 0.3.2 (unreleased)
+
+- Codex now refuses risky commands in two layers. Managed Codex command rules refuse six literal command
+  prefixes: the Supervisor (`ha supervisor`, `ha super`, `ha su`), credentials, the app's policy folder and
+  full access. They apply with Remote Control off too. The command hook stays the main check. The app tests
+  that Codex loads the rules before Remote Control starts. A rules warning stops chat turns and keeps Remote
+  Control off until the app restarts after a repair. A failed or timed-out rule test is tried again on the next
+  **Turn on**. The probe's process group is always stopped. DOCS says how an owner allow rule and the prefix
+  limits change these checks.
+- A Turn on request that races a rules warning now leaves Remote Control saved as off.
+- The command hook joins a backslash and newline inside a word, as the shell does, so `h\` on one line and
+  `a su info` on the next is read as `ha su info`. Continuations it cannot read (in a heredoc, a substitution or
+  unreadable quoting) are refused with a request for a one-line command. Its text floor also reads the command
+  with every backslash and newline removed, in any quote or comment state. So a Supervisor command spelled
+  across lines is refused also in single quotes, after a carriage return, inside `${...}`, and in a shell or
+  wrapper that the parser does not open (`dash -c`, `setsid sh -c`, `bash --norc -c`).
+- The app no longer makes a ChatGPT sign-in code by itself at start. A code works for 15 minutes and only
+  while its sign-in runs, so a code made at start was often stale before anyone used it. While Codex is not
+  signed in, the Home Assistant notification now points to **Sign in**, and the owner starts a sign-in there
+  when ready. A mark file that older versions left in the app's storage is removed at start.
+- The ChatGPT and GitHub sign-in codes show how long they still work, with a live countdown. The worker sends
+  the seconds left by its own clock, so a phone with a wrong clock still shows the right time, and the page sets
+  the time again from each status reply, so a phone that slept catches up. When a code runs out, the page says so and offers **Get a new code**, which cancels the old sign-in and starts a new one.
+- A ChatGPT sign-in that stops without signing in now says why when it can: the code expired, or the error line
+  that Codex printed (with any code in it replaced). The page shows the reason, and **Sign in** becomes
+  **Get a new code**. A canceled sign-in can no longer mark the next one as failed or clear its process.
+- **Cancel** on a ChatGPT sign-in no longer raises a false "Codex sign-in failed" notification. The app now
+  marks the sign-in canceled before it stops the sign-in process.
+- Settings on a phone: every settings section starts collapsed, with a one-line status in its header (for
+  example "Connected as owner, 1 repository" or "3 of 5 on"); a section that needs attention says so in red:
+  a sign-in that waits or failed, house rules that wait for review, a schedule that waits for approval, or
+  schedules paused without the Home Assistant time zone. Tap a header to
+  open its section. Button rows wrap, and at phone width the buttons of a row share it in equal columns, so the
+  ChatGPT buttons no longer render tall and narrow and the GitHub buttons no longer run past the edge.
+- The name the ChatGPT app shows for this Home Assistant can be changed on the page, under remote control,
+  while remote control is off. The page saves it as the **Remote control machine name** option through
+  Supervisor, so the app's Configuration tab shows the same name. Only that option changes; the other options are
+  sent back as Supervisor reports them (defaults merged with the stored values, as Save in the Configuration tab
+  does), with any `!secret` reference kept. A name can have up to 63 characters.
+- A first message such as "Test" now gets a normal reply. The task prompt asks Codex to write its summary as a
+  reply to the person, not as a report from the worker, and it names `/config/AGENTS.md` only when that file
+  exists, in chat tasks and in remote-control sessions. Before, a missing file could show in the answer as
+  "/config/AGENTS.md was not found". The page now shows a missing `AGENTS.md` once, above the message box, as a
+  setup hint that you can dismiss.
+
+## 0.3.1 (unreleased)
+
+- A repository in `/share` whose name starts with `ha_` can be used again with Remote Control on. The check
+  that keeps Codex out of the app's policy folder `/usr/share/ha_codex` refused every command that named
+  `/share/ha_` anywhere, so even `git -C /share/ha_<name> status` was refused as a policy change. The check now
+  allows the plain absolute `/share/ha_<name>` and its subfolders. Every other way to reach the policy folder is
+  still refused: a relative `share/ha_...` (the text cannot tell whether the command runs in `/usr`),
+  `../share/ha_...`, globs such as `/usr/sh*/ha_*`, braces, quotes, backslashes, and a variable or command
+  substitution before `/share/ha_` or `/ha_codex`. The command check and the approval check use the same rule.
+- The credentialed `git fetch` and `git push` now pin the TLS trust: the system CA bundle and CA folder are set
+  for git, and `http.sslCAInfo`, `http.sslCAPath`, `http.proxy`, `http.extraHeader`, `http.cookieFile`,
+  `http.saveCookies` and `http.curloptResolve` are reset for the run. A CA file or folder left in a repository's
+  git settings, in any `http.<url>` form, is never trusted for the GitHub sign-in.
+
+## 0.3.0 (unreleased)
+
+- GitHub sign-in (release 0.3). **Settings > GitHub**, beside the ChatGPT account, connects GitHub with
+  buttons only: **Connect GitHub** shows GitHub's device code and the `github.com/login/device` link on the
+  page, then **Read test**, **Check now**, **Accept this access**, **Disconnect** (with the link to revoke on
+  GitHub) and **Use a token instead** for one fine-grained token. **Clone** (into `/share/<repository>`) and **Link**
+  (a folder under `/share` or `/config`) set up a repository. The code and the token are never logged or kept in browser storage.
+- The app keeps the sign-in in `/data/github`, hidden in every Codex sandbox and left out of the app backup.
+  Codex never holds it: the new `github_git` tool (repos, fetch, pull, push, clone, link) asks the app to run
+  git, and every push runs the kit's push guard first. Read-only chats and schedules can only list and fetch.
+  A push that adds a `guard: allow` mark is refused, because an allow mark needs the owner. GitHub refuses
+  changes to `.github/workflows/*` with Contents-only access. A page button for allow marks and a list of the
+  git folders on this box come in 0.3.1.
+- The app checks the sign-in at start, hourly and on **Check now**. A change fires the event
+  `codex_cli_github_access`, sends one notification (`codex_cli_github`), shows a banner above the chat, and
+  the integration raises the repair `github_access_lost` until the check is OK or the sign-in is disconnected.
+  The new option `github_client_id` is for an owner who registered their own GitHub App.
 
 - The app now installs its own integration. At each start it copies the Codex integration of the same
   release, carried in the app image, to `/config/custom_components/codex_cli`, then asks for one restart of
@@ -26,7 +111,7 @@
   signed in.
 - Smaller fixes: the install notice no longer says to finish setup for an integration that may already be set
   up; a file name that cannot be encoded is reported like any failed copy; a damaged notice record is not
-  replayed; the documentation says how to go back to a version before 0.1.81.3.
+  replayed; the documentation says how to go back to a version before 0.3.0.
 
 ## 0.1.81.2 (unreleased)
 
