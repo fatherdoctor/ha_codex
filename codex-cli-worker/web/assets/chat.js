@@ -562,18 +562,6 @@ document.getElementById("export-interaction-logs").addEventListener("click", asy
   }
 });
 
-document.getElementById("save-diagnostic-retention").addEventListener("click", async () => {
-  const status = document.getElementById("export-logs-status");
-  try {
-    const capacity = Number(document.getElementById("diagnostic-retention").value);
-    if (!Number.isInteger(capacity) || capacity < 10 || capacity > 100)
-      throw new Error("Keep between 10 and 100 interactions.");
-    await api("diagnostics/settings", { capacity });
-    status.textContent = `Keeping up to ${capacity} interactions. Running interactions are retained.`;
-  } catch (error) {
-    status.textContent = error.message;
-  }
-});
 /** Build an error that keeps the HTTP status so callers can tell 404 apart. */
 function workerError(message, status) {
   const error = new Error(message);
@@ -2885,8 +2873,7 @@ function setAccountPart(sectionId, word, attention = false) {
   );
 }
 collapseSettingsSections();
-setSectionStatus("appearance-section", "Follows Home Assistant");
-setSectionStatus("advanced-section", "Workspace rules");
+setSectionStatus("workspace-section", "AGENTS.md");
 /*
  * The time left on a sign-in code. The worker sends the seconds left, by its
  * own clock; the page counts down from when that reply arrived, so a phone
@@ -3486,38 +3473,18 @@ function renderRemoteControl(rc) {
   $("remote-control-log-box").hidden = !(rc.log || []).length;
   document.dispatchEvent(new CustomEvent("remote-view", {detail: rc}));
 }
-/**
- * Show the configured machine name in its field. Codex reads the name when
- * remote control starts, so the field is locked while it is on. Polling never
- * replaces a name the person is still typing.
- */
+/** Show the machine name the ChatGPT app lists; it is set on the Configuration tab (0.3.5). */
 function renderRemoteControlName(rc) {
-  const input = $("remote-control-name");
-  if (!input.dataset.edited) input.value = rc.configured_name || "";
-  input.disabled = Boolean(rc.enabled);
-  $("remote-control-name-save").disabled = Boolean(rc.enabled);
-  $("remote-control-name-note").textContent = rc.enabled
-    ? "Turn remote control off to change the name."
-    : "Pairing is kept, so the app should show the new name the next time remote control connects. If it still shows the old name, choose New pairing code.";
+  $("remote-control-name").textContent = rc.configured_name || "";
 }
-$("remote-control-name").oninput = () => {
-  $("remote-control-name").dataset.edited = "1";
-};
-$("remote-control-name-form").onsubmit = async (event) => {
-  event.preventDefault();
-  const input = $("remote-control-name");
-  $("remote-control-name-save").disabled = true;
-  try {
-    const data = await api("remote-control/name", { name: input.value });
-    delete input.dataset.edited;
-    renderRemoteControl(data.remote_control);
-    $("remote-control-name-note").textContent = data.notice
-      || `Saved. The ChatGPT app will show “${data.remote_control.configured_name}”.`;
-  } catch (error) {
-    settingsError(error);
-    $("remote-control-name-save").disabled = false;
-  }
-};
+/**
+ * Point the Add-on configuration row at this app's Configuration tab. The slug differs per install, so the
+ * worker asks Supervisor; the link in the page stays when it cannot say.
+ */
+async function loadAddonConfiguration() {
+  const data = await api("addon-configuration");
+  if (typeof data.url === "string" && data.url.startsWith("/hassio/addon/")) $("addon-configuration").href = data.url;
+}
 for (const [id, action] of [
   ["remote-control-start", "start"],
   ["remote-control-stop", "stop"],
@@ -3685,10 +3652,8 @@ permissionSwitches().forEach((input) => input.addEventListener("change", async (
 $("settings-button").onclick = async () => {
   try {
     const data = await api("diagnostics/settings");
-    $("diagnostic-retention").value = data.capacity;
     setSectionStatus("interaction-logs-section", `Keeps ${data.capacity}`);
   } catch (_error) {
-    $("export-logs-status").textContent = "Log retention is available to administrators.";
     setSectionStatus("interaction-logs-section", "Administrators only");
   }
   sidebar(false);
@@ -3704,6 +3669,7 @@ $("settings-button").onclick = async () => {
     loadPause(),
     loadBrowserPermissions(),
     loadPermissionOverrides(),
+    loadAddonConfiguration(),
   ]);
   for (const result of results)
     if (result.status === "rejected") settingsError(result.reason);

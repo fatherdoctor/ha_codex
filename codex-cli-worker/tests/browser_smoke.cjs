@@ -1331,7 +1331,7 @@ function pngBuffer(width = 8, height = 6) {
     await page
       .getByText("Signed in (local preview)", { exact: true })
       .waitFor();
-    await page.locator("#advanced-section .settings-toggle").click();
+    await page.locator("#workspace-section .settings-toggle").click();
     await page.locator("#workspace-open").click();
     await page.locator("#agents").fill("Keep edits focused.");
     await page.getByRole("button", { name: "Save instructions" }).click();

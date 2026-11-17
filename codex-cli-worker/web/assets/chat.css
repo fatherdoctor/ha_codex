@@ -2243,3 +2243,30 @@ details.disclosure > summary {
 details.disclosure > summary::-webkit-details-marker {
   display: none;
 }
+
+/* FB2-SPLIT */
+/*
+ * The Add-on configuration row at the foot of Settings: a link that looks like Home Assistant's navigation rows,
+ * the name and a gray line at the left and a chevron at the right. It lines up with the section headers above it.
+ */
+a.ha-nav-row {
+  padding-left: 0;
+  padding-right: 0;
+  color: inherit;
+  text-decoration: none;
+}
+a.ha-nav-row:hover strong {
+  color: var(--primary-color, var(--accent));
+}
+a.ha-nav-row:focus-visible {
+  outline: 2px solid var(--primary-color, var(--accent));
+  outline-offset: 2px;
+}
+.ha-nav-chevron {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  background: var(--secondary-text-color, var(--muted));
+  -webkit-mask: var(--mdi-chevron-right) center / 24px no-repeat;
+  mask: var(--mdi-chevron-right) center / 24px no-repeat;
+}

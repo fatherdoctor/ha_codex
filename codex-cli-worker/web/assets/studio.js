@@ -170,8 +170,7 @@ $("app-pairing-new").onclick = () => {
 };
 $("connection-dialog").addEventListener("close", () => clearTimeout(remoteTimer));
 
-// Workspace rules are loaded only when Advanced opens their dedicated editor.
-$("workspace-content").append($("workspace-section"));
+// Workspace rules are loaded only when Workspace instructions in Settings opens their dedicated editor.
 $("workspace-open").onclick = async () => {
   $("settings").close();
   $("workspace-dialog").showModal();
