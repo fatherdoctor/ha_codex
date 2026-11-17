@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.4 (unreleased)
+
+- A plain device command such as "set the office overhead to 50%" is faster. On 0.3.3 Codex had no tool on the
+  chat page that finds an entity by name, so it searched `.storage/core.entity_registry` with shell commands, and
+  the page's rules told it to look for `/config/AGENTS.md` in every message. The `home_assistant` `verify` tool
+  has a new read-only `find` operation: it takes the words you used and an optional domain, and returns at most
+  10 matching entities with their entity id, friendly name and state. Entities with a credential-like name and
+  password-mode text entities are left out, as they are for the ChatGPT app's state reads. The page's rules now
+  send a device command through three tool calls (find, act, read the state back) and tell Codex not to search
+  files for an entity.
+- Codex reads `/config/AGENTS.md` again only when it changed. The `exchange_info` tool now says in each message
+  whether the file exists and when it last changed. A change to the file still reaches an open chat on its next
+  message, and a removed file stops applying. The guard-rails block is still read by the worker before every
+  pre-approved action. No approval, sandbox or permission rule changed.
+
 ## 0.3.3 (unreleased)
 
 - The approval card and the remote-control hook now read command text with one shared copy of the comment

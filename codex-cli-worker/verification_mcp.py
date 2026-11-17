@@ -9,7 +9,9 @@ import sys
 TOOL = {
     "name": "verify",
     "description": (
-        "Check Home Assistant configuration, fresh entity state, Core logs, or dashboard configuration. "
+        "Find entities by name, or check Home Assistant configuration, fresh entity state, Core logs, or "
+        "dashboard configuration. For a device command, use find with the name the user gave (and a domain "
+        "such as light when it is clear) to get the entity_id; do not search files for it. "
         "Dashboard checks capture desktop/mobile screenshots and any matching Fully Kiosk displays; "
         "inspect their image_paths before visual claims. "
         "Blocked requests include reasons and approval availability; a policy block does not imply a write. "
@@ -19,8 +21,11 @@ TOOL = {
     "inputSchema": {
         "type": "object", "additionalProperties": False,
         "properties": {
-            "operation": {"type": "string", "enum": ["entity", "config_check", "logs", "dashboard", "dashboard_readback"]},
+            "operation": {"type": "string", "enum": ["entity", "find", "config_check", "logs", "dashboard", "dashboard_readback"]},
             "entity_id": {"type": "string"}, "expected_state": {"type": "string"},
+            "name": {"type": "string", "maxLength": 120,
+                     "description": "For find: the words the user used for the device, for example office overhead"},
+            "domain": {"type": "string", "maxLength": 64, "description": "For find: optional domain, for example light"},
             "attributes": {"type": "array", "items": {"type": "string"}, "maxItems": 10},
             "path": {"type": "string", "description": "Local dashboard path, for example /lovelace/lights"},
             "save_pending": {"type": "boolean"},
