@@ -530,22 +530,38 @@ HA_ALWAYS_FAMILIES = frozenset(("supervisor", "super", "su"))
 SHELL_ASSIGNMENT_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*=")
 # The global flags of ha that take the next word as their value.
 HA_VALUE_FLAGS = ("--log-level", "--api-token", "--endpoint", "--config")
+# A redirection operator, written once for the parsers, the text floor and the spacing below.
+# The heredoc operator has one spelling for each text: "<<-x" is "<<-" with the target "x", never
+# "<<" with the target "-x". Two readings of the same text would make the floor's match time
+# double with each repeated "<<-x".
+_REDIRECTION_OPERATOR = r"(?:&>>?|<<<|<<-|<<(?!-)|<>|>>|>\||>&|<&|>|<)"
+# An optional file descriptor before the operator: a number or {name}.
+_REDIRECTION_FD = r"(?:\d+|\{[A-Za-z_][A-Za-z0-9_]*\})"
 # A redirection as the word splitter returns it: an optional file descriptor (2 or {fd}), the
 # operator, then the target when it is joined to the operator (group 1, empty when the next
 # word is the target). The shell removes a redirection before the command runs, wherever it
 # stands, so "ha 2>/dev/null su info" runs "ha su info".
-REDIRECTION_RE = re.compile(r"^(?:\d+|\{[A-Za-z_][A-Za-z0-9_]*\})?(?:&>>?|<<<|<<-?|<>|>>|>\||>&|<&|>|<)(.*)$", re.DOTALL)
+REDIRECTION_RE = re.compile(r"^" + _REDIRECTION_FD + r"?" + _REDIRECTION_OPERATOR + r"(.*)$", re.DOTALL)
+# An operator as it can stand in command text. The shell ends a word at "<" and ">", so
+# "ha>/dev/null" is "ha", ">", "/dev/null". A file descriptor (group "fd") belongs to the
+# operator only when it starts a word ("2>x"); in "ha2>x" the word is "ha2". A number right
+# after an operator is that operator's target instead (_space_redirections).
+REDIRECTION_TEXT_RE = re.compile(
+    r"(?:(?<![^\s;&|()])(?P<fd>" + _REDIRECTION_FD + r"))?" + _REDIRECTION_OPERATOR)
 # A conservative text floor also catches shell constructs the parser cannot place.
-# It reads the command with its quotes removed. The four value-taking global flags with
-# their value, any other flag, and any redirection with its target may precede the family.
+# It reads the command with its quotes removed and a blank on each side of every redirection
+# operator. The four value-taking global flags with their value, any other flag, and any
+# redirection with its target may precede the family.
 # The three alternatives cannot match the same text: an alternative that could would make
 # the match time double with each repeated flag.
-_HA_REDIRECTION_TEXT = r"(?:\d+|\{\w+\})?(?:&>>?|<<<|<<-?|<>|>>|>\||>&|<&|>|<)\s*[^\s<>&|]\S*"
+_HA_REDIRECTION_TEXT = _REDIRECTION_FD + r"?" + _REDIRECTION_OPERATOR + r"\s*[^\s<>&|]\S*"
 _HA_VALUE_FLAG_TEXT = r"--(?:log-level|api-token|endpoint|config)"
+# The same flags without the first dash, to exclude them from the other-flag alternative.
+_HA_VALUE_FLAG_AFTER_DASH = r"-(?:log-level|api-token|endpoint|config)"
 HA_TEXT_PREFIX = (
     r"\bha\s+(?:(?:"
-    + _HA_VALUE_FLAG_TEXT + r"(?:=\S+|(?:\s+" + _HA_REDIRECTION_TEXT + r")*\s+(?!(?:\d+|\{\w+\})?[<>&])\S+)"
-    + r"|-(?!" + _HA_VALUE_FLAG_TEXT[1:] + r"(?:[=\s]|$))\S+"
+    + _HA_VALUE_FLAG_TEXT + r"(?:=\S+|(?:\s+" + _HA_REDIRECTION_TEXT + r")*\s+(?!" + _REDIRECTION_FD + r"?[<>&])\S+)"
+    + r"|-(?!" + _HA_VALUE_FLAG_AFTER_DASH + r"(?:[=\s]|$))\S+"
     + r"|" + _HA_REDIRECTION_TEXT
     + r")\s+)*")
 HA_REMOTE_TEXT_RE = re.compile(
@@ -558,27 +574,90 @@ HA_SHELL_WORD_RE = re.compile(r"\bh[\"'\\]*a\b", re.IGNORECASE)
 HA_UNKNOWN_FLAG_RE = re.compile(
     r"--(?:log-level|api-token|endpoint|config)(?:=|\s+)"
     r"[^\s;]*(?:[\"'`\\]|\$\()", re.IGNORECASE)
+# A word after ha whose end or value the floor cannot read: a redirection target with a quote
+# or a backslash, a process substitution as the target, or any word with a $ or a backtick (a
+# variable that is empty or holds a blank, ${x:- a}, $(...), `...`). The shell can then put the
+# family word where the floor does not look.
+HA_UNREADABLE_WORD_RE = re.compile(
+    _REDIRECTION_OPERATOR + r"\s*(?:\(|[^\s;<>]*[\"'\\])|[$`]")
 
 
 HA_ALWAYS_WORD_RE = re.compile(r"\b(?:supervisor|super|su)\b", re.IGNORECASE)
+HA_ANY_FAMILY_WORD_RE = re.compile(
+    r"\b(?:supervisor|super|su|add-?ons?|host|os|core|hardware|network|backups?|apps)\b", re.IGNORECASE)
+
+
+def _family_word_after(line: str, start: int, remote_on: bool) -> bool:
+    """Say whether a family word that this mode refuses follows start on the line.
+
+    The rest of the line is read as written and with its quotes and backslashes removed, so
+    ``s\\u`` and ``"su"`` count as ``su``.
+    """
+    family = HA_ANY_FAMILY_WORD_RE if remote_on else HA_ALWAYS_WORD_RE
+    rest = line[start:]
+    return bool(family.search(rest) or family.search(re.sub(r"[\"'`\\]", "", rest)))
 
 
 def _ha_unknown_flag(text: str, remote_on: bool) -> bool:
-    """Conservatively refuse a quoted, escaped or computed global-flag value.
+    """Conservatively refuse a word after ha whose end the floor cannot read.
 
     The text floor reads the command without quotes, so a value with a blank in it ("a b"
-    or a\\ b) looks like two words there, and the family after it is not found. With remote
-    control on, every such value is refused. With it off, only the remote families are
-    allowed, so the value is refused when a Supervisor family word follows it on the line.
-    The text is also read with every backslash-newline pair removed, as the floor reads it,
-    so a family word split across lines is found.
+    or a\\ b) looks like two words there, and the family after it is not found.
+
+    - A global-flag value with a quote, a backslash or a substitution: with remote control
+      on, every such value is refused. With it off, only the remote families are allowed, so
+      the value is refused when a Supervisor family word follows it on the line.
+    - A redirection target with a quote or a backslash, a process substitution, or any word
+      with a ``$`` or a backtick: refused when a family word that this mode refuses follows it
+      on the line (with remote control off, a Supervisor family; with it on, any family).
+
+    The check reads lines, not commands, so a family word in a later command on the same line
+    counts too. The text is also read with every backslash-newline pair removed, as the floor
+    reads it, so a family word split across lines is found.
     """
     for line in text.splitlines() + text.replace("\\\n", "").splitlines():
         word = HA_SHELL_WORD_RE.search(line)
-        flag = HA_UNKNOWN_FLAG_RE.search(line, word.end()) if word else None
-        if flag and (remote_on or HA_ALWAYS_WORD_RE.search(line, flag.end())):
+        if not word:
+            continue
+        flag = HA_UNKNOWN_FLAG_RE.search(line, word.end())
+        if flag and (remote_on or _family_word_after(line, flag.end(), False)):
+            return True
+        unreadable = HA_UNREADABLE_WORD_RE.search(line, word.end())
+        if unreadable and _family_word_after(line, unreadable.end(), remote_on):
             return True
     return False
+
+
+def _space_redirections(text: str) -> str:
+    """Put a blank on each side of every unquoted redirection operator, as the shell reads it.
+
+    The shell ends a word at ``<`` and ``>``, so ``ha>/dev/null su`` runs ``ha su``. The word
+    splitter does not, so the operators are set apart first. A quoted or escaped operator
+    stays in its word, and so does the text of ``${...}``, where ``>`` is not an operator.
+    A number right after an operator, even after a blank, is its target and not the file
+    descriptor of the next operator: bash runs ``ha 2>& 1>x su`` as ``2>& 1``, ``>x``.
+    """
+    out, quote, i, after_operator = [], "", 0, False
+    while i < len(text):
+        ch = text[i]
+        if ch == "\\" and quote != "'" and i + 1 < len(text):
+            out.append(text[i:i + 2]); i += 2; after_operator = False; continue
+        if ch == "'" and quote != '"':
+            quote = "" if quote == "'" else "'"
+        elif ch == '"' and quote != "'":
+            quote = "" if quote == '"' else '"'
+        elif not quote and text.startswith("${", i):
+            end = text.find("}", i)
+            end = len(text) if end < 0 else end + 1
+            out.append(text[i:end]); i = end; after_operator = False; continue
+        elif not quote:
+            operator = REDIRECTION_TEXT_RE.match(text, i)
+            if operator and not (after_operator and operator.group("fd")):
+                out.append(f" {operator.group(0)} "); i = operator.end(); after_operator = True; continue
+        if not ch.isspace():
+            after_operator = False
+        out.append(ch); i += 1
+    return "".join(out)
 
 
 def _floor_texts(text: str, joined: str) -> tuple[str, str]:
@@ -589,10 +668,14 @@ def _floor_texts(text: str, joined: str) -> tuple[str, str]:
     where this module thinks a comment, a quote or a nested shell script starts, so an error in
     that model cannot hide a Supervisor command. The cost is a refusal of a single-quoted literal
     pair that spells one; the floor already refuses such a spelling in a comment.
+    Both readings have a blank on each side of every redirection operator, as the shell reads
+    ``ha>/dev/null su`` (``ha``, ``>``, ``/dev/null``, ``su``).
     """
     quote_chars = r"[\"'`\\]"
     unjoined = text.replace("\\\n", "")
-    return re.sub(quote_chars, "", joined), re.sub(quote_chars, "", unjoined)
+    plain_joined = re.sub(quote_chars, "", joined)
+    plain_unjoined = re.sub(quote_chars, "", unjoined)
+    return _space_redirections(plain_joined), _space_redirections(plain_unjoined)
 
 
 def _shell_words(text: str, punctuation: str) -> list[str]:
@@ -739,7 +822,7 @@ def _ha_supervisor_command(text: str, depth: int = 0) -> bool:
     masked, nested = _shell_substitutions(joined)
     if any(_ha_supervisor_command(item, depth + 1) for item in nested):
         return True
-    for segment in _command_segments(_shell_words(masked, ';&|()\n'), ';&|()\n'):
+    for segment in _command_segments(_shell_words(_space_redirections(masked), ';&|()\n'), ';&|()\n'):
         index = 0
         while index < len(segment):
             word = segment[index].lower()
@@ -751,7 +834,8 @@ def _ha_supervisor_command(text: str, depth: int = 0) -> bool:
                 index = _skip_redirections(segment, index); continue
             if SHELL_ASSIGNMENT_RE.match(segment[index]) or word in ('if', 'then', 'do', '!', '{', 'exec', 'time', 'nohup'):
                 index += 1; continue
-            if word in ('sudo', 'env', 'command', 'xargs', 'timeout', 'watch', 'stdbuf', 'nice'):
+            if word.rsplit('/', 1)[-1] in ('sudo', 'env', 'command', 'xargs', 'timeout', 'watch', 'stdbuf', 'nice'):
+                word = word.rsplit('/', 1)[-1]
                 index += 1
                 while index < len(segment) and segment[index].startswith('-'):
                     flag = segment[index]
@@ -816,7 +900,7 @@ def _ha_command(text: str, remote_on: bool, depth: int = 0) -> bool:
     joined = _join_shell_continuations(text)
     if joined is None:
         return True
-    for segment in _command_segments(_shell_words(joined, ";&|()\n"), ";&|()\n"):
+    for segment in _command_segments(_shell_words(_space_redirections(joined), ";&|()\n"), ";&|()\n"):
         index = 0
         while index < len(segment):
             word = segment[index]
@@ -824,7 +908,7 @@ def _ha_command(text: str, remote_on: bool, depth: int = 0) -> bool:
                 index = _skip_redirections(segment, index)
             elif SHELL_ASSIGNMENT_RE.match(word):
                 index += 1
-            elif word.lower() in ("env", "sudo", "command", "xargs"):
+            elif word.lower().rsplit("/", 1)[-1] in ("env", "sudo", "command", "xargs"):
                 index += 1
                 while index < len(segment) and segment[index].startswith("-"):
                     index += 1

@@ -70,14 +70,26 @@ the parser does not open. Tests: `tests/test_gate_quote.py` (`ContinuationFloorT
 print-only shell).
 
 The shell removes a redirection before the command runs, wherever it stands, so `ha 2>/dev/null su info` runs
-`ha su info`. Both Supervisor parsers find the family word with one helper, `gate_rules.py: _ha_family_index`,
-which skips global flags, their values and redirections (`REDIRECTION_RE`, `_skip_redirections`). The parsers
-split commands with `_command_segments`, which keeps `2>&1` and `>|file` as one word and returns both readings
-of `&>file` (bash: one redirection; dash: `&`, then `>file`). The text floor's prefix (`HA_TEXT_PREFIX`) accepts
-the same redirections, and its three alternatives cannot match the same text, so its match time does not grow
-with repeated flags. A global-flag value with a quote, a backslash or a substitution is refused with remote control
-on, and with it off when a Supervisor family word follows (`_ha_unknown_flag`), because the floor reads the command without quotes and cannot tell where such a
-value ends. Tests: `tests/test_gate_quote.py` (`RedirectionTests`, with a print-only shell control).
+`ha su info`. The shell also ends a word at `<` and `>`, so `ha>/dev/null su info` runs `ha su info` too. Before
+the parsers split a command, `gate_rules.py: _space_redirections` puts a blank on each side of every unquoted
+operator (`REDIRECTION_TEXT_RE`); quoted and escaped operators and the text of `${...}` stay as they are. Both
+Supervisor parsers find the family word with one helper, `_ha_family_index`, which skips global flags, their
+values and redirections (`REDIRECTION_RE`, `_skip_redirections`). The parsers split commands with
+`_command_segments`, which keeps `2>&1` and `>|file` as one word and returns both readings of `&>file` (bash: one
+redirection; dash: `&`, then `>file`). The operator list is written once, in `_REDIRECTION_OPERATOR`.
+
+The text floor reads the command without quotes and with the same blanks around each operator (`_floor_texts`).
+Its prefix (`HA_TEXT_PREFIX`) accepts global flags, their values and redirections before the family. Its three
+alternatives cannot match the same text, and the heredoc operator has one spelling (`<<-x` is `<<-` and `x`), so
+its match time does not grow with repeated flags or redirections (`test_text_floor_time_stays_flat_with_repeated_flags`).
+
+The floor cannot see where a quoted, escaped or computed word ends. `_ha_unknown_flag` covers those words after
+`ha`. A global-flag value with a quote, a backslash or a substitution is refused with remote control on, and with
+it off when a Supervisor family word follows on the line. A redirection target with a quote, a backslash or a
+backtick, a process substitution, or any word with a `$` (a variable that is empty or holds a blank) is refused
+when a family word that the mode refuses follows on the line. Tests: `tests/test_gate_quote.py`
+(`RedirectionTests`, with a print-only shell control). To add a form, add it to a tuple there; the shell control
+runs it under bash and dash.
 
 (*) The shell text is split by one copy of the code, `shell_words.py` (`strip_comments`, `split_words`), which
 `gate_rules.py` and `approvals.py` both import. The hook's continuation join is in the same file. Each check keeps

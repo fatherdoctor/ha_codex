@@ -538,12 +538,52 @@ class RedirectionTests(unittest.TestCase):
         'env ha 2>&1 su info',
         "sh -c 'ha 2>&1 su info'",
         "dash -c 'ha 2>/dev/null su info'",
+        # The shell ends a word at "<" and ">": an operator joined to ha, a flag or another redirection.
+        'ha>/dev/null su info',
+        'ha</dev/null su info',
+        'ha>&2 su info',
+        'ha>>/dev/null su info',
+        'env ha>/dev/null su info',
+        '/usr/bin/env ha>/dev/null supervisor info',
+        'ha 2>/dev/null< /dev/null su info',
+        'ha >/dev/null2> /dev/null su info',
+        'ha --api-token>/dev/null x su info',
+        'ha --log-level</dev/null debug su info',
+        # A number right after an operator is its target, even after a blank (bash).
+        'ha 2>&1>/dev/null su info',
+        'ha 2>& 1>/dev/null su info',
+        'ha >& 1>x su info',
+        # Before ha, the redirection is skipped by the parsers too.
+        '2>/dev/null ha su info',
     )
     REMOTE_FORMS = (
         'ha 2>/dev/null host info',
         'ha 2>&1 core info',
+        '>/dev/null 2>&1 ha host info',
+        'ha>/dev/null host info',
+        'ha </dev/null> /dev/null host info',
+        'ha --config>/dev/null x host info',
         "dash -c 'ha </dev/null host info'",
     )
+    # A redirection target or a word that the text floor cannot read: a quote, a backslash, a
+    # substitution, a process substitution, or a word that expands to nothing or to two words.
+    UNREADABLE_FORMS = (
+        "dash -c 'ha >\"a b\" su info'",
+        "setsid sh -c 'ha 2>a\\ b su info'",
+        'echo ">" & ha 2>&1 >"a b" su info',
+        "dash -c 'ha >$(echo out) su info'",
+        "dash -c 'ha >`echo out` su info'",
+        'ha 2>${x:- a} su info',
+        'ha --config ${x:- a} su info',
+        'ha $EMPTY su info',
+        'ha `true` su info',
+        'ha < <(true) su info',
+        'ha > >(cat) su info',
+        'ha 2> >(cat >/dev/null) su info',
+        # The family word itself escaped after an unreadable target.
+        "dash -c 'ha >\"a b\" s\\u info'",
+    )
+    UNREADABLE_REMOTE_FORMS = ("dash -c 'ha >\"a b\" host info'",)
     QUOTED_VALUE_FORMS = (
         "dash -c 'ha --api-token \"a b\" su info'",
         "setsid sh -c 'ha --endpoint a\\ b su info'",
@@ -552,8 +592,12 @@ class RedirectionTests(unittest.TestCase):
     # The redirection takes the family word as its target, so the shell runs "ha info".
     NOT_SUPERVISOR = ('ha > su info', 'ha 2> su info', 'ha core info 2>/dev/null', 'echo ha 2>/dev/null')
 
-    # Dash has no here-string and reads "&>" as "&" then ">", so these run under bash only.
-    BASH_ONLY = ('<<<', ' &>/dev/null su')
+    # Dash has no here-string or process substitution and reads "&>" as "&" then ">", so these
+    # run under bash only.
+    BASH_ONLY = ('<<<', ' &>/dev/null su', '<(', '>(', '&1>', '& 1>')
+    # Harmless commands with a quoted, computed or joined redirection: no family word follows.
+    HARMLESS = ('ha info 2>"$LOG"', 'grep "x" notes.txt > "/tmp/a b"', 'echo ha > /tmp/x', 'ls>/tmp/x',
+                'echo "${x:->}"', 'cmd 2>&1 | tee "log file"')
 
     def _runs(self, command: str, family: str) -> None:
         """Run the form with a print-only ha stub that writes its arguments to a file, not stdout."""
@@ -563,29 +607,31 @@ class RedirectionTests(unittest.TestCase):
             stub.chmod(0o755)
             out = Path(folder) / 'out'
             env = {**os.environ, 'PATH': folder + os.pathsep + os.environ.get('PATH', ''), 'HA_STUB_OUT': str(out)}
+            env.pop('x', None)
+            env.pop('EMPTY', None)
             shells = ('bash',) if any(mark in command for mark in self.BASH_ONLY) else ('bash', 'dash')
             for shell in shells:
                 with self.subTest(shell=shell, command=command):
                     out.write_text('', encoding='utf-8')
-                    subprocess.run([shell, '-c', command], capture_output=True, text=True,
+                    subprocess.run([shell, '-c', command], capture_output=True, text=True, cwd=folder,
                                    env=env, timeout=10, check=False, stdin=subprocess.DEVNULL)
-                    self.assertIn(f'<{family}><info>', out.read_text(encoding='utf-8'))
+                    self.assertIn(f'<{family}>', out.read_text(encoding='utf-8'))
 
     def test_print_only_shell_runs_each_form(self) -> None:
-        for command in self.SUPERVISOR_FORMS + self.QUOTED_VALUE_FORMS:
+        for command in self.SUPERVISOR_FORMS + self.QUOTED_VALUE_FORMS + self.UNREADABLE_FORMS:
             family = 'supervisor' if ' supervisor ' in command else 'super' if ' super ' in command else 'su'
             self._runs(command, family)
-        for command in self.REMOTE_FORMS:
+        for command in self.REMOTE_FORMS + self.UNREADABLE_REMOTE_FORMS:
             self._runs(command, 'core' if ' core ' in command else 'host')
 
     def test_hook_refuses_supervisor_forms_in_both_modes(self) -> None:
-        for command in self.SUPERVISOR_FORMS + self.QUOTED_VALUE_FORMS:
+        for command in self.SUPERVISOR_FORMS + self.QUOTED_VALUE_FORMS + self.UNREADABLE_FORMS:
             for remote_on in (False, True):
                 with self.subTest(command=command, remote_on=remote_on):
                     self.assertIn('Supervisor', refusal(command, remote_on))
 
     def test_hook_refuses_remote_forms_with_remote_control_on(self) -> None:
-        for command in self.REMOTE_FORMS:
+        for command in self.REMOTE_FORMS + self.UNREADABLE_REMOTE_FORMS:
             with self.subTest(command=command):
                 self.assertIn('Supervisor', refusal(command, True))
                 self.assertEqual(refusal(command, False), '')
@@ -596,18 +642,48 @@ class RedirectionTests(unittest.TestCase):
                 continue  # the parsers do not open dash; the text floor covers it
             with self.subTest(command=command):
                 self.assertTrue(gate_rules._ha_supervisor_command(command))
-        for command in self.REMOTE_FORMS[:2]:
+        for command in self.REMOTE_FORMS:
+            if command.startswith('dash'):
+                continue
             with self.subTest(command=command):
                 self.assertTrue(gate_rules._ha_command(command, True))
+
+    def test_operators_are_set_apart_outside_quotes(self) -> None:
+        """The parsers read ha>x as the shell does; a quoted or escaped operator and ${...} stay one word."""
+        self.assertEqual(gate_rules._space_redirections('ha>/dev/null su').split(), ['ha', '>', '/dev/null', 'su'])
+        self.assertEqual(gate_rules._space_redirections('ha 2>&1 su').split(), ['ha', '2>&', '1', 'su'])
+        self.assertEqual(gate_rules._space_redirections('ha2>x').split(), ['ha2', '>', 'x'])
+        self.assertEqual(gate_rules._space_redirections('ha <<-x su').split(), ['ha', '<<-', 'x', 'su'])
+        self.assertEqual(gate_rules._space_redirections('ha 2>& 1>x').split(), ['ha', '2>&', '1', '>', 'x'])
+        for text in ('echo ">"', "echo '<'", 'echo \\>', 'echo ${x:->}'):
+            with self.subTest(text=text):
+                self.assertEqual(gate_rules._space_redirections(text), text)
+
+    def test_unreadable_word_rule_alone_refuses_each_form(self) -> None:
+        """The rule for unreadable targets and $ words holds without the parsers or the floor."""
+        for command in self.UNREADABLE_FORMS:
+            for remote_on in (False, True):
+                with self.subTest(command=command, remote_on=remote_on):
+                    self.assertTrue(gate_rules._ha_unknown_flag(command, remote_on))
+        for command in self.UNREADABLE_REMOTE_FORMS:
+            with self.subTest(command=command):
+                self.assertTrue(gate_rules._ha_unknown_flag(command, True))
+                self.assertFalse(gate_rules._ha_unknown_flag(command, False))
+
+    def test_harmless_redirections_keep_no_opinion(self) -> None:
+        for command in self.HARMLESS:
+            for remote_on in (False, True):
+                with self.subTest(command=command, remote_on=remote_on):
+                    self.assertEqual(refusal(command, remote_on), '')
 
     def test_text_floor_alone_refuses_each_form(self) -> None:
         with patch.object(gate_rules, '_ha_supervisor_command', return_value=False), \
                 patch.object(gate_rules, '_ha_command', return_value=False):
-            for command in self.SUPERVISOR_FORMS + self.QUOTED_VALUE_FORMS:
+            for command in self.SUPERVISOR_FORMS + self.QUOTED_VALUE_FORMS + self.UNREADABLE_FORMS:
                 for remote_on in (False, True):
                     with self.subTest(command=command, remote_on=remote_on):
                         self.assertIn('Supervisor', refusal(command, remote_on))
-            for command in self.REMOTE_FORMS:
+            for command in self.REMOTE_FORMS + self.UNREADABLE_REMOTE_FORMS:
                 with self.subTest(command=command):
                     self.assertIn('Supervisor', refusal(command, True))
 
@@ -636,7 +712,7 @@ class RedirectionTests(unittest.TestCase):
 
     def test_text_floor_time_stays_flat_with_repeated_flags(self) -> None:
         """No two alternatives of the floor's prefix match the same text, so a long flag list is fast."""
-        for unit in ('--log-level=a ', '--log-level a ', '-x ', '2>/dev/null ', '2> x '):
+        for unit in ('--log-level=a ', '--log-level a ', '-x ', '2>/dev/null ', '2> x ', '<<-x ', '<<- x ', '<<-x<<-y '):
             with self.subTest(unit=unit):
                 started = time.monotonic()
                 gate_rules.HA_ALWAYS_TEXT_RE.search('ha ' + unit * 22 + 'x')

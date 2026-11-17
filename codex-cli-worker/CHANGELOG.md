@@ -3,13 +3,17 @@
 ## 0.3.5 (unreleased)
 
 - The command check now refuses a Supervisor command that has a redirection between `ha` and the command family,
-  such as `ha 2>/dev/null su info` or `ha 2>&1 supervisor logs`. The shell removes the redirection and runs
-  `ha su info`, but the check read the redirection as the family and let the command through, with remote control
-  off and on. The same fix covers the remote-control families (`ha 2>/dev/null host reboot`) when remote control
-  is on. A global flag of `ha` whose value is quoted, escaped or computed, such as `ha --api-token "a b" ...`, is
-  now refused with remote control off too when `su`, `super` or `supervisor` follows it; before, only remote
-  control on refused it. The text check's match time
-  no longer doubles with each repeated global flag. No other approval, sandbox or permission rule changed.
+  such as `ha 2>/dev/null su info`, `ha 2>&1 supervisor logs` or `ha>/dev/null su info`. The shell removes the
+  redirection and runs `ha su info`, but the check read the redirection as the family and let the command through,
+  with remote control off and on. The same fix covers the remote-control families (`ha 2>/dev/null host reboot`)
+  when remote control is on.
+- The check also refuses a word after `ha` that it cannot read to its end when `su`, `super` or `supervisor`
+  follows it on the line, with remote control off too: a global-flag value with a quote, a backslash or a
+  substitution (`ha --api-token "a b" ...`), a redirection target of that kind (`ha >"a b" ...`, `ha < <(true) ...`)
+  and any word with a `$` (`ha $EMPTY su info`). Before, only remote control on refused such a flag value. With
+  remote control on, such a target or `$` word is refused before any family word.
+- The text check's match time no longer doubles with each repeated global flag or heredoc operator. No other
+  approval, sandbox or permission rule changed.
 
 ## 0.3.4 (unreleased)
 
