@@ -2559,4 +2559,85 @@ body.resizing #divider::before {
 }
 body.resizing {
   cursor: ew-resize;
+/* FB2-FLOW */
+/*
+ * The chat flow, with the desktop app as the model (CX-FB2 design, sections 4 and 6). The chat column and
+ * the prompt box share one 720 px column; the owner's message is a bubble up to 70 % of it on a wide screen.
+ * Each answer has one gray "Worked for" line above it that opens its steps and checks. A failed check keeps
+ * one short line under the answer, and an answered permission request is one closed line.
+ * studio.css loads after this file and sets the column (860 px) and the prompt box (920 px), so the two
+ * width rules name the main area to win; a phone keeps studio.css's own padding.
+ */
+@media (min-width: 701px) {
+  main .messages {
+    padding-left: max(24px, calc((100% - 720px) / 2));
+    padding-right: max(24px, calc((100% - 720px) / 2));
+  }
+  main .compose-area {
+    max-width: calc(720px + 60px);
+  }
+  .message.user {
+    max-width: 70%;
+  }
+}
+.activity.worked,
+.answer .activity.worked {
+  margin: 10px 0 8px;
+}
+.activity.worked .activity-toggle,
+.worked-line {
+  font-size: 13px;
+  color: var(--muted);
+}
+.worked-line {
+  margin: 10px 0 8px;
+  padding: 4px 0;
+}
+.activity.worked .activity-steps > .verification {
+  margin: 8px 0 4px 8px;
+}
+.check-failed-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 10px;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: var(--error);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.check-failed-line:hover {
+  text-decoration: underline;
+}
+details.permission-card.is-answered {
+  margin: 8px 0;
+  padding: 6px 12px;
+  border-color: var(--line);
+  border-radius: 8px;
+}
+details.permission-card.is-answered > summary {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--muted);
+}
+details.permission-card.is-answered > summary strong {
+  flex: none;
+  font-weight: 500;
+  color: var(--text);
+}
+details.permission-card.is-answered > summary .permission-headline {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+details.permission-card.is-answered[open] {
+  padding-bottom: 12px;
 }

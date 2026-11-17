@@ -39,6 +39,10 @@ const state = {
   permissionModes: new Map(),
   // Checks whose retry the owner started on this page. Their result shows open; a reload forgets them.
   retriedChecks: new Set(),
+  // Earlier answers whose "Worked for" line the owner opened. The latest answer keeps this in state.activity.
+  workedOpen: new Set(),
+  // The checks block of the latest answer. renderActivity puts it inside that answer's "Worked for" line.
+  latestChecks: null,
 };
 const effortLabels = {
   low: "Low",
@@ -1238,6 +1242,66 @@ function renderVerification(turn, taskId) {
   section.append(textNode("p", "Screenshots are evidence for visual review. State and configuration checks do not prove automation behavior.", "verification-note"));
   return section;
 }
+/**
+ * Return "Worked for 1m 21s" from the exchange's start and end times, or ""
+ * when the record lacks one of them (a chat saved by an older version).
+ */
+function workedLabel(turn) {
+  const started = Date.parse(turn?.started_at || "");
+  const completed = Date.parse(turn?.completed_at || "");
+  if (!Number.isFinite(started) || !Number.isFinite(completed) || completed < started) return "";
+  return `Worked for ${elapsedLabel(completed - started)}`;
+}
+/** Count the checks of an exchange that failed or could not be confirmed. */
+function badCheckCount(turn) {
+  return (turn.verification || []).filter(check => BAD_CHECK_STATUSES.has(check.status)).length;
+}
+/**
+ * Build the "Worked for" line of an earlier answer. Only the latest exchange
+ * has its steps on the page, so here the line opens the checks block alone.
+ * With no checks it is plain text, and with no times either it is left out.
+ * The line opens by itself when the checks block wants attention (a browser
+ * permission review or a retry result).
+ */
+function renderWorked(turn, checks) {
+  const label = workedLabel(turn);
+  if (!checks) return label ? textNode("p", label, "worked-line") : null;
+  const block = textNode("div", "", "activity worked");
+  const toggle = textNode("button", "", "activity-toggle");
+  toggle.type = "button";
+  toggle.append(textNode("span", "", "activity-chevron"), textNode("span", label || "Checks and readback"));
+  const list = textNode("div", "", "activity-steps");
+  list.append(checks);
+  const show = open => {
+    if (open) state.workedOpen.add(turn.turn_id);
+    else state.workedOpen.delete(turn.turn_id);
+    toggle.setAttribute("aria-expanded", String(open));
+    list.hidden = !open;
+  };
+  show(checks.open || state.workedOpen.has(turn.turn_id));
+  toggle.onclick = () => show(list.hidden);
+  block.append(toggle, list);
+  block.openChecks = () => {
+    show(true);
+    checks.open = true;
+    checks.scrollIntoView({block: "nearest"});
+  };
+  return block;
+}
+/**
+ * Build the line that stays under an answer when a check failed, so the owner
+ * sees an accident without a tap. A click opens the checks.
+ */
+function failedChecksLine(count, openChecks) {
+  const line = textNode("button", "", "check-failed-line");
+  line.type = "button";
+  line.append(
+    textNode("span", count === 1 ? "1 check failed" : `${count} checks failed`),
+    textNode("span", "", "activity-chevron"),
+  );
+  line.onclick = openChecks;
+  return line;
+}
 /** Let the owner review a batch of complete requests without interrupting capture. */
 function renderBrowserPermissions(check, turn, taskId) {
   const candidates = check.permission_candidates || [];
@@ -1484,6 +1548,7 @@ function renderTask(force = false) {
     );
   const turns = task.turns || [];
   let newApproval = false;
+  state.latestChecks = null;
   for (const turn of turns) {
     const latest = turn === turns[turns.length - 1];
     const exchange = textNode("section", "", "exchange");
@@ -1512,6 +1577,24 @@ function renderTask(force = false) {
     const hasAnswer =
       turn.summary || turn.details || turn.question || attachments.length || turn.verification?.length;
     if (hasAnswer) {
+      // The steps and checks sit closed behind one "Worked for" line above the answer, as in the desktop app.
+      const evidence = renderVerification(turn, task.task_id);
+      let openChecks = null;
+      if (latest) {
+        state.latestChecks = evidence;
+        exchange.append(activityBlock());
+        openChecks = () => {
+          if (!state.activity || !evidence) return;
+          state.activity.expanded = true;
+          evidence.open = true;
+          renderActivity();
+          evidence.scrollIntoView({block: "nearest"});
+        };
+      } else {
+        const worked = renderWorked(turn, evidence);
+        if (worked) exchange.append(worked);
+        openChecks = () => worked?.openChecks?.();
+      }
       const answer = textNode("div", "", "answer");
       const heading = textNode("div", "", "answer-heading");
       heading.append(textNode("span", "⌘", "mark"), textNode("span", "Codex"));
@@ -1531,8 +1614,8 @@ function renderTask(force = false) {
       const check = renderConfigCheck(turn.config_check);
       if (check) answer.append(check);
       answer.append(...renderBackups(turn));
-      const evidence = renderVerification(turn, task.task_id);
-      if (evidence) answer.append(evidence);
+      const bad = badCheckCount(turn);
+      if (bad) answer.append(failedChecksLine(bad, openChecks));
       if (attachments.length)
         answer.append(renderAttachments(task.task_id, attachments));
       answer.append(
@@ -1550,7 +1633,6 @@ function renderTask(force = false) {
           "turn-meta",
         ),
       );
-      if (latest) answer.append(activityBlock());
       exchange.append(answer);
     } else if (["queued", "running"].includes(turn.status)) {
       const pending = textNode(
@@ -1583,13 +1665,35 @@ function renderTask(force = false) {
   controls();
   ensureActivity();
 }
-/** Show a native permission request as text, with its precise action and scope. */
+/** Return the first line of what a permission request asked for, for its closed line. */
+function approvalHeadline(approval) {
+  const plain = approval.confirmation || {};
+  const first = [
+    approval.command, approval.action, plain.what, approval.network,
+    approval.changes?.[0]?.path, approval.scope,
+  ].find(value => typeof value === "string" && value.trim());
+  return first ? first.trim().split("\n")[0] : "";
+}
+/**
+ * Show a native permission request as text, with its precise action and
+ * scope. While it waits for the owner it is a full card with the two answers.
+ * Once answered (or expired) it shrinks to one closed line, such as
+ * "Allowed once: ls /config", that opens to the same details.
+ */
 function renderApproval(approval, taskId, turnId, active) {
   const pending = active && approval.status === "pending";
-  const card = textNode("section", "", "permission-card");
-  card.setAttribute("aria-label", "Permission request");
   const statuses = { allowed: "Allowed once", denied: "Denied", expired: "Expired" };
-  card.append(textNode("strong", pending ? "Permission needed" : statuses[approval.status] || "Expired"));
+  const status = pending ? "Permission needed" : statuses[approval.status] || "Expired";
+  const card = textNode(pending ? "section" : "details", "", pending ? "permission-card" : "permission-card disclosure is-answered");
+  card.setAttribute("aria-label", "Permission request");
+  if (pending) card.append(textNode("strong", status));
+  else {
+    const summary = textNode("summary", "");
+    const headline = approvalHeadline(approval);
+    summary.append(textNode("strong", status));
+    if (headline) summary.append(textNode("span", `: ${headline}`, "permission-headline"));
+    card.append(summary);
+  }
   const plain = approval.confirmation || {};
   for (const [key, label] of [["what", "What changes"], ["where", "Where"], ["effect", "The effect"]]) {
     if (plain[key]) card.append(textNode("p", `${label}: ${plain[key]}`, "permission-plain"));
@@ -1964,15 +2068,23 @@ async function pollActivity() {
     }
   }
 }
-/** Draw the step list of the latest exchange, with its heading, count, and timer. */
+/**
+ * Draw the latest exchange's step list. While Codex works, the heading counts
+ * the steps and shows the running time, and the list stays open. When the
+ * exchange is over, the heading becomes the closed "Worked for" line above the
+ * answer, and the list holds the steps and then the answer's checks.
+ */
 function renderActivity() {
   const block = $("activity");
   const activity = state.activity;
   if (!block || !activity || activity.id !== state.id) return;
   const steps = [...activity.steps.values()].sort((a, b) => a.index - b.index);
   const running = activity.running || taskActive();
-  block.hidden = !steps.length;
+  const checks = state.latestChecks;
+  const worked = running ? "" : workedLabel(state.task?.turns?.at(-1));
+  block.hidden = !steps.length && !checks && !worked;
   block.classList.toggle("running", running);
+  block.classList.toggle("worked", !running);
   // The step list takes the place of the waiting line once Codex reports steps.
   const pending = $("pending");
   if (pending) pending.hidden = !block.hidden;
@@ -1980,7 +2092,13 @@ function renderActivity() {
     block.replaceChildren();
     return;
   }
-  const expanded = activity.expanded ?? running;
+  if (!steps.length && !checks) {
+    // Nothing to open: the total time alone.
+    block.replaceChildren(textNode("p", worked, "worked-line"));
+    return;
+  }
+  // A checks block that asks for the owner (a browser permission review, a retry result) opens the line.
+  const expanded = activity.expanded ?? (running || Boolean(checks?.open));
   const area = $("messages");
   const nearBottom =
     area.scrollHeight - area.scrollTop - area.clientHeight < 100;
@@ -1993,7 +2111,7 @@ function renderActivity() {
     "span",
     running
       ? `${state.task?.permission_required ? "Waiting for your permission…" : "Working on your request…"} · ${count}`
-      : `${expanded ? "Hide" : "Show"} activity (${count})`,
+      : worked || (steps.length ? `Activity (${count})` : "Checks and readback"),
   );
   if (running) label.append(textNode("span", "", "elapsed"));
   toggle.append(textNode("span", "", "activity-chevron"), label);
@@ -2005,6 +2123,7 @@ function renderActivity() {
   list.id = "activity-steps";
   list.hidden = !expanded;
   for (const step of steps) list.append(renderStep(step, activity));
+  if (checks) list.append(checks);
   block.replaceChildren(toggle, list);
   tickElapsed();
   if (nearBottom) area.scrollTop = area.scrollHeight;
