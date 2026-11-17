@@ -402,7 +402,7 @@
             ><button id="github-disconnect" class="subtle" hidden>Disconnect</button>
           </div>
           <p id="github-test-result" class="muted" role="status" hidden></p>
-          <details id="github-token">
+          <details id="github-token" class="disclosure">
             <summary>Use a token instead</summary>
             <p class="muted">For an account that cannot install the GitHub App. On github.com open Settings, Developer settings, Fine-grained tokens. Choose Only select repositories with one repository, Contents: Read and write, and an expiry of 90 days or less. Paste it here once. It is not shown again.</p>
             <form id="github-token-form" class="github-form" autocomplete="off">
@@ -411,7 +411,7 @@
               <button id="github-token-save" type="submit">Use this token</button>
             </form>
           </details>
-          <details id="github-local" hidden>
+          <details id="github-local" class="disclosure" hidden>
             <summary>Repositories on this box</summary>
             <p class="muted">Git on this box uses the add-on's sign-in only through the add-on. No credential is written into a repository.</p>
             <form id="github-clone-form" class="github-form" autocomplete="off">
@@ -503,7 +503,7 @@
           ><button id="remote-control-pair" class="subtle">New pairing code</button
           ><button id="remote-control-stop" class="subtle">Turn off</button>
         </div>
-        <details id="remote-control-log-box">
+        <details id="remote-control-log-box" class="disclosure">
           <summary>Recent remote-control messages</summary>
           <pre id="remote-control-log"></pre>
         </details>

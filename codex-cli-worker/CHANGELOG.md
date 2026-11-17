@@ -31,9 +31,10 @@
   An open section has the same space between its last line or button and the next divider.
 - The bold **Verification** box under an answer is gone. The checks, the readback and the note on screenshots sit in
   one closed **Checks and readback** line. The line names a bad result, for example "1 failed", in the error color.
-  It opens by itself only while a batch of blocked browser requests needs a decision or a retry runs.
+  It opens by itself only while a batch of blocked browser requests needs a decision, while a retry runs, and to
+  show the result of a retry just started from the page. A saved chat opened later shows it closed.
 - Every arrow in **Settings**, **Scheduled runs**, the thread step list, the checks block and the reasoning picker
-  is a Material Design Icons arrow, the icon set Home Assistant uses (Apache-2.0; see `NOTICE`). The browser's own
+  is a Material Design Icons arrow, the icon set Home Assistant uses (Apache-2.0; see `web/NOTICE`). The browser's own
   triangle is gone from the last collapsed parts that still had it, such as **Use a token instead**.
 - The GitHub sign-in notice in Home Assistant names the new place: **Settings > Accounts and connections > GitHub**.
 

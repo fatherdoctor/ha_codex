@@ -64,6 +64,10 @@ function pngBuffer(width = 8, height = 6) {
     await page.goto("http://127.0.0.1:9137/preview/");
     await page.locator(".chat-row").first().waitFor();
     assert.equal(await page.locator(".chat-row").count(), 20);
+    // The empty message box is one line of text above the control row.
+    assert.equal(await page.locator("#message").getAttribute("rows"), "1");
+    const composerHeight = await page.locator("#composer").evaluate((node) => node.getBoundingClientRect().height);
+    assert.ok(composerHeight < 120, `empty composer is ${composerHeight} px high`);
     await page.getByRole("button", { name: "Load older chats" }).click();
     await page.waitForFunction(
       () => document.querySelectorAll(".chat-row").length === 25,
@@ -1539,6 +1543,14 @@ function pngBuffer(width = 8, height = 6) {
     await phone.locator(".verification > summary").waitFor();
     assert.equal(await phone.locator(".verification h3").count(), 0);
     assert.equal(await phone.locator(".verification").evaluate(node => node.open), false);
+    // The closed line names the check that needs review, in the error color, and keeps one line of height.
+    const closedLine = phone.locator(".verification > summary");
+    assert.equal(await closedLine.textContent(), "Checks and readback (2) · 1 failed");
+    assert.equal(await closedLine.evaluate(node => node.classList.contains("has-failed")), true);
+    assert.equal(await closedLine.evaluate(node => getComputedStyle(node).color),
+      await phone.evaluate(() => { const probe = document.createElement("span"); probe.style.color = "var(--error)";
+        document.body.append(probe); const color = getComputedStyle(probe).color; probe.remove(); return color; }));
+    assert.ok(await closedLine.evaluate(node => node.getBoundingClientRect().height) <= 24);
     assert.equal(await phone.locator(".verification-note").isVisible(), false);
     await phone.locator(".verification > summary").click();
     assert.equal(await phone.locator(".verification-note").isVisible(), true);

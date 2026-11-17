@@ -36,6 +36,8 @@ const state = {
   settingsBusy: false,
   activity: null,
   permissionModes: new Map(),
+  // Checks whose retry the owner started on this page. Their result shows open; a reload forgets them.
+  retriedChecks: new Set(),
 };
 const effortLabels = {
   low: "Low",
@@ -1088,18 +1090,26 @@ function tickElapsed() {
       ? ` · ${elapsedLabel(Date.now() - activity.startedAt)}`
       : "";
 }
+/** Check results that mean something did not work, or could not be confirmed. */
+const BAD_CHECK_STATUSES = new Set(["failed", "issues", "unavailable"]);
 /**
  * Build the collapsed checks block of an answer: one expandable row per check
  * with its result, details, and findings, then the screenshots that have not
  * expired. It stays closed under the answer, except while a batch of blocked
- * browser requests waits for the owner or a retry runs. Returns null when the
- * turn has no checks.
+ * browser requests waits for the owner, a retry runs, or a retry the owner
+ * started on this page has its result. The closed line counts
+ * the bad results, so a failed check shows without opening the block. Returns
+ * null when the turn has no checks.
  */
 function renderVerification(turn, taskId) {
   const checks = turn.verification || [];
   if (!checks.length) return null;
-  const section = textNode("details", "", "verification");
-  section.append(textNode("summary", checks.length === 1 ? "Check and readback" : `Checks and readback (${checks.length})`));
+  const section = textNode("details", "", "verification disclosure");
+  const bad = checks.filter(check => BAD_CHECK_STATUSES.has(check.status)).length;
+  const title = checks.length === 1 ? "Check and readback" : `Checks and readback (${checks.length})`;
+  const summary = textNode("summary", bad ? `${title} · ${bad} failed` : title);
+  if (bad) summary.classList.add("has-failed");
+  section.append(summary);
   if (state.task?.browser_retry?.turn_id === turn.turn_id) {
     section.open = true;
     const progress = textNode("p", "Retrying dashboard inspection…", "browser-permission-progress");
@@ -1107,8 +1117,13 @@ function renderVerification(turn, taskId) {
     section.append(progress);
   }
   for (const check of checks) {
-    const row = textNode("details", "", `verification-result is-${check.status}`);
-    if (check.retry_of && check === checks[checks.length - 1]) row.open = section.open = true;
+    const row = textNode("details", "", `verification-result disclosure is-${check.status}`);
+    // A retry result opens its own row. The block opens too when the owner started that retry on this page,
+    // so the result shows where they clicked; a saved chat opened later starts closed.
+    if (check.retry_of && check === checks[checks.length - 1]) {
+      row.open = true;
+      if (state.retriedChecks.has(check.retry_of)) section.open = true;
+    }
     const label = {
       passed: "Passed", failed: "Failed", observed: "Readback", captured: "Screenshots captured",
       issues: "Needs review", disabled: "Disabled", unavailable: "Unverified",
@@ -1193,7 +1208,7 @@ function renderBrowserPermissions(check, turn, taskId) {
     box.value = candidate.id;
     boxes.push(box);
     label.append(box, textNode("span", candidate.label));
-    const details = textNode("details", "", "browser-permission-details");
+    const details = textNode("details", "", "browser-permission-details disclosure");
     details.append(textNode("summary", "Request details"), textNode("pre", candidate.description));
     item.append(label, details);
     fields.append(item);
@@ -1233,6 +1248,7 @@ function renderBrowserPermissions(check, turn, taskId) {
     const generation = state.generation;
     fields.disabled = allow.disabled = keep.disabled = true;
     feedback.textContent = "Starting a fresh inspection…";
+    state.retriedChecks.add(check.check_id);
     try {
       await api(`tasks/${encodeURIComponent(taskId)}/browser-permissions`, {
         turn_id: turn.turn_id, check_id: check.check_id,
@@ -1272,7 +1288,7 @@ async function loadBrowserPermissions() {
       const row = textNode("div", "", "saved-browser-permission");
       const info = textNode("div", "", "saved-browser-permission-info");
       info.append(textNode("strong", permission.label), textNode("p", permission.path));
-      const details = textNode("details", "", "browser-permission-details");
+      const details = textNode("details", "", "browser-permission-details disclosure");
       details.append(textNode("summary", "Request details"), textNode("pre", permission.description));
       info.append(details);
       const revoke = textNode("button", "Revoke", "subtle");

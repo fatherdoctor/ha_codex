@@ -1097,27 +1097,11 @@ h1 {
 .activity-toggle:hover {
   color: var(--text);
 }
-.activity-chevron::before {
-  content: "";
-  display: inline-block;
-  width: 16px;
-  height: 16px;
-  vertical-align: -3px;
-  background: currentColor;
-  -webkit-mask: var(--mdi-chevron-right) center / 16px no-repeat;
-  mask: var(--mdi-chevron-right) center / 16px no-repeat;
-}
-.activity-toggle[aria-expanded="true"] .activity-chevron::before {
-  -webkit-mask-image: var(--mdi-chevron-down);
-  mask-image: var(--mdi-chevron-down);
-}
 .activity.running .activity-chevron::before {
-  border: 0;
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: var(--accent);
-  transform: none;
   margin: 0 4px;
   -webkit-mask: none;
   mask: none;
@@ -1780,22 +1764,6 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   font-weight: 600;
   text-align: left;
 }
-/* One arrow size for every header, whatever the size of its title. */
-.settings-title::before {
-  content: "";
-  display: inline-block;
-  width: 16px;
-  height: 16px;
-  margin-right: 2px;
-  vertical-align: -3px;
-  background: currentColor;
-  -webkit-mask: var(--mdi-chevron-right) center / 16px no-repeat;
-  mask: var(--mdi-chevron-right) center / 16px no-repeat;
-}
-.settings-toggle[aria-expanded="true"] .settings-title::before {
-  -webkit-mask-image: var(--mdi-chevron-down);
-  mask-image: var(--mdi-chevron-down);
-}
 .settings-status {
   color: var(--muted);
   font-size: 12px;
@@ -1947,6 +1915,8 @@ dialog :is(h3, h4):has(> .settings-toggle) {
 /* Keep verification evidence readable in narrow Ingress panels. */
 .verification { margin: 10px 0; min-width: 0; }
 .verification > summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+/* A failed check shows on the closed line, in the error color. */
+.verification > summary.has-failed { color: var(--error); }
 .verification-result { border: 1px solid var(--border, #8885); border-radius: 8px; margin: 6px 0; padding: 10px; overflow-wrap: anywhere; }
 .verification-result summary { cursor: pointer; font-size: 13px; }
 .verification-result pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; max-height: 260px; overflow: auto; }
@@ -2089,14 +2059,15 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   overflow-wrap: anywhere;
 }
 
-/* Disclosure marks on <details>: the same Material Design Icons arrow instead of the browser's triangle. */
-:is(.verification, .verification-result, .browser-permission-details) > summary {
-  list-style: none;
-}
-:is(.verification, .verification-result, .browser-permission-details) > summary::-webkit-details-marker {
-  display: none;
-}
-:is(.verification, .verification-result, .browser-permission-details) > summary::before {
+/*
+ * One Material Design Icons arrow, at one size, for every collapsible part of the page:
+ * the Settings section headers, the thread step list, and each <details class="disclosure">
+ * (the checks block, Scheduled runs, the GitHub and remote-control parts). It replaces the
+ * browser's own triangle on <details>.
+ */
+.settings-title::before,
+.activity-chevron::before,
+details.disclosure > summary::before {
   content: "";
   display: inline-block;
   width: 16px;
@@ -2107,7 +2078,15 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   -webkit-mask: var(--mdi-chevron-right) center / 16px no-repeat;
   mask: var(--mdi-chevron-right) center / 16px no-repeat;
 }
-:is(.verification, .verification-result, .browser-permission-details)[open] > summary::before {
+.settings-toggle[aria-expanded="true"] .settings-title::before,
+.activity-toggle[aria-expanded="true"] .activity-chevron::before,
+details.disclosure[open] > summary::before {
   -webkit-mask-image: var(--mdi-chevron-down);
   mask-image: var(--mdi-chevron-down);
+}
+details.disclosure > summary {
+  list-style: none;
+}
+details.disclosure > summary::-webkit-details-marker {
+  display: none;
 }

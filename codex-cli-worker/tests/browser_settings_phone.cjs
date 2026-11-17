@@ -92,6 +92,13 @@ async function checkLayout(page) {
       // Space from the last thing in the open section to the section's end, where the next divider is.
       below.push([section.id, Math.round(section.getBoundingClientRect().bottom - last.getBoundingClientRect().bottom)]);
     }
+    // Every visible <details> in Settings and Scheduled runs uses the same arrow, not the browser's triangle.
+    for (const summary of document.querySelectorAll('#settings details > summary')) {
+      if (!summary.offsetParent) continue;
+      const style = getComputedStyle(summary, '::before');
+      arrows.push(`${style.width} ${style.height} ${style.maskImage.includes('svg') || style.webkitMaskImage.includes('svg')}`);
+      if (getComputedStyle(summary).listStyleType !== 'none') arrows.push(`triangle on ${summary.textContent}`);
+    }
     return {arrows, above, closed, below};
   });
   assert.equal(new Set(layout.arrows).size, 1, `one arrow size: ${layout.arrows}`);
