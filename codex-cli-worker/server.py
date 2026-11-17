@@ -50,6 +50,7 @@ from relay_reads import RelayReads, ReadError as RelayReadError
 import schedule_api
 import github_access
 import permission_overrides_api
+import protection_switches
 from account_access import AccountAccess, rejected_sign_in_error
 import sqlite3
 from interaction_diagnostics import RollingDiagnostics, InteractionRecorder
@@ -4501,6 +4502,7 @@ def count_new_prompts(counts: Any, records: list[dict[str, Any]], previous: dict
 
 def build_app_server_args() -> list[str]:
     """Start the bidirectional CLI transport with approvals routed to the user."""
+    protection_switches.prepare_native()
     return [CODEX_BINARY, "app-server", "--config", 'approval_policy="on-request"',
             "--config", 'approvals_reviewer="user"', *verification_mcp_args(), *data_mcp_args(), *scheduling_mcp_args(), *overrides_mcp_args(),
             *github_mcp_args()]
@@ -5988,6 +5990,7 @@ def status() -> Response:
             "integration": integration_status(),
             "remote_control": remote_control_summary(),
             "github": github_service.status(),
+            "protection_checks": protection_switches.status(DATA_ROOT / "protection-checks/settings.json"),
         }
     )
 
@@ -7138,6 +7141,7 @@ def main() -> None:
 
 
 override_service = permission_overrides_api.register(_ToolWorker())
+protection_switches.register(_ToolWorker())
 
 
 if __name__ == "__main__":

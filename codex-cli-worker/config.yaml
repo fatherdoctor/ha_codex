@@ -55,7 +55,7 @@ schema:
   model_pin: str?
   model_reasoning_effort: list(minimal|low|medium|high|xhigh)
   reasoning_summary: list(concise|detailed|none)
-  codex_sandbox: list(workspace-write|read-only)
+  codex_sandbox: list(workspace-write|read-only|danger-full-access)
   task_root: str
   notify_service: str?
   github_client_id: str?

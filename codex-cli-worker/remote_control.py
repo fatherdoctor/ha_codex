@@ -46,6 +46,7 @@ from pathlib import Path
 from typing import Any
 
 import gate_rules
+import protection_switches
 import websocket
 
 EXEC_RULES_WARNING = "Codex could not load command rules. Fix the rule files and restart the app before turning on remote control."
@@ -60,9 +61,8 @@ _exec_rules_lock = threading.Lock()
 
 def exec_rules_enabled() -> bool:
     """Return whether the managed exec-rules kind is on."""
-    # TODO(CX-CHECK-TOGGLES): use its shared saved setting and rebuild requirements
-    # before starting Codex. The named sequencing ruling keeps this kind on now.
-    return True
+    values = protection_switches.load()
+    return any(values[key] for key in protection_switches.SELF)
 
 
 def exec_rules_warning_problem(message: Any) -> str:
@@ -342,12 +342,13 @@ def requirements_problem(path: Path) -> str:
     except (OSError, ValueError) as exc:
         return f"the managed requirements could not be read ({exc})"
     modes = data.get("allowed_sandbox_modes")
-    if not isinstance(modes, list) or not modes or "danger-full-access" in modes:
+    protections = protection_switches.load()
+    if not isinstance(modes, list) or not modes or (protections["full_access"] and "danger-full-access" in modes):
         return "the managed requirements do not rule out the full-access sandbox"
     approvals = data.get("allowed_approval_policies")
-    if not isinstance(approvals, list) or not approvals or "never" in approvals:
+    if not isinstance(approvals, list) or not approvals or (protections["full_access"] and "never" in approvals):
         return "the managed requirements do not rule out the never approval policy"
-    if data.get("allow_managed_hooks_only") is not True:
+    if protections["app_settings"] and data.get("allow_managed_hooks_only") is not True:
         return "the managed requirements do not keep hooks to the managed ones"
     return managed_exec_rules_problem(data)
 
@@ -364,7 +365,7 @@ SELF_TEST_CASES = (
     ("PreToolUse", False, {"hook_event_name": "PreToolUse", "tool_name": "Bash",
                            "tool_input": {"command": "ls /config"}}, False),
 )
-_self_test_cache: dict[tuple[str, float], str] = {}
+_self_test_cache: dict[tuple[str, float, tuple[bool, ...]], str] = {}
 
 
 def hook_problem(hook: Path, run: Callable[..., Any] = subprocess.run) -> str:
@@ -373,7 +374,7 @@ def hook_problem(hook: Path, run: Callable[..., Any] = subprocess.run) -> str:
     The result is kept per hook file and modification time: the image's copy never changes while the app runs.
     """
     try:
-        key = (str(hook), hook.stat().st_mtime)
+        key = (str(hook), hook.stat().st_mtime, tuple(protection_switches.load().values()))
     except OSError:
         return "the command check is missing"
     if key in _self_test_cache:
@@ -381,6 +382,8 @@ def hook_problem(hook: Path, run: Callable[..., Any] = subprocess.run) -> str:
     problem = ""
     with tempfile.TemporaryDirectory() as tmp:
         for event, remote_on, payload, refused in SELF_TEST_CASES:
+            if refused and not protection_switches.load()["credential_reads"]:
+                refused = False
             state = Path(tmp) / "state.json"
             state.write_text(json.dumps({"enabled": remote_on}), encoding="utf-8")
             try:
@@ -963,6 +966,11 @@ class Supervisor:
     # Actions ------------------------------------------------------------------------------------
 
     def _gate_problem(self, probe: bool = False) -> str:
+        if probe:
+            try:
+                protection_switches.prepare_native()
+            except (OSError, ValueError):
+                return "Protection choices could not be prepared. Restart the app after checking its settings."
         if not exec_rules_enabled() or (probe and self._rules_problem in EXEC_RULES_RETRYABLE):
             self._rules_problem = ""
         problem = self.gate() or self._rules_problem or exec_rules_problem()

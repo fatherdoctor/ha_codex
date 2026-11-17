@@ -35,6 +35,7 @@ import os
 import shlex
 import stat
 import time
+import protection_switches
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -127,14 +128,14 @@ def load_rules(path: Path | None = None) -> dict[str, Any]:
     try:
         data = json.loads((path or rules_path()).read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return rules
+        return protection_switches.filtered_rules(rules)
     if not isinstance(data, dict):
-        return rules
+        return protection_switches.filtered_rules(rules)
     for key in LIST_KEYS:
         extra = data.get(key)
         if isinstance(extra, list):
             rules[key] = sorted(set(rules[key]) | {str(item) for item in extra})
-    return rules
+    return protection_switches.filtered_rules(rules)
 
 
 def find_refused(text: str, rules: dict[str, Any], refused_scripts: frozenset[str] | set[str] = frozenset()) -> list[Finding]:
@@ -166,7 +167,7 @@ def find_refused(text: str, rules: dict[str, Any], refused_scripts: frozenset[st
             if definition and definition.group(1) in definitions:
                 findings.append(Finding(number, f"a {definition.group(1)} definition, which runs on its own once loaded", line,
                                         "runs_on_load"))
-        if TEMPLATE_ACTION_RE.match(line):
+        if rules.get("_protections", protection_switches.DEFAULTS)["templated_actions"] and TEMPLATE_ACTION_RE.match(line):
             findings.append(Finding(number, "a templated action", line, "template"))
         if not match and SCRIPT_TARGET_RE.match(line):
             for ref in SCRIPT_REF_RE.findall(line):
@@ -835,7 +836,7 @@ def _policy_restriction(text: str) -> str:
     """
     plain = re.sub(r"[\\'\"]", "", text)
     plain = re.sub(r"/{2,}", "/", plain)
-    if re.search(r"/data/options\.json", plain, re.IGNORECASE):
+    if re.search(r"/data/(?:options\.json|protection-checks(?:/|\b))", plain, re.IGNORECASE):
         return "changes the add-on's settings"
     if re.search(r"schedules\.sqlite3(?:-(?:journal|wal|shm))?|/data/sched[^/\s]*[*?\[]", plain, re.IGNORECASE):
         return "accesses the protected schedule database"
@@ -862,6 +863,8 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
     ``payload`` is the hook's input. Nothing here ever asks: the answer is a
     refusal or no opinion, and with no opinion the usual approval flow runs.
     """
+    protections = rules.get("_protections", protection_switches.DEFAULTS)
+    credentials_on = protections["credential_reads"]
     data = payload if isinstance(payload, dict) else {}
     event = str(data.get("hook_event_name") or event or "")
     tool_input = data.get("tool_input", data.get("input", data))
@@ -871,7 +874,7 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
             return "This permission request does not name an action the command check can review; it is refused."
     # An ordinary PermissionRequest is not an escalation to full access. The
     # unchanged hook returns exit 0 with no output, never an allow decision.
-    if remote_on:
+    if remote_on and protections["templated_actions"]:
         rules = {**rules, "runs_on_load_keys": sorted(set(rules["runs_on_load_keys"]) | {"template"})}
     deadline = time.monotonic() + 2.0
     texts = _strings(tool_input)
@@ -880,14 +883,17 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
     for text in texts:
         if time.monotonic() > deadline:
             return "This tool input exceeds the command check's time budget; it is refused."
+        if protections["app_settings"] and re.search(r"/data/+protection-checks(?:/|\b)", re.sub(r"[\\'\"]", "", text)):
+            return "This request accesses the saved protection choices, which are protected."
         if remote_on:
-            if FULL_ACCESS_RE.search(text):
+            if protections["full_access"] and FULL_ACCESS_RE.search(text):
                 return "This request enables full access, which is never allowed."
             restriction = _policy_restriction(text)
-            if restriction:
+            restriction_group = "credential_reads" if any(word in restriction for word in ("credential", "GitHub sign-in")) else "app_settings"
+            if restriction and protections[restriction_group]:
                 return f"This request {restriction}, which is never allowed."
             definition = _python_definition(text)
-            if definition:
+            if definition and protection_switches.kind_enabled(definition, protections):
                 return f"This request names a {definition} definition file, which Codex may not write or edit."
         if PATCH_BEGIN in text:
             if len(text.encode("utf-8")) > PATCH_MAX_BYTES:
@@ -897,7 +903,7 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
                 for path, added in parse_patch(text):
                     if time.monotonic() > deadline:
                         raise ValueError("command check time budget exceeded")
-                    for pattern, why in PROTECTED_PATH_RES:
+                    for pattern, why in (PROTECTED_PATH_RES if credentials_on else ()):
                         if pattern.search(path):
                             return f"This edit {why}, which is never allowed."
                     if path.lower().endswith(YAML_SUFFIXES):
@@ -922,10 +928,11 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
             # The rest of a command that carries a patch (a heredoc) is still a command.
             text = PATCH_BLOCK_RE.sub(" ", text)
         if remote_on:
-            definition = re.search(r"\b(" + "|".join(REMOTE_DEFINITIONS) + r")\s*:", text)
+            definitions = [name for name in REMOTE_DEFINITIONS if protection_switches.kind_enabled(name, protections)]
+            definition = re.search(r"\b(" + "|".join(definitions) + r")\s*:", text) if definitions else None
             if definition:
                 return f"This command names a {definition[1]} definition, which Codex may not write or edit."
-        for pattern, why in PROTECTED_COMMAND_RES:
+        for pattern, why in (PROTECTED_COMMAND_RES if credentials_on else ()):
             if pattern.search(text):
                 return f"This command {why}, which is never allowed."
         # Join literal words before the conservative quote/backslash floor.
@@ -934,7 +941,7 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
             return ("This command may hide a Home Assistant Supervisor command in a shell line continuation. "
                     "Write the command on one line so it can be checked.")
         floor = _floor_texts(text, joined)
-        if (_ha_supervisor_command(text)
+        if credentials_on and (_ha_supervisor_command(text)
                 or any(HA_ALWAYS_TEXT_RE.search(plain) for plain in floor)
                 or (remote_on and (any(HA_REMOTE_TEXT_RE.search(plain) for plain in floor)
                                    or _ha_unknown_flag(text)))

@@ -19,6 +19,7 @@ import uuid
 from typing import Any, Callable, TextIO
 
 import remote_control
+import protection_switches
 from gate_rules import names_image_folder
 from shell_words import split_words, strip_comments
 
@@ -28,7 +29,7 @@ DISPLAY_LIMIT = 32000
 REQUEST_LIMIT = 50
 COMMAND_APPROVAL = "item/commandExecution/requestApproval"
 # The app's permission policy, its house rules and Codex's own configuration: a change there is never allowed here.
-PROTECTED_PREFIXES = ("/usr/share/ha_codex", "/data/codex-home/AGENTS.md", "/data/codex-home/config.toml",
+PROTECTED_PREFIXES = ("/data/protection-checks", "/usr/share/ha_codex", "/data/codex-home/AGENTS.md", "/data/codex-home/config.toml",
                       "/data/options.json", "/data/worker_api_token", "/data/schedules.sqlite3",
                       "/data/schedules.sqlite3-journal", "/data/schedules.sqlite3-wal", "/data/schedules.sqlite3-shm",
                       "/data/interaction-diagnostics.json", "/data/interaction-diagnostics.key",
@@ -39,7 +40,11 @@ PROTECTED_PREFIXES = ("/usr/share/ha_codex", "/data/codex-home/AGENTS.md", "/dat
 
 def touches_protected_path(path: str) -> bool:
     """Return whether a file change path is, or lies inside, a protected policy location."""
+    protections = protection_switches.load()
     normalized = posixpath.normpath(posixpath.join("/config", str(path)))
+    credential = normalized.startswith(("/data/github", "/data/worker_api_token", "/data/interaction-diagnostics.key"))
+    if not protections["credential_reads" if credential else "app_settings"]:
+        return False
     if normalized.startswith('/data/interaction-diagnostics.json.corrupt-'):
         return True
     return any(normalized == prefix or normalized.startswith(prefix + "/") for prefix in PROTECTED_PREFIXES)
@@ -55,7 +60,7 @@ PROTECTED_COMMAND_RES = (
     re.compile(r"ha_codex/+(policy|agents|house)", re.IGNORECASE),
     re.compile(r"codex-home/+[^\s/]*[*?\[]", re.IGNORECASE),
     re.compile(r"codex-home.*(agents\.md|config\.toml)|(agents\.md|config\.toml).*codex-home", re.IGNORECASE | re.DOTALL),
-    re.compile(r"/data/+options\.json|worker_api_token|schedules\.sqlite3(?:-(?:journal|wal|shm))?|/data/+sched[^/\s]*[*?\[]", re.IGNORECASE),
+    re.compile(r"/data/+protection-checks|/data/+options\.json|worker_api_token|schedules\.sqlite3(?:-(?:journal|wal|shm))?|/data/+sched[^/\s]*[*?\[]", re.IGNORECASE),
 )
 
 
@@ -262,6 +267,12 @@ def _protected_ancestor_operations(command: str, initial_cwd: str = '', depth: i
 
 def command_names_protected_path(command: str) -> bool:
     """Return whether a command's text names a protected policy location by any plain spelling."""
+    protections = protection_switches.load()
+    credential_path = re.compile(r"/data/(?:github(?:\.sock)?|worker_api_token|interaction-diagnostics\.key)(?:/[^\s;|&]*)?", re.IGNORECASE)
+    if not protections["app_settings"]:
+        return bool(protections["credential_reads"] and credential_path.search(command))
+    if not protections["credential_reads"]:
+        command = credential_path.sub("", command)
     if _protected_ancestor_operations(str(command or '')):
         return True
     text = re.sub(r"[\'\"\\]", "", str(command or ""))
@@ -418,6 +429,8 @@ def confirmation(record: dict[str, Any]) -> dict[str, str]:
 
 def require_supported_policy(params: dict[str, Any]) -> None:
     """Integration-owned requests must refuse full access instead of relying on Codex's fallback."""
+    if not protection_switches.load()["full_access"]:
+        return
     config = params.get("config") or {}
     policy = params.get("sandboxPolicy") or {}
     modes = [params.get("sandbox"), config.get("sandbox_mode") if isinstance(config, dict) else None,

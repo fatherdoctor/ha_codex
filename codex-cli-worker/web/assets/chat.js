@@ -413,6 +413,7 @@ async function loadUsage() {
       const data = await api("status");
       renderUsage(data.codex_usage);
       renderIntegration(data.integration);
+      renderProtectionState(data.protection_checks);
       // The quota check also tells the worker which model Codex picks when the add-on names none.
       // Not awaited: the quota shown must not depend on it.
       if (state.catalog) loadChatOptions(true);
@@ -3529,6 +3530,7 @@ $("settings-button").onclick = async () => {
     loadPause(),
     loadBrowserPermissions(),
     loadPermissionOverrides(),
+    loadProtectionSwitches(),
   ]);
   for (const result of results)
     if (result.status === "rejected") settingsError(result.reason);
@@ -3599,3 +3601,52 @@ loadLogin().catch(() => {});
 loadGithub().catch(() => {});
 loadPause().catch(() => {});
 setInterval(tickElapsed, 1000);
+
+// The worker owns the saved choice. Status and the administrator view use its same snapshot.
+let protectionState = null;
+const protectionConfirmations = {
+  credential_reads: "The assistant can read private credentials and use connections already available inside this app. Continue?",
+  full_access: "The assistant can request full access inside this app container. Normal approval and sandbox restrictions can then be removed. Continue?",
+  app_settings: "The assistant can change this app’s settings, policy, rules and these protection switches. Continue?",
+};
+function renderProtectionState(data) {
+  if (!data?.protections) return;
+  protectionState = data;
+  $("protection-notice").textContent = data.notice;
+  $("protection-notice").hidden = !data.notice;
+  document.querySelectorAll("[data-protection]").forEach(input => {
+    input.checked = data.protections[input.dataset.protection] === true;
+  });
+  for (const id of ["command-checks", "self-protection"]) {
+    const inputs = [...$(id).querySelectorAll("[data-protection]")];
+    const off = inputs.filter(input => !input.checked);
+    setSectionStatus(id, off.length ? `${off.length} off` : data.restart_required ? "Restart needed" : "All on", off.length > 0 || data.restart_required);
+    $(id + "-notice").textContent = data.notice ? `${data.notice} ${data.restart_note}` : "All checks are on.";
+  }
+}
+async function loadProtectionSwitches() {
+  const inputs = [...document.querySelectorAll("[data-protection]")];
+  inputs.forEach(input => { input.disabled = true; });
+  try {
+    renderProtectionState(await api("protection-checks"));
+    inputs.forEach(input => { input.disabled = false; });
+  } catch (_) {
+    for (const id of ["command-checks", "self-protection"]) setSectionStatus(id, "Administrators only");
+  }
+}
+document.querySelectorAll("[data-protection]").forEach(input => input.addEventListener("change", async () => {
+  if (!protectionState) return;
+  const kind = input.dataset.protection;
+  const enabled = input.checked;
+  const confirmation = !enabled && protectionConfirmations[kind];
+  if (confirmation && !window.confirm(confirmation)) return renderProtectionState(protectionState);
+  document.querySelectorAll("[data-protection]").forEach(control => { control.disabled = true; });
+  try {
+    renderProtectionState(await api("protection-checks", {kind, enabled, confirmed: Boolean(confirmation)}));
+  } catch (error) {
+    renderProtectionState(protectionState);
+    settingsError(error);
+  } finally {
+    await loadProtectionSwitches();
+  }
+}));

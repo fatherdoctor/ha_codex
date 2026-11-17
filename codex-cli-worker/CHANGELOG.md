@@ -2,6 +2,8 @@
 
 ## 0.3.3 (unreleased)
 
+- Added grouped owner controls for command checks and app self-protection. Choices default on, require administrator access, and use the same signed state across enforcement layers. Disabling self-protection requires confirmation; the page and Status show the choice and any required restart.
+
 - The approval card and the remote-control hook now read command text with one shared copy of the comment
   and word code (`shell_words.py`), so a later fix cannot leave the two checks reading a command differently.
   Each still answers unreadable text its own way. No command is judged differently.

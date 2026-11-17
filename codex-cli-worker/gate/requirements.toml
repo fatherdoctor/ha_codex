@@ -30,7 +30,7 @@ decision = "forbidden"
 justification = "The managed command rule refuses credential access."
 
 [[rules.prefix_rules]]
-pattern = [{ token = "cat" }, { any_of = ["/data/options.json", "/etc/codex/requirements.toml", "/etc/codex/managed_config.toml", "/usr/share/ha_codex/policy.json", "/data/codex-home/config.toml"] }]
+pattern = [{ token = "cat" }, { any_of = ["/data/options.json", "/data/protection-checks/settings.json", "/data/protection-checks/signing.key", "/etc/codex/requirements.toml", "/etc/codex/managed_config.toml", "/usr/share/ha_codex/policy.json", "/data/codex-home/config.toml"] }]
 decision = "forbidden"
 justification = "The managed command rule protects the app settings and policy."
 

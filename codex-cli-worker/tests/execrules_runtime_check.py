@@ -25,6 +25,7 @@ import tomllib
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import remote_control
+import protection_switches
 
 
 def main():
@@ -48,7 +49,7 @@ def main():
         (managed / 'requirements.toml').write_text(text)
         for name in ('ha', 'codex'):
             target = binary_dir / name
-            target.write_text('#!/bin/sh\nprintf EXECUTED\n'); target.chmod(0o755)
+            target.write_text('#!/bin/sh\nprintf SYNTHETIC_ONLY\n'); target.chmod(0o755)
         for name in ('secrets.yaml', 'secrets.yml', '.storage/auth', '.storage/auth_provider.homeassistant'):
             p = config / name; p.parent.mkdir(exist_ok=True); p.write_text('SYNTHETIC_ONLY\n')
         for name in ('options.json', 'codex-home/config.toml'):
@@ -187,8 +188,21 @@ def main():
                     literal = shlex.join(tokens)
                     cases.extend([(f'rule{n} {literal}', literal), (f'rule{n} pipeline {literal}', 'printf fixture | ' + literal)])
             assert ('rule1 ha super', 'ha super') in cases, 'Supervisor alias missing from native cases'
-            assert len(cases) == 40, 'expected twenty literal alternatives and their pipelines'
+            assert len(cases) == 44, 'expected twenty-two literal alternatives and their pipelines'
             batch(cases)
+            # A disabled self-protection removes only its own catalogue rules.
+            # Each request below reads or runs a synthetic fixture, never a real credential.
+            choices = (
+                ('credential_reads', 'cat /config/secrets.yaml', 'cat /data/options.json'),
+                ('app_settings', 'cat /data/options.json', 'cat /config/secrets.yaml'),
+                ('full_access', 'codex --sandbox danger-full-access', 'cat /config/secrets.yaml'),
+            )
+            for kind, allowed_command, retained_command in choices:
+                values = {**protection_switches.DEFAULTS, kind: False}
+                (managed / 'requirements.toml').write_text(protection_switches.requirements(text, values))
+                batch([(kind + ' disabled: synthetic operation executes', allowed_command)], expect_refused=False)
+                batch([(kind + ' disabled: other group remains refused', retained_command)])
+            (managed / 'requirements.toml').write_text(text)
             # A malformed ordinary companion cannot erase managed refusals, but
             # it must prevent the production readiness check from allowing Turn on.
             (home / 'rules').mkdir(); (home / 'rules' / 'invalid.rules').write_text('not_valid_starlark(\n')
@@ -199,7 +213,7 @@ def main():
             sup = remote_control.Supervisor('unused', scratch / 'state', dict, lambda: '', gate=lambda: '')
             ok, state = sup.start(); assert not ok and not state['available'] and state['blocked_reason'] == problem
             batch([('malformed companion retains managed refusal', 'ha supervisor')], expect_warning=True)
-            print(json.dumps({'managed_rules': len(patterns), 'literal_and_pipeline_cases': len(cases),
+            print(json.dumps({'managed_rules': len(patterns), 'literal_and_pipeline_cases': len(cases), 'disabled_group_cases': len(choices),
                               'baseline_synthetic_read_executed': True,
                               'all_refused_without_approval': True, 'malformed_self_test': 'blocked',
                               'malformed_managed_refusal_retained': True, 'self_test_model_requests': 0,

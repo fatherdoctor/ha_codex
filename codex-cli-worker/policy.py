@@ -3,7 +3,8 @@
 The policy ships inside the app image (read-only, outside /config and outside
 every sandbox's writable roots). The worker reads it at startup and before
 every exchange. Nothing in /config, the app options or a chat message can
-loosen it: a setting the policy does not allow stops the worker at startup and
+loosen it unless the owner disables the corresponding protection on the app page.
+A setting the effective policy does not allow stops the worker at startup and
 refuses each task with a "needs support" state.
 
 Owner instructions remain in /config/AGENTS.md; no house rules ship with the app.
@@ -16,6 +17,7 @@ import errno
 import hashlib
 import os
 import stat
+import protection_switches
 from pathlib import Path
 from typing import Any
 
@@ -84,14 +86,18 @@ def load_policy(path: Path | None = None) -> dict[str, Any]:
     modes = policy["allowed_sandbox_modes"]
     if not isinstance(modes, list) or not modes or not all(isinstance(mode, str) for mode in modes):
         raise PolicyError("allowed_sandbox_modes must be a non-empty list of sandbox modes.")
-    # These hold whatever the file says: the fork never ships an approval-free mode.
-    if "danger-full-access" in modes:
+    # These checks hold while the owner keeps Full access protection on.
+    protections = protection_switches.load()
+    if not protections["full_access"] and "danger-full-access" not in modes:
+        modes = [*modes, "danger-full-access"]
+        policy["allowed_sandbox_modes"] = modes
+    if protections["full_access"] and "danger-full-access" in modes:
         raise PolicyError("The protected policy may not allow danger-full-access.")
-    if policy["approval_policy"] == "never":
+    if protections["full_access"] and policy["approval_policy"] == "never":
         raise PolicyError('The protected policy may not set approval_policy to "never".')
-    if policy["approvals_reviewer"] != "user":
+    if protections["full_access"] and policy["approvals_reviewer"] != "user":
         raise PolicyError('The protected policy must keep approvals_reviewer set to "user".')
-    if policy["approvals_require_admin"] is not True:
+    if protections["full_access"] and policy["approvals_require_admin"] is not True:
         raise PolicyError("The protected policy must keep approvals_require_admin on.")
     return policy
 
@@ -116,7 +122,7 @@ def policy_problem(options: dict[str, Any], path: Path | None = None) -> str:
         allowed = " or ".join(policy["allowed_sandbox_modes"])
         return (f'The sandbox mode "{effective["sandbox"]}" is not allowed in this app. '
                 f"Choose {allowed} in the app's settings and restart it.")
-    if effective["approval_policy"] == "never":
+    if protection_switches.load()["full_access"] and effective["approval_policy"] == "never":
         return 'The effective approval policy is "never", which this app refuses.'
     return ""
 

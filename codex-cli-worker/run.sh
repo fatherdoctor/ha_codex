@@ -32,4 +32,5 @@ python3 /integration_sync.py || bashio::log.warning "The integration install ste
 python3 /integration_sync.py --announce &
 
 echo "Codex CLI Worker starting"
+python3 /protection_switches.py --template /usr/share/ha_codex/requirements-template.toml --write-requirements /etc/codex/requirements.toml
 python3 /server.py

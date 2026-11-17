@@ -87,6 +87,8 @@ async function checkButtonRows(page) {
       assert.deepEqual(headers.map(({title, status, attention}) => ({title, status, attention})), [
         {title: 'ChatGPT account', status: 'Signing in: enter the code', attention: true},
         {title: 'GitHub', status: 'Connected as synthetic-owner, 1 repository', attention: false},
+        {title: 'Command checks', status: 'All on', attention: false},
+        {title: 'Self-protection', status: 'All on', attention: false},
         {title: 'Permissions overrides', status: '3 of 5 on', attention: false},
         {title: 'Interaction logs', status: 'Keeps 25', attention: false},
         {title: 'Assistant', status: 'Running', attention: false},

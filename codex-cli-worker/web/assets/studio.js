@@ -226,13 +226,19 @@ function showStudioStatus() {
   ]) details.append(textNode("dt", name), textNode("dd", value));
   const plan = textNode("dd", "Unavailable");
   const access = textNode("dd", "Checking sign-in…");
+  const protectionStatus = textNode("dd", "Protection status unavailable.");
   details.append(textNode("dt", "ChatGPT plan (information only)"), plan,
     textNode("dt", "Codex access"), access);
+  details.append(textNode("dt", "Protections"), protectionStatus);
   $("status-dialog").showModal();
   // Start with unavailable fields so switching accounts never displays an old plan.
   api("status").then(data => {
     plan.textContent = data.account_access?.plan_type || "Unavailable";
     access.textContent = data.account_access?.message || "Codex access cannot be confirmed by a passive read.";
+    const protections = data.protection_checks;
+    protectionStatus.textContent = protections ? protections.notice || "All checks are selected on." : "Protection status unavailable.";
+    if (protections?.restart_note) details.append(textNode("dt", "Apply protection choices"), textNode("dd", protections.restart_note));
+    renderProtectionState(protections);
   }).catch(() => { access.textContent = "Codex access could not be checked."; });
 }
 $("header-status").onclick = showStudioStatus;

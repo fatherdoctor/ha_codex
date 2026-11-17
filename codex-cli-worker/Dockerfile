@@ -95,6 +95,9 @@ COPY permission_overrides.py permission_overrides_api.py permission_overrides_mc
 # /config and outside every sandbox's writable roots. The marker goes last: remote control can be
 # turned on only when it and every file it lists are present and the hook passes its self-test.
 COPY gate/requirements.toml gate/managed_config.toml /etc/codex/
+COPY gate/requirements.toml /usr/share/ha_codex/requirements-template.toml
+COPY protection_switches.py /
+COPY protection_switches.py /usr/share/ha_codex/
 COPY gate/gate_hook.py gate_rules.py shell_words.py policy/refused-domains.json /usr/share/ha_codex/
 COPY gate/remote-control-gate.json /usr/share/ha_codex/remote-control-gate.json
 RUN chmod 0644 /etc/codex/requirements.toml /etc/codex/managed_config.toml /usr/share/ha_codex/* \
