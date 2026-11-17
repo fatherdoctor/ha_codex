@@ -9,6 +9,17 @@
   says that, instead of saying the command touches the app's permission policy.
 - A scheduling or mailbox request whose text holds a character that cannot be stored (a lone surrogate) is now
   refused with a sentence that says so, instead of the bare word `utf-8`.
+- Settings has one **Accounts and connections** section for every sign-in and pairing: ChatGPT account, GitHub,
+  and the ChatGPT app pairing. It starts collapsed. Its header joins the three states ("ChatGPT signed in · GitHub
+  connected · app off"), and when one needs the owner the header names only that one, in red. ChatGPT and GitHub
+  keep their own collapsed headers, codes and countdowns inside it. The app pairing part shows the remote
+  connection state with **Get a pairing code**, **Manage remote connection** and **Turn off**; it replaces the
+  separate **Manage remote connection** row. A pairing code has no countdown: the worker does not know how long
+  Codex keeps it. **Turn off** stops the connection and does not remove the pairing in the ChatGPT app.
+- When a request gets HTTP 401 because the Home Assistant ingress session expired (a tab that slept), the page
+  asks Home Assistant for a new session once, through the parent window as the Home Assistant frontend does, and
+  sends the request again. Requests that fail together share one renewal. If the renewal fails, a banner says the
+  session expired and offers **Reload**; the page no longer shows "The worker returned HTTP 401".
 - A thread started from the chat page no longer shows the page's instructions as your message in the ChatGPT app.
   The page sends its fixed rules as Codex developer instructions, and the message holds only your text, so the
   app shows your words as the message and the title. The details of each message (the backup folder, attached

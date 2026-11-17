@@ -121,6 +121,10 @@
           <span id="phone-title">New chat</span><button id="phone-new" class="icon" aria-label="New chat">＋</button>
           <button id="phone-thread-actions" class="icon" aria-label="Thread menu" aria-haspopup="menu">⋯</button></div>
         <p id="integration-notice" role="status" hidden></p>
+        <section id="session-banner" class="page-banner" role="alert" hidden>
+          <p><strong>Your Home Assistant session expired.</strong> Reload the page to continue.</p>
+          <div class="settings-actions"><button id="session-reload">Reload</button></div>
+        </section>
         <section id="signin-banner" class="page-banner" role="status" hidden>
           <p><strong id="signin-banner-text">The assistant is not signed in to ChatGPT.</strong></p>
           <div id="signin-banner-card"></div>
@@ -391,57 +395,70 @@
           ✕
         </button>
       </div>
-      <section id="chatgpt-section">
-        <h3>ChatGPT account</h3>
-        <p id="login-status" class="muted">Loading account status…</p>
-        <p id="login-requirement" class="muted">A ChatGPT account with Codex access is required. As of November 13, 2026, OpenAI includes Codex across plans, including Free and Go; limits and workspace access vary. <a href="https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan" target="_blank" rel="noopener noreferrer">Check current availability</a>.</p>
-        <div class="settings-actions">
-          <button id="login">Sign in</button
-          ><button id="login-cancel" class="subtle" hidden>Cancel</button
-          ><button id="logout" class="subtle">Sign out</button>
-        </div>
-        <div id="login-card"></div>
-      </section>
-      <section id="github-section" aria-labelledby="github-title">
-        <h3 id="github-title">GitHub</h3>
-        <p id="github-status" class="muted">Loading GitHub status…</p>
-        <p class="muted">Lets the assistant fetch, pull and push the GitHub repositories you choose. The add-on keeps the sign-in; the assistant never sees it, and every push goes through the push guard first.</p>
-        <dl id="github-details" class="github-details" hidden></dl>
-        <ul id="github-repositories" class="github-repositories" hidden></ul>
-        <div id="github-flow"></div>
-        <div class="settings-actions">
-          <button id="github-connect">Connect GitHub</button
-          ><button id="github-cancel" class="subtle" hidden>Cancel</button
-          ><button id="github-test" class="subtle" hidden>Read test</button
-          ><button id="github-check" class="subtle" hidden>Check now</button
-          ><button id="github-accept" class="subtle" hidden>Accept this access</button
-          ><button id="github-disconnect" class="subtle" hidden>Disconnect</button>
-        </div>
-        <p id="github-test-result" class="muted" role="status" hidden></p>
-        <details id="github-token">
-          <summary>Use a token instead</summary>
-          <p class="muted">For an account that cannot install the GitHub App. On github.com open Settings, Developer settings, Fine-grained tokens. Choose Only select repositories with one repository, Contents: Read and write, and an expiry of 90 days or less. Paste it here once. It is not shown again.</p>
-          <form id="github-token-form" class="github-form" autocomplete="off">
-            <label>Repository (owner/name)<input id="github-token-repository" name="repository" autocomplete="off" spellcheck="false" placeholder="owner/repository" required></label>
-            <label>Token<input id="github-token-value" name="token" type="password" autocomplete="off" spellcheck="false" required></label>
-            <button id="github-token-save" type="submit">Use this token</button>
-          </form>
-        </details>
-        <details id="github-local" hidden>
-          <summary>Repositories on this box</summary>
-          <p class="muted">Git on this box uses the add-on's sign-in only through the add-on. No credential is written into a repository.</p>
-          <form id="github-clone-form" class="github-form" autocomplete="off">
-            <label>Repository<select id="github-clone-repository" name="repository" required></select></label>
-            <label>New folder under /share<input id="github-clone-folder" name="folder" autocomplete="off" spellcheck="false" placeholder="repository name" pattern="[A-Za-z0-9][A-Za-z0-9_\-]{0,99}" required></label>
-            <button id="github-clone" type="submit">Clone</button>
-          </form>
-          <form id="github-link-form" class="github-form" autocomplete="off">
-            <label>Repository<select id="github-link-repository" name="repository" required></select></label>
-            <label>Existing folder under /share or /config<input id="github-link-path" name="path" autocomplete="off" spellcheck="false" placeholder="/share/repository" required></label>
-            <button id="github-link" type="submit">Link</button>
-          </form>
-        </details>
-        <p id="github-result" role="alert"></p>
+      <section id="accounts-section" aria-labelledby="accounts-title">
+        <h3 id="accounts-title">Accounts and connections</h3>
+        <section id="chatgpt-section">
+          <h4>ChatGPT account</h4>
+          <p id="login-status" class="muted">Loading account status…</p>
+          <p id="login-requirement" class="muted">A ChatGPT account with Codex access is required. As of November 13, 2026, OpenAI includes Codex across plans, including Free and Go; limits and workspace access vary. <a href="https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan" target="_blank" rel="noopener noreferrer">Check current availability</a>.</p>
+          <div class="settings-actions">
+            <button id="login">Sign in</button
+            ><button id="login-cancel" class="subtle" hidden>Cancel</button
+            ><button id="logout" class="subtle">Sign out</button>
+          </div>
+          <div id="login-card"></div>
+        </section>
+        <section id="github-section" aria-labelledby="github-title">
+          <h4 id="github-title">GitHub</h4>
+          <p id="github-status" class="muted">Loading GitHub status…</p>
+          <p class="muted">Lets the assistant fetch, pull and push the GitHub repositories you choose. The add-on keeps the sign-in; the assistant never sees it, and every push goes through the push guard first.</p>
+          <dl id="github-details" class="github-details" hidden></dl>
+          <ul id="github-repositories" class="github-repositories" hidden></ul>
+          <div id="github-flow"></div>
+          <div class="settings-actions">
+            <button id="github-connect">Connect GitHub</button
+            ><button id="github-cancel" class="subtle" hidden>Cancel</button
+            ><button id="github-test" class="subtle" hidden>Read test</button
+            ><button id="github-check" class="subtle" hidden>Check now</button
+            ><button id="github-accept" class="subtle" hidden>Accept this access</button
+            ><button id="github-disconnect" class="subtle" hidden>Disconnect</button>
+          </div>
+          <p id="github-test-result" class="muted" role="status" hidden></p>
+          <details id="github-token">
+            <summary>Use a token instead</summary>
+            <p class="muted">For an account that cannot install the GitHub App. On github.com open Settings, Developer settings, Fine-grained tokens. Choose Only select repositories with one repository, Contents: Read and write, and an expiry of 90 days or less. Paste it here once. It is not shown again.</p>
+            <form id="github-token-form" class="github-form" autocomplete="off">
+              <label>Repository (owner/name)<input id="github-token-repository" name="repository" autocomplete="off" spellcheck="false" placeholder="owner/repository" required></label>
+              <label>Token<input id="github-token-value" name="token" type="password" autocomplete="off" spellcheck="false" required></label>
+              <button id="github-token-save" type="submit">Use this token</button>
+            </form>
+          </details>
+          <details id="github-local" hidden>
+            <summary>Repositories on this box</summary>
+            <p class="muted">Git on this box uses the add-on's sign-in only through the add-on. No credential is written into a repository.</p>
+            <form id="github-clone-form" class="github-form" autocomplete="off">
+              <label>Repository<select id="github-clone-repository" name="repository" required></select></label>
+              <label>New folder under /share<input id="github-clone-folder" name="folder" autocomplete="off" spellcheck="false" placeholder="repository name" pattern="[A-Za-z0-9][A-Za-z0-9_\-]{0,99}" required></label>
+              <button id="github-clone" type="submit">Clone</button>
+            </form>
+            <form id="github-link-form" class="github-form" autocomplete="off">
+              <label>Repository<select id="github-link-repository" name="repository" required></select></label>
+              <label>Existing folder under /share or /config<input id="github-link-path" name="path" autocomplete="off" spellcheck="false" placeholder="/share/repository" required></label>
+              <button id="github-link" type="submit">Link</button>
+            </form>
+          </details>
+          <p id="github-result" role="alert"></p>
+        </section>
+        <section id="app-pairing-section" aria-labelledby="app-pairing-title" data-always-open>
+          <h4 id="app-pairing-title">ChatGPT app pairing</h4>
+          <p id="app-pairing-status" class="muted" role="status">Loading…</p>
+          <p class="muted">The pairing code and its QR code open in their own window. The worker does not know how long a pairing code lasts, so no countdown shows. If the app refuses a code, get a new one. Turn off stops the ChatGPT app from reaching this Home Assistant until you turn it on again.</p>
+          <div class="settings-actions">
+            <button id="app-pairing-new" hidden>Get a pairing code</button
+            ><button id="remote-connection-open" class="subtle">Manage remote connection</button
+            ><button id="app-pairing-off" class="subtle" hidden>Turn off</button>
+          </div>
+        </section>
       </section>
       <section id="permission-overrides">
         <h3>Permissions overrides</h3>
