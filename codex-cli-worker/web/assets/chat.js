@@ -30,6 +30,7 @@ const state = {
   generation: 0,
   drafts: new Map(),
   signature: "",
+  approvalsShown: new Set(),
   listSignature: "",
   catalog: null,
   chatSettings: new Map(),
@@ -1420,6 +1421,7 @@ function renderTask(force = false) {
       ),
     );
   const turns = task.turns || [];
+  let newApproval = false;
   for (const turn of turns) {
     const latest = turn === turns[turns.length - 1];
     const exchange = textNode("section", "", "exchange");
@@ -1438,8 +1440,12 @@ function renderTask(force = false) {
       );
     if (turn.message)
       exchange.append(renderMarkdown(turn.message, "message user"));
+    // A request still waiting for the owner goes last, below the working lines, so it is not missed.
+    const active = latest && task.status === "running";
+    const waiting = (turn.approvals || []).filter(approval => active && approval.status === "pending");
     for (const approval of turn.approvals || [])
-      exchange.append(renderApproval(approval, task.task_id, turn.turn_id, latest && task.status === "running"));
+      if (!waiting.includes(approval))
+        exchange.append(renderApproval(approval, task.task_id, turn.turn_id, active));
     const attachments = imageAttachments(turn.attachments);
     const hasAnswer =
       turn.summary || turn.details || turn.question || attachments.length || turn.verification?.length;
@@ -1499,11 +1505,19 @@ function renderTask(force = false) {
       exchange.append(pending);
       if (latest) exchange.append(activityBlock());
     }
+    for (const approval of waiting) {
+      exchange.append(renderApproval(approval, task.task_id, turn.turn_id, active));
+      // Bring each new request into view once, even if the owner scrolled up.
+      if (!state.approvalsShown.has(approval.approval_id)) {
+        state.approvalsShown.add(approval.approval_id);
+        newApproval = true;
+      }
+    }
     area.append(exchange);
   }
   if (queued) area.append(renderQueued(task.task_id, queued));
   renderActivity();
-  area.scrollTop = force || nearBottom ? area.scrollHeight : oldScroll;
+  area.scrollTop = force || nearBottom || newApproval ? area.scrollHeight : oldScroll;
   controls();
   ensureActivity();
 }
