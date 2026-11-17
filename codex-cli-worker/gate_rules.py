@@ -560,15 +560,23 @@ HA_UNKNOWN_FLAG_RE = re.compile(
     r"[^\s;]*(?:[\"'`\\]|\$\()", re.IGNORECASE)
 
 
-def _ha_unknown_flag(text: str) -> bool:
+HA_ALWAYS_WORD_RE = re.compile(r"\b(?:supervisor|super|su)\b", re.IGNORECASE)
+
+
+def _ha_unknown_flag(text: str, remote_on: bool) -> bool:
     """Conservatively refuse a quoted, escaped or computed global-flag value.
 
     The text floor reads the command without quotes, so a value with a blank in it ("a b"
-    or a\\ b) looks like two words there, and the family after it is not found.
+    or a\\ b) looks like two words there, and the family after it is not found. With remote
+    control on, every such value is refused. With it off, only the remote families are
+    allowed, so the value is refused when a Supervisor family word follows it on the line.
+    The text is also read with every backslash-newline pair removed, as the floor reads it,
+    so a family word split across lines is found.
     """
-    for line in text.splitlines():
+    for line in text.splitlines() + text.replace("\\\n", "").splitlines():
         word = HA_SHELL_WORD_RE.search(line)
-        if word and HA_UNKNOWN_FLAG_RE.search(line, word.end()):
+        flag = HA_UNKNOWN_FLAG_RE.search(line, word.end()) if word else None
+        if flag and (remote_on or HA_ALWAYS_WORD_RE.search(line, flag.end())):
             return True
     return False
 
@@ -1001,7 +1009,7 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
         floor = _floor_texts(text, joined)
         if (_ha_supervisor_command(text)
                 or any(HA_ALWAYS_TEXT_RE.search(plain) for plain in floor)
-                or _ha_unknown_flag(text)
+                or _ha_unknown_flag(text, remote_on)
                 or (remote_on and any(HA_REMOTE_TEXT_RE.search(plain) for plain in floor))
                 or _ha_command(text, remote_on)):
             return "This command talks to the Home Assistant Supervisor, which is never allowed."

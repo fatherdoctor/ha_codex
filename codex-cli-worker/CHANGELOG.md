@@ -7,7 +7,8 @@
   `ha su info`, but the check read the redirection as the family and let the command through, with remote control
   off and on. The same fix covers the remote-control families (`ha 2>/dev/null host reboot`) when remote control
   is on. A global flag of `ha` whose value is quoted, escaped or computed, such as `ha --api-token "a b" ...`, is
-  now refused with remote control off too; before, only remote control on refused it. The text check's match time
+  now refused with remote control off too when `su`, `super` or `supervisor` follows it; before, only remote
+  control on refused it. The text check's match time
   no longer doubles with each repeated global flag. No other approval, sandbox or permission rule changed.
 
 ## 0.3.4 (unreleased)

@@ -547,6 +547,7 @@ class RedirectionTests(unittest.TestCase):
     QUOTED_VALUE_FORMS = (
         "dash -c 'ha --api-token \"a b\" su info'",
         "setsid sh -c 'ha --endpoint a\\ b su info'",
+        "dash -c 'ha --api-token \"a b\" s\\\nu info'",
     )
     # The redirection takes the family word as its target, so the shell runs "ha info".
     NOT_SUPERVISOR = ('ha > su info', 'ha 2> su info', 'ha core info 2>/dev/null', 'echo ha 2>/dev/null')
@@ -609,6 +610,11 @@ class RedirectionTests(unittest.TestCase):
             for command in self.REMOTE_FORMS:
                 with self.subTest(command=command):
                     self.assertIn('Supervisor', refusal(command, True))
+
+    def test_unreadable_flag_value_without_a_supervisor_word_keeps_remote_off_answer(self) -> None:
+        """With remote control off, a quoted value before a remote family is not refused."""
+        self.assertEqual(refusal("dash -c 'ha --api-token \"a b\" core info'", False), '')
+        self.assertIn('Supervisor', refusal("dash -c 'ha --api-token \"a b\" core info'", True))
 
     def test_redirection_into_the_family_word_is_not_a_supervisor_command(self) -> None:
         for command in self.NOT_SUPERVISOR:

@@ -75,8 +75,8 @@ which skips global flags, their values and redirections (`REDIRECTION_RE`, `_ski
 split commands with `_command_segments`, which keeps `2>&1` and `>|file` as one word and returns both readings
 of `&>file` (bash: one redirection; dash: `&`, then `>file`). The text floor's prefix (`HA_TEXT_PREFIX`) accepts
 the same redirections, and its three alternatives cannot match the same text, so its match time does not grow
-with repeated flags. A global-flag value with a quote, a backslash or a substitution is refused in both remote
-modes (`_ha_unknown_flag`), because the floor reads the command without quotes and cannot tell where such a
+with repeated flags. A global-flag value with a quote, a backslash or a substitution is refused with remote control
+on, and with it off when a Supervisor family word follows (`_ha_unknown_flag`), because the floor reads the command without quotes and cannot tell where such a
 value ends. Tests: `tests/test_gate_quote.py` (`RedirectionTests`, with a print-only shell control).
 
 (*) The shell text is split by one copy of the code, `shell_words.py` (`strip_comments`, `split_words`), which
