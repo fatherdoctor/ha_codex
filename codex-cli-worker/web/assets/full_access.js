@@ -23,6 +23,8 @@ function renderFullAccess(setting) {
     ? "Commands run outside the sandbox, with the app's full access."
     : "Off. An administrator can turn it on in Settings.";
   setSectionStatus("full-access-section", on ? "On" : "Off", on);
+  // A chat set to Full access now shows Default (chat.js, selectedPermissionMode).
+  updateStudio();
 }
 
 /** Save the setting; turning it on sends the id of the warning the owner confirmed. */

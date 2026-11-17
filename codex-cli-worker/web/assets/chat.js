@@ -908,8 +908,14 @@ function messageAttachments(list) {
   return (Array.isArray(list) ? list : []).filter(item =>
     item && ['image', 'file'].includes(item.kind) && /^[0-9a-f]{32}$/.test(item.attachment_id));
 }
+/**
+ * The chat's permission mode for the next message. A Full access choice reads as
+ * Default once the owner's setting is off (full_access.js sets the flag), so the
+ * page shows and sends what the worker will run.
+ */
 function selectedPermissionMode() {
-  return state.permissionModes.get(state.id) || state.task?.permission_mode || 'default';
+  const mode = state.permissionModes.get(state.id) || state.task?.permission_mode || 'default';
+  return mode === 'full-access' && document.body.dataset.fullAccess === 'off' ? 'default' : mode;
 }
 /** Return the image attachments in a list that carry a well-formed id. */
 function imageAttachments(list) {

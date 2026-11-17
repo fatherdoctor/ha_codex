@@ -43,9 +43,28 @@ const base = 'http://127.0.0.1:9137/preview/';
    await page.locator('#full-access-toggle').click();
    await page.locator('#full-access-banner').waitFor({state:'hidden'});
    assert.equal(await page.locator('[data-mode="full-access"]').isDisabled(),true,'off again: the choice is disabled');
+
+   // Turned off while a chat is still set to Full access: the page shows and sends Default.
+   await page.locator('#full-access-toggle').click();
+   await page.locator('#full-access-confirm').click();
+   await page.locator('#full-access-banner').waitFor({state:'visible'});
+   await page.evaluate(()=>document.getElementById('settings').close());
+   await page.locator('#permission-button').click();
+   await page.locator('[data-mode="full-access"]').click();
+   await page.waitForFunction(()=>document.getElementById('permission-button').classList.contains('full-access'));
+   await page.evaluate(()=>document.getElementById('settings-button').click());
+   await page.locator('#full-access-toggle').click();
+   await page.locator('#full-access-banner').waitFor({state:'hidden'});
+   await page.evaluate(()=>document.getElementById('settings').close());
+   assert.equal(await page.locator('#permission-button').getAttribute('aria-label'),'Default permissions','off: the chat shows Default');
+   assert.equal(await page.locator('#permission-button.full-access').count(),0,'off: no Full access marker');
+   const sent = page.waitForRequest(request=>request.method()==='POST' && /\/(tasks|continue)$/.test(new URL(request.url()).pathname));
+   await page.locator('#message').fill('Next message');
+   await page.locator('#send').click();
+   assert.equal((await sent).postDataJSON().permission_mode,'default','off: the next message sends Default');
    assert.deepEqual(errors,[]);
    await context.close();
   }
-  console.log('PASS: Full access warning, cancel, confirm, banner, chat choice and marker, turn off, desktop and mobile');
+  console.log('PASS: Full access warning, cancel, confirm, banner, chat choice and marker, turn off, a Full access chat falls back to Default, desktop and mobile');
  } finally { await browser.close(); }
 })().catch(error=>{console.error(error);process.exit(1);});

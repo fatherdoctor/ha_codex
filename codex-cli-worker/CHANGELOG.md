@@ -9,7 +9,8 @@
   above every chat, Status and the chat's Permissions button show it. The command hook, the managed command rules
   and the configuration watch still run. The setting lives in `/data`, where no sandboxed command can write, and
   the worker writes Codex's managed requirements from the shipped copy at start and on each change, allowing
-  full access only while it is on. With Full access off, every check behaves as in 0.3.4. It is never an app
+  full access only while it is on. Turning it off returns a chat set to Full access to Default permissions on its
+  next message. With Full access off, every check behaves as in 0.3.4. It is never an app
   option: `codex_sandbox: danger-full-access` still stops the app at startup.
 
 ## 0.3.4 (unreleased)

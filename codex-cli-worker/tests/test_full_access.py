@@ -189,6 +189,61 @@ class ChatModeTests(unittest.TestCase):
         self.assertNotEqual(options.get("codex_sandbox"), "danger-full-access")
         self.assertNotIn(full_access.CHAT_OPTION, options)
 
+    def as_admin(self):
+        request = self.ingress("admin-fixture")
+        return {"headers": {**request["headers"], **self.headers},
+                **{key: value for key, value in request.items() if key != "headers"}}
+
+    def chat_set_then_turned_off(self):
+        """An administrator sets the chat to Full access, then turns the setting off; the page has not reloaded."""
+        full_access.set_enabled(True, "admin-fixture")
+        self.assertEqual(self.choose("admin-fixture").status_code, 200)
+        server.tasks[self.task_id]["session_id"] = attachments.SESSION_ID
+        full_access.set_enabled(False, "admin-fixture")
+
+    def test_next_message_after_turning_it_off_runs_with_default(self):
+        self.chat_set_then_turned_off()
+        for payload in ({"message": "Next", "permission_mode": "full-access"}, {"message": "Again"}):
+            with self.subTest(payload=payload):
+                server.tasks[self.task_id]["status"] = "completed"
+                server.active_task_runners.clear()
+                response = self.client.post(f"/tasks/{self.task_id}/continue", json=payload, **self.as_admin())
+                self.assertEqual(response.status_code, 200, response.json)
+                self.assertEqual(server.tasks[self.task_id]["turns"][-1]["permission_mode"], "default")
+                self.assertEqual(server.tasks[self.task_id]["permission_mode"], "default")
+                self.assertNotIn(full_access.CHAT_OPTION, server.task_options(self.task_id))
+
+    def test_turning_it_on_again_does_not_bring_back_a_chat_that_ran_with_default(self):
+        self.chat_set_then_turned_off()
+        response = self.client.post(f"/tasks/{self.task_id}/continue",
+                                    json={"message": "Next", "permission_mode": "full-access"}, **self.as_admin())
+        self.assertEqual(response.status_code, 200, response.json)
+        full_access.set_enabled(True, "admin-fixture")
+        self.assertNotIn(full_access.CHAT_OPTION, server.task_options(self.task_id))
+
+    def test_new_chat_sent_with_full_access_after_turning_it_off_runs_with_default(self):
+        response = self.client.post("/tasks", json={"prompt": "Hello", "permission_mode": "full-access"},
+                                    **self.as_admin())
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(server.tasks[response.json["task_id"]]["permission_mode"], "default")
+
+    def test_model_change_after_turning_it_off_is_not_refused(self):
+        self.chat_set_then_turned_off()
+        response = self.client.post(f"/tasks/{self.task_id}/settings",
+                                    json={"chat_settings": {"model": None, "reasoning_effort": None}},
+                                    **self.as_admin())
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(response.json["permission_mode"], "default")
+
+    def test_member_message_with_full_access_is_refused_while_on(self):
+        self.chat_set_then_turned_off()
+        full_access.set_enabled(True, "admin-fixture")
+        request = self.ingress("member-fixture")
+        request["headers"] = {**request["headers"], **self.headers}
+        response = self.client.post(f"/tasks/{self.task_id}/continue",
+                                    json={"message": "Next", "permission_mode": "full-access"}, **request)
+        self.assertEqual(response.status_code, 400)
+
     def test_api_token_cannot_choose_it(self):
         full_access.set_enabled(True, "admin-fixture")
         response = self.client.post(f"/tasks/{self.task_id}/settings",

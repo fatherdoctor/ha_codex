@@ -578,17 +578,20 @@ def parse_chat_settings(payload: dict[str, Any], task: dict[str, Any] | None = N
     return settings
 
 
-def parse_permission_mode(payload, task=None):
+def parse_permission_mode(payload, task=None, choosing=False):
     """Return the chat's permission mode: Default, Read only, or Full access while the owner's setting is on.
 
     A request that runs or sets Full access must come from a Home Assistant
-    administrator. A queued message has no request; it was checked when it was
-    queued, and it falls back to Default if Full access was turned off since.
+    administrator. While the setting is off, choosing Full access in a chat's
+    Permissions (choosing=True) is refused. A message, or a chat saved with
+    Full access, falls back to Default instead: the setting was turned off
+    after the choice, and the next turn returns to the sandbox. A queued
+    message falls back the same way.
     """
     mode = payload.get('permission_mode', (task or {}).get('permission_mode', 'default'))
     if mode == full_access.PERMISSION_MODE:
         if not full_access.is_on():
-            if not has_request_context():
+            if not choosing:
                 return 'default'
             raise ValueError('Full access is off. A Home Assistant administrator can turn it on in Settings.')
         if has_request_context() and ingress_admin()[0] is None:
@@ -6384,7 +6387,7 @@ def save_chat_settings(task_id: str) -> Response:
             return jsonify({"ok": False, "error": "This chat has a message in the queue. Remove it before changing the settings."}), 409
         try:
             settings = parse_chat_settings(payload, task)
-            permission_mode = parse_permission_mode(payload, task)
+            permission_mode = parse_permission_mode(payload, task, choosing="permission_mode" in payload)
         except ValueError as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
         # Changing the next run's settings must not rewrite the previous turn or
