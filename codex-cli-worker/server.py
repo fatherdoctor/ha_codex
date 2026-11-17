@@ -40,7 +40,8 @@ from flask import Flask, Response, jsonify, request, send_file
 # Also support the existing importlib-based test harness.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from verification import DEFAULT_BROWSER_MEMORY_LIMIT_MIB, Verification, public_check
-from approvals import APPROVAL_GONE, AppServerSession
+from approvals import APPROVAL_GONE
+from safety_block import SafetyBlockSession as AppServerSession
 import policy as protected_policy
 from ha_data import HomeAssistantData
 import ha_data_mcp
@@ -52,6 +53,7 @@ import schedule_api
 import github_access
 import permission_overrides_api
 from account_access import AccountAccess, rejected_sign_in_error
+import safety_block
 import sqlite3
 from interaction_diagnostics import RollingDiagnostics, InteractionRecorder
 
@@ -5431,11 +5433,13 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
         )
         return
 
+    safety_blocked = bool(approval_session and approval_session.safety_blocked)
     if lifecycle_error is not None:
         # A started turn may already have changed files. Keep the normal review,
         # backup, validation, and recovery path even when its transport fails.
         returncode = 1
-        write_task_log(task_id, "worker", f"Codex permission connection failed: {lifecycle_error}")
+        if not safety_blocked:
+            write_task_log(task_id, "worker", f"Codex permission connection failed: {lifecycle_error}")
     final, codex_failure = apply_status_calls(parse_final(final_file, returncode), status_calls)
     start_phase(task_id, "review", "Checking the changes")
     after_manifest = build_manifest() if planted_edits or reviewed_manifest is None else reviewed_manifest
@@ -5467,7 +5471,11 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     # Why the task failed: the reason Codex gave with report_failure, replaced by the worker's own
     # reason when the worker turns the answer into a failure. A timeout has its own summary.
     reason = codex_failure
-    if timed_out:
+    if safety_blocked:
+        reason = safety_block.MESSAGE
+        final = {"status": "failed", "summary": safety_block.SUMMARY,
+                 "details": safety_block.NEXT_STEP, "question": "", "choices": []}
+    elif timed_out:
         record_diagnostic("event", task_id, {"kind": "error", "type": "TimeoutError"})
         record_diagnostic("finish", task_id, "timed_out")
         final = {
@@ -5573,6 +5581,8 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     if task_status == "completed" and returncode == 0:
         record_successful_sign_in(task_id)
     turn_id = str(tasks.get(task_id, {}).get("current_turn_id") or "")
+    if safety_blocked:
+        publish_safety_block(task_id, turn_id)
     event_data = {
         "task_id": task_id,
         "turn_id": turn_id,
@@ -5610,6 +5620,19 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     notify_task_outcome(task_id, status, str(final.get('summary') or ''), turn_id,
                         str(final.get('question') or ''), choices)
     refresh_usage_status_async(force=True)
+
+
+def publish_safety_block(task_id: str, turn_id: str) -> None:
+    """Name the task by id, without copying its prompt or provider error into HA."""
+    write_task_log(task_id, "worker", safety_block.MESSAGE + " No automatic retry.")
+    ok, _ = fire_ha_event("codex_cli_safety_blocked", {"task_id": task_id, "turn_id": turn_id})
+    if not ok:
+        print("Could not send the safety-block event to Home Assistant.", flush=True)
+    create_persistent_notification(
+        "Codex task blocked by the safety filter",
+        f"Task {task_id}: {safety_block.MESSAGE}",
+        f"codex_safety_block_{task_id}",
+    )
 
 
 TURN_ID_RE = re.compile(r"[0-9a-f]{32}")

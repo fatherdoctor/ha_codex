@@ -2,6 +2,10 @@
 
 ## 0.3.4 (unreleased)
 
+- A typed OpenAI safety-filter block now stops the task and creates a Home Assistant persistent notification.
+  The notice names the task by id and says to rephrase or retry. The worker does not retry the block automatically.
+  It also fires `codex_cli_safety_blocked`, without the prompt or provider error text.
+
 - A plain device command such as "set the office overhead to 50%" is faster. On 0.3.3 Codex had no tool on the
   chat page that finds an entity by name, so it searched `.storage/core.entity_registry` with shell commands, and
   the page's rules told it to look for `/config/AGENTS.md` in every message. The `home_assistant` `verify` tool
