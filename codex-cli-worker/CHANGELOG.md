@@ -14,6 +14,11 @@
   whether the file exists and when it last changed. A change to the file still reaches an open chat on its next
   message, and a removed file stops applying. The guard-rails block is still read by the worker before every
   pre-approved action. No approval, sandbox or permission rule changed.
+- A question about Codex cloud tasks, such as "Can you see my cloud tasks?", now gets an answer from
+  `codex cloud list --json` and `codex cloud status`. On 0.3.3 Codex looked at document sessions instead and
+  said it could see none. The page's rules now name the two commands, say that the list holds only Codex cloud
+  tasks of the signed-in account, and tell Codex to say so plainly when the list is empty. In a sandboxed mode
+  each command still raises the usual Allow once card. No approval, sandbox or permission rule changed.
 
 ## 0.3.3 (unreleased)
 
