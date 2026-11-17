@@ -60,7 +60,7 @@ _exec_rules_lock = threading.Lock()
 
 def exec_rules_enabled() -> bool:
     """Return whether the managed exec-rules kind is on."""
-    # TODO(CX-CHECK-TOGGLES): use its shared saved setting and rebuild requirements
+    # TODO: when the checks get their own switch, read its saved setting and rebuild requirements
     # before starting Codex. The named sequencing ruling keeps this kind on now.
     return True
 

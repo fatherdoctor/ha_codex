@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.5 (unreleased)
+
+- The command check now refuses a Supervisor command that has a redirection between `ha` and the command family,
+  such as `ha 2>/dev/null su info` or `ha 2>&1 supervisor logs`. The shell removes the redirection and runs
+  `ha su info`, but the check read the redirection as the family and let the command through, with remote control
+  off and on. The same fix covers the remote-control families (`ha 2>/dev/null host reboot`) when remote control
+  is on. A global flag of `ha` whose value is quoted, escaped or computed, such as `ha --api-token "a b" ...`, is
+  now refused with remote control off too; before, only remote control on refused it. The text check's match time
+  no longer doubles with each repeated global flag. No other approval, sandbox or permission rule changed.
+
 ## 0.3.4 (unreleased)
 
 - A plain device command such as "set the office overhead to 50%" is faster. On 0.3.3 Codex had no tool on the

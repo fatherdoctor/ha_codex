@@ -18,6 +18,7 @@ import sys
 import subprocess
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -505,6 +506,135 @@ class ContinuationFloorTests(unittest.TestCase):
             with self.subTest(family=family):
                 self.assertTrue(any(pattern.search(f'ha {family} info')
                                     for pattern, _why in gate_rules.PROTECTED_COMMAND_RES))
+
+
+
+class RedirectionTests(unittest.TestCase):
+    """A redirection between ``ha`` and the family does not hide the family.
+
+    The shell removes a redirection before ``ha`` runs, wherever it stands, so each form below
+    runs a print-only ``ha`` stub with the family under bash and dash. Both parsers skip the
+    redirection, the text floor accepts it, and a global-flag value with a quoted or escaped
+    blank is refused in both remote-control modes.
+    """
+
+    SUPERVISOR_FORMS = (
+        'ha 2>/dev/null su info',
+        'ha 2> /dev/null su info',
+        'ha </dev/null su info',
+        'ha >/dev/null super info',
+        'ha 2>&1 su info',
+        'ha >&2 su info',
+        'ha 2>&- su info',
+        'ha --raw-json 2>/dev/null supervisor info',
+        'ha --log-level debug 2>&1 su info',
+        'ha --log-level 2>/dev/null debug su info',
+        'ha -- 2>/dev/null su info',
+        'ha >| /dev/null su info',
+        'ha <<<x su info',
+        'ha 3</dev/null su info',
+        'ha &>/dev/null su info',
+        'true &>/dev/null; ha 2>&1 su info',
+        'env ha 2>&1 su info',
+        "sh -c 'ha 2>&1 su info'",
+        "dash -c 'ha 2>/dev/null su info'",
+    )
+    REMOTE_FORMS = (
+        'ha 2>/dev/null host info',
+        'ha 2>&1 core info',
+        "dash -c 'ha </dev/null host info'",
+    )
+    QUOTED_VALUE_FORMS = (
+        "dash -c 'ha --api-token \"a b\" su info'",
+        "setsid sh -c 'ha --endpoint a\\ b su info'",
+    )
+    # The redirection takes the family word as its target, so the shell runs "ha info".
+    NOT_SUPERVISOR = ('ha > su info', 'ha 2> su info', 'ha core info 2>/dev/null', 'echo ha 2>/dev/null')
+
+    # Dash has no here-string and reads "&>" as "&" then ">", so these run under bash only.
+    BASH_ONLY = ('<<<', ' &>/dev/null su')
+
+    def _runs(self, command: str, family: str) -> None:
+        """Run the form with a print-only ha stub that writes its arguments to a file, not stdout."""
+        with tempfile.TemporaryDirectory() as folder:
+            stub = Path(folder) / 'ha'
+            stub.write_text('#!/bin/sh\nprintf "<%s>" "$@" > "$HA_STUB_OUT"\n', encoding='utf-8')
+            stub.chmod(0o755)
+            out = Path(folder) / 'out'
+            env = {**os.environ, 'PATH': folder + os.pathsep + os.environ.get('PATH', ''), 'HA_STUB_OUT': str(out)}
+            shells = ('bash',) if any(mark in command for mark in self.BASH_ONLY) else ('bash', 'dash')
+            for shell in shells:
+                with self.subTest(shell=shell, command=command):
+                    out.write_text('', encoding='utf-8')
+                    subprocess.run([shell, '-c', command], capture_output=True, text=True,
+                                   env=env, timeout=10, check=False, stdin=subprocess.DEVNULL)
+                    self.assertIn(f'<{family}><info>', out.read_text(encoding='utf-8'))
+
+    def test_print_only_shell_runs_each_form(self) -> None:
+        for command in self.SUPERVISOR_FORMS + self.QUOTED_VALUE_FORMS:
+            family = 'supervisor' if ' supervisor ' in command else 'super' if ' super ' in command else 'su'
+            self._runs(command, family)
+        for command in self.REMOTE_FORMS:
+            self._runs(command, 'core' if ' core ' in command else 'host')
+
+    def test_hook_refuses_supervisor_forms_in_both_modes(self) -> None:
+        for command in self.SUPERVISOR_FORMS + self.QUOTED_VALUE_FORMS:
+            for remote_on in (False, True):
+                with self.subTest(command=command, remote_on=remote_on):
+                    self.assertIn('Supervisor', refusal(command, remote_on))
+
+    def test_hook_refuses_remote_forms_with_remote_control_on(self) -> None:
+        for command in self.REMOTE_FORMS:
+            with self.subTest(command=command):
+                self.assertIn('Supervisor', refusal(command, True))
+                self.assertEqual(refusal(command, False), '')
+
+    def test_parsers_alone_skip_the_redirection(self) -> None:
+        for command in self.SUPERVISOR_FORMS:
+            if command.startswith('dash'):
+                continue  # the parsers do not open dash; the text floor covers it
+            with self.subTest(command=command):
+                self.assertTrue(gate_rules._ha_supervisor_command(command))
+        for command in self.REMOTE_FORMS[:2]:
+            with self.subTest(command=command):
+                self.assertTrue(gate_rules._ha_command(command, True))
+
+    def test_text_floor_alone_refuses_each_form(self) -> None:
+        with patch.object(gate_rules, '_ha_supervisor_command', return_value=False), \
+                patch.object(gate_rules, '_ha_command', return_value=False):
+            for command in self.SUPERVISOR_FORMS + self.QUOTED_VALUE_FORMS:
+                for remote_on in (False, True):
+                    with self.subTest(command=command, remote_on=remote_on):
+                        self.assertIn('Supervisor', refusal(command, remote_on))
+            for command in self.REMOTE_FORMS:
+                with self.subTest(command=command):
+                    self.assertIn('Supervisor', refusal(command, True))
+
+    def test_redirection_into_the_family_word_is_not_a_supervisor_command(self) -> None:
+        for command in self.NOT_SUPERVISOR:
+            with self.subTest(command=command):
+                self.assertEqual(refusal(command, False), '')
+
+    def test_both_shell_readings_of_ampersand_redirection(self) -> None:
+        """Bash reads ``&>`` as one redirection; dash runs the part before ``&`` in the background."""
+        tokens = gate_rules._shell_words('true &>/dev/null ha su info', ';&|()\n')
+        segments = gate_rules._command_segments(tokens, ';&|()\n')
+        self.assertIn(['>/dev/null', 'ha', 'su', 'info'], segments)
+        self.assertIn(['true', '&>/dev/null', 'ha', 'su', 'info'], segments)
+
+    def test_a_quoted_operator_does_not_hide_the_next_command(self) -> None:
+        """A quoted ``">"`` before a pipe is read both ways, so the command after the pipe is still checked."""
+        tokens = gate_rules._shell_words('echo ">" | ha su info', ';&|()\n')
+        self.assertIn(['ha', 'su', 'info'], gate_rules._command_segments(tokens, ';&|()\n'))
+        self.assertTrue(gate_rules._ha_supervisor_command('echo ">" | ha su info'))
+
+    def test_text_floor_time_stays_flat_with_repeated_flags(self) -> None:
+        """No two alternatives of the floor's prefix match the same text, so a long flag list is fast."""
+        for unit in ('--log-level=a ', '--log-level a ', '-x ', '2>/dev/null ', '2> x '):
+            with self.subTest(unit=unit):
+                started = time.monotonic()
+                gate_rules.HA_ALWAYS_TEXT_RE.search('ha ' + unit * 22 + 'x')
+                self.assertLess(time.monotonic() - started, 0.5)
 
 
 if __name__ == "__main__":

@@ -69,6 +69,16 @@ floor in `check_tool_call` reads a second form with every backslash-newline pair
 the parser does not open. Tests: `tests/test_gate_quote.py` (`ContinuationFloorTests` runs each form through a
 print-only shell).
 
+The shell removes a redirection before the command runs, wherever it stands, so `ha 2>/dev/null su info` runs
+`ha su info`. Both Supervisor parsers find the family word with one helper, `gate_rules.py: _ha_family_index`,
+which skips global flags, their values and redirections (`REDIRECTION_RE`, `_skip_redirections`). The parsers
+split commands with `_command_segments`, which keeps `2>&1` and `>|file` as one word and returns both readings
+of `&>file` (bash: one redirection; dash: `&`, then `>file`). The text floor's prefix (`HA_TEXT_PREFIX`) accepts
+the same redirections, and its three alternatives cannot match the same text, so its match time does not grow
+with repeated flags. A global-flag value with a quote, a backslash or a substitution is refused in both remote
+modes (`_ha_unknown_flag`), because the floor reads the command without quotes and cannot tell where such a
+value ends. Tests: `tests/test_gate_quote.py` (`RedirectionTests`, with a print-only shell control).
+
 (*) The shell text is split by one copy of the code, `shell_words.py` (`strip_comments`, `split_words`), which
 `gate_rules.py` and `approvals.py` both import. The hook's continuation join is in the same file. Each check keeps
 its own `_shell_words` for text it cannot read: the hook reads it again line by line, the approval card refuses

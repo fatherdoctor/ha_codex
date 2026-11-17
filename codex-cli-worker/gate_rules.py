@@ -528,10 +528,26 @@ HA_REMOTE_FAMILIES = frozenset(("addon", "addons", "add-on", "add-ons", "host", 
                                 "hardware", "network", "backup", "backups", "apps"))
 HA_ALWAYS_FAMILIES = frozenset(("supervisor", "super", "su"))
 SHELL_ASSIGNMENT_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*=")
+# The global flags of ha that take the next word as their value.
+HA_VALUE_FLAGS = ("--log-level", "--api-token", "--endpoint", "--config")
+# A redirection as the word splitter returns it: an optional file descriptor (2 or {fd}), the
+# operator, then the target when it is joined to the operator (group 1, empty when the next
+# word is the target). The shell removes a redirection before the command runs, wherever it
+# stands, so "ha 2>/dev/null su info" runs "ha su info".
+REDIRECTION_RE = re.compile(r"^(?:\d+|\{[A-Za-z_][A-Za-z0-9_]*\})?(?:&>>?|<<<|<<-?|<>|>>|>\||>&|<&|>|<)(.*)$", re.DOTALL)
 # A conservative text floor also catches shell constructs the parser cannot place.
-# It reads the command with its quotes removed. The four documented value-taking
-# global flags, or any other flag, may precede the family.
-HA_TEXT_PREFIX = r"\bha\s+(?:(?:--(?:log-level|api-token|endpoint|config)(?:=\S+|\s+\S+)|-\S+)\s+)*"
+# It reads the command with its quotes removed. The four value-taking global flags with
+# their value, any other flag, and any redirection with its target may precede the family.
+# The three alternatives cannot match the same text: an alternative that could would make
+# the match time double with each repeated flag.
+_HA_REDIRECTION_TEXT = r"(?:\d+|\{\w+\})?(?:&>>?|<<<|<<-?|<>|>>|>\||>&|<&|>|<)\s*[^\s<>&|]\S*"
+_HA_VALUE_FLAG_TEXT = r"--(?:log-level|api-token|endpoint|config)"
+HA_TEXT_PREFIX = (
+    r"\bha\s+(?:(?:"
+    + _HA_VALUE_FLAG_TEXT + r"(?:=\S+|(?:\s+" + _HA_REDIRECTION_TEXT + r")*\s+(?!(?:\d+|\{\w+\})?[<>&])\S+)"
+    + r"|-(?!" + _HA_VALUE_FLAG_TEXT[1:] + r"(?:[=\s]|$))\S+"
+    + r"|" + _HA_REDIRECTION_TEXT
+    + r")\s+)*")
 HA_REMOTE_TEXT_RE = re.compile(
     HA_TEXT_PREFIX + r"(?:add-?ons?|host|os|core|hardware|network|backups?|apps)\b", re.IGNORECASE)
 # The always-refused families get the same floor whether or not remote control is on.
@@ -541,11 +557,15 @@ HA_ALWAYS_TEXT_RE = re.compile(HA_TEXT_PREFIX + r"(?:supervisor|super|su)\b", re
 HA_SHELL_WORD_RE = re.compile(r"\bh[\"'\\]*a\b", re.IGNORECASE)
 HA_UNKNOWN_FLAG_RE = re.compile(
     r"--(?:log-level|api-token|endpoint|config)(?:=|\s+)"
-    r"[^\s;]*(?:[\"'`]|\$\()", re.IGNORECASE)
+    r"[^\s;]*(?:[\"'`\\]|\$\()", re.IGNORECASE)
 
 
 def _ha_unknown_flag(text: str) -> bool:
-    """Conservatively refuse a quoted or computed global-flag value."""
+    """Conservatively refuse a quoted, escaped or computed global-flag value.
+
+    The text floor reads the command without quotes, so a value with a blank in it ("a b"
+    or a\\ b) looks like two words there, and the family after it is not found.
+    """
     for line in text.splitlines():
         word = HA_SHELL_WORD_RE.search(line)
         if word and HA_UNKNOWN_FLAG_RE.search(line, word.end()):
@@ -562,9 +582,9 @@ def _floor_texts(text: str, joined: str) -> tuple[str, str]:
     that model cannot hide a Supervisor command. The cost is a refusal of a single-quoted literal
     pair that spells one; the floor already refuses such a spelling in a comment.
     """
-    unquoted = r"[\"'`\\]"
+    quote_chars = r"[\"'`\\]"
     unjoined = text.replace("\\\n", "")
-    return re.sub(unquoted, "", joined), re.sub(unquoted, "", unjoined)
+    return re.sub(quote_chars, "", joined), re.sub(quote_chars, "", unjoined)
 
 
 def _shell_words(text: str, punctuation: str) -> list[str]:
@@ -627,6 +647,80 @@ def _shell_substitutions(text: str) -> tuple[str, list[str]]:
     return ''.join(out), nested
 
 
+def _segments_of(tokens: list[str], separators: str) -> list[list[str]]:
+    """Group words into simple commands at the shell's separators."""
+    segments, segment = [], []
+    for token in tokens:
+        if token and all(ch in separators for ch in token):
+            if segment:
+                segments.append(segment)
+                segment = []
+        else:
+            segment.append(token)
+    if segment:
+        segments.append(segment)
+    return segments
+
+
+def _join_redirections(tokens: list[str]) -> list[str]:
+    """Join an ``&`` or ``|`` to the redirection operator next to it.
+
+    The word splitter returns ``2>&1`` as ``2>``, ``&``, ``1`` and ``&>file`` as ``&``, ``>file``.
+    Joined, ``2>&``, ``>&``, ``<&``, ``>|`` and ``&>file`` are one redirection word again.
+    """
+    joined: list[str] = []
+    for token in tokens:
+        previous = joined[-1] if joined else ""
+        if REDIRECTION_RE.match(previous) and (
+                (previous.endswith(">") and token in ("&", "|")) or (previous.endswith("<") and token == "&")):
+            joined[-1] = previous + token
+        elif previous == "&" and token.startswith(">"):
+            joined[-1] = "&" + token
+        else:
+            joined.append(token)
+    return joined
+
+
+def _command_segments(tokens: list[str], separators: str) -> list[list[str]]:
+    """Return the simple commands of the words in two readings, and check both.
+
+    In the first reading every ``&`` and ``|`` ends a command. In the second, an ``&`` or ``|``
+    next to a redirection operator belongs to it (``ha 2>&1 su info`` is one command). The text
+    alone cannot always tell which is right: bash reads ``&>file`` as one redirection, dash as
+    ``&`` and then ``>file``, and a quoted ``">"`` looks like an operator. A check of both
+    readings can only add refusals.
+    """
+    segments = _segments_of(tokens, separators)
+    joined = _join_redirections(tokens)
+    if joined != tokens:
+        segments += _segments_of(joined, separators)
+    return segments
+
+
+def _skip_redirections(segment: list[str], index: int) -> int:
+    """Return the index of the first word at or after index that is not part of a redirection."""
+    while index < len(segment):
+        redirection = REDIRECTION_RE.match(segment[index])
+        if not redirection:
+            break
+        # An operator alone ("2>", "<") takes the next word as its target.
+        index += 1 if redirection.group(1) else 2
+    return index
+
+
+def _ha_family_index(segment: list[str], index: int) -> int:
+    """Return the index of the family word: after ha's global flags, their values and any redirections."""
+    index = _skip_redirections(segment, index)
+    while index < len(segment) and segment[index].startswith("-"):
+        flag = segment[index].lower()
+        index = _skip_redirections(segment, index + 1)
+        if flag == "--":
+            break
+        if flag in HA_VALUE_FLAGS and index < len(segment):
+            index = _skip_redirections(segment, index + 1)
+    return index
+
+
 def _ha_supervisor_command(text: str, depth: int = 0) -> bool:
     """Find literal Supervisor CLI aliases without executing shell text."""
     if depth > 6:
@@ -637,17 +731,7 @@ def _ha_supervisor_command(text: str, depth: int = 0) -> bool:
     masked, nested = _shell_substitutions(joined)
     if any(_ha_supervisor_command(item, depth + 1) for item in nested):
         return True
-    tokens = _shell_words(masked, ';&|()\n')
-    segments, segment = [], []
-    for token in tokens:
-        if token and all(ch in ';&|()\n' for ch in token):
-            if segment:
-                segments.append(segment); segment = []
-        else:
-            segment.append(token)
-    if segment:
-        segments.append(segment)
-    for segment in segments:
+    for segment in _command_segments(_shell_words(masked, ';&|()\n'), ';&|()\n'):
         index = 0
         while index < len(segment):
             word = segment[index].lower()
@@ -655,6 +739,8 @@ def _ha_supervisor_command(text: str, depth: int = 0) -> bool:
                 if _ha_supervisor_command(' '.join(segment[index + 1:]), depth + 1):
                     return True
                 break
+            if REDIRECTION_RE.match(segment[index]):
+                index = _skip_redirections(segment, index); continue
             if SHELL_ASSIGNMENT_RE.match(segment[index]) or word in ('if', 'then', 'do', '!', '{', 'exec', 'time', 'nohup'):
                 index += 1; continue
             if word in ('sudo', 'env', 'command', 'xargs', 'timeout', 'watch', 'stdbuf', 'nice'):
@@ -706,13 +792,7 @@ def _ha_supervisor_command(text: str, depth: int = 0) -> bool:
                 pass
         if program != 'ha' or (segment[index].lower() != 'ha' and not segment[index].lower().endswith('/ha')):
             continue
-        index += 1
-        while index < len(segment) and segment[index].startswith('-'):
-            flag = segment[index].lower(); index += 1
-            if flag == '--':
-                break
-            if flag in ('--log-level', '--api-token', '--endpoint', '--config') and index < len(segment):
-                index += 1
+        index = _ha_family_index(segment, index + 1)
         if index < len(segment) and segment[index].lower() in HA_ALWAYS_FAMILIES:
             return True
     return False
@@ -728,23 +808,13 @@ def _ha_command(text: str, remote_on: bool, depth: int = 0) -> bool:
     joined = _join_shell_continuations(text)
     if joined is None:
         return True
-    tokens = _shell_words(joined, ";&|()\n")
-    segments = []
-    segment = []
-    for token in tokens:
-        if token and all(char in ";&|()\n" for char in token):
-            if segment:
-                segments.append(segment)
-                segment = []
-        else:
-            segment.append(token)
-    if segment:
-        segments.append(segment)
-    for segment in segments:
+    for segment in _command_segments(_shell_words(joined, ";&|()\n"), ";&|()\n"):
         index = 0
         while index < len(segment):
             word = segment[index]
-            if SHELL_ASSIGNMENT_RE.match(word):
+            if REDIRECTION_RE.match(word):
+                index = _skip_redirections(segment, index)
+            elif SHELL_ASSIGNMENT_RE.match(word):
                 index += 1
             elif word.lower() in ("env", "sudo", "command", "xargs"):
                 index += 1
@@ -760,12 +830,7 @@ def _ha_command(text: str, remote_on: bool, depth: int = 0) -> bool:
                 return True
         if program != "ha" and not (program.startswith("/") and program.endswith("/ha")):
             continue
-        index += 1
-        while index < len(segment) and segment[index].startswith("-"):
-            flag = segment[index].lower()
-            index += 1
-            if flag in ("--log-level", "--api-token", "--endpoint", "--config") and index < len(segment):
-                index += 1
+        index = _ha_family_index(segment, index + 1)
         if index < len(segment):
             family = segment[index].lower()
             if remote_on and family in HA_REMOTE_FAMILIES:
@@ -936,8 +1001,8 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
         floor = _floor_texts(text, joined)
         if (_ha_supervisor_command(text)
                 or any(HA_ALWAYS_TEXT_RE.search(plain) for plain in floor)
-                or (remote_on and (any(HA_REMOTE_TEXT_RE.search(plain) for plain in floor)
-                                   or _ha_unknown_flag(text)))
+                or _ha_unknown_flag(text)
+                or (remote_on and any(HA_REMOTE_TEXT_RE.search(plain) for plain in floor))
                 or _ha_command(text, remote_on)):
             return "This command talks to the Home Assistant Supervisor, which is never allowed."
     return ""
