@@ -38,8 +38,17 @@
   built family word behind it (`while ha --config "a b" s${x}u info`), and neither does an empty quoted value of
   one pair of quotes or several (`while ha --log-level "" s${x}u info`, `--log-level ""''`), also inside a
   quoted script (`eval 'setsid ha --log-level "" s${x}u info'`). A flag value with a `$` or a backtick that
-  expands to nothing no longer hides a built family word after it (`ha --log-level $nope x s${x}u info`); a built
-  word after such a value is refused, so `ha --config $dir --api-token $token core info` is refused too. A global
+  expands to nothing, a glob (bash's `nullglob` removes one that matches nothing) or a `{,}` no longer hides a
+  built family word after it (`ha --log-level $nope x s${x}u info`), also with flags, redirections or another
+  flag and its value before that word (`ha --log-level $nope x --no-progress s${x}u info`) or a redirection
+  before the value; a built word after such a value is refused, so
+  `ha --config $dir --api-token $token core info` is refused too. A flag value with a `$` or a backtick is
+  refused when `su`, `super` or `supervisor` stands anywhere in the command, before `ha` too, because a variable
+  can hold both the value and the family word (`v='x su'; ha --log-level $v info`). The check ends a word only at
+  a space, a tab or a newline, as the shell does: a flag value of one carriage return or no-break space no longer
+  hides the family word after it (`ha --log-level <CR> su info`). A quoted script is read with the shell's own
+  quote rules (a backslash outside quotes escapes a quote), and also as a second shell gets the words joined
+  (`eval 'setsid ha' '--log-level "" s${x}u info'`). A global
   flag with `=` and an empty value is read as that flag (`setsid ha --config= su info` is refused). A `(` in the family's place is refused,
   for bash's extended globs (`ha @(su) info`), and so is a `$'...'` script with a backslash escape in a command that
   holds the word `ha` (`bash -c $'ha \x73u info'`). `ls -ha *` and `du -ha $dir` are allowed: letters `ha` after
@@ -49,12 +58,13 @@
   `echo 'ha {s,x}u info'`, `ha core info | jq '{a: .b}' # note` or `printf $'a\tb'; ha core info`. Write such a
   command without the `$` word (`grep -rn ha --include='*.yaml' .`), or run it outside Codex.
 - What the check still cannot see, as DOCS states: an odd quote earlier in the command, in a comment or a heredoc
-  body (`echo x # it's` on the line before), stops the reading of quoted blanks, so a flag value with a quoted
+  body (`echo x # it's` on the line before), can stop the reading of quoted blanks, so a flag value with a quoted
   blank can then hide a built family word; a brace word with an escaped brace and a quote kept for a second
   shell (`eval ha \{-x'" y"',s}u info`); the program word in the `$'...'` or `$"..."` form (`h$'a' su info`);
   a built family word in a nested backtick; and a flag `ha` does not know, with a quoted blank, before the family
-  word (the real `ha` stops at it). Substitutions nested more than six deep are not read further: the command is
-  refused when it holds the word `ha`.
+  word (the real `ha` stops at it). Substitutions and quoted scripts nested more than six deep, or more text than
+  four times the command's length plus 64 KB in all, are not read further: the command is refused when it holds
+  the word `ha`.
 - The text check's match time no longer doubles with each repeated global flag or heredoc operator, and many
   words such as `-ha` (a flag group, not the word `ha`) no longer make it grow with the square of their number. No other
   approval, sandbox or permission rule changed.

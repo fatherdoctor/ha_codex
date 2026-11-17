@@ -82,7 +82,9 @@ readings and never joins the `&` after it, so `echo ">" & ha 2>&1 su info` is fo
 
 The text floor reads the command without quotes and with the same blanks around each operator (`_floor_texts`).
 Its prefix (`HA_TEXT_PREFIX`) accepts global flags, their values (also an empty value after `=`, as in
-`--config=`) and redirections before the family. Its three
+`--config=`) and redirections before the family. It ends a word at a space, a tab or a newline only (`_BLANK`,
+`_NOT_BLANK`), as the shell does: Python's `\s` also matches a carriage return or a no-break space, which the shell
+reads as a letter, so `ha --log-level <CR> su info` would hide the family word. Its three
 alternatives cannot match the same text, and the heredoc operator has one spelling (`<<-x` is `<<-` and `x`), so
 its match time does not grow with repeated flags or redirections (`test_text_floor_time_stays_flat_with_repeated_flags`).
 
@@ -124,16 +126,30 @@ stand before `ha` (`while`, `setsid`, `coproc`, `function f {`). It reads the te
 (`_keep_quoted_blanks`), because without its quotes `--config "a b"` reads as two words and the family position
 moves by one. That reading writes a word made only of empty pairs of quotes as a word too
 (`--log-level ""`, `--log-level ""''`), also across a continuation. Each quoted text with the word `ha` in it is
-read the same way again as a script of its own (`_QUOTED_SCRIPT_RE`), because a second shell reads the quotes
-inside it (`eval 'setsid ha --log-level "" s${x}u info'`). A flag value with a `$` or a backtick can expand to
-nothing, and the flag then takes the next word: after such a value, each later word up to the floor's family
-position, and one word more for each such value, is read as a family word
+read the same way again as a script of its own (`_second_shell_texts`, at most `_SCRIPT_QUOTE_DEPTH` deep, 6), as the
+first shell passes it on (backslash escapes in double quotes removed), because a second shell reads the quotes inside
+it (`eval 'setsid ha --log-level "" s${x}u info'`). That function follows the
+quotes as the shell does (a backslash outside quotes escapes a quote: `echo \'; eval '...'`), and it also returns
+the whole text with one level of quotes removed, which is what `eval` or `bash -c` reads when the words are joined
+(`eval 'setsid ha' '--log-level "" s${x}u info'`, `eval 'eval '\''...'\'`). That joined text is read only where a
+quote opens after another quoted text with only blanks between, or right after an escaped quote. Each such reading
+can double the work below it, and a hook that runs past Codex's timeout lets the command run, so the rule reads at
+most four times the command's length plus 64 KB in all (`_SCRIPT_READ_BUDGET_FACTOR`, `_SCRIPT_READ_BUDGET_EXTRA`);
+past that, and past six levels, a script is refused when it holds the word `ha` (fail closed;
+`test_quoted_scripts_past_the_limits_are_refused_with_the_word_ha`, `test_quoted_script_time_stays_linear`). A quoted text is read when the word `ha` stands
+in it, also right before a quote (`_HA_IN_SCRIPT_RE`). A flag value with a `$` or a backtick, a glob (`nullglob`) or `{,}` can
+expand to nothing, and the flag then takes the next word: after such a value (also past a redirection), each later
+word up to the floor's family position, and one plain word more for each such value, is read as a family word
 (`_built_word_after_removable_value`, `_VANISHING_FLAG_VALUE_RE`), so `ha --log-level $nope x s${x}u info` is
-refused. It follows quotes through the whole text and does not know a comment, a heredoc body or a
-substitution: an odd quote in one of them (`echo x # it's`) turns every later blank into a quoted one, and the
-reading then finds no word `ha` after it. DOCS.md states this limit, with a built family word in a nested
-backtick and the program word in the `$'...'` form. Substitutions nested more than six deep are not read further:
-the command is refused when it holds the word `ha` (`_ha_built_family_word`, `depth`). It steps over the same
+refused. A flag, a redirection, its target and another flag's value are not plain words and do not use up that
+count (`ha --log-level $nope x --no-progress s${x}u info`). A flag value with a `$` or a backtick is refused in
+`_ha_unknown_flag` when a family word this mode refuses stands anywhere in the text, before `ha` too
+(`HA_EXPANDED_FLAG_VALUE_RE`): `v='x su'; ha --log-level $v info`. It follows quotes through the whole text and does not know a comment, a heredoc body or a
+substitution: an odd quote in one of them (`echo x # it's`) can turn every later blank into a quoted one, and the
+reading then finds no word `ha` after it (the joined reading above catches some of these forms, not all). DOCS.md states this limit, with a built family word in a nested
+backtick and the program word in the `$'...'` form. Substitutions and quoted scripts nested more than six deep
+(`_SCRIPT_QUOTE_DEPTH`) are not read further: the command is refused when it holds the word `ha`
+(`_ha_built_family_word`, `depth`). It steps over the same
 flags, flag values and redirections as the floor (`_HA_BEFORE_FAMILY_TEXT`), and over a brace word, which can
 expand to nothing. A script in bash's `$'...'` form with a backslash escape is refused in a text with the word `ha`
 (`ANSI_C_ESCAPE_RE`, in `check_tool_call`): no reading here decodes the escapes, and `bash -c $'ha \x73u info'` runs

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import io
 import os
+import shlex
 import sys
 import subprocess
 import tempfile
@@ -1097,6 +1098,155 @@ class RedirectionTests(unittest.TestCase):
         self.assertIn('Supervisor', refusal('ha --log-level ${nope} x s[u] info', False))
         for command in ('ha --config $dir core info', 'ha --config= core info', 'ha --log-level "$lvl" core info',
                         "echo 'ha core info' | jq '{v: .x}'"):
+            with self.subTest(command=command):
+                self.assertEqual(refusal(command, False), '')
+
+    # M1: a flag value or a redirection target of one character that Python's \s reads as a blank
+    # and the shell reads as a letter. The shell's blanks are a space, a tab and a newline only.
+    ODD_BLANKS = ('\r', '\x0b', '\x0c', '\x1c', '\x1f', '\x85', '\xa0', ' ', ' ', ' ',
+                  ' ', ' ', ' ', ' ', '　')
+    ODD_BLANK_FORMS = ('setsid ha --log-level {} su info', 'while ha --api-token {} supervisor info; do break; done',
+                       'ha --config {} su info', "eval 'setsid ha --config {} su info'", 'setsid ha >{} su info')
+    # M2: a removed flag value, then flags, redirections or another value pair before a built word.
+    REMOVED_VALUE_AND_FLAG_FORMS = (
+        'ha --log-level $nope x --no-progress s${x}u info', 'ha --log-level $nope x 2>/dev/null s${x}u info',
+        'ha --log-level $@ x --config y s${x}u info', 'ha --log-level $nope x -- s${x}u info',
+        'setsid ha --log-level $nope x --no-progress --raw-json s${x}u info',
+        'ha --log-level 2>/dev/null $nope x s${x}u info', 'ha --log-level 2> /dev/null `:` x s${x}u info')
+    REMOVED_VALUE_BASH_FORMS = ('shopt -s nullglob; ha --log-level /nope/* x s${x}u info',
+                                'ha --log-level {,} x s${x}u info', 'ha --config {,} x --no-progress s${x}u info')
+    # M3: a quoted script in two pieces, after an escaped quote, or in the '\'' spelling.
+    SECOND_SHELL_FORMS = (
+        """eval 'setsid ha --log-level' '"" s${x}u info'""", """eval 'setsid ha' '--log-level "" s${x}u info'""",
+        """echo \\'; eval 'setsid ha --log-level "" s${x}u info'""",
+        """echo \\"; eval 'setsid ha --log-level "" s${x}u info'""",
+        """echo \\'; bash -c 'setsid ha --log-level "a b" s${x}u info'""",
+        """eval 'eval '\\''setsid ha --log-level "" s${x}u info'\\'""",
+        """eval "setsid ha --log-level '' s\\${x}u info\"""",
+        """bash -c "eval 'setsid ha --log-level \\"\\" s\\${x}u info'\"""",
+        """bash -c "eval 'setsid ha' '--log-level \\"\\" s\\${x}u info'\"""")
+    # M4: a variable that holds the flag value and the family word, set before ha.
+    VARIABLE_VALUE_FORMS = ("v='x su'; ha --log-level $v info", "v='x su'; setsid ha --log-level $v info",
+                            "v='x su'; while ha --log-level $v info; do break; done",
+                            'set -- x su; ha --log-level $* info', 'set -- x su; setsid ha --log-level "$@" info',
+                            'IFS=,; v=x,su; setsid ha --log-level $v info')
+
+    def _eighth_round_forms(self) -> list[str]:
+        odd = [form.format(blank) for form in self.ODD_BLANK_FORMS for blank in self.ODD_BLANKS]
+        return (odd + list(self.REMOVED_VALUE_AND_FLAG_FORMS) + list(self.REMOVED_VALUE_BASH_FORMS)
+                + list(self.SECOND_SHELL_FORMS) + list(self.VARIABLE_VALUE_FORMS))
+
+    def test_print_only_shell_runs_each_eighth_round_form(self) -> None:
+        for command in self._eighth_round_forms():
+            family = 'supervisor' if ' supervisor ' in command else 'su'
+            shells = ('bash',) if command in self.REMOVED_VALUE_BASH_FORMS else ('bash', 'dash')
+            self._runs(command, family, shells)
+
+    def test_hook_refuses_each_eighth_round_form(self) -> None:
+        for command in self._eighth_round_forms():
+            for remote_on in (False, True):
+                with self.subTest(command=command, remote_on=remote_on):
+                    self.assertNotEqual(refusal(command, remote_on), '')
+        for blank in self.ODD_BLANKS:
+            with self.subTest(blank=blank):
+                self.assertNotEqual(refusal(f'setsid ha --endpoint {blank} host reboot', True), '')
+
+    def test_the_floor_alone_reads_an_odd_blank_as_a_flag_value(self) -> None:
+        """M1: the floor ends a word at a space, a tab or a newline only, as the shell does."""
+        for blank in self.ODD_BLANKS:
+            with self.subTest(blank=blank):
+                self.assertTrue(gate_rules.HA_ALWAYS_TEXT_RE.search(f'setsid ha --log-level {blank} su info'))
+                self.assertTrue(gate_rules.HA_ALWAYS_TEXT_RE.search(f'setsid ha >{blank} su info'))
+                self.assertTrue(gate_rules.HA_REMOTE_TEXT_RE.search(f'setsid ha --endpoint {blank} host reboot'))
+                # Inside a word the character is a letter: the value is x<blank>y, and the family is next.
+                self.assertTrue(gate_rules.HA_ALWAYS_TEXT_RE.search(f'setsid ha --log-level x{blank}y su info'))
+                self.assertTrue(gate_rules._ha_built_family_word(f'setsid ha --log-level {blank} s${{x}}u info'))
+
+    def test_a_removed_flag_value_counts_only_plain_words(self) -> None:
+        """M2: flags, redirections, their targets and other flag values do not use up the count."""
+        rule = gate_rules._built_word_after_removable_value
+        for command in self.REMOVED_VALUE_AND_FLAG_FORMS + self.REMOVED_VALUE_BASH_FORMS:
+            with self.subTest(command=command):
+                plain = gate_rules._space_redirections(command)
+                start = plain.index('ha ') + 2
+                end = gate_rules._HA_BEFORE_FAMILY_RE.match(plain, start).end()
+                self.assertTrue(rule(plain, start, end))
+        # One plain word more than the removed values: the second plain word past the end is not read.
+        text = 'ha --config $a core info s${x}u'
+        self.assertFalse(rule(text, 3, text.index('core')))
+        text = 'ha --config $a --api-token b core info s${x}u'
+        self.assertFalse(rule(text, 3, text.index('core')))
+        # The flag must be a word of its own: x--config is no flag.
+        self.assertIsNone(gate_rules._VANISHING_FLAG_VALUE_RE.search('x--config $a'))
+        self.assertIsNotNone(gate_rules._VANISHING_FLAG_VALUE_RE.search('ha --config 2>x $a'))
+
+    def test_second_shell_texts_follow_the_shell_quotes(self) -> None:
+        """M3: one level of quotes removed, with a backslash outside quotes read as an escape."""
+        texts = gate_rules._second_shell_texts
+        self.assertEqual(texts("echo \\'; eval 'a b'"), (['a b'], None))
+        self.assertEqual(texts("echo \\''a b'"), (['a b'], "echo 'a b"))
+        self.assertEqual(texts("eval 'a' '\"\" b'"), (['a', '"" b'], 'eval a "" b'))
+        self.assertEqual(texts("eval 'x '\\''y'\\'"), (['x ', 'y'], "eval x 'y'"))
+        self.assertEqual(texts("eval 'a''b'"), (['a', 'b'], 'eval ab'))
+        # No quote joins another: the joined text adds nothing, and it is not read.
+        self.assertEqual(texts('eval "a \\$x \\\\ \\n"'), (['a $x \\ \\n'], None))
+        self.assertEqual(texts("echo 'open"), (['open'], None))
+        self.assertEqual(texts("echo 'a' x 'b'"), (['a', 'b'], None))
+
+    def test_empty_pairs_end_at_the_first_letter(self) -> None:
+        """M5: after a letter, a later empty pair is joined to the word, not an empty word."""
+        self.assertEqual(gate_rules._keep_quoted_blanks('ha \'\'"x"y"" s'), 'ha xy s')
+
+    def test_quoted_scripts_are_read_at_each_depth(self) -> None:
+        """M5: a script in double quotes, and a script two levels deep, are read."""
+        for command in ("""bash -c "eval 'setsid ha' '--log-level \\"\\" s\\${x}u info'\"""",
+                        """bash -c "setsid ha --log-level '' s\\${x}u info\"""",
+                        """bash -c "eval 'x; setsid ha --log-level \\"\\" s\\${x}u info'\""""):
+            self._runs(command, 'su', ('bash', 'dash'))
+            with self.subTest(command=command):
+                self.assertTrue(gate_rules._ha_built_family_word(command))
+
+    def test_quoted_script_time_stays_linear(self) -> None:
+        """Ten quoted scripts inside a quoted script, 100 KB: no text is read again with its quotes joined."""
+        command = "echo '" + ('ha "' + 'ha x ' * 2000 + '" ') * 10 + "'"
+        started = time.monotonic()
+        refusal(command, False)
+        self.assertLess(time.monotonic() - started, 5)
+
+    def test_joined_quotes_are_read_at_every_level(self) -> None:
+        """M3: a script quoted for a second shell at each level, as shlex.quote writes it, is refused."""
+        command = """eval 'setsid ha' '--log-level "" s${x}u info'"""
+        for level in range(1, 8):
+            command = ('bash -c ' if level % 2 else 'eval ') + shlex.quote(command)
+            with self.subTest(level=level):
+                self.assertTrue(gate_rules._ha_built_family_word(command))
+        self._runs(command, 'su', ('bash',))
+
+    def test_quoted_scripts_past_the_limits_are_refused_with_the_word_ha(self) -> None:
+        """Deeper than six levels, or past the read budget, a script is refused when it holds ha."""
+        deep, harmless = 'ha core info', 'echo hi'
+        for _ in range(8):
+            deep, harmless = 'bash -c ' + shlex.quote(deep), 'bash -c ' + shlex.quote(harmless)
+        self.assertTrue(gate_rules._ha_built_family_word(deep))
+        self.assertFalse(gate_rules._ha_built_family_word(harmless))
+        # Six levels are read, not refused: a remote family word with remote control off is allowed.
+        allowed = 'ha core info'
+        for _ in range(5):
+            allowed = 'bash -c ' + shlex.quote(allowed)
+        self.assertFalse(gate_rules._ha_built_family_word(allowed))
+        with patch.object(gate_rules, '_SCRIPT_READ_BUDGET_FACTOR', 1), \
+                patch.object(gate_rules, '_SCRIPT_READ_BUDGET_EXTRA', 0):
+            self.assertTrue(gate_rules._ha_built_family_word("echo 'ha core info'"))
+            self.assertFalse(gate_rules._ha_built_family_word("echo 'hi there'"))
+        self.assertFalse(gate_rules._ha_built_family_word("echo 'ha core info'"))
+
+    def test_stated_over_refusals_of_the_eighth_round(self) -> None:
+        """A $ flag value with a family word anywhere in the text is refused, as DOCS states."""
+        self.assertIn('Supervisor', refusal('x=su; ha --config $dir core info', False))
+        self.assertIn('Supervisor', refusal('ha --config /etc/* x --no-progress s${x}u info', False))
+        for command in ('ha --config $dir core info', 'ha --log-level "$lvl" core info',
+                        "echo 'ha core info' | jq '{v: .x}'", "echo \\'; ha core info",
+                        "eval 'ha core' 'info'", 'ha --config /etc/*.yaml core info'):
             with self.subTest(command=command):
                 self.assertEqual(refusal(command, False), '')
 

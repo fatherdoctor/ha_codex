@@ -554,7 +554,14 @@ REDIRECTION_TEXT_RE = re.compile(
 # too), any other flag, and any redirection with its target may precede the family.
 # The three alternatives cannot match the same text: an alternative that could would make
 # the match time double with each repeated flag.
-_HA_REDIRECTION_TEXT = _REDIRECTION_FD + r"?" + _REDIRECTION_OPERATOR + r"\s*[^\s<>&|]\S*"
+# The shell's blanks, the only characters that end a word outside quotes. Python's \s matches
+# 25 characters (a carriage return, a form feed, a no-break space, ...); to the shell those are
+# letters of a word, so `ha --log-level <CR> su info` gives the flag the value <CR> and runs the
+# su family. Every pattern below that finds a word after ha uses these two instead of \s and \S.
+_BLANK = r"[ \t\n]"
+_NOT_BLANK = r"[^ \t\n]"
+_HA_REDIRECTION_TEXT = (
+    _REDIRECTION_FD + r"?" + _REDIRECTION_OPERATOR + _BLANK + r"*[^ \t\n<>&|]" + _NOT_BLANK + r"*")
 _HA_VALUE_FLAG_TEXT = r"--(?:log-level|api-token|endpoint|config)"
 # The same flags without the first dash, to exclude them from the other-flag alternative.
 _HA_VALUE_FLAG_AFTER_DASH = r"-(?:log-level|api-token|endpoint|config)"
@@ -562,11 +569,12 @@ _HA_VALUE_FLAG_AFTER_DASH = r"-(?:log-level|api-token|endpoint|config)"
 # followed by blanks.
 _HA_BEFORE_FAMILY_TEXT = (
     r"(?:(?:"
-    + _HA_VALUE_FLAG_TEXT + r"(?:=\S*|(?:\s+" + _HA_REDIRECTION_TEXT + r")*\s+(?!" + _REDIRECTION_FD + r"?[<>&])\S+)"
-    + r"|-(?!" + _HA_VALUE_FLAG_AFTER_DASH + r"(?:[=\s]|$))\S+"
+    + _HA_VALUE_FLAG_TEXT + r"(?:=" + _NOT_BLANK + r"*|(?:" + _BLANK + r"+" + _HA_REDIRECTION_TEXT + r")*"
+    + _BLANK + r"+(?!" + _REDIRECTION_FD + r"?[<>&])" + _NOT_BLANK + r"+)"
+    + r"|-(?!" + _HA_VALUE_FLAG_AFTER_DASH + r"(?:[= \t\n]|$))" + _NOT_BLANK + r"+"
     + r"|" + _HA_REDIRECTION_TEXT
-    + r")\s+)*")
-HA_TEXT_PREFIX = r"(?<!-)\bha\s+" + _HA_BEFORE_FAMILY_TEXT
+    + r")" + _BLANK + r"+)*")
+HA_TEXT_PREFIX = r"(?<!-)\bha" + _BLANK + r"+" + _HA_BEFORE_FAMILY_TEXT
 HA_REMOTE_TEXT_RE = re.compile(
     HA_TEXT_PREFIX + r"(?:add-?ons?|host|os|core|hardware|network|backups?|apps)\b", re.IGNORECASE)
 # The always-refused families get the same floor whether or not remote control is on.
@@ -577,6 +585,12 @@ HA_SHELL_WORD_RE = re.compile(r"\bh[\"'\\]*a\b", re.IGNORECASE)
 HA_UNKNOWN_FLAG_RE = re.compile(
     r"--(?:log-level|api-token|endpoint|config)(?:=|\s+)"
     r"[^\s;]*(?:[\"'`\\]|\$\()", re.IGNORECASE)
+# A global-flag value with a $ or a backtick. A variable can hold the value and the family word
+# with it (v='x su'; ha --log-level $v info runs ha --log-level x su info), so such a value is
+# refused when a family word that this mode refuses stands anywhere in the command text, before
+# ha too.
+HA_EXPANDED_FLAG_VALUE_RE = re.compile(
+    r"--(?:log-level|api-token|endpoint|config)(?:=|[ \t\n]+)[^ \t\n;]*[$`]", re.IGNORECASE)
 # A word after ha whose end or value the floor cannot read: a redirection target with a quote
 # or a backslash, a process substitution as the target, any word with a $ or a backtick (a
 # variable that is empty or holds a blank, ${x:- a}, $(...), `...`), a glob (with nullglob, a
@@ -594,18 +608,34 @@ HA_COMPUTED_WORD_RE = re.compile(r"[$`*?\[]")
 # ha su info, and no reading here decodes the escapes. Refused in a text with the word ha.
 ANSI_C_ESCAPE_RE = re.compile(r"\$'[^']*\\")
 # Not right after a dash: in ``ls -ha *`` the letters are a flag group, never the program.
-_HA_WORD_TEXT_RE = re.compile(r"(?<![\w-])ha\s+", re.IGNORECASE)
+_HA_WORD_TEXT_RE = re.compile(r"(?<![\w-])ha" + _BLANK + r"+", re.IGNORECASE)
+# The word ha anywhere in a quoted script, also right before a quote that a later reading joins
+# to the next quoted text (eval 'setsid ha' '--log-level ...'). A script without it is not read.
+_HA_IN_SCRIPT_RE = re.compile(r"(?<![\w-])ha(?![\w-])", re.IGNORECASE)
 # A built family word for the rule below: a $, a backtick, a glob, or a "(" (with bash's extglob
 # option, @(su), +(su) and !(x) are globs too).
 _HA_BUILT_WORD_RE = re.compile(r"[$`*?\[(]")
-_HA_BEFORE_FAMILY_RE = re.compile(r"\s*" + _HA_BEFORE_FAMILY_TEXT, re.IGNORECASE)
-# A single-quoted text, or a double-quoted text with its backslash escapes, for the built family
-# word rule to read again as a script of its own.
-_QUOTED_SCRIPT_RE = re.compile(r"'(?P<single>[^']*)'|\"(?P<double>(?:[^\"\\]|\\.)*)\"", re.DOTALL)
-# A value-taking flag, then a value word that holds a $ or a backtick: the shell removes that word
-# when it expands to nothing ($nope, $@, $(:), `:`), and the flag then takes the next word.
-_VANISHING_FLAG_VALUE_RE = re.compile(r"(?<!\S)" + _HA_VALUE_FLAG_TEXT + r"\s+[^\s$`]*[$`]\S*", re.IGNORECASE)
-_HA_NEXT_WORD_RE = re.compile(r"\S+")
+_HA_BEFORE_FAMILY_RE = re.compile(_BLANK + r"*" + _HA_BEFORE_FAMILY_TEXT, re.IGNORECASE)
+# How deep the built family word rule reads quoted text again as a script of its own
+# (eval 'eval "..."'). Text nested deeper is refused when it holds the word ha.
+_SCRIPT_QUOTE_DEPTH = 6
+# How much text the built family word rule reads in all, as a multiple of the command's length plus
+# a fixed part. Quoted scripts and joined quoted pieces are read again at each level, so nested
+# quotes can multiply the work; past this budget the rule refuses any text that holds the word ha,
+# so the time stays within the hook's timeout (Codex lets a command run when its hook times out).
+_SCRIPT_READ_BUDGET_FACTOR = 4
+_SCRIPT_READ_BUDGET_EXTRA = 64 * 1024
+# A value-taking flag, then (past any redirections) a value word that the shell can remove: a word
+# with a $ or a backtick that expands to nothing ($nope, $@, $(:), `:`), a glob that matches
+# nothing (with bash's nullglob option) or a brace word ({,} expands to nothing). The flag then
+# takes the next word as its value.
+_REMOVABLE_WORD_TEXT = (
+    r"[^ \t\n$`*?\[{]*(?:[$`*?\[]|\{[^ \t\n{}]*(?:,|\.\.))" + _NOT_BLANK + r"*")
+_VANISHING_FLAG_VALUE_RE = re.compile(
+    r"(?<!" + _NOT_BLANK + r")" + _HA_VALUE_FLAG_TEXT
+    + r"(?:" + _BLANK + r"+" + _HA_REDIRECTION_TEXT + r")*" + _BLANK + r"+" + _REMOVABLE_WORD_TEXT,
+    re.IGNORECASE)
+_HA_NEXT_WORD_RE = re.compile(_NOT_BLANK + r"+")
 # Where the shell ends a word outside quotes: a blank (a space, a tab or a newline; not a carriage
 # return or a form feed) or an operator character.
 _SHELL_WORD_BREAKS = " \t\n;&|<>()"
@@ -759,6 +789,9 @@ def _ha_unknown_flag(text: str, remote_on: bool) -> bool:
       with a ``$``, a backtick, a glob character or a brace expansion: refused when a family
       word that this mode refuses follows it (with remote control off, a Supervisor family;
       with it on, any family).
+    - A global-flag value with a ``$`` or a backtick, when a family word that this mode refuses
+      stands anywhere in the command text, also before ``ha``: the variable can hold the value
+      and the family word (``v='x su'; ha --log-level $v info``).
     - A word with a brace after the first ha that bash can expand into such a family word
       (``s{u,}``), or that holds a quote, a backslash or a backtick (``{s,"x y"}u``).
 
@@ -788,6 +821,8 @@ def _ha_unknown_flag(text: str, remote_on: bool) -> bool:
             flag = HA_UNKNOWN_FLAG_RE.search(reading, word.end(), end)
             if flag and (remote_on or last_always >= flag.end()):
                 return True
+            if last_refused >= 0 and HA_EXPANDED_FLAG_VALUE_RE.search(reading, word.end(), end):
+                return True
             unreadable = HA_UNREADABLE_WORD_RE.search(reading, word.end(), end)
             if unreadable and last_refused >= unreadable.start():
                 return True
@@ -813,7 +848,7 @@ def _ha_floor_brace_word(text: str, remote_on: bool) -> bool:
     return any(_brace_word_names_family(brace, remote_on) for brace in _brace_words(plain, first.end()))
 
 
-def _ha_built_family_word(joined: str, depth: int = 0) -> bool:
+def _ha_built_family_word(joined: str, depth: int = 0, budget: list[int] | None = None) -> bool:
     """Refuse a family word that the shell builds, after any ha word in the text.
 
     The parser refuses ``ha s${x}u info`` where it finds ``ha`` as the program, but it finds the
@@ -828,32 +863,95 @@ def _ha_built_family_word(joined: str, depth: int = 0) -> bool:
     parser), so a blank inside it does not move the family position, and its own text is read as
     a command. Each quoted text that holds the word ``ha`` is read the same way as a script of its
     own, because a second shell reads the quotes inside it again
-    (``eval 'setsid ha --log-level "" s${x}u info'``). The text is then read four times: with continuations joined and with every
+    (``eval 'setsid ha --log-level "" s${x}u info'``), and so are quoted texts that a second shell
+    joins (``_second_shell_texts``). Deeper than ``_SCRIPT_QUOTE_DEPTH`` levels, or past the read
+    ``budget`` (a list of one count, shared by the calls of one check), a text with the word ``ha``
+    is refused. The text is then read four times: with continuations joined and with every
     backslash-newline pair removed, and each of those once with its quotes and backslashes
     removed (as the floor reads it) and once with each quoted or escaped blank kept inside its
     word (``--config "a b"`` is one flag value, as the shell reads it). The cost: a ``$``, a
     backtick, a glob or a ``(`` right after the word ``ha`` anywhere in the command is refused,
     even as an argument of another program (``grep ha *.yaml``).
     """
-    if depth > 6:
-        # Substitutions nested this deep are not read further: refuse when the word ha is there.
-        return bool(_HA_WORD_TEXT_RE.search(joined))
+    if budget is None:
+        budget = [_SCRIPT_READ_BUDGET_FACTOR * len(joined) + _SCRIPT_READ_BUDGET_EXTRA]
+    budget[0] -= len(joined)
+    if depth > _SCRIPT_QUOTE_DEPTH or budget[0] < 0:
+        # Substitutions or quoted scripts nested this deep, or past the read budget, are not read
+        # further: refuse when the word ha is there.
+        return bool(_HA_IN_SCRIPT_RE.search(joined))
     masked, nested = _shell_substitutions(joined)
-    if any(_ha_built_family_word(item, depth + 1) for item in nested):
+    if any(_ha_built_family_word(item, depth + 1, budget) for item in nested):
         return True
-    if depth < 6:
-        # Text in quotes can be a script for a second shell (eval '...', bash -c '...'), which
-        # reads the quotes inside it again: read it as a command of its own.
-        for quoted in _QUOTED_SCRIPT_RE.finditer(masked):
-            script = quoted.group("single") or quoted.group("double") or ""
-            if _HA_WORD_TEXT_RE.search(script) and _ha_built_family_word(script, depth + 1):
-                return True
+    # Text in quotes can be a script for a second shell (eval '...', bash -c '...'), which reads
+    # the quotes inside it again: read each quoted text as a command of its own, and read the whole
+    # text as the second shell gets it, with one level of quotes removed. Past the depth limit the
+    # call below refuses a script with the word ha.
+    pieces, unquoted_once = _second_shell_texts(masked)
+    if unquoted_once is not None:
+        pieces.append(unquoted_once)
+    for script in pieces:
+        if (script != masked and _HA_IN_SCRIPT_RE.search(script)
+                and _ha_built_family_word(script, depth + 1, budget)):
+            return True
     for reading in (masked, masked.replace("\\\n", "")):
         unquoted = _space_redirections(re.sub(r"[\"'\\]", "", reading))
         quoted_kept = _keep_quoted_blanks(_space_redirections(reading))
         if _built_word_after_ha(unquoted) or _built_word_after_ha(quoted_kept):
             return True
     return False
+
+
+def _second_shell_texts(text: str) -> tuple[list[str], str | None]:
+    """Return the quoted texts in ``text`` as passed on, and ``text`` with one level of quotes removed.
+
+    Each quoted text is returned as the first shell passes it on, with the backslash escapes of
+    double quotes removed. The quotes are followed as the shell follows them: outside quotes a backslash escapes the next
+    character, so ``echo \\'; eval '...'`` holds one quoted text, not two. Inside double quotes a
+    backslash escapes only ``$``, a backtick, ``"``, a backslash or a newline. A quote that does not
+    close takes the rest of the text.
+
+    The second value is what ``eval`` or ``bash -c`` reads when the words are joined:
+    ``eval 'setsid ha' '--log-level "" s${x}u info'`` and ``eval 'eval '\\''setsid ha ... '\\'``
+    reach the second shell as one script. It differs from the quoted texts read alone only where
+    a quote opens after another quoted text with nothing but blanks between them, or right after
+    an escaped quote. Elsewhere the second value is None, so a text with many quoted texts is not
+    read twice.
+    """
+    pieces, out, quote, piece_start, i = [], [], "", 0, 0
+    joins = False
+    # last_close: where the last quoted text or escaped quote ended outside quotes.
+    last_close = -1
+    while i < len(text):
+        ch = text[i]
+        if quote == "'":
+            if ch == "'":
+                pieces.append("".join(out[piece_start:]))
+                quote, last_close = "", i + 1
+            else:
+                out.append(ch)
+        elif ch == "\\" and i + 1 < len(text) and (not quote or text[i + 1] in '$`"\\\n'):
+            if text[i + 1] != "\n":
+                out.append(text[i + 1])
+            if not quote and text[i + 1] in "'\"":
+                last_close = i + 2
+            i += 1
+        elif quote == '"':
+            if ch == '"':
+                pieces.append("".join(out[piece_start:]))
+                quote, last_close = "", i + 1
+            else:
+                out.append(ch)
+        elif ch in "'\"":
+            if last_close >= 0 and not text[last_close:i].strip(" \t"):
+                joins = True
+            quote, piece_start = ch, len(out)
+        else:
+            out.append(ch)
+        i += 1
+    if quote:
+        pieces.append("".join(out[piece_start:]))
+    return pieces, "".join(out) if joins else None
 
 
 def _built_word_after_ha(plain: str) -> bool:
@@ -879,27 +977,36 @@ def _built_word_after_removable_value(plain: str, start: int, end: int) -> bool:
     """Say whether a built word follows a flag value that the shell can remove, between ``start`` and ``end``.
 
     ``start`` and ``end`` hold the flags, flag values and redirections that the floor reads between
-    ``ha`` and its family word. When a flag's value holds a ``$`` or a backtick and expands to
-    nothing, the flag takes the next word as its value, and each later word moves one place to
-    the left. In ``ha --log-level $nope x s${x}u info`` the family is ``s${x}u``, and in
-    ``ha --log-level $nope --config s${x}u info`` it is the word the floor read as a value. So
-    every word after the first such value, up to ``end`` and one word more for each such value,
-    is read as a family word: a flag or a redirection is passed over, a built word is refused.
+    ``ha`` and its family word. When a flag's value expands to nothing (``$nope``, a backtick, a
+    glob with nullglob, ``{,}``), the flag takes the next word as its value, and each later word
+    moves one place to the left. In ``ha --log-level $nope x s${x}u info`` the family is
+    ``s${x}u``, and in ``ha --log-level $nope --config s${x}u info`` it is the word the floor read
+    as a value. So each word from the first such value on is read: a built word is refused, a
+    flag or a redirection is passed over. Past ``end``, the rule stops after one plain word more
+    for each such value. A flag, a redirection, its target and the word after a value-taking flag
+    are not plain words, so they do not use up that count
+    (``ha --log-level $nope x --config y s${x}u info``).
     """
     removable = list(_VANISHING_FLAG_VALUE_RE.finditer(plain, start, end))
     if not removable:
         return False
-    words_after_end = len(removable) + 1
+    plain_words_left = len(removable) + 1
+    # not_plain: the next word is the value of a flag or the target of a redirection.
+    not_plain = False
     for candidate in _HA_NEXT_WORD_RE.finditer(plain, removable[0].end()):
-        if candidate.start() >= end:
-            if words_after_end == 0:
-                return False
-            words_after_end -= 1
         text = candidate.group()
-        if text.startswith("-") or REDIRECTION_RE.match(text):
+        redirection = REDIRECTION_RE.match(text)
+        if text.startswith("-") or redirection:
+            not_plain = (redirection is not None and not redirection.group(1)) or (
+                text.lower() in HA_VALUE_FLAGS)
             continue
         if _HA_BUILT_WORD_RE.search(text):
             return True
+        if candidate.start() >= end and not not_plain:
+            plain_words_left -= 1
+            if plain_words_left == 0:
+                return False
+        not_plain = False
     return False
 
 

@@ -37,7 +37,11 @@
 # the real ha refuses to run). Six commands that printf or echo -e builds for a second shell are left out, as
 # below. closer11-* to closer13-* are the seventh closure's three sets (a value flag with = and an empty
 # value, an empty word of several quoted pieces, a flag value that the shell removes, then a built family
-# word); their one pass is the odd-quote limit above.
+# word); their one pass is the odd-quote limit above. closer14-* and closer15-* are the eighth closure's two
+# sets (a flag value of one character that Python reads as a blank and the shell reads as a letter, a removed
+# flag value before a flag, a redirection or another value pair, a nullglob or {,} value, a quoted script in two
+# pieces or after an escaped quote, a variable that holds the flag value and the family word); closerws-* are
+# that closure's white space probe (18 characters in 7 forms).
 # n/a: Unicode look-alike letters (ha is a fixed ASCII program name; the shell does not fold them);
 # aliases and functions (DOCS names them as a limit: the check reads text, not shell state).
 # Left out on purpose, as limits DOCS states (the check cannot see a program that the command builds or that
@@ -3459,25 +3463,25 @@ closer9-1235	none	test -f ha && echo yes
 closer9-1236	remote:bash,dash	ha core info # {x,y}
 closer9-1237	remote:bash,dash	ha core info | jq '{v: .version}'
 closer9-1238	remote:bash,dash	ha core info | jq '{v: .version, m: .machine}'
-closer10-0001	su-limit:bash,dash	echo x # it's\nwhile ha --config "a b" s${x}u info; do break; done
+closer10-0001	su:bash,dash	echo x # it's\nwhile ha --config "a b" s${x}u info; do break; done
 closer10-0002	su-limit:bash,dash	echo x # say "\nwhile ha --config "a b" s${x}u info; do break; done
-closer10-0003	su-limit:bash,dash	cat <<E\nit's\nE\nwhile ha --config "a b" s${x}u info; do break; done
+closer10-0003	su:bash,dash	cat <<E\nit's\nE\nwhile ha --config "a b" s${x}u info; do break; done
 closer10-0004	su-limit:bash,dash	cat <<'E'\na " b\nE\nwhile ha --config "a b" s${x}u info; do break; done
 closer10-0005	su:bash,dash	echo it\\'s; while ha --config "a b" s${x}u info; do break; done
 closer10-0006	su:bash,dash	echo "it's"; while ha --config "a b" s${x}u info; do break; done
 closer10-0007	su:bash,dash	echo 'a"b'; while ha --config "a b" s${x}u info; do break; done
 closer10-0008	su:bash	echo $'it\\'s'; while ha --config "a b" s${x}u info; do break; done
 closer10-0009	su-limit:bash,dash	echo x # it's\nsetsid ha --config 'a b' s`:`u info
-closer10-0010	su-limit:bash,dash	echo x # it's\nwhile ha -x"a b" s$(:)u info; do break; done
-closer10-0011	su-limit:bash,dash	echo x # it's\ntouch su; while ha --config "a b" s[u] info; do break; done
-closer10-0012	su-limit:bash,dash	echo x # it's\nwhile ha 2>"a b" s${x}u info; do break; done
+closer10-0010	su:bash,dash	echo x # it's\nwhile ha -x"a b" s$(:)u info; do break; done
+closer10-0011	su:bash,dash	echo x # it's\ntouch su; while ha --config "a b" s[u] info; do break; done
+closer10-0012	su:bash,dash	echo x # it's\nwhile ha 2>"a b" s${x}u info; do break; done
 closer10-0013	remote:bash,dash	echo x # it's\nwhile ha --config "a b" ho${x}st reboot; do break; done
 closer10-0014	su:bash,dash	: "${x#\\"}"; while ha --config "a b" s${x}u info; do break; done
 closer10-0015	su:bash,dash	: ${x#\\'}; while ha --config "a b" s${x}u info; do break; done
 closer10-0016	su:bash,dash	: ${x%"}"}; while ha --config "a b" s${x}u info; do break; done
 closer10-0017	none	echo a#'b; while ha --config "a b" s${x}u info; do break; done
 closer10-0018	none	x=a#\\"; while ha --config "a b" s${x}u info; do break; done
-closer10-0019	su-limit:bash,dash	echo $(echo "a b" # it's\n); while ha --config "a b" s${x}u info; do break; done
+closer10-0019	su:bash,dash	echo $(echo "a b" # it's\n); while ha --config "a b" s${x}u info; do break; done
 closer10-0020	su:bash,dash	echo `echo it\\'s`; while ha --config "a b" s${x}u info; do break; done
 closer10-0021	su:bash,dash	: $((1 < 2)); while ha --config "a b" s${x}u info; do break; done
 closer10-0022	su:bash,dash	while ha --config "a b" s${x}u info; do break; done # it's
@@ -3485,7 +3489,7 @@ closer10-0023	su:bash,dash	case x in "x") while ha --config "a b" s${x}u info; d
 closer10-0024	su:bash,dash	echo x # it's\nwhile ha --config "a b" s${x}u info; do break; done\necho y # it's
 closer10-0025	su:bash,dash	echo x # '"'\nwhile ha --config "a b" s${x}u info; do break; done
 closer10-0026	su:bash,dash	echo x #\\'\nwhile ha --config "a b" s${x}u info; do break; done
-closer10-0027	su-limit:bash,dash	echo x # it's\nwhile ha --config a\\ b s${x}u info; do break; done
+closer10-0027	su:bash,dash	echo x # it's\nwhile ha --config a\\ b s${x}u info; do break; done
 closer10-0028	su-limit:bash	eval ha \\{-x'" y"',s}u info
 closer10-0029	su-limit:bash	eval ha \\{-x\\" y\\",s}u info
 closer10-0030	su-limit:bash	eval ha '{'-x'" y"',s}u info
@@ -3739,7 +3743,7 @@ closer11-0119	su:bash,dash	while /usr/bin/env ha --log-level "" s${x}u info; do 
 closer11-0120	su:bash,dash	ha --log-level \\x00 su info
 closer11-0121	su:bash,dash	while ha --log-level "" s${x}u info "" ""; do break; done
 closer11-0122	su:bash,dash	echo "" "" ""; while ha --log-level "" s${x}u info; do break; done
-closer11-0123	su-limit:bash,dash	echo '' # it's\nwhile ha --log-level "" s${x}u info; do break; done
+closer11-0123	su:bash,dash	echo '' # it's\nwhile ha --log-level "" s${x}u info; do break; done
 closer11-0124	su:bash,dash	echo ""; ha su info
 closer11-0125	su:bash,dash	echo "" | ha su info
 closer11-0126	su:bash,dash	echo ""&&ha s${x}u info
@@ -3975,3 +3979,460 @@ closer13-0036	none	ha --log-level ${nope} x s[u] info
 closer13-0037	remote:bash,dash	ha --config= core info
 closer13-0038	none	ha --log-level= info
 closer13-0039	none	setsid ha --config= info
+closer14-0001	su:bash,dash	setsid ha --config="" su info
+closer14-0002	su:bash,dash	while ha --config="" supervisor info; do break; done
+closer14-0003	su:bash,dash	while ha --config='' supervisor info; do break; done
+closer14-0004	su:bash,dash	setsid ha --config=$nope su info
+closer14-0005	su:bash,dash	while ha --config=$nope supervisor info; do break; done
+closer14-0006	su:bash,dash	setsid ha --config=${nope} su info
+closer14-0007	su:bash,dash	while ha --config=${nope} supervisor info; do break; done
+closer14-0008	su:bash,dash	setsid ha --config="$nope" su info
+closer14-0009	su:bash,dash	while ha --config="$nope" supervisor info; do break; done
+closer14-0010	su:bash,dash	setsid ha --config=$(:) su info
+closer14-0011	su:bash,dash	while ha --config=$(:) supervisor info; do break; done
+closer14-0012	su:bash,dash	setsid ha --config=`:` su info
+closer14-0013	su:bash,dash	while ha --config=`:` supervisor info; do break; done
+closer14-0014	su:bash,dash	setsid ha --config=\\\n su info
+closer14-0015	su:bash,dash	while ha --config=\\\n supervisor info; do break; done
+closer14-0016	su:bash,dash	setsid ha --config=\t su info
+closer14-0017	su:bash,dash	while ha --config=\t supervisor info; do break; done
+closer14-0018	su:bash,dash	setsid ha --config=$'' su info
+closer14-0019	su:bash,dash	while ha --config=$'' supervisor info; do break; done
+closer14-0020	su:bash,dash	setsid ha --config=""'' su info
+closer14-0021	su:bash,dash	while ha --config=""'' supervisor info; do break; done
+closer14-0022	su:bash,dash	setsid ha --config=$@ su info
+closer14-0023	su:bash,dash	while ha --config=$@ supervisor info; do break; done
+closer14-0024	su:bash,dash	setsid ha --CONFIG= su info
+closer14-0025	su:bash,dash	while ha --CONFIG= supervisor info; do break; done
+closer14-0026	su:bash,dash	setsid ha --config=\\\n --log-level= su info
+closer14-0027	su:bash,dash	while ha --config=\\\n --log-level= supervisor info; do break; done
+closer14-0028	su:bash,dash	xargs -a /dev/null ha --config= su info
+closer14-0029	su:bash,dash	nice ha --config= su info
+closer14-0030	su:bash,dash	timeout 5 ha --config= su info
+closer14-0031	su:bash,dash	command ha --config= su info
+closer14-0032	su:bash,dash	exec ha --config= su info
+closer14-0033	su:bash,dash	true && ha --config= su info
+closer14-0034	su:bash,dash	false || ha --config= su info
+closer14-0035	su:bash,dash	f() { ha --config= su info; }; f
+closer14-0036	su:bash,dash	case x in x) ha --config= su info;; esac
+closer14-0037	su:bash,dash	for i in 1; do ha --config= su info; done
+closer14-0038	su:bash,dash	until ha --config= su info; do break; done
+closer14-0039	su:bash,dash	echo $(ha --config= su info)
+closer14-0040	su:bash,dash	echo `ha --config= su info`
+closer14-0041	su:bash,dash	true & ha --config= su info
+closer14-0042	su:bash,dash	stdbuf -o0 ha --config= su info
+closer14-0043	su:bash,dash	setsid -w ha --config= su info
+closer14-0044	none	env -i PATH=$PATH ha --config= su info
+closer14-0045	su:bash,dash	setsid /usr/bin/env ha --config= su info
+closer14-0046	su:bash,dash	eval "setsid ha --config= su info"
+closer14-0047	su:bash,dash	bash -c "eval 'setsid ha --config= su info'"
+closer14-0048	su:bash,dash	sh -c 'sh -c "setsid ha --config= su info"'
+closer14-0049	su:bash	bash <<< 'setsid ha --config= su info'
+closer14-0050	su:bash,dash	sh <<EOF\nsetsid ha --config= su info\nEOF
+closer14-0051	su:bash,dash	echo 'setsid ha --config= su info' | sh
+closer14-0052	su:bash,dash	eval setsid ha --config= su info
+closer14-0053	su:bash,dash	eval 'while ha --log-level """" s${x}u info; do break; done'
+closer14-0054	su:bash,dash	bash -c 'while ha --log-level $nope x s${x}u info; do break; done'
+closer14-0055	su:bash,dash	eval 'eval "setsid ha --config= su info"'
+closer14-0056	su:bash,dash	c='setsid ha --config= su info'; eval "$c"
+closer14-0057	su:bash,dash	trap 'setsid ha --config= su info' EXIT
+closer14-0058	su:bash,dash	setsid ha --log-level \r su info
+closer14-0059	su:bash,dash	setsid ha --config=\r su info
+closer14-0060	su:bash,dash	while ha --log-level \r s${x}u info; do break; done
+closer14-0061	su:bash,dash	setsid ha --log-level \x0b su info
+closer14-0062	su:bash,dash	setsid ha --config=\x0b su info
+closer14-0063	su:bash,dash	while ha --log-level \x0b s${x}u info; do break; done
+closer14-0064	su:bash,dash	setsid ha --log-level \x0c su info
+closer14-0065	su:bash,dash	setsid ha --config=\x0c su info
+closer14-0066	su:bash,dash	while ha --log-level \x0c s${x}u info; do break; done
+closer14-0067	su:bash,dash	setsid ha --log-level \xa0 su info
+closer14-0068	su:bash,dash	setsid ha --config=\xa0 su info
+closer14-0069	su:bash,dash	while ha --log-level \xa0 s${x}u info; do break; done
+closer14-0070	su:bash,dash	setsid ha --log-level \u2003 su info
+closer14-0071	su:bash,dash	setsid ha --config=\u2003 su info
+closer14-0072	su:bash,dash	while ha --log-level \u2003 s${x}u info; do break; done
+closer14-0073	su:bash,dash	setsid ha --log-level \x1f su info
+closer14-0074	su:bash,dash	setsid ha --config=\x1f su info
+closer14-0075	su:bash,dash	while ha --log-level \x1f s${x}u info; do break; done
+closer14-0076	su:bash,dash	setsid ha --log-level \x85 su info
+closer14-0077	su:bash,dash	setsid ha --config=\x85 su info
+closer14-0078	su:bash,dash	while ha --log-level \x85 s${x}u info; do break; done
+closer14-0079	su:bash,dash	while ha --log-level "\\\n" s${x}u info; do break; done
+closer14-0080	su:bash,dash	setsid ha --config "\\\n" s`:`u info
+closer14-0081	su:bash,dash	setsid ha --config $'' s`:`u info
+closer14-0082	su:bash,dash	setsid ha --config $"" s`:`u info
+closer14-0083	su:bash,dash	setsid ha --config ""$nope s`:`u info
+closer14-0084	su:bash,dash	setsid ha --config $nope"" s`:`u info
+closer14-0085	su:bash,dash	setsid ha --config "$nope" s`:`u info
+closer14-0086	su:bash,dash	setsid ha --config "${nope}" s`:`u info
+closer14-0087	su:bash,dash	while ha --log-level "$*" s${x}u info; do break; done
+closer14-0088	su:bash,dash	setsid ha --config "$*" s`:`u info
+closer14-0089	su:bash,dash	setsid ha --config "${nope:-}" s`:`u info
+closer14-0090	su:bash,dash	while ha --log-level ""\\\n"" s${x}u info; do break; done
+closer14-0091	su:bash,dash	setsid ha --config ""\\\n"" s`:`u info
+closer14-0092	su:bash,dash	while ha --log-level ''\\\n s${x}u info; do break; done
+closer14-0093	su:bash,dash	setsid ha --config ''\\\n s`:`u info
+closer14-0094	su:bash,dash	while ha --log-level \\\n'' s${x}u info; do break; done
+closer14-0095	su:bash,dash	setsid ha --config \\\n'' s`:`u info
+closer14-0096	su:bash,dash	setsid ha --config "$(:)" s`:`u info
+closer14-0097	su:bash,dash	setsid ha --config "`:`" s`:`u info
+closer14-0098	su:bash,dash	while ha --log-level """""" s${x}u info; do break; done
+closer14-0099	su:bash,dash	setsid ha --config """""" s`:`u info
+closer14-0100	su:bash,dash	while ha --log-level '''''''' s${x}u info; do break; done
+closer14-0101	su:bash,dash	setsid ha --config '''''''' s`:`u info
+closer14-0102	su:bash,dash	while ha --log-level ""$@ s${x}u info; do break; done
+closer14-0103	su:bash,dash	setsid ha --config ""$@ s`:`u info
+closer14-0104	su:bash,dash	while ha --log-level "$nope"'' s${x}u info; do break; done
+closer14-0105	su:bash,dash	setsid ha --config "$nope"'' s`:`u info
+closer14-0106	su:bash,dash	while ha --log-level ''$nope'' s${x}u info; do break; done
+closer14-0107	su:bash,dash	setsid ha --config ''$nope'' s`:`u info
+closer14-0108	none	setsid ha --config "" "" s`:`u info
+closer14-0109	su:bash,dash	setsid ha --log-level $nope x su info
+closer14-0110	su:bash,dash	while ha --config $nope x --no-progress s`:`u info; do break; done
+closer14-0111	su:bash,dash	ha --log-level ${nope} x s${x}u info
+closer14-0112	su:bash,dash	setsid ha --log-level ${nope} x su info
+closer14-0113	su:bash,dash	while ha --config ${nope} x --no-progress s`:`u info; do break; done
+closer14-0114	su:bash,dash	setsid ha --log-level $@ x su info
+closer14-0115	su:bash,dash	while ha --config $@ x --no-progress s`:`u info; do break; done
+closer14-0116	su:bash,dash	ha --log-level $* x s${x}u info
+closer14-0117	su:bash,dash	setsid ha --log-level $* x su info
+closer14-0118	su:bash,dash	while ha --config $* x --no-progress s`:`u info; do break; done
+closer14-0119	su:bash,dash	ha --log-level "$@" x s${x}u info
+closer14-0120	su:bash,dash	setsid ha --log-level "$@" x su info
+closer14-0121	su:bash,dash	while ha --config "$@" x --no-progress s`:`u info; do break; done
+closer14-0122	su:bash,dash	ha --log-level "${@}" x s${x}u info
+closer14-0123	su:bash,dash	setsid ha --log-level "${@}" x su info
+closer14-0124	su:bash,dash	while ha --config "${@}" x --no-progress s`:`u info; do break; done
+closer14-0125	su:bash,dash	setsid ha --log-level `:` x su info
+closer14-0126	su:bash,dash	while ha --config `:` x --no-progress s`:`u info; do break; done
+closer14-0127	su:bash,dash	setsid ha --log-level $(:) x su info
+closer14-0128	su:bash,dash	while ha --config $(:) x --no-progress s`:`u info; do break; done
+closer14-0129	su:bash,dash	ha --log-level $(true) x s${x}u info
+closer14-0130	su:bash,dash	setsid ha --log-level $(true) x su info
+closer14-0131	su:bash,dash	while ha --config $(true) x --no-progress s`:`u info; do break; done
+closer14-0132	su:bash,dash	ha --log-level ${nope:+x} x s${x}u info
+closer14-0133	su:bash,dash	setsid ha --log-level ${nope:+x} x su info
+closer14-0134	su:bash,dash	while ha --config ${nope:+x} x --no-progress s`:`u info; do break; done
+closer14-0135	su:bash,dash	ha --log-level $IFS x s${x}u info
+closer14-0136	su:bash,dash	setsid ha --log-level $IFS x su info
+closer14-0137	su:bash,dash	while ha --config $IFS x --no-progress s`:`u info; do break; done
+closer14-0138	su:bash	ha --log-level {,} x s${x}u info
+closer14-0139	su:bash	setsid ha --log-level {,} x su info
+closer14-0140	su:bash	while ha --config {,} x --no-progress s`:`u info; do break; done
+closer14-0141	su:bash,dash	ha --log-level $nope$nope x s${x}u info
+closer14-0142	su:bash,dash	setsid ha --log-level $nope$nope x su info
+closer14-0143	su:bash,dash	while ha --config $nope$nope x --no-progress s`:`u info; do break; done
+closer14-0144	su:bash,dash	ha --log-level $nope`:` x s${x}u info
+closer14-0145	su:bash,dash	setsid ha --log-level $nope`:` x su info
+closer14-0146	su:bash,dash	while ha --config $nope`:` x --no-progress s`:`u info; do break; done
+closer14-0147	su:bash,dash	ha --log-level $nope"$@" x s${x}u info
+closer14-0148	su:bash,dash	setsid ha --log-level $nope"$@" x su info
+closer14-0149	su:bash,dash	while ha --config $nope"$@" x --no-progress s`:`u info; do break; done
+closer14-0150	su:bash,dash	ha --log-level ${nope#x} x s${x}u info
+closer14-0151	su:bash,dash	setsid ha --log-level ${nope#x} x su info
+closer14-0152	su:bash,dash	while ha --config ${nope#x} x --no-progress s`:`u info; do break; done
+closer14-0153	su:bash,dash	ha --log-level $1 x s${x}u info
+closer14-0154	su:bash,dash	setsid ha --log-level $1 x su info
+closer14-0155	su:bash,dash	while ha --config $1 x --no-progress s`:`u info; do break; done
+closer14-0156	none	ha --log-level ${!nope} x s${x}u info
+closer14-0157	none	setsid ha --log-level ${!nope} x su info
+closer14-0158	none	while ha --config ${!nope} x --no-progress s`:`u info; do break; done
+closer14-0159	su:bash,dash	ha --log-level x $nope s${x}u info
+closer14-0160	su:bash,dash	ha $nope s${x}u info
+closer14-0161	su:bash,dash	setsid ha $nope su info
+closer14-0162	su:bash,dash	setsid ha --log-level $a $b x s${x}u info
+closer14-0163	su:bash,dash	setsid ha --log-level $a --config $b --endpoint x s${x}u info
+closer14-0164	su:bash,dash	setsid ha --log-level $a --config $b --endpoint x su info
+closer14-0165	su:bash,dash	setsid ha --log-level $a $b x su info
+closer14-0166	su:bash,dash	setsid ha --no-progress $a --log-level $b x su info
+closer14-0167	su:bash,dash	setsid ha --log-level $nope x -- su info
+closer14-0168	su:bash,dash	setsid ha --log-level $nope x 2>/dev/null su info
+closer14-0169	su:bash,dash	setsid ha --log-level $nope\tx\tsu info
+closer14-0170	su:bash,dash	setsid ha --log-level $nope \\\n x su info
+closer14-0171	su:bash,dash	setsid ha --log-level=$nope --config $nope x su info
+closer14-0172	su:bash,dash	setsid ha --log-level $nope x "su" info
+closer14-0173	su:bash,dash	setsid ha --log-level $nope x s""u info
+closer14-0174	su:bash,dash	setsid ha --log-level $nope x s\\u info
+closer14-0175	su:bash	setsid ha --log-level $nope x {su,} info
+closer14-0176	su:bash	setsid ha --log-level $nope x $'su' info
+closer14-0177	su:bash,dash	v='x su'; setsid ha --log-level $v info
+closer14-0178	su:bash,dash	v='x su'; ha --log-level $v info
+closer14-0179	su:bash,dash	v='--log-level x su'; setsid ha $v info
+closer14-0180	su:bash,dash	v=su; setsid ha --config= $v info
+closer14-0181	su:bash,dash	v='x su'; while ha --log-level $v info; do break; done
+closer14-0182	su:bash,dash	set -- x su; setsid ha --log-level "$@" info
+closer14-0183	su:bash,dash	set -- x su; setsid ha --log-level $* info
+closer14-0184	su:bash,dash	IFS=,; v=x,su; setsid ha --log-level $v info
+closer14-0185	su:bash,dash	v='su info'; setsid ha --config= $v
+closer14-0186	su:bash,dash	setsid ha --config= ${v:-su} info
+closer14-0187	su:bash,dash	setsid ha --log-level ${v:-x su} info
+closer14-0188	su:bash,dash	setsid ha --log-level ${v:-x} su info
+closer14-0189	su:bash,dash	setsid ha --log-level $(echo x su) info
+closer14-0190	su:bash,dash	setsid ha --log-level `echo x` su info
+closer14-0191	none	echo ha --config= su info
+closer14-0192	none	setsid ha --config=su info
+closer14-0193	none	setsid ha --config=\\\nsu info
+closer14-0194	none	grep -r 'ha --config= su' .
+closer14-0195	none	ls --config= su
+closer14-0196	remote:bash,dash	setsid ha --log-level $nope x core info
+closer14-0197	none	git commit -m 'ha --config= su info'
+closer14-0198	none	echo ""'' su
+closer14-0199	remote:bash,dash	ha --log-level ""'' core info
+closer14-0200	none	setsid ha --log-level $nope x y su
+closer14-0201	none	cat <<EOF\nha --config= su info\nEOF
+closer15-0001	su:bash,dash	ha --log-level $nope x --no-progress s${x}u info
+closer15-0002	su:bash,dash	setsid ha --log-level $nope x --no-progress s${x}u info
+closer15-0003	su:bash,dash	ha --log-level $nope x 2>/dev/null s${x}u info
+closer15-0004	su:bash,dash	setsid ha --log-level $nope x 2>/dev/null s${x}u info
+closer15-0005	su:bash,dash	ha --log-level $nope x >/dev/null s${x}u info
+closer15-0006	su:bash,dash	setsid ha --log-level $nope x >/dev/null s${x}u info
+closer15-0007	su:bash,dash	ha --log-level $nope x --config y s${x}u info
+closer15-0008	su:bash,dash	setsid ha --log-level $nope x --config y s${x}u info
+closer15-0009	su:bash,dash	ha --log-level $nope x --no-progress --raw-json s${x}u info
+closer15-0010	su:bash,dash	setsid ha --log-level $nope x --no-progress --raw-json s${x}u info
+closer15-0011	su:bash,dash	ha --log-level $nope x --  s${x}u info
+closer15-0012	su:bash,dash	setsid ha --log-level $nope x --  s${x}u info
+closer15-0013	su:bash,dash	ha --log-level `:` x --no-progress s${x}u info
+closer15-0014	su:bash,dash	setsid ha --log-level `:` x --no-progress s${x}u info
+closer15-0015	su:bash,dash	ha --log-level `:` x 2>/dev/null s${x}u info
+closer15-0016	su:bash,dash	setsid ha --log-level `:` x 2>/dev/null s${x}u info
+closer15-0017	su:bash,dash	ha --log-level `:` x >/dev/null s${x}u info
+closer15-0018	su:bash,dash	setsid ha --log-level `:` x >/dev/null s${x}u info
+closer15-0019	su:bash,dash	ha --log-level `:` x --config y s${x}u info
+closer15-0020	su:bash,dash	setsid ha --log-level `:` x --config y s${x}u info
+closer15-0021	su:bash,dash	ha --log-level `:` x --no-progress --raw-json s${x}u info
+closer15-0022	su:bash,dash	setsid ha --log-level `:` x --no-progress --raw-json s${x}u info
+closer15-0023	su:bash,dash	ha --log-level `:` x --  s${x}u info
+closer15-0024	su:bash,dash	setsid ha --log-level `:` x --  s${x}u info
+closer15-0025	su:bash,dash	ha --log-level $@ x --no-progress s${x}u info
+closer15-0026	su:bash,dash	setsid ha --log-level $@ x --no-progress s${x}u info
+closer15-0027	su:bash,dash	ha --log-level $@ x 2>/dev/null s${x}u info
+closer15-0028	su:bash,dash	setsid ha --log-level $@ x 2>/dev/null s${x}u info
+closer15-0029	su:bash,dash	ha --log-level $@ x >/dev/null s${x}u info
+closer15-0030	su:bash,dash	setsid ha --log-level $@ x >/dev/null s${x}u info
+closer15-0031	su:bash,dash	ha --log-level $@ x --config y s${x}u info
+closer15-0032	su:bash,dash	setsid ha --log-level $@ x --config y s${x}u info
+closer15-0033	su:bash,dash	ha --log-level $@ x --no-progress --raw-json s${x}u info
+closer15-0034	su:bash,dash	setsid ha --log-level $@ x --no-progress --raw-json s${x}u info
+closer15-0035	su:bash,dash	ha --log-level $@ x --  s${x}u info
+closer15-0036	su:bash,dash	setsid ha --log-level $@ x --  s${x}u info
+closer15-0037	su:bash,dash	ha --log-level 2>/dev/null $nope x s${x}u info
+closer15-0038	su:bash,dash	ha --log-level >/dev/null $nope x s${x}u info
+closer15-0039	su:bash,dash	setsid ha --log-level 2>/dev/null $nope x s${x}u info
+closer15-0040	su:bash,dash	ha --log-level $nope 2>/dev/null x s${x}u info
+closer15-0041	su:bash	shopt -s nullglob; ha --log-level /nope/* x s${x}u info
+closer15-0042	su:bash	shopt -s nullglob; setsid ha --log-level /nope/* x s${x}u info
+closer15-0043	su:bash	shopt -s nullglob; setsid ha --log-level /nope/? x su info
+closer15-0044	su:bash	setsid ha --log-level {,} x s${x}u info
+closer15-0045	none	ha --LOG-LEVEL $nope x s${x}u info
+closer15-0046	su:bash,dash	ha --log-level\t$nope\tx\ts${x}u info
+closer15-0047	su:bash,dash	ha --log-level \\\n$nope x s${x}u info
+closer15-0048	su:bash,dash	ha --log-level $nope\\\n x s${x}u info
+closer15-0049	su:bash,dash	ha --log-level $a $b $c x s${x}u info
+closer15-0050	su:bash,dash	ha --log-level $a $b $c $d $e x s${x}u info
+closer15-0051	su:bash,dash	while ha --config `:` x supervisor info; do break; done
+closer15-0052	su:bash,dash	if false; then :; else ha --api-token $@ x super info; fi
+closer15-0053	su:bash,dash	eval 'ha --log-level $nope x su info'
+closer15-0054	su:bash,dash	bash -c 'ha --log-level $nope x su info'
+closer15-0055	remote:bash,dash	setsid ha --log-level $nope x host reboot
+closer15-0056	su:bash,dash	setsid ha --log-level $nope --config su info
+closer15-0057	remote:bash,dash	setsid ha --endpoint $(:) x core stop
+closer15-0058	su:bash,dash	eval 'setsid ha --log-level' '"" s${x}u info'
+closer15-0059	su:bash,dash	eval 'setsid ha --log-level ""' 's${x}u info'
+closer15-0060	su:bash,dash	eval 'setsid ha' '--log-level "" s${x}u info'
+closer15-0061	su:bash,dash	eval 'setsid ha --log-level "" s${x}'"u info"
+closer15-0062	su:bash,dash	bash -c 'setsid ha --log-level "" s'"\\${x}u info"
+closer15-0063	su:bash,dash	eval 'setsid' 'ha' '--log-level' '""' 's${x}u' 'info'
+closer15-0064	su:bash,dash	eval setsid ha --log-level '""' 's${x}u' info
+closer15-0065	su:bash,dash	eval setsid ha --log-level \\"\\" 's${x}u' info
+closer15-0066	su:bash,dash	eval setsid ha --log-level \\'\\' 's${x}u' info
+closer15-0067	su:bash,dash	echo \\'; eval 'setsid ha --log-level "" s${x}u info'
+closer15-0068	su:bash,dash	echo \\"; eval 'setsid ha --log-level "" s${x}u info'
+closer15-0069	su:bash,dash	echo \\'; bash -c 'setsid ha --log-level "a b" s${x}u info'
+closer15-0070	su:bash,dash	eval "setsid ha --log-level \\"\\" s\\${x}u info"
+closer15-0071	su:bash,dash	eval "setsid ha --log-level '' s\\${x}u info"
+closer15-0072	su:bash,dash	bash -c "setsid ha --log-level \\"a b\\" s\\${x}u info"
+closer15-0073	su:bash,dash	bash -c "eval \\"setsid ha --log-level '' s\\\\\\${x}u info\\""
+closer15-0074	su:bash,dash	eval $'setsid ha --log-level "" s${x}u info'
+closer15-0075	su:bash,dash	eval 'eval '\\''setsid ha --log-level "" s${x}u info'\\'
+closer15-0076	su:bash,dash	eval 'ha --log-level $nope x s${x}u info'
+closer15-0077	su:bash,dash	eval 'setsid ha --log-level' '$nope x s${x}u info'
+closer15-0078	su:bash,dash	eval 'setsid ha --log-level """" s${x}u info'
+closer15-0079	su:bash,dash	eval "setsid ha --log-level \\"\\"'' s\\${x}u info"
+closer15-0080	su:bash,dash	c='setsid ha --log-level "" s${x}u info'; eval "$c"
+closer15-0081	su:bash,dash	eval 'setsid ha --log-level "" s${x}u info' # it's
+closer15-0082	su:bash,dash	eval 'x=u; setsid ha --log-level "" s$x info'
+closer15-0083	su:bash,dash	sh -c 'eval "setsid ha --log-level \\"\\" s\\${x}u info"'
+closer15-0084	su:bash,dash	eval 'sh -c "sh -c '\\''setsid ha --log-level \\"\\" s\\${x}u info'\\''"'
+closer15-0085	su:bash,dash	while ha --log-level ""\\\n\\\n'' s${x}u info; do break; done
+closer15-0086	su:bash,dash	while ha --log-level \\\n""'' s${x}u info; do break; done
+closer15-0087	su:bash,dash	while ha --log-level ""\\\n''\\\n s${x}u info; do break; done
+closer15-0088	su:bash,dash	while ha --log-level ''"\\\n" s${x}u info; do break; done
+closer15-0089	su:bash,dash	while ha --log-level ""''\\\n"" s${x}u info; do break; done
+closer15-0090	su:bash,dash	while ha --log-level "" \\\n s${x}u info; do break; done
+closer15-0091	su:bash,dash	while ha --log-level ''$@ s${x}u info; do break; done
+closer15-0092	su:bash,dash	while ha --log-level ""\\  s${x}u info; do break; done
+closer15-0093	none	while ha --log-level ""\\\\\n s${x}u info; do break; done
+closer15-0094	none	while ha --log-level """ s${x}u info; do break; done
+closer15-0095	none	while ha --log-level ""'' "" s${x}u info; do break; done
+closer15-0096	su:bash,dash	while ha --log-level x"" s${x}u info; do break; done
+closer15-0097	su:bash,dash	while ha --log-level ""x s${x}u info; do break; done
+closer15-0098	none	while ha --log-level ""''x y s${x}u info; do break; done
+closer15-0099	su:bash,dash	while ha --log-level "a"'' s${x}u info; do break; done
+closer15-0100	su:bash,dash	while ha --config ""'' --log-level ''"" s${x}u info; do break; done
+closer15-0101	none	while ha --log-level;"" s${x}u info; do break; done
+closer15-0102	su:bash,dash	while ha --log-level ""'';ha s${x}u info; do break; done
+closer15-0103	su:bash,dash	while ha --log-level ""''>/dev/null s${x}u info; do break; done
+closer15-0104	su:bash,dash	while ha --log-level >""''x y s${x}u info; do break; done
+closer15-0105	su:bash,dash	setsid ha --config=>/dev/null su info
+closer15-0106	su:bash,dash	setsid ha --config=;ha su info
+closer15-0107	su:bash,dash	setsid ha --config=&& ha su info
+closer15-0108	su:bash,dash	setsid ha --config=|ha su info
+closer15-0109	su:bash,dash	setsid ha --config=2>/dev/null su info
+closer15-0110	su:bash,dash	setsid ha --config= >/dev/null su info
+closer15-0111	su:bash,dash	setsid ha --config="" 2>&1 su info
+closer15-0112	su:bash,dash	setsid ha --config= \\\nsu info
+closer15-0113	su:bash,dash	setsid ha --config==  su info
+closer15-0114	su:bash,dash	setsid ha --config= -- su info
+closer15-0115	su:bash,dash	setsid ha --no-progress= su info
+closer15-0116	none	setsid ha --log-level= --config su info
+closer15-0117	su:bash,dash	setsid ha --config= --config= --config= supervisor info
+closer15-0118	su:bash,dash	setsid ha --config="a b" su info
+closer15-0119	su:bash,dash	setsid ha --config=a\\ b su info
+closer15-0120	su:bash,dash	setsid ha --config='' --log-level "" s${x}u info
+closer15-0121	none	setsid ha --config=$nope x s${x}u info
+closer15-0122	none	ha --log-level $lvl core info
+closer15-0123	remote:bash,dash	ha --config $dir --no-progress core info
+closer15-0124	none	ha --config $dir core info >$log
+closer15-0125	none	eval 'echo ha' '$x'
+closer15-0126	none	echo 'ha' "$x"
+closer15-0127	none	git commit -m 'ha --log-level "" $x'
+closer15-0128	none	grep 'ha ' "$file"
+closer15-0129	none	echo "aloha $name"
+closer15-0130	none	printf '%s\\n' 'ha $x'
+closer15-0131	remote:bash,dash	ha --config "$dir" core info
+closer15-0132	remote:bash,dash	ha --config= --log-level=debug core info
+closer15-0133	none	ssh host 'ha core info'
+closer15-0134	none	echo 'ha  $1' >> notes.txt
+closer15-0135	none	jq '.ha | $x' file
+closer15-0136	remote:bash,dash	ha --log-level debug core info $extra
+closer15-0137	none	ha --config $dir core logs --lines $n
+closerws-0001	su:bash,dash	setsid ha --log-level \x1c su info
+closerws-0002	su:bash,dash	setsid ha --log-level \x1d su info
+closerws-0003	su:bash,dash	setsid ha --log-level \x1e su info
+closerws-0004	su:bash,dash	setsid ha --log-level \u1680 su info
+closerws-0005	su:bash,dash	setsid ha --log-level \u2000 su info
+closerws-0006	su:bash,dash	setsid ha --log-level \u200a su info
+closerws-0007	su:bash,dash	setsid ha --log-level \u2028 su info
+closerws-0008	su:bash,dash	setsid ha --log-level \u2029 su info
+closerws-0009	su:bash,dash	setsid ha --log-level \u202f su info
+closerws-0010	su:bash,dash	setsid ha --log-level \u205f su info
+closerws-0011	su:bash,dash	setsid ha --log-level \u3000 su info
+closerws-0012	su:bash,dash	while ha --api-token \r supervisor info; do break; done
+closerws-0013	su:bash,dash	while ha --api-token \x0b supervisor info; do break; done
+closerws-0014	su:bash,dash	while ha --api-token \x0c supervisor info; do break; done
+closerws-0015	su:bash,dash	while ha --api-token \x1c supervisor info; do break; done
+closerws-0016	su:bash,dash	while ha --api-token \x1d supervisor info; do break; done
+closerws-0017	su:bash,dash	while ha --api-token \x1e supervisor info; do break; done
+closerws-0018	su:bash,dash	while ha --api-token \x1f supervisor info; do break; done
+closerws-0019	su:bash,dash	while ha --api-token \x85 supervisor info; do break; done
+closerws-0020	su:bash,dash	while ha --api-token \xa0 supervisor info; do break; done
+closerws-0021	su:bash,dash	while ha --api-token \u1680 supervisor info; do break; done
+closerws-0022	su:bash,dash	while ha --api-token \u2000 supervisor info; do break; done
+closerws-0023	su:bash,dash	while ha --api-token \u2003 supervisor info; do break; done
+closerws-0024	su:bash,dash	while ha --api-token \u200a supervisor info; do break; done
+closerws-0025	su:bash,dash	while ha --api-token \u2028 supervisor info; do break; done
+closerws-0026	su:bash,dash	while ha --api-token \u2029 supervisor info; do break; done
+closerws-0027	su:bash,dash	while ha --api-token \u202f supervisor info; do break; done
+closerws-0028	su:bash,dash	while ha --api-token \u205f supervisor info; do break; done
+closerws-0029	su:bash,dash	while ha --api-token \u3000 supervisor info; do break; done
+closerws-0030	su:bash,dash	ha --config \r su info
+closerws-0031	su:bash,dash	ha --config \x0b su info
+closerws-0032	su:bash,dash	ha --config \x0c su info
+closerws-0033	su:bash,dash	ha --config \x1c su info
+closerws-0034	su:bash,dash	ha --config \x1d su info
+closerws-0035	su:bash,dash	ha --config \x1e su info
+closerws-0036	su:bash,dash	ha --config \x1f su info
+closerws-0037	su:bash,dash	ha --config \x85 su info
+closerws-0038	su:bash,dash	ha --config \xa0 su info
+closerws-0039	su:bash,dash	ha --config \u1680 su info
+closerws-0040	su:bash,dash	ha --config \u2000 su info
+closerws-0041	su:bash,dash	ha --config \u2003 su info
+closerws-0042	su:bash,dash	ha --config \u200a su info
+closerws-0043	su:bash,dash	ha --config \u2028 su info
+closerws-0044	su:bash,dash	ha --config \u2029 su info
+closerws-0045	su:bash,dash	ha --config \u202f su info
+closerws-0046	su:bash,dash	ha --config \u205f su info
+closerws-0047	su:bash,dash	ha --config \u3000 su info
+closerws-0048	remote:bash,dash	setsid ha --endpoint \r host reboot
+closerws-0049	remote:bash,dash	setsid ha --endpoint \x0b host reboot
+closerws-0050	remote:bash,dash	setsid ha --endpoint \x0c host reboot
+closerws-0051	remote:bash,dash	setsid ha --endpoint \x1c host reboot
+closerws-0052	remote:bash,dash	setsid ha --endpoint \x1d host reboot
+closerws-0053	remote:bash,dash	setsid ha --endpoint \x1e host reboot
+closerws-0054	remote:bash,dash	setsid ha --endpoint \x1f host reboot
+closerws-0055	remote:bash,dash	setsid ha --endpoint \x85 host reboot
+closerws-0056	remote:bash,dash	setsid ha --endpoint \xa0 host reboot
+closerws-0057	remote:bash,dash	setsid ha --endpoint \u1680 host reboot
+closerws-0058	remote:bash,dash	setsid ha --endpoint \u2000 host reboot
+closerws-0059	remote:bash,dash	setsid ha --endpoint \u2003 host reboot
+closerws-0060	remote:bash,dash	setsid ha --endpoint \u200a host reboot
+closerws-0061	remote:bash,dash	setsid ha --endpoint \u2028 host reboot
+closerws-0062	remote:bash,dash	setsid ha --endpoint \u2029 host reboot
+closerws-0063	remote:bash,dash	setsid ha --endpoint \u202f host reboot
+closerws-0064	remote:bash,dash	setsid ha --endpoint \u205f host reboot
+closerws-0065	remote:bash,dash	setsid ha --endpoint \u3000 host reboot
+closerws-0066	su:bash,dash	setsid ha >\r su info
+closerws-0067	su:bash,dash	setsid ha >\x0b su info
+closerws-0068	su:bash,dash	setsid ha >\x0c su info
+closerws-0069	su:bash,dash	setsid ha >\x1c su info
+closerws-0070	su:bash,dash	setsid ha >\x1d su info
+closerws-0071	su:bash,dash	setsid ha >\x1e su info
+closerws-0072	su:bash,dash	setsid ha >\x1f su info
+closerws-0073	su:bash,dash	setsid ha >\x85 su info
+closerws-0074	su:bash,dash	setsid ha >\xa0 su info
+closerws-0075	su:bash,dash	setsid ha >\u1680 su info
+closerws-0076	su:bash,dash	setsid ha >\u2000 su info
+closerws-0077	su:bash,dash	setsid ha >\u2003 su info
+closerws-0078	su:bash,dash	setsid ha >\u200a su info
+closerws-0079	su:bash,dash	setsid ha >\u2028 su info
+closerws-0080	su:bash,dash	setsid ha >\u2029 su info
+closerws-0081	su:bash,dash	setsid ha >\u202f su info
+closerws-0082	su:bash,dash	setsid ha >\u205f su info
+closerws-0083	su:bash,dash	setsid ha >\u3000 su info
+closerws-0084	su:bash,dash	setsid ha --log-level x\ry su info
+closerws-0085	su:bash,dash	setsid ha --log-level x\x0by su info
+closerws-0086	su:bash,dash	setsid ha --log-level x\x0cy su info
+closerws-0087	su:bash,dash	setsid ha --log-level x\x1cy su info
+closerws-0088	su:bash,dash	setsid ha --log-level x\x1dy su info
+closerws-0089	su:bash,dash	setsid ha --log-level x\x1ey su info
+closerws-0090	su:bash,dash	setsid ha --log-level x\x1fy su info
+closerws-0091	su:bash,dash	setsid ha --log-level x\x85y su info
+closerws-0092	su:bash,dash	setsid ha --log-level x\xa0y su info
+closerws-0093	su:bash,dash	setsid ha --log-level x\u1680y su info
+closerws-0094	su:bash,dash	setsid ha --log-level x\u2000y su info
+closerws-0095	su:bash,dash	setsid ha --log-level x\u2003y su info
+closerws-0096	su:bash,dash	setsid ha --log-level x\u200ay su info
+closerws-0097	su:bash,dash	setsid ha --log-level x\u2028y su info
+closerws-0098	su:bash,dash	setsid ha --log-level x\u2029y su info
+closerws-0099	su:bash,dash	setsid ha --log-level x\u202fy su info
+closerws-0100	su:bash,dash	setsid ha --log-level x\u205fy su info
+closerws-0101	su:bash,dash	setsid ha --log-level x\u3000y su info
+closerws-0102	su:bash,dash	eval 'setsid ha --config \r su info'
+closerws-0103	su:bash,dash	eval 'setsid ha --config \x0b su info'
+closerws-0104	su:bash,dash	eval 'setsid ha --config \x0c su info'
+closerws-0105	su:bash,dash	eval 'setsid ha --config \x1c su info'
+closerws-0106	su:bash,dash	eval 'setsid ha --config \x1d su info'
+closerws-0107	su:bash,dash	eval 'setsid ha --config \x1e su info'
+closerws-0108	su:bash,dash	eval 'setsid ha --config \x1f su info'
+closerws-0109	su:bash,dash	eval 'setsid ha --config \x85 su info'
+closerws-0110	su:bash,dash	eval 'setsid ha --config \xa0 su info'
+closerws-0111	su:bash,dash	eval 'setsid ha --config \u1680 su info'
+closerws-0112	su:bash,dash	eval 'setsid ha --config \u2000 su info'
+closerws-0113	su:bash,dash	eval 'setsid ha --config \u2003 su info'
+closerws-0114	su:bash,dash	eval 'setsid ha --config \u200a su info'
+closerws-0115	su:bash,dash	eval 'setsid ha --config \u2028 su info'
+closerws-0116	su:bash,dash	eval 'setsid ha --config \u2029 su info'
+closerws-0117	su:bash,dash	eval 'setsid ha --config \u202f su info'
+closerws-0118	su:bash,dash	eval 'setsid ha --config \u205f su info'
+closerws-0119	su:bash,dash	eval 'setsid ha --config \u3000 su info'
