@@ -2,6 +2,10 @@
 
 ## 0.3.5 (unreleased)
 
+- A permission request that waits for you now shows at the bottom of the chat, below the "Working" lines, and the
+  chat scrolls to it once when it first appears. Before, it sat above those lines and was easy to miss. A request
+  you already answered stays where it was. No approval or permission rule changed.
+
 - **Full access mode, off by default.** A Home Assistant administrator can turn it on in Settings > Full access,
   after confirming a warning. A chat whose Permissions an administrator sets to Full access then runs Codex
   without its sandbox: commands can change everything in `/config`, use the network, and reach everything the
