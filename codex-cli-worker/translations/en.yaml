@@ -13,7 +13,7 @@ configuration:
     description: How much of its thinking Codex reports while it works. concise shows short headlines in the chat activity list, detailed asks for fuller summaries, and none hides reasoning from the list. Commands, file edits, searches, and progress notes are shown regardless.
   codex_sandbox:
     name: Codex sandbox
-    description: workspace-write is the default and allows edits in /config; read-only allows inspection. Commands or file changes needing extra access ask a Home Assistant administrator for Allow once or Deny in the chat. There is no full-access mode in this fork.
+    description: workspace-write is the default and allows edits in /config; read-only allows inspection. Commands or file changes needing extra access ask a Home Assistant administrator for Allow once or Deny in the chat. A danger-full-access setting stops the app unless an Ingress administrator turns Block full access off in Settings. This permits full access inside the app container without adding host access.
   task_root:
     name: Task root
     description: Folder where prompts, logs, backups, status files, and change lists are saved. Keep it inside /config so Codex can save a copy of each file before changing it.

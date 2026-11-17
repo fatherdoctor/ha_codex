@@ -35,17 +35,21 @@ const path = require('node:path');
         if (await input.getAttribute('data-protection') !== 'shell_commands') assert.equal(await input.isChecked(), true);
       }
       await self.locator('.settings-toggle').click();
+      const confirmationCopy = await page.evaluate(async () => (await api('protection-checks')).confirmations);
       const full = self.locator('[data-protection=full_access]');
       page.once('dialog', dialog => dialog.dismiss());
       await full.locator('..').click();
       assert.equal(await full.isChecked(), true, 'cancel does not change the saved choice');
       page.once('dialog', dialog => {
-        assert.match(dialog.message(), /container/);
+        assert.equal(dialog.message(), confirmationCopy.full_access);
+        assert.match(dialog.message(), /Remaining protections may no longer hold/);
         return dialog.accept();
       });
       await full.locator('..').click();
       await page.waitForFunction(() => document.querySelector('#protection-notice').textContent.includes('Full access'));
-      await page.waitForFunction(() => !document.querySelector('[data-protection=full_access]').checked && !document.querySelector('[data-protection=full_access]').disabled);
+      await page.waitForFunction(() => !document.querySelector('[data-protection=full_access]').checked
+        && !document.querySelector('[data-protection=full_access]').disabled);
+      assert.match(await page.locator('#protection-notice').textContent(), /Remaining protections may no longer hold/);
       await page.screenshot({path: path.join(shots, `protection-switches-${colorScheme}-400.png`), animations: 'disabled'});
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
       await page.locator('#close-settings').click();
@@ -66,11 +70,31 @@ const path = require('node:path');
         if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click();
       }
       await full.locator('..').click();
-      await page.waitForFunction(() => document.querySelector('[data-protection=full_access]').checked && !document.querySelector('[data-protection=full_access]').disabled);
+      await page.waitForFunction(() => document.querySelector('[data-protection=full_access]').checked
+        && !document.querySelector('[data-protection=full_access]').disabled);
       await page.waitForFunction(() => !document.querySelector('[data-protection=shell_commands]').disabled);
       await shell.locator('..').click();
       await page.waitForFunction(() => document.querySelector('#command-checks .settings-status').textContent === 'Restart needed');
       assert.match(await page.locator('#protection-notice').textContent(), /Restart the app/);
+      for (const kind of ['credential_reads', 'app_settings']) {
+        const control = self.locator(`[data-protection=${kind}]`);
+        await page.waitForFunction(() => !document.querySelector('[data-protection=full_access]').disabled);
+        page.once('dialog', dialog => {
+          assert.equal(dialog.message(), confirmationCopy[kind]);
+          return dialog.accept();
+        });
+        await control.locator('..').click();
+        await page.waitForFunction(kind => !document.querySelector(`[data-protection=${kind}]`).checked
+          && !document.querySelector(`[data-protection=${kind}]`).disabled, kind);
+        if (kind === 'credential_reads') {
+          assert.match(await control.getAttribute('aria-label'), /Supervisor commands/);
+        } else {
+          assert.match(await page.locator('#protection-notice').textContent(), /Remaining protections may no longer hold/);
+        }
+        await control.locator('..').click();
+        await page.waitForFunction(kind => document.querySelector(`[data-protection=${kind}]`).checked
+          && !document.querySelector(`[data-protection=${kind}]`).disabled, kind);
+      }
       assert.deepEqual(errors, []);
       await page.close();
       console.log(`PASS protection choices: ${colorScheme}, 400 px, grouped switches, confirmation, persistence, chat and Status notices`);

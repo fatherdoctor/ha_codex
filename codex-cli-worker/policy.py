@@ -95,9 +95,9 @@ def load_policy(path: Path | None = None) -> dict[str, Any]:
         raise PolicyError("The protected policy may not allow danger-full-access.")
     if protections["full_access"] and policy["approval_policy"] == "never":
         raise PolicyError('The protected policy may not set approval_policy to "never".')
-    if protections["full_access"] and policy["approvals_reviewer"] != "user":
+    if policy["approvals_reviewer"] != "user":
         raise PolicyError('The protected policy must keep approvals_reviewer set to "user".')
-    if protections["full_access"] and policy["approvals_require_admin"] is not True:
+    if policy["approvals_require_admin"] is not True:
         raise PolicyError("The protected policy must keep approvals_require_admin on.")
     return policy
 

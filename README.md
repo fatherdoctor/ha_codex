@@ -137,8 +137,10 @@ Each chat turn runs in one of two modes.
 | `workspace-write` (default) | Edit files in your configuration folder. Shell networking and writes outside it need your permission. |
 
 Anything else shows a **Permission needed** card with the full command or file change, and the buttons **Allow once**
-and **Deny**. Only a Home Assistant administrator can answer it. This fork has no full-access mode; an old setting that
-names it stops the app at startup, with a log line that says why.
+and **Deny**. Only a Home Assistant administrator can answer it. With **Block full access** on (the default), a `danger-full-access` setting stops the app at startup
+with a log line that says why. An Ingress administrator can turn that protection off in Settings to allow full
+access inside the app container. This adds no host access or container privileges. See
+[protection switches](codex-cli-worker/DOCS.md#owner-controlled-protection-checks).
 
 ### Pre-approved action groups
 

@@ -22,18 +22,19 @@ COMMANDS = {
     'templated_actions': 'Templated actions',
 }
 SELF = {
-    'credential_reads': 'Credential reads',
+    'credential_reads': 'Protect credentials and Supervisor commands',
     'full_access': 'Full access',
     'app_settings': 'App settings, policy and rules',
 }
 DEFAULTS = dict.fromkeys((*COMMANDS, *SELF), True)
 CONFIRMATIONS = {
-    'credential_reads': ('The assistant can read private credentials and use connections already available inside this app. '
-                         'Continue?'),
+    'credential_reads': ('The assistant can read private credentials, run Supervisor commands, '
+                         'and use connections already available inside this app. Continue?'),
     'full_access': ('The assistant can request full access inside this app container. '
-                    'Normal approval and sandbox restrictions can then be removed. Continue?'),
+                    'Normal approval and sandbox restrictions can then be removed. '
+                    'Remaining protections may no longer hold. Continue?'),
     'app_settings': ('The assistant can change this app’s settings, policy, rules and these protection switches. '
-                     'Continue?'),
+                     'Remaining protections may no longer hold. Continue?'),
 }
 KINDS = {
     'shell_command': 'shell_commands', 'rest_command': 'rest_commands',
@@ -42,6 +43,25 @@ KINDS = {
     'pyscript': 'python_scripts', 'template': 'templated_actions',
     'hassio': 'credential_reads',
 }
+# Each shipped prefix rule has one stable identity: its first two literal
+# alternatives. Explanatory justification text never chooses a switch group.
+MANAGED_RULE_GROUPS = {
+    ('ha', 'supervisor'): 'credential_reads',
+    ('printenv', 'SUPERVISOR_TOKEN'): 'credential_reads',
+    ('cat', '/proc/1/environ'): 'credential_reads',
+    ('cat', '/data/options.json'): 'app_settings',
+    ('codex', '--dangerously-bypass-approvals-and-sandbox'): 'full_access',
+    ('codex', '--sandbox'): 'full_access',
+}
+
+
+def managed_rule_identity(rule: dict) -> tuple[str, str]:
+    """Identify a shipped rule without depending on human-readable reasons."""
+    def first(token):
+        return token['token'] if 'token' in token else token['any_of'][0]
+    return tuple(first(token) for token in rule['pattern'][:2])
+
+
 _lock = threading.RLock()
 
 
@@ -120,9 +140,20 @@ def save(values: dict[str, bool], path: Path | None = None) -> None:
                 stream.write(secrets.token_bytes(32))
                 stream.flush()
                 os.fsync(stream.fileno())
-        key = _private_bytes(key_path, 32)
+        key = _private_bytes(key_path, 8192)
         if len(key) != 32:
-            raise ValueError('Protection signing key is unavailable.')
+            # No record can validate against a wrong-size key. An administrator
+            # save can finish an interrupted creation; readers still keep all on.
+            key = secrets.token_bytes(32)
+            fd, temporary = tempfile.mkstemp(dir=path.parent)
+            try:
+                with os.fdopen(fd, 'wb') as stream:
+                    stream.write(key)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(temporary, key_path)
+            finally:
+                Path(temporary).unlink(missing_ok=True)
         record = json.loads(_payload(values))
         record['signature'] = hmac.new(key, _payload(values), hashlib.sha256).hexdigest()
         _write_private(path, record)
@@ -138,9 +169,11 @@ def kind_enabled(kind: str, values: dict[str, bool]) -> bool:
 
 def filtered_rules(rules: dict, values: dict[str, bool] | None = None) -> dict:
     values = load() if values is None else values
-    return {**rules, **{key: [kind for kind in rules[key] if kind_enabled(kind, values)]
-                       for key in ('reaches_anything', 'runs_on_load_platforms', 'runs_on_load_keys')},
-            '_protections': dict(values)}
+    filtered = dict(rules)
+    for key in ('reaches_anything', 'runs_on_load_platforms', 'runs_on_load_keys'):
+        filtered[key] = [kind for kind in rules[key] if kind_enabled(kind, values)]
+    filtered['_protections'] = dict(values)
+    return filtered
 
 
 def status(path: Path | None = None) -> dict:
@@ -153,9 +186,11 @@ def status(path: Path | None = None) -> dict:
     restart_required = applied != values or path.with_name('pending.json').exists()
     off = [label for key, label in {**COMMANDS, **SELF}.items() if not values[key]]
     notice = 'Protections selected off: ' + ', '.join(off) + '.' if off else ''
+    if not values['app_settings'] or not values['full_access']:
+        notice += ' Remaining protections may no longer hold when app settings can be changed or full access is used.'
     if restart_required:
         notice += ' Restart the app; previous managed rules and launch permissions remain until their Codex process restarts.'
-    return {'protections': values, 'off': off,
+    return {'protections': values, 'off': off, 'confirmations': dict(CONFIRMATIONS),
             'notice': notice.strip(), 'restart_required': restart_required,
             'restart_note': 'Restart the app after a change to apply managed command rules and launch permissions.'}
 
@@ -189,7 +224,8 @@ def register(worker) -> None:
                 try:
                     save(values, path)
                 except (OSError, ValueError):
-                    return jsonify(ok=False, error='The protection change could not be confirmed. Reload the view to check its current state.'), 503
+                    message = 'The protection change could not be confirmed. Reload the view to check its current state.'
+                    return jsonify(ok=False, error=message), 503
         response = jsonify(ok=True, **status(path))
         response.headers['Cache-Control'] = 'no-store'
         return response
@@ -210,10 +246,12 @@ def requirements(template: str, values: dict[str, bool]) -> str:
              'allow_managed_hooks_only = ' + str(values['app_settings']).lower()]
     for rule in data.get('rules', {}).get('prefix_rules', []):
         why = rule.get('justification', '')
-        group = ('credential_reads' if 'credential access' in why or 'Supervisor access' in why
-                 else 'app_settings' if 'settings and policy' in why
-                 else 'full_access' if 'full access' in why else None)
-        if group and not values[group]:
+        identity = managed_rule_identity(rule)
+        try:
+            group = MANAGED_RULE_GROUPS[identity]
+        except KeyError:
+            raise ValueError('Shipped managed rule has no protection group.') from None
+        if not values[group]:
             continue
         tokens = []
         for token in rule['pattern']:
@@ -266,7 +304,9 @@ if __name__ == '__main__':
         print(int(values['credential_reads']), int(values['app_settings']))
     elif args.write_requirements and args.template:
         values = load()
-        args.write_requirements.write_text(requirements(args.template.read_text(), values), encoding='utf-8')
+        TEMPLATE_PATH = args.template
+        REQUIREMENTS_PATH = args.write_requirements
+        prepare_native()
         mark_app_start(values)
     else:
         parser.error('Choose the requirements output or sandbox state.')

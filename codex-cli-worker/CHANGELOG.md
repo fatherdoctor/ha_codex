@@ -58,6 +58,9 @@
   tasks of the signed-in account, and tell Codex to say so plainly when the list is empty. In a sandboxed mode
   each command still raises the usual Allow once card. No approval, sandbox or permission rule changed.
 - Added grouped owner controls for command checks and app self-protection. Choices default on, require administrator access, and use the same signed state across enforcement layers. Disabling self-protection requires confirmation; the page and Status show the choice and any required restart.
+- Kept credential and app-settings checks independent, grouped managed rules explicitly, and kept administrator
+  approval requirements fixed when full access is enabled. Protection notices now explain broader effects,
+  confirmation text comes from the worker, and interrupted signing-key creation can recover on an administrator save.
 
 ## 0.3.3 (unreleased)
 

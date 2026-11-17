@@ -442,19 +442,59 @@
       <section id="command-checks">
         <h3>Command checks</h3>
         <p class="muted">On checks this kind. Off leaves ordinary Codex approvals in place.</p>
-        <label class="permission-row"><span>Shell commands</span><input type="checkbox" role="switch" data-protection="shell_commands" checked disabled aria-label="Shell commands"><span class="ha-permission-switch" aria-hidden="true"></span></label>
-        <label class="permission-row"><span>REST commands</span><input type="checkbox" role="switch" data-protection="rest_commands" checked disabled aria-label="REST commands"><span class="ha-permission-switch" aria-hidden="true"></span></label>
-        <label class="permission-row"><span>Command-line integrations</span><input type="checkbox" role="switch" data-protection="command_line" checked disabled aria-label="Command-line integrations"><span class="ha-permission-switch" aria-hidden="true"></span></label>
-        <label class="permission-row"><span>Python scripts</span><input type="checkbox" role="switch" data-protection="python_scripts" checked disabled aria-label="Python scripts"><span class="ha-permission-switch" aria-hidden="true"></span></label>
-        <label class="permission-row"><span>Templated actions</span><input type="checkbox" role="switch" data-protection="templated_actions" checked disabled aria-label="Templated actions"><span class="ha-permission-switch" aria-hidden="true"></span></label>
+        <label class="permission-row">
+          <span>Shell commands</span>
+          <input type="checkbox" role="switch" data-protection="shell_commands"
+            checked disabled aria-label="Shell commands">
+          <span class="ha-permission-switch" aria-hidden="true"></span>
+        </label>
+        <label class="permission-row">
+          <span>REST commands</span>
+          <input type="checkbox" role="switch" data-protection="rest_commands"
+            checked disabled aria-label="REST commands">
+          <span class="ha-permission-switch" aria-hidden="true"></span>
+        </label>
+        <label class="permission-row">
+          <span>Command-line integrations</span>
+          <input type="checkbox" role="switch" data-protection="command_line"
+            checked disabled aria-label="Command-line integrations">
+          <span class="ha-permission-switch" aria-hidden="true"></span>
+        </label>
+        <label class="permission-row">
+          <span>Python scripts</span>
+          <input type="checkbox" role="switch" data-protection="python_scripts"
+            checked disabled aria-label="Python scripts">
+          <span class="ha-permission-switch" aria-hidden="true"></span>
+        </label>
+        <label class="permission-row">
+          <span>Templated actions</span>
+          <input type="checkbox" role="switch" data-protection="templated_actions"
+            checked disabled aria-label="Templated actions">
+          <span class="ha-permission-switch" aria-hidden="true"></span>
+        </label>
         <p id="command-checks-notice" role="status" class="muted"></p>
       </section>
       <section id="self-protection">
         <h3>Self-protection</h3>
         <p class="muted">On keeps the protection. An off choice requires confirmation.</p>
-        <label class="permission-row"><span>Credential reads</span><input type="checkbox" role="switch" data-protection="credential_reads" checked disabled aria-label="Credential reads"><span class="ha-permission-switch" aria-hidden="true"></span></label>
-        <label class="permission-row"><span>Block full access</span><input type="checkbox" role="switch" data-protection="full_access" checked disabled aria-label="Block full access"><span class="ha-permission-switch" aria-hidden="true"></span></label>
-        <label class="permission-row"><span>App settings, policy and rules</span><input type="checkbox" role="switch" data-protection="app_settings" checked disabled aria-label="App settings, policy and rules"><span class="ha-permission-switch" aria-hidden="true"></span></label>
+        <label class="permission-row">
+          <span>Protect credentials and Supervisor commands</span>
+          <input type="checkbox" role="switch" data-protection="credential_reads"
+            checked disabled aria-label="Protect credentials and Supervisor commands">
+          <span class="ha-permission-switch" aria-hidden="true"></span>
+        </label>
+        <label class="permission-row">
+          <span>Block full access</span>
+          <input type="checkbox" role="switch" data-protection="full_access"
+            checked disabled aria-label="Block full access">
+          <span class="ha-permission-switch" aria-hidden="true"></span>
+        </label>
+        <label class="permission-row">
+          <span>App settings, policy and rules</span>
+          <input type="checkbox" role="switch" data-protection="app_settings"
+            checked disabled aria-label="App settings, policy and rules">
+          <span class="ha-permission-switch" aria-hidden="true"></span>
+        </label>
         <p id="self-protection-notice" role="status" class="muted"></p>
       </section>
       <section id="permission-overrides">

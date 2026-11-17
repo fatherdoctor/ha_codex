@@ -113,11 +113,138 @@ class ProtectionSwitchTests(unittest.TestCase):
                                       ('cat /data/options.json', settings_on),
                                       ('cat /data/protection-checks/settings.json', settings_on)]:
                 self.assertEqual(bool(gate_rules.check_tool_call('PreToolUse', {'tool_input': {'command': command}}, True, rules)), expected)
-            self.assertEqual(bool(gate_rules.check_tool_call('PreToolUse', {'tool_input': {'path': '/data/protection-checks/signing.key'}}, False, rules)), settings_on)
+            request = {'tool_input': {'path': '/data/protection-checks/signing.key'}}
+            self.assertEqual(bool(gate_rules.check_tool_call('PreToolUse', request, False, rules)), settings_on)
             self.assertEqual(approvals.touches_protected_path('/data/worker_api_token'), credential_on)
             self.assertEqual(approvals.touches_protected_path('/data/options.json'), settings_on)
             self.assertEqual(approvals.command_names_protected_path('cat /data/worker_api_token'), credential_on)
             self.assertEqual(approvals.command_names_protected_path('cat /data/options.json'), settings_on)
+
+    def test_review_paths_keep_their_own_group_after_normalization(self):
+        # Review examples are classifier input only, never shell commands to run.
+        samples = [
+            ('cd /data && cat worker_api_token', 'credential_reads'),
+            ('cat "/data/"worker_api_token', 'credential_reads'),
+            ('cat /data/github/token>/data/options.json', 'app_settings'),
+            ('cat /data/github/t>/usr/share/ha_codex/policy.json', 'app_settings'),
+        ]
+        for command, group in samples:
+            with self.subTest(command=command):
+                self.choose(**{**dict.fromkeys(switches.SELF, False), group: True})
+                self.assertTrue(approvals.command_names_protected_path(command))
+
+    def test_catalogue_groups_do_not_depend_on_explanatory_text(self):
+        import tomllib
+        template = (Path(__file__).resolve().parents[1] / 'gate/requirements.toml').read_text()
+        changed = template.replace('credential access', 'private data').replace('Supervisor access', 'system actions')
+        for kind in switches.SELF:
+            values = {**switches.DEFAULTS, kind: False}
+            original = tomllib.loads(switches.requirements(template, values))
+            renamed = tomllib.loads(switches.requirements(changed, values))
+            self.assertEqual([rule['pattern'] for rule in original['rules']['prefix_rules']],
+                             [rule['pattern'] for rule in renamed['rules']['prefix_rules']])
+
+    def test_every_shipped_rule_has_an_explicit_group(self):
+        import tomllib
+        template = Path(__file__).resolve().parents[1] / 'gate/requirements.toml'
+        rules = tomllib.loads(template.read_text())['rules']['prefix_rules']
+        identities = [switches.managed_rule_identity(rule) for rule in rules]
+        self.assertEqual(len(identities), len(set(identities)))
+        self.assertEqual(set(identities), set(switches.MANAGED_RULE_GROUPS))
+        for rule in rules:
+            group = switches.MANAGED_RULE_GROUPS[switches.managed_rule_identity(rule)]
+            for disabled in switches.SELF:
+                data = tomllib.loads(switches.requirements(template.read_text(),
+                                    {**switches.DEFAULTS, disabled: False}))
+                self.assertEqual(rule in data['rules']['prefix_rules'], disabled != group)
+
+    def test_disabled_full_access_keeps_approval_identity_and_admin_boundary(self):
+        self.choose(full_access=False)
+        for change in ({'approvals_reviewer': 'auto_review'}, {'approvals_require_admin': False}):
+            path = self.root / 'policy.json'
+            path.write_text(json.dumps({**policy.STRICT_POLICY, **change}))
+            with self.subTest(change=change), self.assertRaises(policy.PolicyError):
+                policy.load_policy(path)
+
+    def test_nonprivate_record_or_key_keeps_all_on(self):
+        for name in ('settings.json', 'signing.key'):
+            for mode in (0o640, 0o604):
+                with self.subTest(name=name, mode=mode):
+                    self.choose(shell_commands=False)
+                    path = self.path.with_name(name)
+                    path.chmod(mode)
+                    self.assertEqual(switches.load(), switches.DEFAULTS)
+                    path.chmod(0o600)
+
+    def test_interrupted_key_creation_can_be_repaired_by_an_admin_save(self):
+        self.path.parent.mkdir()
+        key = self.path.with_name('signing.key')
+        for size in (0, 16, 33):
+            with self.subTest(size=size):
+                key.write_bytes(b'x' * size)
+                key.chmod(0o600)
+                self.assertEqual(switches.load(), switches.DEFAULTS)
+                self.choose(shell_commands=False)
+                self.assertFalse(switches.load()['shell_commands'])
+                self.assertEqual(len(key.read_bytes()), 32)
+
+    def test_remaining_protections_notice_when_settings_can_be_changed(self):
+        for changes in ({'app_settings': False}, {'full_access': False}):
+            self.choose(**changes)
+            self.assertIn('Remaining protections may no longer hold', switches.status()['notice'])
+
+    def test_public_protection_claims_describe_owner_selected_full_access(self):
+        root = Path(__file__).resolve().parents[2]
+        claims = {
+            'AUDITING.md': 'Full access is not available, whatever a client or an option asks for',
+            'README.md': 'This fork has no full-access mode',
+            'codex-cli-worker/README.md': 'This fork has no full-access mode',
+            'codex-cli-worker/translations/en.yaml': 'There is no full-access mode in this fork',
+            'SECURITY.md': None,
+        }
+        for name, obsolete in claims.items():
+            with self.subTest(document=name):
+                text = (root / name).read_text()
+                if obsolete:
+                    self.assertNotIn(obsolete, text)
+                self.assertIn('Block full access', text)
+                self.assertIn('container', text)
+
+    def test_native_preparation_failure_keeps_installed_requirements(self):
+        template = Path(__file__).resolve().parents[1] / 'gate/requirements.toml'
+        output = self.root / 'requirements.toml'
+        output.write_text(template.read_text())
+        before = output.read_text()
+        with patch.object(switches, 'TEMPLATE_PATH', template), patch.object(switches, 'REQUIREMENTS_PATH', output):
+            with patch('protection_switches.os.replace', side_effect=OSError('synthetic write failure')):
+                with self.assertRaises(OSError):
+                    switches.prepare_native()
+        self.assertEqual(output.read_text(), before)
+
+    def test_building_arguments_does_not_write_native_requirements(self):
+        from test_server import server
+        with patch.object(switches, 'prepare_native') as prepare:
+            args = server.build_app_server_args()
+        self.assertIn('app-server', args)
+        prepare.assert_not_called()
+
+    def test_restriction_groups_do_not_depend_on_display_reason(self):
+        self.choose(credential_reads=False)
+        rules = gate_rules.load_rules()
+        changed = tuple((group, pattern, 'updated explanation')
+                        for group, pattern, _reason in gate_rules.POLICY_RESTRICTIONS)
+        # The review's mixed-path example still names app settings.
+        request = {'tool_input': {'command': 'cat /data/github/token>/data/options.json'}}
+        with patch.object(gate_rules, 'POLICY_RESTRICTIONS', changed):
+            self.assertTrue(gate_rules.check_tool_call('PreToolUse', request, True, rules))
+
+    def test_managed_rule_loading_remains_on_for_each_enabled_group(self):
+        self.choose(**dict.fromkeys(switches.SELF, False))
+        self.assertFalse(remote_control.exec_rules_enabled())
+        for kind in switches.SELF:
+            self.choose(**{key: key == kind for key in switches.SELF})
+            with self.subTest(kind=kind):
+                self.assertTrue(remote_control.exec_rules_enabled())
 
     def test_full_access_choice_reaches_hook_policy_and_managed_requirements(self):
         template = (Path(__file__).resolve().parents[1] / 'gate/requirements.toml').read_text()
@@ -281,6 +408,13 @@ class ProtectionApiTests(unittest.TestCase):
                 response = self.client.post('/protection-checks', json={'kind': kind, 'enabled': True})
                 self.assertEqual(response.json['off'], [])
                 self.assertTrue(response.json['restart_required'])
+
+    def test_confirmation_copy_comes_from_the_same_api_snapshot(self):
+        state = self.client.get('/protection-checks').json
+        self.assertEqual(state['confirmations'], switches.CONFIRMATIONS)
+        for kind, expected in state['confirmations'].items():
+            response = self.client.post('/protection-checks', json={'kind': kind, 'enabled': False})
+            self.assertEqual(response.json['error'], expected)
 
     def test_non_administrator_cannot_read_or_change_choices(self):
         self.admin = False

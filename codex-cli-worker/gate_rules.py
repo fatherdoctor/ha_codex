@@ -828,27 +828,38 @@ def names_image_folder(text: str) -> bool:
                     return True
     return False
 
-def _policy_restriction(text: str) -> str:
-    """Name protected app settings/rules/policy in either a patch path or command text.
+# Explicit groups belong to the restriction, never to its display wording.
+POLICY_RESTRICTIONS = (
+    ('app_settings', r"/data/(?:options\.json|protection-checks(?:/|\b))", "changes the add-on's settings"),
+    ('app_settings', r"schedules\.sqlite3(?:-(?:journal|wal|shm))?|/data/sched[^/\s]*[*?\[]",
+     "accesses the protected schedule database"),
+    ('credential_reads', r"worker_api_token", "accesses the add-on's private credential"),
+    ('credential_reads', r"/data/+github", "accesses the add-on's GitHub sign-in"),
+    ('app_settings', r"codex-home/.*(?:AGENTS\.md|house-rules)|ha_codex/.*(?:AGENTS\.md|house-rules)",
+     "changes the add-on's rules"),
+    ('app_settings', r"ha_codex/(?:policy|agents|house)|codex-home/.*(?:config\.toml|[?*\[])|/etc/codex/(?:requirements|managed_config)",
+     "changes the add-on's permission policy"),
+)
 
-    Like the approval adapter, this is a conservative literal-path check, not
-    a shell interpreter. Computed/obfuscated paths still require the sandbox.
+
+def _policy_restrictions(text: str) -> list[tuple[str, str]]:
+    """Return each named restriction with its group; no command is executed.
+
+    This keeps the existing conservative literal-path check, not a shell
+    interpreter. Computed paths still depend on the sandbox.
     """
     plain = re.sub(r"[\\'\"]", "", text)
     plain = re.sub(r"/{2,}", "/", plain)
-    if re.search(r"/data/(?:options\.json|protection-checks(?:/|\b))", plain, re.IGNORECASE):
-        return "changes the add-on's settings"
-    if re.search(r"schedules\.sqlite3(?:-(?:journal|wal|shm))?|/data/sched[^/\s]*[*?\[]", plain, re.IGNORECASE):
-        return "accesses the protected schedule database"
-    if re.search(r"worker_api_token", plain, re.IGNORECASE):
-        return "accesses the add-on's private credential"
-    if re.search(r"/data/+github", plain, re.IGNORECASE):
-        return "accesses the add-on's GitHub sign-in"
-    if re.search(r"codex-home/.*(?:AGENTS\.md|house-rules)|ha_codex/.*(?:AGENTS\.md|house-rules)", plain, re.IGNORECASE):
-        return "changes the add-on's rules"
-    if names_image_folder(text) or re.search(r"ha_codex/(?:policy|agents|house)|codex-home/.*(?:config\.toml|[?*\[])|/etc/codex/(?:requirements|managed_config)", plain, re.IGNORECASE):
-        return "changes the add-on's permission policy"
-    return ""
+    found = [(group, reason) for group, pattern, reason in POLICY_RESTRICTIONS
+             if re.search(pattern, plain, re.IGNORECASE)]
+    if names_image_folder(text):
+        found.append(('app_settings', "changes the add-on's permission policy"))
+    return found
+
+
+def _policy_restriction(text: str) -> str:
+    """Compatibility display helper; switch decisions use the explicit groups."""
+    return next((reason for _group, reason in _policy_restrictions(text)), '')
 
 
 def _python_definition(path: str) -> str:
@@ -888,10 +899,9 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
         if remote_on:
             if protections["full_access"] and FULL_ACCESS_RE.search(text):
                 return "This request enables full access, which is never allowed."
-            restriction = _policy_restriction(text)
-            restriction_group = "credential_reads" if any(word in restriction for word in ("credential", "GitHub sign-in")) else "app_settings"
-            if restriction and protections[restriction_group]:
-                return f"This request {restriction}, which is never allowed."
+            for group, reason in _policy_restrictions(text):
+                if protections[group]:
+                    return f"This request {reason}, which is never allowed."
             definition = _python_definition(text)
             if definition and protection_switches.kind_enabled(definition, protections):
                 return f"This request names a {definition} definition file, which Codex may not write or edit."

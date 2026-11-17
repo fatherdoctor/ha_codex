@@ -56,7 +56,7 @@ fi
 # reader retains all masks. No task-supplied environment value selects the file.
 reader=/protection_switches.py
 [ -f "$reader" ] || reader="$(dirname "$0")/protection_switches.py"
-choices="$(/usr/bin/python3 "$reader" --sandbox-state 2>/dev/null)" || choices="1 1"
+choices="$(/usr/bin/python3 -I "$reader" --sandbox-state 2>/dev/null)" || choices="1 1"
 case "$choices" in
   "0 0") credentials_on=0; settings_on=0 ;;
   "0 1") credentials_on=0; settings_on=1 ;;

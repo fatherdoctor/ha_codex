@@ -11,7 +11,7 @@ place, that is a bug in this page and worth an issue.
 ## The shape in one paragraph
 
 The add-on is one container. A Python worker (`codex-cli-worker/server.py`) serves the chat page through Home
-Assistant Ingress and starts the Codex CLI for each exchange. Codex runs every command inside a Bubblewrap
+Assistant Ingress and starts the Codex CLI for each exchange. By default, Codex runs commands inside a Bubblewrap
 sandbox whose launcher the add-on wraps (`codex-bwrap`). Before any tool call, Codex runs a hook the add-on
 ships in the image (`gate/gate_hook.py`), which can refuse but never approve. Anything the hook does not refuse
 goes to Codex's normal approval flow, and an approval has to be answered by a Home Assistant administrator on
@@ -30,31 +30,37 @@ So there are four layers, and no single one is meant to hold alone:
 
 Paths are under `codex-cli-worker/` unless they start with `custom_components/`.
 
+Every protection switch starts on. The conditions below matter when an administrator changes one in Settings.
+The hook and approval adapter read current choices. Managed rules and launch permissions apply to a new Codex
+process; an existing process keeps its snapshot until restart. Disabling app-settings protection exposes the
+settings and signing key, and using full access removes the sandbox's isolation, so remaining protections may
+no longer hold. A switch still shown on is a selected setting, not an assurance against those broader choices.
+
 ### Layer 1: what Codex can see
 
 | protection | enforced in | shown by |
 |---|---|---|
 | The Supervisor token and the worker's own capabilities are not in Codex's environment | `server.py: codex_env` | `tests/test_server.py`, `tests/test_sandbox_readiness.py` |
 | The remote-control process gets an environment without the Supervisor token or per-exchange capabilities | `remote_control.py: STRIPPED_ENV`, `remote_env` | `tests/test_remote_control.py` |
-| A sandboxed command cannot see `secrets.yaml`, Home Assistant's sign-in store, the add-on's options, its API token, the schedule database or the container's saved environment | `codex-bwrap: HIDDEN_DIRS`, `HIDDEN_FILES` | `tests/test_bwrap.py`, `tests/apparmor_317_check.py` |
+| With credential protection on, sandbox masks hide `secrets.yaml`, Home Assistant's sign-in store, the API token and saved environment; with app-settings protection on, they hide options and the schedule database | `codex-bwrap: HIDDEN_DIRS`, `HIDDEN_FILES` | `tests/test_bwrap.py`, `tests/apparmor_317_check.py` |
 | The one case where the wrapper changes Bubblewrap's arguments (Codex's own `/bin/true` probe) | `codex-bwrap: is_codex_proc_probe`, `codex-bwrap-probe.py`; explained in `SANDBOX_TESTING.md` | `tests/test_bwrap.py`, `tests/test_proc_assertion.py` |
-| A sandboxed command cannot see the add-on's GitHub sign-in (`/data/github`); the token is never in an environment the worker builds, never in a git argument, remote URL or log, and the folder is left out of the add-on backup | `codex-bwrap: HIDDEN_DIRS`; `github_access.py: GitRunner.env`, `Store`; `github_askpass.py`; `config.yaml: backup_exclude` | `tests/test_bwrap.py` (`test_the_github_folder_is_hidden_in_every_sandbox`), `tests/test_github_access.py` |
+| With credential protection on, a sandboxed command cannot see the add-on's GitHub sign-in (`/data/github`); the token is never in an environment the worker builds, never in a git argument, remote URL or log, and the folder is left out of the add-on backup | `codex-bwrap: HIDDEN_DIRS`; `github_access.py: GitRunner.env`, `Store`; `github_askpass.py`; `config.yaml: backup_exclude` | `tests/test_bwrap.py` (`test_the_github_folder_is_hidden_in_every_sandbox`), `tests/test_github_access.py` |
 | The relay runs under its own AppArmor label with all capabilities dropped, entered only through one fixed launcher | `apparmor.txt`, `relay-launcher`, `relay-tool-launcher` | `tests/apparmor_317_check.py`, `.github/workflows/apparmor-317.yaml` |
 | The worker's memory cannot be read by a process it starts | `server.py: make_worker_undumpable` | `tests/test_gate.py` (`test_the_flag_is_set`) |
-| Full access is not available, whatever a client or an option asks for | `gate/requirements.toml` (Codex's managed requirements) and `policy.py: load_policy`, `policy_problem`; checked before each exchange at the top of `server.py: run_task` | `tests/test_policy.py` |
+| With Block full access on, no client or option can select full access; turning it off permits container full access and the `never` approval policy, while reviewer identity and administrator requirements stay fixed | `protection_switches.py: requirements`, `gate/requirements.toml` (the shipped template) and `policy.py: load_policy`, `policy_problem`; checked before each exchange at the top of `server.py: run_task` | `tests/test_policy.py` |
 
 ### Layer 2: what the hook refuses
 
 | protection | enforced in | shown by |
 |---|---|---|
-| The hook runs for every tool call and permission request, from every client, and a hook planted in `/config` cannot replace it | `gate/managed_config.toml`, `gate/requirements.toml` (`allow_managed_hooks_only`) | `remote_control.py: requirements_problem`, `hook_problem`, `gate_problem` refuse to start remote control when these are not in place |
+| With app-settings protection on, managed hooks run for every tool call and permission request from every client; a hook planted in `/config` cannot replace them | `gate/managed_config.toml`, `gate/requirements.toml` (`allow_managed_hooks_only`) | `remote_control.py: requirements_problem`, `hook_problem`, `gate_problem` refuse to start remote control when these are not in place |
 | A request the hook cannot read or judge is refused, not passed | `gate/gate_hook.py: main` | `tests/test_gate.py` |
 | The hook answers before its own deadline, because Codex runs the action if a hook is still working when its timeout passes; an answer found after the deadline is refused | `gate/gate_hook.py: DEADLINE_SECONDS`, `wait_for_child`, `answer_before_deadline`; the Codex-side `timeout` in `gate/managed_config.toml` leaves room beyond it | `tests/test_gate.py` (`test_a_stuck_scan_is_refused_by_the_deadline`, `test_the_deadline_leaves_room_inside_the_codex_timeout` and their neighbors) |
-| Commands that read a process environment, use the Supervisor token, talk to the Supervisor, or read the sign-in store or `secrets.yaml` are refused (*) | `gate_rules.py: check_tool_call`, `PROTECTED_COMMAND_RES`, `_ha_supervisor_command` | `tests/test_gate.py`, `tests/fixtures/gate_tool_calls.json` |
-| A second layer, in Codex itself: managed command rules refuse literal `ha supervisor`, `ha super` and `ha su`, `printenv` of the two Supervisor-token names, `cat` of the credential and app-policy paths, and the two full-access spellings, with remote control off too. They match literal prefixes only; DOCS.md "Prefix limits" lists what they miss | `gate/requirements.toml` (`rules.prefix_rules`); `remote_control.py: managed_exec_rules_problem` checks the shipped rules, `exec_rules_self_test` makes Codex load them before remote control starts, and `record_exec_rules_warning` keeps remote control off after a rule-load warning until the app restarts | `tests/test_exec_rules.py`, `tests/execrules_runtime_check.py` (the pinned Codex binary) |
-| Edits that add a command which can reach anything (`shell_command`, `rest_command`, `python_script`, ...), a platform that runs on load, or a templated action are refused | `gate_rules.py: find_refused`, `STRICT_RULES`, `policy/refused-domains.json` (the file can add domains, never remove the built-in ones: `load_rules`) | `tests/test_gate.py` |
+| With credential protection on, commands that read a process environment, use the Supervisor token, talk to the Supervisor, or read the sign-in store or `secrets.yaml` are refused (*) | `gate_rules.py: check_tool_call`, `PROTECTED_COMMAND_RES`, `_ha_supervisor_command` | `tests/test_gate.py`, `tests/fixtures/gate_tool_calls.json` |
+| A second layer, in Codex itself: managed command rules in each enabled self-protection group refuse literal `ha supervisor`, `ha super` and `ha su`, `printenv` of the two Supervisor-token names, `cat` of the credential and app-policy paths, and the two full-access spellings, with remote control off too. They match literal prefixes only; DOCS.md "Prefix limits" lists what they miss | `gate/requirements.toml` (`rules.prefix_rules`); `remote_control.py: managed_exec_rules_problem` checks the shipped rules, `exec_rules_self_test` makes Codex load them before remote control starts, and `record_exec_rules_warning` keeps remote control off after a rule-load warning until the app restarts | `tests/test_exec_rules.py`, `tests/execrules_runtime_check.py` (the pinned Codex binary) |
+| With the corresponding Command checks switch on, edits adding a command that can reach anything (`shell_command`, `rest_command`, `python_script`, ...), a platform that runs on load, or a templated action are refused | `gate_rules.py: find_refused`, `STRICT_RULES`, `policy/refused-domains.json` (the file can add domains, never remove the built-in ones: `load_rules`) | `tests/test_gate.py` |
 | With remote control on: a patch is rebuilt in memory and refused if the result holds something new that is refused, or if it cannot be rebuilt with certainty | `gate_rules.py: patch_versions`, `new_refused`, `refused_blocks` | `tests/test_gate.py` |
-| With remote control on: the add-on's settings, rules, policy files, schedule database and API token cannot be named in a command | `gate_rules.py: _policy_restriction` | `tests/test_gate.py` |
+| With remote control on and the matching self-protection group on, the add-on's settings, rules, policy files, schedule database and API token cannot be named in a command | `gate_rules.py: POLICY_RESTRICTIONS`, `_policy_restrictions` | `tests/test_gate.py` |
 | Files the checks read are opened without following links and with a size limit | `gate_rules.py: read_config_bytes` | `tests/test_gate.py` |
 
 The hook reads text. It does not run a shell, so a path or command built while the command runs is out of its
@@ -75,6 +81,16 @@ its own `_shell_words` for text it cannot read: the hook reads it again line by 
 it. `tests/test_shell_words.py` checks that both use the shared code and that the image ships it next to the hook
 and the worker.
 
+### Owner protection choices
+
+| protection | enforced in | shown by |
+|---|---|---|
+| Only an active Ingress administrator can read or save the eight switches; disabling self-protection requires confirmation | `protection_switches.py: register`; `server.py: require_auth`, `require_ingress`, `ingress_admin` | `tests/test_protection_switches.py: ProtectionApiTests`, `tests/browser_protection_switches.cjs` |
+| Choices and the signing key persist in private files under `/data/protection-checks`; writes are atomic. The signature detects corruption, not an actor able to write the record and key | `protection_switches.py: save`, `_write_private`, `_private_bytes` | `tests/test_protection_switches.py` |
+| Missing, unreadable, nonprivate, malformed or wrongly signed choices keep every switch on; a complete boolean schema is required by every reader | `protection_switches.py: load`, `validate`; hook and worker import this shared reader | `tests/test_protection_switches.py` |
+| Before each sandbox launch the isolated reader selects credential and settings masks, with all masks on if reading fails. It grants no extra host mounts, devices, Supervisor scopes, capabilities or AppArmor permissions | `codex-bwrap: reader`, `protection_switches.py: --sandbox-state`; image copies documented in `Dockerfile` | `tests/test_protection_switches.py: test_native_launcher_uses_the_same_signed_choices_and_keeps_the_capability_ceiling` |
+| Each shipped managed prefix rule has an explicit switch group independent of its explanatory text; new rules without a group fail catalogue generation | `protection_switches.py: MANAGED_RULE_GROUPS`, `requirements` | `tests/test_protection_switches.py: test_every_shipped_rule_has_an_explicit_group` |
+
 ### Layer 3: who can approve
 
 | protection | enforced in | shown by |
@@ -89,7 +105,7 @@ and the worker.
 | When only a group that is off or a service-data field outside the allow-list refuses a device action, the `act` tool asks the owner in the chat (Allow once / Deny), outside the service lock, for up to three minutes. Allow once dispatches the same request again from the start with those two checks lifted and nothing else: capability, launch permissions, house rules, guard rails, targets, value types and ranges all run again. The answer goes to the tool, never to Codex, and is audited as `owner_allowed`. The question comes only after every other check of the action has passed; security-group actions (their data can hold a code), guard rails, templates, targets, remote and scheduled turns never ask. A target key in the data (`entity_id`, `device_id`, `area_id`, `floor_id`, `label_id`) is refused before the allow-list and never asks, so every target goes through the target checks. `Engine.dispatch` itself refuses `owner_allowed` for any operation other than a device action, and for the security group | `permission_overrides.py: OwnerCanAllow`, `Engine.dispatch` (`owner_allowed`, `offer_owner`), `owner_question`; `permission_overrides_api.py: Service.dispatch`, `Core.validate_service` (`DATA_TARGET_KEYS`), `check_light_data`; `approvals.py: AppServerSession.ask_owner_action`, `.decide` | `tests/test_permission_overrides.py` (`LightDataTests`), `tests/test_permission_overrides_final_authorization.py` (`OwnerQuestion`), `tests/test_approvals.py` (`OwnerActionTests`) |
 | Owner guard-rail lines (no locks, alarm, covers, cameras, messages or external publishing) are read from one marked block in the agent's rules and refuse the matching actions even when the group is on; a custom line or a block that cannot be verified asks for normal approval | `permission_overrides.py: GUARD_LINES`, `selected_guard_lines`, `guard_rules` | `tests/test_permission_overrides_peer2.py`, `tests/test_permission_overrides_review.py` |
 | The groups can be changed only by an administrator on the chat page; the settings file is small, exactly five booleans, and a bad file means normal approval | `permission_overrides_api.py`: the `/permissions-overrides` route (`require_auth`, `require_ingress`, `ingress_admin`); `permission_overrides.py: Settings.read`, `validate` | `tests/test_permission_overrides.py` |
-| A change to the add-on's own policy, rules, options or credentials cannot be approved at all | `approvals.py: touches_protected_path`, `command_names_protected_path`, `PROTECTED_PREFIXES` | `tests/test_approvals.py` |
+| With the matching self-protection group on, a change to the add-on's own policy, rules, options or credentials cannot be approved | `approvals.py: touches_protected_path`, `command_names_protected_path`, `PROTECTED_PREFIXES` | `tests/test_approvals.py` |
 | The remote-control machine name is the one add-on option the worker writes, and only for an administrator on the chat page while remote control is off; the other options go back as Supervisor's info reply gives them (defaults merged with the stored values, `!secret` references kept), so the first rename also stores every default, as Save in the Configuration tab does; a name over 63 characters is refused | `server.py`: the `/remote-control/<action>` route (`require_auth`, `require_ingress`, `ingress_admin`), `rename_remote_control`, `save_remote_control_name`, `write_local_option` | `tests/test_remote_name_and_first_reply.py` |
 | Browser permissions are managed only from the chat page | `server.py: require_ingress` | `tests/test_browser_permissions.py` |
 | The GitHub sign-in can be connected, tested, accepted or disconnected only by an administrator on the chat page; the worker's API token can read its status and nothing else | `github_access.py: register` (the `/github` routes) | `tests/test_github_routes.py` |

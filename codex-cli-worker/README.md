@@ -6,7 +6,7 @@ The assistant can act on any device the owner confirms. Put limits specific to y
 
 The app provides a responsive chat UI with saved conversations, a resizable desktop sidebar, and a mobile chat drawer. It also provides a token-protected local API for the Codex integration, device-code sign-in, backup tracking, task logs, and notifications when work needs input or fails.
 
-Codex always runs in a sandbox: `workspace-write` (the default) or `read-only`. This fork has no full-access mode. Commands and file changes that need extra access ask a Home Assistant administrator to **Allow once** or **Deny** in the chat. See [sandbox modes, safeguards, and permission requests](https://github.com/fatherdoctor/ha_codex/blob/main/codex-cli-worker/DOCS.md#sandbox).
+Codex defaults to a sandbox: `workspace-write` or `read-only`. With **Block full access** on, a `danger-full-access` setting stops the app. An Ingress administrator can turn that protection off to permit full access inside the app container; this adds no host mounts or privileges. Commands and file changes that need extra access ask a Home Assistant administrator to **Allow once** or **Deny** in the chat. See [sandbox modes, safeguards, and permission requests](https://github.com/fatherdoctor/ha_codex/blob/main/codex-cli-worker/DOCS.md#sandbox).
 
 ## Dashboard browser verification
 

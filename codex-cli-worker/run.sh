@@ -32,5 +32,9 @@ python3 /integration_sync.py || bashio::log.warning "The integration install ste
 python3 /integration_sync.py --announce &
 
 echo "Codex CLI Worker starting"
-python3 /protection_switches.py --template /usr/share/ha_codex/requirements-template.toml --write-requirements /etc/codex/requirements.toml
+if ! python3 -I /protection_switches.py \
+    --template /usr/share/ha_codex/requirements-template.toml \
+    --write-requirements /etc/codex/requirements.toml; then
+    echo "WARNING: Could not prepare protection choices; keeping the installed command requirements." >&2
+fi
 python3 /server.py

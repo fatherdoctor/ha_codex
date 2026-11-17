@@ -3731,11 +3731,6 @@ setInterval(tickElapsed, 1000);
 
 // The worker owns the saved choice. Status and the administrator view use its same snapshot.
 let protectionState = null;
-const protectionConfirmations = {
-  credential_reads: "The assistant can read private credentials and use connections already available inside this app. Continue?",
-  full_access: "The assistant can request full access inside this app container. Normal approval and sandbox restrictions can then be removed. Continue?",
-  app_settings: "The assistant can change this app’s settings, policy, rules and these protection switches. Continue?",
-};
 function renderProtectionState(data) {
   if (!data?.protections) return;
   protectionState = data;
@@ -3747,7 +3742,8 @@ function renderProtectionState(data) {
   for (const id of ["command-checks", "self-protection"]) {
     const inputs = [...$(id).querySelectorAll("[data-protection]")];
     const off = inputs.filter(input => !input.checked);
-    setSectionStatus(id, off.length ? `${off.length} off` : data.restart_required ? "Restart needed" : "All on", off.length > 0 || data.restart_required);
+    const label = off.length ? `${off.length} off` : data.restart_required ? "Restart needed" : "All on";
+    setSectionStatus(id, label, off.length > 0 || data.restart_required);
     $(id + "-notice").textContent = data.notice ? `${data.notice} ${data.restart_note}` : "All checks are on.";
   }
 }
@@ -3765,7 +3761,7 @@ document.querySelectorAll("[data-protection]").forEach(input => input.addEventLi
   if (!protectionState) return;
   const kind = input.dataset.protection;
   const enabled = input.checked;
-  const confirmation = !enabled && protectionConfirmations[kind];
+  const confirmation = !enabled && protectionState.confirmations?.[kind];
   if (confirmation && !window.confirm(confirmation)) return renderProtectionState(protectionState);
   document.querySelectorAll("[data-protection]").forEach(control => { control.disabled = true; });
   try {

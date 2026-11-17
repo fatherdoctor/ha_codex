@@ -31,6 +31,21 @@ approval for shell networking, while `danger-full-access` does not. Review each
 approved command and keep connections short-lived. See [SSH setup and
 limits](codex-cli-worker/DOCS.md#ssh-connections).
 
+Protection switches start on. Only an active Home Assistant administrator through Ingress can change them.
+Turning off a Command checks switch removes that kind of hook and configuration-watch finding. Turning off
+credential protection also removes the existing Supervisor-command restrictions, credential masks and related
+managed prefix rules. Block full access normally refuses `danger-full-access` and the `never` approval policy;
+turning it off permits them inside the app container. Turning off app-settings protection exposes the app's
+settings, rules, policy and protection choices, including their signing key. In those last two cases, remaining
+protections may no longer hold even if their switches still show on. No switch grants a host mount, device,
+capability, Supervisor scope or AppArmor permission. Administrator approval identity remains required.
+
+Choices persist as a signed private record. A missing, invalid or nonprivate record keeps every switch on.
+The signature detects corruption; it does not isolate the choices from an actor who can write both record and
+key. The hook and approval adapter read current choices; managed rules and launch permissions need a new
+Codex process. Restart the app to apply a common snapshot to all its processes. See
+[protection switches](codex-cli-worker/DOCS.md#owner-controlled-protection-checks).
+
 To check these protections in the code, see [AUDITING.md](AUDITING.md).
 
 ## Supported Versions

@@ -11,9 +11,13 @@ Each kind has one saved value shared by the hook and configuration watch. The re
 
 The separate Self-protection group controls credential reads, full-access restrictions, and the app's settings, policy and rules.
 These choices feed the hook, approval adapter, native sandbox masks, managed prefix catalogue and launch-policy validation.
-The credential group includes the existing Supervisor-connection restrictions.
+The credential group is labeled Protect credentials and Supervisor commands and includes the existing Supervisor-connection restrictions.
+Each restriction and shipped managed rule has an explicit group; display wording never selects it.
+Turning off full-access protection does not change reviewer identity or the administrator approval requirement.
 Only an Ingress administrator can save a choice. Each disabled self-protection requires a confirmation that names its effect.
 The chat page and Status name disabled protections and explain when a restart is required.
+They also warn that remaining protections may no longer hold if app settings can be changed or full access is used.
+Confirmation text is supplied by the worker in the same status response the UI renders.
 
 The private record lives at /data/protection-checks/settings.json. Its signing key lives beside it.
 The reader requires a complete boolean schema, a private regular file, and the app's signature.

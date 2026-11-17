@@ -58,12 +58,17 @@ def touches_protected_path(path: str) -> bool:
 # is gate_rules.names_image_folder, shared with the hook, so the absolute /share/ha_<name> stays usable. Best
 # effort on the text, like the file-path check: it cannot see a path a command builds at run time.
 PROTECTED_COMMAND_RES = (
-    re.compile(r"codex-home/+house-rules(?:\b|[*?\[])", re.IGNORECASE),
-    re.compile(r"/data/+interaction-diagnostics(?:\b|[*?\[])", re.IGNORECASE),
-    re.compile(r"ha_codex/+(policy|agents|house)", re.IGNORECASE),
-    re.compile(r"codex-home/+[^\s/]*[*?\[]", re.IGNORECASE),
-    re.compile(r"codex-home.*(agents\.md|config\.toml)|(agents\.md|config\.toml).*codex-home", re.IGNORECASE | re.DOTALL),
-    re.compile(r"/data/+protection-checks|/data/+options\.json|worker_api_token|schedules\.sqlite3(?:-(?:journal|wal|shm))?|/data/+sched[^/\s]*[*?\[]", re.IGNORECASE),
+    ('app_settings', re.compile(r"codex-home/+house-rules(?:\b|[*?\[])", re.IGNORECASE)),
+    ('app_settings', re.compile(r"/data/+interaction-diagnostics(?!\.key)(?:\b|[*?\[])", re.IGNORECASE)),
+    ('credential_reads', re.compile(r"/data/+interaction-diagnostics\.key", re.IGNORECASE)),
+    ('credential_reads', re.compile(r"/data/+github|worker_api_token", re.IGNORECASE)),
+    ('app_settings', re.compile(r"ha_codex/+(policy|agents|house)", re.IGNORECASE)),
+    ('app_settings', re.compile(r"codex-home/+[^\s/]*[*?\[]", re.IGNORECASE)),
+    ('app_settings', re.compile(
+        r"codex-home.*(agents\.md|config\.toml)|(agents\.md|config\.toml).*codex-home", re.IGNORECASE | re.DOTALL)),
+    ('app_settings', re.compile(
+        r"/data/+protection-checks|/data/+options\.json|schedules\.sqlite3(?:-(?:journal|wal|shm))?|/data/+sched[^/\s]*[*?\[]",
+        re.IGNORECASE)),
 )
 
 
@@ -271,17 +276,19 @@ def _protected_ancestor_operations(command: str, initial_cwd: str = '', depth: i
 def command_names_protected_path(command: str) -> bool:
     """Return whether a command's text names a protected policy location by any plain spelling."""
     protections = protection_switches.load()
-    credential_path = re.compile(r"/data/(?:github(?:\.sock)?|worker_api_token|interaction-diagnostics\.key)(?:/[^\s;|&]*)?", re.IGNORECASE)
-    if not protections["app_settings"]:
-        return bool(protections["credential_reads"] and credential_path.search(command))
-    if not protections["credential_reads"]:
-        command = credential_path.sub("", command)
-    if _protected_ancestor_operations(str(command or '')):
+    if not any(protections[group] for group in ('credential_reads', 'app_settings')):
+        return False
+    settings_on = protections['app_settings']
+    if settings_on and _protected_ancestor_operations(str(command or '')):
         return True
+    # Never remove a disabled group's text: adjacent redirections can name an
+    # independently protected path. Normalize the whole input for both groups.
     text = re.sub(r"[\'\"\\]", "", str(command or ""))
     text = re.sub(r"/{2,}", "/", text)
-    if (any(pattern.search(text) for pattern in PROTECTED_COMMAND_RES) or names_image_folder(text)
-            or re.search(r"/etc/codex/requirements\.toml(?![\w./-])", text, re.IGNORECASE)):
+    if any(protections[group] and pattern.search(text) for group, pattern in PROTECTED_COMMAND_RES):
+        return True
+    if settings_on and (names_image_folder(text)
+                        or re.search(r"/etc/codex/requirements\.toml(?![\w./-])", text, re.IGNORECASE)):
         return True
     # Match per path component: a shell wildcard cannot cross a slash.
     # Consider the complete command so cd, pushd, env -C and grouped commands
@@ -308,10 +315,10 @@ def command_names_protected_path(command: str) -> bool:
         else:
             expanded.append(word)
     # Paths may be embedded in options such as --chdir=/etc/codex or -C/etc/codex.
-    if any('/' in word and names_directory(word[word.index('/'):]) for word in expanded):
+    if settings_on and any('/' in word and names_directory(word[word.index('/'):]) for word in expanded):
         return True
     # A find from an ancestor can select the managed requirements file.
-    if (re.search(r"\bfind\s+/(?:etc)?(?:\s|/|$)", text, re.IGNORECASE)
+    if (settings_on and re.search(r"\bfind\s+/(?:etc)?(?:\s|/|$)", text, re.IGNORECASE)
             and any(fnmatch.fnmatchcase('requirements.toml', posixpath.basename(word).lower())
                     for word in expanded)):
         return True
@@ -332,9 +339,10 @@ def command_names_protected_path(command: str) -> bool:
                 candidate = posixpath.normpath(posixpath.join(directory, word))
             else:
                 continue
-            if names_directory(candidate) or matches_path(candidate, target):
+            if (touches_protected_path(candidate)
+                    or settings_on and (names_directory(candidate) or matches_path(candidate, target))):
                 return True
-    if any(word.startswith('/') and matches_path(word, target) for word in expanded):
+    if settings_on and any(word.startswith('/') and matches_path(word, target) for word in expanded):
         return True
     return False
 

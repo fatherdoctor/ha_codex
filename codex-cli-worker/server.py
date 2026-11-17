@@ -4550,7 +4550,6 @@ def count_new_prompts(counts: Any, records: list[dict[str, Any]], previous: dict
 
 def build_app_server_args() -> list[str]:
     """Start the bidirectional CLI transport with approvals routed to the user."""
-    protection_switches.prepare_native()
     return [CODEX_BINARY, "app-server", "--config", 'approval_policy="on-request"',
             "--config", 'approvals_reviewer="user"', *verification_mcp_args(), *data_mcp_args(), *scheduling_mcp_args(), *overrides_mcp_args(),
             *github_mcp_args()]
@@ -5282,6 +5281,7 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     # Images recorded before this run belong to earlier exchanges of the session.
     known_image_ids = {item["id"] for item in image_generation_items(session_id or "")}
     try:
+        protection_switches.prepare_native()
         proc = subprocess.Popen(
             args,
             cwd="/config",
