@@ -588,7 +588,7 @@ When the state changes, and only then:
 
 - The app fires the Home Assistant event `codex_cli_github_access` with the state, the previous state, the reason, the account login, the missing and added repositories, the permission problem and the expiry. It never sends a token or a code. The integration fires the same event, with `source: integration`, when it sees the change, so an automation still works if the app's own call failed. An automation can route it to your notify service.
 - The app sends one notification through its `notify_service` option, or a persistent notification (`codex_cli_github`) without one.
-- The integration raises the repair **The Codex add-on's GitHub sign-in needs attention** (`github_access_lost`). It is an error for expired, revoked and cannot be checked, and a warning for expires soon and access changed. It clears when the check is OK or you disconnect. If you never connected, there is no repair.
+- The integration raises one repair (`github_access_lost`). It is an error for expired, revoked and cannot be checked, and a warning for expires soon and access changed. Its text fits the state and the kind of sign-in: for expires soon it says that GitHub still works and gives the date, and for a token it names **Use a token instead**, because **Connect again** starts an App sign-in. It clears when the check is OK or you disconnect. If you never connected, there is no repair.
 - A banner above the chat offers **Open GitHub settings**.
 
 ### When GitHub stops working
@@ -598,9 +598,10 @@ Open **Settings > Accounts and connections > GitHub** in the app page. The card 
 - **Not connected to GitHub:** No sign-in is saved, or the app was restored from a backup. Press **Connect GitHub** to connect the App. If you use a fine-grained token, open **Use a token instead**.
 - **Connecting:** The App is waiting for you to finish on GitHub. Follow the link on the card. If the code expires, press **Get a new code**. To start over while it is waiting, press **Cancel**, then **Connect GitHub**.
 - **Connected to GitHub:** The access check is OK. If a repository operation still fails, press **Read test** to check the connected repositories.
-- **Connected, but the sign-in expires within 7 days:** The saved token is close to its expiry. Open **Use a token instead** and save a new fine-grained token, or press **Connect again** to use the App.
-- **The GitHub sign-in expired:** The saved sign-in is past its expiry. Press **Connect again** for the App, or open **Use a token instead** to save a new token.
-- **GitHub refused the stored sign-in (revoked):** GitHub no longer accepts the saved sign-in. Press **Connect again** for the App, or open **Use a token instead** to save a new token.
+- **GitHub still works, but this sign-in (or token) expires within 7 days:** The assistant can still use GitHub. Before the date, press **Connect again** for the App, or create a new fine-grained token and open **Use a token instead** for a token.
+- **The GitHub sign-in expired** or **This GitHub token expired:** The saved sign-in is past its expiry. For the App, press **Connect again**. For a token, create a new one on GitHub, then open **Use a token instead**.
+- **GitHub no longer accepts this sign-in (or token):** GitHub refused the saved sign-in (revoked). For the App, press **Connect again**; if GitHub still refuses it, restore the App's repository access on GitHub. For a token, create a new one, then open **Use a token instead**.
+- **The new GitHub sign-in failed:** A **Connect again** did not finish. The card gives GitHub's reason, and the previous sign-in stays as it was.
 - **The GitHub sign-in reaches different repositories or access than you connected:** GitHub reports a changed repository list or permissions. Check the list and access shown on the card. If the repository change is intended and **Accept this access** is available, press it. If you did not intend the repository change, restore the repository selection for the App on GitHub. Then press **Check now**. If permissions changed, restore Contents read and write on GitHub, then press **Check now**.
 - **The GitHub sign-in cannot be checked:** GitHub could not be reached repeatedly, or the check found another error. Check the last-check reason and your connection, then press **Check now**.
 
