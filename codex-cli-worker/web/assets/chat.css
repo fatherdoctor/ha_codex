@@ -1,4 +1,7 @@
 :root {
+  /* Material Design Icons (Apache-2.0, @mdi/js 7.4.47): mdiChevronRight and mdiChevronDown, the arrows Home Assistant uses. */
+  --mdi-chevron-right: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z'/%3E%3C/svg%3E");
+  --mdi-chevron-down: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z'/%3E%3C/svg%3E");
   color-scheme: light;
   --bg: #fff;
   --sidebar: #f7f7f5;
@@ -1097,17 +1100,16 @@ h1 {
 .activity-chevron::before {
   content: "";
   display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-right: 1.5px solid currentColor;
-  border-bottom: 1.5px solid currentColor;
-  transform: rotate(-45deg);
-  transition: transform 0.15s;
-  margin-bottom: 2px;
+  width: 16px;
+  height: 16px;
+  vertical-align: -3px;
+  background: currentColor;
+  -webkit-mask: var(--mdi-chevron-right) center / 16px no-repeat;
+  mask: var(--mdi-chevron-right) center / 16px no-repeat;
 }
 .activity-toggle[aria-expanded="true"] .activity-chevron::before {
-  transform: rotate(45deg);
-  margin-bottom: 4px;
+  -webkit-mask-image: var(--mdi-chevron-down);
+  mask-image: var(--mdi-chevron-down);
 }
 .activity.running .activity-chevron::before {
   border: 0;
@@ -1116,7 +1118,9 @@ h1 {
   border-radius: 50%;
   background: var(--accent);
   transform: none;
-  margin: 0;
+  margin: 0 4px;
+  -webkit-mask: none;
+  mask: none;
   animation: activity-pulse 1.4s ease-in-out infinite;
 }
 @keyframes activity-pulse {
@@ -1778,13 +1782,19 @@ dialog :is(h3, h4):has(> .settings-toggle) {
 }
 /* One arrow size for every header, whatever the size of its title. */
 .settings-title::before {
-  content: "▸";
+  content: "";
   display: inline-block;
   width: 16px;
-  font-size: 12px;
+  height: 16px;
+  margin-right: 2px;
+  vertical-align: -3px;
+  background: currentColor;
+  -webkit-mask: var(--mdi-chevron-right) center / 16px no-repeat;
+  mask: var(--mdi-chevron-right) center / 16px no-repeat;
 }
 .settings-toggle[aria-expanded="true"] .settings-title::before {
-  content: "▾";
+  -webkit-mask-image: var(--mdi-chevron-down);
+  mask-image: var(--mdi-chevron-down);
 }
 .settings-status {
   color: var(--muted);
@@ -1935,8 +1945,8 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   }
 }
 /* Keep verification evidence readable in narrow Ingress panels. */
-.verification { margin: 18px 0; min-width: 0; }
-.verification h3 { font-size: 14px; margin-bottom: 8px; }
+.verification { margin: 10px 0; min-width: 0; }
+.verification > summary { cursor: pointer; font-size: 13px; color: var(--muted); }
 .verification-result { border: 1px solid var(--border, #8885); border-radius: 8px; margin: 6px 0; padding: 10px; overflow-wrap: anywhere; }
 .verification-result summary { cursor: pointer; font-size: 13px; }
 .verification-result pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; max-height: 260px; overflow: auto; }
@@ -2077,4 +2087,27 @@ dialog :is(h3, h4):has(> .settings-toggle) {
 }
 #github-result {
   overflow-wrap: anywhere;
+}
+
+/* Disclosure marks on <details>: the same Material Design Icons arrow instead of the browser's triangle. */
+:is(.verification, .verification-result, .browser-permission-details) > summary {
+  list-style: none;
+}
+:is(.verification, .verification-result, .browser-permission-details) > summary::-webkit-details-marker {
+  display: none;
+}
+:is(.verification, .verification-result, .browser-permission-details) > summary::before {
+  content: "";
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  margin-right: 2px;
+  vertical-align: -3px;
+  background: currentColor;
+  -webkit-mask: var(--mdi-chevron-right) center / 16px no-repeat;
+  mask: var(--mdi-chevron-right) center / 16px no-repeat;
+}
+:is(.verification, .verification-result, .browser-permission-details)[open] > summary::before {
+  -webkit-mask-image: var(--mdi-chevron-down);
+  mask-image: var(--mdi-chevron-down);
 }

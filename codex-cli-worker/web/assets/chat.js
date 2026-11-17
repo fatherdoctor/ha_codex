@@ -1089,23 +1089,26 @@ function tickElapsed() {
       : "";
 }
 /**
- * Build the Verification section of an answer: one expandable row per check
+ * Build the collapsed checks block of an answer: one expandable row per check
  * with its result, details, and findings, then the screenshots that have not
- * expired. Returns null when the turn has no checks.
+ * expired. It stays closed under the answer, except while a batch of blocked
+ * browser requests waits for the owner or a retry runs. Returns null when the
+ * turn has no checks.
  */
 function renderVerification(turn, taskId) {
   const checks = turn.verification || [];
   if (!checks.length) return null;
-  const section = textNode("section", "", "verification");
-  section.append(textNode("h3", "Verification"));
+  const section = textNode("details", "", "verification");
+  section.append(textNode("summary", checks.length === 1 ? "Check and readback" : `Checks and readback (${checks.length})`));
   if (state.task?.browser_retry?.turn_id === turn.turn_id) {
+    section.open = true;
     const progress = textNode("p", "Retrying dashboard inspection…", "browser-permission-progress");
     progress.setAttribute("role", "status");
     section.append(progress);
   }
   for (const check of checks) {
     const row = textNode("details", "", `verification-result is-${check.status}`);
-    if (check.retry_of && check === checks[checks.length - 1]) row.open = true;
+    if (check.retry_of && check === checks[checks.length - 1]) row.open = section.open = true;
     const label = {
       passed: "Passed", failed: "Failed", observed: "Readback", captured: "Screenshots captured",
       issues: "Needs review", disabled: "Disabled", unavailable: "Unverified",
@@ -1149,6 +1152,7 @@ function renderVerification(turn, taskId) {
       row.append(textNode("p", "Some blocked requests can't be offered for approval: they were incomplete, looked like credentials, or exceeded the review limit."));
     const review = renderBrowserPermissions(check, turn, taskId);
     if (review) row.append(review);
+    if (review?.classList.contains("browser-permission-review")) section.open = true;
     section.append(row);
   }
   const images = imageAttachments(turn.verification_attachments).filter(image => image.expires_at * 1000 > Date.now());

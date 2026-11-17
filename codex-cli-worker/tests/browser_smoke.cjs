@@ -1535,7 +1535,13 @@ function pngBuffer(width = 8, height = 6) {
       .getByText("The dashboard configuration is valid.", { exact: true })
       .waitFor();
     // The screenshot the user attached shows with their message.
-    await phone.locator(".verification h3").waitFor();
+    // No bold Verification box under the answer: the checks sit in one closed block, readback and note inside.
+    await phone.locator(".verification > summary").waitFor();
+    assert.equal(await phone.locator(".verification h3").count(), 0);
+    assert.equal(await phone.locator(".verification").evaluate(node => node.open), false);
+    assert.equal(await phone.locator(".verification-note").isVisible(), false);
+    await phone.locator(".verification > summary").click();
+    assert.equal(await phone.locator(".verification-note").isVisible(), true);
     assert.equal(await phone.locator(".verification-result").count(), 2);
     await phone.locator(".verification-result").nth(1).locator("summary").click();
     assert.equal(await phone.locator(".verification").getByText("Custom element does not exist: sample-card", {exact:true}).isVisible(), true);

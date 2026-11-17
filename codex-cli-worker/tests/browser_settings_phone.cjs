@@ -68,7 +68,8 @@ async function checkLayout(page) {
   const layout = await page.evaluate(() => {
     const arrows = [...document.querySelectorAll('#settings .settings-title')].filter(t => t.offsetParent).map(t => {
       const style = getComputedStyle(t, '::before');
-      return `${style.fontSize} ${style.width}`;
+      // One Material Design Icons arrow: the same 16 px box, drawn from an SVG mask.
+      return `${style.width} ${style.height} ${style.maskImage.includes('svg') || style.webkitMaskImage.includes('svg')}`;
     });
     const sections = [...document.querySelectorAll('#settings section')].filter(s => s.offsetParent);
     // A divider is a section's top border; the last section also has one at its bottom.
@@ -94,6 +95,7 @@ async function checkLayout(page) {
     return {arrows, above, closed, below};
   });
   assert.equal(new Set(layout.arrows).size, 1, `one arrow size: ${layout.arrows}`);
+  assert.ok(layout.arrows.every(arrow => arrow.endsWith(' true')), `every arrow is an SVG icon: ${layout.arrows}`);
   assert.ok(layout.above.every(gap => Math.abs(gap - layout.above[0]) <= 1), `divider to header: ${layout.above}`);
   assert.ok(layout.closed.every(gap => Math.abs(gap - layout.above[0]) <= 1),
     `closed header to the next divider: ${layout.closed}, divider to header: ${layout.above[0]}`);

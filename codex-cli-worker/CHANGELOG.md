@@ -12,6 +12,10 @@
 - **Advanced** is a section like the others, with the same arrow and a status line.
 - Every section header in **Settings** has the same arrow size and the same space to the divider above and below it.
   An open section has the same space between its last line or button and the next divider.
+- The bold **Verification** box under an answer is gone. The checks, the readback and the note on screenshots sit in
+  one closed **Checks and readback** line, which opens when a batch of blocked browser requests needs a decision.
+- Every arrow in **Settings**, the thread step list, the checks block and the reasoning picker is a Material Design
+  Icons arrow, the icon set Home Assistant uses (Apache-2.0; see `NOTICE`).
 - The GitHub sign-in notice in Home Assistant names the new place: **Settings > Accounts and connections > GitHub**.
 
 ## 0.3.3 (unreleased)
