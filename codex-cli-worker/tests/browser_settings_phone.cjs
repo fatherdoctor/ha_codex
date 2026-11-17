@@ -146,7 +146,6 @@ async function checkLayout(page) {
         {title: 'ChatGPT account', status: 'Signing in: enter the code', attention: true},
         {title: 'GitHub', status: 'Connected as synthetic-owner, 1 repository', attention: false},
         {title: 'ChatGPT app pairing', status: 'Unavailable', attention: false},
-        {title: 'Permissions overrides', status: '3 of 5 on', attention: false},
         {title: 'Interaction logs', status: 'Keeps 25', attention: false},
         {title: 'Assistant', status: 'Running', attention: false},
         {title: 'Browser permissions', status: 'None remembered', attention: false},

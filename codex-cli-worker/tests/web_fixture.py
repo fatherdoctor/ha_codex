@@ -47,7 +47,6 @@ def main():
         server.DATA_ROOT = root
         server.CONFIG_ROOT = root
         from interaction_diagnostics import RollingDiagnostics, InteractionRecorder
-        from permission_overrides import owner_question
         server.interaction_logs = RollingDiagnostics(root / "interaction-diagnostics.json")
         server.diagnostics = InteractionRecorder(server.interaction_logs, "0.1.81.2", "0.166.0")
         server.diagnostics.begin("synthetic", "addon_page", "gpt-6.1-sol")
@@ -231,24 +230,18 @@ def main():
                         command = 'curl "$HA_URL/api/history/period?filter_entity_id=sensor.energy" -H "Authorization: Bearer $HA_TOKEN"'
                     else:
                         command = "curl '$HA_URL/api/history/period' -H 'Authorization: Bearer $HA_TOKEN'\n# <img src=x onerror=alert(1)>"
-                    if (reply or prompt).startswith("Request permission to run a light action"):
-                        # The act tool's own Allow once request, built by the engine as for a real action.
-                        session.ask_owner_action(owner_question({
-                            "operation": "service", "service": "light.turn_on", "target": ["light.sample_lamp"],
-                            "data": {"effect": "colorloop"}}), timeout=120)
-                    else:
-                        if file_permission:
-                            session.receive({"method": "item/started", "params": {
-                                "threadId": session_id, "turnId": "preview-native", "item": {
-                                    "id": "preview-command", "type": "fileChange", "changes": [{
-                                        "path": "/other/original.yaml", "diff": "-name: Before\n+name: After",
-                                        "kind": {"type": "update", "move_path": "/other/renamed.yaml"}}]}}})
-                        session.receive({"id": 0, "method": "item/fileChange/requestApproval" if file_permission else "item/commandExecution/requestApproval", "params": {
-                            "threadId": session_id, "turnId": "preview-native", "itemId": "preview-command",
-                            "command": command,
-                            "cwd": "/config", "reason": "Read historical sensor states from Home Assistant", "startedAtMs": 1,
-                        }})
-                        answered.wait(120)
+                    if file_permission:
+                        session.receive({"method": "item/started", "params": {
+                            "threadId": session_id, "turnId": "preview-native", "item": {
+                                "id": "preview-command", "type": "fileChange", "changes": [{
+                                    "path": "/other/original.yaml", "diff": "-name: Before\n+name: After",
+                                    "kind": {"type": "update", "move_path": "/other/renamed.yaml"}}]}}})
+                    session.receive({"id": 0, "method": "item/fileChange/requestApproval" if file_permission else "item/commandExecution/requestApproval", "params": {
+                        "threadId": session_id, "turnId": "preview-native", "itemId": "preview-command",
+                        "command": command,
+                        "cwd": "/config", "reason": "Read historical sensor states from Home Assistant", "startedAtMs": 1,
+                    }})
+                    answered.wait(120)
                     session.close()
                     with server.lock:
                         server.approval_sessions.pop(task_id, None)

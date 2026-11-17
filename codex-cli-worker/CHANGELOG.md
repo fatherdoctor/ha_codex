@@ -2,6 +2,14 @@
 
 ## 0.3.5 (unreleased)
 
+- The app's own grant layer is removed: the five pre-approved action groups (Settings > Permissions overrides), the
+  guard-rails block they read from `/config/AGENTS.md`, and the `home_assistant_actions` `act` tool with its
+  **Allow once** card. Codex's own permission requests are now the only way a change to the house is approved. A
+  device command still finds the entity and reads its state back with the `home_assistant` tools; the change itself
+  now needs your normal **Allow once**, as every other action does. The sandbox, the command check, the protected
+  places and the check after each exchange are unchanged. A test build that used the groups leaves
+  `/data/codex-home/house-rules/permission-overrides.json`, `/data/house-rules/confirmed.json`,
+  `/data/permission-overrides-backups` and `/data/permission-overrides.sock` behind; the app no longer reads them, and you can delete them.
 - A permission request that waits for you now shows at the bottom of the chat, below the "Working" lines, and the
   chat scrolls to it once when it first appears. Before, it sat above those lines and was easy to miss. A request
   you already answered stays where it was. No approval or permission rule changed.
