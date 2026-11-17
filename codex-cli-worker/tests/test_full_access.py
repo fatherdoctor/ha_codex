@@ -274,6 +274,108 @@ class NeverApprovalTests(unittest.TestCase):
                     self.assertEqual(sent["params"]["approvalPolicy"], "never" if allow else "on-request")
 
 
+class PolicyPairTests(unittest.TestCase):
+    """Each pair of sandbox and approval policy, on the chat page and in the ChatGPT app.
+
+    The chat page builds every turn itself, so it runs exactly three pairs and
+    refuses the rest. The app's turns go straight to Codex, whose managed
+    requirements list the allowed sandboxes and the allowed approval policies
+    separately. While Full access is on, an app thread can therefore mix them,
+    for example "never" with workspace-write. That is a known limit: no mix
+    reaches further than Full access itself.
+    """
+
+    SANDBOXES = ("read-only", "workspace-write", "danger-full-access")
+    APPROVALS = ("on-request", "never")
+    # How far each setting reaches: a wider sandbox, or asking less, reaches further.
+    SANDBOX_REACH = {"read-only": 0, "workspace-write": 1, "danger-full-access": 2}
+    APPROVAL_REACH = {"on-request": 0, "never": 1}
+
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.root = Path(folder.name)
+        self.setting = self.root / "full_access.json"
+        patcher = patch.object(full_access, "SETTING_PATH", self.setting)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def page_pair(self, sandbox, chat_full_access):
+        """Return the pair a chat page turn runs with, or None when the worker refuses the turn."""
+        options = {"codex_sandbox": sandbox}
+        if chat_full_access:
+            options[full_access.CHAT_OPTION] = True
+        if policy.policy_problem(options):
+            return None
+        effective = policy.effective_policy(options, policy.load_policy())
+        return effective["sandbox"], effective["approval_policy"]
+
+    def app_pairs(self):
+        """Return every pair the managed requirements let an app thread choose, as the worker writes them."""
+        target = self.root / "etc" / "requirements.toml"
+        target.parent.mkdir(exist_ok=True)
+        full_access.write_requirements(target, SHIPPED, self.setting)
+        self.assertEqual(rc.requirements_problem(target), "")
+        data = tomllib.loads(target.read_text(encoding="utf-8"))
+        return {(sandbox, approval) for sandbox in data["allowed_sandbox_modes"]
+                for approval in data["allowed_approval_policies"]}
+
+    def test_the_page_runs_each_sandbox_with_one_approval_policy(self):
+        expected = {
+            # (setting on, sandbox, chat set to Full access): the pair the turn runs with, or None (refused)
+            (False, "read-only", False): ("read-only", "on-request"),
+            (False, "workspace-write", False): ("workspace-write", "on-request"),
+            (False, "danger-full-access", False): None,
+            (False, "read-only", True): ("read-only", "on-request"),
+            (False, "workspace-write", True): ("workspace-write", "on-request"),
+            (False, "danger-full-access", True): None,
+            (True, "read-only", False): ("read-only", "on-request"),
+            (True, "workspace-write", False): ("workspace-write", "on-request"),
+            (True, "danger-full-access", False): None,
+            (True, "read-only", True): ("read-only", "on-request"),
+            (True, "workspace-write", True): ("workspace-write", "on-request"),
+            (True, "danger-full-access", True): ("danger-full-access", "never"),
+        }
+        for (enabled, sandbox, chat_full_access), pair in expected.items():
+            with self.subTest(enabled=enabled, sandbox=sandbox, chat_full_access=chat_full_access):
+                full_access.set_enabled(enabled, "admin-fixture")
+                self.assertEqual(self.page_pair(sandbox, chat_full_access), pair)
+
+    def test_the_page_refuses_never_with_every_sandbox_but_full_access(self):
+        # allow_full_access is what the worker passes for a Full access turn (server.task_options).
+        for sandbox in self.SANDBOXES:
+            for approval in self.APPROVALS:
+                for allow in (False, True):
+                    full = sandbox == "danger-full-access"
+                    # The one mix that passes here, Full access's sandbox with on-request, is never sent by
+                    # the worker (the test above), and Codex confirming it is refused (NeverApprovalTests).
+                    passes = (not full or allow) and (approval != "never" or (full and allow))
+                    params = {"sandbox": sandbox, "approvalPolicy": approval}
+                    with self.subTest(sandbox=sandbox, approval=approval, allow=allow):
+                        if passes:
+                            approvals.require_supported_policy(params, allow_full_access=allow)
+                        else:
+                            with self.assertRaises(ValueError):
+                                approvals.require_supported_policy(params, allow_full_access=allow)
+
+    def test_the_app_gets_only_the_page_pairs_while_off(self):
+        self.assertEqual(self.app_pairs(), {("read-only", "on-request"), ("workspace-write", "on-request")})
+
+    def test_the_app_can_mix_the_settings_while_on_but_no_mix_reaches_past_full_access(self):
+        full_access.set_enabled(True, "admin-fixture")
+        pairs = self.app_pairs()
+        self.assertEqual(pairs, {(sandbox, approval) for sandbox in self.SANDBOXES for approval in self.APPROVALS})
+        # The known limit: the mixes an app thread can choose and the chat page never runs.
+        page = {("read-only", "on-request"), ("workspace-write", "on-request"), ("danger-full-access", "never")}
+        self.assertEqual(pairs - page, {("read-only", "never"), ("workspace-write", "never"),
+                                        ("danger-full-access", "on-request")})
+        widest = (self.SANDBOX_REACH["danger-full-access"], self.APPROVAL_REACH["never"])
+        for sandbox, approval in pairs:
+            with self.subTest(sandbox=sandbox, approval=approval):
+                self.assertLessEqual(self.SANDBOX_REACH[sandbox], widest[0])
+                self.assertLessEqual(self.APPROVAL_REACH[approval], widest[1])
+
+
 class StaticRefusalTests(unittest.TestCase):
     """In Full access Codex asks nothing, so only refusals that never ask are left; they hold the same way.
 
