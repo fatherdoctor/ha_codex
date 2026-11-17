@@ -754,29 +754,37 @@ function controls() {
   document.dispatchEvent(new Event("chat-view"));
 }
 /** Build the small pin icon shown beside pinned chat titles. */
-function pinIcon() {
+/** One 24 px Material Design icon, the set Home Assistant uses, filled with the text color. */
+function mdiIcon(path, className) {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("viewBox", "0 0 24 24");
   svg.setAttribute("aria-hidden", "true");
-  svg.classList.add("pin-icon");
-  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  path.setAttribute(
-    "d",
-    "M8 2h8v2l-1.5 1v5.5l3.5 3V16h-5v6l-1 1-1-1v-6H6v-2.5l3.5-3V5L8 4z",
-  );
-  svg.append(path);
+  svg.classList.add("row-icon", className);
+  const shape = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  shape.setAttribute("d", path);
+  svg.append(shape);
   return svg;
 }
-/** Build the small clock icon that marks a message waiting in the queue. */
+/** mdiPin: a pinned chat. */
+function pinIcon() {
+  return mdiIcon("M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z", "pin-icon");
+}
+/** mdiClockOutline: a message that waits in the queue. */
 function queueIcon() {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("aria-hidden", "true");
-  svg.classList.add("queue-icon");
-  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  path.setAttribute("d", "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm0 4.5V12l3 2");
-  svg.append(path);
-  return svg;
+  return mdiIcon(
+    "M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z",
+    "queue-icon",
+  );
+}
+/** mdiMessageOutline: an ordinary chat. */
+function chatIcon() {
+  return mdiIcon("M20,2H4A2,2 0 0,0 2,4V22L6,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2M20,16H5.17L4,17.17V4H20V16Z", "chat-icon");
+}
+/** A small spinner for a chat that is working now. */
+function spinnerIcon() {
+  const spinner = textNode("span", "", "row-icon row-spinner");
+  spinner.setAttribute("aria-hidden", "true");
+  return spinner;
 }
 /** Find a loaded sidebar chat by task id. */
 function chatById(id) {
@@ -809,7 +817,9 @@ function renderRow(chat, queued = null) {
   main.setAttribute("aria-current", String(chat.task_id === state.id));
   const heading = textNode("span", "", "row-title");
   if (queued) heading.append(queueIcon());
+  else if (chat.status === "running") heading.append(spinnerIcon());
   else if (chat.pinned) heading.append(pinIcon());
+  else heading.append(chatIcon());
   heading.append(textNode("span", title));
   main.append(heading);
   main.append(
@@ -842,6 +852,8 @@ function renderRow(chat, queued = null) {
     ),
   );
   main.append(meta);
+  // One line for each chat: the last answer is the tooltip instead of a second line.
+  main.title = `${title} - ${main.querySelector(".row-preview").textContent}`;
   main.onclick = () => selectChat(chat.task_id);
   row.append(main);
   // A chat that is still waiting for its first message has nothing to pin or rename yet.
@@ -2813,14 +2825,17 @@ $("cancel").onclick = async () => {
     controls();
   }
 };
+const SIDEBAR_MIN = 200;
+const SIDEBAR_MAX = 480;
+const SIDEBAR_DEFAULT = 260;
 /**
- * Set the sidebar width in pixels, kept between 220 and 440 and leaving 360
+ * Set the sidebar width in pixels, kept between 200 and 480 and leaving 360
  * for the chat when the window allows, and remember it for the next visit.
  */
 function setWidth(value) {
   const width = Math.max(
-    220,
-    Math.min(440, Number(value) || 280, innerWidth - 360),
+    SIDEBAR_MIN,
+    Math.min(SIDEBAR_MAX, Number(value) || SIDEBAR_DEFAULT, innerWidth - 360),
   );
   document.documentElement.style.setProperty("--sidebar-width", `${width}px`);
   $("divider").setAttribute("aria-valuenow", String(width));
@@ -2831,9 +2846,9 @@ function setWidth(value) {
   }
 }
 try {
-  setWidth(localStorage.getItem("codex-sidebar-width") || 280);
+  setWidth(localStorage.getItem("codex-sidebar-width") || SIDEBAR_DEFAULT);
 } catch (_) {
-  setWidth(280);
+  setWidth(SIDEBAR_DEFAULT);
 }
 $("divider").addEventListener("pointerdown", (event) => {
   if (event.button !== 0) return;
@@ -2849,6 +2864,8 @@ $("divider").addEventListener("pointerup", (event) => {
 $("divider").addEventListener("lostpointercapture", () =>
   document.body.classList.remove("resizing"),
 );
+// A double-click gives back the default width.
+$("divider").addEventListener("dblclick", () => setWidth(SIDEBAR_DEFAULT));
 $("divider").addEventListener("keydown", (event) => {
   if (["ArrowLeft", "ArrowRight"].includes(event.key)) {
     event.preventDefault();
