@@ -122,6 +122,7 @@ Codex holds no Home Assistant credential for these; it holds a short-lived capab
 
 | protection | enforced in | shown by |
 |---|---|---|
+| Entity lookup by name on the chat page (`verify` operation `find`): a read only, at most 10 rows of entity id, friendly name and state, no password-mode text entities, no credential-like names, valid only for the running message's capability and inside its check limit | `verification.py`: `Verification.find`, `find_row`, `MAX_FIND_MATCHES`; filters shared from `relay_reads.py`: `PRIVATE`, `password_state` | `tests/test_cx_parity.py` (`DeviceCommandSpeedTests`), `tests/test_verification.py` |
 | Relay state reads: listed entities and attributes only, no password-mode text entities, no credential-like names, bounded size, valid only while the relay that was given the capability is alive | `relay_reads.py`: `RelayReads._dispatch`, `PRIVATE`, `ATTRIBUTES`, `password_state` | `tests/test_relay_read_filters.py`, `tests/test_relay_request_shapes.py` |
 | Recorder history: read-only, per exchange, limited in count | `ha_data.py`: `HomeAssistantData.dispatch` | `tests/test_ha_data.py` |
 | `exchange_info`: returns only the details the worker recorded for the running exchange (backup folder, attachments, notes); it takes no arguments, reads no Home Assistant data and needs the same capability as the recorder reads | `ha_data.py`: `HomeAssistantData.read_exchange_info`; `server.py`: `exchange_info` | `tests/test_app_thread_store.py` |
