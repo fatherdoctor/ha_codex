@@ -1559,6 +1559,7 @@ function renderApproval(approval, taskId, turnId, active) {
   if (approval.cwd) card.append(textNode("p", `Working folder: ${approval.cwd}`, "permission-folder"));
   if (approval.network) card.append(textNode("p", `Network host: ${approval.network}`));
   if (approval.command) card.append(textNode("pre", approval.command, "permission-command"));
+  if (approval.action) card.append(textNode("pre", approval.action, "permission-command"));
   for (const change of approval.changes || []) {
     card.append(textNode("p", `${change.kind}: ${change.path}`, "permission-folder"));
     if (change.move_path) card.append(textNode("p", `Move to: ${change.move_path}`, "permission-folder"));

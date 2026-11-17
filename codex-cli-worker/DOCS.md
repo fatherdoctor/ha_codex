@@ -1004,8 +1004,18 @@ Administrators can open Settings → Permissions overrides to choose five groups
 Everyday control and Organize start on; Bigger changes and Security and people start off. Changes save
 immediately. The worker tool `home_assistant_actions.act` performs only the supported fixed Core operations;
 it does not provide shell commands, arbitrary URLs or a Supervisor tool. A successful result names the
-action, and the assistant must name it in its answer. Refusals fall back to normal native approval. Never
-retry an unknown outcome automatically: inspect the affected state before any further attempt.
+action, and the assistant must name it in its answer. Never retry an unknown outcome automatically: inspect
+the affected state before any further attempt.
+
+When a device action (a light, a switch, a script and so on) is refused only because its group is off, or
+because its data has a field the tool does not accept on its own, and every other check passes, the tool asks
+you in the chat: a **Permission needed** card shows the exact action and data, with **Allow once** and
+**Deny**. It waits up to three minutes. Actions of the Security and people group (locks, alarm, covers,
+cameras, notifications) never ask this way, because their data can hold a code. Allow once runs that one action, after every check below runs again; it does not turn on the
+group or allow later actions. Deny, or no answer, changes nothing. Other refusals do not ask: they fall back to
+normal native approval. Light actions accept `brightness`, `brightness_pct`, `brightness_step`,
+`brightness_step_pct`, `color_temp_kelvin`, `transition`, `rgb_color`, `hs_color`, `xy_color`, `color_name`
+and `flash` without a question, each only in the range Home Assistant's light service accepts.
 
 Groups apply only to person-started Default exchanges (workspace-write with on-request user approvals).
 Scheduled and lead-channel runs keep normal prompts, even when their launch mode permits writes.

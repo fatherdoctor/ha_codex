@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.4 (unreleased)
+
+- "Set the light to 100%" works again without an approval. A pre-approved light action now accepts
+  `brightness_pct` and Home Assistant's other common light fields: `brightness_step`, `brightness_step_pct`,
+  `hs_color`, `xy_color`, `color_name` and `flash`, next to `brightness`, `color_temp_kelvin`, `transition` and
+  `rgb_color`. Each value must have the right type and stay in the range Home Assistant's light service accepts;
+  a value outside it is refused.
+- When a device action is refused only because its permission group is off or because its data has a field
+  that is not on the list, the `act` tool now shows the owner an **Allow once** / **Deny** request in the chat
+  and waits up to three minutes. Allow once runs that one action after every check runs again; it turns on no
+  group and allows no later action. Deny, or no answer, leaves everything unchanged. Before, the refusal asked
+  for an approval that the page could not show, so the exchange ended with nothing done. The owner is
+  asked only when every other check passes. Security and people actions (locks, alarm, covers, cameras,
+  notifications) never ask, because their data can hold a code. Guard rails, templates, unknown targets and the
+  other refusals are unchanged.
+
 ## 0.3.3 (unreleased)
 
 - The approval card and the remote-control hook now read command text with one shared copy of the comment

@@ -278,3 +278,119 @@ class PreparedAdapterTests(unittest.TestCase):
                                                     'data_schema': [], 'data': {'password': 'SYNTHETIC_PRIVATE_VALUE'}}):
             result = core.execute({'operation': 'flow_start', 'target': 'sample', 'data': {}})
         self.assertEqual(result, {'flow_id': 'sample', 'type': 'form', 'step_id': 'user', 'fields': [], 'errors': {}})
+
+
+class LightDataTests(unittest.TestCase):
+    """The light fields a pre-approved action may set, and the ranges each one must stay in."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.backend = Backend()
+        self.engine = Engine(Settings(Path(temporary.name) / 'settings.json'), self.backend, lambda: '', lambda event: None)
+        self.authority = Authority('workspace-write', 'on-request', 'user', 'worker')
+
+    def turn_on(self, data, **options):
+        return self.engine.dispatch({'operation': 'service', 'service': 'light.turn_on',
+                                     'target': ['light.sample'], 'data': data}, self.authority, **options)
+
+    def test_brightness_pct_100_needs_no_approval(self):
+        # The owner's "set the light to 100%" on 0.3.3 sent brightness_pct and was refused.
+        result = self.turn_on({'brightness_pct': 100})
+        self.assertTrue(result['ok'], result)
+        self.assertEqual(self.backend.writes[0]['data'], {'brightness_pct': 100})
+
+    def test_common_light_fields_need_no_approval(self):
+        for data in ({'brightness': 0}, {'brightness': 255}, {'brightness_pct': 0}, {'brightness_pct': 37.5},
+                     {'brightness_step': -255}, {'brightness_step_pct': 100}, {'color_temp_kelvin': 2700},
+                     {'transition': 0}, {'rgb_color': [255, 0, 0]}, {'hs_color': [360, 100]},
+                     {'xy_color': [0.3, 0.3]}, {'color_name': 'warm white'}, {'flash': 'short'},
+                     {'brightness_pct': 50, 'color_temp_kelvin': 3000, 'transition': 2}):
+            with self.subTest(data=data):
+                self.assertTrue(self.turn_on(data)['ok'])
+
+    def test_out_of_range_or_wrong_type_values_are_refused(self):
+        for data in ({'brightness_pct': 101}, {'brightness_pct': -1}, {'brightness_pct': '100'},
+                     {'brightness_pct': True}, {'brightness_pct': float('nan')}, {'brightness': 256},
+                     {'brightness_step': -256}, {'brightness_step_pct': 101}, {'color_temp_kelvin': 999},
+                     {'transition': 6554}, {'rgb_color': [256, 0, 0]}, {'rgb_color': [1, 2]},
+                     {'rgb_color': '255,0,0'}, {'hs_color': [361, 0]}, {'xy_color': [0.5, 1.5]},
+                     {'color_name': 'Red; off'}, {'color_name': 'x' * 33}, {'flash': 'strobe'}):
+            with self.subTest(data=data):
+                result = self.turn_on(data, offer_owner=True)
+                self.assertFalse(result['ok'])
+                self.assertNotIn('owner_question', result)
+        self.assertEqual(self.backend.writes, [])
+
+    def test_unknown_field_offers_the_owner_one_question(self):
+        result = self.turn_on({'effect': 'colorloop'}, offer_owner=True)
+        self.assertFalse(result['ok'])
+        self.assertEqual(result['reason'], 'Unsupported service data requires normal approval.')
+        question = result['owner_question']
+        self.assertEqual(question['what'], 'Run the Home Assistant action light.turn_on.')
+        self.assertEqual(json.loads(question['detail']),
+                         {'service': 'light.turn_on', 'target': ['light.sample'], 'data': {'effect': 'colorloop'}})
+        self.assertEqual(self.backend.writes, [])
+
+    def test_owner_allowed_lifts_the_allow_list_only(self):
+        self.assertTrue(self.turn_on({'effect': 'colorloop'}, owner_allowed=True)['ok'])
+        # The type and range checks of known fields still apply after Allow once.
+        self.assertFalse(self.turn_on({'effect': 'colorloop', 'brightness_pct': 150}, owner_allowed=True)['ok'])
+        self.assertEqual(len(self.backend.writes), 1)
+
+    def test_hard_refusals_never_offer_the_owner_a_question(self):
+        settings = self.engine.settings
+        settings.save({**DEFAULTS, 'security': True})
+        cases = [
+            # An owner guard rail.
+            (lambda: setattr(self.engine, 'guards', lambda: MARKERS[0] + '\n- Do not lock or unlock locks.\n' + MARKERS[1]),
+             {'operation': 'service', 'service': 'lock.unlock', 'target': ['lock.sample']}),
+            # A service the groups never cover.
+            (lambda: None, {'operation': 'service', 'service': 'light.unknown', 'target': ['light.sample']}),
+            # A template.
+            (lambda: None, {'operation': 'service', 'service': 'light.turn_on', 'target': ['light.sample'],
+                            'data': {'effect': '{{ states.lock }}'}}),
+            # A group that is off, for an operation that is not a device action.
+            (lambda: settings.save({**DEFAULTS, 'apply': False}), {'operation': 'check_config'}),
+        ]
+        for prepare, request in cases:
+            with self.subTest(request=request):
+                prepare()
+                result = self.engine.dispatch(request, self.authority, offer_owner=True)
+                self.assertFalse(result['ok'])
+                self.assertNotIn('owner_question', result)
+        remote = Authority('workspace-write', 'on-request', 'user', 'remote')
+        result = self.engine.dispatch({'operation': 'service', 'service': 'light.turn_on', 'target': ['light.sample'],
+                                       'data': {'effect': 'colorloop'}}, remote, offer_owner=True)
+        self.assertNotIn('owner_question', result)
+        self.assertEqual(self.backend.writes, [])
+
+    def test_group_off_device_action_offers_the_owner_a_question(self):
+        self.engine.settings.save({**DEFAULTS, 'everyday': False})
+        result = self.turn_on({'brightness_pct': 50}, offer_owner=True)
+        self.assertEqual(result['reason'], 'This action group is off; request normal approval.')
+        self.assertIn('owner_question', result)
+        self.assertTrue(self.turn_on({'brightness_pct': 50}, owner_allowed=True)['ok'])
+
+    def test_the_owner_is_asked_only_when_nothing_else_refuses(self):
+        self.backend.expansion = {'area_id': []}
+        for data, target in (({'effect': 'colorloop', 'brightness_pct': 150}, ['light.sample']),
+                             ({'effect': 'colorloop'}, {'area_id': 'empty'})):
+            with self.subTest(data=data, target=target):
+                result = self.engine.dispatch({'operation': 'service', 'service': 'light.turn_on',
+                                               'target': target, 'data': data}, self.authority, offer_owner=True)
+                self.assertFalse(result['ok'])
+                self.assertNotIn('owner_question', result)
+        self.assertEqual(self.backend.writes, [])
+
+    def test_security_actions_never_ask_the_owner(self):
+        # Security starts off; its data can hold a lock or alarm code, which a question would show.
+        for request in ({'operation': 'service', 'service': 'lock.unlock', 'target': ['lock.sample'],
+                         'data': {'code': 'SYNTHETIC'}},
+                        {'operation': 'service', 'service': 'alarm_control_panel.alarm_disarm',
+                         'target': ['alarm_control_panel.sample'], 'data': {'code': 'SYNTHETIC'}}):
+            with self.subTest(request=request):
+                result = self.engine.dispatch(request, self.authority, offer_owner=True)
+                self.assertTrue(result['approval_required'])
+                self.assertNotIn('owner_question', result)
+        self.assertEqual(self.backend.writes, [])
