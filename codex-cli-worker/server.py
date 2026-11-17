@@ -6874,6 +6874,9 @@ def addon_slug() -> str | None:
 @require_auth
 def addon_configuration() -> Response:
     """Return the Home Assistant path of this app's Configuration tab, or null when Supervisor cannot say."""
+    # The worker token is enough here on purpose: unlike the routes that change
+    # settings, this one changes nothing and its reply holds only the slug path,
+    # which is no secret, so it needs no Ingress administrator.
     slug = addon_slug()
     return jsonify({"ok": True, "url": f"/hassio/addon/{slug}/config" if slug else None})
 

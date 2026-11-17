@@ -126,7 +126,7 @@ async function showSidebar(page, phone) {
       await page.screenshot({path: path.join(SHOTS, `foot-${theme}-${width}.png`)});
       if (phone) await page.locator('#close-sidebar').click();
 
-      // 6. While a task runs, the send button is the stop button; typing brings back send (to the queue).
+      // 6. While a task runs, the send button is the stop button, and a draft or a file in the box keeps it there.
       await page.locator(phone ? '#phone-new' : '#new-chat').click();
       await page.locator('#message').fill('Take your time and list the synthetic porch lights.');
       await page.locator('#send').click();
@@ -136,11 +136,21 @@ async function showSidebar(page, phone) {
       const [stopBox, composeBox] = [await page.locator('#cancel').boundingBox(), await page.locator('#composer').boundingBox()];
       assert.ok(stopBox.x + stopBox.width <= composeBox.x + composeBox.width && stopBox.y >= composeBox.y, 'stop sits in the prompt box');
       await page.screenshot({path: path.join(SHOTS, `stop-${theme}-${width}.png`)});
-      await page.locator('#message').fill('A second synthetic message');
-      assert.equal(await page.locator('#cancel').isHidden(), true);
-      assert.equal(await page.locator('#send').isVisible(), true);
+      const stopShows = async (why) => {
+        assert.equal(await page.locator('#cancel').isVisible(), true, `stop stays in view ${why}`);
+        assert.equal(await page.locator('#cancel').isEnabled(), true, `stop stays usable ${why}`);
+        assert.equal(await page.locator('#send').isHidden(), true, `send stays hidden ${why}`);
+      };
+      await page.locator('#message').fill('wait, not the synthetic porch');
+      await stopShows('with a draft typed');
+      await page.locator('#message').press('Enter');
+      await stopShows('after Enter with a draft');
       await page.locator('#message').fill('');
-      await page.locator('#cancel:not([hidden])').waitFor();
+      await page.locator('#file-input').setInputFiles({name: 'synthetic dot.png', mimeType: 'image/png',
+        buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAwS2OUAAAAABJRU5ErkJggg==', 'base64')});
+      await page.locator('.pending-file').waitFor();
+      await stopShows('with a file attached');
+      await page.locator('#message').fill('wait, not the synthetic porch');
       const cancelled = page.waitForRequest(request => /\/tasks\/[^/]+\/cancel$/.test(request.url()));
       await page.locator('#cancel').click();
       await cancelled;

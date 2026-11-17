@@ -12,8 +12,8 @@
 - The two bands above the chat move to the foot of the side bar. One thin row above the messages keeps the
   chat title and the chat menu. The foot of the side bar holds Home Assistant with the integration state (opens
   Status), Remote connection with its state (opens the pairing window), the 5-hour and weekly quota with the plan
-  type and reset times, and Settings. A row that needs your attention shows an amber dot. While a task runs and
-  the message box is empty, the send button is the stop button.
+  type and reset times, and Settings. A row that needs your attention shows an amber dot. While a task runs, the
+  send button is the stop button, even with a draft or a file in the message box.
 - "Your chats" is one list card with one line for each chat: an icon, the title and its age. The open chat has a
   light tint. The divider between the side bar and the chat is now visible, resizes from 200 to 480 px, and goes
   back to 260 px on a double-click.

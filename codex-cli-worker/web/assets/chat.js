@@ -704,12 +704,13 @@ function controls() {
     ? "Add to the queue. It starts when the running chat finishes."
     : "";
   $("send").classList.toggle("queueing", queueing);
-  // While a task runs and the prompt box is empty, the send button becomes the stop button.
+  // While this chat's task runs or waits to run, the send button is the stop
+  // button, whatever the message box holds. Send cannot be used then anyway
+  // (see blocked), and a draft must never take away the only way to stop.
   const running = Boolean(task && ["queued", "running"].includes(task.status));
-  const typing = Boolean($("message").value.trim()) || state.files.length > 0;
-  $("cancel").hidden = !running || typing;
+  $("cancel").hidden = !running;
   $("cancel").disabled = state.busy;
-  $("send").hidden = running && !typing;
+  $("send").hidden = running;
   $("new-chat").disabled = state.busy || state.settingsBusy;
   $("message").readOnly = state.busy;
   $("attach").disabled =

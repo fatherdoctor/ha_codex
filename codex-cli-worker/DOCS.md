@@ -1065,7 +1065,7 @@ Above the messages is one thin row with the chat's title and its menu. The foot 
 bottom: **Home Assistant** with the state of the Codex integration (it opens the Status window), **Remote
 connection** with its state (it opens the window that pairs the ChatGPT app), the 5-hour and weekly quota with a
 line for the plan type and the reset times, and **Settings**. A row that needs you shows an amber dot. While a task
-runs and the message box is empty, the send button is the stop button. On a phone, a slim row holds the
+runs, the send button is the stop button, even with a draft or a file in the message box. On a phone, a slim row holds the
 conversations button, the title, New chat and the thread menu; the foot rows are at the bottom of the
 conversations drawer. The composer stays at the bottom. Its model and reasoning controls show the saved chat choice
 or configured default, rather than a sample selection.
