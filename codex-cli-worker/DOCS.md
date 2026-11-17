@@ -1017,8 +1017,11 @@ When a device action (a light, a switch, a script and so on) is refused only bec
 because its data has a field the tool does not accept on its own, and every other check passes, the tool asks
 you in the chat: a **Permission needed** card shows the exact action and data, with **Allow once** and
 **Deny**. It waits up to three minutes. Actions of the Security and people group (locks, alarm, covers,
-cameras, notifications) never ask this way, because their data can hold a code. Allow once runs that one action, after every check below runs again; it does not turn on the
-group or allow later actions. Deny, or no answer, changes nothing. Other refusals do not ask: they fall back to
+cameras, notifications) never ask this way, because their data can hold a code. While that group is off, the refusal
+tells you to turn it on in Settings → Permissions overrides if you want Codex to do it, and then ask again. Allow once runs that one action, after every check below runs again; it does not turn on the
+group or allow later actions. Deny, or no answer, changes nothing. A target in the action's data (`entity_id`,
+`device_id`, `area_id`, `floor_id` or `label_id`) is refused and never asks: a target goes in the target, where it is
+checked. Other refusals do not ask: they fall back to
 normal native approval. Light actions accept `brightness`, `brightness_pct`, `brightness_step`,
 `brightness_step_pct`, `color_temp_kelvin`, `transition`, `rgb_color`, `hs_color`, `xy_color`, `color_name`
 and `flash` without a question, each only in the range Home Assistant's light service accepts.

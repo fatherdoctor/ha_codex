@@ -37,10 +37,14 @@ LIGHT_COLORS = {
     'xy_color': ((0, 1), (0, 1)),
 }
 COLOR_NAME = re.compile(r'[a-z ]{1,32}')
+# Home Assistant reads these keys in service data as targets. A target there would skip every
+# target check (resolve, the limit of 64, require_entity), so a target goes in "target" only.
+DATA_TARGET_KEYS = frozenset({'entity_id', 'device_id', 'area_id', 'floor_id', 'label_id'})
 
 
 def check_light_data(data):
     """Refuse a light field whose value has the wrong type or is outside its range."""
+    # validate_service checks the type of each number first, so the comparisons below see numbers only.
     for key, (low, high) in LIGHT_NUMBERS.items():
         if key in data and not low <= data[key] <= high:
             raise ApprovalRequired('A light value is out of range.')
@@ -240,9 +244,12 @@ class Core:
         """Refuse service data outside the allow-list, and allowed fields with a wrong type or range.
 
         owner_allowed (the owner pressed Allow once for this action) lifts the allow-list only;
-        the type and range checks below still apply to the fields they name.
+        the target keys and the type and range checks below still apply.
         """
         domain, name = service.split('.')
+        # Not liftable by Allow once: the owner's question names only the checked target.
+        if DATA_TARGET_KEYS & set(data):
+            raise ApprovalRequired('A target in the action data is not accepted; put every target in target.')
         allowed = {'light': set(LIGHT_NUMBERS) | set(LIGHT_COLORS) | {'color_name', 'flash'},
                    'input_number': {'value'}, 'input_text': {'value'}, 'input_select': {'option'},
                    'script': {'variables'}, 'automation': {'skip_condition', 'stop_actions'},

@@ -10,7 +10,8 @@ import unittest
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from permission_overrides import ApprovalRequired, Authority, DEFAULTS, Engine, MARKERS, Settings, guard_rules
+from permission_overrides import (ApprovalRequired, Authority, DEFAULTS, Engine, MARKERS, SECURITY_OFF, Settings,
+                                  guard_rules)
 import permission_overrides_api as api
 
 
@@ -381,6 +382,46 @@ class LightDataTests(unittest.TestCase):
                                                'target': target, 'data': data}, self.authority, offer_owner=True)
                 self.assertFalse(result['ok'])
                 self.assertNotIn('owner_question', result)
+        self.assertEqual(self.backend.writes, [])
+
+    def test_a_target_in_the_data_is_refused_even_after_allow_once(self):
+        # Home Assistant would act on these as targets, past the checks of the named target.
+        for key in ('entity_id', 'device_id', 'area_id', 'floor_id', 'label_id'):
+            with self.subTest(key=key):
+                data = {key: 'synthetic_target'}
+                result = self.turn_on(data, offer_owner=True)
+                self.assertFalse(result['ok'])
+                self.assertTrue(result['approval_required'])
+                self.assertNotIn('owner_question', result)
+                self.assertFalse(self.turn_on(data, owner_allowed=True)['ok'])
+                switch = self.engine.dispatch({'operation': 'service', 'service': 'switch.turn_off',
+                                               'target': ['switch.sample'], 'data': data},
+                                              self.authority, owner_allowed=True)
+                self.assertFalse(switch['ok'])
+        self.assertEqual(self.backend.writes, [])
+
+    def test_security_group_off_tells_the_owner_how_to_turn_it_on(self):
+        result = self.engine.dispatch({'operation': 'service', 'service': 'cover.close_cover',
+                                       'target': ['cover.sample']}, self.authority, offer_owner=True)
+        self.assertFalse(result['ok'])
+        self.assertEqual(result['reason'], SECURITY_OFF)
+        self.assertIn('Settings > Permissions overrides', result['reason'])
+        self.assertNotIn('normal approval', result['reason'])
+        self.assertNotIn('owner_question', result)
+
+    def test_allow_once_is_refused_for_a_security_action(self):
+        self.engine.settings.save({**DEFAULTS, 'security': True})
+        result = self.engine.dispatch({'operation': 'service', 'service': 'lock.lock', 'target': ['lock.sample']},
+                                      self.authority, owner_allowed=True)
+        self.assertFalse(result['ok'])
+        self.assertEqual(result['reason'], 'Allow once does not apply to this action; request normal approval.')
+        self.assertEqual(self.backend.writes, [])
+
+    def test_allow_once_is_refused_for_an_operation_that_is_not_a_device_action(self):
+        # Bigger changes start off; Allow once must not lift the group of a restart.
+        result = self.engine.dispatch({'operation': 'restart'}, self.authority, owner_allowed=True)
+        self.assertFalse(result['ok'])
+        self.assertEqual(result['reason'], 'Allow once does not apply to this action; request normal approval.')
         self.assertEqual(self.backend.writes, [])
 
     def test_security_actions_never_ask_the_owner(self):

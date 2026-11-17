@@ -44,6 +44,11 @@ GUARD_LINES = {
 }
 
 
+# The refusal Codex passes on to the owner, so the turn does not end as "approval is unavailable".
+SECURITY_OFF = ('The Security and people group is off, so this action was not done. Tell the owner they can turn '
+                'that group on in Settings > Permissions overrides and then ask again.')
+
+
 class ApprovalRequired(ValueError):
     """Fixed, worker-authored explanation; never a backend response or exception string."""
 
@@ -233,6 +238,10 @@ class Engine:
                     raise ApprovalRequired('Unsupported action fields; request normal approval.')
                 bounded_json(request, 1024 * 1024)
                 group = operation_group(operation, request.get('service'))
+                # Allow once is only ever for a device action outside the security group; the caller
+                # is not trusted to keep to that.
+                if owner_allowed and (operation != 'service' or group == 'security'):
+                    raise ApprovalRequired('Allow once does not apply to this action; request normal approval.')
                 groups = self.settings.read()
                 rules = guard_rules(self.guards())
                 checks = set()
@@ -277,7 +286,12 @@ class Engine:
 
 
     def allowed(self, group, groups, owner_allowed=False):
-        if not groups[group] and not owner_allowed:
+        if groups[group]:
+            return
+        if group == 'security':
+            # Never liftable: the data of these actions can hold a code. Only the owner's setting opens it.
+            raise ApprovalRequired(SECURITY_OFF)
+        if not owner_allowed:
             raise OwnerCanAllow('This action group is off; request normal approval.')
 
     def targets(self, selector, domain=None):

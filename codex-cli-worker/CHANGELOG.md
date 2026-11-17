@@ -25,8 +25,10 @@
   group and allows no later action. Deny, or no answer, leaves everything unchanged. Before, the refusal asked
   for an approval that the page could not show, so the exchange ended with nothing done. The owner is
   asked only when every other check passes. Security and people actions (locks, alarm, covers, cameras,
-  notifications) never ask, because their data can hold a code. Guard rails, templates, unknown targets and the
-  other refusals are unchanged.
+  notifications) never ask, because their data can hold a code; while that group is off, the refusal tells the
+  owner how to turn it on in Settings → Permissions overrides. A target in the action data (`entity_id`,
+  `device_id`, `area_id`, `floor_id`, `label_id`) is refused and never asks, so Allow once can only reach the
+  target the request names. Guard rails, templates, unknown targets and the other refusals are unchanged.
 
 ## 0.3.3 (unreleased)
 

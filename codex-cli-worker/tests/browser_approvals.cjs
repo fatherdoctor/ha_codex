@@ -81,6 +81,18 @@ async function testApprovals(browser, output, errors) {
   assert.match(await approvalPage.locator(".permission-card").textContent(), /Move to: \/other\/renamed.yaml/);
   await approvalPage.getByRole("button", {name: "Allow once", exact: true}).click();
   await approvalPage.locator(".permission-card strong").filter({hasText: /^Allowed once$/}).waitFor();
+  // The act tool's own request: the card shows the exact action and its data, with both answers.
+  await approvalPage.locator("#new-chat").click();
+  await approvalPage.locator("#message").fill("Request permission to run a light action");
+  await approvalPage.getByRole("button", {name: "Send message", exact: true}).click();
+  await approvalPage.getByRole("button", {name: "Allow once", exact: true}).waitFor();
+  assert.equal(await approvalPage.getByRole("button", {name: "Deny", exact: true}).count(), 1);
+  const actionCard = await approvalPage.locator(".permission-card").textContent();
+  assert.match(actionCard, /Run the Home Assistant action light\.turn_on\./);
+  assert.match(actionCard, /"effect": "colorloop"/);
+  assert.match(actionCard, /light\.sample_lamp/);
+  await approvalPage.getByRole("button", {name: "Allow once", exact: true}).click();
+  await approvalPage.locator(".permission-card strong").filter({hasText: /^Allowed once$/}).waitFor();
   await approvalPage.close();
 }
 module.exports = testApprovals;
@@ -94,7 +106,7 @@ async function main() {
     const errors = [];
     await testApprovals(browser, output, errors);
     assert.deepEqual(errors, []);
-    console.log("PASS: permission UI on desktop and mobile, allow/deny, stale replies, cancellation, drafts, and safe text.");
+    console.log("PASS: permission UI on desktop and mobile, allow/deny, stale replies, cancellation, drafts, safe text, and the act tool's Allow once card.");
   } finally {
     await browser.close();
   }
