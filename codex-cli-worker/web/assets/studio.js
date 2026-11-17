@@ -263,32 +263,12 @@ $("archive-list").onclick = async () => {
   try { await loadList(); } catch (error) { sidebarError(error); }
 };
 
-/** Copy HA's exposed theme tokens across the iframe boundary when permitted. */
-const themeTokens = ["primary-color", "primary-background-color", "secondary-background-color", "card-background-color",
-  "primary-text-color", "secondary-text-color", "divider-color", "error-color", "text-light-primary-color"];
-function followTheme() {
-  let dark = matchMedia("(prefers-color-scheme: dark)").matches;
-  try {
-    if (parent !== window) {
-      const host = parent.document.querySelector("home-assistant") || parent.document.documentElement;
-      const style = parent.getComputedStyle(host);
-      if (typeof host.hass?.themes?.darkMode === "boolean") dark = host.hass.themes.darkMode;
-      else if (style.colorScheme === "dark") dark = true;
-      else if (style.colorScheme === "light") dark = false;
-      for (const token of themeTokens) {
-        const value = style.getPropertyValue("--" + token).trim();
-        if (value) document.documentElement.style.setProperty("--" + token, value);
-        else document.documentElement.style.removeProperty("--" + token);
-      }
-    }
-  } catch (_) { /* Cross-origin hosts use standalone system-theme fallbacks. */ }
-  document.documentElement.dataset.theme = dark ? "dark" : "light";
-}
-followTheme();
-matchMedia("(prefers-color-scheme: dark)").addEventListener("change", followTheme);
+/** Follow Home Assistant's theme now and whenever it changes (haTheme() is in chat.js). */
+haTheme();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", haTheme);
 try {
   if (parent !== window) {
-    const observer = new MutationObserver(followTheme);
+    const observer = new MutationObserver(haTheme);
     observer.observe(parent.document.documentElement, {attributes:true, attributeFilter:["style", "class"]});
     const host = parent.document.querySelector("home-assistant");
     if (host) observer.observe(host, {attributes:true, attributeFilter:["style", "class"]});

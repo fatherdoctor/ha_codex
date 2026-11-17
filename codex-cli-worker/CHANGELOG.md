@@ -2,6 +2,13 @@
 
 ## 0.3.5 (unreleased)
 
+- Settings and its windows (Status, Remote connection, Permissions, Workspace rules) look more like Home Assistant's
+  own settings pages. Text, number and list fields are filled fields with a line under them, as on the add-on's
+  Configuration tab. Each part's main button is filled in the primary color, and the other buttons are text buttons.
+  The close buttons and the check mark of the chosen permission mode use Home Assistant's icons. The page now takes
+  Home Assistant's font, and an answer's lines sit a little closer. The page copies its theme from Home Assistant,
+  so a custom theme and dark mode reach every field, switch and button. Opened alone, outside Home Assistant, the
+  page keeps its own colors. No setting, permission or approval rule changed.
 - A permission request that waits for you now shows at the bottom of the chat, below the "Working" lines, and the
   chat scrolls to it once when it first appears. Before, it sat above those lines and was easy to miss. A request
   you already answered stays where it was. No approval or permission rule changed.

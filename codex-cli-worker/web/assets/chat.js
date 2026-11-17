@@ -3567,19 +3567,52 @@ function settingsError(error) {
 let permissionGroups = null;
 let permissionRuleDigest = null;
 const permissionSwitches = () => [...document.querySelectorAll("[data-permission-group]")];
-function permissionTheme() {
+/**
+ * The Home Assistant theme variables the page reads, by name without the leading "--". Home Assistant sets them on
+ * its own document; the page runs in an iframe and does not inherit them, so haTheme() copies them to this page's
+ * root. Each use in chat.css and studio.css has a fallback, so a name a frontend version lacks changes nothing.
+ */
+const haThemeTokens = [
+  // Colors: studio.css maps these onto the page's own --bg, --sidebar, --surface, --text, --muted, --line and --accent.
+  "primary-color", "primary-background-color", "secondary-background-color", "card-background-color",
+  "primary-text-color", "secondary-text-color", "divider-color", "disabled-text-color", "error-color", "text-light-primary-color",
+  // Filled buttons and filled fields, as on the add-on's Configuration tab.
+  "ha-color-fill-primary-loud-resting", "ha-color-on-primary-loud",
+  "input-fill-color", "input-ink-color", "input-label-ink-color", "input-idle-line-color",
+  // Switches. Newer frontends name them --ha-switch-* and --ha-color-*, older ones --switch-*; chat.css tries each.
+  "ha-switch-background-color", "ha-switch-thumb-background-color",
+  "ha-switch-checked-background-color", "ha-switch-checked-thumb-background-color",
+  "ha-color-border-neutral-normal", "ha-color-border-primary-loud",
+  "ha-color-fill-disabled-quiet-resting", "ha-color-on-neutral-normal", "ha-color-fill-primary-normal-resting", "ha-color-on-primary-normal",
+  "switch-unchecked-track-color", "switch-unchecked-button-color", "switch-checked-track-color", "switch-checked-button-color",
+  // Font and type scale.
+  "ha-font-family-body", "ha-font-size-s", "ha-font-size-m",
+];
+/**
+ * Follow Home Assistant's theme: copy its variables to this page's root and set data-theme to light or dark. A
+ * variable the theme does not set is removed, so a theme change never leaves an old color behind. With no parent
+ * window (the standalone preview) or one the page may not read, the page keeps its own palette and the system's
+ * light or dark setting.
+ */
+function haTheme() {
+  let dark = matchMedia("(prefers-color-scheme: dark)").matches;
   try {
-    if (window.parent === window) return;
-    const theme = getComputedStyle(window.parent.document.documentElement);
-    const target = $("permission-overrides");
-    for (const key of ["--primary-color", "--primary-text-color", "--secondary-text-color", "--divider-color", "--card-background-color",
-      "--ha-switch-background-color", "--ha-switch-thumb-background-color", "--ha-switch-checked-background-color", "--ha-switch-checked-thumb-background-color",
-      "--ha-color-fill-disabled-quiet-resting", "--ha-color-on-neutral-normal", "--ha-color-fill-primary-normal-resting", "--ha-color-on-primary-normal"])
-      if (theme.getPropertyValue(key).trim()) target.style.setProperty(key, theme.getPropertyValue(key));
-  } catch (_error) { /* Standalone/cross-origin previews use the page theme. */ }
+    if (window.parent !== window) {
+      const host = window.parent.document.querySelector("home-assistant") || window.parent.document.documentElement;
+      const style = window.parent.getComputedStyle(host);
+      if (typeof host.hass?.themes?.darkMode === "boolean") dark = host.hass.themes.darkMode;
+      else if (style.colorScheme === "dark") dark = true;
+      else if (style.colorScheme === "light") dark = false;
+      for (const token of haThemeTokens) {
+        const value = style.getPropertyValue("--" + token).trim();
+        if (value) document.documentElement.style.setProperty("--" + token, value);
+        else document.documentElement.style.removeProperty("--" + token);
+      }
+    }
+  } catch (_error) { /* A cross-origin parent: keep the page's own palette. */ }
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
 }
 async function loadPermissionOverrides() {
-  permissionTheme();
   const controls = permissionSwitches();
   controls.forEach((input) => { input.disabled = true; });
   try {
@@ -3659,6 +3692,7 @@ $("settings-button").onclick = async () => {
     setSectionStatus("interaction-logs-section", "Administrators only");
   }
   sidebar(false);
+  haTheme();
   $("settings").showModal();
   $("settings-result").textContent = "";
   $("agents").disabled = true;

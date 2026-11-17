@@ -90,7 +90,18 @@ dialog::backdrop { background: #0006; }
 .permission-option strong, .permission-option span { display: block; }
 .permission-option span { color: var(--muted); font-size: 12px; line-height: 1.6; margin-top: 5px; }
 .permission-option[aria-pressed="true"] { border-color: var(--accent); background: var(--hover); }
-.permission-option[aria-pressed="true"] strong::after { content: " ✓"; color: var(--accent); }
+/* The chosen permission mode: mdiCheck (chat.css) in the primary color after its name. */
+.permission-option[aria-pressed="true"] strong::after {
+  content: "";
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  margin-left: 6px;
+  vertical-align: -3px;
+  background: var(--accent);
+  -webkit-mask: var(--mdi-check) center / 18px no-repeat;
+  mask: var(--mdi-check) center / 18px no-repeat;
+}
 #status-details { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; font-size: 13px; }
 #status-details dt { color: var(--muted); }
 #status-details dd { margin: 0; overflow-wrap: anywhere; }

@@ -355,7 +355,7 @@
       </div>
     </dialog>
     <dialog id="permissions-dialog" class="studio-sheet" aria-labelledby="permissions-title">
-      <div class="dialog-header"><h2 id="permissions-title">Permissions</h2><button class="icon" data-close="permissions-dialog" aria-label="Close permissions">✕</button></div>
+      <div class="dialog-header"><h2 id="permissions-title">Permissions</h2><button class="icon icon-close" data-close="permissions-dialog" aria-label="Close permissions"></button></div>
       <p class="muted">Choose how this chat starts its next turn. A choice cannot expand the add-on's configured permissions.</p>
       <button class="permission-option" data-mode="default"><strong>Default permissions</strong><span>Use the configured sandbox and ask for native approval when needed.</span></button>
       <button class="permission-option" data-mode="read-only"><strong>Read only</strong><span>Inspect and explain. Changes require a specific owner approval.</span></button>
@@ -363,15 +363,13 @@
       <button class="permission-option" disabled><strong>Full access · Coming</strong><span>Not available in this build.</span></button>
       <p id="permission-result" role="status"></p>
     </dialog>
-    <dialog id="status-dialog" class="studio-sheet" aria-labelledby="status-title"><div class="dialog-header"><h2 id="status-title">Status</h2><button class="icon" data-close="status-dialog" aria-label="Close status">✕</button></div><dl id="status-details"></dl></dialog>
-    <dialog id="connection-dialog" class="studio-sheet" aria-labelledby="connection-title"><div class="dialog-header"><h2 id="connection-title">Remote connection</h2><button class="icon" data-close="connection-dialog" aria-label="Close remote connection">✕</button></div><div id="connection-content"></div><p id="connection-result" role="alert"></p></dialog>
-    <dialog id="workspace-dialog" class="studio-sheet" aria-labelledby="workspace-title"><div class="dialog-header"><h2 id="workspace-title">Workspace rules</h2><button class="icon" data-close="workspace-dialog" aria-label="Close workspace rules">✕</button></div><div id="workspace-content"></div><p id="workspace-result" role="status"></p></dialog>
+    <dialog id="status-dialog" class="studio-sheet" aria-labelledby="status-title"><div class="dialog-header"><h2 id="status-title">Status</h2><button class="icon icon-close" data-close="status-dialog" aria-label="Close status"></button></div><dl id="status-details"></dl></dialog>
+    <dialog id="connection-dialog" class="studio-sheet" aria-labelledby="connection-title"><div class="dialog-header"><h2 id="connection-title">Remote connection</h2><button class="icon icon-close" data-close="connection-dialog" aria-label="Close remote connection"></button></div><div id="connection-content"></div><p id="connection-result" role="alert"></p></dialog>
+    <dialog id="workspace-dialog" class="studio-sheet" aria-labelledby="workspace-title"><div class="dialog-header"><h2 id="workspace-title">Workspace rules</h2><button class="icon icon-close" data-close="workspace-dialog" aria-label="Close workspace rules"></button></div><div id="workspace-content"></div><p id="workspace-result" role="status"></p></dialog>
     <dialog id="settings">
       <div class="dialog-header">
         <h2>Settings</h2>
-        <button id="close-settings" class="icon" aria-label="Close settings">
-          ✕
-        </button>
+        <button id="close-settings" class="icon icon-close" aria-label="Close settings"></button>
       </div>
       <section id="accounts-section" aria-labelledby="accounts-title">
         <h3 id="accounts-title">Accounts and connections</h3>
@@ -441,11 +439,11 @@
       <section id="permission-overrides">
         <h3>Permissions overrides</h3>
         <p class="muted">Choose which actions can run without a prompt in Default permissions. Your guard rails still apply. Remote turns require normal approval in this version.</p>
-        <label class="permission-row"><span><strong>Apply my changes</strong><span class="permission-description">Reload YAML, check configuration, and set up integrations.</span></span><input type="checkbox" role="switch" data-permission-group="apply" disabled aria-label="Apply my changes"><span class="ha-permission-switch" aria-hidden="true"></span></label>
-        <label class="permission-row"><span><strong>Everyday control</strong><span class="permission-description">Lights, switches, scenes, automations, and helper values.</span></span><input type="checkbox" role="switch" data-permission-group="everyday" disabled aria-label="Everyday control"><span class="ha-permission-switch" aria-hidden="true"></span></label>
-        <label class="permission-row"><span><strong>Organize</strong><span class="permission-description">Names, areas, labels, and dashboard edits with a backup.</span></span><input type="checkbox" role="switch" data-permission-group="organize" disabled aria-label="Organize"><span class="ha-permission-switch" aria-hidden="true"></span></label>
-        <label class="permission-row"><span><strong>Bigger changes</strong><span class="permission-description">Scripts, entity IDs, backups, restarts, and deletions.</span></span><input type="checkbox" role="switch" data-permission-group="bigger" disabled aria-label="Bigger changes"><span class="ha-permission-switch" aria-hidden="true"></span></label>
-        <label class="permission-row"><span><strong>Security and people</strong><span class="permission-description">Locks, alarms, covers, cameras, and messages.</span></span><input type="checkbox" role="switch" data-permission-group="security" disabled aria-label="Security and people"><span class="ha-permission-switch" aria-hidden="true"></span></label>
+        <label class="ha-row"><span><strong>Apply my changes</strong><span class="ha-row-description">Reload YAML, check configuration, and set up integrations.</span></span><input type="checkbox" role="switch" data-permission-group="apply" disabled aria-label="Apply my changes"><span class="ha-switch" aria-hidden="true"></span></label>
+        <label class="ha-row"><span><strong>Everyday control</strong><span class="ha-row-description">Lights, switches, scenes, automations, and helper values.</span></span><input type="checkbox" role="switch" data-permission-group="everyday" disabled aria-label="Everyday control"><span class="ha-switch" aria-hidden="true"></span></label>
+        <label class="ha-row"><span><strong>Organize</strong><span class="ha-row-description">Names, areas, labels, and dashboard edits with a backup.</span></span><input type="checkbox" role="switch" data-permission-group="organize" disabled aria-label="Organize"><span class="ha-switch" aria-hidden="true"></span></label>
+        <label class="ha-row"><span><strong>Bigger changes</strong><span class="ha-row-description">Scripts, entity IDs, backups, restarts, and deletions.</span></span><input type="checkbox" role="switch" data-permission-group="bigger" disabled aria-label="Bigger changes"><span class="ha-switch" aria-hidden="true"></span></label>
+        <label class="ha-row"><span><strong>Security and people</strong><span class="ha-row-description">Locks, alarms, covers, cameras, and messages.</span></span><input type="checkbox" role="switch" data-permission-group="security" disabled aria-label="Security and people"><span class="ha-switch" aria-hidden="true"></span></label>
         <p class="muted">Only the marked guard-rails block controls these switches. Other instructions remain for the assistant to follow in chat. Everyday control includes anything exposed as a switch.</p>
         <button id="confirm-permission-rules" class="subtle">Review and confirm house rules</button>
         <p id="permissions-overrides-guard-note" role="status" class="muted" hidden></p>
