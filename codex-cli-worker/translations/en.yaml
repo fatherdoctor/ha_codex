@@ -19,7 +19,7 @@ configuration:
     description: Folder where prompts, logs, backups, status files, and change lists are saved. Keep it inside /config so Codex can save a copy of each file before changing it.
   notify_service:
     name: Notification service
-    description: Optional Home Assistant notify service for task completion, failures, questions, and permission requests. Leave unset or blank to use persistent notifications. The app configuration page does not support Home Assistant service autocomplete, so this is a plain text field.
+    description: Optional Home Assistant notify service for questions, permission requests and failures. Leave unset or blank to use persistent notifications. The app configuration page does not support Home Assistant service autocomplete, so this is a plain text field.
   github_client_id:
     name: GitHub App client ID
     description: Public client ID used for GitHub sign-in. The default uses The Backshop GitHub App. Change this only if you use your own GitHub App. The client ID is not a secret.

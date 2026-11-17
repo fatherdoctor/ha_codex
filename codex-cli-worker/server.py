@@ -3246,13 +3246,17 @@ def background_task(task_id: str) -> bool:
 
 
 def notify_task_outcome(task_id, status, summary, turn_id='', question='', choices=None):
-    """Background work reports in its run log; only permission requests push."""
+    """Notify about a finished turn only when it needs the owner: a question or a failure.
+
+    A completed answer sends nothing; the owner reads it in the chat. Background
+    work reports in its run log; only its permission requests push.
+    """
     if background_task(task_id):
         return
     if status == 'needs_input':
         notify_question(task_id, turn_id, question or 'Codex needs your input.', choices or [])
-    else:
-        notify('Codex task completed' if status == 'completed' else 'Codex task failed', f'{summary} Task: {task_id}')
+    elif status != 'completed':
+        notify('Codex task failed', f'{summary} Task: {task_id}')
 
 
 def notify_question(task_id: str, turn_id: str, question: str, choices: list[str]) -> None:
@@ -3290,7 +3294,7 @@ def notify_permission(task_id: str, approval: dict[str, Any], withdrawn: threadi
     action, which the chat shows. It carries the already redacted reason and
     never the command or the diff. `withdrawn` is set once the request no longer
     waits; a notification not delivered by then is dropped, so it cannot replace
-    the one about the task's result.
+    a later one about the task's question or failure.
     """
     subject = "a file change" if approval.get("kind") == "file_change" else "a command"
     reason = " ".join(str(approval.get("reason") or "").split())
@@ -4933,8 +4937,7 @@ def publish_cancelled_task_outcome(task_id: str, returncode: int | None = None) 
     ok, detail = fire_ha_event("codex_cli_task_result", event_data)
     if not ok:
         print(f"Codex task result event failed: {detail}", flush=True)
-    if not background_task(task_id):
-        notify("Codex task cancelled", f"{CANCELLED_TASK_SUMMARY}. Task: {task_id}")
+    # No notification: the owner cancels a task on purpose, so the cancel does not need the owner.
     refresh_usage_status_async(force=True)
     return True
 
