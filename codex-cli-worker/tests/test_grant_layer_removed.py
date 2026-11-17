@@ -6,8 +6,9 @@ Version 0.3.5 removed the action groups, the permission overrides and the ``act`
 
 from __future__ import annotations
 
-from pathlib import Path
 import unittest
+from itertools import pairwise
+from pathlib import Path
 from unittest.mock import patch
 
 from test_server import server
@@ -20,7 +21,7 @@ REMOVED_MODULES = ("permission_overrides", "permission_overrides_api", "permissi
 def configured_servers(args: list[str]) -> set[str]:
     """Return the name of every MCP server that a Codex command line configures."""
     names = set()
-    for flag, value in zip(args, args[1:]):
+    for flag, value in pairwise(args):
         if flag == "--config" and value.startswith("mcp_servers."):
             names.add(value[len("mcp_servers."):].split(".", 1)[0])
     return names
