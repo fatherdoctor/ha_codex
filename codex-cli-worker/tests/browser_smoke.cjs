@@ -1317,7 +1317,8 @@ function pngBuffer(width = 8, height = 6) {
       error: "This question is no longer waiting for an answer.",
     });
     await page.getByRole("button", { name: "Open settings" }).click();
-    // Settings sections start collapsed; the ChatGPT header carries the short status.
+    // Settings sections start collapsed; the ChatGPT header inside Accounts and connections carries the short status.
+    await page.locator("#accounts-section > h3 .settings-toggle").click();
     await page
       .locator("#chatgpt-section .settings-status")
       .getByText("Signed in", { exact: true })

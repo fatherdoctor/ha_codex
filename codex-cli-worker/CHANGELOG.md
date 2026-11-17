@@ -1,9 +1,29 @@
 # Changelog
 
-## 0.3.2 (unreleased)
+## 0.3.3 (unreleased)
 
+- The approval card and the remote-control hook now read command text with one shared copy of the comment
+  and word code (`shell_words.py`), so a later fix cannot leave the two checks reading a command differently.
+  Each still answers unreadable text its own way. No command is judged differently.
+- When the approval card refuses **Allow once** because it cannot read a command's heredoc or quoting, it now
+  says that, instead of saying the command touches the app's permission policy.
+- A scheduling or mailbox request whose text holds a character that cannot be stored (a lone surrogate) is now
+  refused with a sentence that says so, instead of the bare word `utf-8`.
+- Settings has one **Accounts and connections** section for every sign-in and pairing: ChatGPT account, GitHub,
+  and the ChatGPT app pairing. It starts collapsed. Its header joins the three states ("ChatGPT signed in · GitHub
+  connected · app off"), and when one needs the owner the header names only that one, in red. ChatGPT and GitHub
+  keep their own collapsed headers, codes and countdowns inside it. The app pairing part shows the remote
+  connection state with **Get a pairing code**, **Manage remote connection** and **Turn off**; it replaces the
+  separate **Manage remote connection** row. A pairing code has no countdown: the worker does not know how long
+  Codex keeps it. **Turn off** stops the connection and does not remove the pairing in the ChatGPT app.
+- When a request gets HTTP 401 because the Home Assistant ingress session expired (a tab that slept), the page
+  asks Home Assistant for a new session once, through the parent window as the Home Assistant frontend does, and
+  sends the request again. Requests that fail together share one renewal. If the renewal fails, a banner says the
+  session expired and offers **Reload**; the page no longer shows "The worker returned HTTP 401".
 - Add a Repair and body-free event for unanswered task, approval and mailbox requests.
   The reminder comes no later than half the task timeout. Answers and ended tasks clear it; it never answers automatically.
+
+## 0.3.2 (unreleased)
 
 - Codex now refuses risky commands in two layers. Managed Codex command rules refuse six literal command
   prefixes: the Supervisor (`ha supervisor`, `ha super`, `ha su`), credentials, the app's policy folder and
@@ -37,6 +57,16 @@
   schedules paused without the Home Assistant time zone. Tap a header to
   open its section. Button rows wrap, and at phone width the buttons of a row share it in equal columns, so the
   ChatGPT buttons no longer render tall and narrow and the GitHub buttons no longer run past the edge.
+- The name the ChatGPT app shows for this Home Assistant can be changed on the page, under remote control,
+  while remote control is off. The page saves it as the **Remote control machine name** option through
+  Supervisor, so the app's Configuration tab shows the same name. Only that option changes; the other options are
+  sent back as Supervisor reports them (defaults merged with the stored values, as Save in the Configuration tab
+  does), with any `!secret` reference kept. A name can have up to 63 characters.
+- A first message such as "Test" now gets a normal reply. The task prompt asks Codex to write its summary as a
+  reply to the person, not as a report from the worker, and it names `/config/AGENTS.md` only when that file
+  exists, in chat tasks and in remote-control sessions. Before, a missing file could show in the answer as
+  "/config/AGENTS.md was not found". The page now shows a missing `AGENTS.md` once, above the message box, as a
+  setup hint that you can dismiss.
 
 ## 0.3.1 (unreleased)
 

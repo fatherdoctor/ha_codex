@@ -6,6 +6,7 @@
     "/etc/codex/managed_config.toml",
     "/usr/share/ha_codex/gate_hook.py",
     "/usr/share/ha_codex/gate_rules.py",
+    "/usr/share/ha_codex/shell_words.py",
     "/usr/share/ha_codex/refused-domains.json"
   ],
   "hook": "/usr/share/ha_codex/gate_hook.py",

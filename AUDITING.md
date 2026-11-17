@@ -61,7 +61,7 @@ The hook reads text. It does not run a shell, so a path or command built while t
 reach; DOCS.md lists those limits, and layers 1, 3 and 4 are what cover them.
 
 Before it splits a command, the hook joins each backslash-newline pair the way the shell does
-(`gate_rules.py: _join_shell_continuations`), so a command name split across lines is read whole. The join has
+(`shell_words.py: join_shell_continuations`), so a command name split across lines is read whole. The join has
 its own model of quotes and comments. Where that model is not sure (a heredoc, a substitution, quoting it cannot
 read) the command is refused with a request for one line. The model can still be wrong, so the Supervisor text
 floor in `check_tool_call` reads a second form with every backslash-newline pair removed, whatever the quotes
@@ -69,9 +69,11 @@ floor in `check_tool_call` reads a second form with every backslash-newline pair
 the parser does not open. Tests: `tests/test_gate_quote.py` (`ContinuationFloorTests` runs each form through a
 print-only shell).
 
-(*) Known weakness: the shell text is split by two copies of the same code, `_strip_comments` and `_split_words`,
-one in `gate_rules.py` and one in `approvals.py`. Both refuse quoting they cannot read. Nothing but review keeps
-the copies the same, so check both when you check one.
+(*) The shell text is split by one copy of the code, `shell_words.py` (`strip_comments`, `split_words`), which
+`gate_rules.py` and `approvals.py` both import. The hook's continuation join is in the same file. Each check keeps
+its own `_shell_words` for text it cannot read: the hook reads it again line by line, the approval card refuses
+it. `tests/test_shell_words.py` checks that both use the shared code and that the image ships it next to the hook
+and the worker.
 
 ### Layer 3: who can approve
 
@@ -79,6 +81,7 @@ the copies the same, so check both when you check one.
 |---|---|---|
 | The chat page is reachable only through Home Assistant Ingress; a request that claims to be Ingress from any other address is rejected | `server.py: enforce_ingress_boundary`, `is_ingress_request` | `tests/test_server.py` |
 | Every other route needs the worker's API token, compared in constant time | `server.py: require_auth` | `tests/test_api.py`, `tests/test_server.py` |
+| When an Ingress session expires, the page gets a new one only from the Home Assistant frontend that holds it, through that frontend's own signed-in connection in a same-origin parent window; the page holds no credential, a parent on another origin gets no request, and the worker's checks above are unchanged | `web/assets/chat.js: renewIngressSession`, `pageFetch` | `tests/browser_accounts.cjs` |
 | The API token (held only by the integration) can never answer a permission request; only an active Home Assistant administrator signed in on the chat page can, and a failed lookup refuses | `server.py: ingress_admin`, `lookup_ha_users`, `decide_approval` | `tests/test_approvals.py` |
 | A native approval covers one action in the current exchange; it installs no rule and expires with the exchange. Standing permission exists only as the administrator's pre-approved action groups, in the next rows | `approvals.py`: `AppServerSession.decide` and `.receive` | `tests/test_approvals.py`, `tests/test_approval_smoke.py` |
 | Pre-approved action groups: an administrator can switch on groups of Home Assistant actions (`apply`, `everyday` and `organize` start on; `bigger` and `security` start off), and Codex then performs them through `home_assistant_actions.act` with no per-action approval. The `security` group (locks, alarm, covers, cameras, notifications) is off unless the administrator turns it on | `permission_overrides.py: DEFAULTS`, `SECURITY`, `SERVICES`, `OPERATIONS`; entity targets and action data are bounded (`entity`, `bounded_json`) and templates need normal approval | `tests/test_permission_overrides.py`, `tests/test_permission_overrides_direct.py`, `tests/test_permission_overrides_runtime.py` |
@@ -86,6 +89,7 @@ the copies the same, so check both when you check one.
 | Owner guard-rail lines (no locks, alarm, covers, cameras, messages or external publishing) are read from one marked block in the agent's rules and refuse the matching actions even when the group is on; a custom line or a block that cannot be verified asks for normal approval | `permission_overrides.py: GUARD_LINES`, `selected_guard_lines`, `guard_rules` | `tests/test_permission_overrides_peer2.py`, `tests/test_permission_overrides_review.py` |
 | The groups can be changed only by an administrator on the chat page; the settings file is small, exactly five booleans, and a bad file means normal approval | `permission_overrides_api.py`: the `/permissions-overrides` route (`require_auth`, `require_ingress`, `ingress_admin`); `permission_overrides.py: Settings.read`, `validate` | `tests/test_permission_overrides.py` |
 | A change to the add-on's own policy, rules, options or credentials cannot be approved at all | `approvals.py: touches_protected_path`, `command_names_protected_path`, `PROTECTED_PREFIXES` | `tests/test_approvals.py` |
+| The remote-control machine name is the one add-on option the worker writes, and only for an administrator on the chat page while remote control is off; the other options go back as Supervisor's info reply gives them (defaults merged with the stored values, `!secret` references kept), so the first rename also stores every default, as Save in the Configuration tab does; a name over 63 characters is refused | `server.py`: the `/remote-control/<action>` route (`require_auth`, `require_ingress`, `ingress_admin`), `rename_remote_control`, `save_remote_control_name`, `write_local_option` | `tests/test_remote_name_and_first_reply.py` |
 | Browser permissions are managed only from the chat page | `server.py: require_ingress` | `tests/test_browser_permissions.py` |
 | The GitHub sign-in can be connected, tested, accepted or disconnected only by an administrator on the chat page; the worker's API token can read its status and nothing else | `github_access.py: register` (the `/github` routes) | `tests/test_github_routes.py` |
 | A push Codex asks for runs the kit's push guard first, from the read-only copy in the image, and pushes only the commit it checked; a push that adds a `guard: allow` mark is refused, since an allow mark needs the owner; no force, delete or tag push; read-only chats and schedules can only list and fetch | `github_access.py: GitRunner.push`, `valid_branch`, `GitHubService.dispatch`; `push_guard.py` (byte-identical to the kit's) | `tests/test_github_access.py` |

@@ -1743,8 +1743,17 @@ dialog label {
   }
 }
 /* A collapsed settings section: the header button shows the title and a one-line status. */
-dialog h3:has(> .settings-toggle) {
+dialog :is(h3, h4):has(> .settings-toggle) {
   margin: 0;
+}
+/* The three parts of Accounts and connections sit inside it, indented, with a lighter rule. */
+#accounts-section section {
+  margin: 0 0 0 12px;
+  padding: 0;
+  border-top: 1px solid var(--line);
+}
+#accounts-section h4 .settings-toggle {
+  font-size: 13px;
 }
 .settings-toggle {
   display: flex;
@@ -1773,20 +1782,18 @@ dialog h3:has(> .settings-toggle) {
   font-weight: 400;
   overflow-wrap: anywhere;
 }
-.needs-attention .settings-status {
+/* Only the section's own header: a marked Accounts and connections must not mark the parts inside it. */
+.needs-attention > :is(h3, h4) .settings-status,
+.needs-attention > #app-pairing-status {
   color: var(--error);
   font-weight: 600;
 }
-.needs-attention .settings-status:not(:empty)::before {
+.needs-attention > :is(h3, h4) .settings-status:not(:empty)::before,
+.needs-attention > #app-pairing-status:not(:empty)::before {
   content: "⚠ ";
 }
 .signin-expired {
   color: var(--error);
-}
-.settings-link-row {
-  border-top: 1px solid var(--line);
-  margin-top: 22px;
-  padding-top: 12px;
 }
 #login-card img {
   max-width: 220px;
@@ -1965,6 +1972,14 @@ dialog h3:has(> .settings-toggle) {
   padding: 0.75rem 1rem;
   border: 1px solid var(--line);
   border-radius: 8px;
+}
+#agents-hint {
+  margin: 0 0 10px;
+}
+#remote-control-name {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
 }
 .signin-card {
   display: grid;
