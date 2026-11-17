@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.5 (unreleased)
+
+- The Courtyard mark now identifies the app and integration. The integration has light and dark images; the store images use a light backing.
+
 ## 0.3.4 (unreleased)
 
 - A plain device command such as "set the office overhead to 50%" is faster. On 0.3.3 Codex had no tool on the
