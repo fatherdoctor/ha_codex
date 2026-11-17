@@ -42,6 +42,7 @@ body {
 }
 button,
 input,
+select,
 textarea {
   font: inherit;
   color: inherit;
@@ -2559,6 +2560,7 @@ body.resizing #divider::before {
 }
 body.resizing {
   cursor: ew-resize;
+}
 /* FB2-FLOW */
 /*
  * The chat flow, with the desktop app as the model (CX-FB2 design, sections 4 and 6). The chat column and

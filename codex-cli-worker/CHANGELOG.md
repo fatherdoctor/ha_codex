@@ -9,6 +9,18 @@
   Home Assistant's font, and an answer's lines sit a little closer. The page copies its theme from Home Assistant,
   so a custom theme and dark mode reach every field, switch and button. Opened alone, outside Home Assistant, the
   page keeps its own colors. No setting, permission or approval rule changed.
+- The two bands above the chat move to the foot of the side bar. One thin row above the messages keeps the
+  chat title and the chat menu. The foot of the side bar holds Home Assistant with the integration state (opens
+  Status), Remote connection with its state (opens the pairing window), the 5-hour and weekly quota with the plan
+  type and reset times, and Settings. A row that needs your attention shows an amber dot. While a task runs and
+  the message box is empty, the send button is the stop button.
+- "Your chats" is one list card with one line for each chat: an icon, the title and its age. The open chat has a
+  light tint. The divider between the side bar and the chat is now visible, resizes from 200 to 480 px, and goes
+  back to 260 px on a double-click.
+- The chat reads more like the desktop app. A gray "Worked for" line above each answer opens its steps and
+  checks. A failed check keeps one short line under the answer. An answered or expired permission request is one
+  closed line that opens to the same details. On a wide screen the chat and the prompt box share one 720 px
+  column. These are display changes only: no approval, permission or sign-in rule changed.
 - A permission request that waits for you now shows at the bottom of the chat, below the "Working" lines, and the
   chat scrolls to it once when it first appears. Before, it sat above those lines and was easy to miss. A request
   you already answered stays where it was. No approval or permission rule changed.

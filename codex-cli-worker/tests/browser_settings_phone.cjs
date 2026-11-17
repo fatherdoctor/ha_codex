@@ -120,6 +120,8 @@ const themeLook = target => target.evaluate(() => {
   };
   return {
     font: getComputedStyle(document.body).fontFamily,
+    // A list field takes the same font as the page (#schedule-mode, Scheduled runs).
+    selectFont: css('#schedule-mode', 'font-family'),
     fieldFill: css('#diagnostic-retention', 'background-color'),
     fieldLine: css('#diagnostic-retention', 'border-bottom-color'),
     fieldHeight: document.querySelector('#diagnostic-retention').getBoundingClientRect().height,
@@ -135,6 +137,15 @@ const themeLook = target => target.evaluate(() => {
       `${b.textContent.trim() === ''} ${getComputedStyle(b, '::before').maskImage.includes('svg') || getComputedStyle(b, '::before').webkitMaskImage.includes('svg')}`),
   };
 });
+
+/**
+ * Wait until a switch that is on shows the expected color. Its fill fades in over 0.15 s, so a single
+ * read can catch it halfway. On a timeout the caller's assertion reports the color it found.
+ */
+const switchSettles = (target, color) => target.waitForFunction(expected => {
+  const track = document.querySelector('.ha-row input:checked + .ha-switch');
+  return track !== null && getComputedStyle(track).backgroundColor === expected;
+}, color, {timeout: 5000}).catch(() => {});
 
 /** Open the sections that hold a switch, a field and both kinds of button. */
 async function openThemedSections(target) {
@@ -264,8 +275,10 @@ async function openThemedSections(target) {
       await page.goto('http://127.0.0.1:9137/preview/');
       await page.getByRole('button', {name: 'Open settings', exact: true}).click();
       await openThemedSections(page);
+      await switchSettles(page, 'rgb(0, 154, 199)');
       const look = await themeLook(page);
       assert.match(look.font, /^Inter,/, 'the page font with no Home Assistant font');
+      assert.equal(look.selectFont, look.font, 'a list field takes the page font');
       assert.equal(look.fieldHeight, 56, 'a filled field is 56 px high');
       assert.ok(look.rowHeight >= 72, `a two-line switch row is 72 px or more: ${look.rowHeight}`);
       assert.equal(look.filled, 'rgb(0, 154, 199)', 'the filled button takes the page accent');
@@ -304,8 +317,10 @@ async function openThemedSections(target) {
       if (await conversations.isVisible()) await conversations.click();
       await frame.getByRole('button', {name: 'Open settings', exact: true}).click();
       await openThemedSections(page);
+      await switchSettles(page, 'rgb(17, 170, 85)');
       const look = await themeLook(page);
       assert.match(look.font, /^"?Synthetic Sans"?, sans-serif$/, `Home Assistant's font: ${look.font}`);
+      assert.equal(look.selectFont, look.font, `a list field takes Home Assistant's font: ${look.selectFont}`);
       assert.equal(look.fieldFill, 'rgb(42, 59, 76)', 'the field fill is --input-fill-color');
       assert.equal(look.fieldLine, 'rgb(136, 153, 170)', 'the field line is --input-idle-line-color');
       assert.equal(look.filled, 'rgb(85, 34, 238)', 'the filled button is --ha-color-fill-primary-loud-resting');
