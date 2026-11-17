@@ -462,10 +462,11 @@ function pngBuffer(width = 8, height = 6) {
       .waitFor();
     // The numbered suggestions of this answer are a list.
     assert.equal(await page.locator("#messages .details ol > li").count(), 2);
-    // A finished exchange keeps its steps behind a collapsed toggle.
+    // A finished exchange keeps its steps behind a collapsed toggle. This saved chat has no start time,
+    // so the line counts the steps instead of reading "Worked for" (CX-FB2-FLOW).
     const storedToggle = page.locator("#activity .activity-toggle");
     await storedToggle.waitFor();
-    assert.equal(await storedToggle.textContent(), "Show activity (4 steps)");
+    assert.equal(await storedToggle.textContent(), "Activity (4 steps)");
     assert.equal(await page.locator("#activity-steps").isVisible(), false);
     await storedToggle.click();
     assert.equal(await page.locator("#activity .step").count(), 4);
@@ -626,12 +627,15 @@ function pngBuffer(width = 8, height = 6) {
         exact: true,
       })
       .waitFor();
-    // Four steps from Codex and four from the worker; the timer stops with the run.
-    await page.waitForFunction(
-      () =>
-        document.querySelector("#activity .activity-toggle")?.textContent ===
-        "Show activity (8 steps)",
+    // Four steps from Codex and four from the worker; the timer stops with the run,
+    // and the closed line reads the exchange's total time (CX-FB2-FLOW).
+    await page.waitForFunction(() =>
+      /^Worked for \d+s$/.test(
+        document.querySelector("#activity .activity-toggle")?.textContent || "",
+      ),
     );
+    await page.locator("#activity .activity-toggle").click();
+    assert.equal(await page.locator("#activity .step").count(), 8);
     assert.equal(await page.locator(".elapsed").count(), 0);
     assert.equal(await page.locator("#activity").count(), 1);
     assert.equal(await page.locator("#activity .step.is-running").count(), 0);
@@ -1540,6 +1544,17 @@ function pngBuffer(width = 8, height = 6) {
       .waitFor();
     // The screenshot the user attached shows with their message.
     // No bold Verification box under the answer: the checks sit in one closed block, readback and note inside.
+    // CX-FB2-FLOW: that block is inside the answer's closed "Worked for" line, and a failed check keeps one
+    // short line under the answer, in the error color.
+    const errorColor = await phone.evaluate(() => { const probe = document.createElement("span"); probe.style.color = "var(--error)";
+      document.body.append(probe); const color = getComputedStyle(probe).color; probe.remove(); return color; });
+    const failedLine = phone.locator(".answer .check-failed-line");
+    await failedLine.waitFor();
+    assert.equal(await failedLine.textContent(), "1 check failed");
+    assert.equal(await failedLine.evaluate(node => getComputedStyle(node).color), errorColor);
+    assert.ok(await failedLine.evaluate(node => node.getBoundingClientRect().height) <= 24);
+    assert.equal(await phone.locator(".verification > summary").isVisible(), false);
+    await phone.locator("#activity > .activity-toggle").click();
     await phone.locator(".verification > summary").waitFor();
     assert.equal(await phone.locator(".verification h3").count(), 0);
     assert.equal(await phone.locator(".verification").evaluate(node => node.open), false);
@@ -1563,6 +1578,12 @@ function pngBuffer(width = 8, height = 6) {
     assert.equal(await phone.locator(".verification img").count(), 1);
     assert.equal(await phone.locator(".verification img").evaluate(img => img.complete && img.naturalWidth > 0), true);
     await phone.screenshot({path: path.join(output, "verification-mobile.png"), fullPage: true});
+    // From a closed "Worked for" line, the failed-check line opens the line and the checks in one tap.
+    await phone.locator("#activity > .activity-toggle").click();
+    await phone.locator(".verification").evaluate(node => { node.open = false; });
+    assert.equal(await phone.locator(".verification > summary").isVisible(), false);
+    await failedLine.click();
+    assert.equal(await phone.locator(".verification-note").isVisible(), true);
     assert.equal(
       await phone.locator("#messages .user-attachments img").count(),
       1,
