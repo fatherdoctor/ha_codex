@@ -538,5 +538,59 @@ class StatusRunTests(unittest.TestCase):
         self.assertEqual(task["question"], "")
         self.assertIn("Codex exited with 1.", task["details"])
 
+
+class OwnerNoticeTests(unittest.TestCase):
+    """A turn sends a Home Assistant notification only when it needs the owner.
+
+    A plain answer to the owner's own question sends nothing: the owner reads it in the chat. A question, a
+    permission request and a failure still send one.
+    """
+
+    # The same stand-in exchange as StatusRunTests, without running its tests a second time.
+    setUp = StatusRunTests.setUp
+    process = StatusRunTests.process
+    run_exchange = StatusRunTests.run_exchange
+    mcp_item = StatusRunTests.mcp_item
+
+    def titles(self):
+        """The titles of the notifications sent so far (server.notify is a stand-in from the setUp)."""
+        return [call.args[0] for call in server.notify.call_args_list]
+
+    def test_a_plain_answer_sends_no_notification(self):
+        """No tool call: the turn is completed and nobody is notified."""
+        task = self.run_exchange([], "The porch light turns on 10 minutes after sunset.")
+        self.assertEqual(task["status"], "completed")
+        self.assertEqual(self.titles(), [])
+
+    def test_a_question_sends_one_notification(self):
+        """ask_owner: one notification with the question."""
+        task = self.run_exchange([self.mcp_item(ASK)], "Remove the duplicate automation? Go ahead, or Keep both.")
+        self.assertEqual(task["status"], "waiting_for_input")
+        self.assertEqual(self.titles(), ["Codex needs input"])
+        self.assertIn("Remove the duplicate automation?", server.notify.call_args.args[1])
+
+    def test_a_failure_sends_one_notification(self):
+        """report_failure: one notification, as before."""
+        task = self.run_exchange([self.mcp_item(FAIL)], "I could not do this: the entity light.porch does not exist.")
+        self.assertEqual(task["status"], "failed")
+        self.assertEqual(self.titles(), ["Codex task failed"])
+
+    def test_a_permission_request_sends_one_notification(self):
+        """An approval prompt is notified on its own path, which a completed turn does not change."""
+        withdrawn = threading.Event()
+        server.notify_permission("task", {"kind": "command", "reason": "List the configuration folder"}, withdrawn)
+        self.assertEqual(self.titles(), ["Codex needs permission"])
+
+    def test_a_canceled_task_sends_no_notification(self):
+        """The owner cancels a chat task on purpose: the result event goes out, a notification does not."""
+        events = []
+        server.fire_ha_event.side_effect = lambda name, data: events.append((name, data)) or (True, "")
+        accepted, _process, error = server.request_task_cancellation("task")
+        self.assertTrue(accepted, error)
+        self.assertTrue(server.publish_cancelled_task_outcome("task"))
+        self.assertEqual([(name, data["status"]) for name, data in events], [("codex_cli_task_result", "cancelled")])
+        self.assertEqual(self.titles(), [])
+
+
 if __name__ == "__main__":
     unittest.main()
