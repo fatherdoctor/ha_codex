@@ -555,72 +555,97 @@ Sign-in uses your ChatGPT account and its Codex allowance. Availability and usag
 
 ## GitHub sign-in
 
-Release 0.3 lets the assistant fetch, pull, push, clone and link the GitHub repositories you choose. You do every step with a button in the app page: **Settings > Accounts and connections > GitHub**, just below **ChatGPT account**. No step needs a shell, and nothing about GitHub is typed into chat.
+The GitHub connection lets the assistant work with repositories you choose. A repository is a project and its tracked files and history. A clone is a local copy of a repository. A push sends committed changes to GitHub. Link changes the GitHub destination of an existing local repository.
 
-The app keeps the sign-in in its own private folder, `/data/github`. That folder is hidden in every Codex sandbox, so a task cannot read it. Codex never holds the token. It calls one tool, `github_git`, and the app runs git for it. Every push goes through the kit's push guard first.
+You can set up the connection and a local copy with the controls below. You can also make ordinary repository requests in chat. Enter a sign-in code only on GitHub's device page, and enter a token only in the token form. Never put either in chat.
+
+### Before you connect
+
+1. Sign in to Home Assistant as an administrator. Open **Settings > Apps > Codex for Home Assistant > Open Web UI**. GitHub controls require this Home Assistant entry point and administrator access.
+2. In the app page, open **Settings > Accounts and connections > GitHub**. This is the app's Settings, separate from Home Assistant Settings and GitHub Settings.
+3. Sign in to GitHub and choose the account and repository you want to use. You need a repository before either sign-in method. To make one, follow [GitHub's repository guide](https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-new-repository), choose **Private**, and add a README. A private repository is visible only to people you permit.
+4. For the normal connection, open the [Codex for Home Assistant GitHub App installation page](https://github.com/apps/codex-for-home-assistant/installations/new). Choose the account that owns your repository. Choose **Only select repositories** and select the intended private repository. Review the requested permissions and complete the installation. An organization may need its owner's approval. Then return to the app page.
+
+The normal path uses the built-in GitHub App. You do not need to register an App or enter a Client ID. Installation lets the App reach the selected repositories; the next step authorizes it for your account. GitHub's [installation guide](https://docs.github.com/en/apps/using-github-apps/installing-a-github-app-from-a-third-party) explains this distinction.
 
 ### Connect
 
-1. Install the **Codex for Home Assistant** GitHub App on the repositories of your choice. Use GitHub's own page for this. You can change the set there later.
-2. In **Settings > Accounts and connections > GitHub**, press **Connect GitHub**. The card shows a code in large letters and a link to `github.com/login/device`.
-3. Open the link, type the code and approve the App. The card checks every 5 seconds and shows your account, the repositories it reaches and their access as soon as GitHub confirms. Press **Cancel** to stop a sign-in that is waiting. The code works for 15 minutes; after that, press **Connect GitHub** again for a new code.
+1. In the app's GitHub settings, press **Connect GitHub**. The card shows a code and a link to GitHub's device sign-in page.
+2. Open that link. Enter the code there and approve the App. Return to the app page. It checks every 5 seconds and then shows the account, repositories and access. Press **Cancel** to stop a waiting sign-in. If the code expires after 15 minutes, start again for a new code.
+3. Check that the account and repository list are the ones you intended. Press **Read test**. A successful read checks repository metadata. It does not download files or commit changes. It does not test a push. Continue with **Clone** or **Link**, then press **Check now**.
 
-The App asks for Contents read and write only (GitHub adds Metadata read). The sign-in reaches only what you can reach and what the App was installed on. An App sign-in does not expire. It lasts until you revoke it on GitHub or uninstall the App.
-
-The code appears only on the page. The app does not write it to a log, and the page does not keep it in browser storage.
+The App requests Contents read and write; GitHub adds Metadata read. The connection reaches repositories both you and the App can access. The built-in App sign-in has no expiry stored by the app. You can revoke it on GitHub or uninstall the App. The page does not keep the device code in browser storage, and the app does not log it.
 
 ### Use a token instead
 
-If you cannot install the App (for example, an organization forbids third-party Apps), open **Use a token instead**. Make a fine-grained token on github.com: **Settings > Developer settings > Fine-grained tokens**. Choose **Only select repositories** with one repository, **Contents: Read and write**, and an expiry of 90 days or less. Paste the token and the `owner/repository` name, then press **Use this token**. The app accepts a token only when it reaches that one repository and nothing more. The page clears the field at once and never shows the token again.
+Use this alternative if you cannot install the GitHub App. A token is a credential that grants the selected access. Create a replacement the same way if a token expires or is revoked.
+
+1. On GitHub, open your profile's **Settings > Developer settings > Personal access tokens > Fine-grained tokens**. GitHub's [token guide](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) explains the screens.
+2. Select **Generate new token** and give it a name. Under **Resource owner**, select the account or organization that owns the intended repository.
+3. Choose an expiration of 90 days or less. Under repository access, choose **Only select repositories**, then select that one repository.
+4. Under repository permissions, choose **Contents: Read and write**. Leave **Metadata: Read-only**, which GitHub supplies, and do not add other permissions.
+5. Generate the token and copy it when GitHub shows it. An organization may require approval before it works.
+6. Return to the app's GitHub settings and open **Use a token instead**. In **Repository (owner/name)**, enter the repository owner's account name, a slash, and the repository name. Paste the token into **Token** and press **Use this token**. The page clears the field and does not show the token again.
+7. Press **Read test**, then **Check now**. If you are setting up a local copy, continue with **Clone** below.
+
+The app checks that the token reaches the named repository and that its account listing contains no other repository. GitHub may still give tokens read-only access to public repositories.
+
+### Put a repository on this box
+
+For a new local copy, use **Clone** after a successful **Read test**:
+
+1. Open **Repositories on this box** in the app's GitHub settings.
+2. Under **Clone**, choose the intended repository. Keep the suggested name in **New folder under /share**, unless you need a different new folder name.
+3. Press **Clone**. The message **Cloned into** followed by the path confirms the copy.
+4. Press **Check now** to check the connection. The copy is under `/share`; it does not automatically synchronize the live Home Assistant configuration.
+
+**Link** is different. It changes the GitHub destination, called `origin`, of an existing Git repository under `/share` or `/config`. Check its current destination and choose the intended connected repository before pressing **Link**. Link does not turn a normal folder into a Git repository or upload its files. If you only have a normal folder, use a supported preparation method first. GitHub's [Desktop guide](https://docs.github.com/en/desktop/overview/creating-your-first-repository-using-github-desktop) explains creating a repository on a computer. Move a prepared copy into an allowed folder only when you understand which files it contains.
+
+There is no local repository list in this version. Neither Clone nor Link writes a credential into the repository; GitHub operations on this box use the app's sign-in.
 
 ### The card
 
-- **Read test** reads each connected repository once and shows the result.
-- **Check now** runs the access check at once (see below).
-- **Accept this access** appears when the repositories changed on GitHub but the access is still exactly Contents read and write. It makes the current set the one the check expects. If the access itself changed, change it back on GitHub instead.
-- **Disconnect** forgets the sign-in on this box. It cannot revoke it on GitHub, because that needs a secret the app does not carry. So the card then shows the link to revoke it: `https://github.com/settings/apps/authorizations` for the App, `https://github.com/settings/tokens` for a token. Disconnect waits while a task runs.
-- **Repositories on this box**: **Clone** copies a connected repository into a new folder directly under `/share`; the folder name starts as the repository's name, so a clone goes to `/share/<repository>`. **Link** points an existing git folder under `/share` or `/config` at a connected repository (it sets `origin`). Release 0.3 maps Home Assistant's `/share` folder read-write into the app for this. Neither writes a credential into the repository, so git on this box reaches GitHub with the sign-in only through the app. A list of the git folders on this box, with menus, comes in 0.3.1.
-
-You can also ask the assistant in chat to clone or link a connected repository. It uses the same `github_git` tool.
-
-### The `github_git` tool
-
-Codex can call `repos`, `fetch`, `pull`, `push`, `clone` and `link`, for connected repositories only and only during a chat or scheduled run. A read-only chat or schedule can only use `repos` and `fetch`. A pull fetches only; the assistant then fast-forwards the work tree in its own shell (`git merge --ff-only`), so the app never checks files out into a folder a task can change. A push never forces, deletes or pushes tags.
-
-Limits of a push:
-
-- **Workflow files.** GitHub refuses a push that changes `.github/workflows/*` with Contents-only access. Change workflow files on GitHub or from another computer.
-- **Allow marks.** When the push guard refuses a push, a line can be marked `guard: allow <reason>` to pass it. That mark needs the owner. The app refuses a push that adds such a mark, so a task cannot undo a refusal by itself. Add the mark yourself, outside the assistant. A page button for it is planned for 0.3.1.
-- **Names check.** The guard's household names check is off in 0.3.
+- **Read test** checks repository metadata, not file downloads or writes.
+- **Check now** runs the access check immediately.
+- **Accept this access** appears for a repository-set change when permissions remain exactly Contents read and write. Use it only when you intended the change. Otherwise restore the intended selection on GitHub. If permissions changed, restore them instead.
+- **Disconnect** forgets the sign-in on this box. It cannot revoke it on GitHub. The card then links to the GitHub authorization or token settings for revocation. Disconnect waits while a task runs.
 
 ### Monitoring
 
-The app checks the sign-in at start, every hour, and when you press **Check now**. The states are: OK, expires within 7 days, expired, revoked, access changed (repositories missing or added, or access other than Contents read and write), and cannot be checked (GitHub unreachable three times in a row).
+The app checks at start, hourly, and on **Check now**. States include OK, expires within 7 days, expired, revoked, access changed and cannot be checked. The last can follow three consecutive connection failures or an API error.
 
-When the state changes, and only then:
+Each state transition fires the Home Assistant event `codex_cli_github_access`. The app sends a warning only when the new state needs attention. An unchanged state does not send another worker warning. A successful recovery clears the Repair and hides the banner instead of issuing another warning. The integration can also emit the event with `source: integration`; account for the source in automations to avoid duplicate messages.
 
-- The app fires the Home Assistant event `codex_cli_github_access` with the state, the previous state, the reason, the account login, the missing and added repositories, the permission problem and the expiry. It never sends a token or a code. The integration fires the same event, with `source: integration`, when it sees the change, so an automation still works if the app's own call failed. An automation can route it to your notify service.
-- The app sends one notification through its `notify_service` option, or a persistent notification (`codex_cli_github`) without one.
-- The integration raises the repair **The Codex add-on's GitHub sign-in needs attention** (`github_access_lost`). It is an error for expired, revoked and cannot be checked, and a warning for expires soon and access changed. It clears when the check is OK or you disconnect. If you never connected, there is no repair.
-- A banner above the chat offers **Open GitHub settings**.
+For a state needing attention, the app sends a notification through `notify_service` or a persistent notification. Without phone delivery, find persistent notifications in Home Assistant's **Notifications**. Find the integration's GitHub sign-in Repair under **Settings > System > Repairs**. See [Notifications](#notifications) to set up phone delivery.
+
+| State | Next step |
+| --- | --- |
+| Expires soon, expired or revoked | For an App connection, restore its installation if needed and press **Connect again**. For a token, create and save a replacement under **Use a token instead**. |
+| Access changed | Review the repository list and permissions. Restore the intended access, or accept an intentional repository-set change when the button is available. |
+| Cannot be checked | Check the reason and connection, then press **Check now**. |
+
+After reconnecting or replacing a token, press **Read test** and **Check now**. For any warning, the banner's **Open GitHub settings** button opens the app's GitHub card.
 
 ### When GitHub stops working
 
-Open **Settings > GitHub** in the app page. The card shows the state and, when available, the last check's reason.
+In the app page, open **Settings > Accounts and connections > GitHub**. The card shows the state and, when available, the last check's reason.
 
-- **Not connected to GitHub:** No sign-in is saved, or the app was restored from a backup. Press **Connect GitHub** to connect the App. If you use a fine-grained token, open **Use a token instead**.
-- **Connecting:** The App is waiting for you to finish on GitHub. Follow the link on the card. If the code expires, press **Get a new code**. To start over while it is waiting, press **Cancel**, then **Connect GitHub**.
-- **Connected to GitHub:** The access check is OK. If a repository operation still fails, press **Read test** to check the connected repositories.
-- **Connected, but the sign-in expires within 7 days:** The saved token is close to its expiry. Open **Use a token instead** and save a new fine-grained token, or press **Connect again** to use the App.
-- **The GitHub sign-in expired:** The saved sign-in is past its expiry. Press **Connect again** for the App, or open **Use a token instead** to save a new token.
-- **GitHub refused the stored sign-in (revoked):** GitHub no longer accepts the saved sign-in. Press **Connect again** for the App, or open **Use a token instead** to save a new token.
-- **The GitHub sign-in reaches different repositories or access than you connected:** GitHub reports a changed repository list or permissions. Check the list and access shown on the card. If the repository change is intended and **Accept this access** is available, press it. If you did not intend the repository change, restore the repository selection for the App on GitHub. Then press **Check now**. If permissions changed, restore Contents read and write on GitHub, then press **Check now**.
-- **The GitHub sign-in cannot be checked:** GitHub could not be reached repeatedly, or the check found another error. Check the last-check reason and your connection, then press **Check now**.
+- **Not connected to GitHub:** Start the App connection, or use the token form if you use a token.
+- **Connecting:** Finish on GitHub. If the code expires, press **Get a new code**. To start over, press **Cancel**, then **Connect GitHub**.
+- **Connected to GitHub:** The access check is OK. If an operation fails, press **Read test** and inspect the result.
+- **Expires soon, expired or revoked:** Follow the App or token recovery path in the table above.
+- **Different repositories or access:** Review the list and restore the intended selection and permissions on GitHub. Accept the change only if you intended the repository-set change and the button is available. Press **Check now**.
+- **Cannot be checked:** Check the reason and connection, then press **Check now**.
 
 ### Backups
 
-`/data/github` is not in the app backup. After a restore, the card shows **Not connected**; press **Connect GitHub** again.
+The app backup does not include `/data/github`. After a restore, the card shows **Not connected**. For an App connection, check the installation and press **Connect GitHub**. For a token connection, create a new token and use **Use a token instead**. In either case, repeat **Read test** and **Check now**.
 
+### Technical reference
+
+The app keeps the sign-in in its private `/data/github` folder, which is hidden in Codex sandboxes. Codex calls the `github_git` tool; the app runs Git operations and applies the push guard. The tool supports `repos`, `fetch`, `pull`, `push`, `clone` and `link` for connected repositories during a chat or scheduled run. A read-only chat or schedule can use only `repos` and `fetch`.
+
+A pull fetches only. The assistant updates its work tree by fast-forwarding it; that shell command is an assistant implementation detail, not an instruction for the owner. A push never forces, deletes or pushes tags. GitHub refuses Contents-only pushes that change workflow files. If the guard refuses a push, stop and inspect the finding. The page does not provide an exception control. The household names check is off in 0.3.
 ## Pausing the assistant
 
 **Settings > Pause the assistant** stops the app from taking new messages: new chats and replies are refused, and queued messages wait. A banner above the chat says so and offers **Resume the assistant**, which also starts the oldest queued message. A running task is not stopped; use **Stop task** for that. The pause is kept across app restarts.
