@@ -550,8 +550,8 @@ REDIRECTION_TEXT_RE = re.compile(
     r"(?:(?<![^\s;&|()])(?P<fd>" + _REDIRECTION_FD + r"))?" + _REDIRECTION_OPERATOR)
 # A conservative text floor also catches shell constructs the parser cannot place.
 # It reads the command with its quotes removed and a blank on each side of every redirection
-# operator. The four value-taking global flags with their value, any other flag, and any
-# redirection with its target may precede the family.
+# operator. The four value-taking global flags with their value (``--config=`` with an empty value
+# too), any other flag, and any redirection with its target may precede the family.
 # The three alternatives cannot match the same text: an alternative that could would make
 # the match time double with each repeated flag.
 _HA_REDIRECTION_TEXT = _REDIRECTION_FD + r"?" + _REDIRECTION_OPERATOR + r"\s*[^\s<>&|]\S*"
@@ -562,7 +562,7 @@ _HA_VALUE_FLAG_AFTER_DASH = r"-(?:log-level|api-token|endpoint|config)"
 # followed by blanks.
 _HA_BEFORE_FAMILY_TEXT = (
     r"(?:(?:"
-    + _HA_VALUE_FLAG_TEXT + r"(?:=\S+|(?:\s+" + _HA_REDIRECTION_TEXT + r")*\s+(?!" + _REDIRECTION_FD + r"?[<>&])\S+)"
+    + _HA_VALUE_FLAG_TEXT + r"(?:=\S*|(?:\s+" + _HA_REDIRECTION_TEXT + r")*\s+(?!" + _REDIRECTION_FD + r"?[<>&])\S+)"
     + r"|-(?!" + _HA_VALUE_FLAG_AFTER_DASH + r"(?:[=\s]|$))\S+"
     + r"|" + _HA_REDIRECTION_TEXT
     + r")\s+)*")
@@ -599,6 +599,12 @@ _HA_WORD_TEXT_RE = re.compile(r"(?<![\w-])ha\s+", re.IGNORECASE)
 # option, @(su), +(su) and !(x) are globs too).
 _HA_BUILT_WORD_RE = re.compile(r"[$`*?\[(]")
 _HA_BEFORE_FAMILY_RE = re.compile(r"\s*" + _HA_BEFORE_FAMILY_TEXT, re.IGNORECASE)
+# A single-quoted text, or a double-quoted text with its backslash escapes, for the built family
+# word rule to read again as a script of its own.
+_QUOTED_SCRIPT_RE = re.compile(r"'(?P<single>[^']*)'|\"(?P<double>(?:[^\"\\]|\\.)*)\"", re.DOTALL)
+# A value-taking flag, then a value word that holds a $ or a backtick: the shell removes that word
+# when it expands to nothing ($nope, $@, $(:), `:`), and the flag then takes the next word.
+_VANISHING_FLAG_VALUE_RE = re.compile(r"(?<!\S)" + _HA_VALUE_FLAG_TEXT + r"\s+[^\s$`]*[$`]\S*", re.IGNORECASE)
 _HA_NEXT_WORD_RE = re.compile(r"\S+")
 # Where the shell ends a word outside quotes: a blank (a space, a tab or a newline; not a carriage
 # return or a form feed) or an operator character.
@@ -820,7 +826,9 @@ def _ha_built_family_word(joined: str, depth: int = 0) -> bool:
 
     Each ``$(...)`` and backtick substitution is first replaced by a word with a ``$`` (as in the
     parser), so a blank inside it does not move the family position, and its own text is read as
-    a command. The text is then read four times: with continuations joined and with every
+    a command. Each quoted text that holds the word ``ha`` is read the same way as a script of its
+    own, because a second shell reads the quotes inside it again
+    (``eval 'setsid ha --log-level "" s${x}u info'``). The text is then read four times: with continuations joined and with every
     backslash-newline pair removed, and each of those once with its quotes and backslashes
     removed (as the floor reads it) and once with each quoted or escaped blank kept inside its
     word (``--config "a b"`` is one flag value, as the shell reads it). The cost: a ``$``, a
@@ -833,6 +841,13 @@ def _ha_built_family_word(joined: str, depth: int = 0) -> bool:
     masked, nested = _shell_substitutions(joined)
     if any(_ha_built_family_word(item, depth + 1) for item in nested):
         return True
+    if depth < 6:
+        # Text in quotes can be a script for a second shell (eval '...', bash -c '...'), which
+        # reads the quotes inside it again: read it as a command of its own.
+        for quoted in _QUOTED_SCRIPT_RE.finditer(masked):
+            script = quoted.group("single") or quoted.group("double") or ""
+            if _HA_WORD_TEXT_RE.search(script) and _ha_built_family_word(script, depth + 1):
+                return True
     for reading in (masked, masked.replace("\\\n", "")):
         unquoted = _space_redirections(re.sub(r"[\"'\\]", "", reading))
         quoted_kept = _keep_quoted_blanks(_space_redirections(reading))
@@ -846,6 +861,8 @@ def _built_word_after_ha(plain: str) -> bool:
     position = 0
     while word := _HA_WORD_TEXT_RE.search(plain, position):
         position = _HA_BEFORE_FAMILY_RE.match(plain, word.end()).end()
+        if _built_word_after_removable_value(plain, word.end(), position):
+            return True
         while family := _HA_NEXT_WORD_RE.match(plain, position):
             position = family.end()
             if family.group().startswith("-") or REDIRECTION_RE.match(family.group()):
@@ -858,17 +875,46 @@ def _built_word_after_ha(plain: str) -> bool:
     return False
 
 
+def _built_word_after_removable_value(plain: str, start: int, end: int) -> bool:
+    """Say whether a built word follows a flag value that the shell can remove, between ``start`` and ``end``.
+
+    ``start`` and ``end`` hold the flags, flag values and redirections that the floor reads between
+    ``ha`` and its family word. When a flag's value holds a ``$`` or a backtick and expands to
+    nothing, the flag takes the next word as its value, and each later word moves one place to
+    the left. In ``ha --log-level $nope x s${x}u info`` the family is ``s${x}u``, and in
+    ``ha --log-level $nope --config s${x}u info`` it is the word the floor read as a value. So
+    every word after the first such value, up to ``end`` and one word more for each such value,
+    is read as a family word: a flag or a redirection is passed over, a built word is refused.
+    """
+    removable = list(_VANISHING_FLAG_VALUE_RE.finditer(plain, start, end))
+    if not removable:
+        return False
+    words_after_end = len(removable) + 1
+    for candidate in _HA_NEXT_WORD_RE.finditer(plain, removable[0].end()):
+        if candidate.start() >= end:
+            if words_after_end == 0:
+                return False
+            words_after_end -= 1
+        text = candidate.group()
+        if text.startswith("-") or REDIRECTION_RE.match(text):
+            continue
+        if _HA_BUILT_WORD_RE.search(text):
+            return True
+    return False
+
+
 def _keep_quoted_blanks(text: str) -> str:
     """Remove quotes and backslashes, and write each quoted or escaped blank or operator as ``_``.
 
     The shell keeps ``"a b"`` and ``a\\ b`` as one word. Without its quotes the text would read
-    as two words, and the family position would move by one. An empty pair of quotes that stands
-    alone (``""`` or ``''`` between blanks) is an empty word to the shell, so it is written as
-    ``_`` too: in ``ha --log-level "" s${x}u info`` it is the flag's value. Joined to a word
-    (``ha''``) it adds nothing.
+    as two words, and the family position would move by one. A word made only of empty pairs of
+    quotes (``""``, ``''``, ``""''`` or ``''\\<newline>''`` between blanks) is an empty word to the
+    shell, so it is written as ``_`` too: in ``ha --log-level "" s${x}u info`` it is the flag's
+    value. Joined to a word (``ha''`` or ``""x``) the pairs add nothing.
     """
     out, quote, opened_at, i = [], "", 0, 0
-    alone = False
+    # alone: the open quote starts a word, or follows only empty pairs that start one.
+    alone = after_empty_pairs = False
     while i < len(text):
         ch = text[i]
         if ch == "\\" and quote != "'" and i + 1 < len(text):
@@ -880,17 +926,38 @@ def _keep_quoted_blanks(text: str) -> str:
             continue
         if ch in "'\"" and quote in ("", ch):
             if not quote:
-                alone = i == 0 or text[i - 1] in _SHELL_WORD_BREAKS
-            elif alone and len(out) == opened_at and (i + 1 == len(text) or text[i + 1] in _SHELL_WORD_BREAKS):
-                out.append("_")
+                before = _before_continuations(text, i)
+                alone = after_empty_pairs or before == 0 or text[before - 1] in _SHELL_WORD_BREAKS
+            elif alone and len(out) == opened_at:
+                following = _after_continuations(text, i + 1)
+                if following == len(text) or text[following] in _SHELL_WORD_BREAKS:
+                    out.append("_")
+                after_empty_pairs = following < len(text) and text[following] in "'\""
             quote = "" if quote else ch
             opened_at = len(out)
-        elif quote and ch in _SHELL_WORD_BREAKS:
+            i += 1
+            continue
+        if quote and ch in _SHELL_WORD_BREAKS:
             out.append("_")
         else:
             out.append(ch)
+        after_empty_pairs = False
         i += 1
     return "".join(out)
+
+
+def _after_continuations(text: str, i: int) -> int:
+    """Return the index of the first character at or after ``i`` that is not a backslash-newline pair."""
+    while text.startswith("\\\n", i):
+        i += 2
+    return i
+
+
+def _before_continuations(text: str, i: int) -> int:
+    """Return ``i`` moved back over each backslash-newline pair right before it."""
+    while i >= 2 and text[i - 2:i] == "\\\n":
+        i -= 2
+    return i
 
 
 def _space_redirections(text: str, whole: bool = False) -> str:

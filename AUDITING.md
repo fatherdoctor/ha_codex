@@ -81,7 +81,8 @@ redirection; dash: `&`, then `>file`). A quoted or escaped operator (`">"`, `\>`
 readings and never joins the `&` after it, so `echo ">" & ha 2>&1 su info` is found by the parsers themselves. The operator list is written once, in `_REDIRECTION_OPERATOR`.
 
 The text floor reads the command without quotes and with the same blanks around each operator (`_floor_texts`).
-Its prefix (`HA_TEXT_PREFIX`) accepts global flags, their values and redirections before the family. Its three
+Its prefix (`HA_TEXT_PREFIX`) accepts global flags, their values (also an empty value after `=`, as in
+`--config=`) and redirections before the family. Its three
 alternatives cannot match the same text, and the heredoc operator has one spelling (`<<-x` is `<<-` and `x`), so
 its match time does not grow with repeated flags or redirections (`test_text_floor_time_stays_flat_with_repeated_flags`).
 
@@ -121,8 +122,14 @@ every word `ha` in the text (not right after a dash: `ls -ha` is a flag group), 
 stand before `ha` (`while`, `setsid`, `coproc`, `function f {`). It reads the text twice: as the floor reads it
 (quotes and backslashes removed, backticks kept), and with each quoted or escaped blank kept inside its word
 (`_keep_quoted_blanks`), because without its quotes `--config "a b"` reads as two words and the family position
-moves by one. That reading writes an empty pair of quotes that stands alone as a word too
-(`--log-level ""`). It follows quotes through the whole text and does not know a comment, a heredoc body or a
+moves by one. That reading writes a word made only of empty pairs of quotes as a word too
+(`--log-level ""`, `--log-level ""''`), also across a continuation. Each quoted text with the word `ha` in it is
+read the same way again as a script of its own (`_QUOTED_SCRIPT_RE`), because a second shell reads the quotes
+inside it (`eval 'setsid ha --log-level "" s${x}u info'`). A flag value with a `$` or a backtick can expand to
+nothing, and the flag then takes the next word: after such a value, each later word up to the floor's family
+position, and one word more for each such value, is read as a family word
+(`_built_word_after_removable_value`, `_VANISHING_FLAG_VALUE_RE`), so `ha --log-level $nope x s${x}u info` is
+refused. It follows quotes through the whole text and does not know a comment, a heredoc body or a
 substitution: an odd quote in one of them (`echo x # it's`) turns every later blank into a quoted one, and the
 reading then finds no word `ha` after it. DOCS.md states this limit, with a built family word in a nested
 backtick and the program word in the `$'...'` form. Substitutions nested more than six deep are not read further:

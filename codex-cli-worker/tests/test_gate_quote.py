@@ -1013,6 +1013,93 @@ class RedirectionTests(unittest.TestCase):
         # With the kept reading off, only the reading without continuations joins s and ${x}u.
         self.assertTrue(gate_rules._ha_built_family_word("echo x # it's\nwhile ha s\\\n${x}u info; do break; done"))
 
+    # L1: a value flag with = and an empty value, then a plain family word. The parser does not find
+    # ha behind setsid, while, else, eval or bash -c, so only the text floor reads these.
+    EMPTY_EQUALS_FORMS = ('setsid ha --config= su info', 'while ha --log-level= su info; do break; done',
+                          'setsid ha --api-token= supervisor info',
+                          'if false; then :; else ha --endpoint= super info; fi',
+                          'setsid ha --config= --log-level= su info', 'setsid ha --no-progress --config= su info',
+                          "eval 'setsid ha --config= su info'", "bash -c 'setsid ha --config= su info'",
+                          'setsid ha --config= 2>/dev/null su info', 'setsid ha --config= s${x}u info')
+    EMPTY_EQUALS_REMOTE_FORMS = ('setsid ha --config= host reboot', 'while ha --api-token= core stop; do break; done')
+    # L3: an empty word made of several empty pairs of quotes, or of pairs joined over a continuation.
+    EMPTY_PAIRS_FORMS = tuple(f'while ha --log-level {pairs} s${{x}}u info; do break; done'
+                              for pairs in ('""' "''", "''" '""', '""""', "''''", '""' "''" '""', '""' "''''",
+                                            "''\\\n''")) + (
+        'setsid ha --config ""' "''" ' s`:`u info', "if false; then :; else ha --api-token '''' s$(:)u info; fi",
+        """eval 'while ha --log-level "" s${x}u info; do break; done'""",
+        """bash -c 'setsid ha --log-level "a b" s${x}u info'""")
+    # L4: a flag value that the shell removes when it expands to nothing, then a built family word.
+    REMOVED_VALUE_FORMS = ('ha --log-level $nope x s${x}u info', 'ha --config $nope x s`:`u info',
+                           'setsid ha --api-token $nope x s$(:)u info', 'ha --log-level $nope --config s${x}u info',
+                           'ha --log-level $@ x s${x}u info', 'ha --log-level `:` x s${x}u info',
+                           'ha --log-level $(:) x s${x}u info', 'ha --log-level $nope x ho${x}st reboot')
+
+    def test_print_only_shell_runs_each_seventh_round_form(self) -> None:
+        for command in self.EMPTY_EQUALS_FORMS + self.EMPTY_PAIRS_FORMS + self.REMOVED_VALUE_FORMS:
+            family = 'supervisor' if ' supervisor ' in command else 'super' if ' super ' in command else (
+                'host' if 'ho${x}st' in command else 'su')
+            self._runs(command, family, ('bash', 'dash'))
+        self._runs(self.EMPTY_EQUALS_REMOTE_FORMS[0], 'host', ('bash', 'dash'))
+        self._runs(self.EMPTY_EQUALS_REMOTE_FORMS[1], 'core', ('bash', 'dash'))
+
+    def test_hook_refuses_each_seventh_round_form(self) -> None:
+        for command in self.EMPTY_EQUALS_FORMS + self.EMPTY_PAIRS_FORMS + self.REMOVED_VALUE_FORMS:
+            for remote_on in (False, True):
+                with self.subTest(command=command, remote_on=remote_on):
+                    self.assertNotEqual(refusal(command, remote_on), '')
+        for command in self.EMPTY_EQUALS_REMOTE_FORMS:
+            with self.subTest(command=command):
+                self.assertNotEqual(refusal(command, True), '')
+
+    def test_the_floor_alone_reads_an_empty_equals_value(self) -> None:
+        """L1: --config= with nothing after it is a flag with its value, not the end of the flags."""
+        for command in self.EMPTY_EQUALS_FORMS[:8]:
+            with self.subTest(command=command):
+                self.assertTrue(gate_rules.HA_ALWAYS_TEXT_RE.search(command.replace("'", '')))
+        self.assertTrue(gate_rules.HA_REMOTE_TEXT_RE.search('setsid ha --config= host reboot'))
+
+    def test_an_empty_word_of_several_pairs_keeps_the_family_position(self) -> None:
+        """L3 and L5: empty pairs joined to each other are one empty word; joined to a letter they add nothing."""
+        for text in ('ha ""' "'' s", "ha ''" '"" s', 'ha """" s', "ha '' s", "ha ''\\\n'' s", 'ha ""' "''" '"" s'):
+            with self.subTest(text=text):
+                self.assertEqual(gate_rules._keep_quoted_blanks(text), 'ha _ s')
+        self.assertEqual(gate_rules._keep_quoted_blanks('ha "" "" s'), 'ha _ _ s')
+        self.assertEqual(gate_rules._keep_quoted_blanks('ha ""' "''"), 'ha _')
+        # Joined to the next word (L5) or to the word before, the pairs add nothing.
+        self.assertEqual(gate_rules._keep_quoted_blanks('ha ""x s'), 'ha x s')
+        self.assertEqual(gate_rules._keep_quoted_blanks('ha ""' "''x s"), 'ha x s')
+        self.assertEqual(gate_rules._keep_quoted_blanks('ha x""' "'' s"), 'ha x s')
+        # A continuation joins words: the pairs are alone only when a blank stands past it.
+        self.assertEqual(gate_rules._keep_quoted_blanks("ha ''\\\n s"), 'ha _ s')
+        self.assertEqual(gate_rules._keep_quoted_blanks("ha x\\\n'' s"), 'ha x s')
+        self.assertEqual(gate_rules._keep_quoted_blanks("ha ''\\\nx s"), 'ha x s')
+
+    def test_a_removed_flag_value_moves_the_family_position(self) -> None:
+        """L4: each word after a value with a $ or a backtick is read as a family word."""
+        for command in self.REMOVED_VALUE_FORMS:
+            with self.subTest(command=command):
+                self.assertTrue(gate_rules._ha_built_family_word(command))
+        rule = gate_rules._built_word_after_removable_value
+        # Flags and redirections are passed over; one more word is read for each removed value.
+        text = 'ha --config $a --api-token $b --endpoint s${x}u'
+        self.assertTrue(rule(text, 3, len(text)))
+        text = 'ha --config $a >/dev/null core s${x}u'
+        self.assertTrue(rule(text, 3, text.index('core')))
+        text = 'ha --config $dir core info ${x}'
+        self.assertFalse(rule(text, 3, text.index('core')))
+        text = 'ha --config dir core s${x}u'
+        self.assertFalse(rule(text, 3, text.index('core')))
+
+    def test_stated_over_refusals_of_the_seventh_round(self) -> None:
+        """A built word after a value that the shell could remove is refused, as DOCS states."""
+        self.assertIn('Supervisor', refusal('ha --config $dir --api-token $token core info', False))
+        self.assertIn('Supervisor', refusal('ha --log-level ${nope} x s[u] info', False))
+        for command in ('ha --config $dir core info', 'ha --config= core info', 'ha --log-level "$lvl" core info',
+                        "echo 'ha core info' | jq '{v: .x}'"):
+            with self.subTest(command=command):
+                self.assertEqual(refusal(command, False), '')
+
     def test_many_dash_ha_words_stay_fast(self) -> None:
         """K6: letters ha after a dash do not start a floor match, so many -ha words stay linear."""
         command = 'echo ' + ' '.join(['-ha'] * 10_000)

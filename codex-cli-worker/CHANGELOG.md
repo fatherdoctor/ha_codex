@@ -35,8 +35,12 @@
   reads it: `eval ha s\{u,\} info` and `bash -c 'ha s{u,'"} info"` run `ha su info` and are refused. In a command
   with `${`, `$(`, a backtick, a `#` or a heredoc, a brace word with a quote is refused with or without a comma
   (`ha {-x" y",s}u info # note` runs `ha su info` in bash). A flag value with a quoted blank no longer hides a
-  built family word behind it (`while ha --config "a b" s${x}u info`), and neither does an empty quoted value
-  (`while ha --log-level "" s${x}u info`). A `(` in the family's place is refused,
+  built family word behind it (`while ha --config "a b" s${x}u info`), and neither does an empty quoted value of
+  one pair of quotes or several (`while ha --log-level "" s${x}u info`, `--log-level ""''`), also inside a
+  quoted script (`eval 'setsid ha --log-level "" s${x}u info'`). A flag value with a `$` or a backtick that
+  expands to nothing no longer hides a built family word after it (`ha --log-level $nope x s${x}u info`); a built
+  word after such a value is refused, so `ha --config $dir --api-token $token core info` is refused too. A global
+  flag with `=` and an empty value is read as that flag (`setsid ha --config= su info` is refused). A `(` in the family's place is refused,
   for bash's extended globs (`ha @(su) info`), and so is a `$'...'` script with a backslash escape in a command that
   holds the word `ha` (`bash -c $'ha \x73u info'`). `ls -ha *` and `du -ha $dir` are allowed: letters `ha` after
   a dash are a flag group.

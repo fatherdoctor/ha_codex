@@ -33,8 +33,14 @@ SHELLS = ("bash", "dash")
 ALWAYS_FAMILIES = {"su", "super", "supervisor"}
 REMOTE_FAMILIES = {"host", "core", "os", "addons", "backups", "network", "hardware"}
 # The stub writes each argument followed by a NUL byte and ends each call with byte 1, so an
-# argument with a newline or a blank in it stays one argument.
-STUB = '#!/bin/sh\nfor a; do printf "%s\\0" "$a" >> "$HA_STUB_OUT"; done\nprintf "\\1" >> "$HA_STUB_OUT"\n'
+# argument with a newline or a blank in it stays one argument. Each call writes a file of its own
+# in the HA_STUB_OUT folder, named by the time it started: two calls at once (ha info & ha su info)
+# cannot mix their arguments, and the files sorted by name give the calls in order. The programs
+# are named by their full path, because a command can change PATH before it runs ha.
+STUB = """#!/bin/sh
+record=$({mktemp} "$HA_STUB_OUT/$({date} +%s%N).XXXXXX")
+{{ for a; do printf "%s\\0" "$a"; done; printf "\\1"; }} > "$record"
+"""
 
 
 def load_corpus() -> list[tuple[str, str, str]]:
@@ -67,19 +73,21 @@ def family_received(record: bytes) -> str | None:
 
 def shells_answer(command: str, folder: Path, work: Path) -> dict[str, str]:
     """Run the command under each shell with the stub and return the family each shell ran."""
-    record = folder / "record"
-    env = {**os.environ, "PATH": str(folder) + os.pathsep + os.environ.get("PATH", ""), "HA_STUB_OUT": str(record)}
+    records = folder / "records"
+    records.mkdir(exist_ok=True)
+    env = {**os.environ, "PATH": str(folder) + os.pathsep + os.environ.get("PATH", ""), "HA_STUB_OUT": str(records)}
     env.pop("x", None)
     env.pop("EMPTY", None)
     received = {}
     for shell in SHELLS:
-        record.write_bytes(b"")
+        for item in records.iterdir():
+            item.unlink()
         try:
             subprocess.run([shell, "-c", command], capture_output=True, env=env, timeout=10, check=False,
                            stdin=subprocess.DEVNULL, cwd=work)
         except subprocess.TimeoutExpired:
             pass
-        family = family_received(record.read_bytes())
+        family = family_received(b"".join(item.read_bytes() for item in sorted(records.iterdir())))
         if family:
             received[shell] = family
         for item in work.iterdir():
@@ -131,7 +139,8 @@ class SupervisorCorpusTests(unittest.TestCase):
         wrong, passed = [], []
         with tempfile.TemporaryDirectory() as stub_folder, tempfile.TemporaryDirectory() as work_folder:
             folder = Path(stub_folder)
-            (folder / "ha").write_text(STUB, encoding="utf-8")
+            stub = STUB.format(mktemp=shutil.which("mktemp"), date=shutil.which("date"))
+            (folder / "ha").write_text(stub, encoding="utf-8")
             (folder / "ha").chmod(0o755)
             for case_id, expect, command in load_corpus():
                 received = shells_answer(command, folder, Path(work_folder))
