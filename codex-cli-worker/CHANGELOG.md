@@ -41,9 +41,11 @@
   before the value; a built word after such a value is refused, so
   `ha --config $dir --api-token $token core info` is refused too. A flag value with a `$` or a backtick, also
   past redirections, with a blank before the operator or joined to the flag (`ha --log-level>f $v info`), and a
-  process substitution as a redirection target between the flag and its value (`ha --log-level > >(cat) $v info`),
-  is refused when the whole word `su`, `super` or `supervisor` stands anywhere in the command, before `ha` too, because a variable
-  can hold both the value and the family word (`v='x su'; ha --log-level $v info`). The check ends a word only at
+  redirection target between the flag and its value whose end the check cannot read, a process substitution or a
+  target with a quote, a backslash, a `$` or a backtick (`ha --log-level > >(cat) $v info`,
+  `ha --log-level >'a&b' $v info`), is refused when the whole word `su`, `super` or `supervisor` stands anywhere in the command, before `ha` too, because a variable
+  can hold both the value and the family word (`v='x su'; ha --log-level $v info`). A line with more than 16
+  value-taking global flags after `ha` is refused under the same condition, so the check ends in time. The check ends a word only at
   a space, a tab or a newline, as the shell does: a flag value of one carriage return or no-break space no longer
   hides the family word after it (`ha --log-level <CR> su info`). A quoted script is read with the shell's own
   quote rules (a backslash outside quotes escapes a quote), and also as a second shell gets the words joined

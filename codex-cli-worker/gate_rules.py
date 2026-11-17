@@ -589,26 +589,37 @@ HA_UNKNOWN_FLAG_RE = re.compile(
 # The redirections that can stand between a value-taking flag and its value. The shell removes
 # them before the command runs (ha --log-level 2>/dev/null $v info), and it ends the flag word at
 # < or >, so an operator can be joined to the flag (ha --log-level>f $v info). A file descriptor
-# can stand only after a blank: --log-level2>f is one word. A target ends at a blank or at the
-# next operator character, so each text has one reading and the match time stays linear.
+# can stand only after a blank: --log-level2>f is one word. A plain target ends at a blank or at
+# the next operator character, so each text has one reading. A target with a quote, a backslash,
+# a $ or a backtick is read by _HA_UNREADABLE_TARGET_TEXT instead: the shell reads "&", "|", ";",
+# "<" and ">" as letters inside quotes and after a backslash (>'a&b'), and a substitution can hold
+# blanks, so these patterns do not read where such a target ends.
 _HA_FLAG_REDIRECTIONS_TEXT = (
     r"(?:(?:" + _BLANK + r"+" + _REDIRECTION_FD + r"?)?" + _REDIRECTION_OPERATOR
     + _BLANK + r"*[^ \t\n<>&|;]+)*")
-# A process substitution as a redirection target (> >(cat), < <(true)). Its text can hold blanks,
-# and these patterns do not read where it ends, so the flag value after it is not read either.
+# A redirection target whose end these patterns do not read, so the flag value after it is not
+# read either: a process substitution (> >(cat), < <(true)), or a target with a quote, a backslash,
+# a $ or a backtick before its first blank or operator character (>'a&b', >f\&g, >"a b", >$(echo f)).
 # The floor's reading puts blanks around each operator (> > (cat)), so blanks may stand inside.
-_HA_PROCESS_TARGET_TEXT = (
-    r"(?:" + _BLANK + r"+" + _REDIRECTION_FD + r"?)?" + _REDIRECTION_OPERATOR + _BLANK + r"*[<>]" + _BLANK + r"*\(")
+_HA_UNREADABLE_TARGET_TEXT = (
+    r"(?:" + _BLANK + r"+" + _REDIRECTION_FD + r"?)?" + _REDIRECTION_OPERATOR + _BLANK
+    + r"*(?:[<>]" + _BLANK + r"*\(|[^ \t\n<>&|;]*[\"'\\$`])")
 # A global-flag value with a $ or a backtick, also past redirections before it, with or without a
 # blank before the operator. A variable can hold the value and the family word with it
 # (v='x su'; ha --log-level $v info runs ha --log-level x su info), so such a value is refused
 # when a family word that this mode refuses stands anywhere in the command text, before ha too.
-# A process substitution between the flag and its value counts as such a value. The family word
+# A target that _HA_UNREADABLE_TARGET_TEXT reads counts as such a value. The family word
 # must stand whole in the text: a variable that holds part of it (v='x s'; ha --log-level ${v}u
 # info) or a $ joined to the flag (ha --log-level$v info) is a limit that DOCS.md states.
+# The most value-taking flags that the rule above reads after one ha. Its search starts at each
+# flag, and a redirection target can hold the next flag (--log-level>--log-level>...), so each
+# start can read to the end of the line and the time grows with the square of the count. A line
+# with more such flags is refused when the rule would apply. No real command needs so many.
+_HA_MAX_VALUE_FLAGS = 16
+_HA_VALUE_FLAG_RE = re.compile(_HA_VALUE_FLAG_TEXT, re.IGNORECASE)
 HA_EXPANDED_FLAG_VALUE_RE = re.compile(
     _HA_VALUE_FLAG_TEXT + r"(?:=[^ \t\n;]*[$`]|" + _HA_FLAG_REDIRECTIONS_TEXT
-    + r"(?:" + _BLANK + r"+[^ \t\n;]*[$`]|" + _HA_PROCESS_TARGET_TEXT + r"))", re.IGNORECASE)
+    + r"(?:" + _BLANK + r"+[^ \t\n;]*[$`]|" + _HA_UNREADABLE_TARGET_TEXT + r"))", re.IGNORECASE)
 # A word after ha whose end or value the floor cannot read: a redirection target with a quote
 # or a backslash, a process substitution as the target, any word with a $ or a backtick (a
 # variable that is empty or holds a blank, ${x:- a}, $(...), `...`), a glob (with nullglob, a
@@ -649,13 +660,13 @@ _SCRIPT_READ_BUDGET_EXTRA = 64 * 1024
 # A value-taking flag, then (past any redirections, joined to the flag or not) a value word that
 # the shell can remove: a word with a $ or a backtick that expands to nothing ($nope, $@, $(:),
 # `:`), a glob that matches nothing (with bash's nullglob option) or a brace word ({,} expands to
-# nothing). The flag then takes the next word as its value. A process substitution between the
-# flag and its value counts as such a value word: the patterns do not read where it ends.
+# nothing). The flag then takes the next word as its value. A redirection target that
+# _HA_UNREADABLE_TARGET_TEXT reads counts as such a value word: the patterns do not read where it ends.
 _REMOVABLE_WORD_TEXT = (
     r"[^ \t\n$`*?\[{]*(?:[$`*?\[]|\{[^ \t\n{}]*(?:,|\.\.))" + _NOT_BLANK + r"*")
 _VANISHING_FLAG_VALUE_RE = re.compile(
     r"(?<!" + _NOT_BLANK + r")" + _HA_VALUE_FLAG_TEXT + _HA_FLAG_REDIRECTIONS_TEXT
-    + r"(?:" + _BLANK + r"+" + _REMOVABLE_WORD_TEXT + r"|" + _HA_PROCESS_TARGET_TEXT + r")",
+    + r"(?:" + _BLANK + r"+" + _REMOVABLE_WORD_TEXT + r"|" + _HA_UNREADABLE_TARGET_TEXT + r")",
     re.IGNORECASE)
 _HA_NEXT_WORD_RE = re.compile(_NOT_BLANK + r"+")
 # Where the shell ends a word outside quotes: a blank (a space, a tab or a newline; not a carriage
@@ -843,7 +854,9 @@ def _ha_unknown_flag(text: str, remote_on: bool) -> bool:
             flag = HA_UNKNOWN_FLAG_RE.search(reading, word.end(), end)
             if flag and (remote_on or last_always >= flag.end()):
                 return True
-            if last_refused >= 0 and HA_EXPANDED_FLAG_VALUE_RE.search(reading, word.end(), end):
+            if last_refused >= 0 and (
+                    _too_many_value_flags(reading, word.end(), end)
+                    or HA_EXPANDED_FLAG_VALUE_RE.search(reading, word.end(), end)):
                 return True
             unreadable = HA_UNREADABLE_WORD_RE.search(reading, word.end(), end)
             if unreadable and last_refused >= unreadable.start():
@@ -853,6 +866,16 @@ def _ha_unknown_flag(text: str, remote_on: bool) -> bool:
                 if _brace_word_names_family(brace, remote_on):
                     return True
     return _ha_floor_brace_word(text, remote_on)
+
+
+def _too_many_value_flags(text: str, start: int, end: int) -> bool:
+    """Say whether more than ``_HA_MAX_VALUE_FLAGS`` value-taking flags stand between ``start`` and ``end``."""
+    count = 0
+    for _flag in _HA_VALUE_FLAG_RE.finditer(text, start, end):
+        count += 1
+        if count > _HA_MAX_VALUE_FLAGS:
+            return True
+    return False
 
 
 def _ha_floor_brace_word(text: str, remote_on: bool) -> bool:

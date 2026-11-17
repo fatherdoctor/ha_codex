@@ -140,15 +140,19 @@ most four times the command's length plus 64 KB in all (`_SCRIPT_READ_BUDGET_FAC
 past that, and past six levels, a script is refused when it holds the word `ha` (fail closed;
 `test_quoted_scripts_past_the_limits_are_refused_with_the_word_ha`, `test_quoted_script_time_stays_linear`). A quoted text is read when the word `ha` stands
 in it, also right before a quote (`_HA_IN_SCRIPT_RE`). A flag value with a `$` or a backtick, a glob (`nullglob`) or `{,}` can
-expand to nothing, and the flag then takes the next word: after such a value (also past a redirection, joined to the flag or not, or after a process substitution target), each later
+expand to nothing, and the flag then takes the next word: after such a value (also past a redirection, joined to the flag or not, or after a target whose end the patterns do not read), each later
 word up to the floor's family position, and one plain word more for each such value, is read as a family word
 (`_built_word_after_removable_value`, `_VANISHING_FLAG_VALUE_RE`), so `ha --log-level $nope x s${x}u info` is
 refused. A flag, a redirection, its target and another flag's value are not plain words and do not use up that
 count (`ha --log-level $nope x --no-progress s${x}u info`). A flag value with a `$` or a backtick is refused in
 `_ha_unknown_flag` when a family word this mode refuses stands anywhere in the text, before `ha` too
 (`HA_EXPANDED_FLAG_VALUE_RE`, also past redirections before the value, joined to the flag or not, through
-`_HA_FLAG_REDIRECTIONS_TEXT`; a process substitution target there counts as such a value, `_HA_PROCESS_TARGET_TEXT`):
-`v='x su'; ha --log-level $v info`, `ha --log-level>f $v info`, `ha --log-level > >(cat) $v info`. The family
+`_HA_FLAG_REDIRECTIONS_TEXT`, which reads a plain target only; a process substitution target, or a target with a
+quote, a backslash, a `$` or a backtick, counts as such a value, `_HA_UNREADABLE_TARGET_TEXT`):
+`v='x su'; ha --log-level $v info`, `ha --log-level>f $v info`, `ha --log-level > >(cat) $v info`,
+`ha --log-level >'a&b' $v info`. That search starts at each value flag, so a line with more than
+`_HA_MAX_VALUE_FLAGS` (16) of them after `ha` is refused under the same condition (`_too_many_value_flags`), and the
+time stays linear (`test_many_value_flags_are_refused_in_time`). The family
 word must stand whole in the text, and the `$` must start the value: `v='x s'; ha --log-level ${v}u info` and
 `ha --log-level$v info` are limits DOCS.md states. The removed-value rule does not know a nested brace word, an
 extended glob or a redirection between a second flag and its value; DOCS.md states these too, with stated-limit rows

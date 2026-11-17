@@ -1309,6 +1309,34 @@ class RedirectionTests(unittest.TestCase):
         ('ha --log-level > >(cat) $nope x s${x}u info', 'su', ('bash',)),
     )
 
+    # The eleventh closure's R1 (set 20): a redirection target with a quoted or escaped operator character,
+    # a quoted blank or a substitution. The patterns do not read where such a target ends, so it counts as
+    # a value that the rule cannot read. Each runs the family it names in the shells it names, and the hook
+    # refuses it.
+    ELEVENTH_QUOTED_TARGET_FORMS = (
+        ("v='x su'; ha --log-level >f\\&g $v info", 'su', ('bash', 'dash')),
+        ("v='x su'; ha --log-level>f\\&g $v info", 'su', ('bash', 'dash')),
+        ("v='x su'; ha --log-level >'a&b' $v info", 'su', ('bash', 'dash')),
+        ("v='x su'; ha --log-level>'a&b' $v info", 'su', ('bash', 'dash')),
+        ('v=\'x su\'; ha --log-level >"a|b" $v info', 'su', ('bash', 'dash')),
+        ('v=\'x su\'; ha --log-level>"a|b" $v info', 'su', ('bash', 'dash')),
+        ("v='x su'; ha --log-level >'a;b' $v info", 'su', ('bash', 'dash')),
+        ("v='x su'; ha --log-level>'a;b' $v info", 'su', ('bash', 'dash')),
+        ("v='x su'; ha --log-level >f\\;g $v info", 'su', ('bash', 'dash')),
+        ("v='x su'; ha --log-level 2>f\\|g $v info", 'su', ('bash', 'dash')),
+        ("v='x supervisor'; setsid ha --endpoint >'a&b' $v info", 'supervisor', ('bash', 'dash')),
+        ('set -- x su; ha --config >\'a&b\' "$@" info', 'su', ('bash', 'dash')),
+        ("v='x su'; ha --log-level >'a&b' `echo $v` info", 'su', ('bash', 'dash')),
+        ("v='x su'; ha --log-level>$(echo f) $v info", 'su', ('bash', 'dash')),
+        ('v=\'x su\'; ha --log-level>"$(echo a b)" $v info', 'su', ('bash', 'dash')),
+        ('v=\'x su\'; ha --log-level<<<"a;b" $v info', 'su', ('bash',)),
+        ("v='x su'; ha --log-level>f x --config>'a&b' $v info", 'su', ('bash', 'dash')),
+        ('export v=\'x su\'; sh -c \'ha --log-level>"a|b" $v info\'', 'su', ('bash', 'dash')),
+        ('v=\'x su\'; eval \'ha --log-level >"a&b" $v info\'', 'su', ('bash', 'dash')),
+        ("v='x su'; if ha --log-level >'a&b' $v info; then :; fi", 'su', ('bash', 'dash')),
+        ("v='x su'; ( ha --log-level 2>'a;b' $v info )", 'su', ('bash', 'dash')),
+    )
+
     def _ninth_round_forms(self) -> list[str]:
         return [form.format(blank) for form in self.QUOTE_AFTER_ODD_BLANK_FORMS for blank in self.NINTH_ODD_BLANKS]
 
@@ -1366,6 +1394,41 @@ class RedirectionTests(unittest.TestCase):
                 if family in ('su', 'super', 'supervisor'):
                     self.assertNotEqual(refusal(command, False), '')
                 self.assertNotEqual(refusal(command, True), '')
+
+    def test_eleventh_round_quoted_and_escaped_targets_are_refused(self) -> None:
+        """R1: a target with a quote, a backslash, a $ or a backtick counts as a value the rule cannot read."""
+        for command, family, shells in self.ELEVENTH_QUOTED_TARGET_FORMS:
+            self._runs(command, family, shells)
+            with self.subTest(command=command):
+                self.assertNotEqual(refusal(command, False), '')
+                self.assertNotEqual(refusal(command, True), '')
+
+    def test_unreadable_target_pattern_reads_quotes_escapes_and_substitutions(self) -> None:
+        """R1: the operator characters inside quotes or after a backslash do not end the rule."""
+        rule = gate_rules.HA_EXPANDED_FLAG_VALUE_RE
+        for text in ("--log-level >'a&b' x", '--log-level>f\\&g x', '--log-level >"a b" x',
+                     '--log-level>$(echo f) x', '--log-level>`echo f` x', '--log-level<<<"a;b" x',
+                     "--log-level>f 2>'a;b' x"):
+            with self.subTest(text=text):
+                self.assertTrue(rule.search(text))
+        # A plain target, and a quote after the target's end, leave the value to be read as before.
+        for text in ('--log-level >a&b x', "--log-level >f 'x'", "--log-level '>f' x"):
+            with self.subTest(text=text):
+                self.assertIsNone(rule.search(text))
+
+    def test_many_value_flags_are_refused_in_time(self) -> None:
+        """R2: the search starts at each flag, so a line with more than the limit is refused at once."""
+        for piece in ('--log-level>', '--log-level >', '--log-level>f '):
+            command = "v='x su'; ha " + piece * 2000 + ' x'
+            with self.subTest(piece=piece):
+                started = time.monotonic()
+                self.assertNotEqual(refusal(command, False), '')
+                self.assertLess(time.monotonic() - started, 1.0)
+        limit = gate_rules._HA_MAX_VALUE_FLAGS
+        self.assertEqual(refusal("v='x su'; ha " + '--log-level>f ' * limit + 'x info', False), '')
+        self.assertNotEqual(refusal("v='x su'; ha " + '--log-level>f ' * (limit + 1) + 'x info', False), '')
+        # Without a family word that this mode refuses, the count alone refuses nothing.
+        self.assertEqual(refusal('ha ' + '--log-level>f ' * (limit + 1) + 'x info', False), '')
 
     def test_flag_redirections_pattern_has_one_reading(self) -> None:
         """Q1: a file descriptor joined to the flag is part of the flag word, so the value is not read."""

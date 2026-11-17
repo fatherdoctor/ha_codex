@@ -50,7 +50,9 @@
 # the family word (touch a su; ha --log-level * info). closer18-* and closer19-* are the tenth closure's two sets
 # (an odd blank in each place of the white space rules, a redirection joined to a value flag, a process
 # substitution as the target). Their passes are the stated limit of an unknown flag with a quoted blank
-# (setsid ha --foo<CR>"a b" su info).
+# (setsid ha --foo<CR>"a b" su info). closer20-* is the eleventh closure's set (a redirection between a value
+# flag and its value whose target holds a quoted or escaped operator character, a quoted blank or a
+# substitution: v='x su'; ha --log-level >'a&b' $v info).
 # n/a: Unicode look-alike letters (ha is a fixed ASCII program name; the shell does not fold them);
 # aliases and functions (DOCS names them as a limit: the check reads text, not shell state).
 # Left out on purpose, as limits DOCS states (the check cannot see a program that the command builds or that
@@ -5426,3 +5428,77 @@ closer19-0040	remote:bash,dash	v=debug; ha --log-level>f $v core info
 closer19-0041	remote:bash,dash	ha --log-level>f debug core info
 closer19-0042	none	v='x su'; echo ha --log-level>f $v info
 closer19-0043	none	v='x su'; ha --log-level=>f $v info
+closer20-0001	su:bash,dash	v='x su'; ha --log-level >f\\&g $v info
+closer20-0002	su:bash,dash	v='x su'; ha --log-level>f\\&g $v info
+closer20-0003	su:bash,dash	v='x su'; ha --log-level >'a&b' $v info
+closer20-0004	su:bash,dash	v='x su'; ha --log-level>'a&b' $v info
+closer20-0005	su:bash,dash	v='x su'; ha --log-level >"a|b" $v info
+closer20-0006	su:bash,dash	v='x su'; ha --log-level>"a|b" $v info
+closer20-0007	su:bash,dash	v='x su'; ha --log-level >'a;b' $v info
+closer20-0008	su:bash,dash	v='x su'; ha --log-level>'a;b' $v info
+closer20-0009	su:bash,dash	v='x su'; ha --log-level >f\;g $v info
+closer20-0010	su:bash,dash	v='x su'; ha --log-level >'a>b' $v info
+closer20-0011	su:bash,dash	v='x su'; ha --log-level>'a<b' $v info
+closer20-0012	su:bash,dash	v='x su'; ha --log-level 2>f\\|g $v info
+closer20-0013	su:bash,dash	v='x supervisor'; setsid ha --endpoint >'a&b' $v info
+closer20-0014	remote:bash,dash	v='x host'; setsid ha --api-token >'a;b' $v reboot
+closer20-0015	su:bash,dash	set -- x su; ha --config >'a&b' "$@" info
+closer20-0016	su:bash,dash	v='x su'; ha --log-level >'a&b' `echo $v` info
+closer20-0017	su:bash,dash	v='x su'; ha --log-level >"a b" $v info
+closer20-0018	su:bash,dash	v='x su'; ha --log-level>"a b" $v info
+closer20-0019	su:bash,dash	v='x su'; ha --log-level >a\\ b $v info
+closer20-0020	su:bash,dash	v='x su'; ha --log-level>'a b' $v info
+closer20-0021	su:bash,dash	v='x su'; ha --log-level >$(echo f) $v info
+closer20-0022	su:bash,dash	v='x su'; ha --log-level>$(echo f) $v info
+closer20-0023	su:bash,dash	v='x su'; ha --log-level>`echo f` $v info
+closer20-0024	su:dash	v='x su'; ha --log-level >${q:-a b} $v info
+closer20-0025	su:bash,dash	v='x su'; ha --log-level>"$(echo a b)" $v info
+closer20-0026	su:bash	v='x su'; ha --log-level <<<x $v info
+closer20-0027	su:bash	v='x su'; ha --log-level<<<x $v info
+closer20-0028	su:bash	v='x su'; ha --log-level <<<'a b' $v info
+closer20-0029	su:bash	v='x su'; ha --log-level<<<"a;b" $v info
+closer20-0030	su:bash,dash	v='x su'; ha --log-level <<E $v info\nE
+closer20-0031	su:bash,dash	v='x su'; ha --log-level<<E $v info\nE
+closer20-0032	su:bash,dash	v='x su'; ha --log-level<<-E $v info\nE
+closer20-0033	su:bash,dash	v='x su'; ha --log-level<<'E' $v info\nE
+closer20-0037	su:bash	v='x su'; ha --log-level 2>&1- $v info
+closer20-0038	su:bash,dash	v='x su'; ha --log-level <&- $v info
+closer20-0039	su:bash,dash	v='x su'; ha --log-level<&- $v info
+closer20-0040	su:bash,dash	v='x su'; ha --log-level>&- $v info
+closer20-0041	su:bash,dash	v='x su'; ha --log-level 2>&- 3<&- $v info
+closer20-0042	su:bash	v='x su'; ha --log-level &>>f $v info
+closer20-0043	su:bash	v='x su'; ha --log-level&>>f $v info
+closer20-0044	su:bash,dash	v='x su'; ha --log-level>f<>g $v info
+closer20-0046	su:bash,dash	v='x su'; ha --log-level> f $v info
+closer20-0047	su:bash,dash	v='x su'; ha --log-level>\tf\t$v info
+closer20-0048	su:bash,dash	v='x su'; ha --log-level 2> f > g $v info
+closer20-0049	su:bash,dash	v='x su'; ha --log-level>\\\nf $v info
+closer20-0050	su:bash,dash	v='x su'; ha --log-level\\\n>f $v info
+closer20-0051	su:bash,dash	v='x su'; ha --log-level>f \\\n$v info
+closer20-0052	su:bash	v='x su'; ha --log-level>f> >(cat) $v info
+closer20-0053	su:bash	v='x su'; ha --log-level >| >(cat) $v info
+closer20-0054	su:bash	v='x su'; ha --log-level>> >(cat) $v info
+closer20-0055	su:bash	v='x su'; ha --log-level &> >(cat) $v info
+closer20-0056	su:bash	v='x su'; ha --log-level 2>&1 > >(cat) $v info
+closer20-0057	su:bash	v='x su'; ha --log-level > >(cat) 2>f $v info
+closer20-0058	su:bash	v='x su'; ha --log-level < <(echo a; echo b) $v info
+closer20-0059	su:bash	v='x su'; ha --log-level > >(cat >'a b') $v info
+closer20-0060	su:bash	v='x su'; ha --log-level {fd}> >(cat) $v info
+closer20-0061	su:bash,dash	v='su'; ha --log-level>f --endpoint $v info
+closer20-0062	su:bash,dash	v='x su'; ha --log-level x --endpoint>f $v info
+closer20-0063	su:bash,dash	v='x su'; ha --log-level>f x --config>'a&b' $v info
+closer20-0064	su:bash,dash	export v='x su'; sh -c 'ha --log-level>"a|b" $v info'
+closer20-0065	su:bash,dash	v='x su'; eval 'ha --log-level >"a&b" $v info'
+closer20-0066	su:bash,dash	v='x su'; if ha --log-level >'a&b' $v info; then :; fi
+closer20-0067	su:bash,dash	v='x su'; ( ha --log-level 2>'a;b' $v info )
+closer20-0068	su:bash,dash	ha --log-level >'a&b' $nope x s${x}u info
+closer20-0069	su:bash,dash	ha --log-level>'a;b' $nope x s${x}u info
+closer20-0070	su:bash,dash	ha --log-level >"a|b" $nope x s${x}u info
+closer20-0071	su:bash,dash	ha --log-level >f\\&g $nope x s${x}u info
+closer20-0072	su:bash	ha --log-level {fd}>f $nope x s${x}u info
+closer20-0073	su:bash	ha --log-level <<<x $nope x s${x}u info
+closer20-0074	su:bash,dash	ha --log-level>>f $nope x s${x}u info
+closer20-0075	su:bash,dash	ha --log-level>f>g $nope x su info
+closer20-0077	none	v='x su'; echo ha --log-level '>f' $v info
+closer20-0078	remote:bash,dash	ha --log-level debug core info >'a&b'
+closer20-0079	remote:bash,dash	v='x su'; ha --log-level=debug >'a&b' core info
