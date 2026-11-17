@@ -2,6 +2,23 @@
 
 ## 0.3.4 (unreleased)
 
+- A plain device command such as "set the office overhead to 50%" is faster. On 0.3.3 Codex had no tool on the
+  chat page that finds an entity by name, so it searched `.storage/core.entity_registry` with shell commands, and
+  the page's rules told it to look for `/config/AGENTS.md` in every message. The `home_assistant` `verify` tool
+  has a new read-only `find` operation: it takes the words you used and an optional domain, and returns at most
+  10 matching entities with their entity id, friendly name and state. Entities with a credential-like name and
+  password-mode text entities are left out, as they are for the ChatGPT app's state reads. The page's rules now
+  send a device command through three tool calls (find, act, read the state back) and tell Codex not to search
+  files for an entity.
+- Codex reads `/config/AGENTS.md` again only when it changed. The `exchange_info` tool now says in each message
+  whether the file exists and when it last changed. A change to the file still reaches an open chat on its next
+  message, and a removed file stops applying. The guard-rails block is still read by the worker before every
+  pre-approved action. No approval, sandbox or permission rule changed.
+- A task that ends with a plain answer no longer sends a Home Assistant notification; the answer is in the
+  chat. A notification still goes out when a task asks a question, waits for a permission decision, or fails.
+  Before, every completed chat task sent a **Codex task completed** notification with its answer.
+  A chat task the owner cancels sends no notification either; before, it sent **Codex task cancelled**. The
+  `codex_cli_task_result` event still reports the cancel.
 - The **Copy response** button under each answer is gone, with its manual copy dialog. **Copy thread ID** in the
   thread menu still copies.
 - The message box starts at one line of text above the control row, as in the ChatGPT desktop app, and grows as you
@@ -13,9 +30,11 @@
 - Every section header in **Settings** has the same arrow size and the same space to the divider above and below it.
   An open section has the same space between its last line or button and the next divider.
 - The bold **Verification** box under an answer is gone. The checks, the readback and the note on screenshots sit in
-  one closed **Checks and readback** line, which opens when a batch of blocked browser requests needs a decision.
-- Every arrow in **Settings**, the thread step list, the checks block and the reasoning picker is a Material Design
-  Icons arrow, the icon set Home Assistant uses (Apache-2.0; see `NOTICE`).
+  one closed **Checks and readback** line. The line names a bad result, for example "1 failed", in the error color.
+  It opens by itself only while a batch of blocked browser requests needs a decision or a retry runs.
+- Every arrow in **Settings**, **Scheduled runs**, the thread step list, the checks block and the reasoning picker
+  is a Material Design Icons arrow, the icon set Home Assistant uses (Apache-2.0; see `NOTICE`). The browser's own
+  triangle is gone from the last collapsed parts that still had it, such as **Use a token instead**.
 - The GitHub sign-in notice in Home Assistant names the new place: **Settings > Accounts and connections > GitHub**.
 
 ## 0.3.3 (unreleased)

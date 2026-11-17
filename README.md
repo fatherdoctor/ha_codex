@@ -239,9 +239,9 @@ The integration adds actions that scripts, automations and Assist can call.
 | `codex_cli.start_login`, `codex_cli.logout`, `codex_cli.get_login_status` | Manage the sign-in. |
 
 The actions refuse a caller who is not an administrator. A task started this way still uses the normal permission
-cards; the integration cannot answer them. Home Assistant
-sends a notification when a task finishes or waits for you. Set `notify_service` in the app options for phone pushes,
-or leave it empty for persistent notifications.
+cards; the integration cannot answer them. Home Assistant sends a notification when a task waits for you or fails; a
+completed answer sends none. Set `notify_service` in the app options for phone pushes, or leave it empty for persistent
+notifications.
 
 The event `codex_cli_task_result` carries the result for automations. The full list of entities and actions, the task
 output format and an Assist example are in the [integration README](custom_components/codex_cli/README.md). A

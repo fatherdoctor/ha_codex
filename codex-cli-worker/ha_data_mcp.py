@@ -60,7 +60,7 @@ TOOLS = [
     {
         "name": "exchange_info",
         "description": "Read what is particular to this message from the Home Assistant page: its backup folder, "
-                       "the documents and images the user attached, and notes on direct Home Assistant API calls, "
+                       "whether the owner's /config/AGENTS.md exists and when it last changed, the documents and images the user attached, and notes on direct Home Assistant API calls, "
                        "the local documentation and GitHub. Call it once at the start of each message; an answer "
                        "from an earlier message is out of date. Takes no arguments and changes nothing.",
         "inputSchema": {"type": "object", "additionalProperties": False, "properties": {}},
