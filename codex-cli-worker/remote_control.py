@@ -342,14 +342,18 @@ def requirements_problem(path: Path) -> str:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         return f"the managed requirements could not be read ({exc})"
+    # Full access (the full-access sandbox and the never approval policy) may be allowed only while the
+    # owner's setting is on, and only together; full_access.py writes the file to match.
+    full_access_on = full_access.is_on()
     modes = data.get("allowed_sandbox_modes")
     if not isinstance(modes, list) or not modes:
         return "the managed requirements do not rule out the full-access sandbox"
-    # Full access may be allowed only while the owner's setting is on; full_access.py writes the file to match.
-    if "danger-full-access" in modes and not full_access.is_on():
+    if "danger-full-access" in modes and not full_access_on:
         return "the managed requirements do not rule out the full-access sandbox"
     approvals = data.get("allowed_approval_policies")
-    if not isinstance(approvals, list) or not approvals or "never" in approvals:
+    if not isinstance(approvals, list) or not approvals:
+        return "the managed requirements do not rule out the never approval policy"
+    if "never" in approvals and not (full_access_on and "danger-full-access" in modes):
         return "the managed requirements do not rule out the never approval policy"
     if data.get("allow_managed_hooks_only") is not True:
         return "the managed requirements do not keep hooks to the managed ones"

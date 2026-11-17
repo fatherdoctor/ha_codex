@@ -419,19 +419,31 @@ def confirmation(record: dict[str, Any]) -> dict[str, str]:
     return text
 
 
+def _sandbox_modes(params: dict[str, Any]) -> list[Any]:
+    """Return every sandbox mode a request or a thread result names, in either of Codex's two shapes."""
+    config = params.get("config") or {}
+    modes = []
+    for value in (params.get("sandbox"), params.get("sandboxPolicy"),
+                  config.get("sandbox_mode") if isinstance(config, dict) else None):
+        modes.append(value.get("type") if isinstance(value, dict) else value)
+    return modes
+
+
 def require_supported_policy(params: dict[str, Any], allow_full_access: bool = False) -> None:
     """Integration-owned requests must refuse full access instead of relying on Codex's fallback.
 
     allow_full_access is True only for a chat turn the worker itself set to
-    Full access while the owner's setting is on (server.task_options).
+    Full access while the owner's setting is on (server.task_options). Even
+    then the "never" approval policy passes only beside the full-access
+    sandbox: a sandboxed request with "never" is refused.
     """
     config = params.get("config") or {}
-    policy = params.get("sandboxPolicy") or {}
-    modes = [params.get("sandbox"), config.get("sandbox_mode") if isinstance(config, dict) else None,
-             policy.get("type") if isinstance(policy, dict) else policy]
-    if not allow_full_access and any(mode in ("danger-full-access", "dangerFullAccess") for mode in modes):
+    modes = _sandbox_modes(params)
+    full = any(mode in ("danger-full-access", "dangerFullAccess") for mode in modes)
+    if full and not allow_full_access:
         raise ValueError("Full-access requests are refused by this integration; use workspace-write or read-only.")
-    if params.get("approvalPolicy") == "never" or (isinstance(config, dict) and config.get("approval_policy") == "never"):
+    never = params.get("approvalPolicy") == "never" or (isinstance(config, dict) and config.get("approval_policy") == "never")
+    if never and not (allow_full_access and full):
         raise ValueError("The never approval policy is refused by this integration; use on-request.")
 
 
@@ -805,7 +817,12 @@ class AppServerSession:
             self._write({"method": "initialized"})
             self._request("thread/resume" if self.thread_params.get("threadId") else "thread/start", self.thread_params)
         elif method in {"thread/start", "thread/resume"}:
-            if result.get("approvalPolicy") != "on-request" or result.get("approvalsReviewer") != "user":
+            # A Full access turn asked for "never", as the ChatGPT app's Full access does; every other turn
+            # asked for the user's approval requests, and Codex must have kept that.
+            if self.allow_full_access:
+                if result.get("approvalPolicy") != "never" or result.get("approvalsReviewer") != "user":
+                    raise ValueError("Codex did not start the Full access turn with the never approval policy")
+            elif result.get("approvalPolicy") != "on-request" or result.get("approvalsReviewer") != "user":
                 raise ValueError("Codex did not enable user approval requests")
             require_supported_policy(result, self.allow_full_access)
             self.thread_id = result["thread"]["id"]

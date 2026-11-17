@@ -1,11 +1,16 @@
 """Full access: an owner setting that lets a chat run Codex without its sandbox.
 
 Off by default. When it is on, a chat whose permission mode is Full access runs
-Codex with the danger-full-access sandbox: its commands reach /config, the
-network and everything the app's container can reach, with no sandbox around
-them. Codex's managed requirements must allow that mode, so the worker writes
-them at start, and again on each change, from the copy that ships in the image.
-While the setting is off the written file is that shipped copy, byte for byte.
+Codex as the ChatGPT app's Full access does: the danger-full-access sandbox and
+the "never" approval policy. Its commands reach /config, the network and
+everything the app's container can reach, with no sandbox around them, and
+Codex does not ask before it runs them. The managed command rules and the
+command check (hook) still refuse what they refuse in every mode.
+
+Codex's managed requirements must allow that sandbox and that approval policy,
+so the worker writes them at start, and again on each change, from the copy
+that ships in the image. While the setting is off the written file is that
+shipped copy, byte for byte.
 
 The setting is kept in /data, which no sandboxed command can write, so a
 sandboxed Codex cannot turn it on. It counts as on only when the file holds
@@ -37,12 +42,16 @@ WARNING = (
 )
 
 SANDBOX_MODE = "danger-full-access"
+APPROVAL_POLICY = "never"
 PERMISSION_MODE = "full-access"
 # Set only by the worker on the options of one chat turn that asked for Full access; never an app option.
 CHAT_OPTION = "chat_full_access"
 # The one line of the shipped requirements that names the allowed sandbox modes.
 STRICT_MODES_LINE = 'allowed_sandbox_modes = ["read-only", "workspace-write"]'
 OPEN_MODES_LINE = 'allowed_sandbox_modes = ["read-only", "workspace-write", "danger-full-access"]'
+# The one line that names the allowed approval policies.
+STRICT_APPROVALS_LINE = 'allowed_approval_policies = ["on-request"]'
+OPEN_APPROVALS_LINE = 'allowed_approval_policies = ["on-request", "never"]'
 SETTING_KEYS = {"enabled", "warning", "changed_at", "changed_by"}
 
 
@@ -94,14 +103,18 @@ def set_enabled(enabled: bool, changed_by: str, path: Path | None = None) -> dic
 def requirements_text(enabled: bool, shipped: str) -> str:
     """Return the managed requirements for the setting: the shipped text, with full access added only when on.
 
-    Raise ValueError when the shipped text does not hold the expected line
-    exactly once, so a changed file is never edited by guesswork.
+    On, the text allows the danger-full-access sandbox and the "never" approval
+    policy; nothing else changes. Raise ValueError when the shipped text does
+    not hold each expected line exactly once, so a changed file is never edited
+    by guesswork.
     """
     if not enabled:
         return shipped
     if shipped.count(STRICT_MODES_LINE) != 1:
         raise ValueError("The shipped requirements do not hold the expected sandbox modes line.")
-    return shipped.replace(STRICT_MODES_LINE, OPEN_MODES_LINE)
+    if shipped.count(STRICT_APPROVALS_LINE) != 1:
+        raise ValueError("The shipped requirements do not hold the expected approval policies line.")
+    return shipped.replace(STRICT_MODES_LINE, OPEN_MODES_LINE).replace(STRICT_APPROVALS_LINE, OPEN_APPROVALS_LINE)
 
 
 def write_requirements(target: Path | None = None, shipped: Path | None = None, setting: Path | None = None) -> bool:

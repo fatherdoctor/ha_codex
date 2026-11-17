@@ -48,6 +48,8 @@ for (const button of document.querySelectorAll("[data-mode]")) {
         if (id === state.id && state.task) state.task.permission_mode = mode;
       }
       state.permissionModes.set(id, mode);
+      // A new chat has no saved choice yet: the worker compares this time with the setting's when it starts.
+      if (!id) state.newChatFullAccessSince = mode === "full-access" ? fullAccessSince() : null;
       $("permissions-dialog").close();
       updateStudio();
     } catch (error) { $("permission-result").textContent = error.message; }

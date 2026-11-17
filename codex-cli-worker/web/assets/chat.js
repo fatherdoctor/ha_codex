@@ -37,6 +37,8 @@ const state = {
   settingsBusy: false,
   activity: null,
   permissionModes: new Map(),
+  // When the setting was turned on, as the page saw it when the owner chose Full access for a new chat (full_access.js).
+  newChatFullAccessSince: null,
   // Checks whose retry the owner started on this page. Their result shows open; a reload forgets them.
   retriedChecks: new Set(),
 };
@@ -2450,6 +2452,8 @@ $("composer").addEventListener("submit", async (event) => {
         ...(attachments.length ? { attachments } : {}),
         chat_settings: selectedSettings(),
         permission_mode: selectedPermissionMode(),
+        ...(!id && selectedPermissionMode() === "full-access"
+          ? { full_access_since: state.newChatFullAccessSince } : {}),
         // If another chat is working, the worker holds this message in its queue.
         queue: true,
       },

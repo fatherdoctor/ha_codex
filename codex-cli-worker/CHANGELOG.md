@@ -17,6 +17,12 @@
   message, to Default permissions; turning it on again starts every chat at Default, and an administrator chooses
   Full access again. With Full access off, every check behaves as in 0.3.4. It is never an app
   option: `codex_sandbox: danger-full-access` still stops the app at startup.
+- Full access now matches the ChatGPT app's Full access: a Full access chat also runs with Codex's `never`
+  approval policy, so Codex no longer asks before a tool call there. The managed requirements allow `never` only
+  while Full access is on and only beside the full-access sandbox, and every other mode refuses it as before. A
+  browser tab that slept while Full access was turned off and on again can no longer send its old Full access
+  choice: the worker checks each message's choice against the time Full access was last turned on, and runs it
+  with Default otherwise.
 
 ## 0.3.4 (unreleased)
 

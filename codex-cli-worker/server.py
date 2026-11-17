@@ -578,7 +578,7 @@ def parse_chat_settings(payload: dict[str, Any], task: dict[str, Any] | None = N
     return settings
 
 
-def parse_permission_mode(payload, task=None, choosing=False):
+def parse_permission_mode(payload, task=None, choosing=False, sending=False):
     """Return the chat's permission mode: Default, Read only, or Full access while the owner's setting is on.
 
     A request that runs or sets Full access must come from a Home Assistant
@@ -587,19 +587,47 @@ def parse_permission_mode(payload, task=None, choosing=False):
     Full access, falls back to Default instead: the setting was turned off
     after the choice, and the next turn returns to the sandbox. A queued
     message falls back the same way.
+
+    A message sent from the page (sending=True) runs with Full access only when
+    the choice was made after the setting was last turned on
+    (full_access_choice_is_current). A page that missed an off and on cycle,
+    such as a suspended tab, can still send its old choice; that message runs
+    with Default.
     """
     mode = payload.get('permission_mode', (task or {}).get('permission_mode', 'default'))
     if mode == full_access.PERMISSION_MODE:
-        if not full_access.is_on():
+        setting = full_access.read_setting()
+        if not setting["enabled"]:
             if not choosing:
                 return 'default'
             raise ValueError('Full access is off. A Home Assistant administrator can turn it on in Settings.')
         if has_request_context() and ingress_admin()[0] is None:
             raise ValueError('Only a Home Assistant administrator can use Full access.')
+        if sending and not full_access_choice_is_current(payload, task, setting):
+            return 'default'
         return mode
     if not isinstance(mode, str) or mode not in {'default', 'read-only'}:
         raise ValueError('Choose Default permissions or Read only. Other modes are not available.')
     return mode
+
+
+def full_access_choice_is_current(payload, task, setting) -> bool:
+    """Return True when a message's Full access choice was made while the setting has been on, without a gap.
+
+    For a saved chat the record is the chat itself: the owner's choice is saved
+    there, and turning the setting off returns every saved chat to Default. So
+    the message counts only when the saved chat holds Full access now.
+
+    A new chat has nothing saved yet. The page sends full_access_since, the
+    time the setting was turned on as the page saw it when the owner made the
+    choice. It must equal that time now; turning the setting off and on again
+    gives it a new time.
+    """
+    if task is not None:
+        return task.get('permission_mode') == full_access.PERMISSION_MODE
+    since = payload.get('full_access_since')
+    return (isinstance(since, (int, float)) and not isinstance(since, bool)
+            and since == setting["changed_at"])
 
 
 def codex_binary_path() -> str | None:
@@ -4581,10 +4609,12 @@ def build_app_server_args() -> list[str]:
 
 
 def uses_user_approvals(options: dict[str, Any]) -> bool:
-    """Every allowed mode is sandboxed and routes its permission requests to the user.
+    """Every allowed mode runs through the app server: the sandboxed modes route permission requests to the user.
 
-    A mode the protected policy refuses never reaches Codex: run_task stops it
-    first, so the exec path without live approvals is not used for one.
+    A Full access turn uses the app server too, with the never approval policy,
+    so Codex asks nothing (protected_policy.effective_policy). A mode the
+    protected policy refuses never reaches Codex: run_task stops it first, so
+    the exec path without live approvals is not used for one.
     """
     return not protected_policy.policy_problem(options)
 
@@ -4679,8 +4709,11 @@ def create_approval_session(
             update_task(task_id, session_id=found)
 
     mode = str(options.get("codex_sandbox") or "workspace-write")
+    # A Full access turn runs as the ChatGPT app's Full access: no sandbox and the never approval policy.
+    allow_full_access = protected_policy.is_full_access_turn(options)
+    approval_policy = full_access.APPROVAL_POLICY if allow_full_access else "on-request"
     thread_params: dict[str, Any] = {
-        "cwd": "/config", "sandbox": mode, "approvalPolicy": "on-request", "approvalsReviewer": "user",
+        "cwd": "/config", "sandbox": mode, "approvalPolicy": approval_policy, "approvalsReviewer": "user",
     }
     if session_id:
         thread_params["threadId"] = session_id
@@ -4692,7 +4725,6 @@ def create_approval_session(
     policy: dict[str, Any] = {"type": "readOnly" if mode == "read-only" else "workspaceWrite", "networkAccess": False}
     if mode == "workspace-write":
         policy["writableRoots"] = list(TASK_WRITABLE_ROOTS)
-    allow_full_access = options.get(full_access.CHAT_OPTION) is True and mode == full_access.SANDBOX_MODE
     if allow_full_access:
         policy = {"type": "dangerFullAccess"}
     return AppServerSession(
@@ -4703,7 +4735,7 @@ def create_approval_session(
                      # the ask_owner and report_failure calls (apply_status_calls).
                      "effort": execution["reasoning_effort"], "summary": reasoning_summary(options),
                      "sandboxPolicy": policy,
-                     "approvalPolicy": "on-request", "approvalsReviewer": "user"},
+                     "approvalPolicy": approval_policy, "approvalsReviewer": "user"},
         on_event=event, on_approvals=save_approvals,
         on_final=lambda text: final_file.write_text(text, encoding="utf-8"),
         is_active=active, redact=approval_redact, allow_full_access=allow_full_access,
@@ -6500,7 +6532,7 @@ def create_task() -> Response:
         return jsonify({"ok": False, "error": PAUSED_MESSAGE, "paused": True}), 409
     try:
         settings = parse_chat_settings(payload)
-        permission_mode = parse_permission_mode(payload)
+        permission_mode = parse_permission_mode(payload, sending=True)
         execution = resolve_chat_settings(settings, read_options())
         uploads = parse_uploads(payload)
     except ValueError as exc:
@@ -7175,7 +7207,7 @@ def continue_task_request(task_id: str, field: str, *, waiting_only: bool = Fals
             return jsonify({"ok": False, "error": "This chat already has a message in the queue. Edit or remove it first."}), 409
         try:
             settings = parse_chat_settings(payload, task)
-            permission_mode = parse_permission_mode(payload, task)
+            permission_mode = parse_permission_mode(payload, task, sending=True)
             execution = resolve_chat_settings(settings, read_options())
             uploads = parse_uploads(payload)
         except ValueError as exc:

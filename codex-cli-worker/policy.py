@@ -86,7 +86,8 @@ def load_policy(path: Path | None = None) -> dict[str, Any]:
     modes = policy["allowed_sandbox_modes"]
     if not isinstance(modes, list) or not modes or not all(isinstance(mode, str) for mode in modes):
         raise PolicyError("allowed_sandbox_modes must be a non-empty list of sandbox modes.")
-    # These hold whatever the file says: the fork never ships an approval-free mode.
+    # These hold whatever the file says: no app setting turns on an approval-free mode. Only the owner's
+    # Full access setting does, for one chat at a time (is_full_access_turn).
     if "danger-full-access" in modes:
         raise PolicyError("The protected policy may not allow danger-full-access.")
     if policy["approval_policy"] == "never":
@@ -98,32 +99,53 @@ def load_policy(path: Path | None = None) -> dict[str, Any]:
     return policy
 
 
+def is_full_access_turn(options: dict[str, Any]) -> bool:
+    """Return True only for a chat turn the worker set to Full access while the owner's setting is on.
+
+    The worker sets CHAT_OPTION on that turn only (server.task_options), and
+    only for a chat an administrator set to Full access. The app options can
+    never set it: task_options removes it from them first.
+    """
+    return (options.get(full_access.CHAT_OPTION) is True
+            and options.get("codex_sandbox") == full_access.SANDBOX_MODE
+            and full_access.is_on())
+
+
 def effective_policy(options: dict[str, Any], policy: dict[str, Any]) -> dict[str, str]:
-    """Return the sandbox mode and approval policy an exchange would run with under these options."""
+    """Return the sandbox mode and approval policy an exchange would run with under these options.
+
+    A Full access turn runs with the "never" approval policy, as the ChatGPT
+    app's Full access does; every other turn runs with the protected policy's.
+    """
+    full = is_full_access_turn(options)
     return {
         "sandbox": str(options.get("codex_sandbox") or "workspace-write"),
-        "approval_policy": str(policy["approval_policy"]),
+        "approval_policy": full_access.APPROVAL_POLICY if full else str(policy["approval_policy"]),
         "approvals_reviewer": str(policy["approvals_reviewer"]),
     }
 
 
 def policy_problem(options: dict[str, Any], path: Path | None = None) -> str:
-    """Return why these options may not run under the protected policy, or an empty string when they may."""
+    """Return why these options may not run under the protected policy, or an empty string when they may.
+
+    The danger-full-access sandbox and the "never" approval policy pass only
+    together, and only for a Full access turn (is_full_access_turn). The policy
+    file itself can allow neither (load_policy).
+    """
     try:
         policy = load_policy(path)
     except PolicyError as exc:
         return str(exc)
     effective = effective_policy(options, policy)
+    full = is_full_access_turn(options)
     allowed_modes = list(policy["allowed_sandbox_modes"])
-    # Full access is never allowed through the app options: only for a chat turn that asked for it while the
-    # owner's Full access setting is on (full_access.py). The worker sets CHAT_OPTION on that turn only.
-    if options.get(full_access.CHAT_OPTION) is True and full_access.is_on():
+    if full:
         allowed_modes.append(full_access.SANDBOX_MODE)
     if effective["sandbox"] not in allowed_modes:
         allowed = " or ".join(policy["allowed_sandbox_modes"])
         return (f'The sandbox mode "{effective["sandbox"]}" is not allowed in this app. '
                 f"Choose {allowed} in the app's settings and restart it.")
-    if effective["approval_policy"] == "never":
+    if effective["approval_policy"] == "never" and not full:
         return 'The effective approval policy is "never", which this app refuses.'
     return ""
 

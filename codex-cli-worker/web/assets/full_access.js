@@ -10,6 +10,9 @@ let fullAccess = null;
 /** Show the setting everywhere the page marks it. */
 function renderFullAccess(setting) {
   if (!setting) return;
+  // A new "on" time means the setting went off and on again, perhaps while this tab was asleep:
+  // a choice made before that is not a choice for now. The worker checks the same (server.py).
+  if (fullAccess && fullAccess.changed_at !== setting.changed_at) forgetFullAccessChoices();
   fullAccess = setting;
   const on = setting.enabled === true;
   document.body.dataset.fullAccess = on ? "on" : "off";
@@ -27,6 +30,11 @@ function renderFullAccess(setting) {
   updateStudio();
 }
 
+/** The time the setting was turned on, as this page last saw it; null while it is off. */
+function fullAccessSince() {
+  return fullAccess?.enabled === true ? fullAccess.changed_at : null;
+}
+
 /**
  * Turning Full access off returns each chat set to it to Default; the worker does the
  * same for the saved chats. So turning it on again starts every chat at Default, and
@@ -37,6 +45,7 @@ function forgetFullAccessChoices() {
     if (mode === "full-access") state.permissionModes.delete(id);
   }
   if (state.task?.permission_mode === "full-access") state.task.permission_mode = "default";
+  state.newChatFullAccessSince = null;
 }
 
 /** Save the setting; turning it on sends the id of the warning the owner confirmed. */
