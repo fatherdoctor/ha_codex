@@ -435,3 +435,143 @@ class LightDataTests(unittest.TestCase):
                 self.assertTrue(result['approval_required'])
                 self.assertNotIn('owner_question', result)
         self.assertEqual(self.backend.writes, [])
+
+
+class NotifyTargetTests(unittest.TestCase):
+    """A message action goes to the notify entity it names, or it is refused; synthetic entities only."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.settings = Settings(Path(temporary.name) / 'settings.json')
+        self.settings.save({**DEFAULTS, 'security': True})
+        self.backend = Backend()
+        self.audit = []
+        self.engine = Engine(self.settings, self.backend, lambda: '', self.audit.append)
+        self.authority = Authority('workspace-write', 'on-request', 'user', 'worker')
+
+    def send(self, target, data=None, service='notify.send_message'):
+        request = {'operation': 'service', 'service': service, 'data': data or {'message': 'Synthetic test'}}
+        if target is not None:
+            request['target'] = target
+        return self.engine.dispatch(request, self.authority)
+
+    def test_send_message_keeps_its_notify_entity_target(self):
+        result = self.send(['notify.sample_phone'])
+        self.assertTrue(result['ok'], result)
+        self.assertEqual(self.backend.writes[-1]['target'], ['notify.sample_phone'])
+        self.assertEqual(result['performed'], 'notify.send_message for notify.sample_phone')
+
+    def test_core_receives_the_entity_id_for_send_message(self):
+        self.assertTrue(self.send({'entity_id': 'notify.sample_phone'}, {'message': 'Synthetic', 'title': 'Test'})['ok'])
+        core = api.Core(SimpleNamespace())
+        with patch.object(core, 'rest', return_value={}) as rest:
+            core.execute(self.backend.writes[-1])
+        rest.assert_called_once_with('POST', 'services/notify/send_message',
+                                     {'message': 'Synthetic', 'title': 'Test', 'entity_id': ['notify.sample_phone']})
+
+    def test_send_message_without_a_target_is_refused_before_any_write(self):
+        for target in (None, [], {}):
+            with self.subTest(target=target):
+                result = self.send(target)
+                self.assertFalse(result['ok'])
+                self.assertTrue(result['approval_required'])
+                self.assertFalse(result.get('do_not_retry'))
+        self.assertEqual(self.backend.writes, [])
+
+    def test_send_message_refuses_a_target_outside_the_notify_domain(self):
+        for target in (['light.sample'], ['notify.sample_phone', 'switch.sample'], ['sample_phone']):
+            with self.subTest(target=target):
+                self.assertFalse(self.send(target)['ok'])
+        self.assertEqual(self.backend.writes, [])
+
+    def test_send_message_device_target_keeps_only_notify_entities(self):
+        self.backend.expansion['device_id'] = ['sensor.sample_battery', 'notify.sample_phone']
+        result = self.send({'device_id': 'synthetic-device'})
+        self.assertTrue(result['ok'], result)
+        self.assertEqual(self.backend.writes[-1]['target'], ['notify.sample_phone'])
+        self.backend.expansion['device_id'] = ['sensor.sample_battery']
+        self.assertFalse(self.send({'device_id': 'synthetic-device'})['ok'])
+        self.assertEqual(len(self.backend.writes), 1)
+
+    def test_send_message_keeps_the_target_limit_and_entity_checks(self):
+        self.assertFalse(self.send([f'notify.sample_{n}' for n in range(65)])['ok'])
+        self.assertFalse(self.send(['notify.sample_token'])['ok'])
+        with patch.object(self.backend, 'require_entity', side_effect=ApprovalRequired('synthetic missing')):
+            self.assertFalse(self.send(['notify.sample_phone'])['ok'])
+        self.assertEqual(self.backend.writes, [])
+
+    def test_send_message_takes_only_a_message_and_a_title(self):
+        result = self.send(['notify.sample_phone'], {'message': 'Synthetic', 'target': ['synthetic']})
+        self.assertFalse(result['ok'])
+        self.assertNotIn('owner_question', result)
+        self.assertEqual(self.backend.writes, [])
+
+    def test_legacy_notify_service_still_works_without_a_target(self):
+        result = self.send(None, {'message': 'Synthetic', 'target': ['synthetic-device']},
+                           service='notify.mobile_app_sample')
+        self.assertTrue(result['ok'], result)
+        self.assertEqual(self.backend.writes[-1]['target'], [])
+        self.assertEqual(result['performed'], 'notify.mobile_app_sample')
+
+    def test_legacy_notify_service_refuses_an_entity_target_instead_of_dropping_it(self):
+        for service in ('notify.notify', 'notify.mobile_app_sample', 'persistent_notification.create'):
+            with self.subTest(service=service):
+                self.assertFalse(self.send(['notify.sample_phone'], service=service)['ok'])
+        self.assertEqual(self.backend.writes, [])
+
+    def test_persistent_notification_still_works_without_a_target(self):
+        self.assertTrue(self.send(None, service='persistent_notification.create')['ok'])
+        self.assertEqual(self.backend.writes[-1]['target'], [])
+
+    def test_send_message_still_needs_the_security_group(self):
+        self.settings.save(DEFAULTS)
+        result = self.send(['notify.sample_phone'])
+        self.assertEqual(result['reason'], SECURITY_OFF)
+        self.assertEqual(self.backend.writes, [])
+
+
+class CoreRefusalTests(unittest.TestCase):
+    """Which Core answers prove that an action did not run; synthetic responses only."""
+
+    def plan(self):
+        return {'operation': 'service', 'service': 'notify.send_message', 'target': ['notify.sample_phone'],
+                'data': {'message': 'Synthetic'}}
+
+    def core_answering(self, status):
+        response = Mock(status_code=status)
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        worker = SimpleNamespace(ha_token=lambda: 'SYNTHETIC_TOKEN', ha_api_url=lambda path: 'http://core.invalid/' + path,
+                                 requests=SimpleNamespace(request=Mock(return_value=response)))
+        return api.Core(worker)
+
+    def test_auth_and_routing_refusals_prove_the_action_did_not_run(self):
+        for status in (401, 403, 404, 405):
+            with self.subTest(status=status), self.assertRaises(api.NotPerformed):
+                self.core_answering(status).execute(self.plan())
+
+    def test_other_failures_keep_an_unknown_outcome(self):
+        # A 400 can come from a service handler that already started; a 5xx proves nothing.
+        for status in (400, 500, 502, 504):
+            with self.subTest(status=status):
+                with self.assertRaises(ApprovalRequired) as caught:
+                    self.core_answering(status).execute(self.plan())
+                self.assertNotIsInstance(caught.exception, api.NotPerformed)
+
+    def test_engine_reports_a_refusal_not_an_unknown_outcome(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            settings = Settings(Path(temporary) / 'settings.json')
+            settings.save(DEFAULTS)
+            audit = []
+            backend = Backend()
+            engine = Engine(settings, backend, lambda: '', audit.append)
+            request = {'operation': 'service', 'service': 'light.turn_on', 'target': ['light.sample']}
+            authority = Authority('workspace-write', 'on-request', 'user', 'worker')
+            with patch.object(backend, 'execute', side_effect=api.NotPerformed('synthetic refusal')):
+                refused = engine.dispatch(request, authority)
+            with patch.object(backend, 'execute', side_effect=ApprovalRequired('synthetic failure')):
+                unknown = engine.dispatch(request, authority)
+        self.assertEqual(refused, {'ok': False, 'approval_required': True, 'reason': 'synthetic refusal'})
+        self.assertTrue(unknown['do_not_retry'])
+        self.assertEqual([row['outcome'] for row in audit], ['requested', 'refused', 'requested', 'unknown'])

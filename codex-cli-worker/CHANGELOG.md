@@ -5,6 +5,13 @@
 - A permission request that waits for you now shows at the bottom of the chat, below the "Working" lines, and the
   chat scrolls to it once when it first appears. Before, it sat above those lines and was easy to miss. A request
   you already answered stays where it was. No approval or permission rule changed.
+- A pre-approved message to a notify entity (`notify.send_message`, for example to a phone) reaches it again.
+  Before, the `act` tool dropped the entity target, so Home Assistant refused the call and the chat reported an
+  unknown outcome. The notify entities in the target now get the same checks as other targets (at most 64,
+  each one must exist). A legacy `notify.<name>` service and `persistent_notification` still take no entity
+  target; a target given to them is now refused instead of ignored. When Home Assistant refuses an action
+  before it runs (401, 403, 404 or 405), the chat now reports a refusal instead of an unknown outcome. The
+  Security and people group still controls every message action.
 
 ## 0.3.4 (unreleased)
 

@@ -53,6 +53,14 @@ class ApprovalRequired(ValueError):
     """Fixed, worker-authored explanation; never a backend response or exception string."""
 
 
+class NotPerformed(ApprovalRequired):
+    """Core refused the write request itself, so no part of the action ran.
+
+    Raised only where that is certain from where the refusal came; the turn then reports a
+    refusal, not an unknown outcome.
+    """
+
+
 class OwnerCanAllow(ApprovalRequired):
     """A refusal that the owner may lift for this one action from the chat.
 
@@ -264,6 +272,8 @@ class Engine:
                 started_write = True
                 result = self.backend.execute(plan)
             except ApprovalRequired as exc:
+                # A request Core refused before running it changed nothing, so it is a refusal.
+                started_write = started_write and not isinstance(exc, NotPerformed)
                 final_event('unknown' if started_write else 'refused')
                 # Security actions never ask: their data can hold a lock or alarm code, and the
                 # owner keeps that group off on purpose.
@@ -308,6 +318,21 @@ class Engine:
             self.backend.require_entity(target)
         return targets
 
+    def notify_targets(self, service, selector):
+        """Targets of a message service.
+
+        notify.send_message sends through notify entities, so it needs them as targets and they
+        get the same checks as any other target. The legacy notify.<name> services and
+        persistent_notification take no entity target. A target given to them is refused, not
+        dropped, so a message never goes to someone other than the one named.
+        """
+        if service == 'notify.send_message':
+            return self.targets(selector, 'notify')
+        if selector not in (None, '', [], {}):
+            raise ApprovalRequired('This message action takes no entity target. '
+                                   'Use notify.send_message for a notify entity; request normal approval otherwise.')
+        return []
+
     @staticmethod
     def guard_effect(domain, rules):
         if domain in rules or ('external' in rules and domain in SECURITY):
@@ -332,7 +357,10 @@ class Engine:
         if domain == 'script' and service != 'script.turn_on':
             selector = [service]
         self.guard_effect(domain, rules)
-        targets = [] if domain in ('notify', 'persistent_notification') else self.targets(selector, domain)
+        if domain in ('notify', 'persistent_notification'):
+            targets = self.notify_targets(service, selector)
+        else:
+            targets = self.targets(selector, domain)
         if any(target.split('.')[0] != domain for target in targets):
             raise ApprovalRequired('The service and target domains disagree; request normal approval.')
         if liftable is not None:

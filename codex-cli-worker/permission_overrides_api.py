@@ -15,7 +15,7 @@ import time
 import uuid
 
 from flask import jsonify, request
-from permission_overrides import ApprovalRequired, OwnerCanAllow, Authority, Engine, Settings, bounded_json, entity, selected_guard_lines, guard_rules, GUARD_LINES, PRIVATE
+from permission_overrides import ApprovalRequired, NotPerformed, OwnerCanAllow, Authority, Engine, Settings, bounded_json, entity, selected_guard_lines, guard_rules, GUARD_LINES, PRIVATE
 
 IDENTIFIER = re.compile(r'[a-z0-9_-]{1,128}')
 
@@ -40,6 +40,19 @@ COLOR_NAME = re.compile(r'[a-z ]{1,32}')
 # Home Assistant reads these keys in service data as targets. A target there would skip every
 # target check (resolve, the limit of 64, require_entity), so a target goes in "target" only.
 DATA_TARGET_KEYS = frozenset({'entity_id', 'device_id', 'area_id', 'floor_id', 'label_id'})
+# HTTP answers that Home Assistant's HTTP layer gives before the service view runs: no valid
+# token (401), refused (403), no such path (404), wrong method (405). A 400 is not one of them:
+# the service view also answers 400 for vol.Invalid, which a service handler can raise after it
+# has started its work, so a 400 stays an unknown outcome.
+REFUSED_BEFORE_RUN = frozenset({401, 403, 404, 405})
+
+
+class CoreRefused(ApprovalRequired):
+    """Core answered a request with a status other than success."""
+
+    def __init__(self, message, status):
+        super().__init__(message)
+        self.status = status
 
 
 def check_light_data(data):
@@ -152,7 +165,8 @@ class Core:
                 headers={'Authorization': 'Bearer ' + token}, timeout=self.remaining(),
                 allow_redirects=False, stream=True) as response:
             if response.status_code not in (200, 201, 202):
-                raise ApprovalRequired('Core refused the action or its preflight; request normal approval.')
+                raise CoreRefused('Core refused the action or its preflight; request normal approval.',
+                                  response.status_code)
             raw = response.raw.read(1024 * 1024 + 1, decode_content=True)
             if len(raw) > 1024 * 1024:
                 raise ApprovalRequired('Core response exceeds the action limit; request normal approval.')
@@ -255,7 +269,10 @@ class Core:
                    'script': {'variables'}, 'automation': {'skip_condition', 'stop_actions'},
                    'scene': {'transition'}, 'lock': {'code'}, 'alarm_control_panel': {'code'},
                    'cover': {'position'}, 'notify': {'message', 'title', 'target'},
-                   'persistent_notification': {'message', 'title', 'notification_id'}}.get(domain, set())
+                   # A notify entity takes a message and a title; its target is the entity.
+                   'notify.send_message': {'message', 'title'},
+                   'persistent_notification': {'message', 'title', 'notification_id'}}
+        allowed = allowed.get(service, allowed.get(domain, set()))
         if domain in ('input_number', 'input_text') and name == 'set_value' and 'value' not in data:
             raise ApprovalRequired('A helper value is required.')
         if domain == 'input_select' and not isinstance(data.get('option'), str):
@@ -371,7 +388,14 @@ class Core:
                 service = {'check_config': 'homeassistant.check_config',
                            'backup': 'backup.create', 'restart': 'homeassistant.restart'}[operation]
             payload = {**data, **({'entity_id': target} if operation == 'service' and target else {})}
-            self.rest('POST', 'services/' + service.replace('.', '/'), payload)
+            try:
+                self.rest('POST', 'services/' + service.replace('.', '/'), payload)
+            except CoreRefused as exc:
+                # This POST is the action's only write, so a refusal before the run changed nothing.
+                if exc.status in REFUSED_BEFORE_RUN:
+                    raise NotPerformed('Core refused the action before running it, so nothing changed; '
+                                       'request normal approval.') from None
+                raise
             return {'status': 'request accepted'}
         if operation in ('flow_start', 'flow_continue'):
             return self.execute_flow(operation, target, data)

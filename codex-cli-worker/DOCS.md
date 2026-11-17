@@ -1015,6 +1015,12 @@ normal native approval. Light actions accept `brightness`, `brightness_pct`, `br
 `brightness_step_pct`, `color_temp_kelvin`, `transition`, `rgb_color`, `hs_color`, `xy_color`, `color_name`
 and `flash` without a question, each only in the range Home Assistant's light service accepts.
 
+A message to a notify entity uses `notify.send_message` with the notify entity as the target, for example
+`notify.mobile_phone`, and takes `message` and `title`. A legacy `notify.<name>` service and
+`persistent_notification` take no target; a target given to them is refused. When Home Assistant refuses an
+action before it runs (it answers 401, 403, 404 or 405), the result is a refusal. Any other failure after the
+request leaves the outcome unknown.
+
 Groups apply only to person-started Default exchanges (workspace-write with on-request user approvals).
 Scheduled and lead-channel runs keep normal prompts, even when their launch mode permits writes.
 Read only never pre-approves writes. The permission groups apply to chat-page turns; remote threads from the ChatGPT app still use normal approval prompts until Codex supplies a trusted signal identifying who started the turn. Auto-review and Full access remain
