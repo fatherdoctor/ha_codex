@@ -31,6 +31,7 @@ Describe the testing you performed.
 - [ ] The `codex_cli` integration can be set up or reloaded when affected.
 - [ ] The worker app starts when affected.
 - [ ] Relevant actions, entities, or UI flows were tested.
+- [ ] Ways in tested (chat page, ChatGPT app, `codex_cli.start_task`): name each one, or say why it is not affected.
 - [ ] Documentation-only change; links, paths, examples, and factual claims were checked against the current source.
 
 ## Security and Privacy
