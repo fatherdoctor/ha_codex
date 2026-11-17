@@ -552,8 +552,9 @@ class DataMcpTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stderr, "")
         replies = [json.loads(line) for line in result.stdout.splitlines()]
-        self.assertEqual({tool["name"] for tool in replies[1]["result"]["tools"]}, {"history", "statistics"})
-        self.assertTrue(all(tool["annotations"]["readOnlyHint"] for tool in TOOLS))
+        self.assertEqual({tool["name"] for tool in replies[1]["result"]["tools"]},
+                         {"history", "statistics", "exchange_info", "ask_owner", "report_failure"})
+        self.assertTrue(all(tool["annotations"]["readOnlyHint"] for tool in replies[1]["result"]["tools"]))
         self.assertEqual(replies[3]["error"]["code"], -32601)
         self.assertEqual(replies[4]["error"]["code"], -32700)
 

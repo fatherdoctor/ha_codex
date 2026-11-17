@@ -1310,12 +1310,19 @@ async function loadBrowserPermissions() {
     }
   }
 }
+/**
+ * Whether the question needs its own line: from 0.3.3 the answer text already holds it (ask_owner),
+ * while an older answer kept the question apart from its summary.
+ */
+function showsQuestionApart(turn) {
+  return Boolean(turn.question) && !(turn.summary || "").includes(turn.question);
+}
 /** Keep the original Markdown of the answer's visible text, including code indentation. */
 function responseMarkdown(turn) {
   return [
     turn.summary,
     turn.details && turn.details !== turn.summary ? turn.details : "",
-    turn.question && turn.question !== turn.summary ? turn.question : "",
+    showsQuestionApart(turn) ? turn.question : "",
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -1478,8 +1485,7 @@ function renderTask(force = false) {
       if (turn.summary) answer.append(renderMarkdown(turn.summary, "message"));
       if (turn.details && turn.details !== turn.summary)
         answer.append(renderMarkdown(turn.details, "message details"));
-      if (turn.question && turn.question !== turn.summary)
-        answer.append(renderMarkdown(turn.question, "message question"));
+      if (showsQuestionApart(turn)) answer.append(renderMarkdown(turn.question, "message question"));
       const markdown = responseMarkdown(turn);
       if (markdown.trim()) answer.append(renderResponseCopy(markdown));
       // Only the question still waiting can be answered with a choice.

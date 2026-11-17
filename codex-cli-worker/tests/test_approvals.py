@@ -540,10 +540,10 @@ class ApprovalApiTests(unittest.TestCase):
         self.assertEqual(server.tasks["task"]["approvals"][0]["status"], "expired")
 
     def test_transport_configuration_and_policy_selection(self):
-        """The new transport supplies the output schema and never enables shell networking globally."""
+        """The new transport sends no output schema and never enables shell networking globally."""
         self.assertEqual(self.session.thread_params["approvalPolicy"], "on-request")
         self.assertEqual(self.session.thread_params["approvalsReviewer"], "user")
-        self.assertEqual(self.session.turn_params["outputSchema"], server.FINAL_RESPONSE_SCHEMA)
+        self.assertNotIn("outputSchema", self.session.turn_params)
         self.assertEqual(self.session.turn_params["sandboxPolicy"], {
             "type": "workspaceWrite", "networkAccess": False, "writableRoots": ["/config", "/share"]})
         self.assertTrue(server.uses_user_approvals({}))
