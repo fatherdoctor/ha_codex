@@ -603,7 +603,7 @@ class RedirectionTests(unittest.TestCase):
         "echo '>' | ha 2>&1 >\"a\nb\" su info",
         'echo "2>" & ha 2>&1 >"a\rb c" su info',
     )
-    UNREADABLE_REMOTE_FORMS = ("dash -c 'ha >\"a b\" host info'", 'ha ${x:+a\nb} host info')
+    UNREADABLE_REMOTE_FORMS = ("dash -c 'ha >\"a b\" host info'",)
     QUOTED_VALUE_FORMS = (
         'ha --config "a\nb" su info',
         'ha --config "a\rb" su info',
@@ -638,6 +638,24 @@ class RedirectionTests(unittest.TestCase):
         'shopt -s nullglob; ha nothing-here? su info',
     )
     BRACE_REMOTE_FORMS = ('ha {,} host info', 'ha {,} core restart', 'ha {co,}re info', 'ha h{o,}st info')
+    # G1: a quoted or escaped blank or operator does not end a brace word in bash, so these are
+    # one word each and run ha su. Bash only.
+    BRACE_QUOTED_FORMS = (
+        'ha {s,"x y"}u info', 'ha {s,x\\ y}u info', 'ha {s,"a\tb"}u info', 'ha {s,"a\nb"}u info',
+        "ha {s,'x;y'}u info", 'ha {s,a\\;b}u info', 'ha {s,"x&y"}u info', 'ha {s,"x|y"}u info',
+        'ha {s,"x>y"}u info', 'ha {s,"x(y"}u info', 'ha s{u,"a b"} info', 'ha {s,"a b"}{u,"c d"} info',
+        "ha {s,}$x''u info", 'ha --config x {s,"a b"}u info',
+    )
+    # G3: the shell builds the family word itself. The family position holds a $, a backtick or a
+    # glob, so the word is refused in both modes, whatever it could become.
+    COMPUTED_FAMILY_FORMS = (
+        'ha s${x}u info', 'ha s$()u info', 'ha s$@u info', 'ha s$1u info', 'ha s`:`u info',
+        'ha $(printf s)u info', 'ha ${x:-s}${x:-u} info', 'touch su; ha s? info', 'touch su; ha s[u] info',
+        'ha 2>/dev/null s${x}u info', 'ha --config a s$()u info', 'env ha s`:`u info',
+    )
+    COMPUTED_FAMILY_BASH_FORMS = ("ha $'\\163u' info", "ha $'s\\x75' info", "ha s$''u info", 'ha s$""u info',
+                                  'ha {,} s${x}u info', 'ha {,} {,} 2>/dev/null s$()u info')
+    COMPUTED_REMOTE_FORMS = ('ha ${x:+a\nb} host info', 'ha h${x}ost reboot')
     # The redirection takes the family word as its target, so the shell runs "ha info".
     NOT_SUPERVISOR = ('ha > su info', 'ha 2> su info', 'ha core info 2>/dev/null', 'echo ha 2>/dev/null')
 
@@ -651,6 +669,9 @@ class RedirectionTests(unittest.TestCase):
     # Remote control off: these name a brace, a glob or a carriage return, but bash cannot make a
     # Supervisor family of them, so the remote-off answer stays.
     HARMLESS_REMOTE_OFF = ("ha addons logs {a,b}", "ha core info | jq '.data[]'", "ha core logs\r",
+                           "cat ha.json | jq '{name:.su}'", "ha core info --raw-json | jq '{v: .data.version}'",
+                           "ha core info; { echo a; }", "ha core info; echo ${HOME}/{a,b}",
+                           "ha addons logs x | awk '{print $1}'", "git commit -m 'ha: {a,b}'",
                            "ha backups list 2>&1 | grep -c '*'")
 
     def _runs(self, command: str, family: str, shells: tuple[str, ...] = ()) -> None:
@@ -723,6 +744,81 @@ class RedirectionTests(unittest.TestCase):
         for command in self.HARMLESS_REMOTE_OFF:
             with self.subTest(command=command):
                 self.assertEqual(refusal(command, False), '')
+
+    def test_print_only_shell_runs_each_g1_and_g3_form(self) -> None:
+        for command in self.BRACE_QUOTED_FORMS + self.COMPUTED_FAMILY_BASH_FORMS:
+            self._runs(command, 'su', ('bash',))
+        for command in self.COMPUTED_FAMILY_FORMS:
+            self._runs(command, 'su', ('bash', 'dash'))
+        self._runs('ha {ho,"a b"}st reboot', 'host', ('bash',))
+        for command in self.COMPUTED_REMOTE_FORMS:
+            self._runs(command, 'host', ('bash', 'dash'))
+
+    def test_hook_refuses_a_quoted_brace_word_and_a_computed_family_word(self) -> None:
+        for command in self.BRACE_QUOTED_FORMS + self.COMPUTED_FAMILY_FORMS + self.COMPUTED_FAMILY_BASH_FORMS:
+            for remote_on in (False, True):
+                with self.subTest(command=command, remote_on=remote_on):
+                    self.assertIn('Supervisor', refusal(command, remote_on))
+        self.assertIn('Supervisor', refusal('ha {ho,"a b"}st reboot', True))
+        # A computed family word could be su, so it is refused with remote control off too.
+        for command in self.COMPUTED_REMOTE_FORMS:
+            for remote_on in (False, True):
+                with self.subTest(command=command, remote_on=remote_on):
+                    self.assertIn('Supervisor', refusal(command, remote_on))
+
+    def test_each_rule_alone_refuses_its_forms(self) -> None:
+        for command in self.BRACE_QUOTED_FORMS:
+            with self.subTest(command=command):
+                self.assertTrue(gate_rules._ha_unknown_flag(command, False))
+        for command in self.COMPUTED_FAMILY_FORMS + self.COMPUTED_FAMILY_BASH_FORMS + self.COMPUTED_REMOTE_FORMS:
+            with self.subTest(command=command):
+                self.assertTrue(gate_rules._ha_supervisor_command(command))
+
+    def test_brace_words_follow_plain_quotes(self) -> None:
+        """A blank inside quotes stays in the word; a brace inside quotes is not an expansion."""
+        self.assertEqual(gate_rules._brace_words(' {s,"x y"}u info', 0), ['{s,"x y"}u'])
+        self.assertEqual(gate_rules._brace_words(" {s,a\\ b}u;x", 0), ['{s,a\\ b}u'])
+        self.assertEqual(gate_rules._brace_words(" core info | jq '{a: .b}'", 0), [])
+        # A quote still open at the end: the rest is one word, and its quote refuses it.
+        self.assertEqual(gate_rules._brace_words(' x "{s,u}', 0), ['"{s,u}'])
+        # A quote that opens before ha is known, so a brace inside it does not count.
+        self.assertEqual(gate_rules._brace_words("git commit -m 'ha: {a,b}'", 18), [])
+        self.assertEqual(gate_rules._brace_words('{s,u} x ha {a,b}', 10), ['{a,b}'])
+        # With ${, $(, $', $", a backtick, a comment or a heredoc the text is cut at every blank, quotes or not.
+        self.assertEqual(gate_rules._brace_words(' ${x} {s,"a b"}u', 0), ['${x}', '{s,"a'])
+        self.assertEqual(gate_rules._brace_words(" # it's {s,u}", 0), ['{s,u}'])
+        self.assertEqual(gate_rules._brace_words(' <<x\n{a,b}\nx', 0), ['{a,b}'])
+
+    def test_brace_word_rule_fails_closed(self) -> None:
+        """G6: a quote, a backslash or a backtick in the word, or too many choices to list, count as a family word."""
+        for word in ('{s,"x"}u', "{a,'b'}", '{a,b\\ c}', '{a,`b`}'):
+            with self.subTest(word=word):
+                self.assertTrue(gate_rules._brace_word_names_family(word, False))
+        many = '{a,b}' * 7  # 128 choices, none a family word
+        self.assertIsNone(gate_rules._brace_choices(many))
+        self.assertTrue(gate_rules._brace_word_names_family(many, False))
+        self.assertFalse(gate_rules._brace_word_names_family('{a,b}' * 6, False))
+
+    def test_brace_words_count_from_the_first_ha(self) -> None:
+        """G6: a brace word before the first ha is not read; one between two ha lines is."""
+        self.assertFalse(gate_rules._ha_unknown_flag('echo {s,}u; ha core info', False))
+        self.assertTrue(gate_rules._ha_unknown_flag('ha core info; echo {s,}u; ha core logs', False))
+
+    def test_stated_over_refusals_of_harmless_braces(self) -> None:
+        """G4: after the word ha, a brace sequence, or a brace word with a quote in a text with ${ or $(, is refused (DOCS says so)."""
+        for command in ('echo ha; echo {1..3}', 'grep ha notes.txt; for i in {1..3}; do echo $i; done',
+                        'ha core info | jq "{v: ${x}}"'):
+            with self.subTest(command=command):
+                self.assertIn('Supervisor', refusal(command, False))
+
+    def test_brace_word_time_stays_flat_on_one_long_word(self) -> None:
+        """G2: the brace words are read in one pass, so one long word after ha stays fast."""
+        for text in ('ha ' + 'a' * 200_000, 'ha $x ' + 'a' * 200_000, 'ha ' + '{a' * 100_000,
+                     'ha ' + "'{a' " * 40_000, 'ha $x ' + '{a,b}' * 40_000):
+            with self.subTest(text=text[:12]):
+                started = time.monotonic()
+                gate_rules._ha_unknown_flag(text, False)
+                self.assertLess(time.monotonic() - started, 0.5)
 
     def test_full_path_wrapper_before_ha_in_the_remote_parser(self) -> None:
         """C5 (M9): _ha_command knows a wrapper by its full path."""

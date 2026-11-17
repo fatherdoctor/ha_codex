@@ -17,6 +17,13 @@
   expansion (`ha {,} su info`, `ha s{u,} info`). Before, only remote control on refused such a flag value. With
   remote control on, such a word is refused before any family word. A carriage return or a form feed no longer
   ends a line for this check, as it does not for the shell.
+- The check now refuses a command family that the shell builds while the command runs, with remote control off
+  too: a word after `ha` with a `$`, a backtick or a glob in the family's place (`ha s${x}u info`,
+  `ha $'\163u' info`, `ha s[u] info` run from `/bin`). A brace word after `ha` with a quote, a backslash or a
+  backtick in it (`ha {s,"x y"}u info`, which bash runs as `ha su info`) is refused too. A brace inside quotes no
+  longer counts (`cat ha.json | jq '{name: .su}'` is allowed again), except in a command that also has `${`,
+  `$(`, `$'`, a backtick, a `#` or a heredoc. A brace sequence such as `{1..3}` after the word `ha` is refused
+  (`echo ha; echo {1..3}`).
 - These refusals also reach some harmless commands where `ha` is not the program at all, for example
   `git commit -m "ha: fix $name supervisor link"` or `grep -rn "ha " $FILES | grep supervisor`. Write such a
   command without the `$` word, or run it outside Codex.

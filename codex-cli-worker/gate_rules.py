@@ -581,8 +581,23 @@ HA_UNKNOWN_FLAG_RE = re.compile(
 # The shell can then put the family word where the floor does not look.
 HA_UNREADABLE_WORD_RE = re.compile(
     _REDIRECTION_OPERATOR + r"\s*(?:\(|[^\s;<>]*[\"'\\])|[$`*?\[]|\{[^\s{}]*(?:,|\.\.)")
-# A word with a brace, which bash may expand into other words: s{u,} is su.
-HA_BRACE_WORD_RE = re.compile(r"[^\s;&|<>()]*\{[^\s;&|<>()]*")
+# A family word that the shell builds while it runs: a $ (s${x}u, $'\163u', s$""u), a
+# substitution or a glob (s[u] names /bin/su when the command runs in /bin). It is refused in the
+# family position whatever it could become, in both remote-control modes. A brace word is read
+# by the brace rule instead, which lists what bash makes of it.
+HA_COMPUTED_WORD_RE = re.compile(r"[$`*?\[]")
+# Where the shell ends a word outside quotes: a blank (a space, a tab or a newline; not a carriage
+# return or a form feed) or an operator character.
+_SHELL_WORD_BREAKS = " \t\n;&|<>()"
+_SHELL_WORD_PIECE_RE = re.compile(r"[^ \t\n;&|<>()]+")
+# Text that the plain quote reading below does not follow: ${...}, $(...), $'...' and $"..." can
+# hold quotes of their own (bash and dash read some of them differently), a backtick, a comment
+# and a heredoc. A text with any of them is cut at every blank and operator, quoted or not. A
+# plain variable ($x, $1) holds no quote and does not count.
+_BRACE_UNSURE_RE = re.compile(r"\$[{('\"]|[`#]|<<")
+# A brace word with one of these is refused: bash reads a quoted "," or "}" as a plain letter,
+# so {s,"x y"}u is "su" and "x yu", and the word ends where the quotes say, not at the blank.
+_BRACE_WORD_QUOTING_RE = re.compile(r"[\"'`\\]")
 
 _ALWAYS_FAMILY_NAMES = ("supervisor", "super", "su")
 _ANY_FAMILY_NAMES = _ALWAYS_FAMILY_NAMES + (
@@ -617,14 +632,54 @@ def _last_family_word(text: str, remote_on: bool) -> int:
     return last
 
 
+def _brace_words(text: str, after: int) -> list[str]:
+    """Return each word of the text that holds a brace bash may expand and ends after ``after``.
+
+    The text is read from its start, so a quote opened before ``after`` is known. Plain quotes
+    are followed as the shell follows them: a blank or an operator character ends a word only
+    outside quotes and when it is not escaped, so ``{s,"x y"}u`` is one word, and a brace inside
+    quotes is not an expansion (``jq '{a: .b}'``). A text with ``${``, ``$(``, ``$'``, ``$"``, a
+    backtick, a comment or a heredoc is cut at every blank and operator instead, quotes or not.
+    Each reading passes over the text once, so the time grows with its length only.
+    """
+    if _BRACE_UNSURE_RE.search(text):
+        return [piece.group() for piece in _SHELL_WORD_PIECE_RE.finditer(text)
+                if piece.end() > after and "{" in piece.group()]
+    words = []
+    word_start, quote, braced = 0, "", False
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if quote == "'":
+            quote = "" if ch == "'" else quote
+        elif ch == "\\":
+            i += 1
+        elif quote:
+            quote = "" if ch == quote else quote
+        elif ch in "'\"":
+            quote = ch
+        elif ch == "{":
+            braced = True
+        elif ch in _SHELL_WORD_BREAKS:
+            if braced and i > after:
+                words.append(text[word_start:i])
+            word_start, braced = i + 1, False
+        i += 1
+    if braced or (quote and "{" in text[word_start:]):
+        # A quote still open at the end: the reading lost its place, so the rest is one word.
+        words.append(text[word_start:])
+    return words
+
+
 def _brace_word_names_family(word: str, remote_on: bool) -> bool:
     """Say whether bash can expand a word with braces into a family word that this mode refuses.
 
-    A word with too many choices to list, or with a sequence such as {a..z}, counts as one.
+    It fails closed: a word with a quote, a backslash or a backtick, a sequence such as {a..z},
+    and a word with too many choices to list all count as one.
     """
-    if ".." in word:
+    if _BRACE_WORD_QUOTING_RE.search(word) or ".." in word:
         return True
-    choices = _brace_choices(re.sub(r"[\"'`\\]", "", word))
+    choices = _brace_choices(word)
     family = HA_ANY_FAMILY_WORD_RE if remote_on else HA_ALWAYS_WORD_RE
     return choices is None or any(family.search(choice) for choice in choices)
 
@@ -642,7 +697,8 @@ def _ha_unknown_flag(text: str, remote_on: bool) -> bool:
       with a ``$``, a backtick, a glob character or a brace expansion: refused when a family
       word that this mode refuses follows it (with remote control off, a Supervisor family;
       with it on, any family).
-    - A word with a brace after ha that bash can expand into such a family word (``s{u,}``).
+    - A word with a brace after the first ha that bash can expand into such a family word
+      (``s{u,}``), or that holds a quote, a backslash or a backtick (``{s,"x y"}u``).
 
     ``ha`` is looked for on each line, and the family word counts anywhere after the
     unreadable word, to the end of the command text: a quoted value, ``${...}``, ``$(...)`` and
@@ -674,8 +730,8 @@ def _ha_unknown_flag(text: str, remote_on: bool) -> bool:
             if unreadable and last_refused >= unreadable.start():
                 return True
         if first_ha >= 0:
-            for brace in HA_BRACE_WORD_RE.finditer(reading, first_ha):
-                if _brace_word_names_family(brace.group(), remote_on):
+            for brace in _brace_words(reading, first_ha):
+                if _brace_word_names_family(brace, remote_on):
                     return True
     return False
 
@@ -763,6 +819,11 @@ def _shell_words(text: str, punctuation: str) -> list[str]:
     return words
 
 
+# What a substitution becomes in the masked text. It keeps a $, so the family check below sees a
+# word that the shell builds while it runs (ha $(printf s)u info).
+SUBSTITUTION_MARK = "$SUBSTITUTION"
+
+
 def _shell_substitutions(text: str) -> tuple[str, list[str]]:
     """Mask literal shell substitutions while retaining their commands for inspection."""
     out, nested = [], []
@@ -790,11 +851,11 @@ def _shell_substitutions(text: str) -> tuple[str, list[str]]:
                     depth -= 1
                 end += 1
             if not depth:
-                nested.append(text[i + 2:end - 1]); out.append('SUBSTITUTION'); i = end; continue
+                nested.append(text[i + 2:end - 1]); out.append(SUBSTITUTION_MARK); i = end; continue
         if quote != "'" and ch == '`':
             end = text.find('`', i + 1)
             if end >= 0:
-                nested.append(text[i + 1:end]); out.append('SUBSTITUTION'); i = end + 1; continue
+                nested.append(text[i + 1:end]); out.append(SUBSTITUTION_MARK); i = end + 1; continue
         out.append(ch); i += 1
     return ''.join(out), nested
 
@@ -855,7 +916,10 @@ def _ha_family_index(segment: list[str], index: int) -> int:
 
 
 def _ha_supervisor_command(text: str, depth: int = 0) -> bool:
-    """Find literal Supervisor CLI aliases without executing shell text."""
+    """Find literal Supervisor CLI aliases without executing shell text.
+
+    A family word that the shell builds (``ha s${x}u info``) is refused too: it could be any family.
+    """
     if depth > 6:
         return False
     joined = _join_shell_continuations(text)
@@ -927,8 +991,13 @@ def _ha_supervisor_command(text: str, depth: int = 0) -> bool:
         if program != 'ha' or (segment[index].lower() != 'ha' and not segment[index].lower().endswith('/ha')):
             continue
         index = _ha_family_index(segment, index + 1)
-        if index < len(segment) and segment[index].lower() in HA_ALWAYS_FAMILIES:
-            return True
+        while index < len(segment):
+            if segment[index].lower() in HA_ALWAYS_FAMILIES or HA_COMPUTED_WORD_RE.search(segment[index]):
+                return True
+            # A brace word can expand to nothing (ha {,} su info), so the next word may be the family.
+            if "{" not in segment[index]:
+                break
+            index = _ha_family_index(segment, index + 1)
     return False
 
 

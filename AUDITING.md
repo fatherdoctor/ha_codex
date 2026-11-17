@@ -91,9 +91,20 @@ it off when a Supervisor family word follows. A redirection target with a quote,
 process substitution, or any word with a `$`, a backtick, a glob character or a brace expansion is refused when a
 family word that the mode refuses follows (`HA_UNREADABLE_WORD_RE`). "Follows" means anywhere later in the command
 text, not only on the line: a quoted word, `${...}` or `$(...)` can hold a newline (`_last_family_word`). The rule
-finds `ha` on lines that end at a newline only, as the shell's do. A brace word after `ha` that bash can expand
-into a family word (`s{u,}`) is refused too (`_brace_word_names_family`, using `_brace_choices`). This rule does not
-depend on the parsers or the floor. Tests: `tests/test_gate_quote.py` (`RedirectionTests`, with a print-only shell
+finds `ha` on lines that end at a newline only, as the shell's do. A brace word after the first `ha` that bash can
+expand into a family word (`s{u,}`) is refused too (`_brace_word_names_family`, using `_brace_choices`). It fails
+closed: a brace word with a quote, a backslash or a backtick (`{s,"x y"}u` is `su` in bash), a sequence (`{1..3}`)
+or more than 64 choices counts as a family word. `_brace_words` finds the words in one pass, so its time grows with
+the length of the text only. It follows plain quotes as the shell does, so a brace inside quotes does not count;
+in a text with `${`, `$(`, `$'`, a backtick, a `#` or a heredoc it cuts at every blank and operator instead,
+because quotes inside `${...}` and `$(...)` can make a plain reading lose its place. It reads from the start of the
+text, so a quote that opens before `ha` is known. This rule does not depend on the parsers or
+the floor.
+
+The family word itself must be one the shell does not build. `_ha_supervisor_command` refuses, in both modes, a
+family-position word with a `$`, a backtick or a glob character (`HA_COMPUTED_WORD_RE`): `ha s${x}u info`,
+`ha $'\163u' info` and `ha s[u] info` (from `/bin`) all run `ha su info`. The masked text keeps a `$` in place of
+each substitution (`SUBSTITUTION_MARK`), so `ha $(printf s)u info` is refused there too. Tests: `tests/test_gate_quote.py` (`RedirectionTests`, with a print-only shell
 control) and `tests/test_supervisor_corpus.py`, which runs every command in
 `tests/fixtures/supervisor_command_corpus.tsv` under bash and dash with a print-only `ha` and then asks the hook.
 To add a form, add a line to that corpus (its header says how) or to a tuple in `RedirectionTests`.

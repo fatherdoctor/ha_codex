@@ -17,8 +17,15 @@
 # quoted or escaped operators and targets, words that expand to nothing ($x, ${x:+}, $(...),
 # backticks, {,}, nullglob), line breaks Python reads and the shell does not (\r, \x0c, \x0b,
 # \x1c, \x85, U+2028), nested shells, wrappers, continuations and comments.
+# closer3-* and closer4-* are the third closure's two sets (quotes on the family word, words the shell
+# builds, braces with quoted blanks and operators, globs that match a file). Size: one long word or a
+# long command is in the timing tests of test_gate_quote.py, not here (the hook's answer must come in time).
 # n/a: Unicode look-alike letters (ha is a fixed ASCII program name; the shell does not fold them);
 # aliases and functions (DOCS names them as a limit: the check reads text, not shell state).
+# Left out on purpose, as limits DOCS states (the check cannot see a program that the command builds or that
+# another program runs): h${x}a su info, h$(:)a su info, {ha,su} info, {ha,su,info}, {ha,} su info,
+# echo su info | xargs ha, a base64 text piped into sh, python3 -c and perl -e that run ha, an alias,
+# IFS=,; x=ha,su,info; $x.
 reviewer-001	su:bash,dash	ha>/dev/null su info
 reviewer-002	su:bash,dash	ha</dev/null su info
 reviewer-003	su:bash,dash	ha>&2 su info
@@ -1133,3 +1140,377 @@ fuzz-897	su:bash	ha {,}\\\n su info
 fuzz-898	su:bash,dash	ha -{,} su info
 fuzz-899	none	ha {'',} su info
 fuzz-900	none	ha {,""} su info
+closer3-001	su:bash,dash	ha s\\u info
+closer3-002	su:bash,dash	ha "s"u info
+closer3-003	su:bash,dash	ha s''u info
+closer3-004	su:bash,dash	ha s"u" info
+closer3-005	su:bash,dash	ha 's'"u" info
+closer3-006	su:bash,dash	ha s\\\nu info
+closer3-007	su:bash,dash	ha \\\nsu info
+closer3-008	su:bash	ha $'su' info
+closer3-009	su:bash	ha $'s\\x75' info
+closer3-010	su:bash	ha $'\\163u' info
+closer3-011	su:bash	ha $"su" info
+closer3-012	su:bash,dash	ha "su" info
+closer3-013	su:bash,dash	ha su\tinfo
+closer3-014	su:bash,dash	ha\tsu info
+closer3-015	su:bash,dash	ha su info\r
+closer3-016	su:bash,dash	ha -- su info
+closer3-017	su:bash,dash	ha --log-level debug su info
+closer3-018	su:bash,dash	ha --log-level=debug su info
+closer3-019	su:bash,dash	ha ${x-su} info
+closer3-020	su:bash,dash	ha ${x:-su} info
+closer3-021	su:bash,dash	ha ${x:-s}u info
+closer3-022	su:bash,dash	ha ${x:-s}${x:-u} info
+closer3-023	su:bash,dash	ha "${x:-"su"}" info
+closer3-024	su:bash,dash	ha $(echo su) info
+closer3-025	su:bash,dash	ha $(printf s)u info
+closer3-026	su:bash,dash	ha `echo su` info
+closer3-027	su:bash,dash	ha su${IFS}info
+closer3-028	su:bash,dash	ha${IFS}su info
+closer3-029	su:bash,dash	ha$IFS'su' info
+closer3-030	su:bash,dash	ha$x su info
+closer3-031	su:bash,dash	ha${x} su info
+closer3-032	su:bash,dash	ha"" su info
+closer3-033	su:bash,dash	ha'' su info
+closer3-034	su:bash,dash	ha$() su info
+closer3-035	su:bash,dash	ha`` su info
+closer3-036	su:bash,dash	ha$(:) su info
+closer3-037	su:bash,dash	h''a su info
+closer3-038	su:bash,dash	h\\a su info
+closer3-039	su:bash,dash	\\ha su info
+closer3-040	su:bash,dash	"ha" su info
+closer3-041	su:bash,dash	'h'a su info
+closer3-042	su:bash	$'ha' su info
+closer3-043	su:bash,dash	h\\\na su info
+closer3-044	su:bash	ha {s,}u info
+closer3-045	su:bash	ha s{,}u info
+closer3-046	su:bash	ha {s..s}u info
+closer3-047	su:bash	ha {s..s}{u..u} info
+closer3-048	su:bash	ha {{s,},}u info
+closer3-049	su:bash	ha s{{u,},} info
+closer3-050	none	ha {1..0..5}su info
+closer3-051	remote:bash	ha {co,}re restart
+closer3-052	remote:bash	ha {,} {,} host reboot
+closer3-053	su:bash	ha {su,su} info
+closer3-054	su:bash,dash	ha -{x,} su info
+closer3-055	su:bash	ha {--raw-json,su} info
+closer3-056	su:bash	ha {"s","x"}u info
+closer3-057	su:bash	ha {s,x}"u" info
+closer3-058	su:bash,dash	touch su; ha s? info
+closer3-059	su:bash,dash	touch su; ha s[u] info
+closer3-060	su:bash,dash	touch su; ha s* info
+closer3-061	su:bash,dash	touch su; ha ?? info
+closer3-062	su:bash,dash	touch su; ha [s][u] info
+closer3-063	su:bash,dash	touch su; ha * info
+closer3-064	su:bash,dash	touch supervisor; ha s*r info
+closer3-065	remote:bash,dash	touch host; ha h??t reboot
+closer3-066	su:bash,dash	cd /bin && ha s[u] info
+closer3-067	su:bash,dash	touch su; ha s[!a] info
+closer3-068	su:bash,dash	touch su; ha s\\u* info
+closer3-069	su:bash,dash	touch su; ha "s"? info
+closer3-070	su:bash	shopt -s nullglob; ha /nonexistent/? su info
+closer3-071	su:bash	shopt -s nullglob; ha [zz]zz su info
+closer3-072	none	shopt -s extglob; touch su; ha @(su) info
+closer3-073	none	shopt -s extglob nullglob; ha @(zz) su info
+closer3-074	su:bash	ha &>/dev/null su info
+closer3-075	su:bash	ha >&/dev/null su info
+closer3-076	su:bash	ha &>>/dev/null su info
+closer3-077	su:bash,dash	ha >|/dev/null su info
+closer3-078	su:bash,dash	ha <>/dev/null su info
+closer3-079	su:bash,dash	ha 3<&- su info
+closer3-080	su:bash	ha <<<x su info
+closer3-081	su:bash,dash	ha >out1>out2 su info
+closer3-082	su:bash,dash	ha >out1 2>out2 <out1 su info
+closer3-083	su:bash,dash	ha > out1 su info
+closer3-084	su:bash,dash	ha >\\\nout1 su info
+closer3-085	su:bash,dash	ha >out\\ 1 su info
+closer3-086	su:bash,dash	ha >'out 1' su info
+closer3-087	su:bash,dash	ha >"out 1" su info
+closer3-088	su:bash,dash	ha >$'out\\n1' su info
+closer3-089	su:bash,dash	ha >"$(echo out)" su info
+closer3-090	su:dash	ha >out{1,} su info
+closer3-091	none	ha >~ su info 2>/dev/null
+closer3-092	su:bash,dash	ha \\\n  2>/dev/null \\\n su info
+closer3-093	su:bash,dash	2>/dev/null ha su info
+closer3-094	su:bash,dash	>out1 ha su info
+closer3-095	su:bash,dash	x=1 >out1 ha su info
+closer3-096	su:bash	<<<a ha su info
+closer3-097	su:bash	{fd}>out1 ha su info
+closer3-098	su:bash,dash	>&2 ha su info
+closer3-099	su:bash,dash	3<&0 ha su info
+closer3-100	su:bash,dash	>|out1 ha su info
+closer3-101	su:bash,dash	<>out1 ha su info
+closer3-102	su:bash,dash	1>out1 2>out2 ha su info
+closer3-103	su:bash,dash	x=1 y=2 ha su info
+closer3-104	su:bash,dash	x="a b" ha su info
+closer3-105	su:bash,dash	x=$(:) ha su info
+closer3-106	su:bash,dash	x='ha' ha su info
+closer3-107	su:bash,dash	ha su info>out1
+closer3-108	su:bash,dash	ha su>out1 info
+closer3-109	none	ha su<out1
+closer3-110	su:bash,dash	ha <<x su info\nbody\nx
+closer3-111	su:bash,dash	ha <<'x' su info\nbody\nx
+closer3-112	su:bash,dash	ha <<-x su info\n\tbody\n\tx
+closer3-113	su:bash,dash	ha <<x <<y su info\na\nx\nb\ny
+closer3-114	su:bash,dash	cat <<x; ha su info\nbody\nx
+closer3-115	su:bash,dash	cat <<"x"\nbody\nx\nha su info
+closer3-116	su:bash,dash	cat <<\\x\nbody\nx\nha su info
+closer3-117	su:bash,dash	cat <<x\n$(ha su info)\nx
+closer3-118	su:bash,dash	cat <<x\n`ha su info`\nx
+closer3-119	su:bash,dash	cat <<'x'\nbody\n x\nx\nha su info
+closer3-120	su:bash,dash	cat <<-x\n\tbody\n\tx\nha su info
+closer3-121	su:bash,dash	cat <<x\nbody\nx\nha su info
+closer3-122	su:bash,dash	cat <<x && ha su info\nbody\nx
+closer3-123	su:bash	cat <<<$(ha su info)
+closer3-124	su:bash	: <<x\n$(\nx\nha su info
+closer3-125	su:bash,dash	ha su info # c
+closer3-126	su:bash,dash	echo a #\nha su info
+closer3-127	su:bash,dash	echo a#b; ha su info
+closer3-128	su:bash,dash	echo \\# ; ha su info
+closer3-129	su:bash,dash	echo "#" ; ha su info
+closer3-130	su:bash,dash	echo '#' ; ha su info
+closer3-131	su:bash,dash	echo ${x#a}; ha su info
+closer3-132	su:bash,dash	echo $#; ha su info
+closer3-133	su:bash,dash	echo ${#x}; ha su info
+closer3-134	su:bash,dash	echo a #"\nha su info
+closer3-135	su:bash,dash	echo a #'\nha su info #'
+closer3-136	su:bash,dash	:&ha su info
+closer3-137	su:bash,dash	:|ha su info
+closer3-138	su:bash,dash	:;ha su info
+closer3-139	su:bash,dash	:&&ha su info
+closer3-140	none	:||ha su info
+closer3-141	su:bash,dash	(:)&&ha su info
+closer3-142	su:bash	:|&ha su info
+closer3-143	su:bash,dash	:\nha su info
+closer3-144	su:bash,dash	:\n\n\tha su info
+closer3-145	su:bash,dash	(ha su info)
+closer3-146	su:bash,dash	( ha su info )
+closer3-147	su:bash,dash	{ ha su info; }
+closer3-148	su:bash,dash	! ha su info
+closer3-149	su:bash,dash	if true; then ha su info; fi
+closer3-150	su:bash,dash	if false; then :; else ha su info; fi
+closer3-151	su:bash,dash	if ha su info; then :; fi
+closer3-152	su:bash,dash	while ha su info; do break; done
+closer3-153	su:bash,dash	until ha su info; do break; done
+closer3-154	su:bash,dash	for i in 1; do ha su info; done
+closer3-155	su:bash,dash	case x in x) ha su info;; esac
+closer3-156	su:bash,dash	case x in (x) ha su info;; esac
+closer3-157	su:bash,dash	case x in *)ha su info;esac
+closer3-158	su:bash,dash	f(){ ha su info; }; f
+closer3-159	su:bash	function f { ha su info; }; f
+closer3-160	su:bash,dash	f()(ha su info); f
+closer3-161	su:bash,dash	x=$(ha su info)
+closer3-162	su:bash,dash	echo $(ha su info)
+closer3-163	su:bash,dash	echo `ha su info`
+closer3-164	su:bash,dash	echo "$(ha su info)"
+closer3-165	su:bash,dash	echo "`ha su info`"
+closer3-166	su:bash	cat <(ha su info)
+closer3-167	su:bash,dash	echo ${x:-$(ha su info)}
+closer3-168	su:bash,dash	: "${x:=`ha su info`}"
+closer3-169	su:bash,dash	echo $(( $(ha su info >&2; echo 1) + 0 ))
+closer3-170	su:bash,dash	[[ $(ha su info) ]]
+closer3-171	su:bash,dash	[ "$(ha su info)" ]
+closer3-172	su:bash,dash	declare y=$(ha su info)
+closer3-173	su:bash	arr=($(ha su info))
+closer3-174	su:bash,dash	trap 'ha su info' EXIT
+closer3-175	su:bash,dash	echo x | ha su info
+closer3-176	su:bash,dash	ha su info &
+closer3-177	su:bash,dash	ha su info|cat
+closer3-178	su:bash,dash	ha su;info
+closer3-179	su:bash,dash	ha su&
+closer3-180	su:bash,dash	ha su|cat
+closer3-181	none	ha su)
+closer3-182	su:bash	coproc ha su info
+closer3-183	su:bash	time ha su info
+closer3-184	su:bash	time -p ha su info
+closer3-185	su:bash,dash	command ha su info
+closer3-186	su:bash,dash	exec ha su info
+closer3-187	su:bash	builtin command ha su info
+closer3-188	su:bash,dash	nice ha su info
+closer3-189	su:bash,dash	nice -n 5 ha su info
+closer3-190	su:bash,dash	nohup ha su info
+closer3-191	su:bash,dash	timeout 5 ha su info
+closer3-192	su:bash,dash	timeout -s KILL 5 ha su info
+closer3-193	su:bash,dash	setsid ha su info
+closer3-194	su:bash,dash	setsid -w ha su info
+closer3-195	su:bash,dash	stdbuf -o0 ha su info
+closer3-196	none	env -i PATH="$PATH" ha su info
+closer3-197	su:bash,dash	env -u x ha su info
+closer3-198	su:bash,dash	env x=1 ha su info
+closer3-199	su:bash,dash	env -S 'ha su info'
+closer3-200	su:bash,dash	env -- ha su info
+closer3-201	su:bash,dash	sh -c 'ha su info'
+closer3-202	su:bash,dash	bash -c "ha su info"
+closer3-203	su:bash,dash	dash -c 'ha su info'
+closer3-204	su:bash,dash	sh -c "ha s\\"\\"u info"
+closer3-205	su:bash,dash	sh -c 'ha "$@"' x su info
+closer3-206	su:bash,dash	bash -c 'ha $0 info' su
+closer3-207	su:bash,dash	eval ha su info
+closer3-208	su:bash,dash	eval 'ha su' info
+closer3-209	su:bash,dash	eval "ha s""u info"
+closer3-210	su:bash,dash	eval ha s\\\\u info
+closer3-211	su:bash,dash	eval "h""a su info"
+closer3-212	su:bash,dash	xargs ha su info </dev/null
+closer3-213	su:bash,dash	find . -maxdepth 0 -exec ha su info \\;
+closer3-214	none	find . -maxdepth 0 -exec ha su info +
+closer3-215	su:bash,dash	flock out1 ha su info
+closer3-216	su:bash,dash	script -qc 'ha su info' /dev/null
+closer3-217	none	busybox sh -c 'ha su info'
+closer3-218	su:bash,dash	. /dev/stdin <<x\nha su info\nx
+closer3-219	su:bash	source /dev/stdin <<<'ha su info'
+closer3-220	su:bash,dash	bash <<x\nha su info\nx
+closer3-221	su:bash	sh <<<'ha su info'
+closer3-222	su:bash,dash	echo 'ha su info' | sh
+closer3-223	su:bash,dash	echo ha su info | bash
+closer3-224	su:bash,dash	printf 'ha su info\\n' | sh -s
+closer3-225	su:bash,dash	python3 -c 'import os; os.system("ha su info")'
+closer3-226	su:bash,dash	awk 'BEGIN{system("ha su info")}'
+closer3-227	su:bash,dash	echo 'a\\'; ha su info; echo 'b'
+closer3-228	su:bash,dash	echo "a\\\\"; ha su info; echo "b"
+closer3-229	su:bash	echo $'a\\'b'; ha su info
+closer3-230	su:bash,dash	echo $'a\\\\'; ha su info; echo 'b'
+closer3-231	su:bash,dash	echo "$(echo ")")"; ha su info
+closer3-232	su:bash,dash	echo ${x:-'}'}; ha su info
+closer3-233	su:bash,dash	echo a \\\\; ha su info
+closer3-234	su:bash	: $'\\'' ; ha su info ; : $'\\''
+closer3-235	su:bash,dash	echo "a'b"; ha su info; echo "c'd"
+closer3-236	su:bash,dash	echo 'a"b'; ha su info; echo 'c"d'
+closer3-237	su:bash,dash	echo \\"; ha su info; echo \\"
+closer3-238	su:bash,dash	echo \\'; ha su info; echo \\'
+closer3-239	su:bash	echo "a`echo \\"`"; ha su info
+closer3-240	su:bash,dash	echo $(echo \\)); ha su info
+closer3-241	su:bash,dash	echo $((1)); ha su info
+closer3-242	su:bash,dash	echo "${x:-"}"}"; ha su info
+closer3-243	su:bash,dash	echo "a\\\nb"; ha su info
+closer3-244	su:bash,dash	echo 'a\nb'; ha su info
+closer3-245	su:bash,dash	echo "a\n"; ha su info; echo "\nb"
+closer3-246	remote:bash,dash	ha ho''st reboot
+closer3-247	remote:bash	ha $'host' reboot
+closer3-248	remote:bash,dash	ha c\\ore restart
+closer3-249	remote:bash,dash	ha >out1 core restart
+closer3-250	remote:bash,dash	ha ${x:+\\\n} core restart
+closer3-251	remote:bash	ha {,} os info
+closer3-252	remote:bash,dash	ha "addons" info
+closer3-253	remote:bash,dash	ha back''ups new
+closer3-254	remote:bash,dash	ha 2>&1 network info
+closer3-255	none	echo "ha su info"
+closer3-256	none	echo 'ha su info'
+closer3-257	none	: 'x' # ha su info
+closer3-258	none	cat <<'x'\nha su info\nx
+closer3-259	none	cat <<x\nha su info\nx
+closer3-260	none	echo ha; echo su
+closer3-261	none	ha --help
+closer3-262	remote:bash,dash	ha core info
+closer3-263	none	git log --grep="ha su"
+closer3-264	none	grep su ha.txt
+closer3-265	none	ls ha su 2>/dev/null
+closer3-266	none	printf '%s\\n' "ha su info" >out1
+closer4-001	su:bash	ha {s,"x y"}u info
+closer4-002	su:bash	ha {s,x\\ y}u info
+closer4-003	su:bash	ha {s,'x;y'}u info
+closer4-004	su:bash	ha {s,"x&y"}u info
+closer4-005	su:bash	ha {s,"x|y"}u info
+closer4-006	su:bash	ha {s,"x>y"}u info
+closer4-007	su:bash	ha {s,"x(y"}u info
+closer4-008	none	ha {"a b",s}u info
+closer4-009	su:bash	ha {s,"a b"}{u,"c d"} info
+closer4-010	su:bash	ha s{u,"a b"} info
+closer4-011	su:bash	ha {su,"a b"} info
+closer4-012	none	ha {"a b",su} info
+closer4-013	su:bash	ha {s,"a\tb"}u info
+closer4-014	su:bash	ha {s,"a\nb"}u info
+closer4-015	remote:bash	ha {ho,"a b"}st reboot
+closer4-016	none	ha {"a b",}{s,}u info
+closer4-017	su:bash	ha {s,a\\;b}u info
+closer4-018	none	ha {s\\,,s}u info
+closer4-019	su:bash	ha {s,}{u,} info
+closer4-020	none	ha {,s}{,u} info
+closer4-021	none	ha {x,}{,su} info
+closer4-022	none	ha {{,s},}{u,{u,}} info
+closer4-023	none	ha {a,b,c,d,e,f,g,h,i}{a,b,c,d,e,f,g,h,i}{s,}u info
+closer4-024	su:bash	ha {s,$x}u info
+closer4-025	su:bash	ha {s,}$x''u info
+closer4-026	su:bash,dash	ha s${x}u info
+closer4-027	su:bash,dash	ha s$()u info
+closer4-028	su:bash,dash	ha s$@u info
+closer4-029	su:bash,dash	ha s$*u info
+closer4-030	su:bash,dash	ha s$1u info
+closer4-031	su:bash	ha s$''u info
+closer4-032	su:bash	ha s$""u info
+closer4-033	su:bash,dash	ha s`:`u info
+closer4-034	su:bash	ha {,} s${x}u info
+closer4-035	su:bash,dash	ha $x s$@u info
+closer4-036	su:bash,dash	x=su; ha $x info
+closer4-037	su:bash,dash	x=su ; ha "$x" info
+closer4-038	su:bash,dash	set -- su info; ha "$@"
+closer4-039	su:bash,dash	set -- su; ha $1 info
+closer4-040	su:bash,dash	read a <<x\nsu\nx\nha $a info
+closer4-041	su:bash,dash	ha --config >out1 x su info
+closer4-042	su:bash,dash	ha --log-level 2>&1 debug su info
+closer4-043	su:bash,dash	ha --config=>out1 su info
+closer4-044	su:bash,dash	ha -- >out1 su info
+closer4-045	su:bash,dash	ha --raw-json>out1 su info
+closer4-046	su:bash,dash	ha --raw-json su info
+closer4-047	su:bash,dash	ha --no-progress su info
+closer4-048	su:bash,dash	ha --unknown-flag su info
+closer4-049	su:bash,dash	ha -abc su info
+closer4-050	su:bash,dash	ha --raw-json=true su info
+closer4-051	su:bash,dash	ha --api-token=x su info
+closer4-052	su:bash,dash	ha --api-token x su info
+closer4-053	su:bash,dash	ha --log-level debug --raw-json --config=/x su info
+closer4-054	su:bash,dash	ha >a,b su info
+closer4-055	su:bash,dash	ha >{a} su info
+closer4-056	su:bash,dash	ha >a=b su info
+closer4-057	su:bash,dash	ha >-x su info
+closer4-058	su:bash,dash	ha >--config su info
+closer4-059	su:bash,dash	ha > --config su info
+closer4-060	su:bash,dash	ha >--log-level su info
+closer4-061	su:bash,dash	ha >-- su info
+closer4-062	su:bash,dash	ha >&2 su info
+closer4-063	su:bash,dash	ha >& 2 su info
+closer4-064	su:bash,dash	ha >&- su info
+closer4-065	su:bash	ha >& out1 su info
+closer4-066	su:bash	ha >&out1 su info
+closer4-067	su:bash	ha &> out1 su info
+closer4-068	su:bash,dash	ha <& 0 su info
+closer4-069	su:bash	ha <<< x su info
+closer4-070	su:bash	ha <<<x<<<y su info
+closer4-071	su:bash,dash	ha << x su info\nb\nx
+closer4-072	su:bash,dash	ha <<x</dev/null su info\nx
+closer4-073	su:bash,dash	ha <<x\\y su info\nxy
+closer4-074	su:bash,dash	ha 2>&1 >/dev/null </dev/null 3>&1 4<&0 >>o <>p >|q su info
+closer4-075	su:bash	ha {v}>&1 su info
+closer4-076	remote:bash,dash	ha 2>&1 >out1 host reboot
+closer4-077	remote:bash,dash	ha --config >out1 x core restart
+closer4-078	su:bash	echo $'a\\'' ; ha 2>&1 su info
+closer4-079	su:bash,dash	echo "a\\"" & ha 2>&1 su info
+closer4-080	su:bash,dash	echo '>' '&' ; ha 2>&1 su info
+closer4-081	su:bash,dash	echo ">"& ha 2>&1 su info
+closer4-082	su:bash,dash	echo \\>& ha 2>&1 su info
+closer4-083	su:bash,dash	echo \\> & ha 2>&1 su info
+closer4-084	su:bash,dash	echo ">"\\& ha 2>&1 su info ; ha 2>&1 su info
+closer4-085	su:bash,dash	echo "<" & ha <&0 su info
+closer4-086	su:bash,dash	echo ">" | ha >|out1 su info
+closer4-087	su:bash	echo "&" > out1 ; ha &>out2 su info
+closer4-088	su:bash,dash	echo a >"&" ; ha 2>&1 su info
+closer4-089	su:bash,dash	echo ">" & ha 2>&1 >"a\nb" super info
+closer4-090	su:bash	echo '2>' & ha 2>&1 {,} su info
+closer4-091	su:bash,dash	echo ">>" & ha 2>&1 $x su info
+closer4-092	su:bash	ha 2>&1 \\\n {,} \\\n su info
+closer4-093	su:bash,dash	ha $x\\\n\\\n su info
+closer4-094	none	:\rha {,} su info
+closer4-095	none	echo a\x0cha {,} su info
+closer4-096	none	ha {,}\x0bsu info
+closer4-097	su:bash	ha --config "a\nb" {,} su info
+closer4-098	su:bash	ha >"a\nb" {,} su info
+closer4-099	none	echo ha; echo {1..3}
+closer4-100	none	grep ha notes.txt; for i in {1..3}; do echo $i; done
+closer4-101	none	cat ha.json | jq '{name:.su}'
+closer4-102	remote:bash,dash	ha core logs | grep -c "supervisor.*error"
+closer4-103	remote:bash,dash	ha core logs | grep -i '[s]upervisor'
+closer4-104	remote:bash,dash	ha core logs | grep supervisor
+closer4-105	remote:bash,dash	ha core info > out1
+closer4-106	remote:bash,dash	ha core info --raw-json | jq '.data'
+closer4-107	none	ls *.yaml | grep ha ; echo su
+closer4-108	none	echo "ha" ; ls /sys/class/net/*
