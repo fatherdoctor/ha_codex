@@ -987,6 +987,39 @@ class RedirectionTests(unittest.TestCase):
                 self.assertIn('Supervisor', refusal(command, False))
         self.assertEqual(refusal("printf $'a\\tb\\n'", False), '')
 
+    def test_an_empty_quoted_flag_value_keeps_the_family_position(self) -> None:
+        """K3: alone, "" or '' is a word to the shell, so here it is the flag's value."""
+        for word in ('s${x}u', 's`:`u', 's$(:)u'):
+            for command in (f'while ha --log-level "" {word} info; do break; done',
+                            f'setsid ha --log-level "" {word} info',
+                            f'if false; then :; else ha --log-level "" {word} info; fi',
+                            f"while ha --config '' {word} info; do break; done",
+                            f'while ha --config ""\t{word} info; do break; done'):
+                with self.subTest(command=command):
+                    self.assertIn('Supervisor', refusal(command, False))
+        self.assertEqual(gate_rules._keep_quoted_blanks('ha --log-level "" s'), 'ha --log-level _ s')
+        # Joined to a word, an empty pair adds nothing: ha'' is the word ha.
+        self.assertEqual(gate_rules._keep_quoted_blanks("ha'' --config 'a b' s"), 'ha --config a_b s')
+        self.assertIn('Supervisor', refusal("while ha'' --config \"a b\" s${x}u info; do break; done", False))
+
+    def test_each_line_of_the_sixth_round_has_a_form_that_needs_it(self) -> None:
+        """K5: the continuation and redirection steps each change an answer."""
+        # The brace word for a second shell, joined over a continuation: eval reads s{u,}.
+        self.assertIn('Supervisor', refusal('eval ha s\\{u\\\n,\\} info', False))
+        # A redirection joined to ha, read with the quoted blanks kept.
+        self.assertIn('Supervisor', refusal('while ha>"a b" s${x}u info; do break; done', False))
+        # The same with the kept reading off (an apostrophe in a comment): the other reading needs it.
+        self.assertIn('Supervisor', refusal("echo x # it's\nwhile ha>/dev/null s${x}u info; do break; done", False))
+        # With the kept reading off, only the reading without continuations joins s and ${x}u.
+        self.assertTrue(gate_rules._ha_built_family_word("echo x # it's\nwhile ha s\\\n${x}u info; do break; done"))
+
+    def test_many_dash_ha_words_stay_fast(self) -> None:
+        """K6: letters ha after a dash do not start a floor match, so many -ha words stay linear."""
+        command = 'echo ' + ' '.join(['-ha'] * 10_000)
+        started = time.monotonic()
+        self.assertEqual(refusal(command, True), '')
+        self.assertLess(time.monotonic() - started, 3)
+
     def test_brace_word_time_stays_flat_on_one_long_word(self) -> None:
         """G2: the brace words are read in one pass, so one long word after ha stays fast."""
         for text in ('ha ' + 'a' * 200_000, 'ha $x ' + 'a' * 200_000, 'ha ' + '{a' * 100_000,

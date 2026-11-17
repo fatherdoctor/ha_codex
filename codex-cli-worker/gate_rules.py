@@ -566,7 +566,7 @@ _HA_BEFORE_FAMILY_TEXT = (
     + r"|-(?!" + _HA_VALUE_FLAG_AFTER_DASH + r"(?:[=\s]|$))\S+"
     + r"|" + _HA_REDIRECTION_TEXT
     + r")\s+)*")
-HA_TEXT_PREFIX = r"\bha\s+" + _HA_BEFORE_FAMILY_TEXT
+HA_TEXT_PREFIX = r"(?<!-)\bha\s+" + _HA_BEFORE_FAMILY_TEXT
 HA_REMOTE_TEXT_RE = re.compile(
     HA_TEXT_PREFIX + r"(?:add-?ons?|host|os|core|hardware|network|backups?|apps)\b", re.IGNORECASE)
 # The always-refused families get the same floor whether or not remote control is on.
@@ -862,9 +862,13 @@ def _keep_quoted_blanks(text: str) -> str:
     """Remove quotes and backslashes, and write each quoted or escaped blank or operator as ``_``.
 
     The shell keeps ``"a b"`` and ``a\\ b`` as one word. Without its quotes the text would read
-    as two words, and the family position would move by one.
+    as two words, and the family position would move by one. An empty pair of quotes that stands
+    alone (``""`` or ``''`` between blanks) is an empty word to the shell, so it is written as
+    ``_`` too: in ``ha --log-level "" s${x}u info`` it is the flag's value. Joined to a word
+    (``ha''``) it adds nothing.
     """
-    out, quote, i = [], "", 0
+    out, quote, opened_at, i = [], "", 0, 0
+    alone = False
     while i < len(text):
         ch = text[i]
         if ch == "\\" and quote != "'" and i + 1 < len(text):
@@ -875,7 +879,12 @@ def _keep_quoted_blanks(text: str) -> str:
             i += 2
             continue
         if ch in "'\"" and quote in ("", ch):
+            if not quote:
+                alone = i == 0 or text[i - 1] in _SHELL_WORD_BREAKS
+            elif alone and len(out) == opened_at and (i + 1 == len(text) or text[i + 1] in _SHELL_WORD_BREAKS):
+                out.append("_")
             quote = "" if quote else ch
+            opened_at = len(out)
         elif quote and ch in _SHELL_WORD_BREAKS:
             out.append("_")
         else:

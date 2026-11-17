@@ -7,7 +7,10 @@ A shell may give a family where none was recorded: the answer can depend on the 
 has no ``time`` keyword, so ``time ha ...`` runs only where a ``time`` program is installed).
 Then the hook is held to the stricter answer. A command that ran a Supervisor family must be
 refused in both remote-control modes; one that ran only a remote family must be refused with
-remote control on. The corpus header says how to add a case.
+remote control on. A case marked as a stated limit (``su-limit``, ``remote-limit``) is one that
+DOCS.md names as out of the check's reach: the shells must still run it, and the hook must still
+let it pass, so a limit that the hook comes to refuse is moved to ``su`` or ``remote`` and the
+texts are changed with it. The corpus header says how to add a case.
 """
 
 from __future__ import annotations
@@ -85,6 +88,19 @@ def shells_answer(command: str, folder: Path, work: Path) -> dict[str, str]:
     return received
 
 
+def stated_limit(expect: str) -> str | None:
+    """Return su or remote for a case marked as a stated limit, or None for any other case."""
+    kind = expect.split(":")[0]
+    return kind.removesuffix("-limit") if kind.endswith("-limit") else None
+
+
+def missed(command: str, kind: str) -> bool:
+    """Say whether the hook lets a command of this kind pass where it must refuse it."""
+    if kind == "su":
+        return not (refused(command, False) and refused(command, True))
+    return kind == "remote" and not refused(command, True)
+
+
 def kind_of(families: list[str]) -> str:
     """Return su, remote or none for the families that the shells ran."""
     if any(family in ALWAYS_FAMILIES for family in families):
@@ -105,13 +121,14 @@ def refused(command: str, remote_on: bool) -> bool:
 class SupervisorCorpusTests(unittest.TestCase):
     def test_the_corpus_has_cases_of_each_kind(self) -> None:
         kinds = [expect.split(":")[0] for _, expect, _ in load_corpus()]
+        self.assertLessEqual(set(kinds), {"su", "remote", "none", "su-limit", "remote-limit"})
         for kind in ("su", "remote", "none"):
             with self.subTest(kind=kind):
                 self.assertGreater(kinds.count(kind), 20)
 
     @unittest.skipUnless(all(shutil.which(shell) for shell in SHELLS), "needs bash and dash")
     def test_the_shells_give_the_recorded_answer_and_the_hook_refuses(self) -> None:
-        wrong, missed = [], []
+        wrong, passed = [], []
         with tempfile.TemporaryDirectory() as stub_folder, tempfile.TemporaryDirectory() as work_folder:
             folder = Path(stub_folder)
             (folder / "ha").write_text(STUB, encoding="utf-8")
@@ -119,27 +136,28 @@ class SupervisorCorpusTests(unittest.TestCase):
             for case_id, expect, command in load_corpus():
                 received = shells_answer(command, folder, Path(work_folder))
                 recorded_kind, _, recorded_shells = expect.partition(":")
+                recorded_kind = stated_limit(expect) or recorded_kind
                 for shell in filter(None, recorded_shells.split(",")):
                     if kind_of([received[shell]] if shell in received else []) != recorded_kind:
                         wrong.append(f"{case_id}: {shell} recorded {recorded_kind}, gave {received.get(shell)}")
-                kind = stricter(recorded_kind, kind_of(list(received.values())))
-                if kind == "su" and not (refused(command, False) and refused(command, True)):
-                    missed.append(case_id)
-                if kind == "remote" and not refused(command, True):
-                    missed.append(case_id)
+                if stated_limit(expect):
+                    continue
+                if missed(command, stricter(recorded_kind, kind_of(list(received.values())))):
+                    passed.append(case_id)
         self.assertEqual(wrong, [])
-        self.assertEqual(missed, [])
+        self.assertEqual(passed, [])
 
     def test_the_hook_refuses_each_recorded_hostile_case(self) -> None:
         """The same check from the recorded answers alone, for a machine without bash or dash."""
-        missed = []
-        for case_id, expect, command in load_corpus():
-            kind = expect.split(":")[0]
-            if kind == "su" and not (refused(command, False) and refused(command, True)):
-                missed.append(case_id)
-            if kind == "remote" and not refused(command, True):
-                missed.append(case_id)
-        self.assertEqual(missed, [])
+        passed = [case_id for case_id, expect, command in load_corpus()
+                  if not stated_limit(expect) and missed(command, expect.split(":")[0])]
+        self.assertEqual(passed, [])
+
+    def test_each_stated_limit_still_passes(self) -> None:
+        """A stated limit that the hook now refuses is no longer a limit: move it and change the texts."""
+        refused_now = [case_id for case_id, expect, command in load_corpus()
+                       if stated_limit(expect) and not missed(command, stated_limit(expect))]
+        self.assertEqual(refused_now, [])
 
 
 if __name__ == "__main__":

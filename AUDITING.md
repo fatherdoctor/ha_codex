@@ -102,8 +102,11 @@ words in one pass, so its time grows with the length of the text only. It follow
 and reads the text inside each pair of quotes again as a command of its own (`_quoted_brace_words`, at most
 `_BRACE_QUOTE_DEPTH` deep), because a second shell can run it: `bash -c 'ha s{u,} info'`, `eval ha '{s,x}u' info`,
 `trap '...' EXIT`, a pipe into `bash`. Each pair of quotes is read alone there, so `_ha_floor_brace_word` reads the
-brace words once more in the text with every quote and backslash removed, which is what a second shell reads:
-`eval ha s\{u,\} info` and `bash -c 'ha s{u,'"} info"` both become `ha s{u,} info`. In a text with `${`, `$(`, `$'`, a backtick, a `#` or a heredoc it cuts at every blank and operator instead,
+brace words once more in the text with every quote and backslash removed: `eval ha s\{u,\} info` and
+`bash -c 'ha s{u,'"} info"` both reach a second shell as `ha s{u,} info`. This is what the second shell reads
+only when the first shell leaves it no quote of its own: a brace word with an escaped brace and a quote kept for
+the second shell (`eval ha \{-x'" y"',s}u info`) is cut there at the quoted blank and not seen, a limit DOCS.md
+states. In a text with `${`, `$(`, `$'`, a backtick, a `#` or a heredoc it cuts at every blank and operator instead,
 because quotes inside `${...}` and `$(...)` can make a plain reading lose its place. It reads from the start of the
 text, so a quote that opens before `ha` is known. This rule does not depend on the parsers or
 the floor.
@@ -118,13 +121,23 @@ every word `ha` in the text (not right after a dash: `ls -ha` is a flag group), 
 stand before `ha` (`while`, `setsid`, `coproc`, `function f {`). It reads the text twice: as the floor reads it
 (quotes and backslashes removed, backticks kept), and with each quoted or escaped blank kept inside its word
 (`_keep_quoted_blanks`), because without its quotes `--config "a b"` reads as two words and the family position
-moves by one. It steps over the same
+moves by one. That reading writes an empty pair of quotes that stands alone as a word too
+(`--log-level ""`). It follows quotes through the whole text and does not know a comment, a heredoc body or a
+substitution: an odd quote in one of them (`echo x # it's`) turns every later blank into a quoted one, and the
+reading then finds no word `ha` after it. DOCS.md states this limit, with a built family word in a nested
+backtick and the program word in the `$'...'` form. Substitutions nested more than six deep are not read further:
+the command is refused when it holds the word `ha` (`_ha_built_family_word`, `depth`). It steps over the same
 flags, flag values and redirections as the floor (`_HA_BEFORE_FAMILY_TEXT`), and over a brace word, which can
 expand to nothing. A script in bash's `$'...'` form with a backslash escape is refused in a text with the word `ha`
 (`ANSI_C_ESCAPE_RE`, in `check_tool_call`): no reading here decodes the escapes, and `bash -c $'ha \x73u info'` runs
-`ha su info`. Tests: `tests/test_gate_quote.py` (`RedirectionTests`, with a print-only shell
+`ha su info`. This rule and the floor's `\bha` do not start at letters `ha` right after a dash (`HA_TEXT_PREFIX`,
+`_HA_WORD_TEXT_RE`), so `ls -ha` is allowed and many `-ha` words do not make the floor's time grow with the square
+of their number. Two harmless commands are refused on purpose: `ha core info | jq '{a: .b}' # note` (a quoted
+brace word in a text with a comment) and `printf $'a\tb'; ha core info` (a `$'...'` escape beside `ha`). Tests: `tests/test_gate_quote.py` (`RedirectionTests`, with a print-only shell
 control) and `tests/test_supervisor_corpus.py`, which runs every command in
 `tests/fixtures/supervisor_command_corpus.tsv` under bash and dash with a print-only `ha` and then asks the hook.
+Its `su-limit` and `remote-limit` cases are the stated limits: the shells still run them and the hook still lets
+them pass, so a limit that the hook comes to refuse fails a test until it is moved and the texts are changed.
 To add a form, add a line to that corpus (its header says how) or to a tuple in `RedirectionTests`.
 
 (*) The shell text is split by one copy of the code, `shell_words.py` (`strip_comments`, `split_words`), which
