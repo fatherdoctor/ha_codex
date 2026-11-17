@@ -44,8 +44,24 @@ GUARD_LINES = {
 }
 
 
+# The refusal Codex passes on to the owner, so the turn does not end as "approval is unavailable".
+SECURITY_OFF = ('The Security and people group is off, so this action was not done. Tell the owner they can turn '
+                'that group on in Settings > Permissions overrides and then ask again.')
+
+
 class ApprovalRequired(ValueError):
     """Fixed, worker-authored explanation; never a backend response or exception string."""
+
+
+class OwnerCanAllow(ApprovalRequired):
+    """A refusal that the owner may lift for this one action from the chat.
+
+    Two checks raise it: a group that is off, and service data that is not on the allow-list.
+    Engine.dispatch offers it to the owner only for a device action (operation "service") outside
+    the security group, and only after every other check of that action has passed.
+    Every other refusal (guard rails, targets, credentials, templates, launch permissions)
+    stays a refusal the owner cannot lift here.
+    """
 
 
 @dataclass(frozen=True)
@@ -173,6 +189,15 @@ def operation_group(operation, service=None):
     return 'bigger'
 
 
+def owner_question(request):
+    """The exact device action, in the words and data the owner reads before Allow once."""
+    service, target, data = request.get('service'), request.get('target'), request.get('data', {})
+    detail = {'service': service, 'target': target, 'data': data}
+    return {'what': f'Run the Home Assistant action {service}.',
+            'where': json.dumps(target, sort_keys=True) + '.',
+            'detail': json.dumps(detail, indent=2, sort_keys=True)}
+
+
 class Engine:
     """Verify the direct action before a single write; backend failures never auto-retry."""
     def __init__(self, settings, backend, guards, observer):
@@ -182,14 +207,22 @@ class Engine:
         self.observer = observer
         self.lock = threading.RLock()
 
-    def dispatch(self, request, authority, still_active=lambda: True):
+    def dispatch(self, request, authority, still_active=lambda: True, owner_allowed=False, offer_owner=False):
+        """Check and perform one action.
+
+        owner_allowed is True only after the owner pressed Allow once for this same request in
+        the chat; it lifts the two OwnerCanAllow checks and nothing else. With offer_owner, a
+        device action that only those checks refused comes back with an owner_question for the
+        caller to show; the caller then dispatches the same request again, checked in full.
+        """
         operation = request.get('operation') if isinstance(request, dict) else None
         operation = operation if operation in OPERATIONS else 'unknown'
         started = time.monotonic()
         group = 'unknown'
+        approved = 'owner_allowed' if owner_allowed else 'preapproved'
         def event(outcome):
             return {'operation': operation, 'group': group, 'outcome': outcome,
-                    'decision': 'preapproved' if outcome in ('requested', 'completed', 'unknown') else 'refused',
+                    'decision': approved if outcome in ('requested', 'completed', 'unknown') else 'refused',
                     'duration_seconds': time.monotonic() - started}
         def final_event(outcome):
             try:
@@ -205,10 +238,14 @@ class Engine:
                     raise ApprovalRequired('Unsupported action fields; request normal approval.')
                 bounded_json(request, 1024 * 1024)
                 group = operation_group(operation, request.get('service'))
+                # Allow once is only ever for a device action outside the security group; the caller
+                # is not trusted to keep to that.
+                if owner_allowed and (operation != 'service' or group == 'security'):
+                    raise ApprovalRequired('Allow once does not apply to this action; request normal approval.')
                 groups = self.settings.read()
                 rules = guard_rules(self.guards())
                 checks = set()
-                plan = self.plan(request, groups, rules, checks)
+                plan = self.plan(request, groups, rules, checks, owner_allowed)
                 group = plan['group']
                 def recheck_authorization():
                     if (not still_active() or groups != self.settings.read()
@@ -228,6 +265,12 @@ class Engine:
                 result = self.backend.execute(plan)
             except ApprovalRequired as exc:
                 final_event('unknown' if started_write else 'refused')
+                # Security actions never ask: their data can hold a lock or alarm code, and the
+                # owner keeps that group off on purpose.
+                if (offer_owner and not started_write and isinstance(exc, OwnerCanAllow)
+                        and operation == 'service' and group != 'security'):
+                    return {'ok': False, 'approval_required': True, 'reason': str(exc),
+                            'owner_question': owner_question(request)}
                 if started_write:
                     return {'ok': False, 'approval_required': False, 'do_not_retry': True,
                             'reason': 'The action outcome is unknown. Check its state before any further action; do not retry automatically.'}
@@ -242,9 +285,14 @@ class Engine:
                     'answer_instruction': 'Name this pre-approved action in your answer.'}
 
 
-    def allowed(self, group, groups):
-        if not groups[group]:
-            raise ApprovalRequired('This action group is off; request normal approval.')
+    def allowed(self, group, groups, owner_allowed=False):
+        if groups[group]:
+            return
+        if group == 'security':
+            # Never liftable: the data of these actions can hold a code. Only the owner's setting opens it.
+            raise ApprovalRequired(SECURITY_OFF)
+        if not owner_allowed:
+            raise OwnerCanAllow('This action group is off; request normal approval.')
 
     def targets(self, selector, domain=None):
         rows = self.backend.resolve(selector, service_domain=domain)
@@ -265,12 +313,21 @@ class Engine:
         if domain in rules or ('external' in rules and domain in SECURITY):
             raise ApprovalRequired('Owner guard rails restrict this action; request normal approval.')
 
-    def effect(self, service, selector, data, groups, rules, checks):
+    def effect(self, service, selector, data, groups, rules, checks, owner_allowed=False):
         """Judge this service and its direct targets, never the owner's downstream setup."""
         bounded_json(data)
         group = service_group(service)
-        self.allowed(group, groups)
-        self.backend.validate_service(service, data)
+        # An owner-liftable refusal waits until every other check has passed, so the owner is
+        # only ever asked about an action that nothing else refuses.
+        liftable = None
+        try:
+            self.allowed(group, groups, owner_allowed)
+        except OwnerCanAllow as exc:
+            liftable = exc
+        try:
+            self.backend.validate_service(service, data, owner_allowed)
+        except OwnerCanAllow as exc:
+            liftable = liftable or exc
         domain = service.split('.')[0]
         if domain == 'script' and service != 'script.turn_on':
             selector = [service]
@@ -278,10 +335,12 @@ class Engine:
         targets = [] if domain in ('notify', 'persistent_notification') else self.targets(selector, domain)
         if any(target.split('.')[0] != domain for target in targets):
             raise ApprovalRequired('The service and target domains disagree; request normal approval.')
+        if liftable is not None:
+            raise liftable
         checks.update(targets)
         return targets
 
-    def plan(self, request, groups, rules, checks):
+    def plan(self, request, groups, rules, checks, owner_allowed=False):
         operation = request['operation']
         target, data = request.get('target'), request.get('data', {})
         if not isinstance(data, dict):
@@ -289,8 +348,8 @@ class Engine:
         group = operation_group(operation, request.get('service'))
         if operation == 'service':
             service = request.get('service')
-            targets = self.effect(service, target, data, groups, rules, checks)
-            self.backend.validate_service(service, data)
+            targets = self.effect(service, target, data, groups, rules, checks, owner_allowed)
+            self.backend.validate_service(service, data, owner_allowed)
             return {'operation': operation, 'group': service_group(service), 'service': service, 'target': targets, 'data': data,
                     'description': service + (' for ' + ', '.join(targets) if targets else '')}
         if 'service' in request:

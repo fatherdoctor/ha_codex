@@ -157,6 +157,8 @@ In **Settings** > **Permissions overrides**, an administrator turns five groups 
   normal permission card.
 - A group judges the service and the things it directly targets. What a scene or a script does next is your own setup.
 - Unknown limits, templated values, mixed targets and missing data fall back to the normal permission card.
+- A device action that a group that is off, or a data field the tool does not accept, refuses, and that passes every
+  other check, asks you in the chat with **Allow once** and **Deny**. Security and people actions never ask this way.
 - A successful action is named in the answer, and the event is recorded before the action runs.
 
 You can add limits in a marked block in `/config/AGENTS.md`. If the block changes, all groups pause until an

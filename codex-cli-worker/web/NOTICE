@@ -1,0 +1,8 @@
+Third-party material in the chat page
+
+Material Design Icons (https://github.com/Templarian/MaterialDesign-JS, package @mdi/js 7.4.47)
+Used: the paths mdiChevronRight and mdiChevronDown, inlined in web/assets/chat.css and web/index.html.
+License: Apache License 2.0 (https://www.apache.org/licenses/LICENSE-2.0).
+Copyright Pictogrammers and contributors. The paths are unchanged.
+
+marked (web/assets/vendor/) is under the MIT license; its notice is kept beside it.
