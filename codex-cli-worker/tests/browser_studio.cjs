@@ -30,7 +30,11 @@ fs.mkdirSync(output,{recursive:true});
     assert.deepEqual(errors,[]);await context.close();continue;
    }
    await page.locator('#connection-summary').filter({hasText:'Ready as'}).waitFor();
-   assert.equal(await page.locator('#header-status').isVisible(),width>700);
+   // The side bar's foot holds the status rows; on a phone they are inside the chats drawer.
+   for (const id of ['#ha-status-row','#connection-manage','#settings-button']) {
+    const box=await page.locator(id).boundingBox();
+    assert.equal(box.x>=0 && box.x+box.width<=width, width>700, `${id} in view at ${width}`);
+   }
    if(width===1024) {
     const before=await page.locator('#sidebar').boundingBox();
     await page.locator('#divider').focus();
@@ -72,7 +76,7 @@ fs.mkdirSync(output,{recursive:true});
    assert.match(await page.locator('#status-details').textContent(),/Usage and resetUnavailable/);
    await page.locator('[data-close="status-dialog"]').click();
    if(width>700) {
-    await page.locator('#header-status').click();
+    await page.locator('#ha-status-row').click();
     assert.match(await page.locator('#status-details').textContent(),/Usage and resetUnavailable/);
     await page.locator('[data-close="status-dialog"]').click();
    }
@@ -120,7 +124,12 @@ fs.mkdirSync(output,{recursive:true});
     if(width===390) await page.locator('#close-sidebar').click();
    }
 
-   await page.locator('#header-settings').click();
+   // On a phone the foot rows are reached through the chats drawer.
+   const footRow = async id => {
+    if(width===390 && !(await page.evaluate(()=>document.body.classList.contains('sidebar-open')))) await page.locator('#phone-history').click();
+    await page.locator(id).click();
+   };
+   await footRow('#settings-button');
    assert.equal(await page.locator('#agents').isVisible(),false);
    await page.locator('#advanced-section .settings-toggle').click();
    await page.locator('#workspace-open').click();
@@ -132,14 +141,15 @@ fs.mkdirSync(output,{recursive:true});
    // Five real state shapes, all from a synthetic intercepted status response.
    for (const state of ['off','starting','ready','reconnecting','error']) {
     remote={...remote,enabled:state!=='off',state,message:state==='error'?'Synthetic connection error':'Connected',pairing_code:'',pairing_url:''};
-    await page.locator('#connection-chip').click();
+    await footRow('#connection-manage');
     await page.waitForFunction(expected=>document.body.dataset.connection===expected,state);
     await page.screenshot({path:`${output}/connection-${state}-${theme}-${width}.png`});
     await page.locator('[data-close="connection-dialog"]').click();
    }
    remote={...remote,enabled:true,state:'ready',message:'Connected'};
    await page.evaluate(()=>pollConnection());
-   await page.locator('#strip-pair').click();
+   await footRow('#connection-manage');
+   await page.locator('#remote-control-pair').click();
    await page.locator('.pairing-continue').waitFor();
    assert.equal(await page.locator('.pairing-continue').getAttribute('href'),'https://chatgpt.com/codex/pair?pairing_code=SAMPLE-NOT-VALID');
    await page.locator('#copy-pairing-code').click();

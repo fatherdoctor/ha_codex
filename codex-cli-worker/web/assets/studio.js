@@ -22,7 +22,6 @@ document.addEventListener("chat-view", updateStudio);
 
 for (const button of document.querySelectorAll("[data-close]"))
   button.onclick = () => $(button.dataset.close).close();
-$("header-settings").onclick = () => $("settings-button").click();
 $("phone-history").onclick = () => sidebar(true);
 $("phone-new").onclick = () => selectChat(null);
 $("permission-button").onclick = () => {
@@ -105,9 +104,8 @@ function renderStudioRemote(rc) {
   $("remote-control-pair").disabled = label.state !== "ready";
   retryConnection.hidden = label.state !== "error" || !rc.enabled || !rc.available;
   $("connection-summary").textContent = label.text;
-  $("connection-chip").textContent = `Home Assistant · ${label.text}`;
+  $("connection-manage").title = `Remote connection · ${label.text}`;
   document.body.dataset.connection = label.state;
-  $("strip-pair").hidden = label.state !== "ready";
   $("connection-title").textContent = `Remote connection · ${label.text}`;
   const card = $("remote-control-card");
   let pairingURL = null;
@@ -156,12 +154,8 @@ function openConnection() {
   if (!$("connection-dialog").open) $("connection-dialog").showModal();
   pollConnection();
 }
-for (const id of ["connection-chip", "connection-manage"])
-  $(id).onclick = openConnection;
-$("strip-pair").onclick = () => {
-  openConnection();
-  $("remote-control-pair").click();
-};
+// The Remote connection row at the foot of the side bar; its window holds Get a pairing code.
+$("connection-manage").onclick = openConnection;
 // The ChatGPT app pairing part of Accounts and connections in Settings opens the same window.
 $("remote-connection-open").onclick = openConnection;
 $("app-pairing-new").onclick = () => {
@@ -233,7 +227,8 @@ function showStudioStatus() {
     access.textContent = data.account_access?.message || "Codex access cannot be confirmed by a passive read.";
   }).catch(() => { access.textContent = "Codex access could not be checked."; });
 }
-$("header-status").onclick = showStudioStatus;
+// The Home Assistant row at the foot of the side bar opens the Status window.
+$("ha-status-row").onclick = showStudioStatus;
 for (const id of ["thread-actions", "phone-thread-actions"])
   $(id).onclick = event => openChatMenu(state.id, event.currentTarget);
 document.addEventListener("thread-action", async event => {

@@ -53,17 +53,14 @@
         <button id="archive-list" class="subtle">Archived chats</button>
         <button id="load-more" class="subtle" hidden>Load older chats</button>
         <div class="sidebar-footer">
-          <div class="workspace-label">
-            <span class="workspace-dot" aria-hidden="true"></span
-            ><span>Home Assistant workspace</span
-            ><button
-              id="settings-button"
-              class="icon"
-              aria-label="Open settings"
-            >
-              ⚙
-            </button>
-          </div>
+          <button id="ha-status-row" class="foot-row" type="button" data-state="loading">
+            <span class="status-dot" aria-hidden="true"></span
+            ><span class="foot-label">Home Assistant · <span id="ha-status-summary">Loading…</span></span>
+          </button>
+          <button id="connection-manage" class="foot-row" type="button">
+            <span class="status-dot" aria-hidden="true"></span
+            ><span class="foot-label">Remote connection · <span id="connection-summary">Loading…</span></span>
+          </button>
           <div id="usage" class="usage" aria-label="Remaining account quota">
             <span>5h</span>
             <span class="usage-bar unknown" aria-hidden="true"
@@ -76,7 +73,12 @@
             ></span>
             <strong id="usage-weekly">Unavailable</strong>
           </div>
+          <p id="usage-plan" class="usage-plan">Plan unknown</p>
           <p id="usage-note" class="usage-note" role="status">Loading quota…</p>
+          <button id="settings-button" class="foot-row" type="button" aria-label="Open settings">
+            <span class="mdi-icon mdi-cog" aria-hidden="true"></span
+            ><span class="foot-label">Settings</span>
+          </button>
         </div>
       </aside>
       <div
@@ -99,24 +101,10 @@
           >
             ☰
           </button>
-          <div class="chat-heading">
-            <h1 id="chat-title">New chat</h1>
-            <p id="chat-status">Your Home Assistant, with a little help.</p>
-          </div>
-          <div class="header-actions">
-            <button id="connection-chip" class="connection-chip">Home Assistant · Loading</button>
-            <button id="header-status" class="subtle">Status</button>
-            <button id="thread-actions" class="icon" aria-label="Thread menu" aria-haspopup="menu">⋯</button>
-            <button id="header-settings" class="icon" aria-label="Settings">⚙</button>
-          </div>
-          <button id="cancel" class="subtle" hidden>Stop task</button>
+          <h1 id="chat-title">New chat</h1>
+          <p id="chat-status" class="sr-only" role="status">Your Home Assistant, with a little help.</p>
+          <button id="thread-actions" class="icon" aria-label="Thread menu" aria-haspopup="menu">⋯</button>
         </header>
-        <div class="connection-strip" role="status">
-          <span class="status-dot" aria-hidden="true"></span><strong>Remote connection</strong>
-          <span id="connection-summary">Loading…</span>
-          <button id="connection-manage" class="text-button">Manage</button>
-          <button id="strip-pair" class="text-button" hidden>Pair a device</button>
-        </div>
         <div class="phone-thread-tools"><button id="phone-history" class="icon" aria-label="Open conversations">☰</button>
           <span id="phone-title">New chat</span><button id="phone-new" class="icon" aria-label="New chat">＋</button>
           <button id="phone-thread-actions" class="icon" aria-label="Thread menu" aria-haspopup="menu">⋯</button></div>
@@ -286,6 +274,9 @@
               </div>
               <button id="send" type="submit" aria-label="Send message">
                 ↑
+              </button>
+              <button id="cancel" type="button" class="stop-button" aria-label="Stop task" title="Stop task" hidden>
+                <span class="mdi-icon mdi-stop" aria-hidden="true"></span>
               </button>
             </div>
           </form>
