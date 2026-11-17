@@ -5,6 +5,14 @@
 - A permission request that waits for you now shows at the bottom of the chat, below the "Working" lines, and the
   chat scrolls to it once when it first appears. Before, it sat above those lines and was easy to miss. A request
   you already answered stays where it was. No approval or permission rule changed.
+- Four small fixes from upstream 0.1.82, ported by hand. A command or file request that arrives before Codex has
+  started the exchange is now refused and stops the exchange; before, a request with an empty turn id matched the
+  empty turn id of an exchange that had not started. A request that repeats the id of a request still waiting
+  stops the exchange also after the limit of 50 requests; before, it was denied like a new request. Codex's plan
+  shows as one to-do step in the activity list, updated in place; a plan update of the wrong form is ignored, and
+  the text is redacted like every other step. A chat rebuilt from the task index after its `task.json` was lost
+  keeps the turn id of its latest exchange, so the steps saved for it stay linked. Nothing from upstream's Full
+  access changes is included.
 
 ## 0.3.4 (unreleased)
 

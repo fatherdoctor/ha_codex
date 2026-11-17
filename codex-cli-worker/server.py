@@ -1873,6 +1873,11 @@ def task_turns(task: dict[str, Any]) -> list[dict[str, Any]]:
             "turn_id": f"legacy-{index + 1}", "message": reply.get("reply", ""),
             "created_at": reply.get("at", ""), "legacy": True,
         })
+    # The task index still knows the latest turn id when task.json was lost; with it, the
+    # recovered chat finds that turn's saved activity.
+    current_turn = task.get("current_turn_id")
+    if isinstance(current_turn, str) and TURN_ID_RE.fullmatch(current_turn):
+        turns[-1]["turn_id"] = current_turn
     turns[-1].update({key: copy.deepcopy(task[key]) for key in TURN_RESULT_FIELDS if key in task})
     return turns
 
