@@ -40,7 +40,9 @@
   flag and its value before that word (`ha --log-level $nope x --no-progress s${x}u info`) or a redirection
   before the value; a built word after such a value is refused, so
   `ha --config $dir --api-token $token core info` is refused too. A flag value with a `$` or a backtick, also
-  past a redirection, is refused when the whole word `su`, `super` or `supervisor` stands anywhere in the command, before `ha` too, because a variable
+  past redirections, with a blank before the operator or joined to the flag (`ha --log-level>f $v info`), and a
+  process substitution as a redirection target between the flag and its value (`ha --log-level > >(cat) $v info`),
+  is refused when the whole word `su`, `super` or `supervisor` stands anywhere in the command, before `ha` too, because a variable
   can hold both the value and the family word (`v='x su'; ha --log-level $v info`). The check ends a word only at
   a space, a tab or a newline, as the shell does: a flag value of one carriage return or no-break space no longer
   hides the family word after it (`ha --log-level <CR> su info`). A quoted script is read with the shell's own

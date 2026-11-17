@@ -47,7 +47,10 @@
 # in the text (v='x s'; ha --log-level ${v}u info, or a $ joined to the flag), a quoted script with a piece
 # outside quotes (eval 'setsid ha' --log-level '"" s${x}u info'), a nested brace word, an extended glob with
 # nullglob, a redirection before a second flag's value, and a brace word or a glob that holds the value and
-# the family word (touch a su; ha --log-level * info).
+# the family word (touch a su; ha --log-level * info). closer18-* and closer19-* are the tenth closure's two sets
+# (an odd blank in each place of the white space rules, a redirection joined to a value flag, a process
+# substitution as the target). Their passes are the stated limit of an unknown flag with a quoted blank
+# (setsid ha --foo<CR>"a b" su info).
 # n/a: Unicode look-alike letters (ha is a fixed ASCII program name; the shell does not fold them);
 # aliases and functions (DOCS names them as a limit: the check reads text, not shell state).
 # Left out on purpose, as limits DOCS states (the check cannot see a program that the command builds or that
@@ -4933,3 +4936,493 @@ closer17-0157	none	echo su; ha --config $dir core info
 closer17-0158	none	git log --grep 'ha' --format '%s $x'
 closer17-0159	remote:bash,dash	ha core info\r\nha core stats\r\n
 closer17-0160	remote:bash,dash	x='it'\\''s'; ha --config "$x" core info
+closer18-0002	su:bash,dash	setsid ha --log-level x\x0b"a b" su info
+closer18-0004	su:bash,dash	setsid ha --log-level x\x1c"a b" su info
+closer18-0005	su:bash,dash	setsid ha --log-level x\x85"a b" su info
+closer18-0008	su:bash,dash	setsid ha --log-level x\u3000"a b" su info
+closer18-0009	su:bash,dash	setsid ha --log-level \r"a b" su info
+closer18-0010	su:bash,dash	setsid ha --log-level \x0b"a b" su info
+closer18-0011	su:bash,dash	setsid ha --log-level \x0c"a b" su info
+closer18-0012	su:bash,dash	setsid ha --log-level \x1c"a b" su info
+closer18-0013	su:bash,dash	setsid ha --log-level \x85"a b" su info
+closer18-0014	su:bash,dash	setsid ha --log-level \xa0"a b" su info
+closer18-0015	su:bash,dash	setsid ha --log-level \u2003"a b" su info
+closer18-0016	su:bash,dash	setsid ha --log-level \u3000"a b" su info
+closer18-0017	su:bash,dash	setsid ha --log-level "a b"\r su info
+closer18-0018	su:bash,dash	setsid ha --log-level "a b"\x0b su info
+closer18-0019	su:bash,dash	setsid ha --log-level "a b"\x0c su info
+closer18-0020	su:bash,dash	setsid ha --log-level "a b"\x1c su info
+closer18-0021	su:bash,dash	setsid ha --log-level "a b"\x85 su info
+closer18-0022	su:bash,dash	setsid ha --log-level "a b"\xa0 su info
+closer18-0023	su:bash,dash	setsid ha --log-level "a b"\u2003 su info
+closer18-0024	su:bash,dash	setsid ha --log-level "a b"\u3000 su info
+closer18-0025	su:bash,dash	setsid ha --log-level x\r'a b' su info
+closer18-0026	su:bash,dash	setsid ha --log-level x\x0b'a b' su info
+closer18-0027	su:bash,dash	setsid ha --log-level x\x0c'a b' su info
+closer18-0028	su:bash,dash	setsid ha --log-level x\x1c'a b' su info
+closer18-0029	su:bash,dash	setsid ha --log-level x\x85'a b' su info
+closer18-0030	su:bash,dash	setsid ha --log-level x\xa0'a b' su info
+closer18-0031	su:bash,dash	setsid ha --log-level x\u2003'a b' su info
+closer18-0032	su:bash,dash	setsid ha --log-level x\u3000'a b' su info
+closer18-0033	su:bash,dash	setsid ha --log-level x\r$'a b' su info
+closer18-0034	su:bash,dash	setsid ha --log-level x\x0b$'a b' su info
+closer18-0035	su:bash,dash	setsid ha --log-level x\x0c$'a b' su info
+closer18-0036	su:bash,dash	setsid ha --log-level x\x1c$'a b' su info
+closer18-0037	su:bash,dash	setsid ha --log-level x\x85$'a b' su info
+closer18-0038	su:bash,dash	setsid ha --log-level x\xa0$'a b' su info
+closer18-0039	su:bash,dash	setsid ha --log-level x\u2003$'a b' su info
+closer18-0040	su:bash,dash	setsid ha --log-level x\u3000$'a b' su info
+closer18-0041	su:bash,dash	setsid ha --log-level=x\r"a b" supervisor info
+closer18-0042	su:bash,dash	setsid ha --log-level=x\x0b"a b" supervisor info
+closer18-0043	su:bash,dash	setsid ha --log-level=x\x0c"a b" supervisor info
+closer18-0044	su:bash,dash	setsid ha --log-level=x\x1c"a b" supervisor info
+closer18-0045	su:bash,dash	setsid ha --log-level=x\x85"a b" supervisor info
+closer18-0046	su:bash,dash	setsid ha --log-level=x\xa0"a b" supervisor info
+closer18-0047	su:bash,dash	setsid ha --log-level=x\u2003"a b" supervisor info
+closer18-0048	su:bash,dash	setsid ha --log-level=x\u3000"a b" supervisor info
+closer18-0050	su:bash,dash	setsid ha >x\x0b"a b" su info
+closer18-0052	su:bash,dash	setsid ha >x\x1c"a b" su info
+closer18-0053	su:bash,dash	setsid ha >x\x85"a b" su info
+closer18-0056	su:bash,dash	setsid ha >x\u3000"a b" su info
+closer18-0057	su:bash,dash	setsid ha 2>x\r"a b" su info
+closer18-0058	su:bash,dash	setsid ha 2>x\x0b"a b" su info
+closer18-0059	su:bash,dash	setsid ha 2>x\x0c"a b" su info
+closer18-0060	su:bash,dash	setsid ha 2>x\x1c"a b" su info
+closer18-0061	su:bash,dash	setsid ha 2>x\x85"a b" su info
+closer18-0062	su:bash,dash	setsid ha 2>x\xa0"a b" su info
+closer18-0063	su:bash,dash	setsid ha 2>x\u2003"a b" su info
+closer18-0064	su:bash,dash	setsid ha 2>x\u3000"a b" su info
+closer18-0065	su:bash,dash	setsid ha --log-level x\r\\ y su info
+closer18-0066	su:bash,dash	setsid ha --log-level x\x0b\\ y su info
+closer18-0067	su:bash,dash	setsid ha --log-level x\x0c\\ y su info
+closer18-0068	su:bash,dash	setsid ha --log-level x\x1c\\ y su info
+closer18-0069	su:bash,dash	setsid ha --log-level x\x85\\ y su info
+closer18-0070	su:bash,dash	setsid ha --log-level x\xa0\\ y su info
+closer18-0071	su:bash,dash	setsid ha --log-level x\u2003\\ y su info
+closer18-0072	su:bash,dash	setsid ha --log-level x\u3000\\ y su info
+closer18-0073	su-limit:bash,dash	setsid ha --foo\r"a b" su info
+closer18-0074	su-limit:bash,dash	setsid ha --foo\x0b"a b" su info
+closer18-0075	su-limit:bash,dash	setsid ha --foo\x0c"a b" su info
+closer18-0076	su-limit:bash,dash	setsid ha --foo\x1c"a b" su info
+closer18-0077	su-limit:bash,dash	setsid ha --foo\x85"a b" su info
+closer18-0078	su-limit:bash,dash	setsid ha --foo\xa0"a b" su info
+closer18-0079	su-limit:bash,dash	setsid ha --foo\u2003"a b" su info
+closer18-0080	su-limit:bash,dash	setsid ha --foo\u3000"a b" su info
+closer18-0082	remote:bash,dash	setsid ha --endpoint x\x0b"a b" host reboot
+closer18-0084	remote:bash,dash	setsid ha --endpoint x\x1c"a b" host reboot
+closer18-0085	remote:bash,dash	setsid ha --endpoint x\x85"a b" host reboot
+closer18-0088	remote:bash,dash	setsid ha --endpoint x\u3000"a b" host reboot
+closer18-0089	su:bash,dash	setsid ha --log-level x\ry>"a b" su info
+closer18-0090	su:bash,dash	setsid ha --log-level x\x0by>"a b" su info
+closer18-0091	su:bash,dash	setsid ha --log-level x\x0cy>"a b" su info
+closer18-0092	su:bash,dash	setsid ha --log-level x\x1cy>"a b" su info
+closer18-0093	su:bash,dash	setsid ha --log-level x\x85y>"a b" su info
+closer18-0094	su:bash,dash	setsid ha --log-level x\xa0y>"a b" su info
+closer18-0095	su:bash,dash	setsid ha --log-level x\u2003y>"a b" su info
+closer18-0096	su:bash,dash	setsid ha --log-level x\u3000y>"a b" su info
+closer18-0097	su:bash,dash	setsid ha --log-level x\r"a b" s${x}u info
+closer18-0098	su:bash,dash	setsid ha --log-level x\x0b"a b" s${x}u info
+closer18-0099	su:bash,dash	setsid ha --log-level x\x0c"a b" s${x}u info
+closer18-0100	su:bash,dash	setsid ha --log-level x\x1c"a b" s${x}u info
+closer18-0101	su:bash,dash	setsid ha --log-level x\x85"a b" s${x}u info
+closer18-0102	su:bash,dash	setsid ha --log-level x\xa0"a b" s${x}u info
+closer18-0103	su:bash,dash	setsid ha --log-level x\u2003"a b" s${x}u info
+closer18-0104	su:bash,dash	setsid ha --log-level x\u3000"a b" s${x}u info
+closer18-0105	su:bash,dash	setsid ha --log-level x\r"a b" 'su' info
+closer18-0106	su:bash,dash	setsid ha --log-level x\x0b"a b" 'su' info
+closer18-0107	su:bash,dash	setsid ha --log-level x\x0c"a b" 'su' info
+closer18-0108	su:bash,dash	setsid ha --log-level x\x1c"a b" 'su' info
+closer18-0109	su:bash,dash	setsid ha --log-level x\x85"a b" 'su' info
+closer18-0110	su:bash,dash	setsid ha --log-level x\xa0"a b" 'su' info
+closer18-0111	su:bash,dash	setsid ha --log-level x\u2003"a b" 'su' info
+closer18-0112	su:bash,dash	setsid ha --log-level x\u3000"a b" 'su' info
+closer18-0113	su:bash,dash	setsid ha --log-level x\r"a b" s\\u info
+closer18-0114	su:bash,dash	setsid ha --log-level x\x0b"a b" s\\u info
+closer18-0115	su:bash,dash	setsid ha --log-level x\x0c"a b" s\\u info
+closer18-0116	su:bash,dash	setsid ha --log-level x\x1c"a b" s\\u info
+closer18-0117	su:bash,dash	setsid ha --log-level x\x85"a b" s\\u info
+closer18-0118	su:bash,dash	setsid ha --log-level x\xa0"a b" s\\u info
+closer18-0119	su:bash,dash	setsid ha --log-level x\u2003"a b" s\\u info
+closer18-0120	su:bash,dash	setsid ha --log-level x\u3000"a b" s\\u info
+closer18-0121	su:bash,dash	eval 'setsid ha --log-level x\r"a b" su info'
+closer18-0122	su:bash,dash	eval 'setsid ha --log-level x\x0b"a b" su info'
+closer18-0123	su:bash,dash	eval 'setsid ha --log-level x\x0c"a b" su info'
+closer18-0124	su:bash,dash	eval 'setsid ha --log-level x\x1c"a b" su info'
+closer18-0125	su:bash,dash	eval 'setsid ha --log-level x\x85"a b" su info'
+closer18-0126	su:bash,dash	eval 'setsid ha --log-level x\xa0"a b" su info'
+closer18-0127	su:bash,dash	eval 'setsid ha --log-level x\u2003"a b" su info'
+closer18-0128	su:bash,dash	eval 'setsid ha --log-level x\u3000"a b" su info'
+closer18-0129	su:bash,dash	bash -c "setsid ha --log-level x\r'a b' su info"
+closer18-0130	su:bash,dash	bash -c "setsid ha --log-level x\x0b'a b' su info"
+closer18-0131	su:bash,dash	bash -c "setsid ha --log-level x\x0c'a b' su info"
+closer18-0132	su:bash,dash	bash -c "setsid ha --log-level x\x1c'a b' su info"
+closer18-0133	su:bash,dash	bash -c "setsid ha --log-level x\x85'a b' su info"
+closer18-0134	su:bash,dash	bash -c "setsid ha --log-level x\xa0'a b' su info"
+closer18-0135	su:bash,dash	bash -c "setsid ha --log-level x\u2003'a b' su info"
+closer18-0136	su:bash,dash	bash -c "setsid ha --log-level x\u3000'a b' su info"
+closer18-0137	su:bash,dash	setsid ha --log-level x\r"a b" --config y\r"c d" su info
+closer18-0138	su:bash,dash	setsid ha --log-level x\x0b"a b" --config y\x0b"c d" su info
+closer18-0139	su:bash,dash	setsid ha --log-level x\x0c"a b" --config y\x0c"c d" su info
+closer18-0140	su:bash,dash	setsid ha --log-level x\x1c"a b" --config y\x1c"c d" su info
+closer18-0141	su:bash,dash	setsid ha --log-level x\x85"a b" --config y\x85"c d" su info
+closer18-0142	su:bash,dash	setsid ha --log-level x\xa0"a b" --config y\xa0"c d" su info
+closer18-0143	su:bash,dash	setsid ha --log-level x\u2003"a b" --config y\u2003"c d" su info
+closer18-0144	su:bash,dash	setsid ha --log-level x\u3000"a b" --config y\u3000"c d" su info
+closer18-0145	su:bash,dash	setsid ha --log-level x\r"" su info
+closer18-0146	su:bash,dash	setsid ha --log-level x\x0b"" su info
+closer18-0147	su:bash,dash	setsid ha --log-level x\x0c"" su info
+closer18-0148	su:bash,dash	setsid ha --log-level x\x1c"" su info
+closer18-0149	su:bash,dash	setsid ha --log-level x\x85"" su info
+closer18-0150	su:bash,dash	setsid ha --log-level x\xa0"" su info
+closer18-0151	su:bash,dash	setsid ha --log-level x\u2003"" su info
+closer18-0152	su:bash,dash	setsid ha --log-level x\u3000"" su info
+closer18-0153	su:bash,dash	setsid ha --log-level ""\r su info
+closer18-0154	su:bash,dash	setsid ha --log-level ""\x0b su info
+closer18-0155	su:bash,dash	setsid ha --log-level ""\x0c su info
+closer18-0156	su:bash,dash	setsid ha --log-level ""\x1c su info
+closer18-0157	su:bash,dash	setsid ha --log-level ""\x85 su info
+closer18-0158	su:bash,dash	setsid ha --log-level ""\xa0 su info
+closer18-0159	su:bash,dash	setsid ha --log-level ""\u2003 su info
+closer18-0160	su:bash,dash	setsid ha --log-level ""\u3000 su info
+closer18-0161	remote:bash,dash	setsid ha --log-level x\r"a b" core info
+closer18-0162	remote:bash,dash	setsid ha --log-level x\x0b"a b" core info
+closer18-0163	remote:bash,dash	setsid ha --log-level x\x0c"a b" core info
+closer18-0164	remote:bash,dash	setsid ha --log-level x\x1c"a b" core info
+closer18-0165	remote:bash,dash	setsid ha --log-level x\x85"a b" core info
+closer18-0166	remote:bash,dash	setsid ha --log-level x\xa0"a b" core info
+closer18-0167	remote:bash,dash	setsid ha --log-level x\u2003"a b" core info
+closer18-0168	remote:bash,dash	setsid ha --log-level x\u3000"a b" core info
+closer18-0169	none	echo "ha --log-level x\r su info"
+closer18-0170	none	echo "ha --log-level x\x0b su info"
+closer18-0171	none	echo "ha --log-level x\x0c su info"
+closer18-0172	none	echo "ha --log-level x\x1c su info"
+closer18-0173	none	echo "ha --log-level x\x85 su info"
+closer18-0174	none	echo "ha --log-level x\xa0 su info"
+closer18-0175	none	echo "ha --log-level x\u2003 su info"
+closer18-0176	none	echo "ha --log-level x\u3000 su info"
+closer18-0178	remote:bash,dash	v='x host'; setsid ha --endpoint 2>/dev/null $v reboot
+closer18-0180	remote:bash,dash	v='x host'; setsid ha --endpoint >f $v reboot
+closer18-0181	su:bash,dash	v='x su'; ha --log-level >>f $v info
+closer18-0182	remote:bash,dash	v='x host'; setsid ha --endpoint >>f $v reboot
+closer18-0183	su:bash,dash	v='x su'; ha --log-level </dev/null $v info
+closer18-0184	remote:bash,dash	v='x host'; setsid ha --endpoint </dev/null $v reboot
+closer18-0185	su:bash,dash	v='x su'; ha --log-level 2>&1 $v info
+closer18-0186	remote:bash,dash	v='x host'; setsid ha --endpoint 2>&1 $v reboot
+closer18-0187	su:bash	v='x su'; ha --log-level &>f $v info
+closer18-0188	remote:bash	v='x host'; setsid ha --endpoint &>f $v reboot
+closer18-0189	su:bash,dash	v='x su'; ha --log-level >|f $v info
+closer18-0190	remote:bash,dash	v='x host'; setsid ha --endpoint >|f $v reboot
+closer18-0191	su:bash,dash	v='x su'; ha --log-level <>f $v info
+closer18-0192	remote:bash,dash	v='x host'; setsid ha --endpoint <>f $v reboot
+closer18-0193	su:bash,dash	v='x su'; ha --log-level 9>f $v info
+closer18-0194	remote:bash,dash	v='x host'; setsid ha --endpoint 9>f $v reboot
+closer18-0195	su:bash,dash	v='x su'; ha --log-level >&2 $v info
+closer18-0196	remote:bash,dash	v='x host'; setsid ha --endpoint >&2 $v reboot
+closer18-0197	su:bash,dash	v='x su'; ha --log-level 2>/dev/null >f $v info
+closer18-0198	remote:bash,dash	v='x host'; setsid ha --endpoint 2>/dev/null >f $v reboot
+closer18-0199	su:bash,dash	v='x su'; ha --log-level > f $v info
+closer18-0200	remote:bash,dash	v='x host'; setsid ha --endpoint > f $v reboot
+closer18-0201	su:bash,dash	v='x su'; ha --log-level >"f" $v info
+closer18-0202	remote:bash,dash	v='x host'; setsid ha --endpoint >"f" $v reboot
+closer18-0203	su:bash,dash	v='x su'; ha --log-level >'a b' $v info
+closer18-0204	remote:bash,dash	v='x host'; setsid ha --endpoint >'a b' $v reboot
+closer18-0205	su:bash	v='x su'; ha --log-level <<<y $v info
+closer18-0206	remote:bash	v='x host'; setsid ha --endpoint <<<y $v reboot
+closer18-0207	su:bash,dash	v='x su'; ha --log-level >f 2>&1 $v info
+closer18-0208	remote:bash,dash	v='x host'; setsid ha --endpoint >f 2>&1 $v reboot
+closer18-0209	su:bash	v='x su'; ha --log-level {fd}>f $v info
+closer18-0210	remote:bash	v='x host'; setsid ha --endpoint {fd}>f $v reboot
+closer18-0211	su:bash	v='x su'; ha --log-level > >(cat) $v info
+closer18-0212	remote:bash	v='x host'; setsid ha --endpoint > >(cat) $v reboot
+closer18-0213	su:bash,dash	v='x su'; ha --log-level 2>/dev/null\\\n $v info
+closer18-0214	remote:bash,dash	v='x host'; setsid ha --endpoint 2>/dev/null\\\n $v reboot
+closer18-0215	su:bash,dash	v='x su'; ha --log-level \\\n2>/dev/null $v info
+closer18-0216	remote:bash,dash	v='x host'; setsid ha --endpoint \\\n2>/dev/null $v reboot
+closer18-0217	su:bash,dash	v='x su'; ha --log-level >f\t $v info
+closer18-0218	remote:bash,dash	v='x host'; setsid ha --endpoint >f\t $v reboot
+closer18-0219	none	v='x su'; ha --log-level 2>/dev/null >f <f2 9>&1 $v info
+closer18-0220	none	v='x host'; setsid ha --endpoint 2>/dev/null >f <f2 9>&1 $v reboot
+closer18-0221	su:bash,dash	v='x su'; ha --log-level 2>/dev/null ${v} info
+closer18-0222	su:bash,dash	v='x su'; setsid ha --config >f ${v} info
+closer18-0223	su:bash,dash	set -- x su; ha --log-level 2>/dev/null $* info
+closer18-0224	su:bash,dash	set -- x su; setsid ha --config >f $* info
+closer18-0226	su:bash,dash	set -- x su; setsid ha --config >f "$@" info
+closer18-0227	su:bash,dash	v='x su'; ha --log-level 2>/dev/null ${v:-x su} info
+closer18-0228	su:bash,dash	v='x su'; setsid ha --config >f ${v:-x su} info
+closer18-0229	su:bash,dash	v='x su'; ha --log-level 2>/dev/null $(echo x su) info
+closer18-0230	su:bash,dash	v='x su'; setsid ha --config >f $(echo x su) info
+closer18-0231	su:bash,dash	v='x su'; ha --log-level 2>/dev/null `echo x su` info
+closer18-0232	su:bash,dash	v='x su'; setsid ha --config >f `echo x su` info
+closer18-0233	su:bash	v='x su'; ha --log-level 2>/dev/null ${v:0} info
+closer18-0234	su:bash	v='x su'; setsid ha --config >f ${v:0} info
+closer18-0235	su:bash,dash	v='x su'; ha --log-level 2>/dev/null ${v#q} info
+closer18-0236	su:bash,dash	v='x su'; setsid ha --config >f ${v#q} info
+closer18-0237	su:bash,dash	v='x su'; ha --log-level 2>/dev/null $v$e info
+closer18-0238	su:bash,dash	v='x su'; setsid ha --config >f $v$e info
+closer18-0239	su:bash,dash	v='x su'; ha --log-level 2>/dev/null ${e}$v info
+closer18-0240	su:bash,dash	v='x su'; setsid ha --config >f ${e}$v info
+closer18-0241	su:bash	v='x su'; n=v; ha --log-level 2>/dev/null ${!n} info
+closer18-0242	su:bash	v='x su'; n=v; setsid ha --config >f ${!n} info
+closer18-0243	su:bash	a=(x su); ha --log-level 2>/dev/null ${a[@]} info
+closer18-0244	su:bash	a=(x su); setsid ha --config >f ${a[@]} info
+closer18-0245	su:bash,dash	set -- 'x su'; ha --log-level 2>/dev/null $1 info
+closer18-0246	su:bash,dash	set -- 'x su'; setsid ha --config >f $1 info
+closer18-0247	su:bash,dash	v='x su'; f2=/dev/null; ha --log-level>f $v info
+closer18-0248	su:bash,dash	v='x su'; f2=/dev/null; setsid ha --log-level>f $v info
+closer18-0249	su:bash,dash	v='x su'; f2=/dev/null; while ha --log-level>f $v info; do break; done
+closer18-0250	su:bash,dash	v='x su'; f2=/dev/null; if ha --log-level>f $v info; then :; fi
+closer18-0251	su:bash,dash	v='x su'; f2=/dev/null; ! ha --log-level>f $v info
+closer18-0252	su:bash,dash	v='x su'; f2=/dev/null; ( ha --log-level>f $v info )
+closer18-0253	su:bash,dash	v='x su'; f2=/dev/null; { ha --log-level>f $v info; }
+closer18-0254	su:bash,dash	v='x su'; f2=/dev/null; x=1 ha --log-level>f $v info
+closer18-0255	su:bash,dash	v='x su'; f2=/dev/null; command ha --log-level>f $v info
+closer18-0256	su:bash,dash	v='x su'; f2=/dev/null; env ha --log-level>f $v info
+closer18-0257	su:bash,dash	v='x su'; f2=/dev/null; eval 'ha --log-level>f $v info'
+closer18-0258	su:bash,dash	export v='x su' f2=/dev/null; sh -c "ha --log-level>f \\$v info"
+closer18-0259	su:bash,dash	v='x su'; f2=/dev/null; ha --log-level 2>/dev/null>f $v info
+closer18-0260	su:bash,dash	v='x su'; f2=/dev/null; setsid ha --log-level 2>/dev/null>f $v info
+closer18-0261	su:bash,dash	v='x su'; f2=/dev/null; while ha --log-level 2>/dev/null>f $v info; do break; done
+closer18-0262	su:bash,dash	v='x su'; f2=/dev/null; if ha --log-level 2>/dev/null>f $v info; then :; fi
+closer18-0263	su:bash,dash	v='x su'; f2=/dev/null; ! ha --log-level 2>/dev/null>f $v info
+closer18-0264	su:bash,dash	v='x su'; f2=/dev/null; ( ha --log-level 2>/dev/null>f $v info )
+closer18-0265	su:bash,dash	v='x su'; f2=/dev/null; { ha --log-level 2>/dev/null>f $v info; }
+closer18-0266	su:bash,dash	v='x su'; f2=/dev/null; x=1 ha --log-level 2>/dev/null>f $v info
+closer18-0267	su:bash,dash	v='x su'; f2=/dev/null; command ha --log-level 2>/dev/null>f $v info
+closer18-0268	su:bash,dash	v='x su'; f2=/dev/null; env ha --log-level 2>/dev/null>f $v info
+closer18-0269	su:bash,dash	v='x su'; f2=/dev/null; eval 'ha --log-level 2>/dev/null>f $v info'
+closer18-0270	su:bash,dash	export v='x su' f2=/dev/null; sh -c "ha --log-level 2>/dev/null>f \\$v info"
+closer18-0271	su:bash,dash	v='x su'; f2=/dev/null; ha --config c --log-level >f $v info
+closer18-0272	su:bash,dash	v='x su'; f2=/dev/null; setsid ha --config c --log-level >f $v info
+closer18-0273	su:bash,dash	v='x su'; f2=/dev/null; while ha --config c --log-level >f $v info; do break; done
+closer18-0274	su:bash,dash	v='x su'; f2=/dev/null; if ha --config c --log-level >f $v info; then :; fi
+closer18-0275	su:bash,dash	v='x su'; f2=/dev/null; ! ha --config c --log-level >f $v info
+closer18-0276	su:bash,dash	v='x su'; f2=/dev/null; ( ha --config c --log-level >f $v info )
+closer18-0277	su:bash,dash	v='x su'; f2=/dev/null; { ha --config c --log-level >f $v info; }
+closer18-0278	su:bash,dash	v='x su'; f2=/dev/null; x=1 ha --config c --log-level >f $v info
+closer18-0279	su:bash,dash	v='x su'; f2=/dev/null; command ha --config c --log-level >f $v info
+closer18-0280	su:bash,dash	v='x su'; f2=/dev/null; env ha --config c --log-level >f $v info
+closer18-0281	su:bash,dash	v='x su'; f2=/dev/null; eval 'ha --config c --log-level >f $v info'
+closer18-0282	su:bash,dash	export v='x su' f2=/dev/null; sh -c "ha --config c --log-level >f \\$v info"
+closer18-0283	su:bash,dash	v='x su'; f2=/dev/null; ha --log-level a --config >f $v info
+closer18-0284	su:bash,dash	v='x su'; f2=/dev/null; setsid ha --log-level a --config >f $v info
+closer18-0285	su:bash,dash	v='x su'; f2=/dev/null; while ha --log-level a --config >f $v info; do break; done
+closer18-0286	su:bash,dash	v='x su'; f2=/dev/null; if ha --log-level a --config >f $v info; then :; fi
+closer18-0287	su:bash,dash	v='x su'; f2=/dev/null; ! ha --log-level a --config >f $v info
+closer18-0288	su:bash,dash	v='x su'; f2=/dev/null; ( ha --log-level a --config >f $v info )
+closer18-0289	su:bash,dash	v='x su'; f2=/dev/null; { ha --log-level a --config >f $v info; }
+closer18-0290	su:bash,dash	v='x su'; f2=/dev/null; x=1 ha --log-level a --config >f $v info
+closer18-0291	su:bash,dash	v='x su'; f2=/dev/null; command ha --log-level a --config >f $v info
+closer18-0292	su:bash,dash	v='x su'; f2=/dev/null; env ha --log-level a --config >f $v info
+closer18-0293	su:bash,dash	v='x su'; f2=/dev/null; eval 'ha --log-level a --config >f $v info'
+closer18-0294	su:bash,dash	export v='x su' f2=/dev/null; sh -c "ha --log-level a --config >f \\$v info"
+closer18-0295	su:bash,dash	v='x su'; f2=/dev/null; ha >f --log-level $v info
+closer18-0296	su:bash,dash	v='x su'; f2=/dev/null; setsid ha >f --log-level $v info
+closer18-0297	su:bash,dash	v='x su'; f2=/dev/null; while ha >f --log-level $v info; do break; done
+closer18-0298	su:bash,dash	v='x su'; f2=/dev/null; if ha >f --log-level $v info; then :; fi
+closer18-0299	su:bash,dash	v='x su'; f2=/dev/null; ! ha >f --log-level $v info
+closer18-0300	su:bash,dash	v='x su'; f2=/dev/null; ( ha >f --log-level $v info )
+closer18-0301	su:bash,dash	v='x su'; f2=/dev/null; { ha >f --log-level $v info; }
+closer18-0302	su:bash,dash	v='x su'; f2=/dev/null; x=1 ha >f --log-level $v info
+closer18-0303	su:bash,dash	v='x su'; f2=/dev/null; command ha >f --log-level $v info
+closer18-0304	su:bash,dash	v='x su'; f2=/dev/null; env ha >f --log-level $v info
+closer18-0305	su:bash,dash	v='x su'; f2=/dev/null; eval 'ha >f --log-level $v info'
+closer18-0306	su:bash,dash	export v='x su' f2=/dev/null; sh -c "ha >f --log-level \\$v info"
+closer18-0307	su:bash,dash	v='x su'; f2=/dev/null; >f ha --log-level $v info
+closer18-0308	su:bash,dash	v='x su'; f2=/dev/null; setsid >f ha --log-level $v info
+closer18-0309	su:bash,dash	v='x su'; f2=/dev/null; while >f ha --log-level $v info; do break; done
+closer18-0310	su:bash,dash	v='x su'; f2=/dev/null; if >f ha --log-level $v info; then :; fi
+closer18-0311	su:bash,dash	v='x su'; f2=/dev/null; ! >f ha --log-level $v info
+closer18-0312	su:bash,dash	v='x su'; f2=/dev/null; ( >f ha --log-level $v info )
+closer18-0313	su:bash,dash	v='x su'; f2=/dev/null; { >f ha --log-level $v info; }
+closer18-0314	su:bash,dash	v='x su'; f2=/dev/null; x=1 >f ha --log-level $v info
+closer18-0315	su:bash,dash	v='x su'; f2=/dev/null; command >f ha --log-level $v info
+closer18-0316	su:bash,dash	v='x su'; f2=/dev/null; env >f ha --log-level $v info
+closer18-0317	su:bash,dash	v='x su'; f2=/dev/null; eval '>f ha --log-level $v info'
+closer18-0318	su:bash,dash	export v='x su' f2=/dev/null; sh -c ">f ha --log-level \\$v info"
+closer18-0319	su:bash,dash	v='x su'; f2=/dev/null; ha 2>/dev/null --log-level=$v info
+closer18-0320	su:bash,dash	v='x su'; f2=/dev/null; setsid ha 2>/dev/null --log-level=$v info
+closer18-0321	su:bash,dash	v='x su'; f2=/dev/null; while ha 2>/dev/null --log-level=$v info; do break; done
+closer18-0322	su:bash,dash	v='x su'; f2=/dev/null; if ha 2>/dev/null --log-level=$v info; then :; fi
+closer18-0323	su:bash,dash	v='x su'; f2=/dev/null; ! ha 2>/dev/null --log-level=$v info
+closer18-0324	su:bash,dash	v='x su'; f2=/dev/null; ( ha 2>/dev/null --log-level=$v info )
+closer18-0325	su:bash,dash	v='x su'; f2=/dev/null; { ha 2>/dev/null --log-level=$v info; }
+closer18-0326	su:bash,dash	v='x su'; f2=/dev/null; x=1 ha 2>/dev/null --log-level=$v info
+closer18-0327	su:bash,dash	v='x su'; f2=/dev/null; command ha 2>/dev/null --log-level=$v info
+closer18-0328	su:bash,dash	v='x su'; f2=/dev/null; env ha 2>/dev/null --log-level=$v info
+closer18-0329	su:bash,dash	v='x su'; f2=/dev/null; eval 'ha 2>/dev/null --log-level=$v info'
+closer18-0330	su:bash,dash	export v='x su' f2=/dev/null; sh -c "ha 2>/dev/null --log-level=\\$v info"
+closer18-0331	none	v='x su'; f2=/dev/null; ha --log-level= 2>/dev/null $v info
+closer18-0332	none	v='x su'; f2=/dev/null; setsid ha --log-level= 2>/dev/null $v info
+closer18-0333	none	v='x su'; f2=/dev/null; while ha --log-level= 2>/dev/null $v info; do break; done
+closer18-0334	none	v='x su'; f2=/dev/null; if ha --log-level= 2>/dev/null $v info; then :; fi
+closer18-0335	none	v='x su'; f2=/dev/null; ! ha --log-level= 2>/dev/null $v info
+closer18-0336	none	v='x su'; f2=/dev/null; ( ha --log-level= 2>/dev/null $v info )
+closer18-0337	none	v='x su'; f2=/dev/null; { ha --log-level= 2>/dev/null $v info; }
+closer18-0338	none	v='x su'; f2=/dev/null; x=1 ha --log-level= 2>/dev/null $v info
+closer18-0339	none	v='x su'; f2=/dev/null; command ha --log-level= 2>/dev/null $v info
+closer18-0340	none	v='x su'; f2=/dev/null; env ha --log-level= 2>/dev/null $v info
+closer18-0341	none	v='x su'; f2=/dev/null; eval 'ha --log-level= 2>/dev/null $v info'
+closer18-0342	none	export v='x su' f2=/dev/null; sh -c "ha --log-level= 2>/dev/null \\$v info"
+closer18-0343	su:bash,dash	v='x su'; f2=/dev/null; ha --log-level 2>/dev/null $v info # x
+closer18-0344	su:bash,dash	v='x su'; f2=/dev/null; setsid ha --log-level 2>/dev/null $v info # x
+closer18-0345	none	v='x su'; f2=/dev/null; while ha --log-level 2>/dev/null $v info # x; do break; done
+closer18-0346	none	v='x su'; f2=/dev/null; if ha --log-level 2>/dev/null $v info # x; then :; fi
+closer18-0347	su:bash,dash	v='x su'; f2=/dev/null; ! ha --log-level 2>/dev/null $v info # x
+closer18-0348	none	v='x su'; f2=/dev/null; ( ha --log-level 2>/dev/null $v info # x )
+closer18-0349	none	v='x su'; f2=/dev/null; { ha --log-level 2>/dev/null $v info # x; }
+closer18-0350	su:bash,dash	v='x su'; f2=/dev/null; x=1 ha --log-level 2>/dev/null $v info # x
+closer18-0351	su:bash,dash	v='x su'; f2=/dev/null; command ha --log-level 2>/dev/null $v info # x
+closer18-0352	su:bash,dash	v='x su'; f2=/dev/null; env ha --log-level 2>/dev/null $v info # x
+closer18-0353	su:bash,dash	v='x su'; f2=/dev/null; eval 'ha --log-level 2>/dev/null $v info # x'
+closer18-0354	su:bash,dash	export v='x su' f2=/dev/null; sh -c "ha --log-level 2>/dev/null \\$v info # x"
+closer18-0355	su:bash,dash	v='x su'; f2=/dev/null; ha --api-token 2>/dev/null $v info
+closer18-0356	su:bash,dash	v='x su'; f2=/dev/null; setsid ha --api-token 2>/dev/null $v info
+closer18-0357	su:bash,dash	v='x su'; f2=/dev/null; while ha --api-token 2>/dev/null $v info; do break; done
+closer18-0358	su:bash,dash	v='x su'; f2=/dev/null; if ha --api-token 2>/dev/null $v info; then :; fi
+closer18-0359	su:bash,dash	v='x su'; f2=/dev/null; ! ha --api-token 2>/dev/null $v info
+closer18-0360	su:bash,dash	v='x su'; f2=/dev/null; ( ha --api-token 2>/dev/null $v info )
+closer18-0361	su:bash,dash	v='x su'; f2=/dev/null; { ha --api-token 2>/dev/null $v info; }
+closer18-0362	su:bash,dash	v='x su'; f2=/dev/null; x=1 ha --api-token 2>/dev/null $v info
+closer18-0363	su:bash,dash	v='x su'; f2=/dev/null; command ha --api-token 2>/dev/null $v info
+closer18-0364	su:bash,dash	v='x su'; f2=/dev/null; env ha --api-token 2>/dev/null $v info
+closer18-0365	su:bash,dash	v='x su'; f2=/dev/null; eval 'ha --api-token 2>/dev/null $v info'
+closer18-0366	su:bash,dash	export v='x su' f2=/dev/null; sh -c "ha --api-token 2>/dev/null \\$v info"
+closer18-0367	su:bash,dash	v='x su'; f2=/dev/null; ha --log-level 2>/dev/null $v
+closer18-0368	su:bash,dash	v='x su'; f2=/dev/null; setsid ha --log-level 2>/dev/null $v
+closer18-0369	su:bash,dash	v='x su'; f2=/dev/null; while ha --log-level 2>/dev/null $v; do break; done
+closer18-0370	su:bash,dash	v='x su'; f2=/dev/null; if ha --log-level 2>/dev/null $v; then :; fi
+closer18-0371	su:bash,dash	v='x su'; f2=/dev/null; ! ha --log-level 2>/dev/null $v
+closer18-0372	su:bash,dash	v='x su'; f2=/dev/null; ( ha --log-level 2>/dev/null $v )
+closer18-0373	su:bash,dash	v='x su'; f2=/dev/null; { ha --log-level 2>/dev/null $v; }
+closer18-0374	su:bash,dash	v='x su'; f2=/dev/null; x=1 ha --log-level 2>/dev/null $v
+closer18-0375	su:bash,dash	v='x su'; f2=/dev/null; command ha --log-level 2>/dev/null $v
+closer18-0376	su:bash,dash	v='x su'; f2=/dev/null; env ha --log-level 2>/dev/null $v
+closer18-0377	su:bash,dash	v='x su'; f2=/dev/null; eval 'ha --log-level 2>/dev/null $v'
+closer18-0378	su:bash,dash	export v='x su' f2=/dev/null; sh -c "ha --log-level 2>/dev/null \\$v"
+closer18-0379	su:bash,dash	v='x su'; f2=/dev/null; ha --log-level 2> /dev/null $v info
+closer18-0380	su:bash,dash	v='x su'; f2=/dev/null; setsid ha --log-level 2> /dev/null $v info
+closer18-0381	su:bash,dash	v='x su'; f2=/dev/null; while ha --log-level 2> /dev/null $v info; do break; done
+closer18-0382	su:bash,dash	v='x su'; f2=/dev/null; if ha --log-level 2> /dev/null $v info; then :; fi
+closer18-0383	su:bash,dash	v='x su'; f2=/dev/null; ! ha --log-level 2> /dev/null $v info
+closer18-0384	su:bash,dash	v='x su'; f2=/dev/null; ( ha --log-level 2> /dev/null $v info )
+closer18-0385	su:bash,dash	v='x su'; f2=/dev/null; { ha --log-level 2> /dev/null $v info; }
+closer18-0386	su:bash,dash	v='x su'; f2=/dev/null; x=1 ha --log-level 2> /dev/null $v info
+closer18-0387	su:bash,dash	v='x su'; f2=/dev/null; command ha --log-level 2> /dev/null $v info
+closer18-0388	su:bash,dash	v='x su'; f2=/dev/null; env ha --log-level 2> /dev/null $v info
+closer18-0389	su:bash,dash	v='x su'; f2=/dev/null; eval 'ha --log-level 2> /dev/null $v info'
+closer18-0390	su:bash,dash	export v='x su' f2=/dev/null; sh -c "ha --log-level 2> /dev/null \\$v info"
+closer18-0391	none	v='x su'; f2=/dev/null; ha --log-level 2>/dev/null -- $v info
+closer18-0392	none	v='x su'; f2=/dev/null; setsid ha --log-level 2>/dev/null -- $v info
+closer18-0393	none	v='x su'; f2=/dev/null; while ha --log-level 2>/dev/null -- $v info; do break; done
+closer18-0394	none	v='x su'; f2=/dev/null; if ha --log-level 2>/dev/null -- $v info; then :; fi
+closer18-0395	none	v='x su'; f2=/dev/null; ! ha --log-level 2>/dev/null -- $v info
+closer18-0396	none	v='x su'; f2=/dev/null; ( ha --log-level 2>/dev/null -- $v info )
+closer18-0397	none	v='x su'; f2=/dev/null; { ha --log-level 2>/dev/null -- $v info; }
+closer18-0398	none	v='x su'; f2=/dev/null; x=1 ha --log-level 2>/dev/null -- $v info
+closer18-0399	none	v='x su'; f2=/dev/null; command ha --log-level 2>/dev/null -- $v info
+closer18-0400	none	v='x su'; f2=/dev/null; env ha --log-level 2>/dev/null -- $v info
+closer18-0401	none	v='x su'; f2=/dev/null; eval 'ha --log-level 2>/dev/null -- $v info'
+closer18-0402	none	export v='x su' f2=/dev/null; sh -c "ha --log-level 2>/dev/null -- \\$v info"
+closer18-0403	su:bash,dash	v='x su'; f2=/dev/null; ha --log-level 2>/dev/null $v 2>/dev/null info
+closer18-0404	su:bash,dash	v='x su'; f2=/dev/null; setsid ha --log-level 2>/dev/null $v 2>/dev/null info
+closer18-0405	su:bash,dash	v='x su'; f2=/dev/null; while ha --log-level 2>/dev/null $v 2>/dev/null info; do break; done
+closer18-0406	su:bash,dash	v='x su'; f2=/dev/null; if ha --log-level 2>/dev/null $v 2>/dev/null info; then :; fi
+closer18-0407	su:bash,dash	v='x su'; f2=/dev/null; ! ha --log-level 2>/dev/null $v 2>/dev/null info
+closer18-0408	su:bash,dash	v='x su'; f2=/dev/null; ( ha --log-level 2>/dev/null $v 2>/dev/null info )
+closer18-0409	su:bash,dash	v='x su'; f2=/dev/null; { ha --log-level 2>/dev/null $v 2>/dev/null info; }
+closer18-0410	su:bash,dash	v='x su'; f2=/dev/null; x=1 ha --log-level 2>/dev/null $v 2>/dev/null info
+closer18-0411	su:bash,dash	v='x su'; f2=/dev/null; command ha --log-level 2>/dev/null $v 2>/dev/null info
+closer18-0412	su:bash,dash	v='x su'; f2=/dev/null; env ha --log-level 2>/dev/null $v 2>/dev/null info
+closer18-0413	su:bash,dash	v='x su'; f2=/dev/null; eval 'ha --log-level 2>/dev/null $v 2>/dev/null info'
+closer18-0414	su:bash,dash	export v='x su' f2=/dev/null; sh -c "ha --log-level 2>/dev/null \\$v 2>/dev/null info"
+closer18-0415	su:bash,dash	v='x su'; f2=/dev/null; ha --log-level 2>$f2 $v info
+closer18-0416	su:bash,dash	v='x su'; f2=/dev/null; setsid ha --log-level 2>$f2 $v info
+closer18-0417	su:bash,dash	v='x su'; f2=/dev/null; while ha --log-level 2>$f2 $v info; do break; done
+closer18-0418	su:bash,dash	v='x su'; f2=/dev/null; if ha --log-level 2>$f2 $v info; then :; fi
+closer18-0419	su:bash,dash	v='x su'; f2=/dev/null; ! ha --log-level 2>$f2 $v info
+closer18-0420	su:bash,dash	v='x su'; f2=/dev/null; ( ha --log-level 2>$f2 $v info )
+closer18-0421	su:bash,dash	v='x su'; f2=/dev/null; { ha --log-level 2>$f2 $v info; }
+closer18-0422	su:bash,dash	v='x su'; f2=/dev/null; x=1 ha --log-level 2>$f2 $v info
+closer18-0423	su:bash,dash	v='x su'; f2=/dev/null; command ha --log-level 2>$f2 $v info
+closer18-0424	su:bash,dash	v='x su'; f2=/dev/null; env ha --log-level 2>$f2 $v info
+closer18-0425	su:bash,dash	v='x su'; f2=/dev/null; eval 'ha --log-level 2>$f2 $v info'
+closer18-0426	su:bash,dash	export v='x su' f2=/dev/null; sh -c "ha --log-level 2>\\$f2 \\$v info"
+closer18-0427	su:bash,dash	v='x su'; f2=/dev/null; ha --log-level 2>/dev/null $e $v info
+closer18-0428	su:bash,dash	v='x su'; f2=/dev/null; setsid ha --log-level 2>/dev/null $e $v info
+closer18-0429	su:bash,dash	v='x su'; f2=/dev/null; while ha --log-level 2>/dev/null $e $v info; do break; done
+closer18-0430	su:bash,dash	v='x su'; f2=/dev/null; if ha --log-level 2>/dev/null $e $v info; then :; fi
+closer18-0431	su:bash,dash	v='x su'; f2=/dev/null; ! ha --log-level 2>/dev/null $e $v info
+closer18-0432	su:bash,dash	v='x su'; f2=/dev/null; ( ha --log-level 2>/dev/null $e $v info )
+closer18-0433	su:bash,dash	v='x su'; f2=/dev/null; { ha --log-level 2>/dev/null $e $v info; }
+closer18-0434	su:bash,dash	v='x su'; f2=/dev/null; x=1 ha --log-level 2>/dev/null $e $v info
+closer18-0435	su:bash,dash	v='x su'; f2=/dev/null; command ha --log-level 2>/dev/null $e $v info
+closer18-0436	su:bash,dash	v='x su'; f2=/dev/null; env ha --log-level 2>/dev/null $e $v info
+closer18-0437	su:bash,dash	v='x su'; f2=/dev/null; eval 'ha --log-level 2>/dev/null $e $v info'
+closer18-0438	su:bash,dash	export v='x su' f2=/dev/null; sh -c "ha --log-level 2>/dev/null \\$e \\$v info"
+closer18-0439	su:bash,dash	IFS=,; v='x,su'; ha --log-level 2>/dev/null $v info
+closer18-0440	su:bash,dash	v='x su'\nha --log-level 2>/dev/null $v info
+closer18-0441	su:bash,dash	v='x supervisor'; ha --log-level 2>/dev/null $v info
+closer18-0442	su:bash,dash	v='x super'; ha --log-level <<E $v info\nE
+closer18-0443	su:bash,dash	read v <<E\nx su\nE\nha --log-level 2>/dev/null $v info
+closer18-0444	su:bash,dash	for v in 'x su'; do ha --log-level 2>/dev/null $v info; done
+closer18-0445	su:bash,dash	f() { ha --log-level 2>/dev/null $1 info; }; f 'x su'
+closer18-0446	su:bash,dash	v='x su'; ha --log-level 2>/dev/null $v info; echo su
+closer18-0447	su:bash,dash	v='x su'; ha --log-level 2>x\r"a b" $v info
+closer18-0448	su:bash,dash	v='x su'; ha --log-level 2>/dev/null x\r$v info
+closer18-0449	su:bash,dash	v='x\r su'; ha --log-level 2>/dev/null $v info
+closer18-0450	su:bash,dash	v='x su'; ha --log-level 2>x\x0b"a b" $v info
+closer18-0451	su:bash,dash	v='x su'; ha --log-level 2>/dev/null x\x0b$v info
+closer18-0452	su:bash,dash	v='x\x0b su'; ha --log-level 2>/dev/null $v info
+closer18-0453	su:bash,dash	v='x su'; ha --log-level 2>x\x0c"a b" $v info
+closer18-0454	su:bash,dash	v='x su'; ha --log-level 2>/dev/null x\x0c$v info
+closer18-0455	su:bash,dash	v='x\x0c su'; ha --log-level 2>/dev/null $v info
+closer18-0456	su:bash,dash	v='x su'; ha --log-level 2>x\x1c"a b" $v info
+closer18-0457	su:bash,dash	v='x su'; ha --log-level 2>/dev/null x\x1c$v info
+closer18-0458	su:bash,dash	v='x\x1c su'; ha --log-level 2>/dev/null $v info
+closer18-0460	remote:bash,dash	v=debug; ha --log-level 2>/dev/null $v core info
+closer18-0461	none	v='x su'; echo ha --log-level 2>/dev/null $v info
+closer18-0462	remote:bash,dash	v='x su'; ha core info 2>/dev/null; echo $v
+closer18-0463	remote:bash,dash	ha --log-level 2>/dev/null debug core logs
+closer18-0464	remote:bash,dash	v=info; ha 2>/dev/null core $v
+closer18-0465	none	echo 'v=x su; ha --log-level 2>/dev/null $v info'
+closer19-0001	su:bash,dash	v='x su'; ha --log-level>f $v info
+closer19-0002	su:bash,dash	v='x su'; ha --log-level>>f $v info
+closer19-0003	su:bash,dash	v='x su'; ha --log-level</dev/null $v info
+closer19-0004	su:bash,dash	v='x su'; ha --log-level>|f $v info
+closer19-0005	su:bash,dash	v='x su'; ha --log-level<>f $v info
+closer19-0006	su:bash,dash	v='x su'; ha --log-level>&2 $v info
+closer19-0007	su:bash	v='x su'; ha --log-level&>f $v info
+closer19-0008	su:bash,dash	v='x su'; ha --log-level>f 2>/dev/null $v info
+closer19-0009	su:bash,dash	v='x su'; ha --log-level 2>/dev/null>f $v info
+closer19-0010	su:bash,dash	v='x su'; ha --api-token>f $v info
+closer19-0011	su:bash,dash	v='x su'; ha --config>f ${v} info
+closer19-0012	su:bash,dash	set -- x su; ha --log-level>f "$@" info
+closer19-0013	su:bash,dash	v='x supervisor'; setsid ha --endpoint>f $v info
+closer19-0014	remote:bash,dash	v='x host'; setsid ha --log-level>f $v reboot
+closer19-0015	su:bash,dash	v='x su'; ha --log-level>f `echo $v` info
+closer19-0016	su:bash	v='x su'; ha --log-level < <(true) $v info
+closer19-0017	su:bash	v='x su'; ha --log-level 2> >(cat) $v info
+closer19-0019	su:bash,dash	v='x su'; ha --log-level >&- $v info
+closer19-0020	su:bash,dash	v='x su'; ha --log-level <&0 $v info
+closer19-0021	su:bash,dash	v='x su'; ha --log-level 2>/dev/null x$v info
+closer19-0022	su:bash,dash	v=' su'; ha --log-level 2>/dev/null x$v info
+closer19-0023	none	v='x su'; ha --log-level >$t $v info
+closer19-0024	su:bash,dash	v='x su'; t=f; ha --log-level >$t $v info
+closer19-0025	su:bash,dash	v='x su'; ha --log-level\t>f\t$v info
+closer19-0026	none	v='x su'; ha --log-level\n>f $v info
+closer19-0027	su:bash,dash	ha --log-level>f $nope x s${x}u info
+closer19-0028	su:bash,dash	ha --log-level>f $nope x su info
+closer19-0029	su:bash,dash	ha --log-level>f x su info
+closer19-0030	su:bash,dash	ha --log-level>f x s${x}u info
+closer19-0031	su:bash	ha --log-level > >(cat) $nope x s${x}u info
+closer19-0032	none	setsid ha --log-level x\t"a b" su info
+closer19-0033	su:bash,dash	setsid ha --log-level\t\tx\r"a b" su info
+closer19-0034	su:bash,dash	setsid ha --log-level=\r"a b" su info
+closer19-0035	su:bash,dash	setsid ha >\r"a b" su info
+closer19-0036	su:bash,dash	setsid ha >x\r\\ y su info
+closer19-0037	su:bash,dash	setsid ha --log-level x\r`echo y` su info
+closer19-0038	su:bash,dash	setsid ha --log-level x\r$(echo y) su info
+closer19-0040	remote:bash,dash	v=debug; ha --log-level>f $v core info
+closer19-0041	remote:bash,dash	ha --log-level>f debug core info
+closer19-0042	none	v='x su'; echo ha --log-level>f $v info
+closer19-0043	none	v='x su'; ha --log-level=>f $v info

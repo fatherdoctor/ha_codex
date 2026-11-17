@@ -1272,6 +1272,43 @@ class RedirectionTests(unittest.TestCase):
         """eval 'setsid ha' --log-level '"" s${x}u info'""",
         'ha --log-level $nope x --config > f y s${x}u info')
 
+    # The tenth closure's Q1 (sets 18 and 19): a redirection joined to the flag (the shell ends the flag
+    # word at < or >) and a process substitution as the target. Each runs the family it names in the
+    # shells it names, and the hook refuses it.
+    TENTH_JOINED_REDIRECTION_FORMS = (
+        ("v='x su'; ha --log-level > >(cat) $v info", 'su', ('bash',)),
+        ("v='x host'; setsid ha --endpoint > >(cat) $v reboot", 'host', ('bash',)),
+        ("v='x su'; f2=/dev/null; ha --log-level>f $v info", 'su', ('bash', 'dash')),
+        ("v='x su'; f2=/dev/null; setsid ha --log-level>f $v info", 'su', ('bash', 'dash')),
+        ("v='x su'; f2=/dev/null; while ha --log-level>f $v info; do break; done", 'su', ('bash', 'dash')),
+        ("v='x su'; f2=/dev/null; if ha --log-level>f $v info; then :; fi", 'su', ('bash', 'dash')),
+        ("v='x su'; f2=/dev/null; ! ha --log-level>f $v info", 'su', ('bash', 'dash')),
+        ("v='x su'; f2=/dev/null; ( ha --log-level>f $v info )", 'su', ('bash', 'dash')),
+        ("v='x su'; f2=/dev/null; { ha --log-level>f $v info; }", 'su', ('bash', 'dash')),
+        ("v='x su'; f2=/dev/null; x=1 ha --log-level>f $v info", 'su', ('bash', 'dash')),
+        ("v='x su'; f2=/dev/null; command ha --log-level>f $v info", 'su', ('bash', 'dash')),
+        ("v='x su'; f2=/dev/null; env ha --log-level>f $v info", 'su', ('bash', 'dash')),
+        ("v='x su'; f2=/dev/null; eval 'ha --log-level>f $v info'", 'su', ('bash', 'dash')),
+        ('export v=\'x su\' f2=/dev/null; sh -c "ha --log-level>f \\$v info"', 'su', ('bash', 'dash')),
+        ("v='x su'; ha --log-level>f $v info", 'su', ('bash', 'dash')),
+        ("v='x su'; ha --log-level>>f $v info", 'su', ('bash', 'dash')),
+        ("v='x su'; ha --log-level</dev/null $v info", 'su', ('bash', 'dash')),
+        ("v='x su'; ha --log-level>|f $v info", 'su', ('bash', 'dash')),
+        ("v='x su'; ha --log-level<>f $v info", 'su', ('bash', 'dash')),
+        ("v='x su'; ha --log-level>&2 $v info", 'su', ('bash', 'dash')),
+        ("v='x su'; ha --log-level&>f $v info", 'su', ('bash',)),
+        ("v='x su'; ha --log-level>f 2>/dev/null $v info", 'su', ('bash', 'dash')),
+        ("v='x su'; ha --api-token>f $v info", 'su', ('bash', 'dash')),
+        ("v='x su'; ha --config>f ${v} info", 'su', ('bash', 'dash')),
+        ('set -- x su; ha --log-level>f "$@" info', 'su', ('bash', 'dash')),
+        ("v='x supervisor'; setsid ha --endpoint>f $v info", 'supervisor', ('bash', 'dash')),
+        ("v='x host'; setsid ha --log-level>f $v reboot", 'host', ('bash', 'dash')),
+        ("v='x su'; ha --log-level>f `echo $v` info", 'su', ('bash', 'dash')),
+        ("v='x su'; ha --log-level < <(true) $v info", 'su', ('bash',)),
+        ("v='x su'; ha --log-level 2> >(cat) $v info", 'su', ('bash',)),
+        ('ha --log-level > >(cat) $nope x s${x}u info', 'su', ('bash',)),
+    )
+
     def _ninth_round_forms(self) -> list[str]:
         return [form.format(blank) for form in self.QUOTE_AFTER_ODD_BLANK_FORMS for blank in self.NINTH_ODD_BLANKS]
 
@@ -1320,6 +1357,38 @@ class RedirectionTests(unittest.TestCase):
             self._runs(command, 'su', ('bash', 'dash'))
             with self.subTest(command=command):
                 self.assertEqual(refusal(command, False), '')
+
+    def test_tenth_round_joined_redirections_and_process_targets_are_refused(self) -> None:
+        """Q1: the value rules read a redirection joined to the flag and a process substitution target."""
+        for command, family, shells in self.TENTH_JOINED_REDIRECTION_FORMS:
+            self._runs(command, family, shells)
+            with self.subTest(command=command):
+                if family in ('su', 'super', 'supervisor'):
+                    self.assertNotEqual(refusal(command, False), '')
+                self.assertNotEqual(refusal(command, True), '')
+
+    def test_flag_redirections_pattern_has_one_reading(self) -> None:
+        """Q1: a file descriptor joined to the flag is part of the flag word, so the value is not read."""
+        rule = gate_rules.HA_EXPANDED_FLAG_VALUE_RE
+        for text in ('--log-level>f $v', '--log-level>>f>g $v', '--log-level&>f $v', '--log-level>&2 $v',
+                     '--log-level> >(cat) x', '--log-level < <(true) x', '--log-level 2> >(cat) x'):
+            with self.subTest(text=text):
+                self.assertTrue(rule.search(text))
+        # --log-level2 is a word of its own, and >(cat) after =x is part of the flag word's value.
+        for text in ('--log-level2>f $v', '--log-level>f x', '--log-level=x>f $v'):
+            with self.subTest(text=text):
+                self.assertIsNone(rule.search(text))
+        # Many joined operators with no value after them: the match fails in linear time.
+        started = time.monotonic()
+        self.assertIsNone(rule.search('--log-level' + '>f' * 20000 + ' x'))
+        self.assertLess(time.monotonic() - started, 1.0)
+
+    def test_brace_part_of_the_unreadable_word_ends_at_the_shell_blanks(self) -> None:
+        """Q2: a carriage return inside a brace word is a letter, so {x<CR>,} is one brace word."""
+        rule = gate_rules.HA_UNREADABLE_WORD_RE
+        self.assertTrue(rule.search('{x\r,}'))
+        self.assertIsNone(rule.search('{x ,}'))
+        self.assertNotEqual(refusal('setsid ha {x\r,} su info', False), '')
 
     def test_built_word_rules_end_a_word_at_the_shell_blanks(self) -> None:
         """N6: the next-word and ha-word patterns read a carriage return as a letter, as the shell does."""
