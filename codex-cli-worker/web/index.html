@@ -39,6 +39,7 @@
         <button id="new-chat" class="new-chat">
           <span aria-hidden="true">＋</span> New chat
         </button>
+        <section class="chats-card" aria-label="Your chats">
         <div class="list-heading">
           <span>Your chats</span
           ><button id="refresh" class="icon" aria-label="Refresh conversations">
@@ -52,6 +53,7 @@
         </p>
         <button id="archive-list" class="subtle">Archived chats</button>
         <button id="load-more" class="subtle" hidden>Load older chats</button>
+        </section>
         <div class="sidebar-footer">
           <div class="workspace-label">
             <span class="workspace-dot" aria-hidden="true"></span
@@ -84,9 +86,9 @@
         role="separator"
         aria-label="Resize conversations sidebar"
         aria-orientation="vertical"
-        aria-valuemin="220"
-        aria-valuemax="440"
-        aria-valuenow="280"
+        aria-valuemin="200"
+        aria-valuemax="480"
+        aria-valuenow="260"
         tabindex="0"
       ></div>
       <main>

@@ -2243,3 +2243,209 @@ details.disclosure > summary {
 details.disclosure > summary::-webkit-details-marker {
   display: none;
 }
+/* FB2-LIST: "Your chats" as one Home Assistant list card, and a visible side bar divider. */
+:root {
+  --sidebar-width: 260px;
+  --fb2-row-height: 36px;
+  --fb2-row-selected: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.chats-card {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  margin-top: 14px;
+  overflow: hidden;
+  background: var(--card-background-color, var(--bg));
+  border: 1px solid var(--divider-color, var(--line));
+  border-radius: var(--ha-card-border-radius, 12px);
+}
+.chats-card .list-heading {
+  padding: 8px 4px 4px 14px;
+  color: var(--primary-text-color, var(--text));
+  font-size: 14px;
+  font-weight: 500;
+}
+.chats-card .sidebar-error {
+  margin: 0;
+  padding: 4px 14px;
+}
+.chats-card #chat-list {
+  padding-bottom: 4px;
+}
+.chats-card .list-group {
+  margin: 6px 0 2px;
+  padding: 0 14px;
+  font-size: 11px;
+  letter-spacing: 0.4px;
+}
+.chats-card .list-group + .list-group,
+.chats-card .chat-row + .list-group {
+  margin-top: 8px;
+}
+.chats-card #list-empty {
+  padding: 4px 14px 10px;
+}
+/* A flat row: icon, title on one line, age at the right, the menu on hover or focus. */
+.chats-card .chat-row {
+  margin: 0;
+  border-radius: 0;
+  min-height: var(--fb2-row-height);
+}
+.chats-card .chat-row:hover,
+.chats-card .chat-row.menu-open {
+  background: var(--hover);
+}
+.chats-card .chat-row.current {
+  background: var(--fb2-row-selected);
+  box-shadow: none;
+  color: var(--accent);
+}
+.chats-card .chat-row.current .row-main,
+.chats-card .chat-row.current .row-title {
+  color: var(--accent);
+}
+.chats-card .chat-row.queued {
+  outline-offset: -3px;
+}
+.chats-card .row-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 8px;
+  min-height: var(--fb2-row-height);
+  padding: 0 14px;
+  border-radius: 0;
+  font-size: 13px;
+}
+.chats-card .row-title {
+  padding-right: 0;
+  gap: 8px;
+  font-weight: 400;
+}
+.chats-card .row-preview {
+  display: none;
+}
+.chats-card .row-meta {
+  margin: 0;
+  font-size: 12px;
+  white-space: nowrap;
+}
+/* The status word is for a screen reader. A chat that waits for the owner shows a dot in its place. */
+.chats-card .row-meta > span:first-child {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.chats-card .row-meta > .waiting {
+  position: static;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  display: inline-block;
+  vertical-align: middle;
+  border-radius: 50%;
+  background: var(--warning-color, #f59e0b);
+  font-size: 0;
+  clip-path: none;
+}
+.chats-card .row-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+.chats-card .row-menu {
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  font-size: 16px;
+  background: transparent;
+}
+.chats-card .chat-row:hover .row-meta > span:last-child,
+.chats-card .chat-row:focus-within .row-meta > span:last-child,
+.chats-card .chat-row.menu-open .row-meta > span:last-child {
+  visibility: hidden;
+}
+.row-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  fill: var(--muted);
+}
+.chats-card .chat-row.current .row-icon {
+  fill: var(--accent);
+}
+.chats-card .pin-icon,
+.chats-card .queue-icon {
+  fill: var(--accent);
+  stroke: none;
+}
+.row-spinner {
+  box-sizing: border-box;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  fill: none;
+  animation: row-spin 0.9s linear infinite;
+}
+@keyframes row-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .row-spinner {
+    animation: none;
+  }
+}
+/* "Archived chats" and "Load older chats" are text rows at the foot of the card. */
+.chats-card .subtle {
+  width: 100%;
+  min-height: var(--fb2-row-height);
+  padding: 0 14px;
+  text-align: left;
+  border: 0;
+  border-top: 1px solid var(--divider-color, var(--line));
+  border-radius: 0;
+  color: var(--accent);
+  font-size: 13px;
+}
+.chats-card .subtle:hover:not(:disabled) {
+  background: var(--hover);
+}
+@media (pointer: coarse), (max-width: 700px) {
+  :root {
+    --fb2-row-height: 48px;
+  }
+}
+/* The divider: a 1 px line at the side bar's edge in a 9 px grab area. */
+.app {
+  grid-template-columns: var(--sidebar-width) 9px minmax(0, 1fr);
+}
+#divider {
+  position: relative;
+  background: transparent;
+  border-right: 0;
+  cursor: ew-resize;
+}
+#divider::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 4px;
+  width: 1px;
+  background: var(--divider-color, var(--line));
+}
+#divider:hover::before,
+#divider:focus-visible::before,
+body.resizing #divider::before {
+  background: var(--accent);
+}
+#divider:hover,
+#divider:focus-visible {
+  background: transparent;
+}
+body.resizing {
+  cursor: ew-resize;
+}
