@@ -8,10 +8,15 @@
   with remote control off and on. The same fix covers the remote-control families (`ha 2>/dev/null host reboot`)
   when remote control is on.
 - The check also refuses a word after `ha` that it cannot read to its end when `su`, `super` or `supervisor`
-  follows it on the line, with remote control off too: a global-flag value with a quote, a backslash or a
-  substitution (`ha --api-token "a b" ...`), a redirection target of that kind (`ha >"a b" ...`, `ha < <(true) ...`)
-  and any word with a `$` (`ha $EMPTY su info`). Before, only remote control on refused such a flag value. With
-  remote control on, such a target or `$` word is refused before any family word.
+  follows it anywhere later in the command, with remote control off too: a global-flag value with a quote, a
+  backslash or a substitution (`ha --api-token "a b" ...`), a redirection target of that kind (`ha >"a b" ...`,
+  `ha < <(true) ...`), any word with a `$` or a backtick (`ha $EMPTY su info`), a glob, and a bash brace
+  expansion (`ha {,} su info`, `ha s{u,} info`). Before, only remote control on refused such a flag value. With
+  remote control on, such a word is refused before any family word. A carriage return or a form feed no longer
+  ends a line for this check, as it does not for the shell.
+- These refusals also reach some harmless commands where `ha` is not the program at all, for example
+  `git commit -m "ha: fix $name supervisor link"` or `grep -rn "ha " $FILES | grep supervisor`. Write such a
+  command without the `$` word, or run it outside Codex.
 - The text check's match time no longer doubles with each repeated global flag or heredoc operator. No other
   approval, sandbox or permission rule changed.
 

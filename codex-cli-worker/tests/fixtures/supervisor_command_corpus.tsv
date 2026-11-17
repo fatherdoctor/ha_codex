@@ -1,0 +1,1133 @@
+# Supervisor command corpus for the PreToolUse hook (gate_rules.check_tool_call).
+# Real readers: bash and dash (the image installs both). zsh is not a reader of these commands.
+# Columns: id, expect, command. The command is written with Python escapes (\n is a newline,
+# \r a carriage return, \x0c a form feed); the test decodes it.
+# expect is what a print-only ha stub received when the shells ran the command:
+#   su:<shells>     a Supervisor family (su, super, supervisor) ran: refused in both modes.
+#   remote:<shells> only a remote family (host, core, ...) ran: refused with remote control on.
+#   none            no family ran in either shell: no answer is required.
+# test_supervisor_corpus.py runs every command again under bash and dash (as the user the tests
+# run as, never root in CI) and checks that the shells still agree with this column, then that
+# the hook refuses each su and remote case. Add a case here; never delete one.
+# Sources: reviewer-* and closer-* were written by reviewers of the redirection fix; reduced-* are
+# the forms a closer found that passed the hook; fuzz-* are 21 prefixes x 21 middles x 2 families
+# and single lines aimed at each branch of the rule. Families of hostile input: joined operators,
+# quoted or escaped operators and targets, words that expand to nothing ($x, ${x:+}, $(...),
+# backticks, {,}, nullglob), line breaks Python reads and the shell does not (\r, \x0c, \x0b,
+# \x1c, \x85, U+2028), nested shells, wrappers, continuations and comments.
+# n/a: Unicode look-alike letters (ha is a fixed ASCII program name; the shell does not fold them);
+# aliases and functions (DOCS names them as a limit: the check reads text, not shell state).
+reviewer-001	su:bash,dash	ha>/dev/null su info
+reviewer-002	su:bash,dash	ha</dev/null su info
+reviewer-003	su:bash,dash	ha>&2 su info
+reviewer-004	su:bash,dash	ha>>/dev/null su info
+reviewer-005	su:bash	ha&>/dev/null su info
+reviewer-006	su:bash,dash	env ha>/dev/null su info
+reviewer-007	su:bash,dash	/usr/bin/env ha>/dev/null supervisor info
+reviewer-008	remote:bash,dash	ha>/dev/null host info
+reviewer-009	su:bash,dash	ha 2>/dev/null< /dev/null su info
+reviewer-010	su:bash,dash	ha >out2> /dev/null su info
+reviewer-011	su:bash,dash	ha 2>/dev/null>/dev/null su info
+reviewer-012	remote:bash,dash	ha </dev/null> /dev/null host info
+reviewer-013	su:bash,dash	ha --api-token>/dev/null x su info
+reviewer-014	su:bash,dash	ha --log-level</dev/null debug su info
+reviewer-015	remote:bash,dash	ha --config>/dev/null x host info
+reviewer-016	su:bash,dash	ha >"a b" su info
+reviewer-017	su:bash,dash	dash -c 'ha >"a b" su info'
+reviewer-018	su:bash,dash	setsid sh -c 'ha 2>a\\ b su info'
+reviewer-019	remote:bash,dash	dash -c 'ha >"a b" host info'
+reviewer-020	su:bash,dash	echo ">" & ha 2>&1 >"a b" su info
+reviewer-021	su:bash,dash	echo ">" | ha >"a b" su info
+reviewer-022	su:bash,dash	ha >$(echo out) su info
+reviewer-023	su:bash,dash	dash -c 'ha >$(echo out) su info'
+reviewer-024	su:bash,dash	dash -c 'ha >`echo out` su info'
+reviewer-025	su:bash,dash	ha 2>${x:- a} su info
+reviewer-026	su:bash,dash	ha --config ${x:- a} su info
+reviewer-027	su:bash,dash	ha $EMPTY su info
+reviewer-028	su:bash	ha < <(true) su info
+reviewer-029	su:bash	ha > >(cat) su info
+reviewer-030	su:bash	ha 2> >(cat >/dev/null) su info
+reviewer-031	su:bash,dash	ha <<EOF su info\nx\nEOF
+reviewer-032	su:bash,dash	ha <<-'EOF' su info\nx\nEOF
+reviewer-033	su:bash	ha <<< "a b" su info
+reviewer-034	su:bash,dash	dash -c 'ha <<EOF su info\nx\nEOF'
+reviewer-035	su:bash,dash	ha 2>& 1 su info
+reviewer-036	su:bash	ha >& /dev/null su info
+reviewer-037	su:bash	ha &>> /dev/null su info
+reviewer-038	su:bash	ha &> /dev/null su info
+reviewer-039	su:bash,dash	ha <&0 su info
+reviewer-040	su:bash	ha 2>&1- su info
+reviewer-041	su:bash,dash	ha <> /dev/null su info
+reviewer-042	su:bash	ha {fd}>/dev/null su info
+reviewer-043	su:bash	ha 10>/dev/null su info
+reviewer-044	su:bash,dash	ha 2>/dev/null 1>&2 </dev/null su info
+reviewer-045	su:bash,dash	ha 2>/dev/null\tsu info
+reviewer-046	su:bash,dash	ha --raw-json 2>/dev/null -- su info
+reviewer-047	su:bash,dash	ha su>/dev/null info
+reviewer-048	su:bash,dash	ha su 2>/dev/null info
+reviewer-049	remote:bash,dash	ha host>/dev/null info
+reviewer-050	none	sudo ha 2>/dev/null su info
+reviewer-051	su:bash,dash	nohup ha 2>&1 su info &
+reviewer-052	su:bash,dash	( ha 2>/dev/null su info )
+reviewer-053	su:bash,dash	{ ha 2>&1 su info; }
+reviewer-054	su:bash,dash	true && ha 2>/dev/null su info || true
+reviewer-055	su:bash,dash	echo x | ha 2>&1 su info
+reviewer-056	su:bash,dash	x=1 ha 2>/dev/null su info
+reviewer-057	su:bash,dash	2>/dev/null ha >/dev/null su info
+reviewer-058	su:bash,dash	>/dev/null 2>&1 ha su info
+reviewer-059	su:bash,dash	bash --norc -c 'ha 2>&1 su info'
+reviewer-060	su:bash,dash	eval "ha 2>/dev/null su info"
+reviewer-061	su:bash,dash	echo $(ha 2>/dev/null su info)
+reviewer-062	su:bash,dash	timeout 5 ha 2>/dev/null su info
+reviewer-063	su:bash,dash	xargs ha 2>/dev/null su info </dev/null
+reviewer-064	su:bash,dash	foo 2>&1 & ha su info
+reviewer-065	su:bash,dash	echo ">" & ha 2>&1 su info
+reviewer-066	su:bash	echo x >& y ; ha 2>&1 su info
+reviewer-067	su:bash,dash	ha 2>/dev/null \\\n su info
+reviewer-068	su:bash,dash	ha 2>\\\n/dev/null su info
+reviewer-069	su:bash,dash	ha 2\\\n>/dev/null su info
+reviewer-070	su:bash,dash	ha >/dev/null s\\\nu info
+reviewer-071	su:bash,dash	dash -c 'ha >/dev/nu\\\nll su info'
+reviewer-072	su:bash,dash	ha 2>out#x su info
+reviewer-073	su:bash,dash	ha >a#b su info
+reviewer-074	none	ha > su info
+reviewer-075	none	ha 2>> supervisor info
+reviewer-076	none	echo ha 2>/dev/null su
+reviewer-077	none	ha info >/dev/null
+reviewer-078	remote:bash,dash	ha core info 2>&1
+closer-001	su:bash,dash	ha>|/dev/null su info
+closer-002	su:bash,dash	ha >| /dev/null su info
+closer-003	su:bash,dash	ha<>/dev/null su info
+closer-004	su:bash,dash	ha 3<>/dev/null su info
+closer-005	su:bash,dash	ha <&- su info
+closer-006	su:bash,dash	ha 2>&- su info
+closer-007	su:bash	ha 1>&2- su info
+closer-008	su:bash,dash	ha>/dev/null>/dev/null su info
+closer-009	su:bash,dash	ha>/dev/null</dev/null su info
+closer-010	su:bash	ha 2>&1>/dev/null su info
+closer-011	su:bash,dash	ha 2>&1 >&2 su info
+closer-012	su:bash,dash	ha>/dev/null su
+closer-013	remote:bash,dash	ha>/dev/null core info
+closer-014	su:bash,dash	ha --api-token=x>/dev/null su info
+closer-015	su:bash,dash	ha -x>/dev/null su info
+closer-016	su:bash,dash	ha --raw-json>/dev/null su info
+closer-017	su:bash,dash	ha --log-level debug>/dev/null su info
+closer-018	su:bash,dash	ha --log-level 2>/dev/null debug su info
+closer-019	su:bash,dash	ha --log-level=debug>/dev/null su info
+closer-020	su:bash,dash	ha 2>/dev/null --log-level debug su info
+closer-021	su:bash,dash	ha -- >/dev/null su info
+closer-022	su:bash,dash	ha -->/dev/null su info
+closer-023	su:bash,dash	"ha">/dev/null su info
+closer-024	su:bash,dash	'ha'>/dev/null su info
+closer-025	su:bash,dash	h\\a>/dev/null su info
+closer-026	su:bash,dash	/usr/bin/../bin/env ha>/dev/null su info
+closer-027	su:bash,dash	command ha>/dev/null su info
+closer-028	su:bash,dash	exec ha>/dev/null su info
+closer-029	su:bash	time ha>/dev/null su info
+closer-030	su:bash,dash	! ha>/dev/null su info
+closer-031	su:bash,dash	if ha>/dev/null su info; then :; fi
+closer-032	su:bash,dash	while ha>/dev/null su info; do break; done
+closer-033	su:bash,dash	f(){ ha>/dev/null su info; }; f
+closer-034	su:bash,dash	env -i PATH="$PATH" HA_STUB_OUT="$HA_STUB_OUT" ha>/dev/null su info
+closer-035	su:bash,dash	env x=1 ha 2>/dev/null su info
+closer-036	su:bash,dash	x=1>/dev/null ha su info
+closer-037	su:bash,dash	x=">" ha su info
+closer-038	su:bash,dash	x=">" ha>/dev/null su info
+closer-039	su:bash,dash	ha>/dev/null "su" info
+closer-040	su:bash,dash	ha>/dev/null s"u" info
+closer-041	su:bash,dash	ha >/dev/null s\\u info
+closer-042	su:bash,dash	ha>/dev/null 'supervisor' info
+closer-043	su:bash,dash	ha >'/dev/null' su info
+closer-044	su:bash,dash	ha >/dev/"null" su info
+closer-045	su:bash,dash	ha >\\/dev/null su info
+closer-046	su:bash,dash	ha >&"2" su info
+closer-047	su:bash,dash	ha >$'a b' su info
+closer-048	su:bash,dash	ha 2>"a b" --log-level debug su info
+closer-049	su:bash,dash	2>"a b" ha su info
+closer-050	su:bash,dash	>"a b" 2>&1 ha su info
+closer-051	su:bash,dash	>/dev/null<"/dev/null" ha su info
+closer-052	su:bash	ha<<<x su info
+closer-053	su:bash	ha <<<'a b' su info
+closer-054	su:bash	ha <<< $'a\\tb' su info
+closer-055	su:bash	<<<x ha su info
+closer-056	su:bash,dash	ha<<EOF su info\nx\nEOF
+closer-057	su:bash,dash	ha <<-EOF su info\n\tx\n\tEOF
+closer-058	su:bash,dash	ha <<"E F" su info\nx\nE F
+closer-059	su:bash,dash	ha <<EOF>/dev/null su info\nx\nEOF
+closer-060	su:bash,dash	ha ${EMPTY} su info
+closer-061	su:bash,dash	ha $EMPTY$EMPTY su info
+closer-062	su:bash,dash	ha $(true) su info
+closer-063	su:bash,dash	ha `true` su info
+closer-064	su:bash,dash	ha $* su info
+closer-065	su:bash,dash	ha $@ su info
+closer-066	su:bash,dash	ha "$@" su info
+closer-067	su:bash	ha {,} su info
+closer-068	su:bash,dash	ha $EMPTY>/dev/null su info
+closer-069	su:bash,dash	ha 2>$EMPTY/dev/null su info
+closer-070	su:bash,dash	ha >/dev/null$EMPTY su info
+closer-071	su:bash,dash	ha 2>/dev/null$(true) su info
+closer-072	remote:bash,dash	ha $EMPTY host info
+closer-073	none	ha $EMPTY\\\nsu info
+closer-074	su:bash	< <(true) ha su info
+closer-075	none	ha <(true) 2>/dev/null >(cat) su info
+closer-076	su:bash,dash	ha>/dev/null \\\nsu info
+closer-077	su:bash,dash	ha>\\\n/dev/null su info
+closer-078	su:bash,dash	h\\\na>/dev/null su info
+closer-079	su:bash,dash	ha\t>/dev/null\tsu info
+closer-080	su:bash,dash	ha>/dev/null\tsu\tinfo
+closer-081	su:bash,dash	ha>out#x su info
+closer-082	su:bash,dash	echo ">" ; ha>/dev/null su info
+closer-083	su:bash,dash	echo "<" & ha>/dev/null su info
+closer-084	su:bash,dash	echo '>' | ha>"a b" su info
+closer-085	su:bash,dash	echo \\> ; ha >a\\ b su info
+closer-086	su:bash	echo "a > b" && ha 2>&1>/dev/null su info
+closer-087	su:bash,dash	echo '<<EOF' ; ha>/dev/null su info
+closer-088	su:bash,dash	ha|ha>/dev/null su info
+closer-089	su:bash,dash	ha 2>/dev/null&ha>/dev/null su info
+closer-090	su:bash,dash	echo x>y;ha>/dev/null su info
+closer-091	su:bash,dash	ha>/dev/null su info|cat
+closer-092	su:bash,dash	sh -c "ha>/dev/null su info"
+closer-093	su:bash,dash	bash -c 'ha<<<x su info'
+closer-094	su:bash,dash	dash -c 'ha $EMPTY su info'
+closer-095	su:bash,dash	sh -c 'ha>"a b" su info'
+closer-096	su:bash,dash	eval 'ha>/dev/null su info'
+closer-097	su:bash,dash	echo $(ha>/dev/null su info)
+closer-098	none	sudo -n ha>/dev/null su info
+closer-099	su:bash,dash	timeout 5 ha>/dev/null su info
+closer-100	su:bash,dash	nice ha>/dev/null su info
+closer-101	su:bash,dash	xargs ha>/dev/null su info </dev/null
+closer-102	none	ha <(true) info
+closer-103	none	ha "$EMPTY" su info
+closer-104	none	ha>su info
+closer-105	none	ha info>/dev/null
+reduced-001	su:bash,dash	ha ${x:+\r} su info
+reduced-002	su:bash,dash	ha ${x:+\x0c} su info
+reduced-003	su:bash,dash	ha ${x:+\x0b} su info
+reduced-004	su:bash,dash	ha ${x:+\x1c} su info
+reduced-005	su:bash,dash	ha ${x:+\x85} su info
+reduced-006	su:bash,dash	ha ${x:+a\nb} su info
+reduced-007	su:bash,dash	ha $(:\n) su info
+reduced-008	su:bash,dash	ha `:\n` su info
+reduced-009	su:bash,dash	ha --config "a\rb" su info
+reduced-010	su:bash,dash	ha --config "a\nb" su info
+reduced-011	su:bash,dash	ha --config 'a\x0cb c' su info
+reduced-012	su:bash,dash	ha >"a\rb c" su info
+reduced-013	su:bash,dash	ha >"a\nb" su info
+reduced-014	su:bash,dash	ha >'a\x0cb c' su info
+reduced-015	su:bash,dash	echo ">" & ha 2>&1 >"a\nb" su info
+reduced-016	su:bash,dash	echo ">" & ha 2>&1 >"a\rb c" su info
+reduced-017	su:bash,dash	echo ">" & ha 2>&1 -x"> y z" su info
+reduced-018	su:bash,dash	echo ">" & ha 2>&1 --raw-json="> y z" su info
+reduced-019	su:bash,dash	echo ">" & ha 2>&1 -x"y z" su info
+reduced-020	su:bash,dash	echo ">" & ha -x"> y z" su info
+reduced-021	su:bash,dash	ha -x"> y z" su info
+reduced-022	remote:bash	ha {,} host info
+reduced-023	su:bash	ha --config {,} x su info
+reduced-024	su:bash	ha {su,} info
+reduced-025	su:bash	ha s{u,} info
+reduced-026	su:bash	ha {su,info}
+reduced-027	su:bash	ha su{,} info
+reduced-028	su:bash	ha {,}su info
+reduced-029	su:bash	ha 2>&1 {su,} info
+reduced-030	su:bash,dash	bash -c 'ha {,} su info'
+reduced-031	su:bash	shopt -s nullglob; ha /nonexistent-dir-zz/* su info
+fuzz-001	su:bash,dash	ha 2>&1 su info
+fuzz-002	remote:bash,dash	ha 2>&1 host info
+fuzz-003	remote:bash,dash	ha -x"> y z" host info
+fuzz-004	su:bash,dash	ha -x">" su info
+fuzz-005	remote:bash,dash	ha -x">" host info
+fuzz-006	su:bash,dash	ha 2>&1 -x"> y z" su info
+fuzz-007	remote:bash,dash	ha 2>&1 -x"> y z" host info
+fuzz-008	su:bash,dash	ha -x'< y z' su info
+fuzz-009	remote:bash,dash	ha -x'< y z' host info
+fuzz-010	su:bash,dash	ha -x{,} su info
+fuzz-011	remote:bash,dash	ha -x{,} host info
+fuzz-012	remote:bash	ha --config {,} x host info
+fuzz-013	su:bash	ha 2>/dev/null {,} su info
+fuzz-014	remote:bash	ha 2>/dev/null {,} host info
+fuzz-015	su:bash	ha {,,} su info
+fuzz-016	remote:bash	ha {,,} host info
+fuzz-017	su:bash,dash	ha -x"<<<y z" su info
+fuzz-018	remote:bash,dash	ha -x"<<<y z" host info
+fuzz-019	su:bash,dash	ha -x"2> y z" su info
+fuzz-020	remote:bash,dash	ha -x"2> y z" host info
+fuzz-021	su:bash,dash	ha -x\\> su info
+fuzz-022	remote:bash,dash	ha -x\\> host info
+fuzz-023	su:bash,dash	ha --raw-json="> y z" su info
+fuzz-024	remote:bash,dash	ha --raw-json="> y z" host info
+fuzz-025	su:bash,dash	ha -x\x0c2>&1 su info
+fuzz-026	remote:bash,dash	ha -x\x0c2>&1 host info
+fuzz-027	none	ha 2>&1\x0b su info
+fuzz-028	none	ha 2>&1\x0b host info
+fuzz-029	su:bash,dash	ha 2>out\r su info
+fuzz-030	remote:bash,dash	ha 2>out\r host info
+fuzz-031	su:bash,dash	ha -x\u2028 su info
+fuzz-032	remote:bash,dash	ha -x\u2028 host info
+fuzz-033	su:bash,dash	ha -x\x85 su info
+fuzz-034	remote:bash,dash	ha -x\x85 host info
+fuzz-035	su:bash,dash	ha -x\xa0 su info
+fuzz-036	remote:bash,dash	ha -x\xa0 host info
+fuzz-037	su:bash,dash	ha -x\u3000 su info
+fuzz-038	remote:bash,dash	ha -x\u3000 host info
+fuzz-039	remote:bash,dash	echo ">" & ha 2>&1 host info
+fuzz-040	remote:bash,dash	echo ">" & ha -x"> y z" host info
+fuzz-041	su:bash,dash	echo ">" & ha -x">" su info
+fuzz-042	remote:bash,dash	echo ">" & ha -x">" host info
+fuzz-043	remote:bash,dash	echo ">" & ha 2>&1 -x"> y z" host info
+fuzz-044	su:bash,dash	echo ">" & ha -x'< y z' su info
+fuzz-045	remote:bash,dash	echo ">" & ha -x'< y z' host info
+fuzz-046	su:bash	echo ">" & ha {,} su info
+fuzz-047	remote:bash	echo ">" & ha {,} host info
+fuzz-048	su:bash,dash	echo ">" & ha -x{,} su info
+fuzz-049	remote:bash,dash	echo ">" & ha -x{,} host info
+fuzz-050	su:bash	echo ">" & ha --config {,} x su info
+fuzz-051	remote:bash	echo ">" & ha --config {,} x host info
+fuzz-052	su:bash	echo ">" & ha 2>/dev/null {,} su info
+fuzz-053	remote:bash	echo ">" & ha 2>/dev/null {,} host info
+fuzz-054	su:bash	echo ">" & ha {,,} su info
+fuzz-055	remote:bash	echo ">" & ha {,,} host info
+fuzz-056	su:bash,dash	echo ">" & ha -x"<<<y z" su info
+fuzz-057	remote:bash,dash	echo ">" & ha -x"<<<y z" host info
+fuzz-058	su:bash,dash	echo ">" & ha -x"2> y z" su info
+fuzz-059	remote:bash,dash	echo ">" & ha -x"2> y z" host info
+fuzz-060	su:bash,dash	echo ">" & ha -x\\> su info
+fuzz-061	remote:bash,dash	echo ">" & ha -x\\> host info
+fuzz-062	su:bash,dash	echo ">" & ha --raw-json="> y z" su info
+fuzz-063	remote:bash,dash	echo ">" & ha --raw-json="> y z" host info
+fuzz-064	su:bash,dash	echo ">" & ha -x\x0c2>&1 su info
+fuzz-065	remote:bash,dash	echo ">" & ha -x\x0c2>&1 host info
+fuzz-066	none	echo ">" & ha 2>&1\x0b su info
+fuzz-067	none	echo ">" & ha 2>&1\x0b host info
+fuzz-068	su:bash,dash	echo ">" & ha 2>out\r su info
+fuzz-069	remote:bash,dash	echo ">" & ha 2>out\r host info
+fuzz-070	su:bash,dash	echo ">" & ha -x\u2028 su info
+fuzz-071	remote:bash,dash	echo ">" & ha -x\u2028 host info
+fuzz-072	su:bash,dash	echo ">" & ha -x\x85 su info
+fuzz-073	remote:bash,dash	echo ">" & ha -x\x85 host info
+fuzz-074	su:bash,dash	echo ">" & ha -x\xa0 su info
+fuzz-075	remote:bash,dash	echo ">" & ha -x\xa0 host info
+fuzz-076	su:bash,dash	echo ">" & ha -x\u3000 su info
+fuzz-077	remote:bash,dash	echo ">" & ha -x\u3000 host info
+fuzz-078	su:bash,dash	echo "<" ; ha 2>&1 su info
+fuzz-079	remote:bash,dash	echo "<" ; ha 2>&1 host info
+fuzz-080	su:bash,dash	echo "<" ; ha -x"> y z" su info
+fuzz-081	remote:bash,dash	echo "<" ; ha -x"> y z" host info
+fuzz-082	su:bash,dash	echo "<" ; ha -x">" su info
+fuzz-083	remote:bash,dash	echo "<" ; ha -x">" host info
+fuzz-084	su:bash,dash	echo "<" ; ha 2>&1 -x"> y z" su info
+fuzz-085	remote:bash,dash	echo "<" ; ha 2>&1 -x"> y z" host info
+fuzz-086	su:bash,dash	echo "<" ; ha -x'< y z' su info
+fuzz-087	remote:bash,dash	echo "<" ; ha -x'< y z' host info
+fuzz-088	su:bash	echo "<" ; ha {,} su info
+fuzz-089	remote:bash	echo "<" ; ha {,} host info
+fuzz-090	su:bash,dash	echo "<" ; ha -x{,} su info
+fuzz-091	remote:bash,dash	echo "<" ; ha -x{,} host info
+fuzz-092	su:bash	echo "<" ; ha --config {,} x su info
+fuzz-093	remote:bash	echo "<" ; ha --config {,} x host info
+fuzz-094	su:bash	echo "<" ; ha 2>/dev/null {,} su info
+fuzz-095	remote:bash	echo "<" ; ha 2>/dev/null {,} host info
+fuzz-096	su:bash	echo "<" ; ha {,,} su info
+fuzz-097	remote:bash	echo "<" ; ha {,,} host info
+fuzz-098	su:bash,dash	echo "<" ; ha -x"<<<y z" su info
+fuzz-099	remote:bash,dash	echo "<" ; ha -x"<<<y z" host info
+fuzz-100	su:bash,dash	echo "<" ; ha -x"2> y z" su info
+fuzz-101	remote:bash,dash	echo "<" ; ha -x"2> y z" host info
+fuzz-102	su:bash,dash	echo "<" ; ha -x\\> su info
+fuzz-103	remote:bash,dash	echo "<" ; ha -x\\> host info
+fuzz-104	su:bash,dash	echo "<" ; ha --raw-json="> y z" su info
+fuzz-105	remote:bash,dash	echo "<" ; ha --raw-json="> y z" host info
+fuzz-106	su:bash,dash	echo "<" ; ha -x\x0c2>&1 su info
+fuzz-107	remote:bash,dash	echo "<" ; ha -x\x0c2>&1 host info
+fuzz-108	none	echo "<" ; ha 2>&1\x0b su info
+fuzz-109	none	echo "<" ; ha 2>&1\x0b host info
+fuzz-110	su:bash,dash	echo "<" ; ha 2>out\r su info
+fuzz-111	remote:bash,dash	echo "<" ; ha 2>out\r host info
+fuzz-112	su:bash,dash	echo "<" ; ha -x\u2028 su info
+fuzz-113	remote:bash,dash	echo "<" ; ha -x\u2028 host info
+fuzz-114	su:bash,dash	echo "<" ; ha -x\x85 su info
+fuzz-115	remote:bash,dash	echo "<" ; ha -x\x85 host info
+fuzz-116	su:bash,dash	echo "<" ; ha -x\xa0 su info
+fuzz-117	remote:bash,dash	echo "<" ; ha -x\xa0 host info
+fuzz-118	su:bash,dash	echo "<" ; ha -x\u3000 su info
+fuzz-119	remote:bash,dash	echo "<" ; ha -x\u3000 host info
+fuzz-120	su:bash,dash	echo '>' | ha 2>&1 su info
+fuzz-121	remote:bash,dash	echo '>' | ha 2>&1 host info
+fuzz-122	su:bash,dash	echo '>' | ha -x"> y z" su info
+fuzz-123	remote:bash,dash	echo '>' | ha -x"> y z" host info
+fuzz-124	su:bash,dash	echo '>' | ha -x">" su info
+fuzz-125	remote:bash,dash	echo '>' | ha -x">" host info
+fuzz-126	su:bash,dash	echo '>' | ha 2>&1 -x"> y z" su info
+fuzz-127	remote:bash,dash	echo '>' | ha 2>&1 -x"> y z" host info
+fuzz-128	su:bash,dash	echo '>' | ha -x'< y z' su info
+fuzz-129	remote:bash,dash	echo '>' | ha -x'< y z' host info
+fuzz-130	su:bash	echo '>' | ha {,} su info
+fuzz-131	remote:bash	echo '>' | ha {,} host info
+fuzz-132	su:bash,dash	echo '>' | ha -x{,} su info
+fuzz-133	remote:bash,dash	echo '>' | ha -x{,} host info
+fuzz-134	su:bash	echo '>' | ha --config {,} x su info
+fuzz-135	remote:bash	echo '>' | ha --config {,} x host info
+fuzz-136	su:bash	echo '>' | ha 2>/dev/null {,} su info
+fuzz-137	remote:bash	echo '>' | ha 2>/dev/null {,} host info
+fuzz-138	su:bash	echo '>' | ha {,,} su info
+fuzz-139	remote:bash	echo '>' | ha {,,} host info
+fuzz-140	su:bash,dash	echo '>' | ha -x"<<<y z" su info
+fuzz-141	remote:bash,dash	echo '>' | ha -x"<<<y z" host info
+fuzz-142	su:bash,dash	echo '>' | ha -x"2> y z" su info
+fuzz-143	remote:bash,dash	echo '>' | ha -x"2> y z" host info
+fuzz-144	su:bash,dash	echo '>' | ha -x\\> su info
+fuzz-145	remote:bash,dash	echo '>' | ha -x\\> host info
+fuzz-146	su:bash,dash	echo '>' | ha --raw-json="> y z" su info
+fuzz-147	remote:bash,dash	echo '>' | ha --raw-json="> y z" host info
+fuzz-148	su:bash,dash	echo '>' | ha -x\x0c2>&1 su info
+fuzz-149	remote:bash,dash	echo '>' | ha -x\x0c2>&1 host info
+fuzz-150	none	echo '>' | ha 2>&1\x0b su info
+fuzz-151	none	echo '>' | ha 2>&1\x0b host info
+fuzz-152	su:bash,dash	echo '>' | ha 2>out\r su info
+fuzz-153	remote:bash,dash	echo '>' | ha 2>out\r host info
+fuzz-154	su:bash,dash	echo '>' | ha -x\u2028 su info
+fuzz-155	remote:bash,dash	echo '>' | ha -x\u2028 host info
+fuzz-156	su:bash,dash	echo '>' | ha -x\x85 su info
+fuzz-157	remote:bash,dash	echo '>' | ha -x\x85 host info
+fuzz-158	su:bash,dash	echo '>' | ha -x\xa0 su info
+fuzz-159	remote:bash,dash	echo '>' | ha -x\xa0 host info
+fuzz-160	su:bash,dash	echo '>' | ha -x\u3000 su info
+fuzz-161	remote:bash,dash	echo '>' | ha -x\u3000 host info
+fuzz-162	su:bash,dash	echo \\> ; ha 2>&1 su info
+fuzz-163	remote:bash,dash	echo \\> ; ha 2>&1 host info
+fuzz-164	su:bash,dash	echo \\> ; ha -x"> y z" su info
+fuzz-165	remote:bash,dash	echo \\> ; ha -x"> y z" host info
+fuzz-166	su:bash,dash	echo \\> ; ha -x">" su info
+fuzz-167	remote:bash,dash	echo \\> ; ha -x">" host info
+fuzz-168	su:bash,dash	echo \\> ; ha 2>&1 -x"> y z" su info
+fuzz-169	remote:bash,dash	echo \\> ; ha 2>&1 -x"> y z" host info
+fuzz-170	su:bash,dash	echo \\> ; ha -x'< y z' su info
+fuzz-171	remote:bash,dash	echo \\> ; ha -x'< y z' host info
+fuzz-172	su:bash	echo \\> ; ha {,} su info
+fuzz-173	remote:bash	echo \\> ; ha {,} host info
+fuzz-174	su:bash,dash	echo \\> ; ha -x{,} su info
+fuzz-175	remote:bash,dash	echo \\> ; ha -x{,} host info
+fuzz-176	su:bash	echo \\> ; ha --config {,} x su info
+fuzz-177	remote:bash	echo \\> ; ha --config {,} x host info
+fuzz-178	su:bash	echo \\> ; ha 2>/dev/null {,} su info
+fuzz-179	remote:bash	echo \\> ; ha 2>/dev/null {,} host info
+fuzz-180	su:bash	echo \\> ; ha {,,} su info
+fuzz-181	remote:bash	echo \\> ; ha {,,} host info
+fuzz-182	su:bash,dash	echo \\> ; ha -x"<<<y z" su info
+fuzz-183	remote:bash,dash	echo \\> ; ha -x"<<<y z" host info
+fuzz-184	su:bash,dash	echo \\> ; ha -x"2> y z" su info
+fuzz-185	remote:bash,dash	echo \\> ; ha -x"2> y z" host info
+fuzz-186	su:bash,dash	echo \\> ; ha -x\\> su info
+fuzz-187	remote:bash,dash	echo \\> ; ha -x\\> host info
+fuzz-188	su:bash,dash	echo \\> ; ha --raw-json="> y z" su info
+fuzz-189	remote:bash,dash	echo \\> ; ha --raw-json="> y z" host info
+fuzz-190	su:bash,dash	echo \\> ; ha -x\x0c2>&1 su info
+fuzz-191	remote:bash,dash	echo \\> ; ha -x\x0c2>&1 host info
+fuzz-192	none	echo \\> ; ha 2>&1\x0b su info
+fuzz-193	none	echo \\> ; ha 2>&1\x0b host info
+fuzz-194	su:bash,dash	echo \\> ; ha 2>out\r su info
+fuzz-195	remote:bash,dash	echo \\> ; ha 2>out\r host info
+fuzz-196	su:bash,dash	echo \\> ; ha -x\u2028 su info
+fuzz-197	remote:bash,dash	echo \\> ; ha -x\u2028 host info
+fuzz-198	su:bash,dash	echo \\> ; ha -x\x85 su info
+fuzz-199	remote:bash,dash	echo \\> ; ha -x\x85 host info
+fuzz-200	su:bash,dash	echo \\> ; ha -x\xa0 su info
+fuzz-201	remote:bash,dash	echo \\> ; ha -x\xa0 host info
+fuzz-202	su:bash,dash	echo \\> ; ha -x\u3000 su info
+fuzz-203	remote:bash,dash	echo \\> ; ha -x\u3000 host info
+fuzz-204	su:bash,dash	echo "a > b" && ha 2>&1 su info
+fuzz-205	remote:bash,dash	echo "a > b" && ha 2>&1 host info
+fuzz-206	su:bash,dash	echo "a > b" && ha -x"> y z" su info
+fuzz-207	remote:bash,dash	echo "a > b" && ha -x"> y z" host info
+fuzz-208	su:bash,dash	echo "a > b" && ha -x">" su info
+fuzz-209	remote:bash,dash	echo "a > b" && ha -x">" host info
+fuzz-210	su:bash,dash	echo "a > b" && ha 2>&1 -x"> y z" su info
+fuzz-211	remote:bash,dash	echo "a > b" && ha 2>&1 -x"> y z" host info
+fuzz-212	su:bash,dash	echo "a > b" && ha -x'< y z' su info
+fuzz-213	remote:bash,dash	echo "a > b" && ha -x'< y z' host info
+fuzz-214	su:bash	echo "a > b" && ha {,} su info
+fuzz-215	remote:bash	echo "a > b" && ha {,} host info
+fuzz-216	su:bash,dash	echo "a > b" && ha -x{,} su info
+fuzz-217	remote:bash,dash	echo "a > b" && ha -x{,} host info
+fuzz-218	su:bash	echo "a > b" && ha --config {,} x su info
+fuzz-219	remote:bash	echo "a > b" && ha --config {,} x host info
+fuzz-220	su:bash	echo "a > b" && ha 2>/dev/null {,} su info
+fuzz-221	remote:bash	echo "a > b" && ha 2>/dev/null {,} host info
+fuzz-222	su:bash	echo "a > b" && ha {,,} su info
+fuzz-223	remote:bash	echo "a > b" && ha {,,} host info
+fuzz-224	su:bash,dash	echo "a > b" && ha -x"<<<y z" su info
+fuzz-225	remote:bash,dash	echo "a > b" && ha -x"<<<y z" host info
+fuzz-226	su:bash,dash	echo "a > b" && ha -x"2> y z" su info
+fuzz-227	remote:bash,dash	echo "a > b" && ha -x"2> y z" host info
+fuzz-228	su:bash,dash	echo "a > b" && ha -x\\> su info
+fuzz-229	remote:bash,dash	echo "a > b" && ha -x\\> host info
+fuzz-230	su:bash,dash	echo "a > b" && ha --raw-json="> y z" su info
+fuzz-231	remote:bash,dash	echo "a > b" && ha --raw-json="> y z" host info
+fuzz-232	su:bash,dash	echo "a > b" && ha -x\x0c2>&1 su info
+fuzz-233	remote:bash,dash	echo "a > b" && ha -x\x0c2>&1 host info
+fuzz-234	none	echo "a > b" && ha 2>&1\x0b su info
+fuzz-235	none	echo "a > b" && ha 2>&1\x0b host info
+fuzz-236	su:bash,dash	echo "a > b" && ha 2>out\r su info
+fuzz-237	remote:bash,dash	echo "a > b" && ha 2>out\r host info
+fuzz-238	su:bash,dash	echo "a > b" && ha -x\u2028 su info
+fuzz-239	remote:bash,dash	echo "a > b" && ha -x\u2028 host info
+fuzz-240	su:bash,dash	echo "a > b" && ha -x\x85 su info
+fuzz-241	remote:bash,dash	echo "a > b" && ha -x\x85 host info
+fuzz-242	su:bash,dash	echo "a > b" && ha -x\xa0 su info
+fuzz-243	remote:bash,dash	echo "a > b" && ha -x\xa0 host info
+fuzz-244	su:bash,dash	echo "a > b" && ha -x\u3000 su info
+fuzz-245	remote:bash,dash	echo "a > b" && ha -x\u3000 host info
+fuzz-246	su:bash,dash	echo ">&" & ha 2>&1 su info
+fuzz-247	remote:bash,dash	echo ">&" & ha 2>&1 host info
+fuzz-248	su:bash,dash	echo ">&" & ha -x"> y z" su info
+fuzz-249	remote:bash,dash	echo ">&" & ha -x"> y z" host info
+fuzz-250	su:bash,dash	echo ">&" & ha -x">" su info
+fuzz-251	remote:bash,dash	echo ">&" & ha -x">" host info
+fuzz-252	su:bash,dash	echo ">&" & ha 2>&1 -x"> y z" su info
+fuzz-253	remote:bash,dash	echo ">&" & ha 2>&1 -x"> y z" host info
+fuzz-254	su:bash,dash	echo ">&" & ha -x'< y z' su info
+fuzz-255	remote:bash,dash	echo ">&" & ha -x'< y z' host info
+fuzz-256	su:bash	echo ">&" & ha {,} su info
+fuzz-257	remote:bash	echo ">&" & ha {,} host info
+fuzz-258	su:bash,dash	echo ">&" & ha -x{,} su info
+fuzz-259	remote:bash,dash	echo ">&" & ha -x{,} host info
+fuzz-260	su:bash	echo ">&" & ha --config {,} x su info
+fuzz-261	remote:bash	echo ">&" & ha --config {,} x host info
+fuzz-262	su:bash	echo ">&" & ha 2>/dev/null {,} su info
+fuzz-263	remote:bash	echo ">&" & ha 2>/dev/null {,} host info
+fuzz-264	su:bash	echo ">&" & ha {,,} su info
+fuzz-265	remote:bash	echo ">&" & ha {,,} host info
+fuzz-266	su:bash,dash	echo ">&" & ha -x"<<<y z" su info
+fuzz-267	remote:bash,dash	echo ">&" & ha -x"<<<y z" host info
+fuzz-268	su:bash,dash	echo ">&" & ha -x"2> y z" su info
+fuzz-269	remote:bash,dash	echo ">&" & ha -x"2> y z" host info
+fuzz-270	su:bash,dash	echo ">&" & ha -x\\> su info
+fuzz-271	remote:bash,dash	echo ">&" & ha -x\\> host info
+fuzz-272	su:bash,dash	echo ">&" & ha --raw-json="> y z" su info
+fuzz-273	remote:bash,dash	echo ">&" & ha --raw-json="> y z" host info
+fuzz-274	su:bash,dash	echo ">&" & ha -x\x0c2>&1 su info
+fuzz-275	remote:bash,dash	echo ">&" & ha -x\x0c2>&1 host info
+fuzz-276	none	echo ">&" & ha 2>&1\x0b su info
+fuzz-277	none	echo ">&" & ha 2>&1\x0b host info
+fuzz-278	su:bash,dash	echo ">&" & ha 2>out\r su info
+fuzz-279	remote:bash,dash	echo ">&" & ha 2>out\r host info
+fuzz-280	su:bash,dash	echo ">&" & ha -x\u2028 su info
+fuzz-281	remote:bash,dash	echo ">&" & ha -x\u2028 host info
+fuzz-282	su:bash,dash	echo ">&" & ha -x\x85 su info
+fuzz-283	remote:bash,dash	echo ">&" & ha -x\x85 host info
+fuzz-284	su:bash,dash	echo ">&" & ha -x\xa0 su info
+fuzz-285	remote:bash,dash	echo ">&" & ha -x\xa0 host info
+fuzz-286	su:bash,dash	echo ">&" & ha -x\u3000 su info
+fuzz-287	remote:bash,dash	echo ">&" & ha -x\u3000 host info
+fuzz-288	su:bash,dash	echo "2>" & ha 2>&1 su info
+fuzz-289	remote:bash,dash	echo "2>" & ha 2>&1 host info
+fuzz-290	su:bash,dash	echo "2>" & ha -x"> y z" su info
+fuzz-291	remote:bash,dash	echo "2>" & ha -x"> y z" host info
+fuzz-292	su:bash,dash	echo "2>" & ha -x">" su info
+fuzz-293	remote:bash,dash	echo "2>" & ha -x">" host info
+fuzz-294	su:bash,dash	echo "2>" & ha 2>&1 -x"> y z" su info
+fuzz-295	remote:bash,dash	echo "2>" & ha 2>&1 -x"> y z" host info
+fuzz-296	su:bash,dash	echo "2>" & ha -x'< y z' su info
+fuzz-297	remote:bash,dash	echo "2>" & ha -x'< y z' host info
+fuzz-298	su:bash	echo "2>" & ha {,} su info
+fuzz-299	remote:bash	echo "2>" & ha {,} host info
+fuzz-300	su:bash,dash	echo "2>" & ha -x{,} su info
+fuzz-301	remote:bash,dash	echo "2>" & ha -x{,} host info
+fuzz-302	su:bash	echo "2>" & ha --config {,} x su info
+fuzz-303	remote:bash	echo "2>" & ha --config {,} x host info
+fuzz-304	su:bash	echo "2>" & ha 2>/dev/null {,} su info
+fuzz-305	remote:bash	echo "2>" & ha 2>/dev/null {,} host info
+fuzz-306	su:bash	echo "2>" & ha {,,} su info
+fuzz-307	remote:bash	echo "2>" & ha {,,} host info
+fuzz-308	su:bash,dash	echo "2>" & ha -x"<<<y z" su info
+fuzz-309	remote:bash,dash	echo "2>" & ha -x"<<<y z" host info
+fuzz-310	su:bash,dash	echo "2>" & ha -x"2> y z" su info
+fuzz-311	remote:bash,dash	echo "2>" & ha -x"2> y z" host info
+fuzz-312	su:bash,dash	echo "2>" & ha -x\\> su info
+fuzz-313	remote:bash,dash	echo "2>" & ha -x\\> host info
+fuzz-314	su:bash,dash	echo "2>" & ha --raw-json="> y z" su info
+fuzz-315	remote:bash,dash	echo "2>" & ha --raw-json="> y z" host info
+fuzz-316	su:bash,dash	echo "2>" & ha -x\x0c2>&1 su info
+fuzz-317	remote:bash,dash	echo "2>" & ha -x\x0c2>&1 host info
+fuzz-318	none	echo "2>" & ha 2>&1\x0b su info
+fuzz-319	none	echo "2>" & ha 2>&1\x0b host info
+fuzz-320	su:bash,dash	echo "2>" & ha 2>out\r su info
+fuzz-321	remote:bash,dash	echo "2>" & ha 2>out\r host info
+fuzz-322	su:bash,dash	echo "2>" & ha -x\u2028 su info
+fuzz-323	remote:bash,dash	echo "2>" & ha -x\u2028 host info
+fuzz-324	su:bash,dash	echo "2>" & ha -x\x85 su info
+fuzz-325	remote:bash,dash	echo "2>" & ha -x\x85 host info
+fuzz-326	su:bash,dash	echo "2>" & ha -x\xa0 su info
+fuzz-327	remote:bash,dash	echo "2>" & ha -x\xa0 host info
+fuzz-328	su:bash,dash	echo "2>" & ha -x\u3000 su info
+fuzz-329	remote:bash,dash	echo "2>" & ha -x\u3000 host info
+fuzz-330	su:bash,dash	: '<<' ; ha 2>&1 su info
+fuzz-331	remote:bash,dash	: '<<' ; ha 2>&1 host info
+fuzz-332	su:bash,dash	: '<<' ; ha -x"> y z" su info
+fuzz-333	remote:bash,dash	: '<<' ; ha -x"> y z" host info
+fuzz-334	su:bash,dash	: '<<' ; ha -x">" su info
+fuzz-335	remote:bash,dash	: '<<' ; ha -x">" host info
+fuzz-336	su:bash,dash	: '<<' ; ha 2>&1 -x"> y z" su info
+fuzz-337	remote:bash,dash	: '<<' ; ha 2>&1 -x"> y z" host info
+fuzz-338	su:bash,dash	: '<<' ; ha -x'< y z' su info
+fuzz-339	remote:bash,dash	: '<<' ; ha -x'< y z' host info
+fuzz-340	su:bash	: '<<' ; ha {,} su info
+fuzz-341	remote:bash	: '<<' ; ha {,} host info
+fuzz-342	su:bash,dash	: '<<' ; ha -x{,} su info
+fuzz-343	remote:bash,dash	: '<<' ; ha -x{,} host info
+fuzz-344	su:bash	: '<<' ; ha --config {,} x su info
+fuzz-345	remote:bash	: '<<' ; ha --config {,} x host info
+fuzz-346	su:bash	: '<<' ; ha 2>/dev/null {,} su info
+fuzz-347	remote:bash	: '<<' ; ha 2>/dev/null {,} host info
+fuzz-348	su:bash	: '<<' ; ha {,,} su info
+fuzz-349	remote:bash	: '<<' ; ha {,,} host info
+fuzz-350	su:bash,dash	: '<<' ; ha -x"<<<y z" su info
+fuzz-351	remote:bash,dash	: '<<' ; ha -x"<<<y z" host info
+fuzz-352	su:bash,dash	: '<<' ; ha -x"2> y z" su info
+fuzz-353	remote:bash,dash	: '<<' ; ha -x"2> y z" host info
+fuzz-354	su:bash,dash	: '<<' ; ha -x\\> su info
+fuzz-355	remote:bash,dash	: '<<' ; ha -x\\> host info
+fuzz-356	su:bash,dash	: '<<' ; ha --raw-json="> y z" su info
+fuzz-357	remote:bash,dash	: '<<' ; ha --raw-json="> y z" host info
+fuzz-358	su:bash,dash	: '<<' ; ha -x\x0c2>&1 su info
+fuzz-359	remote:bash,dash	: '<<' ; ha -x\x0c2>&1 host info
+fuzz-360	none	: '<<' ; ha 2>&1\x0b su info
+fuzz-361	none	: '<<' ; ha 2>&1\x0b host info
+fuzz-362	su:bash,dash	: '<<' ; ha 2>out\r su info
+fuzz-363	remote:bash,dash	: '<<' ; ha 2>out\r host info
+fuzz-364	su:bash,dash	: '<<' ; ha -x\u2028 su info
+fuzz-365	remote:bash,dash	: '<<' ; ha -x\u2028 host info
+fuzz-366	su:bash,dash	: '<<' ; ha -x\x85 su info
+fuzz-367	remote:bash,dash	: '<<' ; ha -x\x85 host info
+fuzz-368	su:bash,dash	: '<<' ; ha -x\xa0 su info
+fuzz-369	remote:bash,dash	: '<<' ; ha -x\xa0 host info
+fuzz-370	su:bash,dash	: '<<' ; ha -x\u3000 su info
+fuzz-371	remote:bash,dash	: '<<' ; ha -x\u3000 host info
+fuzz-372	su:bash,dash	echo "(" ; ha 2>&1 su info
+fuzz-373	remote:bash,dash	echo "(" ; ha 2>&1 host info
+fuzz-374	su:bash,dash	echo "(" ; ha -x"> y z" su info
+fuzz-375	remote:bash,dash	echo "(" ; ha -x"> y z" host info
+fuzz-376	su:bash,dash	echo "(" ; ha -x">" su info
+fuzz-377	remote:bash,dash	echo "(" ; ha -x">" host info
+fuzz-378	su:bash,dash	echo "(" ; ha 2>&1 -x"> y z" su info
+fuzz-379	remote:bash,dash	echo "(" ; ha 2>&1 -x"> y z" host info
+fuzz-380	su:bash,dash	echo "(" ; ha -x'< y z' su info
+fuzz-381	remote:bash,dash	echo "(" ; ha -x'< y z' host info
+fuzz-382	su:bash	echo "(" ; ha {,} su info
+fuzz-383	remote:bash	echo "(" ; ha {,} host info
+fuzz-384	su:bash,dash	echo "(" ; ha -x{,} su info
+fuzz-385	remote:bash,dash	echo "(" ; ha -x{,} host info
+fuzz-386	su:bash	echo "(" ; ha --config {,} x su info
+fuzz-387	remote:bash	echo "(" ; ha --config {,} x host info
+fuzz-388	su:bash	echo "(" ; ha 2>/dev/null {,} su info
+fuzz-389	remote:bash	echo "(" ; ha 2>/dev/null {,} host info
+fuzz-390	su:bash	echo "(" ; ha {,,} su info
+fuzz-391	remote:bash	echo "(" ; ha {,,} host info
+fuzz-392	su:bash,dash	echo "(" ; ha -x"<<<y z" su info
+fuzz-393	remote:bash,dash	echo "(" ; ha -x"<<<y z" host info
+fuzz-394	su:bash,dash	echo "(" ; ha -x"2> y z" su info
+fuzz-395	remote:bash,dash	echo "(" ; ha -x"2> y z" host info
+fuzz-396	su:bash,dash	echo "(" ; ha -x\\> su info
+fuzz-397	remote:bash,dash	echo "(" ; ha -x\\> host info
+fuzz-398	su:bash,dash	echo "(" ; ha --raw-json="> y z" su info
+fuzz-399	remote:bash,dash	echo "(" ; ha --raw-json="> y z" host info
+fuzz-400	su:bash,dash	echo "(" ; ha -x\x0c2>&1 su info
+fuzz-401	remote:bash,dash	echo "(" ; ha -x\x0c2>&1 host info
+fuzz-402	none	echo "(" ; ha 2>&1\x0b su info
+fuzz-403	none	echo "(" ; ha 2>&1\x0b host info
+fuzz-404	su:bash,dash	echo "(" ; ha 2>out\r su info
+fuzz-405	remote:bash,dash	echo "(" ; ha 2>out\r host info
+fuzz-406	su:bash,dash	echo "(" ; ha -x\u2028 su info
+fuzz-407	remote:bash,dash	echo "(" ; ha -x\u2028 host info
+fuzz-408	su:bash,dash	echo "(" ; ha -x\x85 su info
+fuzz-409	remote:bash,dash	echo "(" ; ha -x\x85 host info
+fuzz-410	su:bash,dash	echo "(" ; ha -x\xa0 su info
+fuzz-411	remote:bash,dash	echo "(" ; ha -x\xa0 host info
+fuzz-412	su:bash,dash	echo "(" ; ha -x\u3000 su info
+fuzz-413	remote:bash,dash	echo "(" ; ha -x\u3000 host info
+fuzz-414	su:bash,dash	echo ")" ; ha 2>&1 su info
+fuzz-415	remote:bash,dash	echo ")" ; ha 2>&1 host info
+fuzz-416	su:bash,dash	echo ")" ; ha -x"> y z" su info
+fuzz-417	remote:bash,dash	echo ")" ; ha -x"> y z" host info
+fuzz-418	su:bash,dash	echo ")" ; ha -x">" su info
+fuzz-419	remote:bash,dash	echo ")" ; ha -x">" host info
+fuzz-420	su:bash,dash	echo ")" ; ha 2>&1 -x"> y z" su info
+fuzz-421	remote:bash,dash	echo ")" ; ha 2>&1 -x"> y z" host info
+fuzz-422	su:bash,dash	echo ")" ; ha -x'< y z' su info
+fuzz-423	remote:bash,dash	echo ")" ; ha -x'< y z' host info
+fuzz-424	su:bash	echo ")" ; ha {,} su info
+fuzz-425	remote:bash	echo ")" ; ha {,} host info
+fuzz-426	su:bash,dash	echo ")" ; ha -x{,} su info
+fuzz-427	remote:bash,dash	echo ")" ; ha -x{,} host info
+fuzz-428	su:bash	echo ")" ; ha --config {,} x su info
+fuzz-429	remote:bash	echo ")" ; ha --config {,} x host info
+fuzz-430	su:bash	echo ")" ; ha 2>/dev/null {,} su info
+fuzz-431	remote:bash	echo ")" ; ha 2>/dev/null {,} host info
+fuzz-432	su:bash	echo ")" ; ha {,,} su info
+fuzz-433	remote:bash	echo ")" ; ha {,,} host info
+fuzz-434	su:bash,dash	echo ")" ; ha -x"<<<y z" su info
+fuzz-435	remote:bash,dash	echo ")" ; ha -x"<<<y z" host info
+fuzz-436	su:bash,dash	echo ")" ; ha -x"2> y z" su info
+fuzz-437	remote:bash,dash	echo ")" ; ha -x"2> y z" host info
+fuzz-438	su:bash,dash	echo ")" ; ha -x\\> su info
+fuzz-439	remote:bash,dash	echo ")" ; ha -x\\> host info
+fuzz-440	su:bash,dash	echo ")" ; ha --raw-json="> y z" su info
+fuzz-441	remote:bash,dash	echo ")" ; ha --raw-json="> y z" host info
+fuzz-442	su:bash,dash	echo ")" ; ha -x\x0c2>&1 su info
+fuzz-443	remote:bash,dash	echo ")" ; ha -x\x0c2>&1 host info
+fuzz-444	none	echo ")" ; ha 2>&1\x0b su info
+fuzz-445	none	echo ")" ; ha 2>&1\x0b host info
+fuzz-446	su:bash,dash	echo ")" ; ha 2>out\r su info
+fuzz-447	remote:bash,dash	echo ")" ; ha 2>out\r host info
+fuzz-448	su:bash,dash	echo ")" ; ha -x\u2028 su info
+fuzz-449	remote:bash,dash	echo ")" ; ha -x\u2028 host info
+fuzz-450	su:bash,dash	echo ")" ; ha -x\x85 su info
+fuzz-451	remote:bash,dash	echo ")" ; ha -x\x85 host info
+fuzz-452	su:bash,dash	echo ")" ; ha -x\xa0 su info
+fuzz-453	remote:bash,dash	echo ")" ; ha -x\xa0 host info
+fuzz-454	su:bash,dash	echo ")" ; ha -x\u3000 su info
+fuzz-455	remote:bash,dash	echo ")" ; ha -x\u3000 host info
+fuzz-456	su:bash,dash	echo "#" ; ha 2>&1 su info
+fuzz-457	remote:bash,dash	echo "#" ; ha 2>&1 host info
+fuzz-458	su:bash,dash	echo "#" ; ha -x"> y z" su info
+fuzz-459	remote:bash,dash	echo "#" ; ha -x"> y z" host info
+fuzz-460	su:bash,dash	echo "#" ; ha -x">" su info
+fuzz-461	remote:bash,dash	echo "#" ; ha -x">" host info
+fuzz-462	su:bash,dash	echo "#" ; ha 2>&1 -x"> y z" su info
+fuzz-463	remote:bash,dash	echo "#" ; ha 2>&1 -x"> y z" host info
+fuzz-464	su:bash,dash	echo "#" ; ha -x'< y z' su info
+fuzz-465	remote:bash,dash	echo "#" ; ha -x'< y z' host info
+fuzz-466	su:bash	echo "#" ; ha {,} su info
+fuzz-467	remote:bash	echo "#" ; ha {,} host info
+fuzz-468	su:bash,dash	echo "#" ; ha -x{,} su info
+fuzz-469	remote:bash,dash	echo "#" ; ha -x{,} host info
+fuzz-470	su:bash	echo "#" ; ha --config {,} x su info
+fuzz-471	remote:bash	echo "#" ; ha --config {,} x host info
+fuzz-472	su:bash	echo "#" ; ha 2>/dev/null {,} su info
+fuzz-473	remote:bash	echo "#" ; ha 2>/dev/null {,} host info
+fuzz-474	su:bash	echo "#" ; ha {,,} su info
+fuzz-475	remote:bash	echo "#" ; ha {,,} host info
+fuzz-476	su:bash,dash	echo "#" ; ha -x"<<<y z" su info
+fuzz-477	remote:bash,dash	echo "#" ; ha -x"<<<y z" host info
+fuzz-478	su:bash,dash	echo "#" ; ha -x"2> y z" su info
+fuzz-479	remote:bash,dash	echo "#" ; ha -x"2> y z" host info
+fuzz-480	su:bash,dash	echo "#" ; ha -x\\> su info
+fuzz-481	remote:bash,dash	echo "#" ; ha -x\\> host info
+fuzz-482	su:bash,dash	echo "#" ; ha --raw-json="> y z" su info
+fuzz-483	remote:bash,dash	echo "#" ; ha --raw-json="> y z" host info
+fuzz-484	su:bash,dash	echo "#" ; ha -x\x0c2>&1 su info
+fuzz-485	remote:bash,dash	echo "#" ; ha -x\x0c2>&1 host info
+fuzz-486	none	echo "#" ; ha 2>&1\x0b su info
+fuzz-487	none	echo "#" ; ha 2>&1\x0b host info
+fuzz-488	su:bash,dash	echo "#" ; ha 2>out\r su info
+fuzz-489	remote:bash,dash	echo "#" ; ha 2>out\r host info
+fuzz-490	su:bash,dash	echo "#" ; ha -x\u2028 su info
+fuzz-491	remote:bash,dash	echo "#" ; ha -x\u2028 host info
+fuzz-492	su:bash,dash	echo "#" ; ha -x\x85 su info
+fuzz-493	remote:bash,dash	echo "#" ; ha -x\x85 host info
+fuzz-494	su:bash,dash	echo "#" ; ha -x\xa0 su info
+fuzz-495	remote:bash,dash	echo "#" ; ha -x\xa0 host info
+fuzz-496	su:bash,dash	echo "#" ; ha -x\u3000 su info
+fuzz-497	remote:bash,dash	echo "#" ; ha -x\u3000 host info
+fuzz-498	su:bash,dash	echo \\# ; ha 2>&1 su info
+fuzz-499	remote:bash,dash	echo \\# ; ha 2>&1 host info
+fuzz-500	su:bash,dash	echo \\# ; ha -x"> y z" su info
+fuzz-501	remote:bash,dash	echo \\# ; ha -x"> y z" host info
+fuzz-502	su:bash,dash	echo \\# ; ha -x">" su info
+fuzz-503	remote:bash,dash	echo \\# ; ha -x">" host info
+fuzz-504	su:bash,dash	echo \\# ; ha 2>&1 -x"> y z" su info
+fuzz-505	remote:bash,dash	echo \\# ; ha 2>&1 -x"> y z" host info
+fuzz-506	su:bash,dash	echo \\# ; ha -x'< y z' su info
+fuzz-507	remote:bash,dash	echo \\# ; ha -x'< y z' host info
+fuzz-508	su:bash	echo \\# ; ha {,} su info
+fuzz-509	remote:bash	echo \\# ; ha {,} host info
+fuzz-510	su:bash,dash	echo \\# ; ha -x{,} su info
+fuzz-511	remote:bash,dash	echo \\# ; ha -x{,} host info
+fuzz-512	su:bash	echo \\# ; ha --config {,} x su info
+fuzz-513	remote:bash	echo \\# ; ha --config {,} x host info
+fuzz-514	su:bash	echo \\# ; ha 2>/dev/null {,} su info
+fuzz-515	remote:bash	echo \\# ; ha 2>/dev/null {,} host info
+fuzz-516	su:bash	echo \\# ; ha {,,} su info
+fuzz-517	remote:bash	echo \\# ; ha {,,} host info
+fuzz-518	su:bash,dash	echo \\# ; ha -x"<<<y z" su info
+fuzz-519	remote:bash,dash	echo \\# ; ha -x"<<<y z" host info
+fuzz-520	su:bash,dash	echo \\# ; ha -x"2> y z" su info
+fuzz-521	remote:bash,dash	echo \\# ; ha -x"2> y z" host info
+fuzz-522	su:bash,dash	echo \\# ; ha -x\\> su info
+fuzz-523	remote:bash,dash	echo \\# ; ha -x\\> host info
+fuzz-524	su:bash,dash	echo \\# ; ha --raw-json="> y z" su info
+fuzz-525	remote:bash,dash	echo \\# ; ha --raw-json="> y z" host info
+fuzz-526	su:bash,dash	echo \\# ; ha -x\x0c2>&1 su info
+fuzz-527	remote:bash,dash	echo \\# ; ha -x\x0c2>&1 host info
+fuzz-528	none	echo \\# ; ha 2>&1\x0b su info
+fuzz-529	none	echo \\# ; ha 2>&1\x0b host info
+fuzz-530	su:bash,dash	echo \\# ; ha 2>out\r su info
+fuzz-531	remote:bash,dash	echo \\# ; ha 2>out\r host info
+fuzz-532	su:bash,dash	echo \\# ; ha -x\u2028 su info
+fuzz-533	remote:bash,dash	echo \\# ; ha -x\u2028 host info
+fuzz-534	su:bash,dash	echo \\# ; ha -x\x85 su info
+fuzz-535	remote:bash,dash	echo \\# ; ha -x\x85 host info
+fuzz-536	su:bash,dash	echo \\# ; ha -x\xa0 su info
+fuzz-537	remote:bash,dash	echo \\# ; ha -x\xa0 host info
+fuzz-538	su:bash,dash	echo \\# ; ha -x\u3000 su info
+fuzz-539	remote:bash,dash	echo \\# ; ha -x\u3000 host info
+fuzz-540	su:bash,dash	echo "'" ; ha 2>&1 su info
+fuzz-541	remote:bash,dash	echo "'" ; ha 2>&1 host info
+fuzz-542	su:bash,dash	echo "'" ; ha -x"> y z" su info
+fuzz-543	remote:bash,dash	echo "'" ; ha -x"> y z" host info
+fuzz-544	su:bash,dash	echo "'" ; ha -x">" su info
+fuzz-545	remote:bash,dash	echo "'" ; ha -x">" host info
+fuzz-546	su:bash,dash	echo "'" ; ha 2>&1 -x"> y z" su info
+fuzz-547	remote:bash,dash	echo "'" ; ha 2>&1 -x"> y z" host info
+fuzz-548	su:bash,dash	echo "'" ; ha -x'< y z' su info
+fuzz-549	remote:bash,dash	echo "'" ; ha -x'< y z' host info
+fuzz-550	su:bash	echo "'" ; ha {,} su info
+fuzz-551	remote:bash	echo "'" ; ha {,} host info
+fuzz-552	su:bash,dash	echo "'" ; ha -x{,} su info
+fuzz-553	remote:bash,dash	echo "'" ; ha -x{,} host info
+fuzz-554	su:bash	echo "'" ; ha --config {,} x su info
+fuzz-555	remote:bash	echo "'" ; ha --config {,} x host info
+fuzz-556	su:bash	echo "'" ; ha 2>/dev/null {,} su info
+fuzz-557	remote:bash	echo "'" ; ha 2>/dev/null {,} host info
+fuzz-558	su:bash	echo "'" ; ha {,,} su info
+fuzz-559	remote:bash	echo "'" ; ha {,,} host info
+fuzz-560	su:bash,dash	echo "'" ; ha -x"<<<y z" su info
+fuzz-561	remote:bash,dash	echo "'" ; ha -x"<<<y z" host info
+fuzz-562	su:bash,dash	echo "'" ; ha -x"2> y z" su info
+fuzz-563	remote:bash,dash	echo "'" ; ha -x"2> y z" host info
+fuzz-564	su:bash,dash	echo "'" ; ha -x\\> su info
+fuzz-565	remote:bash,dash	echo "'" ; ha -x\\> host info
+fuzz-566	su:bash,dash	echo "'" ; ha --raw-json="> y z" su info
+fuzz-567	remote:bash,dash	echo "'" ; ha --raw-json="> y z" host info
+fuzz-568	su:bash,dash	echo "'" ; ha -x\x0c2>&1 su info
+fuzz-569	remote:bash,dash	echo "'" ; ha -x\x0c2>&1 host info
+fuzz-570	none	echo "'" ; ha 2>&1\x0b su info
+fuzz-571	none	echo "'" ; ha 2>&1\x0b host info
+fuzz-572	su:bash,dash	echo "'" ; ha 2>out\r su info
+fuzz-573	remote:bash,dash	echo "'" ; ha 2>out\r host info
+fuzz-574	su:bash,dash	echo "'" ; ha -x\u2028 su info
+fuzz-575	remote:bash,dash	echo "'" ; ha -x\u2028 host info
+fuzz-576	su:bash,dash	echo "'" ; ha -x\x85 su info
+fuzz-577	remote:bash,dash	echo "'" ; ha -x\x85 host info
+fuzz-578	su:bash,dash	echo "'" ; ha -x\xa0 su info
+fuzz-579	remote:bash,dash	echo "'" ; ha -x\xa0 host info
+fuzz-580	su:bash,dash	echo "'" ; ha -x\u3000 su info
+fuzz-581	remote:bash,dash	echo "'" ; ha -x\u3000 host info
+fuzz-582	su:bash,dash	echo '"' ; ha 2>&1 su info
+fuzz-583	remote:bash,dash	echo '"' ; ha 2>&1 host info
+fuzz-584	su:bash,dash	echo '"' ; ha -x"> y z" su info
+fuzz-585	remote:bash,dash	echo '"' ; ha -x"> y z" host info
+fuzz-586	su:bash,dash	echo '"' ; ha -x">" su info
+fuzz-587	remote:bash,dash	echo '"' ; ha -x">" host info
+fuzz-588	su:bash,dash	echo '"' ; ha 2>&1 -x"> y z" su info
+fuzz-589	remote:bash,dash	echo '"' ; ha 2>&1 -x"> y z" host info
+fuzz-590	su:bash,dash	echo '"' ; ha -x'< y z' su info
+fuzz-591	remote:bash,dash	echo '"' ; ha -x'< y z' host info
+fuzz-592	su:bash	echo '"' ; ha {,} su info
+fuzz-593	remote:bash	echo '"' ; ha {,} host info
+fuzz-594	su:bash,dash	echo '"' ; ha -x{,} su info
+fuzz-595	remote:bash,dash	echo '"' ; ha -x{,} host info
+fuzz-596	su:bash	echo '"' ; ha --config {,} x su info
+fuzz-597	remote:bash	echo '"' ; ha --config {,} x host info
+fuzz-598	su:bash	echo '"' ; ha 2>/dev/null {,} su info
+fuzz-599	remote:bash	echo '"' ; ha 2>/dev/null {,} host info
+fuzz-600	su:bash	echo '"' ; ha {,,} su info
+fuzz-601	remote:bash	echo '"' ; ha {,,} host info
+fuzz-602	su:bash,dash	echo '"' ; ha -x"<<<y z" su info
+fuzz-603	remote:bash,dash	echo '"' ; ha -x"<<<y z" host info
+fuzz-604	su:bash,dash	echo '"' ; ha -x"2> y z" su info
+fuzz-605	remote:bash,dash	echo '"' ; ha -x"2> y z" host info
+fuzz-606	su:bash,dash	echo '"' ; ha -x\\> su info
+fuzz-607	remote:bash,dash	echo '"' ; ha -x\\> host info
+fuzz-608	su:bash,dash	echo '"' ; ha --raw-json="> y z" su info
+fuzz-609	remote:bash,dash	echo '"' ; ha --raw-json="> y z" host info
+fuzz-610	su:bash,dash	echo '"' ; ha -x\x0c2>&1 su info
+fuzz-611	remote:bash,dash	echo '"' ; ha -x\x0c2>&1 host info
+fuzz-612	none	echo '"' ; ha 2>&1\x0b su info
+fuzz-613	none	echo '"' ; ha 2>&1\x0b host info
+fuzz-614	su:bash,dash	echo '"' ; ha 2>out\r su info
+fuzz-615	remote:bash,dash	echo '"' ; ha 2>out\r host info
+fuzz-616	su:bash,dash	echo '"' ; ha -x\u2028 su info
+fuzz-617	remote:bash,dash	echo '"' ; ha -x\u2028 host info
+fuzz-618	su:bash,dash	echo '"' ; ha -x\x85 su info
+fuzz-619	remote:bash,dash	echo '"' ; ha -x\x85 host info
+fuzz-620	su:bash,dash	echo '"' ; ha -x\xa0 su info
+fuzz-621	remote:bash,dash	echo '"' ; ha -x\xa0 host info
+fuzz-622	su:bash,dash	echo '"' ; ha -x\u3000 su info
+fuzz-623	remote:bash,dash	echo '"' ; ha -x\u3000 host info
+fuzz-624	su:bash,dash	echo "a\nb" ; ha 2>&1 su info
+fuzz-625	remote:bash,dash	echo "a\nb" ; ha 2>&1 host info
+fuzz-626	su:bash,dash	echo "a\nb" ; ha -x"> y z" su info
+fuzz-627	remote:bash,dash	echo "a\nb" ; ha -x"> y z" host info
+fuzz-628	su:bash,dash	echo "a\nb" ; ha -x">" su info
+fuzz-629	remote:bash,dash	echo "a\nb" ; ha -x">" host info
+fuzz-630	su:bash,dash	echo "a\nb" ; ha 2>&1 -x"> y z" su info
+fuzz-631	remote:bash,dash	echo "a\nb" ; ha 2>&1 -x"> y z" host info
+fuzz-632	su:bash,dash	echo "a\nb" ; ha -x'< y z' su info
+fuzz-633	remote:bash,dash	echo "a\nb" ; ha -x'< y z' host info
+fuzz-634	su:bash	echo "a\nb" ; ha {,} su info
+fuzz-635	remote:bash	echo "a\nb" ; ha {,} host info
+fuzz-636	su:bash,dash	echo "a\nb" ; ha -x{,} su info
+fuzz-637	remote:bash,dash	echo "a\nb" ; ha -x{,} host info
+fuzz-638	su:bash	echo "a\nb" ; ha --config {,} x su info
+fuzz-639	remote:bash	echo "a\nb" ; ha --config {,} x host info
+fuzz-640	su:bash	echo "a\nb" ; ha 2>/dev/null {,} su info
+fuzz-641	remote:bash	echo "a\nb" ; ha 2>/dev/null {,} host info
+fuzz-642	su:bash	echo "a\nb" ; ha {,,} su info
+fuzz-643	remote:bash	echo "a\nb" ; ha {,,} host info
+fuzz-644	su:bash,dash	echo "a\nb" ; ha -x"<<<y z" su info
+fuzz-645	remote:bash,dash	echo "a\nb" ; ha -x"<<<y z" host info
+fuzz-646	su:bash,dash	echo "a\nb" ; ha -x"2> y z" su info
+fuzz-647	remote:bash,dash	echo "a\nb" ; ha -x"2> y z" host info
+fuzz-648	su:bash,dash	echo "a\nb" ; ha -x\\> su info
+fuzz-649	remote:bash,dash	echo "a\nb" ; ha -x\\> host info
+fuzz-650	su:bash,dash	echo "a\nb" ; ha --raw-json="> y z" su info
+fuzz-651	remote:bash,dash	echo "a\nb" ; ha --raw-json="> y z" host info
+fuzz-652	su:bash,dash	echo "a\nb" ; ha -x\x0c2>&1 su info
+fuzz-653	remote:bash,dash	echo "a\nb" ; ha -x\x0c2>&1 host info
+fuzz-654	none	echo "a\nb" ; ha 2>&1\x0b su info
+fuzz-655	none	echo "a\nb" ; ha 2>&1\x0b host info
+fuzz-656	su:bash,dash	echo "a\nb" ; ha 2>out\r su info
+fuzz-657	remote:bash,dash	echo "a\nb" ; ha 2>out\r host info
+fuzz-658	su:bash,dash	echo "a\nb" ; ha -x\u2028 su info
+fuzz-659	remote:bash,dash	echo "a\nb" ; ha -x\u2028 host info
+fuzz-660	su:bash,dash	echo "a\nb" ; ha -x\x85 su info
+fuzz-661	remote:bash,dash	echo "a\nb" ; ha -x\x85 host info
+fuzz-662	su:bash,dash	echo "a\nb" ; ha -x\xa0 su info
+fuzz-663	remote:bash,dash	echo "a\nb" ; ha -x\xa0 host info
+fuzz-664	su:bash,dash	echo "a\nb" ; ha -x\u3000 su info
+fuzz-665	remote:bash,dash	echo "a\nb" ; ha -x\u3000 host info
+fuzz-666	su:bash,dash	x=">" ha 2>&1 su info
+fuzz-667	remote:bash,dash	x=">" ha 2>&1 host info
+fuzz-668	su:bash,dash	x=">" ha -x"> y z" su info
+fuzz-669	remote:bash,dash	x=">" ha -x"> y z" host info
+fuzz-670	su:bash,dash	x=">" ha -x">" su info
+fuzz-671	remote:bash,dash	x=">" ha -x">" host info
+fuzz-672	su:bash,dash	x=">" ha 2>&1 -x"> y z" su info
+fuzz-673	remote:bash,dash	x=">" ha 2>&1 -x"> y z" host info
+fuzz-674	su:bash,dash	x=">" ha -x'< y z' su info
+fuzz-675	remote:bash,dash	x=">" ha -x'< y z' host info
+fuzz-676	su:bash	x=">" ha {,} su info
+fuzz-677	remote:bash	x=">" ha {,} host info
+fuzz-678	su:bash,dash	x=">" ha -x{,} su info
+fuzz-679	remote:bash,dash	x=">" ha -x{,} host info
+fuzz-680	su:bash	x=">" ha --config {,} x su info
+fuzz-681	remote:bash	x=">" ha --config {,} x host info
+fuzz-682	su:bash	x=">" ha 2>/dev/null {,} su info
+fuzz-683	remote:bash	x=">" ha 2>/dev/null {,} host info
+fuzz-684	su:bash	x=">" ha {,,} su info
+fuzz-685	remote:bash	x=">" ha {,,} host info
+fuzz-686	su:bash,dash	x=">" ha -x"<<<y z" su info
+fuzz-687	remote:bash,dash	x=">" ha -x"<<<y z" host info
+fuzz-688	su:bash,dash	x=">" ha -x"2> y z" su info
+fuzz-689	remote:bash,dash	x=">" ha -x"2> y z" host info
+fuzz-690	su:bash,dash	x=">" ha -x\\> su info
+fuzz-691	remote:bash,dash	x=">" ha -x\\> host info
+fuzz-692	su:bash,dash	x=">" ha --raw-json="> y z" su info
+fuzz-693	remote:bash,dash	x=">" ha --raw-json="> y z" host info
+fuzz-694	su:bash,dash	x=">" ha -x\x0c2>&1 su info
+fuzz-695	remote:bash,dash	x=">" ha -x\x0c2>&1 host info
+fuzz-696	none	x=">" ha 2>&1\x0b su info
+fuzz-697	none	x=">" ha 2>&1\x0b host info
+fuzz-698	su:bash,dash	x=">" ha 2>out\r su info
+fuzz-699	remote:bash,dash	x=">" ha 2>out\r host info
+fuzz-700	su:bash,dash	x=">" ha -x\u2028 su info
+fuzz-701	remote:bash,dash	x=">" ha -x\u2028 host info
+fuzz-702	su:bash,dash	x=">" ha -x\x85 su info
+fuzz-703	remote:bash,dash	x=">" ha -x\x85 host info
+fuzz-704	su:bash,dash	x=">" ha -x\xa0 su info
+fuzz-705	remote:bash,dash	x=">" ha -x\xa0 host info
+fuzz-706	su:bash,dash	x=">" ha -x\u3000 su info
+fuzz-707	remote:bash,dash	x=">" ha -x\u3000 host info
+fuzz-708	su:bash,dash	echo ">" 2>&1 & ha 2>&1 su info
+fuzz-709	remote:bash,dash	echo ">" 2>&1 & ha 2>&1 host info
+fuzz-710	su:bash,dash	echo ">" 2>&1 & ha -x"> y z" su info
+fuzz-711	remote:bash,dash	echo ">" 2>&1 & ha -x"> y z" host info
+fuzz-712	su:bash,dash	echo ">" 2>&1 & ha -x">" su info
+fuzz-713	remote:bash,dash	echo ">" 2>&1 & ha -x">" host info
+fuzz-714	su:bash,dash	echo ">" 2>&1 & ha 2>&1 -x"> y z" su info
+fuzz-715	remote:bash,dash	echo ">" 2>&1 & ha 2>&1 -x"> y z" host info
+fuzz-716	su:bash,dash	echo ">" 2>&1 & ha -x'< y z' su info
+fuzz-717	remote:bash,dash	echo ">" 2>&1 & ha -x'< y z' host info
+fuzz-718	su:bash	echo ">" 2>&1 & ha {,} su info
+fuzz-719	remote:bash	echo ">" 2>&1 & ha {,} host info
+fuzz-720	su:bash,dash	echo ">" 2>&1 & ha -x{,} su info
+fuzz-721	remote:bash,dash	echo ">" 2>&1 & ha -x{,} host info
+fuzz-722	su:bash	echo ">" 2>&1 & ha --config {,} x su info
+fuzz-723	remote:bash	echo ">" 2>&1 & ha --config {,} x host info
+fuzz-724	su:bash	echo ">" 2>&1 & ha 2>/dev/null {,} su info
+fuzz-725	remote:bash	echo ">" 2>&1 & ha 2>/dev/null {,} host info
+fuzz-726	su:bash	echo ">" 2>&1 & ha {,,} su info
+fuzz-727	remote:bash	echo ">" 2>&1 & ha {,,} host info
+fuzz-728	su:bash,dash	echo ">" 2>&1 & ha -x"<<<y z" su info
+fuzz-729	remote:bash,dash	echo ">" 2>&1 & ha -x"<<<y z" host info
+fuzz-730	su:bash,dash	echo ">" 2>&1 & ha -x"2> y z" su info
+fuzz-731	remote:bash,dash	echo ">" 2>&1 & ha -x"2> y z" host info
+fuzz-732	su:bash,dash	echo ">" 2>&1 & ha -x\\> su info
+fuzz-733	remote:bash,dash	echo ">" 2>&1 & ha -x\\> host info
+fuzz-734	su:bash,dash	echo ">" 2>&1 & ha --raw-json="> y z" su info
+fuzz-735	remote:bash,dash	echo ">" 2>&1 & ha --raw-json="> y z" host info
+fuzz-736	su:bash,dash	echo ">" 2>&1 & ha -x\x0c2>&1 su info
+fuzz-737	remote:bash,dash	echo ">" 2>&1 & ha -x\x0c2>&1 host info
+fuzz-738	none	echo ">" 2>&1 & ha 2>&1\x0b su info
+fuzz-739	none	echo ">" 2>&1 & ha 2>&1\x0b host info
+fuzz-740	su:bash,dash	echo ">" 2>&1 & ha 2>out\r su info
+fuzz-741	remote:bash,dash	echo ">" 2>&1 & ha 2>out\r host info
+fuzz-742	su:bash,dash	echo ">" 2>&1 & ha -x\u2028 su info
+fuzz-743	remote:bash,dash	echo ">" 2>&1 & ha -x\u2028 host info
+fuzz-744	su:bash,dash	echo ">" 2>&1 & ha -x\x85 su info
+fuzz-745	remote:bash,dash	echo ">" 2>&1 & ha -x\x85 host info
+fuzz-746	su:bash,dash	echo ">" 2>&1 & ha -x\xa0 su info
+fuzz-747	remote:bash,dash	echo ">" 2>&1 & ha -x\xa0 host info
+fuzz-748	su:bash,dash	echo ">" 2>&1 & ha -x\u3000 su info
+fuzz-749	remote:bash,dash	echo ">" 2>&1 & ha -x\u3000 host info
+fuzz-750	su:bash,dash	echo x 2>&1 | ha 2>&1 su info
+fuzz-751	remote:bash,dash	echo x 2>&1 | ha 2>&1 host info
+fuzz-752	su:bash,dash	echo x 2>&1 | ha -x"> y z" su info
+fuzz-753	remote:bash,dash	echo x 2>&1 | ha -x"> y z" host info
+fuzz-754	su:bash,dash	echo x 2>&1 | ha -x">" su info
+fuzz-755	remote:bash,dash	echo x 2>&1 | ha -x">" host info
+fuzz-756	su:bash,dash	echo x 2>&1 | ha 2>&1 -x"> y z" su info
+fuzz-757	remote:bash,dash	echo x 2>&1 | ha 2>&1 -x"> y z" host info
+fuzz-758	su:bash,dash	echo x 2>&1 | ha -x'< y z' su info
+fuzz-759	remote:bash,dash	echo x 2>&1 | ha -x'< y z' host info
+fuzz-760	su:bash	echo x 2>&1 | ha {,} su info
+fuzz-761	remote:bash	echo x 2>&1 | ha {,} host info
+fuzz-762	su:bash,dash	echo x 2>&1 | ha -x{,} su info
+fuzz-763	remote:bash,dash	echo x 2>&1 | ha -x{,} host info
+fuzz-764	su:bash	echo x 2>&1 | ha --config {,} x su info
+fuzz-765	remote:bash	echo x 2>&1 | ha --config {,} x host info
+fuzz-766	su:bash	echo x 2>&1 | ha 2>/dev/null {,} su info
+fuzz-767	remote:bash	echo x 2>&1 | ha 2>/dev/null {,} host info
+fuzz-768	su:bash	echo x 2>&1 | ha {,,} su info
+fuzz-769	remote:bash	echo x 2>&1 | ha {,,} host info
+fuzz-770	su:bash,dash	echo x 2>&1 | ha -x"<<<y z" su info
+fuzz-771	remote:bash,dash	echo x 2>&1 | ha -x"<<<y z" host info
+fuzz-772	su:bash,dash	echo x 2>&1 | ha -x"2> y z" su info
+fuzz-773	remote:bash,dash	echo x 2>&1 | ha -x"2> y z" host info
+fuzz-774	su:bash,dash	echo x 2>&1 | ha -x\\> su info
+fuzz-775	remote:bash,dash	echo x 2>&1 | ha -x\\> host info
+fuzz-776	su:bash,dash	echo x 2>&1 | ha --raw-json="> y z" su info
+fuzz-777	remote:bash,dash	echo x 2>&1 | ha --raw-json="> y z" host info
+fuzz-778	su:bash,dash	echo x 2>&1 | ha -x\x0c2>&1 su info
+fuzz-779	remote:bash,dash	echo x 2>&1 | ha -x\x0c2>&1 host info
+fuzz-780	none	echo x 2>&1 | ha 2>&1\x0b su info
+fuzz-781	none	echo x 2>&1 | ha 2>&1\x0b host info
+fuzz-782	su:bash,dash	echo x 2>&1 | ha 2>out\r su info
+fuzz-783	remote:bash,dash	echo x 2>&1 | ha 2>out\r host info
+fuzz-784	su:bash,dash	echo x 2>&1 | ha -x\u2028 su info
+fuzz-785	remote:bash,dash	echo x 2>&1 | ha -x\u2028 host info
+fuzz-786	su:bash,dash	echo x 2>&1 | ha -x\x85 su info
+fuzz-787	remote:bash,dash	echo x 2>&1 | ha -x\x85 host info
+fuzz-788	su:bash,dash	echo x 2>&1 | ha -x\xa0 su info
+fuzz-789	remote:bash,dash	echo x 2>&1 | ha -x\xa0 host info
+fuzz-790	su:bash,dash	echo x 2>&1 | ha -x\u3000 su info
+fuzz-791	remote:bash,dash	echo x 2>&1 | ha -x\u3000 host info
+fuzz-792	su:bash,dash	echo '&' ; ha 2>&1 su info
+fuzz-793	remote:bash,dash	echo '&' ; ha 2>&1 host info
+fuzz-794	su:bash,dash	echo '&' ; ha -x"> y z" su info
+fuzz-795	remote:bash,dash	echo '&' ; ha -x"> y z" host info
+fuzz-796	su:bash,dash	echo '&' ; ha -x">" su info
+fuzz-797	remote:bash,dash	echo '&' ; ha -x">" host info
+fuzz-798	su:bash,dash	echo '&' ; ha 2>&1 -x"> y z" su info
+fuzz-799	remote:bash,dash	echo '&' ; ha 2>&1 -x"> y z" host info
+fuzz-800	su:bash,dash	echo '&' ; ha -x'< y z' su info
+fuzz-801	remote:bash,dash	echo '&' ; ha -x'< y z' host info
+fuzz-802	su:bash	echo '&' ; ha {,} su info
+fuzz-803	remote:bash	echo '&' ; ha {,} host info
+fuzz-804	su:bash,dash	echo '&' ; ha -x{,} su info
+fuzz-805	remote:bash,dash	echo '&' ; ha -x{,} host info
+fuzz-806	su:bash	echo '&' ; ha --config {,} x su info
+fuzz-807	remote:bash	echo '&' ; ha --config {,} x host info
+fuzz-808	su:bash	echo '&' ; ha 2>/dev/null {,} su info
+fuzz-809	remote:bash	echo '&' ; ha 2>/dev/null {,} host info
+fuzz-810	su:bash	echo '&' ; ha {,,} su info
+fuzz-811	remote:bash	echo '&' ; ha {,,} host info
+fuzz-812	su:bash,dash	echo '&' ; ha -x"<<<y z" su info
+fuzz-813	remote:bash,dash	echo '&' ; ha -x"<<<y z" host info
+fuzz-814	su:bash,dash	echo '&' ; ha -x"2> y z" su info
+fuzz-815	remote:bash,dash	echo '&' ; ha -x"2> y z" host info
+fuzz-816	su:bash,dash	echo '&' ; ha -x\\> su info
+fuzz-817	remote:bash,dash	echo '&' ; ha -x\\> host info
+fuzz-818	su:bash,dash	echo '&' ; ha --raw-json="> y z" su info
+fuzz-819	remote:bash,dash	echo '&' ; ha --raw-json="> y z" host info
+fuzz-820	su:bash,dash	echo '&' ; ha -x\x0c2>&1 su info
+fuzz-821	remote:bash,dash	echo '&' ; ha -x\x0c2>&1 host info
+fuzz-822	none	echo '&' ; ha 2>&1\x0b su info
+fuzz-823	none	echo '&' ; ha 2>&1\x0b host info
+fuzz-824	su:bash,dash	echo '&' ; ha 2>out\r su info
+fuzz-825	remote:bash,dash	echo '&' ; ha 2>out\r host info
+fuzz-826	su:bash,dash	echo '&' ; ha -x\u2028 su info
+fuzz-827	remote:bash,dash	echo '&' ; ha -x\u2028 host info
+fuzz-828	su:bash,dash	echo '&' ; ha -x\x85 su info
+fuzz-829	remote:bash,dash	echo '&' ; ha -x\x85 host info
+fuzz-830	su:bash,dash	echo '&' ; ha -x\xa0 su info
+fuzz-831	remote:bash,dash	echo '&' ; ha -x\xa0 host info
+fuzz-832	su:bash,dash	echo '&' ; ha -x\u3000 su info
+fuzz-833	remote:bash,dash	echo '&' ; ha -x\u3000 host info
+fuzz-834	su:bash,dash	echo ';' > /dev/null ; ha 2>&1 su info
+fuzz-835	remote:bash,dash	echo ';' > /dev/null ; ha 2>&1 host info
+fuzz-836	su:bash,dash	echo ';' > /dev/null ; ha -x"> y z" su info
+fuzz-837	remote:bash,dash	echo ';' > /dev/null ; ha -x"> y z" host info
+fuzz-838	su:bash,dash	echo ';' > /dev/null ; ha -x">" su info
+fuzz-839	remote:bash,dash	echo ';' > /dev/null ; ha -x">" host info
+fuzz-840	su:bash,dash	echo ';' > /dev/null ; ha 2>&1 -x"> y z" su info
+fuzz-841	remote:bash,dash	echo ';' > /dev/null ; ha 2>&1 -x"> y z" host info
+fuzz-842	su:bash,dash	echo ';' > /dev/null ; ha -x'< y z' su info
+fuzz-843	remote:bash,dash	echo ';' > /dev/null ; ha -x'< y z' host info
+fuzz-844	su:bash	echo ';' > /dev/null ; ha {,} su info
+fuzz-845	remote:bash	echo ';' > /dev/null ; ha {,} host info
+fuzz-846	su:bash,dash	echo ';' > /dev/null ; ha -x{,} su info
+fuzz-847	remote:bash,dash	echo ';' > /dev/null ; ha -x{,} host info
+fuzz-848	su:bash	echo ';' > /dev/null ; ha --config {,} x su info
+fuzz-849	remote:bash	echo ';' > /dev/null ; ha --config {,} x host info
+fuzz-850	su:bash	echo ';' > /dev/null ; ha 2>/dev/null {,} su info
+fuzz-851	remote:bash	echo ';' > /dev/null ; ha 2>/dev/null {,} host info
+fuzz-852	su:bash	echo ';' > /dev/null ; ha {,,} su info
+fuzz-853	remote:bash	echo ';' > /dev/null ; ha {,,} host info
+fuzz-854	su:bash,dash	echo ';' > /dev/null ; ha -x"<<<y z" su info
+fuzz-855	remote:bash,dash	echo ';' > /dev/null ; ha -x"<<<y z" host info
+fuzz-856	su:bash,dash	echo ';' > /dev/null ; ha -x"2> y z" su info
+fuzz-857	remote:bash,dash	echo ';' > /dev/null ; ha -x"2> y z" host info
+fuzz-858	su:bash,dash	echo ';' > /dev/null ; ha -x\\> su info
+fuzz-859	remote:bash,dash	echo ';' > /dev/null ; ha -x\\> host info
+fuzz-860	su:bash,dash	echo ';' > /dev/null ; ha --raw-json="> y z" su info
+fuzz-861	remote:bash,dash	echo ';' > /dev/null ; ha --raw-json="> y z" host info
+fuzz-862	su:bash,dash	echo ';' > /dev/null ; ha -x\x0c2>&1 su info
+fuzz-863	remote:bash,dash	echo ';' > /dev/null ; ha -x\x0c2>&1 host info
+fuzz-864	none	echo ';' > /dev/null ; ha 2>&1\x0b su info
+fuzz-865	none	echo ';' > /dev/null ; ha 2>&1\x0b host info
+fuzz-866	su:bash,dash	echo ';' > /dev/null ; ha 2>out\r su info
+fuzz-867	remote:bash,dash	echo ';' > /dev/null ; ha 2>out\r host info
+fuzz-868	su:bash,dash	echo ';' > /dev/null ; ha -x\u2028 su info
+fuzz-869	remote:bash,dash	echo ';' > /dev/null ; ha -x\u2028 host info
+fuzz-870	su:bash,dash	echo ';' > /dev/null ; ha -x\x85 su info
+fuzz-871	remote:bash,dash	echo ';' > /dev/null ; ha -x\x85 host info
+fuzz-872	su:bash,dash	echo ';' > /dev/null ; ha -x\xa0 su info
+fuzz-873	remote:bash,dash	echo ';' > /dev/null ; ha -x\xa0 host info
+fuzz-874	su:bash,dash	echo ';' > /dev/null ; ha -x\u3000 su info
+fuzz-875	remote:bash,dash	echo ';' > /dev/null ; ha -x\u3000 host info
+fuzz-876	su:bash	ha {,su} info
+fuzz-877	su:bash	ha {supervisor,info}
+fuzz-878	su:bash,dash	ha ${x:+\u2028} su info
+fuzz-879	su:bash,dash	ha $(: \x0c) su info
+fuzz-880	su:bash,dash	ha `: \x0c` su info
+fuzz-881	su:bash,dash	ha `: \r` su info
+fuzz-882	none	ha $EMPTY\x0c su info
+fuzz-883	none	ha $EMPTY \x0c2>&1 su info
+fuzz-884	su:bash,dash	ha -x\x0c $EMPTY su info
+fuzz-885	su:bash,dash	ha 2>"a\x0cb" su info
+fuzz-886	su:bash,dash	echo ">" & ha 2>&1 --config "a\nb" su info
+fuzz-887	remote:bash,dash	ha ${x:+a\nb} host info
+fuzz-888	su:bash,dash	ha >'a\x0cb' su info
+fuzz-889	su:bash,dash	bash -O nullglob -c 'ha /nonexistent-dir-zz/* su info'
+fuzz-890	su:bash	set -o braceexpand 2>/dev/null; ha {,} su info
+fuzz-891	none	ha ~+/../$EMPTY su info
+fuzz-892	su:bash	ha 2>&1 # x\nha {,} su info
+fuzz-893	remote:bash	ha {,} core restart
+fuzz-894	su:bash	ha -x {,} su info
+fuzz-895	su:bash	ha {,}{,} su info
+fuzz-896	none	ha {a,b}>/dev/null su info
+fuzz-897	su:bash	ha {,}\\\n su info
+fuzz-898	su:bash,dash	ha -{,} su info
+fuzz-899	none	ha {'',} su info
+fuzz-900	none	ha {,""} su info

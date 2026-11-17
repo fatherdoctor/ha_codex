@@ -546,7 +546,8 @@ class RedirectionTests(unittest.TestCase):
         'env ha>/dev/null su info',
         '/usr/bin/env ha>/dev/null supervisor info',
         'ha 2>/dev/null< /dev/null su info',
-        'ha >/dev/null2> /dev/null su info',
+        # The target is a file in the test's own folder: a runner that is not root cannot write in /dev.
+        'ha >out2> /dev/null su info',
         'ha --api-token>/dev/null x su info',
         'ha --log-level</dev/null debug su info',
         # A number right after an operator is its target, even after a blank (bash).
@@ -582,13 +583,61 @@ class RedirectionTests(unittest.TestCase):
         'ha 2> >(cat >/dev/null) su info',
         # The family word itself escaped after an unreadable target.
         "dash -c 'ha >\"a b\" s\\u info'",
+        # Python ends a line at a carriage return, a form feed or U+2028; the shell does not.
+        'ha ${x:+\r} su info',
+        'ha ${x:+\f} su info',
+        'ha ${x:+\v} su info',
+        'ha ${x:+\x1c} su info',
+        'ha ${x:+\x85} su info',
+        'ha ${x:+\u2028} su info',
+        # A newline inside an expansion or a quoted word: the shell reads on to its end.
+        'ha ${x:+a\nb} su info',
+        'ha $(:\n) su info',
+        'ha `:\n` su info',
+        'ha >"a\nb" su info',
+        'ha >"a\rb c" su info',
+        "ha >'a\fb c' su info",
+        # Behind a quoted operator and 2>&1: the parsers read these themselves.
+        'echo ">" & ha 2>&1 >"a\nb" su info',
+        'echo ">" & ha 2>&1 >"a\rb c" su info',
+        "echo '>' | ha 2>&1 >\"a\nb\" su info",
+        'echo "2>" & ha 2>&1 >"a\rb c" su info',
     )
-    UNREADABLE_REMOTE_FORMS = ("dash -c 'ha >\"a b\" host info'",)
+    UNREADABLE_REMOTE_FORMS = ("dash -c 'ha >\"a b\" host info'", 'ha ${x:+a\nb} host info')
     QUOTED_VALUE_FORMS = (
+        'ha --config "a\nb" su info',
+        'ha --config "a\rb" su info',
+        'echo ">" & ha 2>&1 --config "a\nb" su info',
         "dash -c 'ha --api-token \"a b\" su info'",
         "setsid sh -c 'ha --endpoint a\\ b su info'",
         "dash -c 'ha --api-token \"a b\" s\\\nu info'",
     )
+    # A quoted or escaped operator before 2>&1 is a plain word, so it cannot join the "&" after it
+    # and hide the next command from the parsers.
+    QUOTED_OPERATOR_FORMS = tuple(
+        prefix + middle
+        for prefix in ('echo ">" & ', "echo '>' | ", 'echo "2>" & ', 'echo \\> & ')
+        for middle in ('ha 2>&1 >"a\nb" su info', 'ha 2>&1 >"a\rb c" su info', 'ha 2>&1 -x"y z" su info',
+                       'ha 2>&1 -x"> y z" su info', 'ha 2>&1 --raw-json="> y z" su info'))
+    # Bash brace expansion and nullglob can remove a word or build the family word. Dash expands
+    # neither, so these run under bash only.
+    BRACE_FORMS = (
+        'ha {,} su info',
+        'ha --config {,} x su info',
+        'ha 2>/dev/null {,} su info',
+        'ha {,}su info',
+        'ha {su,} info',
+        'ha s{u,} info',
+        'ha {s,}u info',
+        'ha {su,info}',
+        'ha 2>&1 {su,} info',
+        'ha {x,s}{u,y} info',
+        'ha {s..s}u info',
+        "bash -c 'ha {,} su info'",
+        'shopt -s nullglob; ha /nonexistent-folder/* su info',
+        'shopt -s nullglob; ha nothing-here? su info',
+    )
+    BRACE_REMOTE_FORMS = ('ha {,} host info', 'ha {,} core restart', 'ha {co,}re info', 'ha h{o,}st info')
     # The redirection takes the family word as its target, so the shell runs "ha info".
     NOT_SUPERVISOR = ('ha > su info', 'ha 2> su info', 'ha core info 2>/dev/null', 'echo ha 2>/dev/null')
 
@@ -597,9 +646,14 @@ class RedirectionTests(unittest.TestCase):
     BASH_ONLY = ('<<<', ' &>/dev/null su', '<(', '>(', '&1>', '& 1>')
     # Harmless commands with a quoted, computed or joined redirection: no family word follows.
     HARMLESS = ('ha info 2>"$LOG"', 'grep "x" notes.txt > "/tmp/a b"', 'echo ha > /tmp/x', 'ls>/tmp/x',
-                'echo "${x:->}"', 'cmd 2>&1 | tee "log file"')
+                'echo "${x:->}"', 'cmd 2>&1 | tee "log file"', 'echo ">" & ls 2>&1 -l', 'echo {a,b} > /tmp/x',
+                'ls *.yaml\r\nha --help', 'cat a.txt\x0csupervisor.txt')
+    # Remote control off: these name a brace, a glob or a carriage return, but bash cannot make a
+    # Supervisor family of them, so the remote-off answer stays.
+    HARMLESS_REMOTE_OFF = ("ha addons logs {a,b}", "ha core info | jq '.data[]'", "ha core logs\r",
+                           "ha backups list 2>&1 | grep -c '*'")
 
-    def _runs(self, command: str, family: str) -> None:
+    def _runs(self, command: str, family: str, shells: tuple[str, ...] = ()) -> None:
         """Run the form with a print-only ha stub that writes its arguments to a file, not stdout."""
         with tempfile.TemporaryDirectory() as folder:
             stub = Path(folder) / 'ha'
@@ -609,7 +663,8 @@ class RedirectionTests(unittest.TestCase):
             env = {**os.environ, 'PATH': folder + os.pathsep + os.environ.get('PATH', ''), 'HA_STUB_OUT': str(out)}
             env.pop('x', None)
             env.pop('EMPTY', None)
-            shells = ('bash',) if any(mark in command for mark in self.BASH_ONLY) else ('bash', 'dash')
+            if not shells:
+                shells = ('bash',) if any(mark in command for mark in self.BASH_ONLY) else ('bash', 'dash')
             for shell in shells:
                 with self.subTest(shell=shell, command=command):
                     out.write_text('', encoding='utf-8')
@@ -621,8 +676,67 @@ class RedirectionTests(unittest.TestCase):
         for command in self.SUPERVISOR_FORMS + self.QUOTED_VALUE_FORMS + self.UNREADABLE_FORMS:
             family = 'supervisor' if ' supervisor ' in command else 'super' if ' super ' in command else 'su'
             self._runs(command, family)
+        for command in self.QUOTED_OPERATOR_FORMS:
+            self._runs(command, 'su')
         for command in self.REMOTE_FORMS + self.UNREADABLE_REMOTE_FORMS:
             self._runs(command, 'core' if ' core ' in command else 'host')
+
+    def test_print_only_bash_runs_each_brace_form(self) -> None:
+        for command in self.BRACE_FORMS:
+            self._runs(command, 'su', ('bash',))
+        for command in self.BRACE_REMOTE_FORMS:
+            self._runs(command, 'core' if 'core' in command or '{co,}' in command else 'host', ('bash',))
+
+    def test_hook_refuses_brace_and_quoted_operator_forms(self) -> None:
+        for command in self.BRACE_FORMS + self.QUOTED_OPERATOR_FORMS:
+            for remote_on in (False, True):
+                with self.subTest(command=command, remote_on=remote_on):
+                    self.assertIn('Supervisor', refusal(command, remote_on))
+        for command in self.BRACE_REMOTE_FORMS:
+            with self.subTest(command=command):
+                self.assertIn('Supervisor', refusal(command, True))
+                self.assertEqual(refusal(command, False), '')
+
+    def test_parsers_alone_read_past_a_quoted_operator(self) -> None:
+        """C3: the parsers no longer depend on the floor for a command after a quoted operator."""
+        for command in self.QUOTED_OPERATOR_FORMS:
+            with self.subTest(command=command):
+                self.assertTrue(gate_rules._ha_supervisor_command(command))
+        self.assertTrue(gate_rules._ha_command('echo ">" & ha 2>&1 >"a b" host info', True))
+
+    def test_unreadable_word_rule_alone_refuses_brace_forms(self) -> None:
+        for command in self.BRACE_FORMS:
+            for remote_on in (False, True):
+                with self.subTest(command=command, remote_on=remote_on):
+                    self.assertTrue(gate_rules._ha_unknown_flag(command, remote_on))
+        for command in self.BRACE_REMOTE_FORMS:
+            with self.subTest(command=command):
+                self.assertTrue(gate_rules._ha_unknown_flag(command, True))
+                self.assertFalse(gate_rules._ha_unknown_flag(command, False))
+
+    def test_a_brace_sequence_counts_as_a_family_word(self) -> None:
+        """Bash expands {a..z}{a..z} to every pair of letters, su among them; the rule does not list them."""
+        self.assertTrue(gate_rules._brace_word_names_family('{a..z}{a..z}', False))
+        self.assertFalse(gate_rules._brace_word_names_family('{a,b}', False))
+
+    def test_harmless_braces_and_globs_keep_the_remote_off_answer(self) -> None:
+        for command in self.HARMLESS_REMOTE_OFF:
+            with self.subTest(command=command):
+                self.assertEqual(refusal(command, False), '')
+
+    def test_full_path_wrapper_before_ha_in_the_remote_parser(self) -> None:
+        """C5 (M9): _ha_command knows a wrapper by its full path."""
+        self.assertTrue(gate_rules._ha_command('/usr/bin/env ha host info', True))
+        self.assertTrue(gate_rules._ha_command('/usr/bin/sudo -n ha core restart', True))
+        self.assertFalse(gate_rules._ha_command('/usr/bin/env ha host info', False))
+
+    def test_flag_value_rule_reads_a_quoted_family_word(self) -> None:
+        """C5 (M16): with remote control off, a quoted or escaped family word after a quoted value counts."""
+        for command in ('ha --config "a b" "su" info', 'ha --config "a b" s\\u info', 'ha --config "a b" "s"u info',
+                        "ha --config 'a b' 'supervisor' info"):
+            with self.subTest(command=command):
+                self.assertTrue(gate_rules._ha_unknown_flag(command, False))
+        self.assertFalse(gate_rules._ha_unknown_flag('ha --config "a b" "core" info', False))
 
     def test_hook_refuses_supervisor_forms_in_both_modes(self) -> None:
         for command in self.SUPERVISOR_FORMS + self.QUOTED_VALUE_FORMS + self.UNREADABLE_FORMS:
@@ -699,15 +813,18 @@ class RedirectionTests(unittest.TestCase):
 
     def test_both_shell_readings_of_ampersand_redirection(self) -> None:
         """Bash reads ``&>`` as one redirection; dash runs the part before ``&`` in the background."""
-        tokens = gate_rules._shell_words('true &>/dev/null ha su info', ';&|()\n')
-        segments = gate_rules._command_segments(tokens, ';&|()\n')
-        self.assertIn(['>/dev/null', 'ha', 'su', 'info'], segments)
-        self.assertIn(['true', '&>/dev/null', 'ha', 'su', 'info'], segments)
+        segments = gate_rules._command_segments('true &>/dev/null ha su info', ';&|()\n')
+        self.assertIn(['>', '/dev/null', 'ha', 'su', 'info'], segments)
+        self.assertIn(['true', '&>', '/dev/null', 'ha', 'su', 'info'], segments)
 
     def test_a_quoted_operator_does_not_hide_the_next_command(self) -> None:
         """A quoted ``">"`` before a pipe is read both ways, so the command after the pipe is still checked."""
-        tokens = gate_rules._shell_words('echo ">" | ha su info', ';&|()\n')
-        self.assertIn(['ha', 'su', 'info'], gate_rules._command_segments(tokens, ';&|()\n'))
+        self.assertIn(['ha', 'su', 'info'], gate_rules._command_segments('echo ">" | ha su info', ';&|()\n'))
+        # A quoted ">" before "&" is a plain word in both readings: it never joins the "&".
+        self.assertIn(['ha', '2>&', '1', 'su', 'info'],
+                      gate_rules._command_segments('echo ">" & ha 2>&1 su info', ';&|()\n'))
+        self.assertNotIn(['echo', '>&', 'ha', '2>&', '1', 'su', 'info'],
+                         gate_rules._command_segments('echo ">" & ha 2>&1 su info', ';&|()\n'))
         self.assertTrue(gate_rules._ha_supervisor_command('echo ">" | ha su info'))
 
     def test_text_floor_time_stays_flat_with_repeated_flags(self) -> None:

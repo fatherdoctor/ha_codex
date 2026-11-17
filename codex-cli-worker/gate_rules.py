@@ -575,27 +575,58 @@ HA_UNKNOWN_FLAG_RE = re.compile(
     r"--(?:log-level|api-token|endpoint|config)(?:=|\s+)"
     r"[^\s;]*(?:[\"'`\\]|\$\()", re.IGNORECASE)
 # A word after ha whose end or value the floor cannot read: a redirection target with a quote
-# or a backslash, a process substitution as the target, or any word with a $ or a backtick (a
-# variable that is empty or holds a blank, ${x:- a}, $(...), `...`). The shell can then put the
-# family word where the floor does not look.
+# or a backslash, a process substitution as the target, any word with a $ or a backtick (a
+# variable that is empty or holds a blank, ${x:- a}, $(...), `...`), a glob (with nullglob, a
+# glob that matches nothing is removed) or a bash brace expansion ({,} expands to nothing).
+# The shell can then put the family word where the floor does not look.
 HA_UNREADABLE_WORD_RE = re.compile(
-    _REDIRECTION_OPERATOR + r"\s*(?:\(|[^\s;<>]*[\"'\\])|[$`]")
+    _REDIRECTION_OPERATOR + r"\s*(?:\(|[^\s;<>]*[\"'\\])|[$`*?\[]|\{[^\s{}]*(?:,|\.\.)")
+# A word with a brace, which bash may expand into other words: s{u,} is su.
+HA_BRACE_WORD_RE = re.compile(r"[^\s;&|<>()]*\{[^\s;&|<>()]*")
+
+_ALWAYS_FAMILY_NAMES = ("supervisor", "super", "su")
+_ANY_FAMILY_NAMES = _ALWAYS_FAMILY_NAMES + (
+    "add-?ons?", "host", "os", "core", "hardware", "network", "backups?", "apps")
+HA_ALWAYS_WORD_RE = re.compile(r"\b(?:" + "|".join(_ALWAYS_FAMILY_NAMES) + r")\b", re.IGNORECASE)
+HA_ANY_FAMILY_WORD_RE = re.compile(r"\b(?:" + "|".join(_ANY_FAMILY_NAMES) + r")\b", re.IGNORECASE)
 
 
-HA_ALWAYS_WORD_RE = re.compile(r"\b(?:supervisor|super|su)\b", re.IGNORECASE)
-HA_ANY_FAMILY_WORD_RE = re.compile(
-    r"\b(?:supervisor|super|su|add-?ons?|host|os|core|hardware|network|backups?|apps)\b", re.IGNORECASE)
+def _quote_tolerant(name: str) -> str:
+    """Return a pattern for a family name with quotes or backslashes between its letters (s\\u, "s"u)."""
+    letters = re.findall(r"[^?]\??", name)
+    return r"[\"'`\\]*".join(letters)
 
 
-def _family_word_after(line: str, start: int, remote_on: bool) -> bool:
-    """Say whether a family word that this mode refuses follows start on the line.
+# The family names as the raw text can spell them, with quotes or backslashes between letters.
+_ALWAYS_SPELLED_RE = re.compile(
+    r"\b(?:" + "|".join(map(_quote_tolerant, _ALWAYS_FAMILY_NAMES)) + r")\b", re.IGNORECASE)
+_ANY_SPELLED_RE = re.compile(
+    r"\b(?:" + "|".join(map(_quote_tolerant, _ANY_FAMILY_NAMES)) + r")\b", re.IGNORECASE)
 
-    The rest of the line is read as written and with its quotes and backslashes removed, so
-    ``s\\u`` and ``"su"`` count as ``su``.
+
+def _last_family_word(text: str, remote_on: bool) -> int:
+    """Return where the last family word that this mode refuses starts in text, or -1.
+
+    A family word follows a position when this start is at or after it. One pass over the
+    text answers that for every position, so a long text with many ha lines stays fast.
     """
+    spelled = _ANY_SPELLED_RE if remote_on else _ALWAYS_SPELLED_RE
+    last = -1
+    for match in spelled.finditer(text):
+        last = match.start()
+    return last
+
+
+def _brace_word_names_family(word: str, remote_on: bool) -> bool:
+    """Say whether bash can expand a word with braces into a family word that this mode refuses.
+
+    A word with too many choices to list, or with a sequence such as {a..z}, counts as one.
+    """
+    if ".." in word:
+        return True
+    choices = _brace_choices(re.sub(r"[\"'`\\]", "", word))
     family = HA_ANY_FAMILY_WORD_RE if remote_on else HA_ALWAYS_WORD_RE
-    rest = line[start:]
-    return bool(family.search(rest) or family.search(re.sub(r"[\"'`\\]", "", rest)))
+    return choices is None or any(family.search(choice) for choice in choices)
 
 
 def _ha_unknown_flag(text: str, remote_on: bool) -> bool:
@@ -606,29 +637,50 @@ def _ha_unknown_flag(text: str, remote_on: bool) -> bool:
 
     - A global-flag value with a quote, a backslash or a substitution: with remote control
       on, every such value is refused. With it off, only the remote families are allowed, so
-      the value is refused when a Supervisor family word follows it on the line.
+      the value is refused when a Supervisor family word follows it.
     - A redirection target with a quote or a backslash, a process substitution, or any word
-      with a ``$`` or a backtick: refused when a family word that this mode refuses follows it
-      on the line (with remote control off, a Supervisor family; with it on, any family).
+      with a ``$``, a backtick, a glob character or a brace expansion: refused when a family
+      word that this mode refuses follows it (with remote control off, a Supervisor family;
+      with it on, any family).
+    - A word with a brace after ha that bash can expand into such a family word (``s{u,}``).
 
-    The check reads lines, not commands, so a family word in a later command on the same line
-    counts too. The text is also read with every backslash-newline pair removed, as the floor
+    ``ha`` is looked for on each line, and the family word counts anywhere after the
+    unreadable word, to the end of the command text: a quoted value, ``${...}``, ``$(...)`` and
+    a backtick substitution can hold a newline, and the shell then reads the family word on the
+    next line as part of the same command. A family word in a later command counts too. Lines
+    end at a newline only, as for the shell; a carriage return, a form feed or U+2028 does not
+    end one. The text is also read with every backslash-newline pair removed, as the floor
     reads it, so a family word split across lines is found.
     """
-    for line in text.splitlines() + text.replace("\\\n", "").splitlines():
-        word = HA_SHELL_WORD_RE.search(line)
-        if not word:
-            continue
-        flag = HA_UNKNOWN_FLAG_RE.search(line, word.end())
-        if flag and (remote_on or _family_word_after(line, flag.end(), False)):
-            return True
-        unreadable = HA_UNREADABLE_WORD_RE.search(line, word.end())
-        if unreadable and _family_word_after(line, unreadable.end(), remote_on):
-            return True
+    for reading in (text, text.replace("\\\n", "")):
+        last_always = _last_family_word(reading, False)
+        last_refused = _last_family_word(reading, remote_on)
+        first_ha = -1
+        start = 0
+        while start <= len(reading):
+            end = reading.find("\n", start)
+            if end < 0:
+                end = len(reading)
+            word = HA_SHELL_WORD_RE.search(reading, start, end)
+            start = end + 1
+            if not word:
+                continue
+            if first_ha < 0:
+                first_ha = word.end()
+            flag = HA_UNKNOWN_FLAG_RE.search(reading, word.end(), end)
+            if flag and (remote_on or last_always >= flag.end()):
+                return True
+            unreadable = HA_UNREADABLE_WORD_RE.search(reading, word.end(), end)
+            if unreadable and last_refused >= unreadable.start():
+                return True
+        if first_ha >= 0:
+            for brace in HA_BRACE_WORD_RE.finditer(reading, first_ha):
+                if _brace_word_names_family(brace.group(), remote_on):
+                    return True
     return False
 
 
-def _space_redirections(text: str) -> str:
+def _space_redirections(text: str, whole: bool = False) -> str:
     """Put a blank on each side of every unquoted redirection operator, as the shell reads it.
 
     The shell ends a word at ``<`` and ``>``, so ``ha>/dev/null su`` runs ``ha su``. The word
@@ -636,6 +688,11 @@ def _space_redirections(text: str) -> str:
     stays in its word, and so does the text of ``${...}``, where ``>`` is not an operator.
     A number right after an operator, even after a blank, is its target and not the file
     descriptor of the next operator: bash runs ``ha 2>& 1>x su`` as ``2>& 1``, ``>x``.
+
+    With ``whole``, each operator is also put in single quotes, so the word splitter keeps
+    ``2>&`` and ``&>`` as one word instead of ending a command at their ``&``. Only an operator
+    that the shell reads as one is quoted: a quoted ``">"`` stays a plain word and cannot join
+    the ``&`` after it.
     """
     out, quote, i, after_operator = [], "", 0, False
     while i < len(text):
@@ -653,7 +710,11 @@ def _space_redirections(text: str) -> str:
         elif not quote:
             operator = REDIRECTION_TEXT_RE.match(text, i)
             if operator and not (after_operator and operator.group("fd")):
-                out.append(f" {operator.group(0)} "); i = operator.end(); after_operator = True; continue
+                written = f"'{operator.group(0)}'" if whole else operator.group(0)
+                out.append(f" {written} ")
+                i = operator.end()
+                after_operator = True
+                continue
         if not ch.isspace():
             after_operator = False
         out.append(ch); i += 1
@@ -753,38 +814,19 @@ def _segments_of(tokens: list[str], separators: str) -> list[list[str]]:
     return segments
 
 
-def _join_redirections(tokens: list[str]) -> list[str]:
-    """Join an ``&`` or ``|`` to the redirection operator next to it.
-
-    The word splitter returns ``2>&1`` as ``2>``, ``&``, ``1`` and ``&>file`` as ``&``, ``>file``.
-    Joined, ``2>&``, ``>&``, ``<&``, ``>|`` and ``&>file`` are one redirection word again.
-    """
-    joined: list[str] = []
-    for token in tokens:
-        previous = joined[-1] if joined else ""
-        if REDIRECTION_RE.match(previous) and (
-                (previous.endswith(">") and token in ("&", "|")) or (previous.endswith("<") and token == "&")):
-            joined[-1] = previous + token
-        elif previous == "&" and token.startswith(">"):
-            joined[-1] = "&" + token
-        else:
-            joined.append(token)
-    return joined
-
-
-def _command_segments(tokens: list[str], separators: str) -> list[list[str]]:
-    """Return the simple commands of the words in two readings, and check both.
+def _command_segments(text: str, separators: str) -> list[list[str]]:
+    """Return the simple commands of command text in two readings, and check both.
 
     In the first reading every ``&`` and ``|`` ends a command. In the second, an ``&`` or ``|``
-    next to a redirection operator belongs to it (``ha 2>&1 su info`` is one command). The text
+    inside a redirection operator belongs to it (``ha 2>&1 su info`` is one command). The text
     alone cannot always tell which is right: bash reads ``&>file`` as one redirection, dash as
-    ``&`` and then ``>file``, and a quoted ``">"`` looks like an operator. A check of both
-    readings can only add refusals.
+    ``&`` and then ``>file``. A check of both readings can only add refusals. A quoted or escaped
+    operator (``">"``) is a plain word in both readings.
     """
-    segments = _segments_of(tokens, separators)
-    joined = _join_redirections(tokens)
-    if joined != tokens:
-        segments += _segments_of(joined, separators)
+    segments = []
+    for whole in (False, True):
+        words = _shell_words(_space_redirections(text, whole), separators)
+        segments += _segments_of(words, separators)
     return segments
 
 
@@ -822,7 +864,7 @@ def _ha_supervisor_command(text: str, depth: int = 0) -> bool:
     masked, nested = _shell_substitutions(joined)
     if any(_ha_supervisor_command(item, depth + 1) for item in nested):
         return True
-    for segment in _command_segments(_shell_words(_space_redirections(masked), ';&|()\n'), ';&|()\n'):
+    for segment in _command_segments(masked, ';&|()\n'):
         index = 0
         while index < len(segment):
             word = segment[index].lower()
@@ -900,7 +942,7 @@ def _ha_command(text: str, remote_on: bool, depth: int = 0) -> bool:
     joined = _join_shell_continuations(text)
     if joined is None:
         return True
-    for segment in _command_segments(_shell_words(_space_redirections(joined), ";&|()\n"), ";&|()\n"):
+    for segment in _command_segments(joined, ";&|()\n"):
         index = 0
         while index < len(segment):
             word = segment[index]

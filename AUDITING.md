@@ -75,8 +75,10 @@ the parsers split a command, `gate_rules.py: _space_redirections` puts a blank o
 operator (`REDIRECTION_TEXT_RE`); quoted and escaped operators and the text of `${...}` stay as they are. Both
 Supervisor parsers find the family word with one helper, `_ha_family_index`, which skips global flags, their
 values and redirections (`REDIRECTION_RE`, `_skip_redirections`). The parsers split commands with
-`_command_segments`, which keeps `2>&1` and `>|file` as one word and returns both readings of `&>file` (bash: one
-redirection; dash: `&`, then `>file`). The operator list is written once, in `_REDIRECTION_OPERATOR`.
+`_command_segments`, which reads the text twice: once with every `&` and `|` ending a command, and once with each
+unquoted operator kept as one word (`2>&`, `>|`, `&>`), so both readings of `&>file` are checked (bash: one
+redirection; dash: `&`, then `>file`). A quoted or escaped operator (`">"`, `\>`) is a plain word in both
+readings and never joins the `&` after it, so `echo ">" & ha 2>&1 su info` is found by the parsers themselves. The operator list is written once, in `_REDIRECTION_OPERATOR`.
 
 The text floor reads the command without quotes and with the same blanks around each operator (`_floor_texts`).
 Its prefix (`HA_TEXT_PREFIX`) accepts global flags, their values and redirections before the family. Its three
@@ -85,11 +87,16 @@ its match time does not grow with repeated flags or redirections (`test_text_flo
 
 The floor cannot see where a quoted, escaped or computed word ends. `_ha_unknown_flag` covers those words after
 `ha`. A global-flag value with a quote, a backslash or a substitution is refused with remote control on, and with
-it off when a Supervisor family word follows on the line. A redirection target with a quote, a backslash or a
-backtick, a process substitution, or any word with a `$` (a variable that is empty or holds a blank) is refused
-when a family word that the mode refuses follows on the line. Tests: `tests/test_gate_quote.py`
-(`RedirectionTests`, with a print-only shell control). To add a form, add it to a tuple there; the shell control
-runs it under bash and dash.
+it off when a Supervisor family word follows. A redirection target with a quote, a backslash or a backtick, a
+process substitution, or any word with a `$`, a backtick, a glob character or a brace expansion is refused when a
+family word that the mode refuses follows (`HA_UNREADABLE_WORD_RE`). "Follows" means anywhere later in the command
+text, not only on the line: a quoted word, `${...}` or `$(...)` can hold a newline (`_last_family_word`). The rule
+finds `ha` on lines that end at a newline only, as the shell's do. A brace word after `ha` that bash can expand
+into a family word (`s{u,}`) is refused too (`_brace_word_names_family`, using `_brace_choices`). This rule does not
+depend on the parsers or the floor. Tests: `tests/test_gate_quote.py` (`RedirectionTests`, with a print-only shell
+control) and `tests/test_supervisor_corpus.py`, which runs every command in
+`tests/fixtures/supervisor_command_corpus.tsv` under bash and dash with a print-only `ha` and then asks the hook.
+To add a form, add a line to that corpus (its header says how) or to a tuple in `RedirectionTests`.
 
 (*) The shell text is split by one copy of the code, `shell_words.py` (`strip_comments`, `split_words`), which
 `gate_rules.py` and `approvals.py` both import. The hook's continuation join is in the same file. Each check keeps
