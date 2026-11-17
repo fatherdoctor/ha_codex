@@ -64,6 +64,10 @@ function pngBuffer(width = 8, height = 6) {
     await page.goto("http://127.0.0.1:9137/preview/");
     await page.locator(".chat-row").first().waitFor();
     assert.equal(await page.locator(".chat-row").count(), 20);
+    // The empty message box is one line of text above the control row.
+    assert.equal(await page.locator("#message").getAttribute("rows"), "1");
+    const composerHeight = await page.locator("#composer").evaluate((node) => node.getBoundingClientRect().height);
+    assert.ok(composerHeight < 120, `empty composer is ${composerHeight} px high`);
     await page.getByRole("button", { name: "Load older chats" }).click();
     await page.waitForFunction(
       () => document.querySelectorAll(".chat-row").length === 25,
@@ -1317,7 +1321,8 @@ function pngBuffer(width = 8, height = 6) {
       error: "This question is no longer waiting for an answer.",
     });
     await page.getByRole("button", { name: "Open settings" }).click();
-    // Settings sections start collapsed; the ChatGPT header carries the short status.
+    // Settings sections start collapsed; the ChatGPT header inside Accounts and connections carries the short status.
+    await page.locator("#accounts-section > h3 .settings-toggle").click();
     await page
       .locator("#chatgpt-section .settings-status")
       .getByText("Signed in", { exact: true })
@@ -1326,7 +1331,7 @@ function pngBuffer(width = 8, height = 6) {
     await page
       .getByText("Signed in (local preview)", { exact: true })
       .waitFor();
-    await page.locator(".advanced summary").click();
+    await page.locator("#advanced-section .settings-toggle").click();
     await page.locator("#workspace-open").click();
     await page.locator("#agents").fill("Keep edits focused.");
     await page.getByRole("button", { name: "Save instructions" }).click();
@@ -1534,7 +1539,21 @@ function pngBuffer(width = 8, height = 6) {
       .getByText("The dashboard configuration is valid.", { exact: true })
       .waitFor();
     // The screenshot the user attached shows with their message.
-    await phone.locator(".verification h3").waitFor();
+    // No bold Verification box under the answer: the checks sit in one closed block, readback and note inside.
+    await phone.locator(".verification > summary").waitFor();
+    assert.equal(await phone.locator(".verification h3").count(), 0);
+    assert.equal(await phone.locator(".verification").evaluate(node => node.open), false);
+    // The closed line names the check that needs review, in the error color, and keeps one line of height.
+    const closedLine = phone.locator(".verification > summary");
+    assert.equal(await closedLine.textContent(), "Checks and readback (2) · 1 failed");
+    assert.equal(await closedLine.evaluate(node => node.classList.contains("has-failed")), true);
+    assert.equal(await closedLine.evaluate(node => getComputedStyle(node).color),
+      await phone.evaluate(() => { const probe = document.createElement("span"); probe.style.color = "var(--error)";
+        document.body.append(probe); const color = getComputedStyle(probe).color; probe.remove(); return color; }));
+    assert.ok(await closedLine.evaluate(node => node.getBoundingClientRect().height) <= 24);
+    assert.equal(await phone.locator(".verification-note").isVisible(), false);
+    await phone.locator(".verification > summary").click();
+    assert.equal(await phone.locator(".verification-note").isVisible(), true);
     assert.equal(await phone.locator(".verification-result").count(), 2);
     await phone.locator(".verification-result").nth(1).locator("summary").click();
     assert.equal(await phone.locator(".verification").getByText("Custom element does not exist: sample-card", {exact:true}).isVisible(), true);

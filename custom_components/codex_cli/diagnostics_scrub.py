@@ -148,7 +148,7 @@ def scrub(record, entity_key=None, stored=False):
             item.update(operation=choice(event.get('operation'), OVERRIDE_OPERATIONS),
                         outcome=choice(event.get('outcome'), {'requested', 'completed', 'unknown', 'refused'}),
                         group=choice(event.get('group'), {'apply', 'everyday', 'organize', 'bigger', 'security'}),
-                        decision=choice(event.get('decision'), {'preapproved', 'refused'}),
+                        decision=choice(event.get('decision'), {'preapproved', 'owner_allowed', 'refused'}),
                         duration_seconds=number(event.get('duration_seconds')))
         elif kind == 'ha_read':
             item.update(operation=choice(event.get('operation'), {'state', 'states', 'history', 'statistics'}), domain=choice(event.get('domain'), DOMAINS, 'other'))

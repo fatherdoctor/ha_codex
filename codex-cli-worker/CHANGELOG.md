@@ -1,8 +1,65 @@
 # Changelog
 
-## 0.3.3 (unreleased)
+## 0.3.4 (unreleased)
 
+- A plain device command such as "set the office overhead to 50%" is faster. On 0.3.3 Codex had no tool on the
+  chat page that finds an entity by name, so it searched `.storage/core.entity_registry` with shell commands, and
+  the page's rules told it to look for `/config/AGENTS.md` in every message. The `home_assistant` `verify` tool
+  has a new read-only `find` operation: it takes the words you used and an optional domain, and returns at most
+  10 matching entities with their entity id, friendly name and state. Entities with a credential-like name and
+  password-mode text entities are left out, as they are for the ChatGPT app's state reads. The page's rules now
+  send a device command through three tool calls (find, act, read the state back) and tell Codex not to search
+  files for an entity.
+- Codex reads `/config/AGENTS.md` again only when it changed. The `exchange_info` tool now says in each message
+  whether the file exists and when it last changed. A change to the file still reaches an open chat on its next
+  message, and a removed file stops applying. The guard-rails block is still read by the worker before every
+  pre-approved action. No approval, sandbox or permission rule changed.
+- "Set the light to 100%" works again without an approval. A pre-approved light action now accepts
+  `brightness_pct` and Home Assistant's other common light fields: `brightness_step`, `brightness_step_pct`,
+  `hs_color`, `xy_color`, `color_name` and `flash`, next to `brightness`, `color_temp_kelvin`, `transition` and
+  `rgb_color`. Each value must have the right type and stay in the range Home Assistant's light service accepts;
+  a value outside it is refused.
+- When a device action is refused only because its permission group is off or because its data has a field
+  that is not on the list, the `act` tool now shows the owner an **Allow once** / **Deny** request in the chat
+  and waits up to three minutes. Allow once runs that one action after every check runs again; it turns on no
+  group and allows no later action. Deny, or no answer, leaves everything unchanged. Before, the refusal asked
+  for an approval that the page could not show, so the exchange ended with nothing done. The owner is
+  asked only when every other check passes. Security and people actions (locks, alarm, covers, cameras,
+  notifications) never ask, because their data can hold a code; while that group is off, the refusal tells the
+  owner how to turn it on in Settings → Permissions overrides. A target in the action data (`entity_id`,
+  `device_id`, `area_id`, `floor_id`, `label_id`) is refused and never asks, so Allow once can only reach the
+  target the request names. Guard rails, templates, unknown targets and the other refusals are unchanged.
+- A task that ends with a plain answer no longer sends a Home Assistant notification; the answer is in the
+  chat. A notification still goes out when a task asks a question, waits for a permission decision, or fails.
+  Before, every completed chat task sent a **Codex task completed** notification with its answer.
+  A chat task the owner cancels sends no notification either; before, it sent **Codex task cancelled**. The
+  `codex_cli_task_result` event still reports the cancel.
+- The **Copy response** button under each answer is gone, with its manual copy dialog. **Copy thread ID** in the
+  thread menu still copies.
+- The message box starts at one line of text above the control row, as in the ChatGPT desktop app, and grows as you
+  type, up to 180 pixels.
+- The **Settings** window keeps one size. Opening a section scrolls inside the window instead of making it taller.
+- **ChatGPT app pairing** has its own collapsed header inside **Accounts and connections**, like **ChatGPT account**
+  and **GitHub**. Its header shows the state in one word, for example "Off", in red when the connection failed.
+- **Advanced** is a section like the others, with the same arrow and a status line.
+- Every section header in **Settings** has the same arrow size and the same space to the divider above and below it.
+  An open section has the same space between its last line or button and the next divider.
+- The bold **Verification** box under an answer is gone. The checks, the readback and the note on screenshots sit in
+  one closed **Checks and readback** line. The line names a bad result, for example "1 failed", in the error color.
+  It opens by itself only while a batch of blocked browser requests needs a decision, while a retry runs, and to
+  show the result of a retry just started from the page. A saved chat opened later shows it closed.
+- Every arrow in **Settings**, **Scheduled runs**, the thread step list, the checks block and the reasoning picker
+  is a Material Design Icons arrow, the icon set Home Assistant uses (Apache-2.0; see `web/NOTICE`). The browser's own
+  triangle is gone from the last collapsed parts that still had it, such as **Use a token instead**.
+- The GitHub sign-in notice in Home Assistant names the new place: **Settings > Accounts and connections > GitHub**.
+- A question about Codex cloud tasks, such as "Can you see my cloud tasks?", now gets an answer from
+  `codex cloud list --json` and `codex cloud status`. On 0.3.3 Codex looked at document sessions instead and
+  said it could see none. The page's rules now name the two commands, say that the list holds only Codex cloud
+  tasks of the signed-in account, and tell Codex to say so plainly when the list is empty. In a sandboxed mode
+  each command still raises the usual Allow once card. No approval, sandbox or permission rule changed.
 - Added grouped owner controls for command checks and app self-protection. Choices default on, require administrator access, and use the same signed state across enforcement layers. Disabling self-protection requires confirmation; the page and Status show the choice and any required restart.
+
+## 0.3.3 (unreleased)
 
 - The approval card and the remote-control hook now read command text with one shared copy of the comment
   and word code (`shell_words.py`), so a later fix cannot leave the two checks reading a command differently.
@@ -11,6 +68,32 @@
   says that, instead of saying the command touches the app's permission policy.
 - A scheduling or mailbox request whose text holds a character that cannot be stored (a lone surrogate) is now
   refused with a sentence that says so, instead of the bare word `utf-8`.
+- Settings has one **Accounts and connections** section for every sign-in and pairing: ChatGPT account, GitHub,
+  and the ChatGPT app pairing. It starts collapsed. Its header joins the three states ("ChatGPT signed in · GitHub
+  connected · app off"), and when one needs the owner the header names only that one, in red. ChatGPT and GitHub
+  keep their own collapsed headers, codes and countdowns inside it. The app pairing part shows the remote
+  connection state with **Get a pairing code**, **Manage remote connection** and **Turn off**; it replaces the
+  separate **Manage remote connection** row. A pairing code has no countdown: the worker does not know how long
+  Codex keeps it. **Turn off** stops the connection and does not remove the pairing in the ChatGPT app.
+- When a request gets HTTP 401 because the Home Assistant ingress session expired (a tab that slept), the page
+  asks Home Assistant for a new session once, through the parent window as the Home Assistant frontend does, and
+  sends the request again. Requests that fail together share one renewal. If the renewal fails, a banner says the
+  session expired and offers **Reload**; the page no longer shows "The worker returned HTTP 401".
+- A thread started from the chat page no longer shows the page's instructions as your message in the ChatGPT app.
+  The page sends its fixed rules as Codex developer instructions, and the message holds only your text, so the
+  app shows your words as the message and the title. The details of each message (the backup folder, attached
+  documents and images, and the notes on direct API calls, the local documentation and GitHub) come from a new
+  read-only `exchange_info` tool on the Home Assistant data server. A page message on a thread that the page did
+  not start (a ChatGPT app thread, or one from 0.3.2 or earlier) begins with a one-line note to call that tool,
+  which then also returns the rules. Threads from 0.3.2 or earlier keep their old instructions in their history.
+- Codex's answers are stored in the thread as plain text, so the ChatGPT app shows the answer and not a JSON
+  object. The page no longer sends an output format. Codex calls two new tools on the Home Assistant data server
+  instead: `ask_owner` with a question and up to three choices, and `report_failure` with a reason. Neither asks
+  for permission. The page takes its status, question and choices from these calls. A failure that the worker
+  finds itself (an exit with an error, a timeout, a stall, a configuration that fails its check) still comes
+  first; it now also wins over a question, so a task that leaves a broken configuration is reported as failed and
+  does not ask a question. A JSON answer from a thread of 0.3.2 or earlier still shows as before. The page shows a
+  question on its own line only when the answer text does not already hold it.
 
 ## 0.3.2 (unreleased)
 

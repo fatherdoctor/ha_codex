@@ -120,35 +120,17 @@ class RenameRoute(unittest.TestCase):
 
 
 class FirstReplyPrompt(unittest.TestCase):
-    """The prompt asks for a reply to the person and names AGENTS.md only when it exists."""
+    """The page's rules ask for a reply to the person and follow AGENTS.md only when it exists."""
 
-    def prompt(self, agents: Path) -> str:
-        with ExitStack() as stack:
-            stack.enter_context(patch.object(server, "AGENTS_PATH", agents))
-            for name in ("attached_image_note", "backup_instructions", "home_assistant_api_instructions",
-                         "ha_docs_note"):
-                stack.enter_context(patch.object(server, name, return_value=""))
-            stack.enter_context(patch.object(server, "read_options", return_value={}))
-            return server.build_prompt("Test", "synthetic")
+    def test_page_rules_follow_agents_file_only_when_it_exists(self):
+        # The rules are read once for each thread, so they name the file with a condition, not a fact.
+        text = server.PAGE_INSTRUCTIONS
+        self.assertIn("Owner workspace instructions: if /config/AGENTS.md exists, follow it.", text)
+        self.assertNotIn("Follow /config/AGENTS.md.", text)
 
-    def test_missing_agents_file_is_not_mentioned(self):
-        with tempfile.TemporaryDirectory() as folder:
-            text = self.prompt(Path(folder) / "AGENTS.md")
-        self.assertNotIn("AGENTS.md", text)
-        self.assertIn("\n\nTreat this as a live Home Assistant config tree.", text)
-
-    def test_existing_agents_file_is_followed(self):
-        with tempfile.TemporaryDirectory() as folder:
-            agents = Path(folder) / "AGENTS.md"
-            agents.write_text("Synthetic owner rules")
-            text = self.prompt(agents)
-        self.assertIn("Owner workspace instructions: /config/AGENTS.md.\n\nFollow /config/AGENTS.md. Treat this", text)
-
-    def test_summary_is_a_reply_not_a_worker_report(self):
-        with tempfile.TemporaryDirectory() as folder:
-            text = self.prompt(Path(folder) / "AGENTS.md")
-        line = next(line for line in text.splitlines() if line.startswith("- summary:"))
-        self.assertIn("written to the user as your reply", line)
+    def test_answer_is_a_reply_not_a_worker_report(self):
+        line = next(line for line in server.PAGE_INSTRUCTIONS.splitlines()
+                    if line.startswith("Answer in plain text"))
         self.assertIn("Answer a greeting, a test message or a question directly", line)
         self.assertIn("Do not describe this worker", line)
         self.assertIn("do not report that an optional instruction file is absent", line)

@@ -36,6 +36,8 @@ const state = {
   settingsBusy: false,
   activity: null,
   permissionModes: new Map(),
+  // Checks whose retry the owner started on this page. Their result shows open; a reload forgets them.
+  retriedChecks: new Set(),
 };
 const effortLabels = {
   low: "Low",
@@ -425,9 +427,101 @@ async function loadUsage() {
     usageTimer = setTimeout(loadUsage, 60000);
   }
 }
+/*
+ * Home Assistant lets this page reach the worker through an ingress session,
+ * a cookie that the Home Assistant tab renews. When the tab sleeps, the
+ * session can lapse and every request gets HTTP 401 before it reaches the
+ * worker. The page then asks Home Assistant, through the parent window, for a
+ * new session and sends the request once more. If that fails too, a banner
+ * asks the owner to reload; the HTTP code is never shown.
+ */
+const SESSION_EXPIRED = "Your Home Assistant session expired. Reload the page to continue.";
+let ingressRenewal = null;
+/** The app's slug from the Home Assistant address of this panel, or "" when the address does not show it. */
+function ingressSlug(parentPath) {
+  const match = /^\/(?:app|hassio\/ingress)\/([a-z0-9_]+)\/?$/.exec(parentPath || "");
+  return match ? match[1] : "";
+}
+/**
+ * Ask Home Assistant for a new ingress session and store it as the frontend
+ * does. Newer Home Assistant has a command for this; older releases pass the
+ * request to the Supervisor. True when a new session cookie was set.
+ */
+async function renewIngressSession() {
+  let hass = null;
+  let parentPath = "";
+  try {
+    if (window.parent === window) return false;
+    hass = window.parent.document.querySelector("home-assistant")?.hass;
+    parentPath = window.parent.location.pathname;
+  } catch (_) {
+    return false; // Not inside the Home Assistant frontend.
+  }
+  if (typeof hass?.callWS !== "function") return false;
+  const slug = ingressSlug(parentPath);
+  const requests = [];
+  if (slug) requests.push({ type: "supervisor/ingress/session", slug });
+  requests.push({ type: "supervisor/api", endpoint: "/ingress/session", method: "post" });
+  for (const request of requests) {
+    try {
+      const reply = await hass.callWS(request);
+      const session = reply?.session ?? reply?.data?.session;
+      if (typeof session !== "string" || !session) continue;
+      const secure = location.protocol === "https:" ? ";Secure" : "";
+      document.cookie = `ingress_session=${session};path=/api/hassio_ingress/;SameSite=Strict${secure}`;
+      return true;
+    } catch (_) {
+      // Try the older request next.
+    }
+  }
+  return false;
+}
+/** Show or hide the banner that asks the owner to reload the page. */
+function showSessionExpired(expired) {
+  $("session-banner").hidden = !expired;
+}
+// Reload the Home Assistant tab, which starts a new session; this page alone when it is not inside one.
+$("session-reload").onclick = () => {
+  try {
+    if (window.parent !== window) return window.parent.location.reload();
+  } catch (_) {
+    // A parent on another origin: reload this page only.
+  }
+  location.reload();
+};
+let sessionGeneration = 0;
+/**
+ * fetch() for the worker: on HTTP 401 renew the ingress session and send the
+ * request once more. Requests that fail together share one renewal, and a
+ * request sent before a renewal finished is sent again without a new one.
+ */
+async function pageFetch(url, options) {
+  const generation = sessionGeneration;
+  const response = await fetch(url, options);
+  if (response.status !== 401) {
+    showSessionExpired(false); // The session works again, for example after a sign-in in another tab.
+    return response;
+  }
+  let renewed = generation !== sessionGeneration;
+  if (!renewed) {
+    ingressRenewal ||= renewIngressSession()
+      .then((ok) => {
+        if (ok) sessionGeneration += 1;
+        return ok;
+      })
+      .finally(() => {
+        ingressRenewal = null;
+      });
+    renewed = await ingressRenewal;
+  }
+  const retry = renewed ? await fetch(url, options) : response;
+  showSessionExpired(retry.status === 401);
+  if (retry.status === 401) throw workerError(SESSION_EXPIRED, 401);
+  return retry;
+}
 /** Send a JSON request to the worker API and return the parsed response. */
 async function api(path, body, method) {
-  const response = await fetch(path.replace(/^\//, ""), {
+  const response = await pageFetch(path.replace(/^\//, ""), {
     method: method || (body === undefined ? "GET" : "POST"),
     headers: body === undefined ? {} : { "Content-Type": "application/json" },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -451,7 +545,7 @@ document.getElementById("export-interaction-logs").addEventListener("click", asy
   const status = document.getElementById("export-logs-status");
   button.disabled = true;
   try {
-    const response = await fetch("diagnostics/export", { cache: "no-store" });
+    const response = await pageFetch("diagnostics/export", { cache: "no-store" });
     if (!response.ok) throw new Error("The export could not be downloaded. Try again.");
     const data = await response.json();
     const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
@@ -997,24 +1091,40 @@ function tickElapsed() {
       ? ` · ${elapsedLabel(Date.now() - activity.startedAt)}`
       : "";
 }
+/** Check results that mean something did not work, or could not be confirmed. */
+const BAD_CHECK_STATUSES = new Set(["failed", "issues", "unavailable"]);
 /**
- * Build the Verification section of an answer: one expandable row per check
+ * Build the collapsed checks block of an answer: one expandable row per check
  * with its result, details, and findings, then the screenshots that have not
- * expired. Returns null when the turn has no checks.
+ * expired. It stays closed under the answer, except while a batch of blocked
+ * browser requests waits for the owner, a retry runs, or a retry the owner
+ * started on this page has its result. The closed line counts
+ * the bad results, so a failed check shows without opening the block. Returns
+ * null when the turn has no checks.
  */
 function renderVerification(turn, taskId) {
   const checks = turn.verification || [];
   if (!checks.length) return null;
-  const section = textNode("section", "", "verification");
-  section.append(textNode("h3", "Verification"));
+  const section = textNode("details", "", "verification disclosure");
+  const bad = checks.filter(check => BAD_CHECK_STATUSES.has(check.status)).length;
+  const title = checks.length === 1 ? "Check and readback" : `Checks and readback (${checks.length})`;
+  const summary = textNode("summary", bad ? `${title} · ${bad} failed` : title);
+  if (bad) summary.classList.add("has-failed");
+  section.append(summary);
   if (state.task?.browser_retry?.turn_id === turn.turn_id) {
+    section.open = true;
     const progress = textNode("p", "Retrying dashboard inspection…", "browser-permission-progress");
     progress.setAttribute("role", "status");
     section.append(progress);
   }
   for (const check of checks) {
-    const row = textNode("details", "", `verification-result is-${check.status}`);
-    if (check.retry_of && check === checks[checks.length - 1]) row.open = true;
+    const row = textNode("details", "", `verification-result disclosure is-${check.status}`);
+    // A retry result opens its own row. The block opens too when the owner started that retry on this page,
+    // so the result shows where they clicked; a saved chat opened later starts closed.
+    if (check.retry_of && check === checks[checks.length - 1]) {
+      row.open = true;
+      if (state.retriedChecks.has(check.retry_of)) section.open = true;
+    }
     const label = {
       passed: "Passed", failed: "Failed", observed: "Readback", captured: "Screenshots captured",
       issues: "Needs review", disabled: "Disabled", unavailable: "Unverified",
@@ -1058,6 +1168,7 @@ function renderVerification(turn, taskId) {
       row.append(textNode("p", "Some blocked requests can't be offered for approval: they were incomplete, looked like credentials, or exceeded the review limit."));
     const review = renderBrowserPermissions(check, turn, taskId);
     if (review) row.append(review);
+    if (review?.classList.contains("browser-permission-review")) section.open = true;
     section.append(row);
   }
   const images = imageAttachments(turn.verification_attachments).filter(image => image.expires_at * 1000 > Date.now());
@@ -1098,7 +1209,7 @@ function renderBrowserPermissions(check, turn, taskId) {
     box.value = candidate.id;
     boxes.push(box);
     label.append(box, textNode("span", candidate.label));
-    const details = textNode("details", "", "browser-permission-details");
+    const details = textNode("details", "", "browser-permission-details disclosure");
     details.append(textNode("summary", "Request details"), textNode("pre", candidate.description));
     item.append(label, details);
     fields.append(item);
@@ -1138,6 +1249,7 @@ function renderBrowserPermissions(check, turn, taskId) {
     const generation = state.generation;
     fields.disabled = allow.disabled = keep.disabled = true;
     feedback.textContent = "Starting a fresh inspection…";
+    state.retriedChecks.add(check.check_id);
     try {
       await api(`tasks/${encodeURIComponent(taskId)}/browser-permissions`, {
         turn_id: turn.turn_id, check_id: check.check_id,
@@ -1177,7 +1289,7 @@ async function loadBrowserPermissions() {
       const row = textNode("div", "", "saved-browser-permission");
       const info = textNode("div", "", "saved-browser-permission-info");
       info.append(textNode("strong", permission.label), textNode("p", permission.path));
-      const details = textNode("details", "", "browser-permission-details");
+      const details = textNode("details", "", "browser-permission-details disclosure");
       details.append(textNode("summary", "Request details"), textNode("pre", permission.description));
       info.append(details);
       const revoke = textNode("button", "Revoke", "subtle");
@@ -1219,18 +1331,15 @@ async function loadBrowserPermissions() {
     }
   }
 }
-/** Keep the original Markdown of the answer's visible text, including code indentation. */
-function responseMarkdown(turn) {
-  return [
-    turn.summary,
-    turn.details && turn.details !== turn.summary ? turn.details : "",
-    turn.question && turn.question !== turn.summary ? turn.question : "",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+/**
+ * Whether the question needs its own line: from 0.3.3 the answer text already holds it (ask_owner),
+ * while an older answer kept the question apart from its summary.
+ */
+function showsQuestionApart(turn) {
+  return Boolean(turn.question) && !(turn.summary || "").includes(turn.question);
 }
 /** Try the browser clipboard, then the selection-based copy used on local HTTP. */
-async function copyResponseText(text) {
+async function copyText(text) {
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(text);
@@ -1265,50 +1374,6 @@ async function copyResponseText(text) {
       for (const range of ranges) selection.addRange(range);
     }
   }
-}
-/** Offer selected, read-only Markdown when the browser cannot copy automatically. */
-function showCopyResponse(text) {
-  $("copy-text").value = text;
-  $("copy-dialog").showModal();
-  $("copy-text").focus({ preventScroll: true });
-  $("copy-text").select();
-}
-$("copy-select").onclick = () => {
-  $("copy-text").focus({ preventScroll: true });
-  $("copy-text").select();
-};
-$("copy-close").onclick = () => $("copy-dialog").close();
-$("copy-dialog").addEventListener("close", () => {
-  $("copy-text").value = "";
-});
-/** A copy action belongs to this exchange, even when later answers arrive. */
-function renderResponseCopy(text) {
-  const actions = textNode("div", "", "response-actions");
-  const button = textNode("button", "Copy response", "subtle copy-response");
-  button.type = "button";
-  button.title = "Copy the whole response as Markdown";
-  const status = textNode("span", "", "copy-status");
-  status.setAttribute("role", "status");
-  let timer;
-  button.onclick = async () => {
-    const focused = document.activeElement === button;
-    clearTimeout(timer);
-    status.textContent = "";
-    button.disabled = true;
-    const copied = await copyResponseText(text);
-    button.disabled = false;
-    if (!button.isConnected) return;
-    if (focused && document.activeElement === document.body)
-      button.focus({ preventScroll: true });
-    if (copied) {
-      status.textContent = "Copied!";
-      timer = setTimeout(() => {
-        status.textContent = "";
-      }, 2500);
-    } else showCopyResponse(text);
-  };
-  actions.append(button, status);
-  return actions;
 }
 /** Draw the open chat: every exchange with its answer, checks, saved copies, and steps. */
 function renderTask(force = false) {
@@ -1387,10 +1452,7 @@ function renderTask(force = false) {
       if (turn.summary) answer.append(renderMarkdown(turn.summary, "message"));
       if (turn.details && turn.details !== turn.summary)
         answer.append(renderMarkdown(turn.details, "message details"));
-      if (turn.question && turn.question !== turn.summary)
-        answer.append(renderMarkdown(turn.question, "message question"));
-      const markdown = responseMarkdown(turn);
-      if (markdown.trim()) answer.append(renderResponseCopy(markdown));
+      if (showsQuestionApart(turn)) answer.append(renderMarkdown(turn.question, "message question"));
       // Only the question still waiting can be answered with a choice.
       if (
         latest &&
@@ -1462,6 +1524,7 @@ function renderApproval(approval, taskId, turnId, active) {
   if (approval.cwd) card.append(textNode("p", `Working folder: ${approval.cwd}`, "permission-folder"));
   if (approval.network) card.append(textNode("p", `Network host: ${approval.network}`));
   if (approval.command) card.append(textNode("pre", approval.command, "permission-command"));
+  if (approval.action) card.append(textNode("pre", approval.action, "permission-command"));
   for (const change of approval.changes || []) {
     card.append(textNode("p", `${change.kind}: ${change.path}`, "permission-folder"));
     if (change.move_path) card.append(textNode("p", `Move to: ${change.move_path}`, "permission-folder"));
@@ -2743,8 +2806,12 @@ window.addEventListener("resize", () => {
  */
 function collapseSettingsSections() {
   // Sections marked data-own-dialog move to a dialog of their own (studio.js) and stay open there.
-  document.querySelectorAll("#settings > section:not([data-own-dialog])").forEach((section, index) => {
-    const heading = section.querySelector(":scope > h3");
+  // The three parts of Accounts and connections collapse too, inside it, each under its own header.
+  const sections = document.querySelectorAll(
+    "#settings > section:not([data-own-dialog]), #accounts-section > section",
+  );
+  sections.forEach((section, index) => {
+    const heading = section.querySelector(":scope > h3, :scope > h4");
     if (!heading || heading.querySelector(".settings-toggle")) return;
     const body = document.createElement("div");
     body.className = "settings-body";
@@ -2762,24 +2829,51 @@ function collapseSettingsSections() {
     heading.replaceChildren(toggle);
   });
 }
-/** Open or close one settings section. */
+/** Open or close one settings section; opening a part of Accounts and connections opens that section too. */
 function openSettingsSection(section, open = true) {
-  const toggle = section.querySelector(".settings-toggle");
+  const toggle = section.querySelector(":scope > :is(h3, h4) > .settings-toggle");
   const body = section.querySelector(":scope > .settings-body");
   if (!toggle || !body) return;
   toggle.setAttribute("aria-expanded", String(open));
   body.hidden = !open;
+  const parent = section.parentElement?.closest("#settings section");
+  if (open && parent) openSettingsSection(parent);
 }
 /** Put a one-line status in a section's header; attention marks one that needs the owner. */
 function setSectionStatus(sectionId, text, attention = false) {
   const section = $(sectionId);
-  const status = section?.querySelector(".settings-toggle .settings-status");
+  const status = section?.querySelector(":scope > :is(h3, h4) > .settings-toggle .settings-status");
   if (!status) return;
   status.textContent = text;
   section.classList.toggle("needs-attention", Boolean(attention));
 }
+/*
+ * Accounts and connections holds three parts. Its header joins a few words
+ * for each part, for example "ChatGPT signed in · GitHub not connected · app
+ * off". When a part needs the owner, the header is marked and names only the
+ * parts that need the owner.
+ */
+const accountParts = {
+  "chatgpt-section": { label: "ChatGPT", word: "", attention: false },
+  "github-section": { label: "GitHub", word: "", attention: false },
+  "app-pairing-section": { label: "app", word: "", attention: false },
+};
+/** Record one part's short state and redraw the Accounts and connections header. */
+function setAccountPart(sectionId, word, attention = false) {
+  accountParts[sectionId].word = word;
+  accountParts[sectionId].attention = Boolean(attention);
+  const parts = Object.values(accountParts).filter((part) => part.word);
+  // When a part needs the owner, the header names only those parts, so it stays short and plain.
+  const waiting = parts.filter((part) => part.attention);
+  setSectionStatus(
+    "accounts-section",
+    (waiting.length ? waiting : parts).map((part) => `${part.label} ${part.word}`).join(" · "),
+    waiting.length > 0,
+  );
+}
 collapseSettingsSections();
 setSectionStatus("appearance-section", "Follows Home Assistant");
+setSectionStatus("advanced-section", "Workspace rules");
 /*
  * The time left on a sign-in code. The worker sends the seconds left, by its
  * own clock; the page counts down from when that reply arrived, so a phone
@@ -2961,7 +3055,9 @@ function renderLogin(auth) {
     : lapsed
       ? "The assistant's ChatGPT sign-in expired or was revoked. Sign in again."
       : "The assistant is not signed in to ChatGPT.";
-  setSectionStatus("chatgpt-section", chatgptSectionStatus({ signedIn, pending, failed, lapsed }), !signedIn);
+  const sectionStatus = chatgptSectionStatus({ signedIn, pending, failed, lapsed });
+  setSectionStatus("chatgpt-section", sectionStatus, !signedIn);
+  setAccountPart("chatgpt-section", sectionStatus.toLowerCase(), !signedIn);
   for (const id of ["login", "banner-login"]) $(id).textContent = failed ? "Get a new code" : "Sign in";
   const key = JSON.stringify([
     signedIn,
@@ -3008,7 +3104,7 @@ const GITHUB_STATE_TEXT = {
 };
 /** Send a GitHub request; every reply carries the status, also a refusal's, so the card stays true. */
 async function githubApi(path, body) {
-  const response = await fetch(path, {
+  const response = await pageFetch(path, {
     method: body === undefined ? "GET" : "POST",
     headers: body === undefined ? {} : { "Content-Type": "application/json" },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -3089,6 +3185,13 @@ function githubSectionStatus({ waiting, connected, bad, state, login, repository
   }
   if (retry) return "Sign-in did not finish";
   return "Not connected";
+}
+/** The GitHub part of the Accounts and connections header, in one or two words. */
+function githubAccountWord({ waiting, connected, bad, retry }) {
+  if (waiting) return "waiting for the code";
+  if (connected) return bad ? "needs attention" : "connected";
+  if (retry) return "sign-in did not finish";
+  return "not connected";
 }
 /** Put the GitHub status on the card and the banner. Only the contract's fields are read. */
 function renderGithub(github) {
@@ -3174,6 +3277,7 @@ function renderGithub(github) {
     githubSectionStatus({ waiting, connected, bad, state, login, repositoryCount, retry }),
     bad || waiting || retry,
   );
+  setAccountPart("github-section", githubAccountWord({ waiting, connected, bad, retry }), bad || waiting || retry);
   $("github-banner-text").textContent = `The add-on's GitHub sign-in needs attention: ${(GITHUB_STATE_TEXT[state] || state).replace(/\.$/, "")}.`;
   $("github-banner").hidden = !bad;
 }
@@ -3187,13 +3291,14 @@ function githubUnavailable() {
   $("github-token").hidden = true;
   $("github-banner").hidden = true;
   setSectionStatus("github-section", "Not available in this version");
+  setAccountPart("github-section", "not available");
 }
 /** Read the GitHub status. Every 5 seconds while a code waits, else every 5 minutes, so a lost sign-in shows. */
 async function loadGithub() {
   clearTimeout(githubTimer);
   let waiting = false;
   try {
-    const response = await fetch("github");
+    const response = await pageFetch("github");
     if (response.status === 404) return githubUnavailable();
     const data = await response.json().catch(() => null);
     if (!data?.ok || !data.github) throw workerError(data?.error || `The worker returned HTTP ${response.status}.`, response.status);
@@ -3346,6 +3451,7 @@ function renderRemoteControl(rc) {
     }
   }
   }
+  renderAppPairing(rc, status);
   renderRemoteControlName(rc);
   $("remote-control-start").hidden = rc.enabled;
   $("remote-control-start").disabled = !rc.available;
@@ -3419,6 +3525,27 @@ for (const [id, action] of [
     }
   };
 }
+/**
+ * The ChatGPT app pairing part of Accounts and connections: the same state as
+ * the remote connection window, a button for a new pairing code while
+ * remote control is on, and Turn off.
+ */
+function renderAppPairing(rc, status) {
+  const ready = rc.enabled && ["ready", "pairing"].includes(rc.state);
+  const failed = rc.enabled && rc.available && !ready && !["starting", "reconnecting"].includes(rc.state);
+  let word = "on";
+  if (!rc.available) word = "unavailable";
+  else if (!rc.enabled) word = "off";
+  else if (rc.state === "starting" || rc.state === "reconnecting") word = rc.state;
+  else if (failed) word = "connection error";
+  $("app-pairing-status").textContent = status;
+  $("app-pairing-new").hidden = !ready;
+  $("app-pairing-off").hidden = !rc.enabled;
+  // The part's own header shows the word too, capitalized as the other headers are.
+  setSectionStatus("app-pairing-section", word[0].toUpperCase() + word.slice(1), failed);
+  setAccountPart("app-pairing-section", word, failed);
+}
+$("app-pairing-off").onclick = () => $("remote-control-stop").click();
 /** Show an error in the result line of the settings dialog. */
 function settingsError(error) {
   const result = $("connection-dialog").open ? $("connection-result") : $("settings-result");

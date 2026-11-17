@@ -219,15 +219,18 @@ class BackupFolderTests(unittest.TestCase):
                 self.assertIsNone(server.codex_backup_dir(outside, {"codex_sandbox": "workspace-write"}))
                 self.assertEqual(server.codex_backup_dir(outside, {"codex_sandbox": "danger-full-access"}), outside / "backups")
 
-    def test_prompt_carries_the_backup_folder_only_when_there_is_one(self):
-        """The backup instruction is in the prompt only when a folder is given."""
+    def test_exchange_info_carries_the_backup_folder_only_when_there_is_one(self):
+        """exchange_info gives the backup instruction when a folder is given, and says to make no copies without one."""
         with patch.object(server, "tasks", {}):
             folder = Path("/config/codex_tasks/t/turns/a/backups")
-            prompt = server.build_prompt("Edit the automation", "t", backup_dir=folder)
-            self.assertIn(f"copy it to {folder} under the same relative path", prompt)
-            self.assertIn(f"{folder}/.storage/lovelace.kitchen", prompt)
-            self.assertIn("Never copy secrets.yaml", prompt)
-            self.assertNotIn("copy it to", server.build_prompt("Edit the automation", "t"))
+            backups = server.exchange_info("t", folder)["backups"]
+            self.assertIn(f"copy it to {folder} under the same relative path", backups)
+            self.assertIn(f"{folder}/.storage/lovelace.kitchen", backups)
+            self.assertIn("Never copy secrets.yaml", backups)
+            self.assertEqual(server.exchange_info("t", None)["backups"],
+                             "This message has no backup folder. Make no backup copies.")
+            # The folder changes with each message, so the fixed instructions never name one.
+            self.assertNotIn("copy it to", server.PAGE_INSTRUCTIONS)
 
     def test_retention_setting_is_clamped_and_published(self):
         """The retention setting stays within its range and reaches the web UI."""
@@ -419,7 +422,10 @@ class RunTests(unittest.TestCase):
 
     def test_per_file_copies_are_reviewed_without_a_snapshot(self):
         """By default no archive is made and Codex's copies are checked and reported."""
-        with self.codex(keep_copy=True):
+        recorded = []
+        keep = server.ha_data.set_exchange_info
+        with self.codex(keep_copy=True), \
+             patch.object(server.ha_data, "set_exchange_info", side_effect=lambda *a: (recorded.append(a), keep(*a))):
             server.run_task(self.task_id, "Rename the automation")
         task = server.tasks[self.task_id]
         self.assertEqual(task["status"], "completed")
@@ -440,7 +446,10 @@ class RunTests(unittest.TestCase):
         self.assertFalse((self.run_dir / server.SNAPSHOT_FILE).exists())
         self.assertNotIn("snapshot", task)
         self.assertFalse((self.run_dir / "manifest-after.json").exists())
-        self.assertIn(f"copy it to {self.run_dir / 'backups'} under", (self.run_dir / "prompt.txt").read_text(encoding="utf-8"))
+        # The backup folder reaches Codex through exchange_info; the message holds only the user's words.
+        self.assertEqual([task_id for task_id, _ in recorded], [self.task_id])
+        self.assertIn(f"copy it to {self.run_dir / 'backups'} under", recorded[0][1]["backups"])
+        self.assertEqual((self.run_dir / "prompt.txt").read_text(encoding="utf-8"), "Rename the automation")
         self.assertEqual(self.steps(), [
             ("phase", "Noting the current state of your configuration files", "done"),
             ("phase", "Starting Codex", "done"),
