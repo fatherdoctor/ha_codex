@@ -367,7 +367,13 @@ Codex can be reached three ways: the chat page, the ChatGPT app paired through r
 - `codex_cli.start_task` starts the same kind of task as the chat page, so it gets the same tools.
 - A notification goes through the `act` tool only when the Security and people group is on
   ([Permissions overrides](#permissions-overrides)).
-- File edits and shell commands use Codex's own tools on every way in. The sandbox and the approval rules above apply.
+- File edits and shell commands use Codex's own tools on every way in, and the [sandbox](#sandbox) applies on every
+  way in. On the chat page and for `codex_cli.start_task`, a request for more access shows on the chat page as a
+  [permission request](#permission-requests). The ChatGPT app shows Codex's own requests in the app instead, as
+  [Remote control from the ChatGPT app](#remote-control-from-the-chatgpt-app) describes.
+- A scheduled run and a message on the lead agent channel also start a task. They use the same launcher as the chat
+  page and get the page's tools. A Read only schedule narrows the sandbox, not the tools
+  ([Scheduled runs and the lead agent channel](#scheduled-runs-and-the-lead-agent-channel)).
 - "Not available" means the way in has no tool for that request.
 
 `tests/test_surface_matrix.py` starts each way in's tool servers and compares their tools with this table. A change

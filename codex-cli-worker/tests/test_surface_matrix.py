@@ -12,7 +12,9 @@ import importlib.util
 import json
 import re
 import subprocess
+import tempfile
 import unittest
+from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -55,10 +57,10 @@ CONFIG = re.compile(r"mcp_servers\.([a-z_]+)\.(.+?)=(.*)", re.S)
 
 
 def registered_servers(args: list[str]) -> dict[str, dict]:
-    """Read the tool servers that a Codex command line registers, with their settings."""
+    """Read the tool servers that a Codex command line registers, with their settings, from --config or -c."""
     servers: dict[str, dict] = {}
     for flag, value in zip(args, args[1:]):
-        match = CONFIG.fullmatch(value) if flag == "--config" else None
+        match = CONFIG.fullmatch(value) if flag in ("--config", "-c") else None
         if match:
             name, key, raw = match.groups()
             servers.setdefault(name, {})[key] = json.loads(raw)
@@ -69,8 +71,9 @@ def listed_tools(settings: dict) -> list[str]:
     """Start one tool server as Codex starts it and return the names its tools/list answer gives."""
     requests = [{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
                 {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}]
-    result = subprocess.run([settings["command"], *settings["args"]], input="".join(json.dumps(r) + "\n" for r in requests),
-                            capture_output=True, text=True, timeout=30, check=False)
+    command = [settings["command"], *settings["args"]]
+    lines = "".join(json.dumps(r) + "\n" for r in requests)
+    result = subprocess.run(command, input=lines, capture_output=True, text=True, timeout=30, check=False)
     answers = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
     listing = next((a for a in answers if a.get("id") == 2), None)
     if listing is None:
@@ -96,15 +99,50 @@ def page_args() -> list[str]:
     return server.build_app_server_args()
 
 
-def exec_args() -> list[str]:
-    task = {"task_id": "t", "turns": [], "chat_settings": server.DEFAULT_CHAT_SETTINGS}
-    with patch.object(server, "tasks", {"t": task}), patch.object(server, "read_options", return_value={}):
-        return server.build_codex_args("t", Path("prompt"), Path("final"), None)
+def exec_args(task: dict | None = None) -> list[str]:
+    """The arguments of a `codex exec` turn for the given task, or for a new chat with default settings."""
+    task = task or {"task_id": "t", "turns": [], "chat_settings": server.DEFAULT_CHAT_SETTINGS}
+    task_id = task["task_id"]
+    with patch.object(server, "tasks", {task_id: task}), patch.object(server, "read_options", return_value={}):
+        return server.build_codex_args(task_id, Path("prompt"), Path("final"), None)
 
 
 def app_args() -> list[str]:
-    """The tool arguments the remote-control relay adds when the ChatGPT app starts a session."""
-    return server.remote_control_supervisor.tool_args_factory()
+    """The relay's full command line when the ChatGPT app starts a session, built by Supervisor._command.
+
+    The namespace probe is patched to succeed and the supervisor's state is restored afterward. Reading the whole
+    command line, not only tool_args_factory, means a tool server added in remote_control.py also shows here.
+    """
+    supervisor = server.remote_control_supervisor
+    probe = MagicMock(return_value=subprocess.CompletedProcess([], 0))
+    with patch.multiple(supervisor, run=probe, status={}, _name_supported=None, _checked_name=None):
+        return supervisor._command("app-server", "--listen", "unix:///tmp/socket", "--remote-control")
+
+
+def task_started_by_service(prompt: str) -> dict:
+    """Post the request that codex_cli.start_task sends to the worker's /tasks, and return the task it opens.
+
+    start_background_task is patched, so no Codex process starts; the task is removed from the worker afterward.
+    """
+    started = MagicMock()
+    with tempfile.TemporaryDirectory() as temp_dir, ExitStack() as stack:
+        root = Path(temp_dir)
+        stack.enter_context(patch.object(server, "get_task_dir", side_effect=lambda task_id: root / task_id))
+        stack.enter_context(patch.object(server, "api_token", return_value="test-token"))
+        stack.enter_context(patch.object(server, "start_background_task", started))
+        for name in ("save_task_index", "fire_ha_event", "notify", "refresh_usage_status_async"):
+            stack.enter_context(patch.object(server, name))
+        response = server.app.test_client().post(
+            "/tasks", headers={"Authorization": "Bearer test-token"}, json={"prompt": prompt})
+    payload = response.get_json()
+    if not payload.get("ok"):
+        raise AssertionError(f"/tasks refused the service request: {payload}")
+    task_id = payload["task_id"]
+    with server.lock:
+        task = server.tasks.pop(task_id)
+        server.active_task_runners.discard(task_id)
+    started.assert_called_once_with(task_id, prompt)
+    return task
 
 
 def docs_row(request: str) -> str:
@@ -138,6 +176,16 @@ class WaysInTests(unittest.TestCase):
             for tool in listed_tools(settings):
                 with self.subTest(tool=f"{name}.{tool}"):
                     self.assertEqual(settings.get(f"tools.{tool}.approval_mode"), "approve")
+
+    def test_a_task_from_the_service_action_launches_with_the_page_tools(self):
+        """The task that the service's request opens on /tasks gets the page's tools on either launch.
+
+        run_task picks the launch by the approval option, not by the caller: build_app_server_args takes no task,
+        and build_codex_args is built here from the task that the request really opened.
+        """
+        task = task_started_by_service("Turn on a light")
+        self.assertEqual(tools_of(exec_args(task)), self.page)
+        self.assertEqual(tools_of(page_args()), self.page)
 
     def test_the_service_action_starts_the_same_task_as_the_page(self):
         """codex_cli.start_task posts to the worker's /tasks, the route the page uses, so it gets the page's tools."""
