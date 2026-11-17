@@ -2,6 +2,9 @@
 
 ## 0.3.5 (unreleased)
 
+- A permission request that waits for you now shows at the bottom of the chat, below the "Working" lines, and the
+  chat scrolls to it once when it first appears. Before, it sat above those lines and was easy to miss. A request
+  you already answered stays where it was. No approval or permission rule changed.
 - The command check now refuses a Supervisor command that has a redirection between `ha` and the command family,
   such as `ha 2>/dev/null su info`, `ha 2>&1 supervisor logs` or `ha>/dev/null su info`. The shell removes the
   redirection and runs `ha su info`, but the check read the redirection as the family and let the command through,
