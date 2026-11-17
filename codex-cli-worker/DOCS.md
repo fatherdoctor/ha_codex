@@ -2,19 +2,6 @@
 
 This app runs Codex CLI tasks against the Home Assistant config folder mounted at `/config`.
 
-## Copying responses
-
-Choose **Copy response** below any answer in the chat, including a saved answer.
-It copies the summary, details, and any question as original Markdown, preserving
-code fences, links, and YAML indentation. Images, activity logs, and separate
-configuration, backup, and verification cards are not included.
-
-The browser first tries its Clipboard API, then selection-based copying for
-environments such as local HTTP. If both are unavailable or denied, the response
-opens in a read-only dialog with all text selected. Use Ctrl+C / Cmd+C or the
-browser's Copy action. **Select all** selects it again on touch devices. A
-**Copied!** confirmation appears only after automatic copying succeeds.
-
 ## Dashboard browser verification
 
 **Codex can open your dashboards in a real browser and inspect desktop and mobile
@@ -493,7 +480,7 @@ Whole-file undo can replace other edits made to the same file since Turn on; rec
 relax the always-on checks. A watch scan or verified restore cannot reverse a command that already ran,
 prevent a reload before the scan, or guarantee capture of an obfuscated reference.
 
-- **Off until you turn it on.** In the app chat, open **Settings** > **Accounts and connections** > **Manage remote connection**, then choose **Turn on**. You can also open the connection view from the connection chip. The choice is saved and holds across app restarts.
+- **Off until you turn it on.** In the app chat, open **Settings** > **Accounts and connections** > **ChatGPT app pairing** > **Manage remote connection**, then choose **Turn on**. You can also open the connection view from the connection chip. The choice is saved and holds across app restarts.
 - **One supervised process.** The app runs `codex app-server --listen unix://<private socket> --remote-control` in the foreground and starts it again, with a growing delay, if it exits. **Turn off** stops it.
 - **Machine name.** The ChatGPT app lists this machine as **Home Assistant** unless you change the **Remote control machine name** option, either in the app's Configuration tab or with **Name in the ChatGPT app** on the page while remote control is off. The page saves the same option through Supervisor. Pairing is kept with the Codex sign-in, so the app should show the new name the next time remote control connects; if it still shows the old name, choose **New pairing code**. Codex has no name setting, so the app starts it with that name as its host name inside a private namespace. If the private name namespace is unavailable, the page explains that Codex is using its existing host name.
 - **Pairing.** The manual code is shown as large text. A QR for the app link appears only when an app-link code is available; otherwise type the manual code or request a new code. Pairing is kept in the app's private storage with the Codex sign-in, so a restart does not ask for it again. **New pairing code** asks Codex for a fresh one when the ChatGPT app has lost this machine.
@@ -541,7 +528,7 @@ After you choose **Sign in**, the app posts a Home Assistant persistent notifica
 
 While the app is not signed in, a banner above the chat offers **Sign in**. During a sign-in, the banner and **Settings** show the one-time code in large letters, a QR code of the sign-in page served by the app itself, and the link. The code stays on screen, unchanged, until the sign-in completes or you press **Cancel**; pressing **Sign in** again keeps the running sign-in and its code. Under the code, a countdown shows how long it still works (Codex 0.166.0 gives codes 15 minutes); each status reply from the app sets it again, so it stays right after the phone sleeps. When it runs out, the page says so and offers **Get a new code**. If a sign-in stops without signing in, **Settings** says why when it can, and **Sign in** becomes **Get a new code**. The GitHub code in **Settings > Accounts and connections > GitHub** has the same countdown and button.
 
-Every section of **Settings** starts collapsed. Its header shows a one-line status, such as **Signed in**, **Connected as owner, 1 repository**, **3 of 5 on** or **Keeps 25**. A section that needs attention shows its status in red: a sign-in that waits or failed, house rules that wait for your review in **Permissions overrides**, a schedule that waits for your approval, or schedules paused because the Home Assistant time zone is unknown. Tap a header to open the section. When a saved sign-in expires or is revoked, the banner returns and the integration raises a Home Assistant repair; the integration's **Signed in** binary sensor turns off. **Accounts and connections** holds the three sign-ins and pairings: **ChatGPT account**, **GitHub** and **ChatGPT app pairing**. Its header joins their states, for example "ChatGPT signed in · GitHub connected · app off"; when one of them needs you, the header names only that one. The app pairing part shows the remote connection state, **Get a pairing code** while remote control is on, **Manage remote connection** and **Turn off**. Turn off stops the connection; it does not remove the pairing in the ChatGPT app. A pairing code shows no countdown, because the worker does not know how long Codex keeps it.
+Every section of **Settings** starts collapsed. The window keeps one size; an open section scrolls inside it. Its header shows a one-line status, such as **Signed in**, **Connected as owner, 1 repository**, **3 of 5 on** or **Keeps 25**. A section that needs attention shows its status in red: a sign-in that waits or failed, house rules that wait for your review in **Permissions overrides**, a schedule that waits for your approval, or schedules paused because the Home Assistant time zone is unknown. Tap a header to open the section. When a saved sign-in expires or is revoked, the banner returns and the integration raises a Home Assistant repair; the integration's **Signed in** binary sensor turns off. **Accounts and connections** holds the three sign-ins and pairings: **ChatGPT account**, **GitHub** and **ChatGPT app pairing**, each under its own collapsed header. Its header joins their states, for example "ChatGPT signed in · GitHub connected · app off"; when one of them needs you, the header names only that one. The app pairing part shows the remote connection state, **Get a pairing code** while remote control is on, **Manage remote connection** and **Turn off**. Turn off stops the connection; it does not remove the pairing in the ChatGPT app. A pairing code shows no countdown, because the worker does not know how long Codex keeps it.
 
 The page reaches the app through a Home Assistant ingress session, which the Home Assistant tab renews. If a request finds that session expired (for example after a phone slept), the page asks Home Assistant for a new session once and sends the request again. If that fails, a banner says the session expired and offers **Reload**; the page never shows the bare HTTP error.
 
@@ -606,7 +593,7 @@ When the state changes, and only then:
 
 ### When GitHub stops working
 
-Open **Settings > GitHub** in the app page. The card shows the state and, when available, the last check's reason.
+Open **Settings > Accounts and connections > GitHub** in the app page. The card shows the state and, when available, the last check's reason.
 
 - **Not connected to GitHub:** No sign-in is saved, or the app was restored from a backup. Press **Connect GitHub** to connect the App. If you use a fine-grained token, open **Use a token instead**.
 - **Connecting:** The App is waiting for you to finish on GitHub. Follow the link on the card. If the code expires, press **Get a new code**. To start over while it is waiting, press **Cancel**, then **Connect GitHub**.
@@ -796,7 +783,7 @@ Messages are treated as untrusted text:
 - Images are never loaded from a message, because a remote image would tell its server that the message was read. They appear as links. Images that Codex generates or that you attach are shown as before.
 - A message longer than 50,000 characters, or one that takes unusually long to format, is shown as plain text.
 
-The Markdown parser, [marked](https://github.com/markedjs/marked) 18.0.14, is bundled with the app under `web/assets/vendor/` with its MIT license, so the chat does not load scripts from another server. Codex decides how it writes its answers; to ask for Markdown, add an instruction to `/config/AGENTS.md` as described under [Task output](../custom_components/codex_cli/README.md#task-output).
+The Markdown parser, [marked](https://github.com/markedjs/marked) 18.0.14, is bundled with the app under `web/assets/vendor/` with its MIT license, so the chat does not load scripts from another server. The arrows are two Material Design Icons paths (`mdiChevronRight` and `mdiChevronDown` from [@mdi/js](https://github.com/Templarian/MaterialDesign-JS) 7.4.47, Apache-2.0, the icon set Home Assistant uses), inlined in `web/assets/chat.css` and `web/index.html`; `web/NOTICE` keeps the license note and goes into the image with the page. Codex decides how it writes its answers; to ask for Markdown, add an instruction to `/config/AGENTS.md` as described under [Task output](../custom_components/codex_cli/README.md#task-output).
 
 ### Queueing messages while another chat works
 

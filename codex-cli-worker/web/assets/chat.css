@@ -1,4 +1,7 @@
 :root {
+  /* Material Design Icons (Apache-2.0, @mdi/js 7.4.47): mdiChevronRight and mdiChevronDown, the arrows Home Assistant uses. */
+  --mdi-chevron-right: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z'/%3E%3C/svg%3E");
+  --mdi-chevron-down: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z'/%3E%3C/svg%3E");
   color-scheme: light;
   --bg: #fff;
   --sidebar: #f7f7f5;
@@ -662,22 +665,6 @@ h1 {
   margin-top: 14px;
   font-weight: 500;
 }
-.response-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 14px;
-}
-.copy-response {
-  min-height: 44px;
-  padding: 8px 12px;
-  font-size: 12px;
-}
-.copy-status {
-  color: var(--accent);
-  font-size: 12px;
-}
 .copy-buffer {
   position: fixed;
   top: 0;
@@ -1110,29 +1097,14 @@ h1 {
 .activity-toggle:hover {
   color: var(--text);
 }
-.activity-chevron::before {
-  content: "";
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-right: 1.5px solid currentColor;
-  border-bottom: 1.5px solid currentColor;
-  transform: rotate(-45deg);
-  transition: transform 0.15s;
-  margin-bottom: 2px;
-}
-.activity-toggle[aria-expanded="true"] .activity-chevron::before {
-  transform: rotate(45deg);
-  margin-bottom: 4px;
-}
 .activity.running .activity-chevron::before {
-  border: 0;
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: var(--accent);
-  transform: none;
-  margin: 0;
+  margin: 0 4px;
+  -webkit-mask: none;
+  mask: none;
   animation: activity-pulse 1.4s ease-in-out infinite;
 }
 @keyframes activity-pulse {
@@ -1266,7 +1238,6 @@ textarea {
   outline: none;
   resize: none;
   max-height: 180px;
-  min-height: 52px;
   padding: 0 3px;
   display: block;
 }
@@ -1660,16 +1631,6 @@ dialog::backdrop {
   line-height: 1.6;
   overflow-wrap: anywhere;
 }
-.copy-dialog {
-  width: min(650px, calc(100% - 28px));
-}
-#copy-text {
-  margin-top: 16px;
-  max-height: 45dvh;
-  white-space: pre;
-  font-family: ui-monospace, monospace;
-  font-size: 12px;
-}
 #rename-input {
   width: 100%;
   padding: 10px 12px;
@@ -1746,14 +1707,47 @@ dialog label {
 dialog :is(h3, h4):has(> .settings-toggle) {
   margin: 0;
 }
-/* The three parts of Accounts and connections sit inside it, indented, with a lighter rule. */
-#accounts-section section {
-  margin: 0 0 0 12px;
+/*
+ * Every settings section, and each part of Accounts and connections, is a
+ * divider line and a header of the same height. An open section adds its
+ * body with the same space below it, so the gap from each divider to the
+ * next header or button is the same throughout.
+ */
+#settings section {
+  margin: 0;
   padding: 0;
   border-top: 1px solid var(--line);
 }
+#settings > section:last-of-type {
+  border-bottom: 1px solid var(--line);
+}
+/* The three parts of Accounts and connections sit inside it, indented. */
+#accounts-section section {
+  margin-left: 12px;
+}
 #accounts-section h4 .settings-toggle {
   font-size: 13px;
+}
+.settings-body {
+  padding: 2px 0 16px;
+}
+.settings-body > :first-child {
+  margin-top: 0;
+}
+.settings-body > :last-child,
+.settings-body > :last-child > :last-child {
+  margin-bottom: 0;
+}
+/* A status line with nothing to say yet takes no space, so it does not widen the gap above the next divider. */
+.settings-body p:empty {
+  margin: 0;
+}
+/* Accounts and connections holds only the headers of its parts; each open part adds its own space below. */
+#accounts-section > .settings-body {
+  padding: 0;
+}
+#settings > .dialog-header {
+  margin-bottom: 16px;
 }
 .settings-toggle {
   display: flex;
@@ -1770,12 +1764,6 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   font-weight: 600;
   text-align: left;
 }
-.settings-title::before {
-  content: "▸ ";
-}
-.settings-toggle[aria-expanded="true"] .settings-title::before {
-  content: "▾ ";
-}
 .settings-status {
   color: var(--muted);
   font-size: 12px;
@@ -1784,12 +1772,12 @@ dialog :is(h3, h4):has(> .settings-toggle) {
 }
 /* Only the section's own header: a marked Accounts and connections must not mark the parts inside it. */
 .needs-attention > :is(h3, h4) .settings-status,
-.needs-attention > #app-pairing-status {
+.needs-attention > .settings-body > #app-pairing-status {
   color: var(--error);
   font-weight: 600;
 }
 .needs-attention > :is(h3, h4) .settings-status:not(:empty)::before,
-.needs-attention > #app-pairing-status:not(:empty)::before {
+.needs-attention > .settings-body > #app-pairing-status:not(:empty)::before {
   content: "⚠ ";
 }
 .signin-expired {
@@ -1925,8 +1913,10 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   }
 }
 /* Keep verification evidence readable in narrow Ingress panels. */
-.verification { margin: 18px 0; min-width: 0; }
-.verification h3 { font-size: 14px; margin-bottom: 8px; }
+.verification { margin: 10px 0; min-width: 0; }
+.verification > summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+/* A failed check shows on the closed line, in the error color. */
+.verification > summary.has-failed { color: var(--error); }
 .verification-result { border: 1px solid var(--border, #8885); border-radius: 8px; margin: 6px 0; padding: 10px; overflow-wrap: anywhere; }
 .verification-result summary { cursor: pointer; font-size: 13px; }
 .verification-result pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; max-height: 260px; overflow: auto; }
@@ -2067,4 +2057,36 @@ dialog :is(h3, h4):has(> .settings-toggle) {
 }
 #github-result {
   overflow-wrap: anywhere;
+}
+
+/*
+ * One Material Design Icons arrow, at one size, for every collapsible part of the page:
+ * the Settings section headers, the thread step list, and each <details class="disclosure">
+ * (the checks block, Scheduled runs, the GitHub and remote-control parts). It replaces the
+ * browser's own triangle on <details>.
+ */
+.settings-title::before,
+.activity-chevron::before,
+details.disclosure > summary::before {
+  content: "";
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  margin-right: 2px;
+  vertical-align: -3px;
+  background: currentColor;
+  -webkit-mask: var(--mdi-chevron-right) center / 16px no-repeat;
+  mask: var(--mdi-chevron-right) center / 16px no-repeat;
+}
+.settings-toggle[aria-expanded="true"] .settings-title::before,
+.activity-toggle[aria-expanded="true"] .activity-chevron::before,
+details.disclosure[open] > summary::before {
+  -webkit-mask-image: var(--mdi-chevron-down);
+  mask-image: var(--mdi-chevron-down);
+}
+details.disclosure > summary {
+  list-style: none;
+}
+details.disclosure > summary::-webkit-details-marker {
+  display: none;
 }

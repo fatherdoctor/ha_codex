@@ -73,6 +73,10 @@ async function task(page) {
     assert.equal(replay.status(), 409);
     // Saved permissions remain discoverable after navigation and a full reload.
     await page.reload();
+    // A saved, completed retry starts collapsed: nothing waits for the owner. Its result row is the open one inside.
+    await page.locator('.verification > summary').waitFor();
+    assert.equal(await page.locator('.verification').evaluate(node => node.open), false);
+    assert.equal(await page.locator('.verification-result').last().evaluate(node => node.open), true);
     await page.setViewportSize({width: 1440, height: 1000});
     await page.getByRole('button', {name: 'Open settings', exact: true}).click();
     // Settings sections start collapsed; this one stays open once opened.

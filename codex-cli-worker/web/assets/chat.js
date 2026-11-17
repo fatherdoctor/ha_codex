@@ -36,6 +36,8 @@ const state = {
   settingsBusy: false,
   activity: null,
   permissionModes: new Map(),
+  // Checks whose retry the owner started on this page. Their result shows open; a reload forgets them.
+  retriedChecks: new Set(),
 };
 const effortLabels = {
   low: "Low",
@@ -486,12 +488,12 @@ $("session-reload").onclick = () => {
   }
   location.reload();
 };
+let sessionGeneration = 0;
 /**
  * fetch() for the worker: on HTTP 401 renew the ingress session and send the
  * request once more. Requests that fail together share one renewal, and a
  * request sent before a renewal finished is sent again without a new one.
  */
-let sessionGeneration = 0;
 async function pageFetch(url, options) {
   const generation = sessionGeneration;
   const response = await fetch(url, options);
@@ -1088,24 +1090,40 @@ function tickElapsed() {
       ? ` · ${elapsedLabel(Date.now() - activity.startedAt)}`
       : "";
 }
+/** Check results that mean something did not work, or could not be confirmed. */
+const BAD_CHECK_STATUSES = new Set(["failed", "issues", "unavailable"]);
 /**
- * Build the Verification section of an answer: one expandable row per check
+ * Build the collapsed checks block of an answer: one expandable row per check
  * with its result, details, and findings, then the screenshots that have not
- * expired. Returns null when the turn has no checks.
+ * expired. It stays closed under the answer, except while a batch of blocked
+ * browser requests waits for the owner, a retry runs, or a retry the owner
+ * started on this page has its result. The closed line counts
+ * the bad results, so a failed check shows without opening the block. Returns
+ * null when the turn has no checks.
  */
 function renderVerification(turn, taskId) {
   const checks = turn.verification || [];
   if (!checks.length) return null;
-  const section = textNode("section", "", "verification");
-  section.append(textNode("h3", "Verification"));
+  const section = textNode("details", "", "verification disclosure");
+  const bad = checks.filter(check => BAD_CHECK_STATUSES.has(check.status)).length;
+  const title = checks.length === 1 ? "Check and readback" : `Checks and readback (${checks.length})`;
+  const summary = textNode("summary", bad ? `${title} · ${bad} failed` : title);
+  if (bad) summary.classList.add("has-failed");
+  section.append(summary);
   if (state.task?.browser_retry?.turn_id === turn.turn_id) {
+    section.open = true;
     const progress = textNode("p", "Retrying dashboard inspection…", "browser-permission-progress");
     progress.setAttribute("role", "status");
     section.append(progress);
   }
   for (const check of checks) {
-    const row = textNode("details", "", `verification-result is-${check.status}`);
-    if (check.retry_of && check === checks[checks.length - 1]) row.open = true;
+    const row = textNode("details", "", `verification-result disclosure is-${check.status}`);
+    // A retry result opens its own row. The block opens too when the owner started that retry on this page,
+    // so the result shows where they clicked; a saved chat opened later starts closed.
+    if (check.retry_of && check === checks[checks.length - 1]) {
+      row.open = true;
+      if (state.retriedChecks.has(check.retry_of)) section.open = true;
+    }
     const label = {
       passed: "Passed", failed: "Failed", observed: "Readback", captured: "Screenshots captured",
       issues: "Needs review", disabled: "Disabled", unavailable: "Unverified",
@@ -1149,6 +1167,7 @@ function renderVerification(turn, taskId) {
       row.append(textNode("p", "Some blocked requests can't be offered for approval: they were incomplete, looked like credentials, or exceeded the review limit."));
     const review = renderBrowserPermissions(check, turn, taskId);
     if (review) row.append(review);
+    if (review?.classList.contains("browser-permission-review")) section.open = true;
     section.append(row);
   }
   const images = imageAttachments(turn.verification_attachments).filter(image => image.expires_at * 1000 > Date.now());
@@ -1189,7 +1208,7 @@ function renderBrowserPermissions(check, turn, taskId) {
     box.value = candidate.id;
     boxes.push(box);
     label.append(box, textNode("span", candidate.label));
-    const details = textNode("details", "", "browser-permission-details");
+    const details = textNode("details", "", "browser-permission-details disclosure");
     details.append(textNode("summary", "Request details"), textNode("pre", candidate.description));
     item.append(label, details);
     fields.append(item);
@@ -1229,6 +1248,7 @@ function renderBrowserPermissions(check, turn, taskId) {
     const generation = state.generation;
     fields.disabled = allow.disabled = keep.disabled = true;
     feedback.textContent = "Starting a fresh inspection…";
+    state.retriedChecks.add(check.check_id);
     try {
       await api(`tasks/${encodeURIComponent(taskId)}/browser-permissions`, {
         turn_id: turn.turn_id, check_id: check.check_id,
@@ -1268,7 +1288,7 @@ async function loadBrowserPermissions() {
       const row = textNode("div", "", "saved-browser-permission");
       const info = textNode("div", "", "saved-browser-permission-info");
       info.append(textNode("strong", permission.label), textNode("p", permission.path));
-      const details = textNode("details", "", "browser-permission-details");
+      const details = textNode("details", "", "browser-permission-details disclosure");
       details.append(textNode("summary", "Request details"), textNode("pre", permission.description));
       info.append(details);
       const revoke = textNode("button", "Revoke", "subtle");
@@ -1317,18 +1337,8 @@ async function loadBrowserPermissions() {
 function showsQuestionApart(turn) {
   return Boolean(turn.question) && !(turn.summary || "").includes(turn.question);
 }
-/** Keep the original Markdown of the answer's visible text, including code indentation. */
-function responseMarkdown(turn) {
-  return [
-    turn.summary,
-    turn.details && turn.details !== turn.summary ? turn.details : "",
-    showsQuestionApart(turn) ? turn.question : "",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-}
 /** Try the browser clipboard, then the selection-based copy used on local HTTP. */
-async function copyResponseText(text) {
+async function copyText(text) {
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(text);
@@ -1363,50 +1373,6 @@ async function copyResponseText(text) {
       for (const range of ranges) selection.addRange(range);
     }
   }
-}
-/** Offer selected, read-only Markdown when the browser cannot copy automatically. */
-function showCopyResponse(text) {
-  $("copy-text").value = text;
-  $("copy-dialog").showModal();
-  $("copy-text").focus({ preventScroll: true });
-  $("copy-text").select();
-}
-$("copy-select").onclick = () => {
-  $("copy-text").focus({ preventScroll: true });
-  $("copy-text").select();
-};
-$("copy-close").onclick = () => $("copy-dialog").close();
-$("copy-dialog").addEventListener("close", () => {
-  $("copy-text").value = "";
-});
-/** A copy action belongs to this exchange, even when later answers arrive. */
-function renderResponseCopy(text) {
-  const actions = textNode("div", "", "response-actions");
-  const button = textNode("button", "Copy response", "subtle copy-response");
-  button.type = "button";
-  button.title = "Copy the whole response as Markdown";
-  const status = textNode("span", "", "copy-status");
-  status.setAttribute("role", "status");
-  let timer;
-  button.onclick = async () => {
-    const focused = document.activeElement === button;
-    clearTimeout(timer);
-    status.textContent = "";
-    button.disabled = true;
-    const copied = await copyResponseText(text);
-    button.disabled = false;
-    if (!button.isConnected) return;
-    if (focused && document.activeElement === document.body)
-      button.focus({ preventScroll: true });
-    if (copied) {
-      status.textContent = "Copied!";
-      timer = setTimeout(() => {
-        status.textContent = "";
-      }, 2500);
-    } else showCopyResponse(text);
-  };
-  actions.append(button, status);
-  return actions;
 }
 /** Draw the open chat: every exchange with its answer, checks, saved copies, and steps. */
 function renderTask(force = false) {
@@ -1486,8 +1452,6 @@ function renderTask(force = false) {
       if (turn.details && turn.details !== turn.summary)
         answer.append(renderMarkdown(turn.details, "message details"));
       if (showsQuestionApart(turn)) answer.append(renderMarkdown(turn.question, "message question"));
-      const markdown = responseMarkdown(turn);
-      if (markdown.trim()) answer.append(renderResponseCopy(markdown));
       // Only the question still waiting can be answered with a choice.
       if (
         latest &&
@@ -2840,10 +2804,9 @@ window.addEventListener("resize", () => {
  */
 function collapseSettingsSections() {
   // Sections marked data-own-dialog move to a dialog of their own (studio.js) and stay open there.
-  // The long parts of Accounts and connections collapse too, inside it; a short part marked
-  // data-always-open (the app pairing) stays open, so its buttons are one tap away.
+  // The three parts of Accounts and connections collapse too, inside it, each under its own header.
   const sections = document.querySelectorAll(
-    "#settings > section:not([data-own-dialog]), #accounts-section > section:not([data-always-open])",
+    "#settings > section:not([data-own-dialog]), #accounts-section > section",
   );
   sections.forEach((section, index) => {
     const heading = section.querySelector(":scope > h3, :scope > h4");
@@ -2908,6 +2871,7 @@ function setAccountPart(sectionId, word, attention = false) {
 }
 collapseSettingsSections();
 setSectionStatus("appearance-section", "Follows Home Assistant");
+setSectionStatus("advanced-section", "Workspace rules");
 /*
  * The time left on a sign-in code. The worker sends the seconds left, by its
  * own clock; the page counts down from when that reply arrived, so a phone
@@ -3089,8 +3053,9 @@ function renderLogin(auth) {
     : lapsed
       ? "The assistant's ChatGPT sign-in expired or was revoked. Sign in again."
       : "The assistant is not signed in to ChatGPT.";
-  setSectionStatus("chatgpt-section", chatgptSectionStatus({ signedIn, pending, failed, lapsed }), !signedIn);
-  setAccountPart("chatgpt-section", chatgptSectionStatus({ signedIn, pending, failed, lapsed }).toLowerCase(), !signedIn);
+  const sectionStatus = chatgptSectionStatus({ signedIn, pending, failed, lapsed });
+  setSectionStatus("chatgpt-section", sectionStatus, !signedIn);
+  setAccountPart("chatgpt-section", sectionStatus.toLowerCase(), !signedIn);
   for (const id of ["login", "banner-login"]) $(id).textContent = failed ? "Get a new code" : "Sign in";
   const key = JSON.stringify([
     signedIn,
@@ -3574,7 +3539,8 @@ function renderAppPairing(rc, status) {
   $("app-pairing-status").textContent = status;
   $("app-pairing-new").hidden = !ready;
   $("app-pairing-off").hidden = !rc.enabled;
-  $("app-pairing-section").classList.toggle("needs-attention", failed);
+  // The part's own header shows the word too, capitalized as the other headers are.
+  setSectionStatus("app-pairing-section", word[0].toUpperCase() + word.slice(1), failed);
   setAccountPart("app-pairing-section", word, failed);
 }
 $("app-pairing-off").onclick = () => $("remote-control-stop").click();

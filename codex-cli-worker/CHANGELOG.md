@@ -19,6 +19,24 @@
   Before, every completed chat task sent a **Codex task completed** notification with its answer.
   A chat task the owner cancels sends no notification either; before, it sent **Codex task cancelled**. The
   `codex_cli_task_result` event still reports the cancel.
+- The **Copy response** button under each answer is gone, with its manual copy dialog. **Copy thread ID** in the
+  thread menu still copies.
+- The message box starts at one line of text above the control row, as in the ChatGPT desktop app, and grows as you
+  type, up to 180 pixels.
+- The **Settings** window keeps one size. Opening a section scrolls inside the window instead of making it taller.
+- **ChatGPT app pairing** has its own collapsed header inside **Accounts and connections**, like **ChatGPT account**
+  and **GitHub**. Its header shows the state in one word, for example "Off", in red when the connection failed.
+- **Advanced** is a section like the others, with the same arrow and a status line.
+- Every section header in **Settings** has the same arrow size and the same space to the divider above and below it.
+  An open section has the same space between its last line or button and the next divider.
+- The bold **Verification** box under an answer is gone. The checks, the readback and the note on screenshots sit in
+  one closed **Checks and readback** line. The line names a bad result, for example "1 failed", in the error color.
+  It opens by itself only while a batch of blocked browser requests needs a decision, while a retry runs, and to
+  show the result of a retry just started from the page. A saved chat opened later shows it closed.
+- Every arrow in **Settings**, **Scheduled runs**, the thread step list, the checks block and the reasoning picker
+  is a Material Design Icons arrow, the icon set Home Assistant uses (Apache-2.0; see `web/NOTICE`). The browser's own
+  triangle is gone from the last collapsed parts that still had it, such as **Use a token instead**.
+- The GitHub sign-in notice in Home Assistant names the new place: **Settings > Accounts and connections > GitHub**.
 
 ## 0.3.3 (unreleased)
 
