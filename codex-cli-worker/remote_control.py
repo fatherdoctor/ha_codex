@@ -45,6 +45,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import full_access
 import gate_rules
 import websocket
 
@@ -342,7 +343,10 @@ def requirements_problem(path: Path) -> str:
     except (OSError, ValueError) as exc:
         return f"the managed requirements could not be read ({exc})"
     modes = data.get("allowed_sandbox_modes")
-    if not isinstance(modes, list) or not modes or "danger-full-access" in modes:
+    if not isinstance(modes, list) or not modes:
+        return "the managed requirements do not rule out the full-access sandbox"
+    # Full access may be allowed only while the owner's setting is on; full_access.py writes the file to match.
+    if "danger-full-access" in modes and not full_access.is_on():
         return "the managed requirements do not rule out the full-access sandbox"
     approvals = data.get("allowed_approval_policies")
     if not isinstance(approvals, list) or not approvals or "never" in approvals:

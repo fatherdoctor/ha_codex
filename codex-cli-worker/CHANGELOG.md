@@ -2,6 +2,15 @@
 
 ## 0.3.4 (unreleased)
 
+- **Full access mode, off by default.** A Home Assistant administrator can turn it on in Settings > Full access,
+  after confirming a warning. A chat whose Permissions an administrator sets to Full access then runs Codex
+  without its sandbox: commands can change everything in `/config`, use the network, and reach everything the
+  app's container can reach, without asking. A ChatGPT app thread can also ask for it while it is on. A banner
+  above every chat, Status and the chat's Permissions button show it. The command hook, the managed command rules
+  and the configuration watch still run. The setting lives in `/data`, where no sandboxed command can write, and
+  the worker writes Codex's managed requirements from the shipped copy at start and on each change, allowing
+  full access only while it is on. With Full access off, every check behaves as in 0.3.3. It is never an app
+  option: `codex_sandbox: danger-full-access` still stops the app at startup.
 - A plain device command such as "set the office overhead to 50%" is faster. On 0.3.3 Codex had no tool on the
   chat page that finds an entity by name, so it searched `.storage/core.entity_registry` with shell commands, and
   the page's rules told it to look for `/config/AGENTS.md` in every message. The `home_assistant` `verify` tool

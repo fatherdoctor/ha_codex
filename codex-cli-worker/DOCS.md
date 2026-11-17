@@ -317,7 +317,7 @@ Codex needs to be able to write to the backup folder. In `workspace-write` mode 
 - `read-only`: Codex can inspect files. Writes and shell networking require permission for the specific action.
 - `workspace-write`: Codex can edit the mounted `/config` workspace and the shared `/share` folder, the same `/share` access the Claude add-on has. Shell networking and writes elsewhere require permission. This remains the default setting.
 
-This fork has no `danger-full-access` mode. The upstream app's full-access mode turned the permission requests off; here the protected policy (below) refuses it, and an older setting that still names it stops the app at startup with a log line saying so.
+**Full access** is off by default and is not an app option: an older `codex_sandbox: danger-full-access` setting still stops the app at startup with a log line saying so. A Home Assistant administrator turns it on in Settings > Full access, after a warning that must be confirmed: commands then run outside the sandbox, can read and change everything in `/config`, use the network, and reach everything the app's container can reach, without asking first. While it is on, a banner shows above every chat, Status says so, and a chat runs without the sandbox only after an administrator sets that chat's Permissions to Full access (the button then shows in the error color). A thread the ChatGPT app starts can also ask for full access while it is on. The command hook, the managed command rules and the configuration watch still run and still refuse what they refuse. The setting is kept in `/data/full_access.json`, which no sandboxed command can write; a file the worker did not write counts as off. At start, and on each change, the worker writes Codex's managed requirements (`/etc/codex/requirements.toml`) from the copy shipped in the image, adding `danger-full-access` to the allowed sandbox modes only while the setting is on; remote control, if on, restarts so its Codex reads them. Turning it off returns every chat to its sandbox on its next turn.
 
 **Protected policy.** Allowed sandbox modes and approval policy come from `/usr/share/ha_codex/policy.json` inside the app image, outside `/config` and sandbox writable roots. Options and chats cannot loosen that policy: unsupported modes stop startup and each task. The gate hook, refused domains, private-file masks, Supervisor-token protection and self-edit refusals remain enforced. No house rules are bundled or copied into Codex's home. Codex uses its defaults and the owner's `/config/AGENTS.md`, whose existing editor and reading path remain available. Updates remove only a byte-identical legacy bundled home copy; edited owner files and symlinks are preserved. Owners who want house practices can use the Whole Home Agent starter kit (published separately) and choose their own instructions. Native approval remains specific to the displayed request; read each action before allowing it.
 
@@ -350,7 +350,7 @@ Authenticated API clients can answer a live request using `POST /tasks/<task_id>
 Codex follows its defaults and the owner's `/config/AGENTS.md`. The integration does not bundle a house-practice file prescribing device categories, API-deletion practices or a writing style. Owners can choose such practices through their own workspace instructions or the starter kit. Permission cards and the enforced gate continue to operate independently of prose instructions.
 
 Credential and permission-policy protections remain always on, including the Supervisor token, process environments,
-private sign-in files, secrets and the app's own settings. Normal remote actions follow Codex's native approval flow; explicit full-access requests remain refused.
+private sign-in files, secrets and the app's own settings. Normal remote actions follow Codex's native approval flow; explicit full-access requests remain refused while Full access is off.
 Planted shell, REST and Python commands, command/platform definitions and templated action or service names stay
 checked in the hook, configuration watch and end-of-exchange check. An unchanged call or templated target follows
 normal approval; it is not a reason to hash or undo an otherwise ordinary change.
@@ -499,7 +499,7 @@ prevent a reload before the scan, or guarantee capture of an obfuscated referenc
 - **Pairing.** The manual code is shown as large text. A QR for the app link appears only when an app-link code is available; otherwise type the manual code or request a new code. Pairing is kept in the app's private storage with the Codex sign-in, so a restart does not ask for it again. **New pairing code** asks Codex for a fresh one when the ChatGPT app has lost this machine.
 - **Automatic Core address and first-run reads.** Relay commands receive the discovered or explicitly overridden `HA_URL`; an owner-configured `HA_TOKEN` remains optional. The separate observational read tool needs no hand-made token. Relay processes never receive the Supervisor token or a chat turn's private MCP capabilities. Never print credentials; approval does not create them.
 - **The command check.** Commands from the ChatGPT app do not pass through this app's Allow and Deny buttons, so the app ships a check that holds outside the model, for every client:
-  - Codex's managed requirements (`/etc/codex/requirements.toml`, read-only) rule out the full-access sandbox and any hook other than the app's own.
+  - Codex's managed requirements (`/etc/codex/requirements.toml`, read-only) rule out any hook other than the app's own, and the full-access sandbox unless an administrator turned on Full access (see [Sandbox](#sandbox)).
   - **Managed command prefixes.** The same read-only requirements file forbids literal `ha supervisor`, `ha super` and `ha su` commands. It forbids `printenv` of the two Supervisor-token variable names. It forbids `cat` of the catalogued credential and app-policy paths, and the two explicit Codex full-access spellings. These six rules have 20 literal alternatives. Recognized shell pipelines check each segment.
 
     A native forbidden decision raises no approval request. Auto-review cannot override it. This layer ships no ordinary `.rules` file or allow rule.
@@ -1074,8 +1074,9 @@ Archived chats can restore it. Delete remains a separate action.
 The Permissions picker starts at Default permissions: use the add-on's configured sandbox and native
 approval flow. Read only narrows the next turn to the read-only sandbox, including a resumed or queued turn.
 Neither choice expands a configured read-only sandbox, suppresses native approval, or changes managed
-security refusals. A queued message keeps the choice submitted with it. Auto-review and Full access are
-shown as Coming and cannot be selected. Camera and Plan mode are not offered in this build.
+security refusals. A queued message keeps the choice submitted with it. Full access can be chosen only by an
+administrator, and only while Full access is on in Settings; a queued Full access message that starts after it was
+turned off runs with Default permissions. Auto-review is shown as Coming and cannot be selected. Camera and Plan mode are not offered in this build.
 
 The thread menu includes Pin, Rename, Copy thread ID, Archive and Status. A thread without a native ID
 reports that it is unavailable instead of substituting the page's task ID. Status shows the workspace,

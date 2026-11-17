@@ -2068,3 +2068,10 @@ dialog :is(h3, h4):has(> .settings-toggle) {
 #github-result {
   overflow-wrap: anywhere;
 }
+/* Full access is on: the banner and a chat set to Full access are marked in the error color. */
+#full-access-banner {
+  border-color: var(--error);
+}
+#permission-button.full-access {
+  color: var(--error);
+}

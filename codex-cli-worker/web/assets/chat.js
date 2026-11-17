@@ -411,6 +411,7 @@ async function loadUsage() {
   try {
     if (!document.hidden) {
       const data = await api("status");
+      document.dispatchEvent(new CustomEvent("worker-status", { detail: data }));
       renderUsage(data.codex_usage);
       renderIntegration(data.integration);
       // The quota check also tells the worker which model Codex picks when the add-on names none.

@@ -19,6 +19,8 @@ import stat
 from pathlib import Path
 from typing import Any
 
+import full_access
+
 IMAGE_DIR = Path("/usr/share/ha_codex")
 SOURCE_DIR = Path(__file__).resolve().parent / "policy"
 
@@ -112,7 +114,12 @@ def policy_problem(options: dict[str, Any], path: Path | None = None) -> str:
     except PolicyError as exc:
         return str(exc)
     effective = effective_policy(options, policy)
-    if effective["sandbox"] not in policy["allowed_sandbox_modes"]:
+    allowed_modes = list(policy["allowed_sandbox_modes"])
+    # Full access is never allowed through the app options: only for a chat turn that asked for it while the
+    # owner's Full access setting is on (full_access.py). The worker sets CHAT_OPTION on that turn only.
+    if options.get(full_access.CHAT_OPTION) is True and full_access.is_on():
+        allowed_modes.append(full_access.SANDBOX_MODE)
+    if effective["sandbox"] not in allowed_modes:
         allowed = " or ".join(policy["allowed_sandbox_modes"])
         return (f'The sandbox mode "{effective["sandbox"]}" is not allowed in this app. '
                 f"Choose {allowed} in the app's settings and restart it.")

@@ -35,12 +35,13 @@ from urllib.parse import urlparse, urlunparse
 import requests
 import websocket
 import yaml
-from flask import Flask, Response, jsonify, request, send_file
+from flask import Flask, Response, has_request_context, jsonify, request, send_file
 
 # Also support the existing importlib-based test harness.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from verification import DEFAULT_BROWSER_MEMORY_LIMIT_MIB, Verification, public_check
 from approvals import APPROVAL_GONE, AppServerSession
+import full_access
 import policy as protected_policy
 from ha_data import HomeAssistantData
 import ha_data_mcp
@@ -578,8 +579,21 @@ def parse_chat_settings(payload: dict[str, Any], task: dict[str, Any] | None = N
 
 
 def parse_permission_mode(payload, task=None):
-    """Only the two modes this build supports, never a policy supplied by a model."""
+    """Return the chat's permission mode: Default, Read only, or Full access while the owner's setting is on.
+
+    A request that runs or sets Full access must come from a Home Assistant
+    administrator. A queued message has no request; it was checked when it was
+    queued, and it falls back to Default if Full access was turned off since.
+    """
     mode = payload.get('permission_mode', (task or {}).get('permission_mode', 'default'))
+    if mode == full_access.PERMISSION_MODE:
+        if not full_access.is_on():
+            if not has_request_context():
+                return 'default'
+            raise ValueError('Full access is off. A Home Assistant administrator can turn it on in Settings.')
+        if has_request_context() and ingress_admin()[0] is None:
+            raise ValueError('Only a Home Assistant administrator can use Full access.')
+        return mode
     if not isinstance(mode, str) or mode not in {'default', 'read-only'}:
         raise ValueError('Choose Default permissions or Read only. Other modes are not available.')
     return mode
@@ -4412,13 +4426,22 @@ def overrides_mcp_args() -> list[str]:
 
 
 def task_options(task_id: str) -> dict[str, Any]:
-    """A chat's Read only choice or unattended mode can narrow, never expand, normal policy."""
+    """A chat's Read only choice or unattended mode narrows normal policy; only a Full access chat expands it.
+
+    Full access applies to a chat the owner set to it, and only while the
+    owner's Full access setting is on (full_access.py). It is never taken from
+    the app options.
+    """
     options = dict(read_options())
+    options.pop(full_access.CHAT_OPTION, None)
     with lock:
         task = tasks.get(task_id, {})
         if (task.get('permission_mode') == 'read-only'
                 or (task.get('task_source') in {'schedule', 'lead'} and task.get('background_mode') == 'read-only')):
             options['codex_sandbox'] = 'read-only'
+        elif task.get('permission_mode') == full_access.PERMISSION_MODE and full_access.is_on():
+            options['codex_sandbox'] = full_access.SANDBOX_MODE
+            options[full_access.CHAT_OPTION] = True
     return options
 
 
@@ -4660,6 +4683,9 @@ def create_approval_session(
     policy: dict[str, Any] = {"type": "readOnly" if mode == "read-only" else "workspaceWrite", "networkAccess": False}
     if mode == "workspace-write":
         policy["writableRoots"] = list(TASK_WRITABLE_ROOTS)
+    allow_full_access = options.get(full_access.CHAT_OPTION) is True and mode == full_access.SANDBOX_MODE
+    if allow_full_access:
+        policy = {"type": "dangerFullAccess"}
     return AppServerSession(
         proc.stdin, lock=lock, thread_params=thread_params,
         turn_params={"input": [{"type": "text", "text": prompt},
@@ -4671,7 +4697,7 @@ def create_approval_session(
                      "approvalPolicy": "on-request", "approvalsReviewer": "user"},
         on_event=event, on_approvals=save_approvals,
         on_final=lambda text: final_file.write_text(text, encoding="utf-8"),
-        is_active=active, redact=approval_redact,
+        is_active=active, redact=approval_redact, allow_full_access=allow_full_access,
     )
 
 
@@ -6118,6 +6144,7 @@ def status() -> Response:
             "integration": integration_status(),
             "remote_control": remote_control_summary(),
             "github": github_service.status(),
+            "full_access": full_access_payload(),
         }
     )
 
@@ -6936,6 +6963,51 @@ def change_remote_control(action: str) -> Response | tuple[Response, int]:
     return jsonify({"ok": True, "remote_control": state})
 
 
+def full_access_payload() -> dict[str, Any]:
+    """The Full access setting as the page shows it: on or off, when and by whom, and the warning to confirm."""
+    setting = full_access.read_setting()
+    return {"enabled": setting["enabled"], "changed_at": setting["changed_at"], "changed_by": setting["changed_by"],
+            "warning": full_access.WARNING, "warning_id": full_access.WARNING_ID}
+
+
+@app.get("/full-access")
+@require_auth
+def get_full_access() -> Response:
+    return jsonify({"ok": True, "full_access": full_access_payload()})
+
+
+@app.post("/full-access")
+@require_auth
+@require_ingress
+def change_full_access() -> Response | tuple[Response, int]:
+    """Turn Full access on or off; only an administrator on the app page, and on only with the warning confirmed.
+
+    The managed requirements are written again for the new setting, and remote
+    control, if on, restarts so its Codex reads them. A chat's Codex reads them
+    at its next turn.
+    """
+    admin, refusal = ingress_admin()
+    if admin is None:
+        return jsonify({"ok": False, "error": refusal}), 403
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or not isinstance(payload.get("enabled"), bool):
+        return jsonify({"ok": False, "error": "enabled must be true or false"}), 400
+    if payload["enabled"] and payload.get("confirm") != full_access.WARNING_ID:
+        return jsonify({"ok": False, "error": "Read and confirm the Full access warning first."}), 400
+    try:
+        full_access.set_enabled(payload["enabled"], admin["user_id"])
+        full_access.write_requirements()
+    except (OSError, ValueError) as exc:
+        print(f"Could not change Full access: {exc}", flush=True)
+        full_access.set_enabled(False, admin["user_id"])
+        return jsonify({"ok": False, "error": "Could not change Full access. It is off."}), 503
+    print(f"Full access turned {'on' if payload['enabled'] else 'off'} by an administrator.", flush=True)
+    if remote_control_supervisor.enabled():
+        remote_control_supervisor.stop()
+        remote_control_supervisor.start()
+    return jsonify({"ok": True, "full_access": full_access_payload()})
+
+
 @app.get("/browser-permissions")
 @require_auth
 @require_ingress
@@ -7226,6 +7298,11 @@ def main() -> None:
     if problem:
         print(f"Codex CLI Worker will not start: {problem}", flush=True)
         sys.exit(1)
+    # Codex's managed requirements follow the owner's Full access setting (off: the shipped file as is).
+    try:
+        full_access.write_requirements()
+    except (OSError, ValueError) as exc:
+        print(f"Could not write the managed requirements for Full access; it stays off: {exc}", flush=True)
     if not make_worker_undumpable():
         print("Could not mark the worker process not dumpable; its environment stays readable to root.", flush=True)
     ensure_runtime_files()

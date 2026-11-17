@@ -416,13 +416,17 @@ def confirmation(record: dict[str, Any]) -> dict[str, str]:
     return text
 
 
-def require_supported_policy(params: dict[str, Any]) -> None:
-    """Integration-owned requests must refuse full access instead of relying on Codex's fallback."""
+def require_supported_policy(params: dict[str, Any], allow_full_access: bool = False) -> None:
+    """Integration-owned requests must refuse full access instead of relying on Codex's fallback.
+
+    allow_full_access is True only for a chat turn the worker itself set to
+    Full access while the owner's setting is on (server.task_options).
+    """
     config = params.get("config") or {}
     policy = params.get("sandboxPolicy") or {}
     modes = [params.get("sandbox"), config.get("sandbox_mode") if isinstance(config, dict) else None,
              policy.get("type") if isinstance(policy, dict) else policy]
-    if any(mode in ("danger-full-access", "dangerFullAccess") for mode in modes):
+    if not allow_full_access and any(mode in ("danger-full-access", "dangerFullAccess") for mode in modes):
         raise ValueError("Full-access requests are refused by this integration; use workspace-write or read-only.")
     if params.get("approvalPolicy") == "never" or (isinstance(config, dict) and config.get("approval_policy") == "never"):
         raise ValueError("The never approval policy is refused by this integration; use on-request.")
@@ -441,7 +445,7 @@ class AppServerSession:
         turn_params: dict[str, Any], on_event: Callable[[dict[str, Any]], None],
         on_approvals: Callable[[list[dict[str, Any]]], None],
         on_final: Callable[[str], None], is_active: Callable[[], bool],
-        redact: Callable[[str], str],
+        redact: Callable[[str], str], allow_full_access: bool = False,
     ) -> None:
         """Bind a live transport to one worker exchange and its persistence callbacks."""
         self.writer = writer
@@ -453,6 +457,7 @@ class AppServerSession:
         self.on_final = on_final
         self.is_active = is_active
         self.redact = redact
+        self.allow_full_access = allow_full_access
         self.finished = threading.Event()
         # When Codex last sent anything, or the user last answered; the worker's stall watchdog reads it.
         self.last_activity = time.monotonic()
@@ -478,7 +483,7 @@ class AppServerSession:
     def _request(self, method: str, params: dict[str, Any]) -> None:
         """Send a client request with a namespace distinct from server request IDs."""
         if method in {"thread/start", "thread/resume", "turn/start"}:
-            require_supported_policy(params)
+            require_supported_policy(params, self.allow_full_access)
         self._next_id += 1
         request_id = f"worker-{self._next_id}"
         self._requests[request_id] = method
@@ -490,8 +495,8 @@ class AppServerSession:
             if self._closed or not self.is_active():
                 self.close()
                 return
-            require_supported_policy(self.thread_params)
-            require_supported_policy(self.turn_params)
+            require_supported_policy(self.thread_params, self.allow_full_access)
+            require_supported_policy(self.turn_params, self.allow_full_access)
             self._request("initialize", {"clientInfo": {
                 "name": "home_assistant_worker", "title": "Home Assistant", "version": "1",
             }})
@@ -739,7 +744,7 @@ class AppServerSession:
         elif method in {"thread/start", "thread/resume"}:
             if result.get("approvalPolicy") != "on-request" or result.get("approvalsReviewer") != "user":
                 raise ValueError("Codex did not enable user approval requests")
-            require_supported_policy(result)
+            require_supported_policy(result, self.allow_full_access)
             self.thread_id = result["thread"]["id"]
             expected = self.thread_params.get("threadId")
             if expected and self.thread_id != expected:

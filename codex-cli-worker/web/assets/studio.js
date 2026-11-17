@@ -1,6 +1,6 @@
 "use strict";
 /** Production controls for the Quiet Studio layout. No sample account data. */
-const permissionNames = {default: "Default permissions", "read-only": "Read only"};
+const permissionNames = {default: "Default permissions", "read-only": "Read only", "full-access": "Full access"};
 function updateStudio() {
   document.body.dataset.newChat = String(!state.id);
   const hour = new Date().getHours();
@@ -12,6 +12,7 @@ function updateStudio() {
     ? 'Default' : permissionLabel) + '⌄';
   $("permission-button").setAttribute('aria-label', permissionLabel);
   $("permission-button").title = permissionLabel;
+  $("permission-button").classList.toggle("full-access", selectedPermissionMode() === "full-access");
   $("phone-new").disabled = state.busy || state.settingsBusy;
   $("permission-button").disabled = state.busy || state.loading || state.settingsBusy ||
     Boolean(state.task && ["queued", "running"].includes(state.task.status)) || Boolean(state.task?.queued_message);
@@ -52,7 +53,9 @@ for (const button of document.querySelectorAll("[data-mode]")) {
     } catch (error) { $("permission-result").textContent = error.message; }
     finally {
       state.settingsBusy = false;
-      for (const choice of document.querySelectorAll('[data-mode]')) choice.disabled = false;
+      // Full access stays unavailable while the owner's setting is off (full_access.js keeps the flag).
+      for (const choice of document.querySelectorAll('[data-mode]'))
+        choice.disabled = choice.dataset.mode === "full-access" && document.body.dataset.fullAccess !== "on";
       controls();
     }
   };
@@ -219,6 +222,7 @@ function showStudioStatus() {
   for (const [name, value] of [
     ["Thread", state.task?.session_id || "Unavailable"], ["Workspace", "/config"],
     ["Model", modelLabel()], ["Permissions", permissionNames[selectedPermissionMode()]],
+    ["Full access", document.body.dataset.fullAccess === "on" ? "On for this app" : "Off"],
     ["Context", "Unavailable"], ["Usage and reset", "Unavailable"],
     ["Connection", lastRemoteState ? connectionLabel(lastRemoteState).text : "Unavailable"],
   ]) details.append(textNode("dt", name), textNode("dd", value));

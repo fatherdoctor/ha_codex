@@ -41,10 +41,10 @@ class ManagedRulesTests(unittest.TestCase):
         self.assertIn('remote_control.py', (ROOT / 'Dockerfile').read_text())
 
     def test_remote_control_imports_with_the_apparmor_fixture_modules(self):
-        # The existing enforcement fixture copies these four modules, not the
+        # The existing enforcement fixture copies these five modules, not the
         # entire worker. Keep readiness helpers usable in that shipped boundary.
         with tempfile.TemporaryDirectory() as tmp:
-            for name in ('remote_control.py', 'gate_rules.py', 'shell_words.py', 'relay_diagnostics.py'):
+            for name in ('remote_control.py', 'full_access.py', 'gate_rules.py', 'shell_words.py', 'relay_diagnostics.py'):
                 shutil.copyfile(ROOT / name, Path(tmp) / name)
             code = ('import sys; sys.path.insert(0, sys.argv[1]); '
                     'import remote_control; assert remote_control.exec_rules_enabled()')
