@@ -74,6 +74,11 @@ async function task(page) {
     // Saved permissions remain discoverable after navigation and a full reload.
     await page.reload();
     // A saved, completed retry starts collapsed: nothing waits for the owner. Its result row is the open one inside.
+    // The checks sit inside the answer's closed "Worked for" line (CX-FB2-FLOW), which opens them.
+    const worked = page.locator('#activity > .activity-toggle');
+    await worked.waitFor();
+    assert.equal(await worked.getAttribute('aria-expanded'), 'false');
+    await worked.click();
     await page.locator('.verification > summary').waitFor();
     assert.equal(await page.locator('.verification').evaluate(node => node.open), false);
     assert.equal(await page.locator('.verification-result').last().evaluate(node => node.open), true);
