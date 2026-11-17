@@ -17,8 +17,9 @@
 - "Your chats" is one list card with one line for each chat: an icon, the title and its age. The open chat has a
   light tint. The divider between the side bar and the chat is now visible, resizes from 200 to 480 px, and goes
   back to 260 px on a double-click.
-- The chat reads more like the desktop app. A gray "Worked for" line above each answer opens its steps and
-  checks. A failed check keeps one short line under the answer. An answered or expired permission request is one
+- The chat reads more like the desktop app. A gray "Worked for" line above each answer opens its checks, and on the
+  latest answer its steps too (the worker keeps the steps of the latest exchange only). A failed check keeps one
+  short line under the answer. An answered or expired permission request is one
   closed line that opens to the same details. On a wide screen the chat and the prompt box share one 720 px
   column. These are display changes only: no approval, permission or sign-in rule changed.
 - A permission request that waits for you now shows at the bottom of the chat, below the "Working" lines, and the
@@ -29,7 +30,9 @@
   on the page; an install that saved a number keeps it, and a new install keeps 25. The remote control machine name
   is set on the Configuration tab only, so the worker no longer writes any app option. The empty Appearance and
   Advanced sections are gone, and Workspace rules opens from Workspace instructions. A new Add-on configuration row
-  at the foot of Settings opens the Configuration tab.
+  at the foot of Settings opens the Configuration tab; when Supervisor cannot name the app, the row says where to
+  find the tab and is not a link. The number of interactions to keep now applies before the worker closes the
+  records an interrupted run left open, so a restart keeps as many records as the option says.
 
 ## 0.3.4 (unreleased)
 

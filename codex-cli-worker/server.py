@@ -74,7 +74,9 @@ verification = Verification(_ToolWorker())
 
 CONFIG_ROOT = Path("/config")
 DATA_ROOT = Path("/data")
-interaction_logs = RollingDiagnostics(DATA_ROOT / "interaction-diagnostics.json")
+# Rows an interrupted run left open are closed in main(), after the interactions_to_keep option is applied, so the
+# repair keeps as many rows as the option says and not the number saved before it.
+interaction_logs = RollingDiagnostics(DATA_ROOT / "interaction-diagnostics.json", repair=False)
 diagnostics = InteractionRecorder(interaction_logs, os.environ.get("ADDON_VERSION", "unknown"),
                                  os.environ.get("CODEX_VERSION", "unknown"))
 def record_diagnostic(method, *args, **kwargs):
@@ -7199,6 +7201,7 @@ def main() -> None:
         print("Could not mark the worker process not dumpable; its environment stays readable to root.", flush=True)
     ensure_runtime_files()
     apply_interaction_limit(read_options())
+    interaction_logs.close_abandoned()
     refresh_core_address()
     version = codex_version_status()
     sandbox = sandbox_readiness()

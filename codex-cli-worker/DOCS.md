@@ -480,7 +480,7 @@ Whole-file undo can replace other edits made to the same file since Turn on; rec
 relax the always-on checks. A watch scan or verified restore cannot reverse a command that already ran,
 prevent a reload before the scan, or guarantee capture of an obfuscated reference.
 
-- **Off until you turn it on.** In the app chat, open **Settings** > **Accounts and connections** > **ChatGPT app pairing** > **Manage remote connection**, then choose **Turn on**. You can also open the connection view from the connection chip. The choice is saved and holds across app restarts.
+- **Off until you turn it on.** In the app chat, open **Settings** > **Accounts and connections** > **ChatGPT app pairing** > **Manage remote connection**, then choose **Turn on**. You can also open the connection view from the **Remote connection** row at the foot of the side bar. The choice is saved and holds across app restarts.
 - **One supervised process.** The app runs `codex app-server --listen unix://<private socket> --remote-control` in the foreground and starts it again, with a growing delay, if it exits. **Turn off** stops it.
 - **Machine name.** The ChatGPT app lists this machine as **Home Assistant** unless you change the **Remote control machine name** option on the app's Configuration tab (from 0.3.5 the page shows the name and no longer changes it). The new name takes effect when the app restarts. Pairing is kept with the Codex sign-in, so the app should show the new name the next time remote control connects; if it still shows the old name, choose **New pairing code**. Codex has no name setting, so the app starts it with that name as its host name inside a private namespace. If the private name namespace is unavailable, the page explains that Codex is using its existing host name.
 - **Pairing.** The manual code is shown as large text. A QR for the app link appears only when an app-link code is available; otherwise type the manual code or request a new code. Pairing is kept in the app's private storage with the Codex sign-in, so a restart does not ask for it again. **New pairing code** asks Codex for a fresh one when the ChatGPT app has lost this machine.
@@ -1101,7 +1101,8 @@ or start pairing. No live account enrollment or device handoff is implied by loc
 Settings → Workspace instructions → Workspace rules opens a separate editor. The file is read only when that editor
 opens, and Save remains an explicit action. Existing account, diagnostic, scheduling and browser-permission
 controls remain in Settings. The **Add-on configuration** row at the foot of Settings opens the app's
-Configuration tab in Home Assistant, where the plain options are set.
+Configuration tab in Home Assistant, where the plain options are set. When Supervisor cannot name the app, the row
+is not a link and says to open the Configuration tab from the Home Assistant settings.
 
 
 A chat's **Read only** choice also disables worker-mediated dashboard saves: both

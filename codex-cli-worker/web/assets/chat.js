@@ -3663,13 +3663,24 @@ function renderRemoteControl(rc) {
 function renderRemoteControlName(rc) {
   $("remote-control-name").textContent = rc.configured_name || "";
 }
+const ADDON_CONFIGURATION_UNKNOWN =
+  "Home Assistant did not give this app's address. Open the app's Configuration tab from the Home Assistant settings.";
 /**
  * Point the Add-on configuration row at this app's Configuration tab. The slug differs per install, so the
- * worker asks Supervisor; the link in the page stays when it cannot say.
+ * worker asks Supervisor. The row has no link until Supervisor answers, and it says where to go when it cannot.
  */
 async function loadAddonConfiguration() {
-  const data = await api("addon-configuration");
-  if (typeof data.url === "string" && data.url.startsWith("/hassio/addon/")) $("addon-configuration").href = data.url;
+  const row = $("addon-configuration");
+  const description = $("addon-configuration-description");
+  description.dataset.usual ??= description.textContent;
+  const data = await api("addon-configuration").catch(() => ({}));
+  if (typeof data.url === "string" && data.url.startsWith("/hassio/addon/")) {
+    row.href = data.url;
+    description.textContent = description.dataset.usual;
+  } else {
+    row.removeAttribute("href");
+    description.textContent = ADDON_CONFIGURATION_UNKNOWN;
+  }
 }
 for (const [id, action] of [
   ["remote-control-start", "start"],

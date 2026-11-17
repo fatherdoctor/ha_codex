@@ -2655,7 +2655,11 @@ a.ha-nav-row {
   color: inherit;
   text-decoration: none;
 }
-a.ha-nav-row:hover strong {
+a.ha-nav-row:not([href]) .ha-nav-chevron {
+  /* No address from Supervisor yet: the row is text, not a link. */
+  visibility: hidden;
+}
+a.ha-nav-row[href]:hover strong {
   color: var(--primary-color, var(--accent));
 }
 a.ha-nav-row:focus-visible {

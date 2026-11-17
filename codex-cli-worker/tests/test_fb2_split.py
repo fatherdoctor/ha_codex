@@ -109,6 +109,8 @@ class SettingsPage(unittest.TestCase):
         self.assertEqual(self.html.count('id="addon-configuration"'), 1)
         row = self.html.split('id="addon-configuration"', 1)[1].split("</a>", 1)[0]
         self.assertIn('target="_top"', row)
+        # No href until Supervisor names the slug: a guessed path is wrong on a normal install (review F2).
+        self.assertNotIn("href=", row)
         self.assertIn('aria-label="Add-on configuration"', row)
         settings = self.html.split('<dialog id="settings">', 1)[1].split("</dialog>", 1)[0]
         self.assertGreater(settings.index('id="addon-configuration"'), settings.index('id="workspace-section"'))
