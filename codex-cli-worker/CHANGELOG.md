@@ -14,6 +14,11 @@
   whether the file exists and when it last changed. A change to the file still reaches an open chat on its next
   message, and a removed file stops applying. The guard-rails block is still read by the worker before every
   pre-approved action. No approval, sandbox or permission rule changed.
+- A task that ends with a plain answer no longer sends a Home Assistant notification; the answer is in the
+  chat. A notification still goes out when a task asks a question, waits for a permission decision, or fails.
+  Before, every completed chat task sent a **Codex task completed** notification with its answer.
+  A chat task the owner cancels sends no notification either; before, it sent **Codex task cancelled**. The
+  `codex_cli_task_result` event still reports the cancel.
 
 ## 0.3.3 (unreleased)
 
