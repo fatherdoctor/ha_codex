@@ -65,7 +65,7 @@ The separate **Home Assistant data** MCP server lets Codex read state history an
 
 Ask, for example: “Compare my kitchen temperature, humidity and extractor fan history yesterday and suggest activation thresholds. Only analyze the measurements.” Codex finds the relevant entity IDs in the configuration, queries the data, and explains its analysis. These tools do not change configuration, call services, or run automations. Verification remains a separate tool.
 
-Two tools are available under `home_assistant_data`:
+Five tools are available under `home_assistant_data`. **`exchange_info`** takes no arguments and changes nothing: it gives Codex the details of the current message (see [What a chat thread holds](#what-a-chat-thread-holds)). **`ask_owner`** and **`report_failure`** change nothing either: they tell the page that Codex needs an answer or that the task failed (see [Human Input](#human-input)). The two data tools are:
 
 - **`history`** reads `/api/history/period/<start_time>` for explicit `entity_ids`, `start_time`, and `end_time`. It returns timestamped state strings, including `unknown` and `unavailable`, and the initial state at the window boundary. Attributes are omitted; the existing entity verification tool can read units separately. Example: `{"entity_ids":["sensor.kitchen_temperature","fan.extractor"],"start_time":"2026-10-01T00:00:00+03:00","end_time":"2026-10-02T00:00:00+03:00"}`.
 - **`statistics`** reads `recorder/get_statistics_metadata` and `recorder/statistics_during_period` through Home Assistant's WebSocket API, for explicit `statistic_ids`, `start_time`, and `end_time`. `period` is `5minute`, `hour` (default), `day`, `week`, or `month`. Optional `types` selects `mean`, `min`, `max`, `sum`, `state`, `change`, or `last_reset`, where supported. It returns display units and bucket start/end timestamps in UTC. Example: `{"statistic_ids":["sensor.kitchen_temperature"],"start_time":"2026-10-01T00:00:00+03:00","end_time":"2026-10-08T00:00:00+03:00","period":"hour","types":["mean","min","max"]}`.
@@ -99,7 +99,7 @@ API references: [Home Assistant REST history](https://developers.home-assistant.
 ## Local Home Assistant documentation
 
 From **0.1.70**, the worker keeps a copy of the official Home Assistant
-documentation in private app storage. The task prompt instructs Codex to search
+documentation in private app storage. The `exchange_info` tool tells Codex to search
 those files before using web search for Home Assistant documentation.
 Web search remains available for
 custom integrations, custom cards, and anything the documentation does not cover.
@@ -279,11 +279,23 @@ Dashboard auto-save skips storage files that failed validation and reports the s
 
 The chat shows the outcome under the answer: a passing check as a short confirmation, a failing check with Home Assistant's error, and an unavailable check as a note. `GET /tasks/<task_id>`, `codex_cli.get_task`, and the `codex_cli_task_result` event carry `config_check` with `result` (`valid`, `invalid`, `unavailable`, `skipped` when no YAML changed or syntax already failed, or `disabled`), `errors`, and `warnings`, and `recovery_files` with `path` and `copy` per affected file. An entry without a copy has a `reason` of `no_backup` or `excluded_credentials`, unless the task created the file. A configuration check does not prove that an automation behaves as intended; it only confirms Home Assistant would load the configuration.
 
+## What a chat thread holds
+
+A conversation from the chat page is a Codex thread, and the ChatGPT app shows the same thread when remote control is on. From 0.3.3 the page sends its fixed rules as Codex developer instructions when it starts a thread. The thread's first message is your own text, so the app shows your words as the message and as the title, not the page's rules.
+
+Details that change from one message to the next are not part of the rules: the backup folder, the documents and images you attached, and the notes on direct API calls (the `HA_TOKEN` option), the local documentation and GitHub. Codex reads them from the `exchange_info` tool at the start of each message. Codex keeps the developer instructions a thread started with, so an update of this app changes the rules of a new thread; an older thread keeps its rules until Codex compacts it.
+
+A thread that this page did not start has no page rules: a thread started in the ChatGPT app, or one started by 0.3.2 or earlier. A message from the page on such a thread starts with a one-line note that tells Codex to call `exchange_info`, which then also returns the rules. A thread from 0.3.2 or earlier also keeps that version's instructions in its history, so it can still answer in the app with the page's JSON format. The page still reads such a JSON answer.
+
+From 0.3.3 the page asks for no output format, so the thread stores Codex's answer as plain text, as the app shows it. The page's status, question and choices come from the `ask_owner` and `report_failure` tool calls (see [Human Input](#human-input)).
+
+In the ChatGPT app the `exchange_info` tool is not available. The rules tell Codex to make no backup copy there and to say so in its answer. The worker's protections do not depend on these rules: approvals, the sandbox, the policy and the backup check after a page message stay the same.
+
 ## Backups
 
 From **0.1.63**, the worker no longer archives the whole configuration folder before every message. On a large configuration that archive took longer than Codex needed to start answering, and one archive was kept per message forever.
 
-**Per-file copies (default).** The task prompt tells Codex to copy each existing file to `<task_root>/<task_id>/turns/<turn_id>/backups/<path under /config>` before it changes, moves, or deletes it. Only the files Codex is about to change are copied. When the run ends the worker reviews those copies:
+**Per-file copies (default).** The `exchange_info` tool tells Codex to copy each existing file to `<task_root>/<task_id>/turns/<turn_id>/backups/<path under /config>` before it changes, moves, or deletes it. Only the files Codex is about to change are copied. When the run ends the worker reviews those copies:
 
 - A copy counts only when it is identical to the file as the worker saw it before the run started. A copy made after the first edit is reported as not saved.
 - The review covers the files that are Codex's doing: files it reported editing, files it copied, changed YAML files, and changed dashboard storage files. Home Assistant rewrites its own `.storage` files all the time, so other changed files are not reviewed.
@@ -718,9 +730,18 @@ Home Assistant app configuration schemas do not currently provide a Home Assista
 
 ## Human Input
 
-Tasks run without an interactive terminal. If Codex needs a decision, it returns `needs_input` with a question. The task is marked `waiting_for_input`, and your answer continues it as the next message. Sandbox permission requests use the separate [approval flow](#permission-requests) during the running exchange.
+Tasks run without an interactive terminal. If Codex needs a decision, it calls the `ask_owner` tool with a question, ends its turn and writes the same question as its answer. The task is marked `waiting_for_input`, and your answer continues it as the next message. If the task cannot be done, Codex calls `report_failure` with the reason, and the task is marked failed with that reason. Up to 0.3.2, Codex returned the status `needs_input` or `failed` in a JSON answer instead; the page still reads that answer from an older thread. Sandbox permission requests use the separate [approval flow](#permission-requests) during the running exchange.
 
-From **0.1.69**, Codex can offer up to three short answers with its question, for example **Go ahead** and **Don't change anything**. When it asks whether to go ahead with a change, it is told to say in the summary exactly what it would change.
+The worker reads these calls from the exchange's events and decides the status in this order:
+
+1. A failure that the worker finds itself: no answer, an exit with an error, a timeout, a stall, a configuration that fails its check, or a refused configuration edit. A question is not asked over a broken configuration.
+2. A `report_failure` call.
+3. An `ask_owner` call.
+4. Completed.
+
+Of several calls to one tool, the last counts. Only a call that finished counts, and only one within the limits: a question or reason of 1 to 2,000 characters, and at most three choices of up to 200 characters each. Neither tool asks you for permission. With no output format, a question that Codex writes in its answer without calling `ask_owner` gives a completed exchange with no choice buttons; you can still answer it in the chat.
+
+From **0.1.69**, Codex can offer up to three short answers with its question, for example **Go ahead** and **Don't change anything**. When it asks whether to go ahead with a change, it is told to say in its answer exactly what it would change.
 
 - **In the chat**, the choices are buttons under the question. Picking one sends it as your next message. You can still type a different answer in the message box, and a draft there stays as it is. Once the question is answered the buttons are gone, and the question stays in the history.
 - **In a notification**, a mobile app notify service (`notify.mobile_app_...`) shows a button for each choice, and tapping one sends that answer. The **Codex** integration receives the tap, so it has to be installed and at **0.1.69** or later. Any other notify service, and the persistent notification, lists the choices in the text instead.
@@ -811,7 +832,7 @@ Image generation uses Codex's built-in `image_gen` tool with the signed-in ChatG
 
 After each run, the worker reads the session's rollout file under `/data/codex-home/sessions` and looks for completed `image_gen.generation` items that were not already present before the exchange. This works for app-server turns, including images absent from the live event stream. Codex saves each result under `/data/codex-home/generated_images/<session_id>/`. The worker copies the file into `<task_root>/<task_id>/turns/<turn_id>/attachments/` and records metadata on that exchange. If the saved file is missing, the worker decodes the inline result from the rollout instead. The original stays where Codex saved it so follow-up edits in the same conversation keep working.
 
-The task prompt tells Codex that generated images are attached automatically and that it should leave them at the default save location unless the user asks for a file at a specific path, for example under `/config/www` for use on a dashboard.
+The page's rules tell Codex that generated images are attached automatically and that it should leave them at the default save location unless the user asks for a file at a specific path, for example under `/config/www` for use on a dashboard.
 
 Limits and retention: only PNG, JPEG, GIF, and WebP content is accepted, checked by inspecting the file rather than trusting its name. Files larger than 25 MiB and images beyond the first 12 per exchange are skipped and noted in the task log. Attachments are retained with the task history and are removed when the task directory is deleted; there is no automatic expiry for generated images. The worker serves them through its authenticated attachment API and does not publish them under `/config/www`; Codex can copy an image there if you request it.
 
@@ -823,7 +844,7 @@ If an image does not appear, open the task log and look for `Skipped image gener
 
 From **0.1.51**, you can attach images to a message: a screenshot of a dashboard problem, a photo of a device, or a design mockup. Use the paperclip button next to the model pill, paste an image from the clipboard into the message box, or drop image files onto the composer. Pending images appear above the message box with a remove button and go out with the next message, in a new chat or when continuing a saved one. They then appear with your message in the conversation and stay with it across reloads and worker restarts.
 
-Codex receives each image with the message as a `localImage` input in sandboxed app-server turns. The task prompt also names the attached files. Images become part of the saved session and can contribute to the context of later turns, so the UI resizes images whose longest edge exceeds 2048 pixels before uploading.
+Codex receives each image with the message as a `localImage` input in sandboxed app-server turns. The `exchange_info` tool also names the attached files. Images become part of the saved session and can contribute to the context of later turns, so the UI resizes images whose longest edge exceeds 2048 pixels before uploading.
 
 In the Home Assistant Android app, the paperclip picks one image at a time; use it again to add more. The app's file chooser returns nothing when a multi-select picker is used, so the web UI asks Android WebViews for a single selection. Paste and drag-and-drop still accept several images at once.
 
