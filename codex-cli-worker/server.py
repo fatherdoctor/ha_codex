@@ -5292,7 +5292,7 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
             text=True,
             bufsize=1,
         )
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         fail_task_launch(task_id, exc, session_id=session_id)
         return
     cancel_after_launch = False

@@ -110,6 +110,8 @@ class ProtectionSwitchTests(unittest.TestCase):
             self.choose(credential_reads=credential_on, app_settings=settings_on)
             rules = gate_rules.load_rules()
             for command, expected in [('cat /config/secrets.yaml', credential_on),
+                                      ('cat /data/worker_api_token', credential_on),
+                                      ('cat /data/github/token', credential_on),
                                       ('cat /data/options.json', settings_on),
                                       ('cat /data/protection-checks/settings.json', settings_on)]:
                 self.assertEqual(bool(gate_rules.check_tool_call('PreToolUse', {'tool_input': {'command': command}}, True, rules)), expected)
@@ -132,6 +134,39 @@ class ProtectionSwitchTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.choose(**{**dict.fromkeys(switches.SELF, False), group: True})
                 self.assertTrue(approvals.command_names_protected_path(command))
+
+        diagnostics = [
+            'cat /data/interaction-diagnostics.k*',
+            'cat /data/interaction-diagnostics.ke?',
+            'cat /data/interaction-diagnostics.{key,json}',
+            'cat /data/interaction-diagnostics*',
+        ]
+        for credentials in (True, False):
+            for settings in (True, False):
+                self.choose(credential_reads=credentials, app_settings=settings)
+                for command in diagnostics:
+                    with self.subTest(command=command, credentials=credentials, settings=settings):
+                        self.assertEqual(approvals.command_names_protected_path(command), credentials or settings)
+
+    def test_invalid_native_requirements_reach_launch_failure_without_starting_codex(self):
+        from test_server import server
+        problem = ValueError('Synthetic rule has no protection group.')
+        with (
+            patch.object(server, 'get_task_dir', return_value=self.root / 'task'),
+            patch.object(server, 'update_task'),
+            patch.object(server, 'read_options', return_value={'task_timeout_seconds': 30}),
+            patch.object(server, 'sandbox_readiness', return_value={'required': True, 'ready': True}),
+            patch.object(server, 'write_task_log'),
+            patch.object(server, 'record_baseline', return_value={}),
+            patch.object(server, 'refresh_core_address'),
+            patch.object(server, 'prepare_ha_docs'),
+            patch.object(switches, 'prepare_native', side_effect=problem),
+            patch.object(server, 'fail_task_launch') as fail,
+            patch.object(server.subprocess, 'Popen') as start,
+        ):
+            server.run_task('synthetic-task', 'Inspect the synthetic task.')
+        fail.assert_called_once_with('synthetic-task', problem, session_id=None)
+        start.assert_not_called()
 
     def test_catalogue_groups_do_not_depend_on_explanatory_text(self):
         import tomllib

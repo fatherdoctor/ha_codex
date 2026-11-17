@@ -285,6 +285,10 @@ def command_names_protected_path(command: str) -> bool:
     # independently protected path. Normalize the whole input for both groups.
     text = re.sub(r"[\'\"\\]", "", str(command or ""))
     text = re.sub(r"/{2,}", "/", text)
+    # A wildcard or brace can name both diagnostic settings and the key.
+    # The early all-off check means either enabled group protects this spelling.
+    if re.search(r"/data/+interaction-diagnostics[^\s/<>;&|]*[*?\[{}]", text, re.IGNORECASE):
+        return True
     if any(protections[group] and pattern.search(text) for group, pattern in PROTECTED_COMMAND_RES):
         return True
     if settings_on and (names_image_folder(text)

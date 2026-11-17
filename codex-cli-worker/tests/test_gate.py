@@ -582,6 +582,7 @@ class MarkerTests(unittest.TestCase):
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
         self.assertIn(marker["hook"], marker["files"])
         self.assertIn(marker["requirements"], marker["files"])
+        self.assertIn("/usr/share/ha_codex/protection_switches.py", marker["files"])
         self.assertIn("/etc/codex/", dockerfile)
         self.assertIn("/usr/share/ha_codex/remote-control-gate.json", dockerfile)
         for path in marker["files"]:
