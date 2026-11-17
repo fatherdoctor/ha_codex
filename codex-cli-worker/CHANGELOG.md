@@ -24,6 +24,12 @@
 - A permission request that waits for you now shows at the bottom of the chat, below the "Working" lines, and the
   chat scrolls to it once when it first appears. Before, it sat above those lines and was easy to miss. A request
   you already answered stays where it was. No approval or permission rule changed.
+- Settings keeps what needs a button, a sign-in or a confirm step. Plain values move to the app's Configuration
+  tab, so each value has one place to change it. A new option, Interactions to keep (10 to 100), replaces the field
+  on the page; an install that saved a number keeps it, and a new install keeps 25. The remote control machine name
+  is set on the Configuration tab only, so the worker no longer writes any app option. The empty Appearance and
+  Advanced sections are gone, and Workspace rules opens from Workspace instructions. A new Add-on configuration row
+  at the foot of Settings opens the Configuration tab.
 
 ## 0.3.4 (unreleased)
 

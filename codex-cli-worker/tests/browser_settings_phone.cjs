@@ -122,16 +122,17 @@ const themeLook = target => target.evaluate(() => {
     font: getComputedStyle(document.body).fontFamily,
     // A list field takes the same font as the page (#schedule-mode, Scheduled runs).
     selectFont: css('#schedule-mode', 'font-family'),
-    fieldFill: css('#diagnostic-retention', 'background-color'),
-    fieldLine: css('#diagnostic-retention', 'border-bottom-color'),
-    fieldHeight: document.querySelector('#diagnostic-retention').getBoundingClientRect().height,
+    // A text field and a text button of Scheduled runs (the log number field moved to the Configuration tab).
+    fieldFill: css('#schedule-value', 'background-color'),
+    fieldLine: css('#schedule-value', 'border-bottom-color'),
+    fieldHeight: document.querySelector('#schedule-value').getBoundingClientRect().height,
     switchOn: css('.ha-row input:checked + .ha-switch', 'background-color'),
     switchOff: css('.ha-row input:not(:checked) + .ha-switch', 'background-color'),
     rowHeight: document.querySelector('.ha-row').getBoundingClientRect().height,
     filled: css('#pause', 'background-color'),
     filledText: css('#pause', 'color'),
-    textButton: css('#save-diagnostic-retention', 'color'),
-    textButtonFill: css('#save-diagnostic-retention', 'background-color'),
+    textButton: css('#schedule-reset', 'color'),
+    textButtonFill: css('#schedule-reset', 'background-color'),
     // Every close button of Settings and its dialogs is the mdiClose icon, with no text glyph.
     closeIcons: [...document.querySelectorAll('#close-settings, dialog.studio-sheet .dialog-header .icon')].map(b =>
       `${b.textContent.trim() === ''} ${getComputedStyle(b, '::before').maskImage.includes('svg') || getComputedStyle(b, '::before').webkitMaskImage.includes('svg')}`),
@@ -149,7 +150,7 @@ const switchSettles = (target, color) => target.waitForFunction(expected => {
 
 /** Open the sections that hold a switch, a field and both kinds of button. */
 async function openThemedSections(target) {
-  for (const id of ['permission-overrides', 'interaction-logs-section', 'assistant-section'])
+  for (const id of ['permission-overrides', 'interaction-logs-section', 'assistant-section', 'scheduled-work'])
     await target.locator(`#${id} > h3 .settings-toggle`).click();
   await target.waitForFunction(() => document.querySelector('.ha-row input:checked'));
 }
@@ -196,8 +197,7 @@ async function openThemedSections(target) {
         {title: 'Assistant', status: 'Running', attention: false},
         {title: 'Browser permissions', status: 'None remembered', attention: false},
         {title: 'Scheduled runs', status: 'Paused: time zone unavailable', attention: true},
-        {title: 'Appearance', status: 'Follows Home Assistant', attention: false},
-        {title: 'Advanced', status: 'Workspace rules', attention: false},
+        {title: 'Workspace instructions', status: 'AGENTS.md', attention: false},
       ]);
       assert.equal(await page.locator('#remote-control-section .settings-toggle').count(), 0, 'own dialog stays open');
       await page.screenshot({path: path.join(SHOTS, `settings-collapsed-${colorScheme}-400.png`)});
@@ -258,7 +258,7 @@ async function openThemedSections(target) {
       const size = await windowSize(page);
       await checkLayout(page);
       await page.screenshot({path: path.join(SHOTS, `settings-collapsed-${colorScheme}-1280.png`)});
-      for (const id of ['accounts-section', 'app-pairing-section', 'assistant-section', 'advanced-section']) {
+      for (const id of ['accounts-section', 'app-pairing-section', 'assistant-section', 'workspace-section']) {
         await page.locator(`#${id} > :is(h3, h4) .settings-toggle`).click();
         assert.deepEqual(await windowSize(page), size, `the window keeps its size after ${id} opens`);
       }
