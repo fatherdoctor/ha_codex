@@ -93,18 +93,26 @@ family word that the mode refuses follows (`HA_UNREADABLE_WORD_RE`). "Follows" m
 text, not only on the line: a quoted word, `${...}` or `$(...)` can hold a newline (`_last_family_word`). The rule
 finds `ha` on lines that end at a newline only, as the shell's do. A brace word after the first `ha` that bash can
 expand into a family word (`s{u,}`) is refused too (`_brace_word_names_family`, using `_brace_choices`). It fails
-closed: a brace word with a quote, a backslash or a backtick (`{s,"x y"}u` is `su` in bash), a sequence (`{1..3}`)
-or more than 64 choices counts as a family word. `_brace_words` finds the words in one pass, so its time grows with
-the length of the text only. It follows plain quotes as the shell does, so a brace inside quotes does not count;
-in a text with `${`, `$(`, `$'`, a backtick, a `#` or a heredoc it cuts at every blank and operator instead,
+closed: a brace word with a quote, a backslash or a backtick (`{s,"x y"}u` is `su` in bash), a sequence (`{1..3}`),
+more than 64 braces (`_BRACE_MAX_BRACES`), more than 64 choices, or a `$` with braces that do not close counts as a
+family word. A brace word with no comma and no `..` is no expansion and does not count. `_brace_words` finds the
+words in one pass, so its time grows with the length of the text only. It follows plain quotes as the shell does,
+and reads the text inside each pair of quotes again as a command of its own (`_quoted_brace_words`, at most
+`_BRACE_QUOTE_DEPTH` deep), because a second shell can run it: `bash -c 'ha s{u,} info'`, `eval ha '{s,x}u' info`,
+`trap '...' EXIT`, a pipe into `bash`. In a text with `${`, `$(`, `$'`, a backtick, a `#` or a heredoc it cuts at every blank and operator instead,
 because quotes inside `${...}` and `$(...)` can make a plain reading lose its place. It reads from the start of the
 text, so a quote that opens before `ha` is known. This rule does not depend on the parsers or
 the floor.
 
-The family word itself must be one the shell does not build. `_ha_supervisor_command` refuses, in both modes, a
-family-position word with a `$`, a backtick or a glob character (`HA_COMPUTED_WORD_RE`): `ha s${x}u info`,
-`ha $'\163u' info` and `ha s[u] info` (from `/bin`) all run `ha su info`. The masked text keeps a `$` in place of
-each substitution (`SUBSTITUTION_MARK`), so `ha $(printf s)u info` is refused there too. Tests: `tests/test_gate_quote.py` (`RedirectionTests`, with a print-only shell
+The family word itself must be one the shell does not build. Two places refuse, in both modes, a family-position
+word with a `$`, a backtick or a glob character (`HA_COMPUTED_WORD_RE`): `ha s${x}u info`, `ha $'\163u' info` and
+`ha s[u] info` (from `/bin`) all run `ha su info`. `_ha_supervisor_command` refuses it where the parser finds `ha`
+as the program, behind the words in its own list only. Its masked text keeps a `$` in place of each substitution
+(`SUBSTITUTION_MARK`), so `ha $(printf s)u info` is refused there too. `_ha_built_family_word` refuses it after
+every word `ha` in the text, read as the floor reads it (quotes and backslashes removed, backticks kept), with no
+list of the words that may stand before `ha` (`while`, `setsid`, `coproc`, `function f {`). It steps over the same
+flags, flag values and redirections as the floor (`_HA_BEFORE_FAMILY_TEXT`), and over a brace word, which can
+expand to nothing. Tests: `tests/test_gate_quote.py` (`RedirectionTests`, with a print-only shell
 control) and `tests/test_supervisor_corpus.py`, which runs every command in
 `tests/fixtures/supervisor_command_corpus.tsv` under bash and dash with a print-only `ha` and then asks the hook.
 To add a form, add a line to that corpus (its header says how) or to a tuple in `RedirectionTests`.

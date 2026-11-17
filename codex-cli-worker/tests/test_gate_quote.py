@@ -672,7 +672,27 @@ class RedirectionTests(unittest.TestCase):
                            "cat ha.json | jq '{name:.su}'", "ha core info --raw-json | jq '{v: .data.version}'",
                            "ha core info; { echo a; }", "ha core info; echo ${HOME}/{a,b}",
                            "ha addons logs x | awk '{print $1}'", "git commit -m 'ha: {a,b}'",
-                           "ha backups list 2>&1 | grep -c '*'")
+                           "ha backups list 2>&1 | grep -c '*'", "ha core info | jq '{a: .x, b: .su}'",
+                           'ha core info | jq "{v: ${x}}"', "bash -c 'jq \"{name: .su}\" ha.json'",
+                           "grep -rn ha --include='*.yaml' .", "echo '{s,x}u' ha")
+    # H1: a brace word inside quotes that a second shell reads as a command and expands.
+    SECOND_SHELL_BRACE_FORMS = (
+        "bash -c 'ha {s,x}u info'", "bash -c 'ha s{u,} info'", 'bash -c "ha {s,x}u info"',
+        "bash -c 'ha {s,\"x y\"}u info'", "bash -c 'ha {,} {s,x}u info'", "eval 'ha {s,x}u info'",
+        'eval "ha s{u,} info"', "eval ha '{s,x}u' info", 'eval ha "s{u,}" info', "trap 'ha {s,x}u info' EXIT",
+        "x='ha {s,x}u info'; eval \"$x\"", "echo 'ha {s,x}u info' | bash", "bash -c 'echo a; ha s{u,} info'",
+        "env bash -c 'ha s{u,} info'", "bash -lc 'ha s{u,} info'", """bash -c 'bash -c "ha s{u,} info"'""",
+        "bash -c 'ha \"s\"{u,} info'", "eval 'ha {s,\"x y\"}u info'")
+    # H2: a built family word behind a word that the parser does not step over.
+    BUILT_FAMILY_BEHIND_FORMS = (
+        'while ha s${x}u info; do break; done', 'until ha s${x}u info; do break; done',
+        'if false; then :; else ha s${x}u info; fi', 'if false; then :; elif ha s${x}u info; then :; fi',
+        "while ha $'su' info; do break; done", 'touch su; while ha s[u] info; do break; done',
+        'setsid ha s${x}u info', 'setsid -w ha s${x}u info', 'coproc ha s${x}u info',
+        'exec -a x ha s${x}u info', 'time -p ha s${x}u info', 'builtin command ha s${x}u info',
+        'function f { ha s${x}u info; }; f', 'while ha {,} s${x}u info; do break; done',
+        'while ha {s,$(:)}u info; do break; done', 'while ha {s,${x:-a b}}u info; do break; done',
+        'while ha {s,$((1 + 1))}u info; do break; done', 'while ha s{u,${x:-(}} info; do break; done')
 
     def _runs(self, command: str, family: str, shells: tuple[str, ...] = ()) -> None:
         """Run the form with a print-only ha stub that writes its arguments to a file, not stdout."""
@@ -775,14 +795,22 @@ class RedirectionTests(unittest.TestCase):
                 self.assertTrue(gate_rules._ha_supervisor_command(command))
 
     def test_brace_words_follow_plain_quotes(self) -> None:
-        """A blank inside quotes stays in the word; a brace inside quotes is not an expansion."""
+        """A blank inside quotes stays in the word; quoted text is read again as a command of its own (H1)."""
         self.assertEqual(gate_rules._brace_words(' {s,"x y"}u info', 0), ['{s,"x y"}u'])
         self.assertEqual(gate_rules._brace_words(" {s,a\\ b}u;x", 0), ['{s,a\\ b}u'])
-        self.assertEqual(gate_rules._brace_words(" core info | jq '{a: .b}'", 0), [])
+        # A second shell would cut the jq filter at its blank: "{a:" has no comma, so it is no expansion.
+        self.assertEqual(gate_rules._brace_words(" core info | jq '{a: .b}'", 0), ['{a:'])
+        self.assertFalse(gate_rules._brace_word_names_family('{a:', False))
+        self.assertEqual(gate_rules._brace_words(" bash -c 'ha s{u,} info'", 0), ['s{u,}'])
+        self.assertEqual(gate_rules._brace_words(' eval ha "s{u,}" info', 0), ['s{u,}'])
+        self.assertEqual(gate_rules._brace_words(""" bash -c 'bash -c "ha {s,x}u"'""", 0), ['{s,x}u'])
+        # In double quotes a backslash still escapes the quote, so the text goes on past it.
+        self.assertEqual(gate_rules._brace_words(' "a\\"b {s,x}u"', 0), ['{s,x}u'])
         # A quote still open at the end: the rest is one word, and its quote refuses it.
         self.assertEqual(gate_rules._brace_words(' x "{s,u}', 0), ['"{s,u}'])
-        # A quote that opens before ha is known, so a brace inside it does not count.
-        self.assertEqual(gate_rules._brace_words("git commit -m 'ha: {a,b}'", 18), [])
+        # Quoted text that closes after ha is read, even when it opens before ha.
+        self.assertEqual(gate_rules._brace_words("git commit -m 'ha: {a,b}'", 18), ['{a,b}'])
+        self.assertEqual(gate_rules._brace_words("echo '{s,x}u' ha", 14), [])
         self.assertEqual(gate_rules._brace_words('{s,u} x ha {a,b}', 10), ['{a,b}'])
         # With ${, $(, $', $", a backtick, a comment or a heredoc the text is cut at every blank, quotes or not.
         self.assertEqual(gate_rules._brace_words(' ${x} {s,"a b"}u', 0), ['${x}', '{s,"a'])
@@ -794,10 +822,69 @@ class RedirectionTests(unittest.TestCase):
         for word in ('{s,"x"}u', "{a,'b'}", '{a,b\\ c}', '{a,`b`}'):
             with self.subTest(word=word):
                 self.assertTrue(gate_rules._brace_word_names_family(word, False))
+        # A $ word whose braces do not close: the cut reading broke it inside ${...} or $(...) (H2).
+        for word in ('{s,$', '{s,${x:-a', 's{u,${x:-'):
+            with self.subTest(word=word):
+                self.assertTrue(gate_rules._brace_word_names_family(word, False))
+        self.assertFalse(gate_rules._brace_word_names_family('${HOME}/{a,b}', False))
         many = '{a,b}' * 7  # 128 choices, none a family word
         self.assertIsNone(gate_rules._brace_choices(many))
         self.assertTrue(gate_rules._brace_word_names_family(many, False))
         self.assertFalse(gate_rules._brace_word_names_family('{a,b}' * 6, False))
+
+    def test_print_only_bash_runs_each_h1_and_h2_form(self) -> None:
+        for command in self.SECOND_SHELL_BRACE_FORMS + self.BUILT_FAMILY_BEHIND_FORMS:
+            self._runs(command, 'su', ('bash',))
+        self._runs("bash -c 'ha {ho,x}st reboot'", 'host', ('bash',))
+        self._runs('while ha ho${x}st reboot; do break; done', 'host', ('bash',))
+
+    def test_hook_refuses_a_brace_word_for_a_second_shell_and_a_built_family_word_behind_any_word(self) -> None:
+        for command in self.SECOND_SHELL_BRACE_FORMS + self.BUILT_FAMILY_BEHIND_FORMS:
+            for remote_on in (False, True):
+                with self.subTest(command=command, remote_on=remote_on):
+                    self.assertIn('Supervisor', refusal(command, remote_on))
+        self.assertIn('Supervisor', refusal("bash -c 'ha {ho,x}st reboot'", True))
+        self.assertIn('Supervisor', refusal('while ha ho${x}st reboot; do break; done', False))
+
+    def test_built_family_word_rule_alone_refuses_each_h2_form(self) -> None:
+        """H2: the text rule needs no list of the words that can stand before ha."""
+        for command in self.BUILT_FAMILY_BEHIND_FORMS:
+            with self.subTest(command=command):
+                self.assertTrue(gate_rules._ha_built_family_word(command))
+        # A substitution is read as a command of its own, also nested past the depth the rule reads.
+        for command in ('x=$(while ha s${y}u info; do :; done)', 'echo `setsid ha s${y}u info`',
+                        'echo ' + '$(' * 8 + 'ha core info' + ')' * 8):
+            with self.subTest(command=command):
+                self.assertTrue(gate_rules._ha_built_family_word(command))
+        # A blank inside a substitution does not move the family position.
+        for command in ('ha core info', 'ha --log-level debug core info', 'ha core logs > $LOG',
+                        'ha {,} core info', 'echo ha', 'ha --api-token `cat t` core info',
+                        'ha --api-token $(cat /tmp/t) core restart'):
+            with self.subTest(command=command):
+                self.assertFalse(gate_rules._ha_built_family_word(command))
+
+    def test_a_brace_word_ends_at_a_newline(self) -> None:
+        """H3: a newline ends a word outside quotes, as for the shell."""
+        self.assertEqual(gate_rules._brace_words('ha a\ns{u,}', 0), ['s{u,}'])
+
+    def test_quoted_text_is_read_again_only_so_deep(self) -> None:
+        """Past _BRACE_QUOTE_DEPTH the quoted text is one word with its quotes: refused with a comma, allowed without."""
+        deep = gate_rules._BRACE_QUOTE_DEPTH
+        self.assertEqual(gate_rules._brace_words("'{a,b}'", -1, deep), ["'{a,b}'"])
+        self.assertTrue(gate_rules._brace_word_names_family("'{a,b}'", False))
+        self.assertFalse(gate_rules._brace_word_names_family("'{a}'", False))
+
+    def test_nested_braces_are_refused_past_the_limit_and_stay_fast(self) -> None:
+        """H5: a word with more than _BRACE_MAX_BRACES braces and a comma is refused without expansion."""
+        limit = gate_rules._BRACE_MAX_BRACES
+        self.assertTrue(gate_rules._brace_word_names_family('{a:' * limit + '{b,c}' + '}' * limit, False))
+        self.assertFalse(gate_rules._brace_word_names_family('{a:' * (limit - 1) + '{b,c}' + '}' * (limit - 1), False))
+        for text in ('echo ha; echo ' + '{a:' * 3200 + '1' + '}' * 3200,
+                     'ha ' + '{a:' * 3200 + '{b,c}' + '}' * 3200):
+            with self.subTest(text=text[:20]):
+                started = time.monotonic()
+                gate_rules._ha_unknown_flag(text, False)
+                self.assertLess(time.monotonic() - started, 0.5)
 
     def test_brace_words_count_from_the_first_ha(self) -> None:
         """G6: a brace word before the first ha is not read; one between two ha lines is."""
@@ -805,9 +892,10 @@ class RedirectionTests(unittest.TestCase):
         self.assertTrue(gate_rules._ha_unknown_flag('ha core info; echo {s,}u; ha core logs', False))
 
     def test_stated_over_refusals_of_harmless_braces(self) -> None:
-        """G4: after the word ha, a brace sequence, or a brace word with a quote in a text with ${ or $(, is refused (DOCS says so)."""
+        """After the word ha, a brace sequence, a quoted brace word that could expand to a family word (H1), and a
+        $, a backtick or a glob right after the word ha (H2) are refused. DOCS says so."""
         for command in ('echo ha; echo {1..3}', 'grep ha notes.txt; for i in {1..3}; do echo $i; done',
-                        'ha core info | jq "{v: ${x}}"'):
+                        "echo 'ha {s,x}u info'", 'ha "{s,x}u" info', 'echo ha ${HOME}', 'grep ha *.yaml'):
             with self.subTest(command=command):
                 self.assertIn('Supervisor', refusal(command, False))
 

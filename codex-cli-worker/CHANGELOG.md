@@ -20,13 +20,21 @@
 - The check now refuses a command family that the shell builds while the command runs, with remote control off
   too: a word after `ha` with a `$`, a backtick or a glob in the family's place (`ha s${x}u info`,
   `ha $'\163u' info`, `ha s[u] info` run from `/bin`). A brace word after `ha` with a quote, a backslash or a
-  backtick in it (`ha {s,"x y"}u info`, which bash runs as `ha su info`) is refused too. A brace inside quotes no
-  longer counts (`cat ha.json | jq '{name: .su}'` is allowed again), except in a command that also has `${`,
-  `$(`, `$'`, a backtick, a `#` or a heredoc. A brace sequence such as `{1..3}` after the word `ha` is refused
+  backtick in it (`ha {s,"x y"}u info`, which bash runs as `ha su info`) is refused too. A brace word that is no
+  expansion does not count (`cat ha.json | jq '{name: .su}'` is allowed again). A brace sequence such as `{1..3}` after the word `ha` is refused
   (`echo ha; echo {1..3}`).
+- The check now reads text inside quotes again as a command of its own, because a second shell can run it. So a
+  brace word in a quoted script is refused when bash can expand it into a family word (`bash -c 'ha s{u,} info'`,
+  `eval ha '{s,x}u' info`, `trap 'ha {s,x}u info' EXIT`, `echo 'ha {s,x}u info' | bash`). A brace word without a
+  comma or `..` is no expansion and is allowed (`ha core info | jq "{v: ${x}}"` is allowed again). A brace word
+  with more than 64 braces is refused instead of expanded, so its time stays short.
+- A family word that the shell builds is now refused after any word `ha`, whatever stands before it
+  (`while ha s${x}u info`, `setsid ha s${x}u info`, `coproc ha s${x}u info`). Before, only the words the parser
+  knew (`if`, `then`, `do`, `env`, `sudo` and a few more) could stand before `ha` for this refusal.
 - These refusals also reach some harmless commands where `ha` is not the program at all, for example
-  `git commit -m "ha: fix $name supervisor link"` or `grep -rn "ha " $FILES | grep supervisor`. Write such a
-  command without the `$` word, or run it outside Codex.
+  `git commit -m "ha: fix $name supervisor link"`, `grep -rn "ha " $FILES | grep supervisor`, `grep ha *.yaml`
+  or `echo 'ha {s,x}u info'`. Write such a command without the `$` word (`grep -rn ha --include='*.yaml' .`),
+  or run it outside Codex.
 - The text check's match time no longer doubles with each repeated global flag or heredoc operator. No other
   approval, sandbox or permission rule changed.
 
