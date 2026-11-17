@@ -4,7 +4,7 @@ Use Codex CLI to inspect and edit your configuration through a chat in Home Assi
 
 The assistant can act on any device the owner confirms. Put limits specific to your installation in `/config/AGENTS.md`. Codex uses its defaults and your workspace instructions; the app bundles no house rules. Its permission policy, approval checks and other enforced safeguards remain in place.
 
-The app provides a responsive chat UI with saved conversations, a resizable desktop sidebar, and a mobile chat drawer. It also provides a token-protected local API for the Codex integration, device-code sign-in, backup tracking, task logs, and notifications when work completes or needs input.
+The app provides a responsive chat UI with saved conversations, a resizable desktop sidebar, and a mobile chat drawer. It also provides a token-protected local API for the Codex integration, device-code sign-in, backup tracking, task logs, and notifications when work needs input or fails.
 
 Codex runs in a sandbox: `workspace-write` (the default) or `read-only`. An administrator can turn on Full access in Settings, after a warning, for chats set to it; it is off by default. Commands and file changes that need extra access ask a Home Assistant administrator to **Allow once** or **Deny** in the chat. See [sandbox modes, safeguards, and permission requests](https://github.com/fatherdoctor/ha_codex/blob/main/codex-cli-worker/DOCS.md#sandbox).
 
@@ -39,8 +39,6 @@ Each SSH command goes through the **Allow once / Deny** approval flow. Remote pe
 Open an existing chat to continue with its saved Codex context, or choose **New chat** for a separate conversation. Account controls and workspace instructions are under **Settings**.
 
 The chat formats Markdown in your messages and in Codex's answers. Wrap code in triple backticks to send it as a code block; inline code, headings, lists, tables, and links are formatted too.
-
-Use **Copy response** below an answer, including a saved answer, to copy its original Markdown with code blocks and YAML indentation. If automatic copying is blocked, a dialog offers selectable text for manual copying. Images, activity logs, and separate configuration, backup, and verification cards are not included.
 
 While one chat is working, messages you send in other chats wait in a queue and start in order when it finishes. You can edit or remove a waiting message until it starts.
 

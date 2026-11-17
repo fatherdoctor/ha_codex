@@ -157,6 +157,8 @@ In **Settings** > **Permissions overrides**, an administrator turns five groups 
   normal permission card.
 - A group judges the service and the things it directly targets. What a scene or a script does next is your own setup.
 - Unknown limits, templated values, mixed targets and missing data fall back to the normal permission card.
+- A device action that a group that is off, or a data field the tool does not accept, refuses, and that passes every
+  other check, asks you in the chat with **Allow once** and **Deny**. Security and people actions never ask this way.
 - A successful action is named in the answer, and the event is recorded before the action runs.
 
 You can add limits in a marked block in `/config/AGENTS.md`. If the block changes, all groups pause until an
@@ -239,9 +241,9 @@ The integration adds actions that scripts, automations and Assist can call.
 | `codex_cli.start_login`, `codex_cli.logout`, `codex_cli.get_login_status` | Manage the sign-in. |
 
 The actions refuse a caller who is not an administrator. A task started this way still uses the normal permission
-cards; the integration cannot answer them. Home Assistant
-sends a notification when a task finishes or waits for you. Set `notify_service` in the app options for phone pushes,
-or leave it empty for persistent notifications.
+cards; the integration cannot answer them. Home Assistant sends a notification when a task waits for you or fails; a
+completed answer sends none. Set `notify_service` in the app options for phone pushes, or leave it empty for persistent
+notifications.
 
 The event `codex_cli_task_result` carries the result for automations. The full list of entities and actions, the task
 output format and an Assist example are in the [integration README](custom_components/codex_cli/README.md). A

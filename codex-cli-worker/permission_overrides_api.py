@@ -15,9 +15,52 @@ import time
 import uuid
 
 from flask import jsonify, request
-from permission_overrides import ApprovalRequired, Authority, Engine, Settings, bounded_json, entity, selected_guard_lines, guard_rules, GUARD_LINES, PRIVATE
+from permission_overrides import ApprovalRequired, OwnerCanAllow, Authority, Engine, Settings, bounded_json, entity, selected_guard_lines, guard_rules, GUARD_LINES, PRIVATE
 
 IDENTIFIER = re.compile(r'[a-z0-9_-]{1,128}')
+
+# Light fields a pre-approved action may set, with the range Home Assistant's light service
+# accepts for each (homeassistant/components/light/__init__.py). A value outside it is refused
+# here, so a wrong number never reaches the light.
+LIGHT_NUMBERS = {
+    'brightness': (0, 255),
+    'brightness_pct': (0, 100),
+    'brightness_step': (-255, 255),
+    'brightness_step_pct': (-100, 100),
+    'color_temp_kelvin': (1000, 20000),
+    'transition': (0, 6553),
+}
+# Each color is a list with one range per part: red, green, blue; hue, saturation; x, y.
+LIGHT_COLORS = {
+    'rgb_color': ((0, 255), (0, 255), (0, 255)),
+    'hs_color': ((0, 360), (0, 100)),
+    'xy_color': ((0, 1), (0, 1)),
+}
+COLOR_NAME = re.compile(r'[a-z ]{1,32}')
+# Home Assistant reads these keys in service data as targets. A target there would skip every
+# target check (resolve, the limit of 64, require_entity), so a target goes in "target" only.
+DATA_TARGET_KEYS = frozenset({'entity_id', 'device_id', 'area_id', 'floor_id', 'label_id'})
+
+
+def check_light_data(data):
+    """Refuse a light field whose value has the wrong type or is outside its range."""
+    # validate_service checks the type of each number first, so the comparisons below see numbers only.
+    for key, (low, high) in LIGHT_NUMBERS.items():
+        if key in data and not low <= data[key] <= high:
+            raise ApprovalRequired('A light value is out of range.')
+    for key, ranges in LIGHT_COLORS.items():
+        if key not in data:
+            continue
+        value = data[key]
+        if not isinstance(value, list) or len(value) != len(ranges):
+            raise ApprovalRequired('A light color is invalid.')
+        for part, (low, high) in zip(value, ranges):
+            if type(part) not in (int, float) or not low <= part <= high:
+                raise ApprovalRequired('A light color is invalid.')
+    if 'color_name' in data and not (isinstance(data['color_name'], str) and COLOR_NAME.fullmatch(data['color_name'])):
+        raise ApprovalRequired('A light color name is invalid.')
+    if 'flash' in data and data['flash'] not in ('short', 'long'):
+        raise ApprovalRequired('A light flash value is invalid.')
 
 # Core sends a serialized field list. Return its shape only, never defaults/options/values.
 SAFE_FLOW_FIELDS = frozenset(('host', 'port', 'name', 'username', 'title', 'scan_interval'))
@@ -197,24 +240,35 @@ class Core:
         return identifier
 
 
-    def validate_service(self, service, data):
+    def validate_service(self, service, data, owner_allowed=False):
+        """Refuse service data outside the allow-list, and allowed fields with a wrong type or range.
+
+        owner_allowed (the owner pressed Allow once for this action) lifts the allow-list only;
+        the target keys and the type and range checks below still apply.
+        """
         domain, name = service.split('.')
-        allowed = {'light': {'brightness', 'color_temp_kelvin', 'transition', 'rgb_color'},
+        # Not liftable by Allow once: the owner's question names only the checked target.
+        if DATA_TARGET_KEYS & set(data):
+            raise ApprovalRequired('A target in the action data is not accepted; put every target in target.')
+        allowed = {'light': set(LIGHT_NUMBERS) | set(LIGHT_COLORS) | {'color_name', 'flash'},
                    'input_number': {'value'}, 'input_text': {'value'}, 'input_select': {'option'},
                    'script': {'variables'}, 'automation': {'skip_condition', 'stop_actions'},
                    'scene': {'transition'}, 'lock': {'code'}, 'alarm_control_panel': {'code'},
                    'cover': {'position'}, 'notify': {'message', 'title', 'target'},
                    'persistent_notification': {'message', 'title', 'notification_id'}}.get(domain, set())
-        if set(data) - allowed:
-            raise ApprovalRequired('Unsupported service data requires normal approval.')
         if domain in ('input_number', 'input_text') and name == 'set_value' and 'value' not in data:
             raise ApprovalRequired('A helper value is required.')
         if domain == 'input_select' and not isinstance(data.get('option'), str):
             raise ApprovalRequired('A helper option is required.')
         if domain in ('notify', 'persistent_notification') and name != 'dismiss' and not isinstance(data.get('message'), str):
             raise ApprovalRequired('A message is required.')
-        if any(key in data and type(data[key]) not in (int, float) for key in ('brightness', 'transition', 'color_temp_kelvin', 'position')):
+        if any(key in data and type(data[key]) not in (int, float) for key in (*LIGHT_NUMBERS, 'position')):
             raise ApprovalRequired('Numeric service data is invalid.')
+        if domain == 'light':
+            check_light_data(data)
+        # Last, so the owner is asked only about data that passed every check above.
+        if set(data) - allowed and not owner_allowed:
+            raise OwnerCanAllow('Unsupported service data requires normal approval.')
 
     def validate_flow(self, operation, target):
         if operation == 'flow_continue':
@@ -489,6 +543,34 @@ class Service:
                 raise ApprovalRequired('Action diagnostics could not be saved; request normal approval.')
 
     def dispatch(self, payload):
+        """Run one act call; when only an owner-liftable check refuses it, ask the owner in the chat.
+
+        The question waits outside this service's lock, so Settings stays usable meanwhile. After
+        Allow once, the same payload is dispatched again from the start: capability, launch
+        permissions, house rules, guard rails and targets are all checked again before the write.
+        """
+        result = self.dispatch_checked(payload, owner_allowed=False)
+        question = result.pop('owner_question', None)
+        task_id = result.pop('task_id', None)
+        session = getattr(self.worker, 'approval_sessions', {}).get(task_id)
+        if question is None or session is None:
+            # No live chat to ask in: the refusal stands as it is.
+            return result
+        try:
+            answer = session.ask_owner_action(question)
+        except Exception:
+            answer = None
+        if answer is True:
+            return self.dispatch_checked(payload, owner_allowed=True)
+        if answer is False:
+            return {'ok': False, 'approval_required': False, 'denied_by_owner': True,
+                    'reason': 'The owner denied this action in the chat. Nothing was changed. '
+                              'Do not ask again in this exchange; tell the owner it was not done.'}
+        return {'ok': False, 'approval_required': False,
+                'reason': 'The owner did not answer the Allow once request in time, or the exchange ended. '
+                          'Nothing was changed. Tell the owner the action was not done.'}
+
+    def dispatch_checked(self, payload, owner_allowed):
         if not isinstance(payload, dict) or set(payload) != {'arguments', 'capability'}:
             return {'ok': False, 'approval_required': True, 'reason': 'Unsupported action envelope; request normal approval.'}
         worker, capability = self.worker, payload['capability']
@@ -519,7 +601,11 @@ class Service:
                         raise ApprovalRequired('House rules changed during this exchange; start a new exchange after confirming.')
                     return self.guards()
                 engine = Engine(self.settings(), Core(worker), pinned_guards, lambda event: self.audit(task_id, event))
-                return engine.dispatch(payload['arguments'], authority, lambda: worker.ha_data.active(task_id, capability))
+                result = engine.dispatch(payload['arguments'], authority, lambda: worker.ha_data.active(task_id, capability),
+                                         owner_allowed=owner_allowed, offer_owner=not owner_allowed)
+                if 'owner_question' in result:
+                    result['task_id'] = task_id
+                return result
             except Exception:
                 return {'ok': False, 'approval_required': True, 'reason': 'Action authorization is unavailable; request normal approval.'}
 

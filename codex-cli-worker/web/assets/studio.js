@@ -249,7 +249,7 @@ document.addEventListener("thread-action", async event => {
     try {
       const task = id === state.id ? state.task : (await api(`tasks/${encodeURIComponent(id)}`)).task;
       if (!task?.session_id) throw new Error("This conversation has no native thread ID yet.");
-      await copyResponseText(task.session_id);
+      await copyText(task.session_id);
     } catch (error) { showError(error); }
   } else if (action === "archive") {
     try {

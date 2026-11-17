@@ -234,6 +234,8 @@ class CheckTests(ServiceCase):
                 self.assertEqual(self.events[0][1]["previous_state"], "ok")
                 self.assertEqual(self.events[0][1]["source"], "worker")
                 self.assertEqual(len(self.notices), 1)
+                # The notice names where the GitHub part is now: inside Accounts and connections.
+                self.assertIn("Settings > Accounts and connections > GitHub", self.notices[0][1])
                 self.assertNotIn(APP_TOKEN, json.dumps(self.events) + json.dumps(self.notices))
                 # The same state again: no second event, no second notice (one cause, one warning).
                 self.check_with(answers)

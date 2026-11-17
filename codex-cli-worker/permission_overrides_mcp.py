@@ -7,7 +7,7 @@ from permission_overrides import OPERATIONS
 
 TOOL = {
     'name': 'act',
-    'description': 'Perform a supported Core action only when the administrator enabled its group and this exchange permits writes. Owner guard rails and hard refusals always apply. Name every successful performed action in your answer. If approval_required, use normal native approval; never enable a group yourself. If do_not_retry, inspect the outcome before attempting anything again. Remote turns require normal approval in this version.',
+    'description': 'Perform a supported Core action only when the administrator enabled its group and this exchange permits writes. Owner guard rails and hard refusals always apply. Name every successful performed action in your answer. For a device action that a group or the data allow-list does not cover, this tool itself asks the owner in the chat to Allow once or Deny, and waits for the answer. If approval_required is still true, use normal native approval; if denied_by_owner, do not ask again in this exchange; never enable a group yourself. If the reason says the Security and people group is off, tell the owner what it says and do not say that approval is unavailable. If do_not_retry, inspect the outcome before attempting anything again. Remote turns require normal approval in this version.',
     'inputSchema': {'type': 'object', 'additionalProperties': False,
                     'properties': {'operation': {'type': 'string', 'enum': sorted(OPERATIONS)},
                                    'target': {'type': ['string', 'array', 'object', 'null']},
