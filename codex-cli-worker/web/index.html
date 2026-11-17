@@ -358,7 +358,9 @@
     </dialog>
     <dialog id="status-dialog" class="studio-sheet" aria-labelledby="status-title"><div class="dialog-header"><h2 id="status-title">Status</h2><button class="icon icon-close" data-close="status-dialog" aria-label="Close status"></button></div><dl id="status-details"></dl></dialog>
     <dialog id="connection-dialog" class="studio-sheet" aria-labelledby="connection-title"><div class="dialog-header"><h2 id="connection-title">Remote connection</h2><button class="icon icon-close" data-close="connection-dialog" aria-label="Close remote connection"></button></div><div id="connection-content"></div><p id="connection-result" role="alert"></p></dialog>
-    <dialog id="workspace-dialog" class="studio-sheet" aria-labelledby="workspace-title"><div class="dialog-header"><h2 id="workspace-title">Workspace rules</h2><button class="icon icon-close" data-close="workspace-dialog" aria-label="Close workspace rules"></button></div><div id="workspace-content"></div><p id="workspace-result" role="status"></p></dialog>
+    <dialog id="workspace-dialog" class="studio-sheet" aria-labelledby="workspace-title"><div class="dialog-header"><h2 id="workspace-title">Workspace rules</h2><button class="icon icon-close" data-close="workspace-dialog" aria-label="Close workspace rules"></button></div><div id="workspace-content"><label for="agents">AGENTS.md</label
+      ><textarea id="agents" rows="12" spellcheck="false"></textarea
+      ><button id="save-agents">Save instructions</button></div><p id="workspace-result" role="status"></p></dialog>
     <dialog id="settings">
       <div class="dialog-header">
         <h2>Settings</h2>
@@ -445,9 +447,7 @@
       <section id="interaction-logs-section">
         <h3>Interaction logs</h3>
         <p class="muted">Export recent worker metadata. Remote ChatGPT threads are not recorded. Review the file before sharing it.</p>
-        <label for="diagnostic-retention">Interactions to keep (10–100)</label>
-        <input id="diagnostic-retention" type="number" min="10" max="100" value="25" step="1">
-        <button id="save-diagnostic-retention" class="subtle">Save log retention</button>
+        <p id="diagnostic-retention-note" class="muted">Set how many interactions to keep with Interactions to keep in Add-on configuration.</p>
         <button id="export-interaction-logs" class="subtle">Export logs</button>
         <p id="export-logs-status" class="muted" role="status"></p>
       </section>
@@ -483,12 +483,8 @@
           thread warning reaches this page; a missing warning does not prove
           the requested permissions were granted.
         </p>
-        <form id="remote-control-name-form">
-          <label for="remote-control-name">Name in the ChatGPT app</label>
-          <input id="remote-control-name" maxlength="63" autocomplete="off" spellcheck="false">
-          <div class="settings-actions"><button id="remote-control-name-save" type="submit" class="subtle">Save name</button></div>
-          <p id="remote-control-name-note" class="muted" role="status"></p>
-        </form>
+        <p id="remote-control-name-line" class="muted">Name in the ChatGPT app: <strong id="remote-control-name"></strong>.
+          Change it with Remote control machine name in Add-on configuration.</p>
         <div class="settings-actions">
           <button id="remote-control-start">Turn on</button
           ><button id="remote-control-pair" class="subtle">New pairing code</button
@@ -538,18 +534,18 @@
         <form id="schedule-mail-form"><input id="schedule-mail-parent" type="hidden" /><p id="schedule-mail-target" class="muted">New message</p><label for="schedule-mail-body">Message</label><textarea id="schedule-mail-body" rows="3" maxlength="8000" required></textarea><div class="settings-actions"><button type="submit">Save message</button><button id="schedule-mail-reset" type="button" class="subtle">New thread</button></div></form>
         <p id="schedule-result" role="status"></p>
       </section>
-      <section id="workspace-section" data-own-dialog>
+      <section id="workspace-section">
         <h3>Workspace instructions</h3>
         <p class="muted">
           Codex follows these instructions when working in your Home Assistant
           configuration.
         </p>
-        <label for="agents">AGENTS.md</label
-        ><textarea id="agents" rows="12" spellcheck="false"></textarea
-        ><button id="save-agents">Save instructions</button>
+        <button id="workspace-open" class="subtle">Workspace rules</button>
       </section>
-      <section id="appearance-section"><h3>Appearance</h3><p class="muted">Follow Home Assistant</p></section>
-      <section id="advanced-section"><h3>Advanced</h3><button id="workspace-open" class="subtle">Workspace rules</button></section>
+      <a id="addon-configuration" class="ha-row ha-nav-row" href="/hassio/addon/codex_cli_worker/config" target="_top"
+         aria-label="Add-on configuration" aria-describedby="addon-configuration-description"
+        ><span><strong>Add-on configuration</strong><span id="addon-configuration-description" class="ha-row-description">Model, sandbox, logs to keep, the remote control name and the other options.</span></span
+        ><span class="ha-nav-chevron" aria-hidden="true"></span></a>
       <p id="settings-result" role="status"></p>
     </dialog>
   </body>

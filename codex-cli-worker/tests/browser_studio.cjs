@@ -131,7 +131,7 @@ fs.mkdirSync(output,{recursive:true});
    };
    await footRow('#settings-button');
    assert.equal(await page.locator('#agents').isVisible(),false);
-   await page.locator('#advanced-section .settings-toggle').click();
+   await page.locator('#workspace-section .settings-toggle').click();
    await page.locator('#workspace-open').click();
    await page.waitForFunction(()=>!document.getElementById('agents').disabled);
    await page.locator('#agents').fill('Synthetic workspace rules.');

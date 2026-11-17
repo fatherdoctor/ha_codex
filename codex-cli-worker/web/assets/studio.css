@@ -84,7 +84,6 @@ dialog::backdrop { background: #0006; }
 .pairing-continue { display: block; background: var(--accent); color: var(--text-light-primary-color, #212121); text-decoration: none; border-radius: 10px; padding: 14px; margin: 16px 0; font-weight: 600; }
 .pairing-qr { display: block; background: white; padding: 12px; width: min(260px, 100%); height: auto; margin: 16px auto; }
 .pairing-code { overflow-wrap: anywhere; }
-#workspace-section > h3 { display: none; }
 #agents { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line); padding: 12px; border-radius: 10px; }
 @media (max-width: 1050px) and (min-width: 701px) {
   .compose-area { padding: 12px 20px 22px; }
