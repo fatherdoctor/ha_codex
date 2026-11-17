@@ -673,7 +673,7 @@ class RedirectionTests(unittest.TestCase):
                            "ha core info; { echo a; }", "ha core info; echo ${HOME}/{a,b}",
                            "ha addons logs x | awk '{print $1}'", "git commit -m 'ha: {a,b}'",
                            "ha backups list 2>&1 | grep -c '*'", "ha core info | jq '{a: .x, b: .su}'",
-                           'ha core info | jq "{v: ${x}}"', "bash -c 'jq \"{name: .su}\" ha.json'",
+                           "bash -c 'jq \"{name: .su}\" ha.json'",
                            "grep -rn ha --include='*.yaml' .", "echo '{s,x}u' ha")
     # H1: a brace word inside quotes that a second shell reads as a command and expands.
     SECOND_SHELL_BRACE_FORMS = (
@@ -868,11 +868,11 @@ class RedirectionTests(unittest.TestCase):
         self.assertEqual(gate_rules._brace_words('ha a\ns{u,}', 0), ['s{u,}'])
 
     def test_quoted_text_is_read_again_only_so_deep(self) -> None:
-        """Past _BRACE_QUOTE_DEPTH the quoted text is one word with its quotes: refused with a comma, allowed without."""
+        """Past _BRACE_QUOTE_DEPTH the quoted text is one word with its quotes, and a brace word with a quote is refused."""
         deep = gate_rules._BRACE_QUOTE_DEPTH
         self.assertEqual(gate_rules._brace_words("'{a,b}'", -1, deep), ["'{a,b}'"])
         self.assertTrue(gate_rules._brace_word_names_family("'{a,b}'", False))
-        self.assertFalse(gate_rules._brace_word_names_family("'{a}'", False))
+        self.assertTrue(gate_rules._brace_word_names_family("'{a}'", False))
 
     def test_nested_braces_are_refused_past_the_limit_and_stay_fast(self) -> None:
         """H5: a word with more than _BRACE_MAX_BRACES braces and a comma is refused without expansion."""
@@ -898,6 +898,94 @@ class RedirectionTests(unittest.TestCase):
                         "echo 'ha {s,x}u info'", 'ha "{s,x}u" info', 'echo ha ${HOME}', 'grep ha *.yaml'):
             with self.subTest(command=command):
                 self.assertIn('Supervisor', refusal(command, False))
+
+    # J1: in a text with a #, $(, a backtick or a heredoc, the reading cuts a brace word at a quoted blank.
+    CUT_BRACE_FORMS = (
+        'ha {-x" y",s}u info # c', "ha {-x' y',s}u info # c", 'ha {-x\\ y,s}u info # c', 'ha {-x";",s}u info # c',
+        'ha {-x">",s}u info # c', 'ha {--config" x",s}u info # c', 'ha {-x" y",su} info # c',
+        'echo $(:); ha {-x" y",s}u info', 'echo `:`; ha {-x" y",s}u info', 'ha {-x" y",s}u info <<E\nE',
+        'ha {-x"\ty",s}u info # c', 'bash -c \'ha {-x" y",s}u info\' # c')
+    # J2: a second shell reads the text after the first shell removed its quotes and backslashes.
+    SECOND_SHELL_JOINED_FORMS = (
+        'eval ha s\\{u,\\} info', 'eval ha s\\{u,} info', 'eval ha s\\{u,x} info', 'eval ha \\{s,x\\}u info',
+        'eval ha s\\{u..u} info', "eval eval ha 's\\{u,}' info", "eval ha s'{'u,'}' info", "eval 'ha s{u,''} info'",
+        "eval \"ha s{u,\"'} info'", "eval 'ha s{u.''.u} info'")
+    SECOND_SHELL_JOINED_BOTH_SHELLS = (
+        "bash -c 'eval ha s\\{u,\\} info'", "bash -c 'ha s{u,'\"} info\"", "bash -c 'ha s{u,'\\''x'\\''} info'",
+        "bash -c 'ha s{u,'\"x} info\"", "bash -c 'ha s{''u,} info'")
+    # J3: a quoted or escaped blank before a built family word is one word for the shell.
+    QUOTED_BLANK_BUILT_FORMS = (
+        'while ha --config "a b" s${x}u info; do break; done', "while ha --config 'a b' s${x}u info; do break; done",
+        'while ha --config a\\ b s${x}u info; do break; done', 'while ha --api-token "a b" s${x}u info; do break; done',
+        'while ha --endpoint "a b c" s${x}u info; do break; done',
+        'while ha --config "${y:-a b}" s${x}u info; do break; done', 'while ha -x"a b" s${x}u info; do break; done',
+        'while ha 2>"a b" s${x}u info; do break; done', 'while ha > "a b" s${x}u info; do break; done',
+        'setsid ha --config "a b" s${x}u info', 'if false; then :; else ha 2>"a b" s${x}u info; fi',
+        'touch su; while ha --config "a b" s[u] info; do break; done')
+    # J4: with bash's extglob option, @(su), +(su) and !(x) are globs.
+    EXTGLOB_FORMS = ('touch su\nshopt -s extglob\nha @(su) info', 'touch su\nshopt -s extglob\nha +(su) info',
+                     'touch su\nshopt -s extglob\nha @(su|x) info', 'touch su\nshopt -s extglob\nha @(s)u info',
+                     'touch su\nshopt -s extglob\nwhile ha @(su) info; do break; done')
+    # J5: a script in the $'...' form that spells the family or a brace with an escape.
+    ANSI_C_FORMS = ("bash -c $'ha \\x73u info'", "bash -c $'ha s\\x7bu,} info'", "bash -c $'ha s\\173u,\\175 info'",
+                    "eval $'ha s\\x7bu,\\x7d info'", "bash -c $'ha s{u\\x2c} info'")
+    # J6: ha right after a dash is a flag group, not the program.
+    DASH_HA_HARMLESS = ('ls -ha *', 'ls -ha $HOME', 'du -ha * | sort -h', 'du -ha "$dir"', 'tar -czf x.tgz -ha *',
+                        'grep -ha $x f')
+
+    def test_print_only_shell_runs_each_sixth_round_form(self) -> None:
+        for command in self.CUT_BRACE_FORMS + self.SECOND_SHELL_JOINED_FORMS + self.EXTGLOB_FORMS + self.ANSI_C_FORMS:
+            self._runs(command, 'su', ('bash',))
+        for command in self.SECOND_SHELL_JOINED_BOTH_SHELLS + self.QUOTED_BLANK_BUILT_FORMS:
+            self._runs(command, 'su', ('bash', 'dash'))
+
+    def test_hook_refuses_each_sixth_round_form(self) -> None:
+        for command in (self.CUT_BRACE_FORMS + self.SECOND_SHELL_JOINED_FORMS + self.SECOND_SHELL_JOINED_BOTH_SHELLS
+                        + self.QUOTED_BLANK_BUILT_FORMS + self.EXTGLOB_FORMS + self.ANSI_C_FORMS):
+            for remote_on in (False, True):
+                with self.subTest(command=command, remote_on=remote_on):
+                    self.assertIn('Supervisor', refusal(command, remote_on))
+
+    def test_each_sixth_round_rule_alone_refuses_its_forms(self) -> None:
+        for command in self.CUT_BRACE_FORMS:
+            with self.subTest(command=command):
+                self.assertTrue(gate_rules._ha_unknown_flag(command, False))
+        for command in self.SECOND_SHELL_JOINED_FORMS + self.SECOND_SHELL_JOINED_BOTH_SHELLS:
+            with self.subTest(command=command):
+                self.assertTrue(gate_rules._ha_floor_brace_word(command, False))
+        for command in self.QUOTED_BLANK_BUILT_FORMS + self.EXTGLOB_FORMS:
+            with self.subTest(command=command):
+                self.assertTrue(gate_rules._ha_built_family_word(gate_rules._join_shell_continuations(command)))
+
+    def test_ha_after_a_dash_is_not_the_program(self) -> None:
+        for command in self.DASH_HA_HARMLESS:
+            for remote_on in (False, True):
+                with self.subTest(command=command, remote_on=remote_on):
+                    self.assertEqual(refusal(command, remote_on), '')
+        self.assertIn('Supervisor', refusal('ls; ha s${x}u info', False))
+
+    def test_built_family_word_readings(self) -> None:
+        """J7: each reading in _ha_built_family_word has a form that only it reads right."""
+        # Redirections are set apart first: ha>/dev/null is ha, >, /dev/null.
+        self.assertTrue(gate_rules._built_word_after_ha(gate_rules._space_redirections('while ha>/dev/null s${x}u info')))
+        self.assertFalse(gate_rules._built_word_after_ha('while ha>/dev/null s${x}u info'))
+        # Quotes and backslashes are removed: "h"a is the word ha.
+        self.assertTrue(gate_rules._ha_built_family_word('while "h"a s${x}u info; do break; done'))
+        # A quoted or escaped blank stays inside its word, and a continuation is removed.
+        self.assertEqual(gate_rules._keep_quoted_blanks('ha --config "a b" s${x}u'), 'ha --config a_b s${x}u')
+        self.assertEqual(gate_rules._keep_quoted_blanks("ha -x'a;b' a\\ b"), 'ha -xa_b a_b')
+        self.assertEqual(gate_rules._keep_quoted_blanks('ha \\\nsu'), 'ha su')
+        self.assertEqual(gate_rules._keep_quoted_blanks("a 'x\\ y'"), 'a x\\_y')
+        # The second reading removes every backslash-newline pair, also inside single quotes.
+        self.assertTrue(gate_rules._ha_built_family_word("while ha --config 'a\\\nb' s${x}u info; do break; done"))
+
+    def test_stated_over_refusals_of_the_sixth_round(self) -> None:
+        """DOCS states these: a quoted brace word in a text with ${ or a comment, and a $'...' escape beside ha."""
+        for command in ('ha core info | jq "{v: ${x}}"', "ha core info | jq '{a: .b}' # x",
+                        "printf $'a\\tb\\n'; ha core info"):
+            with self.subTest(command=command):
+                self.assertIn('Supervisor', refusal(command, False))
+        self.assertEqual(refusal("printf $'a\\tb\\n'", False), '')
 
     def test_brace_word_time_stays_flat_on_one_long_word(self) -> None:
         """G2: the brace words are read in one pass, so one long word after ha stays fast."""

@@ -23,6 +23,9 @@
 # closer5-* and closer6-* are the fourth closure's two sets (a brace word inside a quoted script that a second
 # shell reads: bash -c, eval, trap, a pipe into bash; a built family word behind while, until, else, setsid and
 # other words before ha). builder5-* are the fix's own cases, with allowed commands that look hostile (jq filters).
+# closer7-* and closer8-* are the fifth closure's two sets (a brace word cut at a quoted blank, a brace word made of
+# quoted pieces or an escaped brace for a second shell, a quoted blank before a built family word, extended globs,
+# $'...' scripts with escapes, ls -ha and du -ha). Commands already in the corpus are not repeated.
 # n/a: Unicode look-alike letters (ha is a fixed ASCII program name; the shell does not fold them);
 # aliases and functions (DOCS names them as a limit: the check reads text, not shell state).
 # Left out on purpose, as limits DOCS states (the check cannot see a program that the command builds or that
@@ -1826,3 +1829,383 @@ builder5-013	su:bash	eval "eval 'ha s{u,} info'"
 builder5-014	su:bash,dash	x="ha s{u,} info"; bash -c "$x"
 builder5-015	su:bash	until ha {s,$(:)}u info; do break; done
 builder5-016	su:bash,dash	nice -n 5 setsid ha s${x}u info
+closer7-001	su:bash	eval ha s\\{u,\\} info
+closer7-002	su:bash	eval ha s{u\\,} info
+closer7-003	su:bash	eval ha s'{'u,'}' info
+closer7-004	su:bash	eval ha s\\{u,} info
+closer7-005	su:bash	eval ha s{u,\\} info
+closer7-006	su:bash	eval 'ha' 's{u,}' info
+closer7-007	su:bash	eval "ha" '{s,x}u' info
+closer7-008	su:bash	eval 'ha s{u,''} info'
+closer7-009	su:bash,dash	bash -c 'ha s{u,'"} info"
+closer7-010	su:bash	eval eval ha 's\\{u,}' info
+closer7-011	su:bash,dash	bash -c 'eval ha s\\{u,\\} info'
+closer7-012	su:bash,dash	bash -c "eval ha 's{u,}' info"
+closer7-013	su:bash	eval ha 's{u..u}' info
+closer7-014	su:bash,dash	bash -c 'ha s{u..u} info'
+closer7-015	su:bash,dash	bash -c 'ha {s..s}u info'
+closer7-016	su:bash	eval 'ha s{u..u..1} info'
+closer7-017	su:bash	ha s{u..v} info
+closer7-018	none	ha {r..s}u info
+closer7-019	su:bash	ha s{u..u..1} info
+closer7-020	su:bash	ha {s..s..2}u info
+closer7-021	su:bash	bash -c $'ha s\\x7bu,} info'
+closer7-022	su:bash	bash -c $'ha s\\173u,\\175 info'
+closer7-023	su:bash	eval $'ha {s,x}u info'
+closer7-024	su:bash,dash	bash -c "ha s{u,$EMPTY} info"
+closer7-025	su:bash	x=,; eval 'ha s{u'$x'} info'
+closer7-026	su:bash	x=,; eval "ha s{u$x} info"
+closer7-027	su:bash,dash	bash -c 'x=,; eval "ha s{u$x} info"'
+closer7-028	su:bash,dash	bash -c ha\\ s{u,}\\ info
+closer7-029	su:bash,dash	bash -c "ha s"{u,}" info"
+closer7-030	su:bash	eval "ha "{s,x}u info
+closer7-031	su:bash	eval "ha" s{u,} info
+closer7-032	su:bash,dash	bash -c 'ha s'{u,}' info'
+closer7-033	su:bash	eval ha\\ {s,x}u info
+closer7-034	su:bash,dash	bash -c 'ha '{su,x}' info'
+closer7-035	su:bash	sh -c "ha "{su,x}" info"
+closer7-036	su:bash,dash	sh -c "bash -c 'ha s{u,} info'"
+closer7-037	su:bash,dash	bash -c "bash -c \\"ha s{u,} info\\""
+closer7-038	su:bash,dash	bash -c 'eval "ha s{u,} info"'
+closer7-039	su:bash,dash	bash --norc -c 'ha s{u,} info'
+closer7-040	su:bash,dash	bash -o braceexpand -c 'ha s{u,} info'
+closer7-041	su:bash,dash	bash -ec 'ha s{u,} info'
+closer7-042	su:bash,dash	bash -xc 'ha s{u,} info'
+closer7-043	su:bash,dash	/bin/bash -c 'ha s{u,} info'
+closer7-044	su:bash,dash	/usr/bin/env bash -c 'ha s{u,} info'
+closer7-045	su:bash,dash	"bash" -c 'ha s{u,} info'
+closer7-046	su:bash,dash	ba''sh -c 'ha s{u,} info'
+closer7-047	su:bash,dash	command bash -c 'ha s{u,} info'
+closer7-048	su:bash,dash	exec bash -c 'ha s{u,} info'
+closer7-049	su:bash,dash	nohup bash -c 'ha s{u,} info'
+closer7-050	su:bash,dash	timeout 5 bash -c 'ha s{u,} info'
+closer7-051	su:bash,dash	nice bash -c 'ha s{u,} info'
+closer7-052	su:bash,dash	setsid -w bash -c 'ha s{u,} info'
+closer7-053	su:bash,dash	bash -c 'ha s{u,} info' x y
+closer7-054	su:bash,dash	bash -c 'ha s{u,} info' 2>&1
+closer7-055	su:bash,dash	true && bash -c 'ha s{u,} info'
+closer7-056	su:bash,dash	(bash -c 'ha s{u,} info')
+closer7-057	su:bash,dash	echo $(bash -c 'ha s{u,} info')
+closer7-058	su:bash,dash	if bash -c 'ha s{u,} info'; then :; fi
+closer7-059	su:bash,dash	while bash -c 'ha s{u,} info'; do break; done
+closer7-060	su:bash,dash	find . -maxdepth 0 -exec bash -c 'ha s{u,} info' \\;
+closer7-061	su:bash,dash	bash <<'E'\nha s{u,} info\nE
+closer7-062	su:bash,dash	bash <<E\nha s{u,} info\nE
+closer7-063	su:bash,dash	bash -s <<'E'\nha {s,x}u info\nE
+closer7-064	su:bash,dash	cat <<'E' | bash\nha s{u,} info\nE
+closer7-065	su:bash	bash <<< 'ha s{u,} info'
+closer7-066	su:bash	bash <<<'ha {s,x}u info'
+closer7-067	su:bash,dash	printf 'ha s{u,} info\\n' | bash
+closer7-068	su:bash,dash	printf '%s\\n' 'ha s{u,} info' | bash
+closer7-069	su:bash,dash	echo 'ha s{u,} info' | bash -s
+closer7-070	su:bash,dash	echo 'ha s{u,} info' | bash /dev/stdin
+closer7-071	su:bash	bash <(echo 'ha s{u,} info')
+closer7-072	su:bash	source <(echo 'ha s{u,} info')
+closer7-073	su:bash,dash	bash -c "$(echo 'ha s{u,} info')"
+closer7-074	su:bash,dash	echo 'ha s{u,} info' > f; bash f
+closer7-075	su:bash	echo 'ha s{u,} info' >f; . ./f
+closer7-076	su:bash	echo 'ha s{u,} info' >f; source ./f
+closer7-077	su:bash	trap "ha s{u,} info" 0
+closer7-078	su:bash	trap 'ha s{u,} info' EXIT; exit
+closer7-079	su:bash	x='s{u,}'; eval ha $x info
+closer7-080	su:bash,dash	x='ha s{u,} info'; bash -c "$x"
+closer7-081	su:bash,dash	bash -c 'eval "$@"' x ha 's{u,}' info
+closer7-082	su:bash,dash	bash -c 'eval ha "$1" info' x 's{u,}'
+closer7-083	su:bash	f() { eval "$@"; }; f ha 's{u,}' info
+closer7-084	su:bash	declare -f >/dev/null; eval 'ha s{u,} info' 2>&1
+closer7-085	su:bash	eval -- 'ha s{u,} info'
+closer7-086	su:bash	builtin eval 'ha s{u,} info'
+closer7-087	su:bash	command eval 'ha {s,x}u info'
+closer7-088	su:bash,dash	bash -c 'ha s{u,} info;'
+closer7-089	su:bash,dash	bash -c ' ha s{u,} info'
+closer7-090	su:bash,dash	bash -c '\nha s{u,} info'
+closer7-091	su:bash,dash	bash -c 'ha \\\ns{u,} info'
+closer7-092	su:bash,dash	bash -c 'ha s{u,} info # c'
+closer7-093	su:bash,dash	bash -c 'ha -x s{u,} info'
+closer7-094	su:bash,dash	bash -c 'ha --log-level debug s{u,} info'
+closer7-095	su:bash,dash	bash -c 'ha 2>&1 s{u,} info'
+closer7-096	su:bash,dash	bash -c 'ha >/dev/null {s,x}u info'
+closer7-097	su:bash,dash	bash -c 'ha s{"u",} info'
+closer7-098	su:bash,dash	bash -c "ha s{'u',} info"
+closer7-099	remote:bash	eval 'ha {co,x}re restart'
+closer7-100	su:bash,dash	while h\\a s${x}u info; do break; done
+closer7-101	su:bash,dash	while "ha" s${x}u info; do break; done
+closer7-102	su:bash,dash	while 'ha' s${x}u info; do break; done
+closer7-103	su:bash,dash	while h''a s${x}u info; do break; done
+closer7-104	su:bash,dash	setsid h""a s${x}u info
+closer7-105	su:bash,dash	until h\\a s${x}u info; do break; done
+closer7-106	su:bash,dash	if false; then :; else 'ha' s${x}u info; fi
+closer7-107	su:bash	coproc h\\a s${x}u info
+closer7-108	su:bash,dash	for i in 1; do ha s${x}u info; done
+closer7-109	su:bash,dash	case x in x) h\\a s${x}u info;; esac
+closer7-110	su:bash	function f { 'ha' s${x}u info; }; f
+closer7-111	su:bash,dash	echo $(ha s${x}u info)
+closer7-112	su:bash,dash	echo `ha s${x}u info`
+closer7-113	su:bash,dash	x=$(ha s${x}u info)
+closer7-114	su:bash	cat <(ha s${x}u info)
+closer7-115	su:bash,dash	[[ -n $(ha s${x}u info) ]]
+closer7-116	su:bash,dash	a=b ha s${x}u info
+closer7-117	su:bash,dash	a=b c=d h\\a s${x}u info
+closer7-118	su:bash,dash	true | ha s${x}u info
+closer7-119	su:bash	true |& ha s${x}u info
+closer7-120	su:bash,dash	ha s${x}u info &
+closer7-121	su:bash,dash	true && ha s${x}u info
+closer7-122	su:bash,dash	false || ha s${x}u info
+closer7-123	su:bash,dash	env A=1 ha s${x}u info
+closer7-124	su:bash,dash	env -i PATH="$PATH" HA_STUB_OUT="$HA_STUB_OUT" ha s${x}u info
+closer7-125	su:bash,dash	\\ha s${x}u info
+closer7-126	su:bash	exec -a x h\\a s${x}u info
+closer7-127	su:bash	time -p 'ha' s${x}u info
+closer7-128	su:bash	builtin command h''a s${x}u info
+closer7-129	su:bash,dash	echo ha; ha s${x}u info
+closer7-130	su:bash,dash	echo ha x; ha s${x}u info
+closer7-131	su:bash,dash	echo ha info; h\\a s${x}u info
+closer7-132	su:bash,dash	ha info; ha s${x}u info
+closer7-133	su:bash,dash	ha info && ha s${x}u info
+closer7-134	su:bash,dash	ha info | ha s${x}u info
+closer7-135	su:bash,dash	ha info\nha s${x}u info
+closer7-136	su:bash,dash	ha -x s${x}u info
+closer7-137	su:bash,dash	ha --log-level=debug s${x}u info
+closer7-138	su:bash,dash	ha --no-progress s${x}u info
+closer7-139	su:bash,dash	ha --config "" s${x}u info
+closer7-140	su:bash,dash	ha --config -x s${x}u info
+closer7-141	su:bash,dash	ha --config "a b" s${x}u info
+closer7-142	su:bash,dash	ha --config 'a b' s${x}u info
+closer7-143	su:bash,dash	ha --config a\\ b s${x}u info
+closer7-144	su:bash,dash	ha --config "$(echo a b)" s${x}u info
+closer7-145	su:bash,dash	ha --config $(echo x) s${x}u info
+closer7-146	su:bash,dash	ha -x"a b" s${x}u info
+closer7-147	su:bash,dash	ha 2>&1 s${x}u info
+closer7-148	su:bash,dash	ha >f s${x}u info
+closer7-149	su:bash,dash	ha > f s${x}u info
+closer7-150	su:bash,dash	ha 2> "a b" s${x}u info
+closer7-151	su:bash,dash	ha >| f s${x}u info
+closer7-152	su:bash	ha {fd}>/dev/null s${x}u info
+closer7-153	su:bash,dash	ha 3<>f s${x}u info
+closer7-154	su:bash,dash	ha 2>$(echo /dev/null) s${x}u info
+closer7-155	su:bash,dash	ha >"$(echo f g)" s${x}u info
+closer7-156	su:bash,dash	ha >${y:-f} s${x}u info
+closer7-157	su:bash,dash	ha 2>/dev/null >/dev/null s${x}u info
+closer7-158	su:bash,dash	ha </dev/null s${x}u info
+closer7-159	su:bash,dash	ha -x \\\n s${x}u info
+closer7-160	su:bash,dash	ha s${x}u info # c
+closer7-161	su:bash,dash	ha s${x}u\tinfo
+closer7-162	su:bash,dash	ha s${x}u
+closer7-163	su:bash,dash	ha s${x}u;
+closer7-164	su:bash,dash	ha s${x}u|cat
+closer7-165	su:bash,dash	ha s${x}u>/dev/null info
+closer7-166	su:bash,dash	ha s${x}u&
+closer7-167	su:bash,dash	(ha s${x}u)
+closer7-168	su:bash,dash	ha\\\n s${x}u info
+closer7-169	su:bash	while h\\a $'su' info; do break; done
+closer7-170	su:bash	ha --config "a b" $'su' info
+closer7-171	su:bash	while ha s$'u' info; do break; done
+closer7-172	su:bash	while h\\a s$'u' info; do break; done
+closer7-173	su:bash	ha --config "a b" s$'u' info
+closer7-174	su:bash	while ha $'\\x73u' info; do break; done
+closer7-175	su:bash	while h\\a $'\\x73u' info; do break; done
+closer7-176	su:bash	ha --config "a b" $'\\x73u' info
+closer7-177	su:bash,dash	ha s$(:)u info
+closer7-178	su:bash,dash	while ha s$(:)u info; do break; done
+closer7-179	su:bash,dash	while h\\a s$(:)u info; do break; done
+closer7-180	su:bash,dash	ha --config "a b" s$(:)u info
+closer7-181	su:bash,dash	while ha s`:`u info; do break; done
+closer7-182	su:bash,dash	while h\\a s`:`u info; do break; done
+closer7-183	su:bash,dash	ha --config "a b" s`:`u info
+closer7-184	su:bash,dash	while ha ${x:-su} info; do break; done
+closer7-185	su:bash,dash	while h\\a ${x:-su} info; do break; done
+closer7-186	su:bash,dash	ha --config "a b" ${x:-su} info
+closer7-187	su:bash,dash	while ha ${x-su} info; do break; done
+closer7-188	su:bash,dash	while h\\a ${x-su} info; do break; done
+closer7-189	su:bash,dash	ha --config "a b" ${x-su} info
+closer7-190	su:bash,dash	ha s"$x"u info
+closer7-191	su:bash,dash	while ha s"$x"u info; do break; done
+closer7-192	su:bash,dash	while h\\a s"$x"u info; do break; done
+closer7-193	su:bash,dash	ha --config "a b" s"$x"u info
+closer7-194	su:bash,dash	ha su$x info
+closer7-195	su:bash,dash	while ha su$x info; do break; done
+closer7-196	su:bash,dash	while h\\a su$x info; do break; done
+closer7-197	su:bash,dash	ha --config "a b" su$x info
+closer7-198	su:bash,dash	ha $x''su info
+closer7-199	su:bash,dash	while ha $x''su info; do break; done
+closer7-200	su:bash,dash	while h\\a $x''su info; do break; done
+closer7-201	su:bash,dash	ha --config "a b" $x''su info
+closer7-202	su:bash,dash	ha s${x:+a}u info
+closer7-203	su:bash,dash	while ha s${x:+a}u info; do break; done
+closer7-204	su:bash,dash	while h\\a s${x:+a}u info; do break; done
+closer7-205	su:bash,dash	ha --config "a b" s${x:+a}u info
+closer7-206	su:bash,dash	ha su${x} info
+closer7-207	su:bash,dash	while ha su${x} info; do break; done
+closer7-208	su:bash,dash	while h\\a su${x} info; do break; done
+closer7-209	su:bash,dash	ha --config "a b" su${x} info
+closer7-210	su:bash	while ha $"su" info; do break; done
+closer7-211	su:bash	while h\\a $"su" info; do break; done
+closer7-212	su:bash	ha --config "a b" $"su" info
+closer7-213	su:bash,dash	ha su$EMPTY info
+closer7-214	su:bash,dash	while ha su$EMPTY info; do break; done
+closer7-215	su:bash,dash	while h\\a su$EMPTY info; do break; done
+closer7-216	su:bash,dash	ha --config "a b" su$EMPTY info
+closer7-217	su:bash,dash	touch su; ha su* info
+closer7-218	su:bash,dash	touch su; ha s[!x] info
+closer7-219	su:bash,dash	touch su; while h\\a s? info; do break; done
+closer7-220	su:bash,dash	touch su; ha --config "a b" s[u] info
+closer7-221	su:bash	touch su\nshopt -s extglob\nha @(su) info
+closer7-222	su:bash	touch su\nshopt -s extglob\nha +(su) info
+closer7-223	su:bash	touch su\nshopt -s extglob\nha ?(su) info
+closer7-224	su:bash	touch su\nshopt -s extglob\nha @(su|x) info
+closer7-225	su:bash	touch su\nshopt -s extglob\nha !(x) info
+closer7-226	su:bash,dash	touch supervisor; ha super* info
+closer7-227	remote:bash,dash	touch host; ha h?st reboot
+closer7-228	remote:bash	ha $'core' restart
+closer7-229	remote:bash	ha {ho,$x}st reboot
+closer7-230	su:bash,dash	while ha s\\\nu info; do break; done
+closer7-231	su:bash,dash	while h\\a s''u info; do break; done
+closer7-232	su:bash,dash	while 'ha' "su" info; do break; done
+closer7-233	su:bash,dash	setsid h\\a su info
+closer7-234	su:bash	setsid ha {s,${x:-a b}}u info
+closer7-235	su:bash	ha {$x,s}u info
+closer7-236	none	ha s{u,$x info
+closer7-237	su:bash	ha {s,$(echo })}u info
+closer7-238	su:bash	ha {s,$(echo \\))}u info
+closer7-239	su:bash	ha {s,${x:-\\}}}u info
+closer7-240	su:bash	ha {s,`echo ';'`}u info
+closer7-241	none	echo 'ha {a} b'
+closer7-242	none	bash -c 'echo {a,b}'
+closer7-243	remote:bash,dash	bash -c 'ha core info'
+closer7-244	none	bash -c 'ha s{u} info'
+closer7-245	remote:bash,dash	ha addons info $SLUG
+closer7-246	remote:bash,dash	ha core logs | grep "$x"
+closer7-247	remote:bash,dash	ha addons logs core_ssh
+closer7-248	none	echo '{"a":1}' > ha.json
+closer7-249	none	git commit -m 'ha {x,y} note'
+closer7-250	none	echo "ha s{u,} info"
+closer7-251	none	grep -r 'ha su' .
+closer7-252	none	bash -c "ha s\\{u,} info"
+closer7-253	none	bash -c 'ha s{u'"'"','"'"'} info'
+closer7-254	none	while read l; do echo "$l"; done < ha.txt
+closer7-255	none	for f in *.yaml; do echo $f; done
+closer7-256	remote:bash,dash	ha core check
+closer7-257	none	ha jobs info
+closer7-258	none	curl -d '{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":1}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}' http://x.invalid/
+closer7-259	none	echo '{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":1}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}' > ha.json
+closer8-001	su:bash,dash	while ha --config "a b" s${x}u info; do break; done
+closer8-002	su:bash	while ha --config 'a b' s$'u' info; do break; done
+closer8-003	su:bash,dash	while ha --config a\\ b s${x}u info; do break; done
+closer8-004	su:bash,dash	while ha -x"a b" s${x}u info; do break; done
+closer8-005	su:bash,dash	while ha 2>"a b" s${x}u info; do break; done
+closer8-006	su:bash,dash	while ha > "a b" s${x}u info; do break; done
+closer8-007	su:bash,dash	while ha --api-token "a b" s`:`u info; do break; done
+closer8-008	su:bash,dash	while ha --config "${y:-a b}" s${x}u info; do break; done
+closer8-009	su:bash,dash	while ha --endpoint "a b c" s${x}u info; do break; done
+closer8-010	remote:bash,dash	while ha --log-level "debug x" ho${x}st reboot; do break; done
+closer8-011	su:bash,dash	while ha -x"a\tb" s${x}u info; do break; done
+closer8-012	su:bash,dash	setsid ha --config "a b" s${x}u info
+closer8-013	su:bash	coproc ha -x"a b" s${x}u info
+closer8-014	su:bash,dash	if false; then :; else ha 2>"a b" s${x}u info; fi
+closer8-015	su:bash,dash	touch su; while ha --config "a b" s[u] info; do break; done
+closer8-016	su:bash,dash	ha 2>"a b" s${x}u info
+closer8-017	su:bash,dash	while ha x;ha s${x}u info; do break; done
+closer8-018	su:bash,dash	while ha info&&ha s${x}u info; do break; done
+closer8-019	su:bash,dash	while ha info|ha s${x}u info; do break; done
+closer8-020	none	while ha info||ha s${x}u info; do break; done
+closer8-021	su:bash,dash	while ha info&ha s${x}u info; do break; done
+closer8-022	su:bash,dash	while echo ha x;ha s${x}u info; do break; done
+closer8-023	su:bash,dash	while echo ha;ha s${x}u info; do break; done
+closer8-024	su:bash,dash	while ha -x;ha s${x}u info; do break; done
+closer8-025	su:bash,dash	while ha 2>&1;ha s${x}u info; do break; done
+closer8-026	su:bash,dash	while ha info\nha s${x}u info; do break; done
+closer8-027	su:bash,dash	while (ha info);ha s${x}u info; do break; done
+closer8-028	su:bash,dash	while ha {a};ha s${x}u info; do break; done
+closer8-029	su:bash,dash	while ha info;'ha' s${x}u info; do break; done
+closer8-030	su:bash,dash	setsid ha info;setsid ha s${x}u info
+closer8-031	remote:bash,dash	until ha x;ha ho${x}st reboot; do break; done
+closer8-032	su:bash	ha {-x" y",s}u info # c
+closer8-033	su:bash	ha {-x' y',s}u info # c
+closer8-034	su:bash	ha {-x\\ y,s}u info # c
+closer8-035	su:bash	echo $(:); ha {-x" y",s}u info
+closer8-036	su:bash	ha {-x";",s}u info # c
+closer8-037	su:bash	ha {-x">",s}u info # c
+closer8-038	su:bash	ha {--config" x",s}u info # c
+closer8-039	su:bash	ha {-x"\ty",s}u info # c
+closer8-040	remote:bash	ha {-x" y",ho}st reboot # c
+closer8-041	su:bash	echo `:`; ha {-x" y",s}u info
+closer8-042	su:bash	ha {-x" y",s}u info <<E\nE
+closer8-043	su:bash	ha {-x" y",s}u info
+closer8-044	su:bash,dash	bash -c 'ha {-x" y",s}u info' # c
+closer8-045	su:bash	ha {-x" y",su} info # c
+closer8-046	none	ha {2\\>" y",s}u info # c
+closer8-047	su:bash	ha {-x"|",{s,x}}u info # c
+closer8-048	none	ha -{x" y",-}  {" ",s}u info # c
+closer8-049	su:bash,dash	bash -c 'ha s{u,'\\''x'\\''} info'
+closer8-050	su:bash,dash	bash -c 'ha s{u,'"x} info"
+closer8-051	su:bash	eval "ha s{u,"'} info'
+closer8-052	su:bash	eval ha s\\{u,x} info
+closer8-053	su:bash	eval ha \\{s,x\\}u info
+closer8-054	su:bash	eval ha {s\\,x}u info
+closer8-055	su:bash	eval eval ha 's\\\\{u,}' info
+closer8-056	su:bash	eval ha s\\{u..u} info
+closer8-057	su:bash	eval 'ha s{u.''.u} info'
+closer8-058	su:bash,dash	bash -c 'ha s{u,}'' info'
+closer8-059	su:bash,dash	bash -c 'ha ''s{u,} info'
+closer8-060	su:bash,dash	bash -c 'ha'' s{u,} info'
+closer8-061	su:bash	eval 'ha' 's{u,}'' info'
+closer8-062	su:bash,dash	bash -c 'ha s{''u,} info'
+closer8-063	su:bash	bash -c $'ha s{u\\x2c} info'
+closer8-064	su:bash	bash -c $'ha \\x73u info'
+closer8-065	su:bash	bash -c $'ha s{u,} info' x
+closer8-066	su:bash	eval $'ha s\\x7bu,\\x7d info'
+closer8-067	su:bash	h\\a s{u,} info
+closer8-068	su:bash	'ha' s{u,} info
+closer8-069	su:bash	h''a {s,x}u info
+closer8-070	su:bash,dash	bash -c 'h\\a s{u,} info'
+closer8-071	su:bash,dash	bash -c 'h"a" s{u,} info'
+closer8-072	su:bash	eval h\\\\a 's{u,}' info
+closer8-073	su:bash	eval h'a' 's{u,}' info
+closer8-074	su:bash	h\\\na s{u,} info
+closer8-075	su:bash,dash	bash -c 'h'\\''a'\\'' s{u,} info'
+closer8-076	su:bash	/usr/bin/env ha s{u,} info
+closer8-077	none	HA s{u,} info
+closer8-078	su:bash,dash	bash -c "bash -c 'bash -c \\"ha s{u,} info\\"'"
+closer8-079	none	ha {{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{s,x}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}u info
+closer8-080	none	ha {{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{s,x}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}u info
+closer8-081	none	bash -c 'ha {{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{s,x}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}u info'
+closer8-082	su:bash	ha s{u,}{,}{,}{,}{,}{,}{,}{,} info
+closer8-083	none	ha s{u,}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a}{a} info
+closer8-084	su:bash	cd /bin\nshopt -s extglob\nha @(su) info
+closer8-085	su:bash,dash	bash -O extglob -c 'cd /bin; ha @(su) info'
+closer8-086	su:bash,dash	bash -O extglob -c 'cd /bin; ha +(su) info'
+closer8-087	none	bash -O extglob -c 'cd /bin; ha !(*[!s]*|*[!u]|s|u|ss*|su?*) info'
+closer8-088	su:bash,dash	bash -O extglob -c 'cd /bin; while ha @(su) info; do break; done'
+closer8-089	su:bash	cd /bin\nshopt -s extglob\nha @(s)u info
+closer8-090	su:bash,dash	cd /bin; ha s[u] info
+closer8-091	none	cd /bin; ha su? info
+closer8-092	none	ha ~+/../su info
+closer8-093	none	ha ~root/../su info
+closer8-094	none	ls -ha *
+closer8-095	none	ls -ha $HOME
+closer8-096	none	du -ha * | sort -h
+closer8-097	none	du -ha "$dir"
+closer8-098	none	df -ha
+closer8-099	none	ls -ha
+closer8-100	none	ls -ha /config
+closer8-101	none	tar -czf x.tgz -ha *
+closer8-102	none	grep -ha $x f
+closer8-103	none	ls -lha *.yaml
+closer8-104	none	cat /config/ha *.yaml
+closer8-105	none	echo ha $(date)
+closer8-106	none	git commit -m "ha $x"
+closer8-107	none	git commit -m 'restart ha {a,b}'
+closer8-108	none	echo 'ha {a,b}'
+closer8-109	remote:bash,dash	ha core info | jq "{v: ${x}}"
+closer8-110	remote:bash,dash	ha core info; echo $x
+closer8-111	remote:bash,dash	ha core info > ${f}.txt
+closer8-112	none	echo $(echo $(echo $(echo $(echo $(echo $(echo $(echo ha x))))))))
+closer8-113	none	echo '{"a":1,"b":{"c":2}}' > ha.json
+closer8-114	none	curl -d '{"a":1,"b":2}' http://x.invalid/ha
+closer8-115	remote:bash,dash	ha backups list | jq '.data.backups[] | {slug, name}'
+closer8-116	remote:bash,dash	ha core info | jq '{a,b}'
+closer8-117	remote:bash,dash	ha core info | jq -r '.data | {version, arch}'
+closer8-118	none	echo ha | tr a-z A-Z
+closer8-119	remote:bash,dash	ha core info && echo "$?"
+closer8-120	remote:bash,dash	ha core info; for f in *.yaml; do echo $f; done
+closer8-121	none	cd /config && ha core check && ls *.yaml

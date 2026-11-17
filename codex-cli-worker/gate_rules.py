@@ -590,7 +590,14 @@ HA_UNREADABLE_WORD_RE = re.compile(
 # by the brace rule instead, which lists what bash makes of it.
 HA_COMPUTED_WORD_RE = re.compile(r"[$`*?\[]")
 # The same family position as the text floor finds it, for the built family word rule below.
-_HA_WORD_TEXT_RE = re.compile(r"\bha\s+", re.IGNORECASE)
+# A script in bash's $'...' form with a backslash escape in it: bash -c $'ha \x73u info' runs
+# ha su info, and no reading here decodes the escapes. Refused in a text with the word ha.
+ANSI_C_ESCAPE_RE = re.compile(r"\$'[^']*\\")
+# Not right after a dash: in ``ls -ha *`` the letters are a flag group, never the program.
+_HA_WORD_TEXT_RE = re.compile(r"(?<![\w-])ha\s+", re.IGNORECASE)
+# A built family word for the rule below: a $, a backtick, a glob, or a "(" (with bash's extglob
+# option, @(su), +(su) and !(x) are globs too).
+_HA_BUILT_WORD_RE = re.compile(r"[$`*?\[(]")
 _HA_BEFORE_FAMILY_RE = re.compile(r"\s*" + _HA_BEFORE_FAMILY_TEXT, re.IGNORECASE)
 _HA_NEXT_WORD_RE = re.compile(r"\S+")
 # Where the shell ends a word outside quotes: a blank (a space, a tab or a newline; not a carriage
@@ -711,15 +718,20 @@ def _brace_word_names_family(word: str, remote_on: bool) -> bool:
 
     Bash expands braces only around a comma or a sequence (``{a,b}``, ``{a..z}``) written in the
     command: a comma that a quote, a variable or a substitution makes is a plain letter. So a word
-    with neither is no expansion (``{name:.su}`` in a jq filter). Any other word fails closed: a
-    quote, a backslash or a backtick, a sequence, more than ``_BRACE_MAX_BRACES`` braces, and too
-    many choices to list all count as a family word. So does a word with a ``$`` whose braces do
-    not close: the cut reading broke it inside ``${...}`` or ``$(...)`` (``{s,$(:)}u`` is cut to
-    ``{s,$``), so its end is not known.
+    with neither is no expansion (``{name:.su}`` in a jq filter). A word with a quote, a backslash
+    or a backtick counts as a family word first, comma or not: the cut reading may have split it at
+    a quoted blank, so the comma can be in the next piece. Any other word fails closed too: a
+    sequence, more than ``_BRACE_MAX_BRACES`` braces, and too many choices to list all count as a
+    family word. So does a word with a ``$`` whose braces do not close: the cut reading broke it
+    inside ``${...}`` or ``$(...)`` (``{s,$(:)}u`` is cut to ``{s,$``), so its end is not known.
     """
+    if _BRACE_WORD_QUOTING_RE.search(word):
+        # Tested before the comma: the cut reading splits {-x" y",s}u at the quoted blank, so the
+        # piece {-x" holds no comma, and bash still makes "su" of the whole word.
+        return True
     if "," not in word and ".." not in word:
         return False
-    if (_BRACE_WORD_QUOTING_RE.search(word) or ".." in word
+    if (".." in word
             or ("$" in word and word.count("{") != word.count("}"))
             or word.count("{") > _BRACE_MAX_BRACES):
         return True
@@ -777,7 +789,22 @@ def _ha_unknown_flag(text: str, remote_on: bool) -> bool:
             for brace in _brace_words(reading, first_ha):
                 if _brace_word_names_family(brace, remote_on):
                     return True
-    return False
+    return _ha_floor_brace_word(text, remote_on)
+
+
+def _ha_floor_brace_word(text: str, remote_on: bool) -> bool:
+    """Read the brace words once more in the text as the floor reads it: no quotes, no backslashes.
+
+    A second shell (``eval``, ``bash -c``) reads the text after the first shell has removed its
+    quotes and backslashes. So ``eval ha s\\{u,\\} info`` and ``bash -c 'ha s{u,'"} info"`` both
+    reach it as ``ha s{u,} info``, while the reading above sees an escaped brace or two quoted
+    pieces that each hold a brace that does not close.
+    """
+    plain = re.sub(r"[\"'\\]", "", text.replace("\\\n", ""))
+    first = HA_SHELL_WORD_RE.search(plain)
+    if not first:
+        return False
+    return any(_brace_word_names_family(brace, remote_on) for brace in _brace_words(plain, first.end()))
 
 
 def _ha_built_family_word(joined: str, depth: int = 0) -> bool:
@@ -787,16 +814,18 @@ def _ha_built_family_word(joined: str, depth: int = 0) -> bool:
     program only behind the words it knows (``if``, ``env``, ...). Behind any other word
     (``while``, ``setsid``, ``coproc``) it does not, so this rule reads the text as the floor
     does and needs no list of words: after a word ``ha`` and its flags, flag values and
-    redirections, the next word is refused when it holds a ``$``, a backtick or a glob. A brace
-    word there can expand to nothing (``ha {,} s${x}u``), so the word after it is read too.
+    redirections, the next word is refused when it holds a ``$``, a backtick, a glob or a ``(``
+    (an extended glob). A brace word there can expand to nothing (``ha {,} s${x}u``), so the word
+    after it is read too.
 
     Each ``$(...)`` and backtick substitution is first replaced by a word with a ``$`` (as in the
     parser), so a blank inside it does not move the family position, and its own text is read as
-    a command. Then the text is read with its quotes and backslashes removed and a blank on each
-    side of every redirection operator, once with continuations joined and once with every
-    backslash-newline pair removed. The cost: a ``$``, a backtick or a glob right after the word
-    ``ha`` anywhere in the command is refused, even as an argument of another program
-    (``grep ha *.yaml``).
+    a command. The text is then read four times: with continuations joined and with every
+    backslash-newline pair removed, and each of those once with its quotes and backslashes
+    removed (as the floor reads it) and once with each quoted or escaped blank kept inside its
+    word (``--config "a b"`` is one flag value, as the shell reads it). The cost: a ``$``, a
+    backtick, a glob or a ``(`` right after the word ``ha`` anywhere in the command is refused,
+    even as an argument of another program (``grep ha *.yaml``).
     """
     if depth > 6:
         # Substitutions nested this deep are not read further: refuse when the word ha is there.
@@ -805,20 +834,54 @@ def _ha_built_family_word(joined: str, depth: int = 0) -> bool:
     if any(_ha_built_family_word(item, depth + 1) for item in nested):
         return True
     for reading in (masked, masked.replace("\\\n", "")):
-        plain = _space_redirections(re.sub(r"[\"'\\]", "", reading))
-        position = 0
-        while word := _HA_WORD_TEXT_RE.search(plain, position):
-            position = _HA_BEFORE_FAMILY_RE.match(plain, word.end()).end()
-            while family := _HA_NEXT_WORD_RE.match(plain, position):
-                position = family.end()
-                if family.group().startswith("-") or REDIRECTION_RE.match(family.group()):
-                    break
-                if HA_COMPUTED_WORD_RE.search(family.group()):
-                    return True
-                if "{" not in family.group():
-                    break
-                position = _HA_BEFORE_FAMILY_RE.match(plain, position).end()
+        unquoted = _space_redirections(re.sub(r"[\"'\\]", "", reading))
+        quoted_kept = _keep_quoted_blanks(_space_redirections(reading))
+        if _built_word_after_ha(unquoted) or _built_word_after_ha(quoted_kept):
+            return True
     return False
+
+
+def _built_word_after_ha(plain: str) -> bool:
+    """Say whether a word ``ha`` in plain text is followed, past its flags, by a built family word."""
+    position = 0
+    while word := _HA_WORD_TEXT_RE.search(plain, position):
+        position = _HA_BEFORE_FAMILY_RE.match(plain, word.end()).end()
+        while family := _HA_NEXT_WORD_RE.match(plain, position):
+            position = family.end()
+            if family.group().startswith("-") or REDIRECTION_RE.match(family.group()):
+                break
+            if _HA_BUILT_WORD_RE.search(family.group()):
+                return True
+            if "{" not in family.group():
+                break
+            position = _HA_BEFORE_FAMILY_RE.match(plain, position).end()
+    return False
+
+
+def _keep_quoted_blanks(text: str) -> str:
+    """Remove quotes and backslashes, and write each quoted or escaped blank or operator as ``_``.
+
+    The shell keeps ``"a b"`` and ``a\\ b`` as one word. Without its quotes the text would read
+    as two words, and the family position would move by one.
+    """
+    out, quote, i = [], "", 0
+    while i < len(text):
+        ch = text[i]
+        if ch == "\\" and quote != "'" and i + 1 < len(text):
+            following = text[i + 1]
+            if following != "\n":
+                # A backslash-newline pair is a continuation: the shell removes both.
+                out.append("_" if following in _SHELL_WORD_BREAKS else following)
+            i += 2
+            continue
+        if ch in "'\"" and quote in ("", ch):
+            quote = "" if quote else ch
+        elif quote and ch in _SHELL_WORD_BREAKS:
+            out.append("_")
+        else:
+            out.append(ch)
+        i += 1
+    return "".join(out)
 
 
 def _space_redirections(text: str, whole: bool = False) -> str:
@@ -1291,6 +1354,7 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
                 or any(HA_ALWAYS_TEXT_RE.search(plain) for plain in floor)
                 or _ha_unknown_flag(text, remote_on)
                 or _ha_built_family_word(joined)
+                or (HA_SHELL_WORD_RE.search(text) and ANSI_C_ESCAPE_RE.search(text))
                 or (remote_on and any(HA_REMOTE_TEXT_RE.search(plain) for plain in floor))
                 or _ha_command(text, remote_on)):
             return "This command talks to the Home Assistant Supervisor, which is never allowed."
