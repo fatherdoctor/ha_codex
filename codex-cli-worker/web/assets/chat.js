@@ -323,10 +323,12 @@ let usageTimer;
 let usageLoading = false;
 /**
  * Show the quota left for the five-hour and weekly limits as a figure and a
- * bar, with the reset time as a tooltip. A limit without a valid percentage
- * reads Unavailable, and a note says when the quota is stale or missing.
+ * bar, with the reset time as a tooltip. A limit the account does not report
+ * reads Unknown, one with a bad value reads Unavailable, and a note says when
+ * the quota is stale or missing. The line under the bars names the plan and
+ * the reset times in plain text.
  */
-function renderUsage(usage) {
+function renderUsage(usage, planType) {
   // An account can lack either limit, and the worker may have no quota data at all.
   usage = usage || {};
   // The worker's percentages already represent quota left, not quota used.
@@ -340,7 +342,9 @@ function renderUsage(usage) {
         ? Number(raw)
         : NaN;
     const valid = Number.isFinite(percent) && percent >= 0 && percent <= 100;
-    $(id).textContent = valid ? `${percent}% left` : "Unavailable";
+    // An empty field in a good read means the account has no such window.
+    const unreported = usage.status === "ok" && (raw === undefined || raw === null || raw === "");
+    $(id).textContent = valid ? `${percent}% left` : unreported ? "Unknown" : "Unavailable";
     // The bar is as long as the quota left, turns red below 5%, and is an outline without a value.
     const bar = $(`${id}-bar`);
     bar.style.width = valid ? `${percent}%` : "0";
@@ -358,6 +362,46 @@ function renderUsage(usage) {
         ? ""
         : "Quota is currently unavailable.";
   $("usage-note").hidden = !$("usage-note").textContent;
+  $("usage-plan").textContent = planLine(usage, planType);
+}
+/** A reset time short enough for the side bar: the weekday and the time. */
+function shortResetLabel(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+}
+/**
+ * The plan line under the quota bars, for example "Pro plan · Weekly resets
+ * Mon 9:00 AM · 5h resets 2:30 PM". The plan is information only; a reset time
+ * shows only for a window the read reported.
+ */
+function planLine(usage, planType) {
+  const plan = typeof planType === "string" && planType.trim()
+    ? `${planType.trim()[0].toUpperCase()}${planType.trim().slice(1)} plan`
+    : "Plan unknown";
+  const parts = [plan];
+  for (const [key, name] of [["weekly", "Weekly"], ["five_hour", "5h"]]) {
+    const reset = shortResetLabel(usage[`${key}_reset_at`]) || usage[`${key}_reset`];
+    if (usage[`${key}_percent`] !== undefined && usage[`${key}_percent`] !== "" && reset)
+      parts.push(`${name} resets ${reset}`);
+  }
+  return parts.join(" · ");
+}
+// The Home Assistant row at the foot of the side bar: the state of the Codex integration.
+const HOME_ASSISTANT_STATES = {
+  ok: ["ready", "Ready"],
+  starting: ["starting", "Starting"],
+  not_installed: ["needs-owner", "Integration not installed"],
+  outdated: ["needs-owner", "Integration out of date"],
+  not_connected: ["needs-owner", "Integration not connected"],
+};
+/** Show the integration state in the side bar row; a failed status read shows Unavailable. */
+function renderHomeAssistantStatus(integration) {
+  const [dot, text] = integration === undefined
+    ? ["error", "Unavailable"]
+    : HOME_ASSISTANT_STATES[integration?.state] || ["error", "Unavailable"];
+  $("ha-status-row").dataset.state = dot;
+  $("ha-status-summary").textContent = text;
 }
 // Where the line at the top of the chat sends someone to install the integration.
 const INTEGRATION_INSTALL_URL =
@@ -414,14 +458,16 @@ async function loadUsage() {
   try {
     if (!document.hidden) {
       const data = await api("status");
-      renderUsage(data.codex_usage);
+      renderUsage(data.codex_usage, data.account_access?.plan_type);
       renderIntegration(data.integration);
+      renderHomeAssistantStatus(data.integration || null);
       // The quota check also tells the worker which model Codex picks when the add-on names none.
       // Not awaited: the quota shown must not depend on it.
       if (state.catalog) loadChatOptions(true);
     }
   } catch (_) {
     renderUsage();
+    renderHomeAssistantStatus(undefined);
   } finally {
     usageLoading = false;
     usageTimer = setTimeout(loadUsage, 60000);
@@ -666,8 +712,12 @@ function controls() {
     ? "Add to the queue. It starts when the running chat finishes."
     : "";
   $("send").classList.toggle("queueing", queueing);
-  $("cancel").hidden = !task || !["queued", "running"].includes(task.status);
+  // While a task runs and the prompt box is empty, the send button becomes the stop button.
+  const running = Boolean(task && ["queued", "running"].includes(task.status));
+  const typing = Boolean($("message").value.trim()) || state.files.length > 0;
+  $("cancel").hidden = !running || typing;
   $("cancel").disabled = state.busy;
+  $("send").hidden = running && !typing;
   $("new-chat").disabled = state.busy || state.settingsBusy;
   $("message").readOnly = state.busy;
   $("attach").disabled =
@@ -3575,7 +3625,8 @@ const permissionSwitches = () => [...document.querySelectorAll("[data-permission
 const haThemeTokens = [
   // Colors: studio.css maps these onto the page's own --bg, --sidebar, --surface, --text, --muted, --line and --accent.
   "primary-color", "primary-background-color", "secondary-background-color", "card-background-color",
-  "primary-text-color", "secondary-text-color", "divider-color", "disabled-text-color", "error-color", "text-light-primary-color",
+  "primary-text-color", "secondary-text-color", "divider-color", "disabled-text-color", "error-color", "warning-color",
+  "text-light-primary-color",
   // Filled buttons and filled fields, as on the add-on's Configuration tab.
   "ha-color-fill-primary-loud-resting", "ha-color-on-primary-loud",
   "input-fill-color", "input-ink-color", "input-label-ink-color", "input-idle-line-color",

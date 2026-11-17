@@ -100,8 +100,9 @@ function pngBuffer(width = 8, height = 6) {
         ],
       ],
     );
-    // An account can lack either limit, or both. A missing one reads Unavailable
-    // with an empty outline instead of an empty quota, and the other keeps its bar.
+    // An account can lack either limit, or both. In a good read, a limit the
+    // account does not report reads Unknown; a bad value or a failed read reads
+    // Unavailable. Both show an empty outline, and the other limit keeps its bar.
     /**
      * Render a quota payload in the page and return, for each limit, the text
      * shown, the bar width, and the bar's classes.
@@ -119,14 +120,15 @@ function pngBuffer(width = 8, height = 6) {
         });
       }, usage);
     const missing = ["Unavailable", "0px", "usage-bar unknown"];
+    const unreported = ["Unknown", "0px", "usage-bar unknown"];
     assert.deepEqual(await quotaRows({ status: "ok", weekly_percent: "87" }), [
-      missing,
+      unreported,
       ["87% left", "87%", "usage-bar"],
     ]);
     assert.equal(await page.locator("#usage-note").isHidden(), true);
     assert.deepEqual(
       await quotaRows({ status: "ok", five_hour_percent: "2", weekly_percent: "" }),
-      [["2% left", "2%", "usage-bar low"], missing],
+      [["2% left", "2%", "usage-bar low"], unreported],
     );
     // Neither limit, values that are not percentages, and no quota data at all.
     for (const usage of [
@@ -135,7 +137,10 @@ function pngBuffer(width = 8, height = 6) {
       { status: "ok", five_hour_percent: null, weekly_percent: -1 },
       null,
     ]) {
-      assert.deepEqual(await quotaRows(usage), [missing, missing]);
+      assert.deepEqual(await quotaRows(usage), [
+        usage?.status === "ok" ? unreported : missing,
+        missing,
+      ]);
       assert.equal(
         await page.locator("#usage-note").textContent(),
         usage?.status === "ok" ? "" : "Quota is currently unavailable.",
@@ -224,15 +229,14 @@ function pngBuffer(width = 8, height = 6) {
       target.evaluate(() => {
         const messages = document.getElementById("messages");
         messages.scrollTop = messages.scrollHeight;
-        const header = document
-          .querySelector(".chat-header")
-          .getBoundingClientRect();
+        // The chat column; a phone hides the title row and shows its slim row instead.
+        const header = document.querySelector("main").getBoundingClientRect();
         const line = document
           .getElementById("integration-notice")
           .getBoundingClientRect();
         const list = messages.getBoundingClientRect();
         return (
-          Math.abs(line.top - (document.querySelector(".phone-thread-tools").offsetHeight ? document.querySelector(".phone-thread-tools") : document.querySelector(".connection-strip")).getBoundingClientRect().bottom) < 1 &&
+          Math.abs(line.top - (document.querySelector(".phone-thread-tools").offsetHeight ? document.querySelector(".phone-thread-tools") : document.querySelector(".chat-header")).getBoundingClientRect().bottom) < 1 &&
           Math.abs(line.bottom - list.top) < 1 &&
           Math.abs(line.left - header.left) < 1 &&
           Math.abs(line.width - header.width) < 1 &&
