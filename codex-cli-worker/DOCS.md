@@ -480,9 +480,9 @@ Whole-file undo can replace other edits made to the same file since Turn on; rec
 relax the always-on checks. A watch scan or verified restore cannot reverse a command that already ran,
 prevent a reload before the scan, or guarantee capture of an obfuscated reference.
 
-- **Off until you turn it on.** In the app chat, open **Settings** > **Accounts and connections** > **ChatGPT app pairing** > **Manage remote connection**, then choose **Turn on**. You can also open the connection view from the connection chip. The choice is saved and holds across app restarts.
+- **Off until you turn it on.** In the app chat, open **Settings** > **Accounts and connections** > **ChatGPT app pairing** > **Manage remote connection**, then choose **Turn on**. You can also open the connection view from the **Remote connection** row at the foot of the side bar. The choice is saved and holds across app restarts.
 - **One supervised process.** The app runs `codex app-server --listen unix://<private socket> --remote-control` in the foreground and starts it again, with a growing delay, if it exits. **Turn off** stops it.
-- **Machine name.** The ChatGPT app lists this machine as **Home Assistant** unless you change the **Remote control machine name** option, either in the app's Configuration tab or with **Name in the ChatGPT app** on the page while remote control is off. The page saves the same option through Supervisor. Pairing is kept with the Codex sign-in, so the app should show the new name the next time remote control connects; if it still shows the old name, choose **New pairing code**. Codex has no name setting, so the app starts it with that name as its host name inside a private namespace. If the private name namespace is unavailable, the page explains that Codex is using its existing host name.
+- **Machine name.** The ChatGPT app lists this machine as **Home Assistant** unless you change the **Remote control machine name** option on the app's Configuration tab (from 0.3.5 the page shows the name and no longer changes it). The new name takes effect when the app restarts. Pairing is kept with the Codex sign-in, so the app should show the new name the next time remote control connects; if it still shows the old name, choose **New pairing code**. Codex has no name setting, so the app starts it with that name as its host name inside a private namespace. If the private name namespace is unavailable, the page explains that Codex is using its existing host name.
 - **Pairing.** The manual code is shown as large text. A QR for the app link appears only when an app-link code is available; otherwise type the manual code or request a new code. Pairing is kept in the app's private storage with the Codex sign-in, so a restart does not ask for it again. **New pairing code** asks Codex for a fresh one when the ChatGPT app has lost this machine.
 - **Automatic Core address and first-run reads.** Relay commands receive the discovered or explicitly overridden `HA_URL`; an owner-configured `HA_TOKEN` remains optional. The separate observational read tool needs no hand-made token. Relay processes never receive the Supervisor token or a chat turn's private MCP capabilities. Never print credentials; approval does not create them.
 - **The command check.** Commands from the ChatGPT app do not pass through this app's Allow and Deny buttons, so the app ships a check that holds outside the model, for every client:
@@ -614,7 +614,7 @@ Open **Settings > Accounts and connections > GitHub** in the app page. The card 
 
 ## AGENTS.md and HA_TOKEN
 
-The app web UI includes an editor for `/config/AGENTS.md` under **Settings** > **Advanced** > **Workspace rules**. This file remains the source of truth for shared Codex project instructions. When the file does not exist, the task prompt does not mention it, and the page shows a setup hint above the message box until you write the file or choose **Dismiss** (the choice is kept in that browser).
+The app web UI includes an editor for `/config/AGENTS.md` under **Settings** > **Workspace instructions** > **Workspace rules**. This file remains the source of truth for shared Codex project instructions. When the file does not exist, the task prompt does not mention it, and the page shows a setup hint above the message box until you write the file or choose **Dismiss** (the choice is kept in that browser).
 
 From **0.3.4**, Codex no longer looks for `/config/AGENTS.md` in every message. Codex loads the file when a chat
 starts. In each message the worker tells Codex whether the file exists and when it last changed, and Codex reads
@@ -808,7 +808,7 @@ The authenticated worker API exposes `GET /chat-options` for choices and default
 
 ### Live activity
 
-From **0.1.53**, the chat shows what Codex is doing while it works on your latest message. Steps appear under the message as Codex reports them: reasoning headlines, progress notes, the commands it runs, the files it edits, web searches, and tool calls. A failed command or an error is highlighted. When a run is stopped or fails, the list ends with a **Stopped** or **Failed** row. The list is expanded while the run lasts and collapses to **Show activity (N steps)** under the answer when it finishes. Only the latest exchange of a chat shows steps; earlier exchanges do not.
+From **0.1.53**, the chat shows what Codex is doing while it works on your latest message. Steps appear under the message as Codex reports them: reasoning headlines, progress notes, the commands it runs, the files it edits, web searches, and tool calls. A failed command or an error is highlighted. When a run is stopped or fails, the list ends with a **Stopped** or **Failed** row. The list is expanded while the run lasts. When it finishes, it closes to one gray line above the answer, **Worked for** and the exchange's total time, which opens the steps and the answer's checks. Only the latest exchange of a chat shows steps; on an earlier exchange the line opens its checks alone. When a check failed, a short **1 check failed** line stays under the answer and opens the checks. A permission request you have answered shrinks to one line, such as **Allowed once: ls /config**, that opens to its details.
 
 From **0.1.63**, the list starts as soon as a message is accepted. The worker reports its own steps alongside those of Codex: recording the state of the configuration files, saving a full snapshot when that option is on, starting Codex, waiting for its first response, and checking the changes afterwards. The heading shows how long the exchange has been running, and its dot pulses for as long as the run lasts.
 
@@ -951,8 +951,10 @@ categories come from fixed allowlists. Numeric release strings are retained;
 ambiguous address-shaped four-part values are rejected. Unknown values remain
 unknown. A test ties the bundled CLI version to its Dockerfile pin.
 
-Settings lets an administrator choose **10–100 interactions**, with **25 by
-default**. The byte cap scales from 128 KiB at ten to 1,280 KiB at 100. Completed
+The **Interactions to keep** option (`interactions_to_keep`, 10–100) on the app's
+Configuration tab sets how many interactions are kept. Left empty, the app keeps the
+number it has: **25** on a new install, or the number saved on the page before 0.3.5,
+when Settings had the field. The byte cap scales from 128 KiB at ten to 1,280 KiB at 100. Completed
 records are removed before still-running interactions; reducing retention also
 preserves running work. Per record, retain at most 48 events, 64 entity
 references, 32 file categories and 64 operation/domain counters. Raw paths under
@@ -987,7 +989,7 @@ read RPCs are grouped separately within one capability lifetime, with counts per
 operation/domain; they do not describe the remote conversation or its approvals.
 Only worker-visible gate refusals and approval events are included. The export
 requires an administrator for Ingress requests; the integration's worker token
-remains able to fetch it. Only an Ingress administrator may change retention.
+remains able to fetch it. Retention changes only on the Configuration tab.
 An unavailable worker returns an unavailable data section without its exception
 message or connection address.
 
@@ -996,8 +998,13 @@ message or connection address.
 
 The page follows Home Assistant colors in light and dark when its host exposes them; otherwise it follows
 the device appearance. Recent conversations stay alongside the writing canvas on tablets and desktop.
-On a phone the connection chip and Settings stay in the header, with conversations, New chat and the thread
-menu below. The composer stays at the bottom. Its model and reasoning controls show the saved chat choice
+Above the messages is one thin row with the chat's title and its menu. The foot of the side bar holds, top to
+bottom: **Home Assistant** with the state of the Codex integration (it opens the Status window), **Remote
+connection** with its state (it opens the window that pairs the ChatGPT app), the 5-hour and weekly quota with a
+line for the plan type and the reset times, and **Settings**. A row that needs you shows an amber dot. While a task
+runs, the send button is the stop button, even with a draft or a file in the message box. On a phone, a slim row holds the
+conversations button, the title, New chat and the thread menu; the foot rows are at the bottom of the
+conversations drawer. The composer stays at the bottom. Its model and reasoning controls show the saved chat choice
 or configured default, rather than a sample selection.
 
 The plus menu uploads photos or files. A message accepts at most six attachments, up to 10 MB each.
@@ -1028,9 +1035,11 @@ a new code or type it; no app link is invented. The QR has a four-module quiet z
 URLs and QR images remain limited to verified Ingress administrators; API tokens alone cannot read them
 or start pairing. No live account enrollment or device handoff is implied by local rendering tests.
 
-Settings → Advanced → Workspace rules opens a separate editor. The file is read only when that editor
+Settings → Workspace instructions → Workspace rules opens a separate editor. The file is read only when that editor
 opens, and Save remains an explicit action. Existing account, diagnostic, scheduling and browser-permission
-controls remain in Settings.
+controls remain in Settings. The **Add-on configuration** row at the foot of Settings opens the app's
+Configuration tab in Home Assistant, where the plain options are set. When Supervisor cannot name the app, the row
+is not a link and says to open the Configuration tab from the Home Assistant settings.
 
 
 A chat's **Read only** choice also disables worker-mediated dashboard saves: both

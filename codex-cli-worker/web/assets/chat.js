@@ -39,6 +39,10 @@ const state = {
   permissionModes: new Map(),
   // Checks whose retry the owner started on this page. Their result shows open; a reload forgets them.
   retriedChecks: new Set(),
+  // Earlier answers whose "Worked for" line the owner opened. The latest answer keeps this in state.activity.
+  workedOpen: new Set(),
+  // The checks block of the latest answer. renderActivity puts it inside that answer's "Worked for" line.
+  latestChecks: null,
 };
 const effortLabels = {
   low: "Low",
@@ -323,10 +327,12 @@ let usageTimer;
 let usageLoading = false;
 /**
  * Show the quota left for the five-hour and weekly limits as a figure and a
- * bar, with the reset time as a tooltip. A limit without a valid percentage
- * reads Unavailable, and a note says when the quota is stale or missing.
+ * bar, with the reset time as a tooltip. A limit the account does not report
+ * reads Unknown, one with a bad value reads Unavailable, and a note says when
+ * the quota is stale or missing. The line under the bars names the plan and
+ * the reset times in plain text.
  */
-function renderUsage(usage) {
+function renderUsage(usage, planType) {
   // An account can lack either limit, and the worker may have no quota data at all.
   usage = usage || {};
   // The worker's percentages already represent quota left, not quota used.
@@ -340,7 +346,9 @@ function renderUsage(usage) {
         ? Number(raw)
         : NaN;
     const valid = Number.isFinite(percent) && percent >= 0 && percent <= 100;
-    $(id).textContent = valid ? `${percent}% left` : "Unavailable";
+    // An empty field in a good read means the account has no such window.
+    const unreported = usage.status === "ok" && (raw === undefined || raw === null || raw === "");
+    $(id).textContent = valid ? `${percent}% left` : unreported ? "Unknown" : "Unavailable";
     // The bar is as long as the quota left, turns red below 5%, and is an outline without a value.
     const bar = $(`${id}-bar`);
     bar.style.width = valid ? `${percent}%` : "0";
@@ -358,6 +366,46 @@ function renderUsage(usage) {
         ? ""
         : "Quota is currently unavailable.";
   $("usage-note").hidden = !$("usage-note").textContent;
+  $("usage-plan").textContent = planLine(usage, planType);
+}
+/** A reset time short enough for the side bar: the weekday and the time. */
+function shortResetLabel(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+}
+/**
+ * The plan line under the quota bars, for example "Pro plan · Weekly resets
+ * Mon 9:00 AM · 5h resets 2:30 PM". The plan is information only; a reset time
+ * shows only for a window the read reported.
+ */
+function planLine(usage, planType) {
+  const plan = typeof planType === "string" && planType.trim()
+    ? `${planType.trim()[0].toUpperCase()}${planType.trim().slice(1)} plan`
+    : "Plan unknown";
+  const parts = [plan];
+  for (const [key, name] of [["weekly", "Weekly"], ["five_hour", "5h"]]) {
+    const reset = shortResetLabel(usage[`${key}_reset_at`]) || usage[`${key}_reset`];
+    if (usage[`${key}_percent`] !== undefined && usage[`${key}_percent`] !== "" && reset)
+      parts.push(`${name} resets ${reset}`);
+  }
+  return parts.join(" · ");
+}
+// The Home Assistant row at the foot of the side bar: the state of the Codex integration.
+const HOME_ASSISTANT_STATES = {
+  ok: ["ready", "Ready"],
+  starting: ["starting", "Starting"],
+  not_installed: ["needs-owner", "Integration not installed"],
+  outdated: ["needs-owner", "Integration out of date"],
+  not_connected: ["needs-owner", "Integration not connected"],
+};
+/** Show the integration state in the side bar row; a failed status read shows Unavailable. */
+function renderHomeAssistantStatus(integration) {
+  const [dot, text] = integration === undefined
+    ? ["error", "Unavailable"]
+    : HOME_ASSISTANT_STATES[integration?.state] || ["error", "Unavailable"];
+  $("ha-status-row").dataset.state = dot;
+  $("ha-status-summary").textContent = text;
 }
 // Where the line at the top of the chat sends someone to install the integration.
 const INTEGRATION_INSTALL_URL =
@@ -414,14 +462,16 @@ async function loadUsage() {
   try {
     if (!document.hidden) {
       const data = await api("status");
-      renderUsage(data.codex_usage);
+      renderUsage(data.codex_usage, data.account_access?.plan_type);
       renderIntegration(data.integration);
+      renderHomeAssistantStatus(data.integration || null);
       // The quota check also tells the worker which model Codex picks when the add-on names none.
       // Not awaited: the quota shown must not depend on it.
       if (state.catalog) loadChatOptions(true);
     }
   } catch (_) {
     renderUsage();
+    renderHomeAssistantStatus(undefined);
   } finally {
     usageLoading = false;
     usageTimer = setTimeout(loadUsage, 60000);
@@ -562,18 +612,6 @@ document.getElementById("export-interaction-logs").addEventListener("click", asy
   }
 });
 
-document.getElementById("save-diagnostic-retention").addEventListener("click", async () => {
-  const status = document.getElementById("export-logs-status");
-  try {
-    const capacity = Number(document.getElementById("diagnostic-retention").value);
-    if (!Number.isInteger(capacity) || capacity < 10 || capacity > 100)
-      throw new Error("Keep between 10 and 100 interactions.");
-    await api("diagnostics/settings", { capacity });
-    status.textContent = `Keeping up to ${capacity} interactions. Running interactions are retained.`;
-  } catch (error) {
-    status.textContent = error.message;
-  }
-});
 /** Build an error that keeps the HTTP status so callers can tell 404 apart. */
 function workerError(message, status) {
   const error = new Error(message);
@@ -666,8 +704,13 @@ function controls() {
     ? "Add to the queue. It starts when the running chat finishes."
     : "";
   $("send").classList.toggle("queueing", queueing);
-  $("cancel").hidden = !task || !["queued", "running"].includes(task.status);
+  // While this chat's task runs or waits to run, the send button is the stop
+  // button, whatever the message box holds. Send cannot be used then anyway
+  // (see blocked), and a draft must never take away the only way to stop.
+  const running = Boolean(task && ["queued", "running"].includes(task.status));
+  $("cancel").hidden = !running;
   $("cancel").disabled = state.busy;
+  $("send").hidden = running;
   $("new-chat").disabled = state.busy || state.settingsBusy;
   $("message").readOnly = state.busy;
   $("attach").disabled =
@@ -704,29 +747,37 @@ function controls() {
   document.dispatchEvent(new Event("chat-view"));
 }
 /** Build the small pin icon shown beside pinned chat titles. */
-function pinIcon() {
+/** One 24 px Material Design icon, the set Home Assistant uses, filled with the text color. */
+function mdiIcon(path, className) {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("viewBox", "0 0 24 24");
   svg.setAttribute("aria-hidden", "true");
-  svg.classList.add("pin-icon");
-  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  path.setAttribute(
-    "d",
-    "M8 2h8v2l-1.5 1v5.5l3.5 3V16h-5v6l-1 1-1-1v-6H6v-2.5l3.5-3V5L8 4z",
-  );
-  svg.append(path);
+  svg.classList.add("row-icon", className);
+  const shape = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  shape.setAttribute("d", path);
+  svg.append(shape);
   return svg;
 }
-/** Build the small clock icon that marks a message waiting in the queue. */
+/** mdiPin: a pinned chat. */
+function pinIcon() {
+  return mdiIcon("M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z", "pin-icon");
+}
+/** mdiClockOutline: a message that waits in the queue. */
 function queueIcon() {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("aria-hidden", "true");
-  svg.classList.add("queue-icon");
-  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  path.setAttribute("d", "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm0 4.5V12l3 2");
-  svg.append(path);
-  return svg;
+  return mdiIcon(
+    "M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z",
+    "queue-icon",
+  );
+}
+/** mdiMessageOutline: an ordinary chat. */
+function chatIcon() {
+  return mdiIcon("M20,2H4A2,2 0 0,0 2,4V22L6,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2M20,16H5.17L4,17.17V4H20V16Z", "chat-icon");
+}
+/** A small spinner for a chat that is working now. */
+function spinnerIcon() {
+  const spinner = textNode("span", "", "row-icon row-spinner");
+  spinner.setAttribute("aria-hidden", "true");
+  return spinner;
 }
 /** Find a loaded sidebar chat by task id. */
 function chatById(id) {
@@ -759,7 +810,9 @@ function renderRow(chat, queued = null) {
   main.setAttribute("aria-current", String(chat.task_id === state.id));
   const heading = textNode("span", "", "row-title");
   if (queued) heading.append(queueIcon());
+  else if (chat.status === "running") heading.append(spinnerIcon());
   else if (chat.pinned) heading.append(pinIcon());
+  else heading.append(chatIcon());
   heading.append(textNode("span", title));
   main.append(heading);
   main.append(
@@ -792,6 +845,8 @@ function renderRow(chat, queued = null) {
     ),
   );
   main.append(meta);
+  // One line for each chat: the last answer is the tooltip instead of a second line.
+  main.title = `${title} - ${main.querySelector(".row-preview").textContent}`;
   main.onclick = () => selectChat(chat.task_id);
   row.append(main);
   // A chat that is still waiting for its first message has nothing to pin or rename yet.
@@ -1176,6 +1231,66 @@ function renderVerification(turn, taskId) {
   section.append(textNode("p", "Screenshots are evidence for visual review. State and configuration checks do not prove automation behavior.", "verification-note"));
   return section;
 }
+/**
+ * Return "Worked for 1m 21s" from the exchange's start and end times, or ""
+ * when the record lacks one of them (a chat saved by an older version).
+ */
+function workedLabel(turn) {
+  const started = Date.parse(turn?.started_at || "");
+  const completed = Date.parse(turn?.completed_at || "");
+  if (!Number.isFinite(started) || !Number.isFinite(completed) || completed < started) return "";
+  return `Worked for ${elapsedLabel(completed - started)}`;
+}
+/** Count the checks of an exchange that failed or could not be confirmed. */
+function badCheckCount(turn) {
+  return (turn.verification || []).filter(check => BAD_CHECK_STATUSES.has(check.status)).length;
+}
+/**
+ * Build the "Worked for" line of an earlier answer. Only the latest exchange
+ * has its steps on the page, so here the line opens the checks block alone.
+ * With no checks it is plain text, and with no times either it is left out.
+ * The line opens by itself when the checks block wants attention (a browser
+ * permission review or a retry result).
+ */
+function renderWorked(turn, checks) {
+  const label = workedLabel(turn);
+  if (!checks) return label ? textNode("p", label, "worked-line") : null;
+  const block = textNode("div", "", "activity worked");
+  const toggle = textNode("button", "", "activity-toggle");
+  toggle.type = "button";
+  toggle.append(textNode("span", "", "activity-chevron"), textNode("span", label || "Checks and readback"));
+  const list = textNode("div", "", "activity-steps");
+  list.append(checks);
+  const show = open => {
+    if (open) state.workedOpen.add(turn.turn_id);
+    else state.workedOpen.delete(turn.turn_id);
+    toggle.setAttribute("aria-expanded", String(open));
+    list.hidden = !open;
+  };
+  show(checks.open || state.workedOpen.has(turn.turn_id));
+  toggle.onclick = () => show(list.hidden);
+  block.append(toggle, list);
+  block.openChecks = () => {
+    show(true);
+    checks.open = true;
+    checks.scrollIntoView({block: "nearest"});
+  };
+  return block;
+}
+/**
+ * Build the line that stays under an answer when a check failed, so the owner
+ * sees an accident without a tap. A click opens the checks.
+ */
+function failedChecksLine(count, openChecks) {
+  const line = textNode("button", "", "check-failed-line");
+  line.type = "button";
+  line.append(
+    textNode("span", count === 1 ? "1 check failed" : `${count} checks failed`),
+    textNode("span", "", "activity-chevron"),
+  );
+  line.onclick = openChecks;
+  return line;
+}
 /** Let the owner review a batch of complete requests without interrupting capture. */
 function renderBrowserPermissions(check, turn, taskId) {
   const candidates = check.permission_candidates || [];
@@ -1422,6 +1537,7 @@ function renderTask(force = false) {
     );
   const turns = task.turns || [];
   let newApproval = false;
+  state.latestChecks = null;
   for (const turn of turns) {
     const latest = turn === turns[turns.length - 1];
     const exchange = textNode("section", "", "exchange");
@@ -1450,6 +1566,24 @@ function renderTask(force = false) {
     const hasAnswer =
       turn.summary || turn.details || turn.question || attachments.length || turn.verification?.length;
     if (hasAnswer) {
+      // The steps and checks sit closed behind one "Worked for" line above the answer, as in the desktop app.
+      const evidence = renderVerification(turn, task.task_id);
+      let openChecks = null;
+      if (latest) {
+        state.latestChecks = evidence;
+        exchange.append(activityBlock());
+        openChecks = () => {
+          if (!state.activity || !evidence) return;
+          state.activity.expanded = true;
+          evidence.open = true;
+          renderActivity();
+          evidence.scrollIntoView({block: "nearest"});
+        };
+      } else {
+        const worked = renderWorked(turn, evidence);
+        if (worked) exchange.append(worked);
+        openChecks = () => worked?.openChecks?.();
+      }
       const answer = textNode("div", "", "answer");
       const heading = textNode("div", "", "answer-heading");
       heading.append(textNode("span", "⌘", "mark"), textNode("span", "Codex"));
@@ -1469,8 +1603,8 @@ function renderTask(force = false) {
       const check = renderConfigCheck(turn.config_check);
       if (check) answer.append(check);
       answer.append(...renderBackups(turn));
-      const evidence = renderVerification(turn, task.task_id);
-      if (evidence) answer.append(evidence);
+      const bad = badCheckCount(turn);
+      if (bad) answer.append(failedChecksLine(bad, openChecks));
       if (attachments.length)
         answer.append(renderAttachments(task.task_id, attachments));
       answer.append(
@@ -1488,7 +1622,6 @@ function renderTask(force = false) {
           "turn-meta",
         ),
       );
-      if (latest) answer.append(activityBlock());
       exchange.append(answer);
     } else if (["queued", "running"].includes(turn.status)) {
       const pending = textNode(
@@ -1521,13 +1654,35 @@ function renderTask(force = false) {
   controls();
   ensureActivity();
 }
-/** Show a native permission request as text, with its precise action and scope. */
+/** Return the first line of what a permission request asked for, for its closed line. */
+function approvalHeadline(approval) {
+  const plain = approval.confirmation || {};
+  const first = [
+    approval.command, approval.action, plain.what, approval.network,
+    approval.changes?.[0]?.path, approval.scope,
+  ].find(value => typeof value === "string" && value.trim());
+  return first ? first.trim().split("\n")[0] : "";
+}
+/**
+ * Show a native permission request as text, with its precise action and
+ * scope. While it waits for the owner it is a full card with the two answers.
+ * Once answered (or expired) it shrinks to one closed line, such as
+ * "Allowed once: ls /config", that opens to the same details.
+ */
 function renderApproval(approval, taskId, turnId, active) {
   const pending = active && approval.status === "pending";
-  const card = textNode("section", "", "permission-card");
-  card.setAttribute("aria-label", "Permission request");
   const statuses = { allowed: "Allowed once", denied: "Denied", expired: "Expired" };
-  card.append(textNode("strong", pending ? "Permission needed" : statuses[approval.status] || "Expired"));
+  const status = pending ? "Permission needed" : statuses[approval.status] || "Expired";
+  const card = textNode(pending ? "section" : "details", "", pending ? "permission-card" : "permission-card disclosure is-answered");
+  card.setAttribute("aria-label", "Permission request");
+  if (pending) card.append(textNode("strong", status));
+  else {
+    const summary = textNode("summary", "");
+    const headline = approvalHeadline(approval);
+    summary.append(textNode("strong", status));
+    if (headline) summary.append(textNode("span", `: ${headline}`, "permission-headline"));
+    card.append(summary);
+  }
   const plain = approval.confirmation || {};
   for (const [key, label] of [["what", "What changes"], ["where", "Where"], ["effect", "The effect"]]) {
     if (plain[key]) card.append(textNode("p", `${label}: ${plain[key]}`, "permission-plain"));
@@ -1901,15 +2056,23 @@ async function pollActivity() {
     }
   }
 }
-/** Draw the step list of the latest exchange, with its heading, count, and timer. */
+/**
+ * Draw the latest exchange's step list. While Codex works, the heading counts
+ * the steps and shows the running time, and the list stays open. When the
+ * exchange is over, the heading becomes the closed "Worked for" line above the
+ * answer, and the list holds the steps and then the answer's checks.
+ */
 function renderActivity() {
   const block = $("activity");
   const activity = state.activity;
   if (!block || !activity || activity.id !== state.id) return;
   const steps = [...activity.steps.values()].sort((a, b) => a.index - b.index);
   const running = activity.running || taskActive();
-  block.hidden = !steps.length;
+  const checks = state.latestChecks;
+  const worked = running ? "" : workedLabel(state.task?.turns?.at(-1));
+  block.hidden = !steps.length && !checks && !worked;
   block.classList.toggle("running", running);
+  block.classList.toggle("worked", !running);
   // The step list takes the place of the waiting line once Codex reports steps.
   const pending = $("pending");
   if (pending) pending.hidden = !block.hidden;
@@ -1917,7 +2080,13 @@ function renderActivity() {
     block.replaceChildren();
     return;
   }
-  const expanded = activity.expanded ?? running;
+  if (!steps.length && !checks) {
+    // Nothing to open: the total time alone.
+    block.replaceChildren(textNode("p", worked, "worked-line"));
+    return;
+  }
+  // A checks block that asks for the owner (a browser permission review, a retry result) opens the line.
+  const expanded = activity.expanded ?? (running || Boolean(checks?.open));
   const area = $("messages");
   const nearBottom =
     area.scrollHeight - area.scrollTop - area.clientHeight < 100;
@@ -1930,7 +2099,7 @@ function renderActivity() {
     "span",
     running
       ? `${state.task?.permission_required ? "Waiting for your permission…" : "Working on your request…"} · ${count}`
-      : `${expanded ? "Hide" : "Show"} activity (${count})`,
+      : worked || (steps.length ? `Activity (${count})` : "Checks and readback"),
   );
   if (running) label.append(textNode("span", "", "elapsed"));
   toggle.append(textNode("span", "", "activity-chevron"), label);
@@ -1942,6 +2111,7 @@ function renderActivity() {
   list.id = "activity-steps";
   list.hidden = !expanded;
   for (const step of steps) list.append(renderStep(step, activity));
+  if (checks) list.append(checks);
   block.replaceChildren(toggle, list);
   tickElapsed();
   if (nearBottom) area.scrollTop = area.scrollHeight;
@@ -2762,14 +2932,17 @@ $("cancel").onclick = async () => {
     controls();
   }
 };
+const SIDEBAR_MIN = 200;
+const SIDEBAR_MAX = 480;
+const SIDEBAR_DEFAULT = 260;
 /**
- * Set the sidebar width in pixels, kept between 220 and 440 and leaving 360
+ * Set the sidebar width in pixels, kept between 200 and 480 and leaving 360
  * for the chat when the window allows, and remember it for the next visit.
  */
 function setWidth(value) {
   const width = Math.max(
-    220,
-    Math.min(440, Number(value) || 280, innerWidth - 360),
+    SIDEBAR_MIN,
+    Math.min(SIDEBAR_MAX, Number(value) || SIDEBAR_DEFAULT, innerWidth - 360),
   );
   document.documentElement.style.setProperty("--sidebar-width", `${width}px`);
   $("divider").setAttribute("aria-valuenow", String(width));
@@ -2780,9 +2953,9 @@ function setWidth(value) {
   }
 }
 try {
-  setWidth(localStorage.getItem("codex-sidebar-width") || 280);
+  setWidth(localStorage.getItem("codex-sidebar-width") || SIDEBAR_DEFAULT);
 } catch (_) {
-  setWidth(280);
+  setWidth(SIDEBAR_DEFAULT);
 }
 $("divider").addEventListener("pointerdown", (event) => {
   if (event.button !== 0) return;
@@ -2798,6 +2971,8 @@ $("divider").addEventListener("pointerup", (event) => {
 $("divider").addEventListener("lostpointercapture", () =>
   document.body.classList.remove("resizing"),
 );
+// A double-click gives back the default width.
+$("divider").addEventListener("dblclick", () => setWidth(SIDEBAR_DEFAULT));
 $("divider").addEventListener("keydown", (event) => {
   if (["ArrowLeft", "ArrowRight"].includes(event.key)) {
     event.preventDefault();
@@ -2884,8 +3059,7 @@ function setAccountPart(sectionId, word, attention = false) {
   );
 }
 collapseSettingsSections();
-setSectionStatus("appearance-section", "Follows Home Assistant");
-setSectionStatus("advanced-section", "Workspace rules");
+setSectionStatus("workspace-section", "AGENTS.md");
 /*
  * The time left on a sign-in code. The worker sends the seconds left, by its
  * own clock; the page counts down from when that reply arrived, so a phone
@@ -3485,38 +3659,29 @@ function renderRemoteControl(rc) {
   $("remote-control-log-box").hidden = !(rc.log || []).length;
   document.dispatchEvent(new CustomEvent("remote-view", {detail: rc}));
 }
-/**
- * Show the configured machine name in its field. Codex reads the name when
- * remote control starts, so the field is locked while it is on. Polling never
- * replaces a name the person is still typing.
- */
+/** Show the machine name the ChatGPT app lists; it is set on the Configuration tab (0.3.5). */
 function renderRemoteControlName(rc) {
-  const input = $("remote-control-name");
-  if (!input.dataset.edited) input.value = rc.configured_name || "";
-  input.disabled = Boolean(rc.enabled);
-  $("remote-control-name-save").disabled = Boolean(rc.enabled);
-  $("remote-control-name-note").textContent = rc.enabled
-    ? "Turn remote control off to change the name."
-    : "Pairing is kept, so the app should show the new name the next time remote control connects. If it still shows the old name, choose New pairing code.";
+  $("remote-control-name").textContent = rc.configured_name || "";
 }
-$("remote-control-name").oninput = () => {
-  $("remote-control-name").dataset.edited = "1";
-};
-$("remote-control-name-form").onsubmit = async (event) => {
-  event.preventDefault();
-  const input = $("remote-control-name");
-  $("remote-control-name-save").disabled = true;
-  try {
-    const data = await api("remote-control/name", { name: input.value });
-    delete input.dataset.edited;
-    renderRemoteControl(data.remote_control);
-    $("remote-control-name-note").textContent = data.notice
-      || `Saved. The ChatGPT app will show “${data.remote_control.configured_name}”.`;
-  } catch (error) {
-    settingsError(error);
-    $("remote-control-name-save").disabled = false;
+const ADDON_CONFIGURATION_UNKNOWN =
+  "Home Assistant did not give this app's address. Open the app's Configuration tab from the Home Assistant settings.";
+/**
+ * Point the Add-on configuration row at this app's Configuration tab. The slug differs per install, so the
+ * worker asks Supervisor. The row has no link until Supervisor answers, and it says where to go when it cannot.
+ */
+async function loadAddonConfiguration() {
+  const row = $("addon-configuration");
+  const description = $("addon-configuration-description");
+  description.dataset.usual ??= description.textContent;
+  const data = await api("addon-configuration").catch(() => ({}));
+  if (typeof data.url === "string" && data.url.startsWith("/hassio/addon/")) {
+    row.href = data.url;
+    description.textContent = description.dataset.usual;
+  } else {
+    row.removeAttribute("href");
+    description.textContent = ADDON_CONFIGURATION_UNKNOWN;
   }
-};
+}
 for (const [id, action] of [
   ["remote-control-start", "start"],
   ["remote-control-stop", "stop"],
@@ -3563,16 +3728,55 @@ function settingsError(error) {
   const result = $("connection-dialog").open ? $("connection-result") : $("settings-result");
   result.textContent = String(error.message || error);
 }
+/**
+ * The Home Assistant theme variables the page reads, by name without the leading "--". Home Assistant sets them on
+ * its own document; the page runs in an iframe and does not inherit them, so haTheme() copies them to this page's
+ * root. Each use in chat.css and studio.css has a fallback, so a name a frontend version lacks changes nothing.
+ */
+const haThemeTokens = [
+  // Colors: studio.css maps these onto the page's own --bg, --sidebar, --surface, --text, --muted, --line and --accent.
+  "primary-color", "primary-background-color", "secondary-background-color", "card-background-color",
+  "primary-text-color", "secondary-text-color", "divider-color", "disabled-text-color", "error-color", "warning-color",
+  "text-light-primary-color",
+  // Filled buttons and filled fields, as on the add-on's Configuration tab.
+  "ha-color-fill-primary-loud-resting", "ha-color-on-primary-loud",
+  "input-fill-color", "input-ink-color", "input-label-ink-color", "input-idle-line-color",
+  // Font and type scale.
+  "ha-font-family-body", "ha-font-size-s", "ha-font-size-m",
+];
+/**
+ * Follow Home Assistant's theme: copy its variables to this page's root and set data-theme to light or dark. A
+ * variable the theme does not set is removed, so a theme change never leaves an old color behind. With no parent
+ * window (the standalone preview) or one the page may not read, the page keeps its own palette and the system's
+ * light or dark setting.
+ */
+function haTheme() {
+  let dark = matchMedia("(prefers-color-scheme: dark)").matches;
+  try {
+    if (window.parent !== window) {
+      const host = window.parent.document.querySelector("home-assistant") || window.parent.document.documentElement;
+      const style = window.parent.getComputedStyle(host);
+      if (typeof host.hass?.themes?.darkMode === "boolean") dark = host.hass.themes.darkMode;
+      else if (style.colorScheme === "dark") dark = true;
+      else if (style.colorScheme === "light") dark = false;
+      for (const token of haThemeTokens) {
+        const value = style.getPropertyValue("--" + token).trim();
+        if (value) document.documentElement.style.setProperty("--" + token, value);
+        else document.documentElement.style.removeProperty("--" + token);
+      }
+    }
+  } catch (_error) { /* A cross-origin parent: keep the page's own palette. */ }
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+}
 $("settings-button").onclick = async () => {
   try {
     const data = await api("diagnostics/settings");
-    $("diagnostic-retention").value = data.capacity;
     setSectionStatus("interaction-logs-section", `Keeps ${data.capacity}`);
   } catch (_error) {
-    $("export-logs-status").textContent = "Log retention is available to administrators.";
     setSectionStatus("interaction-logs-section", "Administrators only");
   }
   sidebar(false);
+  haTheme();
   $("settings").showModal();
   $("settings-result").textContent = "";
   $("agents").disabled = true;
@@ -3583,6 +3787,7 @@ $("settings-button").onclick = async () => {
     loadRemoteControl(),
     loadPause(),
     loadBrowserPermissions(),
+    loadAddonConfiguration(),
   ]);
   for (const result of results)
     if (result.status === "rejected") settingsError(result.reason);

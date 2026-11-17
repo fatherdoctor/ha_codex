@@ -73,7 +73,9 @@ verification = Verification(_ToolWorker())
 
 CONFIG_ROOT = Path("/config")
 DATA_ROOT = Path("/data")
-interaction_logs = RollingDiagnostics(DATA_ROOT / "interaction-diagnostics.json")
+# Rows an interrupted run left open are closed in main(), after the interactions_to_keep option is applied, so the
+# repair keeps as many rows as the option says and not the number saved before it.
+interaction_logs = RollingDiagnostics(DATA_ROOT / "interaction-diagnostics.json", repair=False)
 diagnostics = InteractionRecorder(interaction_logs, os.environ.get("ADDON_VERSION", "unknown"),
                                  os.environ.get("CODEX_VERSION", "unknown"))
 def record_diagnostic(method, *args, **kwargs):
@@ -6109,6 +6111,21 @@ def status() -> Response:
     )
 
 
+def apply_interaction_limit(options: dict[str, Any]) -> None:
+    """Keep as many interactions as the interactions_to_keep option says.
+
+    The option has no default in config.yaml, so an install that never set it keeps the number it has: the one
+    saved from the page before 0.3.5, or 25. A value out of range leaves that number and is reported in the log.
+    """
+    limit = options.get("interactions_to_keep")
+    if limit is None:
+        return
+    try:
+        interaction_logs.configure(limit, persist=False)
+    except ValueError as exc:
+        print(f"Ignoring interactions_to_keep: {exc}", flush=True)
+
+
 @app.get("/diagnostics/settings")
 @require_auth
 def get_diagnostic_settings():
@@ -6116,24 +6133,6 @@ def get_diagnostic_settings():
         admin, refusal = ingress_admin()
         if admin is None:
             return jsonify({"ok": False, "error": refusal}), 403
-    return jsonify({"ok": True, "capacity": interaction_logs.capacity})
-
-
-@app.post("/diagnostics/settings")
-@require_auth
-def set_diagnostic_settings():
-    admin, refusal = ingress_admin()
-    if admin is None:
-        return jsonify({"ok": False, "error": refusal}), 403
-    payload = request.get_json(silent=True)
-    if not isinstance(payload, dict) or set(payload) != {"capacity"}:
-        return jsonify({"ok": False, "error": "Choose an interaction count."}), 400
-    try:
-        interaction_logs.configure(payload["capacity"])
-    except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
-    except Exception:
-        return jsonify({"ok": False, "error": "Could not save diagnostic retention."}), 503
     return jsonify({"ok": True, "capacity": interaction_logs.capacity})
 
 
@@ -6828,83 +6827,53 @@ def get_remote_control() -> Response:
 SUPERVISOR_SELF_URL = "http://supervisor/addons/self"
 
 
-def save_remote_control_name(value: Any) -> bool:
-    """Save the remote_control_name option, as the app's Configuration tab would, and return the name the app shows.
+# A Supervisor slug: the repository's prefix, an underscore, then the app's own slug.
+ADDON_SLUG_RE = re.compile(r"[a-z0-9_]{1,64}")
+_addon_slug: str | None = None
 
-    Supervisor replaces every option on a save, so the saved options are read from Supervisor first and only the
-    name changes. Those are the options as written, with any !secret reference kept; options.json holds resolved
-    values and must not be sent back. Supervisor rewrites options.json only when the app starts, so the worker's
-    copy gets the new name as well. Raises ValueError for a value that is not a name and RuntimeError when
-    Supervisor cannot be reached or refuses. Returns False when Supervisor saved the name but the worker's copy could
-    not be updated; the name then shows after the app restarts.
 
-    One limit: the name the app shows is cut to remote_control.MAX_NAME_BYTES, so a longer value is refused rather
-    than cut without a word. Other characters are not refused; machine_name turns them into spaces.
+def addon_slug() -> str | None:
+    """Return this app's slug as Supervisor knows it, with its repository prefix, or None when Supervisor cannot say.
+
+    The page links to the app's Configuration tab at /hassio/addon/<slug>/config, and the prefix differs from one
+    install to the next. Only a successful answer is kept, so a later call tries Supervisor again.
     """
-    if not isinstance(value, str) or len(value.strip()) > remote_control.MAX_NAME_BYTES:
-        raise ValueError(f"Enter a name of up to {remote_control.MAX_NAME_BYTES} characters.")
-    name = value.strip()
-    headers = {"Authorization": f"Bearer {ha_token()}"}
-    try:
-        info = requests.get(f"{SUPERVISOR_SELF_URL}/info", headers=headers, timeout=15)
-        info.raise_for_status()
-        options = dict(info.json()["data"]["options"])
-        options["remote_control_name"] = name
-        saved = requests.post(f"{SUPERVISOR_SELF_URL}/options", headers=headers, json={"options": options}, timeout=15)
-        saved.raise_for_status()
-    except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
-        raise RuntimeError("Home Assistant did not save the name. Try again, or change it in the app's "
-                           "Configuration tab.") from exc
-    try:
-        write_local_option("remote_control_name", name)
-    except (OSError, ValueError):
-        return False
-    return True
+    global _addon_slug
+    if _addon_slug is None:
+        try:
+            info = requests.get(f"{SUPERVISOR_SELF_URL}/info", headers={"Authorization": f"Bearer {ha_token()}"},
+                                timeout=15)
+            info.raise_for_status()
+            slug = info.json()["data"]["slug"]
+        except (requests.RequestException, ValueError, KeyError, TypeError):
+            return None
+        if isinstance(slug, str) and ADDON_SLUG_RE.fullmatch(slug):
+            _addon_slug = slug
+    return _addon_slug
 
 
-def write_local_option(key: str, value: Any) -> None:
-    """Change one value in the worker's options.json, keeping the file's permissions; it can hold a token."""
-    current = json.loads(OPTIONS_PATH.read_text(encoding="utf-8")) if OPTIONS_PATH.exists() else {}
-    current[key] = value
-    temporary = OPTIONS_PATH.with_suffix(".tmp")
-    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-        json.dump(current, handle)
-    temporary.replace(OPTIONS_PATH)
-
-
-def rename_remote_control() -> Response | tuple[Response, int]:
-    """Save a new machine name from the app page; refused while remote control is on, since Codex reads it at start."""
-    if remote_control_supervisor.enabled():
-        return jsonify({"ok": False, "error": "Turn remote control off before you rename it."}), 409
-    payload = request.get_json(silent=True)
-    if not isinstance(payload, dict) or set(payload) != {"name"}:
-        return jsonify({"ok": False, "error": "Enter a name."}), 400
-    try:
-        applied = save_remote_control_name(payload["name"])
-    except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
-    except RuntimeError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 502
-    reply = {"ok": True, "remote_control": remote_control_supervisor.snapshot()}
-    if not applied:
-        reply["notice"] = "The name is saved. It shows here after the app restarts."
-    return jsonify(reply)
+@app.get("/addon-configuration")
+@require_auth
+def addon_configuration() -> Response:
+    """Return the Home Assistant path of this app's Configuration tab, or null when Supervisor cannot say."""
+    # The worker token is enough here on purpose: unlike the routes that change
+    # settings, this one changes nothing and its reply holds only the slug path,
+    # which is no secret, so it needs no Ingress administrator.
+    slug = addon_slug()
+    return jsonify({"ok": True, "url": f"/hassio/addon/{slug}/config" if slug else None})
 
 
 @app.post("/remote-control/<action>")
 @require_auth
 @require_ingress
 def change_remote_control(action: str) -> Response | tuple[Response, int]:
-    """Turn remote control on or off, ask for a new pairing code, mark config changes reviewed, or rename it.
+    """Turn remote control on or off, ask for a new pairing code, or mark config changes reviewed.
 
     Only from an administrator on the app page, never with the API token.
     """
     admin, refusal = ingress_admin()
     if admin is None:
         return jsonify({"ok": False, "error": refusal}), 403
-    if action == "name":
-        return rename_remote_control()
     if action == "start":
         ok, state = remote_control_supervisor.start()
         if not ok:
@@ -7216,6 +7185,8 @@ def main() -> None:
     if not make_worker_undumpable():
         print("Could not mark the worker process not dumpable; its environment stays readable to root.", flush=True)
     ensure_runtime_files()
+    apply_interaction_limit(read_options())
+    interaction_logs.close_abandoned()
     refresh_core_address()
     version = codex_version_status()
     sandbox = sandbox_readiness()
