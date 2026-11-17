@@ -7,8 +7,10 @@
 #   remote:<shells> only a remote family (host, core, ...) ran: refused with remote control on.
 #   none            no family ran in either shell: no answer is required.
 # test_supervisor_corpus.py runs every command again under bash and dash (as the user the tests
-# run as, never root in CI) and checks that the shells still agree with this column, then that
-# the hook refuses each su and remote case. Add a case here; never delete one.
+# run as, never root in CI) and checks that each shell named in this column still gives its answer,
+# then that the hook refuses each su and remote case. A shell may run a family on another machine
+# where none is recorded (dash runs time ha ... only where a time program is installed); the hook
+# is then held to the stricter answer. Add a case here; never delete one.
 # Sources: reviewer-* and closer-* were written by reviewers of the redirection fix; reduced-* are
 # the forms a closer found that passed the hook; fuzz-* are 21 prefixes x 21 middles x 2 families
 # and single lines aimed at each branch of the rule. Families of hostile input: joined operators,

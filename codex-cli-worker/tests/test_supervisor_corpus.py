@@ -1,11 +1,13 @@
 """Every command in tests/fixtures/supervisor_command_corpus.tsv against the shells and the hook.
 
 The corpus records what bash and dash did with each command: which Supervisor or remote family
-a print-only ``ha`` stub received. This test runs each command again under both shells, so a
-recorded answer that the shells no longer give fails here first, and then asks the hook. A
-command that ran a Supervisor family must be refused in both remote-control modes; one that ran
-only a remote family must be refused with remote control on. The corpus header says how to add a
-case.
+a print-only ``ha`` stub received. This test runs each command again under both shells. A shell
+that no longer gives its recorded answer fails the test, so the corpus cannot quietly go stale.
+A shell may give a family where none was recorded: the answer can depend on the machine (dash
+has no ``time`` keyword, so ``time ha ...`` runs only where a ``time`` program is installed).
+Then the hook is held to the stricter answer. A command that ran a Supervisor family must be
+refused in both remote-control modes; one that ran only a remote family must be refused with
+remote control on. The corpus header says how to add a case.
 """
 
 from __future__ import annotations
@@ -60,8 +62,8 @@ def family_received(record: bytes) -> str | None:
     return None
 
 
-def shells_answer(command: str, folder: Path, work: Path) -> str:
-    """Run the command under each shell with the stub and return its expect value."""
+def shells_answer(command: str, folder: Path, work: Path) -> dict[str, str]:
+    """Run the command under each shell with the stub and return the family each shell ran."""
     record = folder / "record"
     env = {**os.environ, "PATH": str(folder) + os.pathsep + os.environ.get("PATH", ""), "HA_STUB_OUT": str(record)}
     env.pop("x", None)
@@ -80,10 +82,19 @@ def shells_answer(command: str, folder: Path, work: Path) -> str:
         for item in work.iterdir():
             if item.is_file():
                 item.unlink()
-    if not received:
-        return "none"
-    kind = "su" if any(family in ALWAYS_FAMILIES for family in received.values()) else "remote"
-    return kind + ":" + ",".join(sorted(received))
+    return received
+
+
+def kind_of(families: list[str]) -> str:
+    """Return su, remote or none for the families that the shells ran."""
+    if any(family in ALWAYS_FAMILIES for family in families):
+        return "su"
+    return "remote" if families else "none"
+
+
+def stricter(first: str, second: str) -> str:
+    order = ("none", "remote", "su")
+    return max(first, second, key=order.index)
 
 
 def refused(command: str, remote_on: bool) -> bool:
@@ -99,19 +110,28 @@ class SupervisorCorpusTests(unittest.TestCase):
                 self.assertGreater(kinds.count(kind), 20)
 
     @unittest.skipUnless(all(shutil.which(shell) for shell in SHELLS), "needs bash and dash")
-    def test_the_shells_still_give_the_recorded_answer(self) -> None:
-        wrong = []
+    def test_the_shells_give_the_recorded_answer_and_the_hook_refuses(self) -> None:
+        wrong, missed = [], []
         with tempfile.TemporaryDirectory() as stub_folder, tempfile.TemporaryDirectory() as work_folder:
             folder = Path(stub_folder)
             (folder / "ha").write_text(STUB, encoding="utf-8")
             (folder / "ha").chmod(0o755)
             for case_id, expect, command in load_corpus():
-                answer = shells_answer(command, folder, Path(work_folder))
-                if answer != expect:
-                    wrong.append(f"{case_id}: recorded {expect}, the shells gave {answer}")
+                received = shells_answer(command, folder, Path(work_folder))
+                recorded_kind, _, recorded_shells = expect.partition(":")
+                for shell in filter(None, recorded_shells.split(",")):
+                    if kind_of([received[shell]] if shell in received else []) != recorded_kind:
+                        wrong.append(f"{case_id}: {shell} recorded {recorded_kind}, gave {received.get(shell)}")
+                kind = stricter(recorded_kind, kind_of(list(received.values())))
+                if kind == "su" and not (refused(command, False) and refused(command, True)):
+                    missed.append(case_id)
+                if kind == "remote" and not refused(command, True):
+                    missed.append(case_id)
         self.assertEqual(wrong, [])
+        self.assertEqual(missed, [])
 
-    def test_the_hook_refuses_each_hostile_case(self) -> None:
+    def test_the_hook_refuses_each_recorded_hostile_case(self) -> None:
+        """The same check from the recorded answers alone, for a machine without bash or dash."""
         missed = []
         for case_id, expect, command in load_corpus():
             kind = expect.split(":")[0]
