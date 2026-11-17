@@ -45,6 +45,10 @@ const base = 'http://127.0.0.1:9137/preview/';
    assert.equal(await page.locator('[data-mode="full-access"]').isDisabled(),true,'off again: the choice is disabled');
 
    // Turned off while a chat is still set to Full access: the page shows and sends Default.
+   await page.evaluate(()=>document.getElementById('settings').close());
+   await page.evaluate(()=>document.querySelector('.chat-row .row-main').click());
+   await page.locator('.message').first().waitFor();
+   await page.evaluate(()=>document.getElementById('settings-button').click());
    await page.locator('#full-access-toggle').click();
    await page.locator('#full-access-confirm').click();
    await page.locator('#full-access-banner').waitFor({state:'visible'});
@@ -62,9 +66,26 @@ const base = 'http://127.0.0.1:9137/preview/';
    await page.locator('#message').fill('Next message');
    await page.locator('#send').click();
    assert.equal((await sent).postDataJSON().permission_mode,'default','off: the next message sends Default');
+
+   // Turned on again: the chat starts at Default, and the owner must choose Full access again.
+   await page.evaluate(()=>document.getElementById('settings-button').click());
+   await page.locator('#full-access-toggle').click();
+   await page.locator('#full-access-confirm').click();
+   await page.locator('#full-access-banner').waitFor({state:'visible'});
+   await page.evaluate(()=>document.getElementById('settings').close());
+   assert.equal(await page.locator('#permission-button').getAttribute('aria-label'),'Default permissions','on again: the chat shows Default');
+   assert.equal(await page.locator('#permission-button.full-access').count(),0,'on again: no Full access marker');
+   const again = page.waitForRequest(request=>request.method()==='POST' && /\/(tasks|continue)$/.test(new URL(request.url()).pathname));
+   await page.locator('#message').fill('One more message');
+   await page.waitForFunction(()=>!document.getElementById('send').disabled);
+   await page.locator('#send').click();
+   assert.equal((await again).postDataJSON().permission_mode,'default','on again: the next message sends Default');
+   await page.evaluate(()=>document.getElementById('settings-button').click());
+   await page.locator('#full-access-toggle').click();
+   await page.locator('#full-access-banner').waitFor({state:'hidden'});
    assert.deepEqual(errors,[]);
    await context.close();
   }
-  console.log('PASS: Full access warning, cancel, confirm, banner, chat choice and marker, turn off, a Full access chat falls back to Default, desktop and mobile');
+  console.log('PASS: Full access warning, cancel, confirm, banner, chat choice and marker, turn off, a Full access chat falls back to Default and stays there when Full access is turned on again, desktop and mobile');
  } finally { await browser.close(); }
 })().catch(error=>{console.error(error);process.exit(1);});

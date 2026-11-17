@@ -244,6 +244,66 @@ class ChatModeTests(unittest.TestCase):
                                     json={"message": "Next", "permission_mode": "full-access"}, **request)
         self.assertEqual(response.status_code, 400)
 
+    def turn_setting(self, enabled):
+        """Turn the setting on or off the way the Settings page does, as an administrator."""
+        for name in ("REQUIREMENTS_PATH", "IMAGE_REQUIREMENTS"):
+            self.stack.enter_context(patch.object(full_access, name, self.root / name.lower()))
+        self.stack.enter_context(patch.object(server.remote_control_supervisor, "enabled", return_value=False))
+        body = {"enabled": True, "confirm": full_access.WARNING_ID} if enabled else {"enabled": False}
+        return self.client.post("/full-access", json=body, **self.as_admin())
+
+    def saved_mode(self):
+        task_file = self.root / "tasks" / self.task_id / "task.json"
+        return json.loads(task_file.read_text(encoding="utf-8"))["permission_mode"]
+
+    def test_turning_it_off_and_on_again_starts_the_chat_at_default(self):
+        self.assertEqual(self.turn_setting(True).status_code, 200)
+        self.assertEqual(self.choose("admin-fixture").status_code, 200)
+        self.assertEqual(self.turn_setting(False).status_code, 200)
+        self.assertEqual(server.tasks[self.task_id]["permission_mode"], "default")
+        self.assertEqual(self.saved_mode(), "default")
+        self.assertEqual(self.turn_setting(True).status_code, 200)
+        self.assertNotIn(full_access.CHAT_OPTION, server.task_options(self.task_id))
+        server.tasks[self.task_id]["session_id"] = attachments.SESSION_ID
+        response = self.client.post(f"/tasks/{self.task_id}/continue", json={"message": "Next"}, **self.as_admin())
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(server.tasks[self.task_id]["turns"][-1]["permission_mode"], "default")
+
+    def test_the_owner_can_choose_it_again_after_turning_it_on(self):
+        self.turn_setting(True)
+        self.choose("admin-fixture")
+        self.turn_setting(False)
+        self.turn_setting(True)
+        self.assertEqual(self.choose("admin-fixture").status_code, 200)
+        self.assertIs(server.task_options(self.task_id)[full_access.CHAT_OPTION], True)
+
+    def test_turning_it_off_returns_a_waiting_message_to_default(self):
+        queue_file = self.root / "queue.json"
+        self.stack.enter_context(patch.object(server, "MESSAGE_QUEUE_FILE", queue_file))
+        self.stack.enter_context(patch.object(server, "message_queue", [
+            {"task_id": self.task_id, "permission_mode": "full-access"},
+            {"task_id": self.task_id, "permission_mode": "read-only"},
+        ]))
+        self.turn_setting(True)
+        self.assertEqual(self.turn_setting(False).status_code, 200)
+        self.assertEqual([entry["permission_mode"] for entry in server.message_queue], ["default", "read-only"])
+        saved = json.loads(queue_file.read_text(encoding="utf-8"))
+        self.assertEqual([entry["permission_mode"] for entry in saved], ["default", "read-only"])
+
+    def test_a_failed_change_returns_the_chat_to_default(self):
+        self.turn_setting(True)
+        self.choose("admin-fixture")
+        with patch.object(full_access, "write_requirements", side_effect=OSError("disk full")):
+            self.assertEqual(self.turn_setting(False).status_code, 503)
+        self.assertFalse(full_access.is_on())
+        self.assertEqual(server.tasks[self.task_id]["permission_mode"], "default")
+
+    def test_turning_it_on_changes_no_chat(self):
+        self.turn_setting(True)
+        self.choose("admin-fixture")
+        self.assertEqual(self.turn_setting(True).status_code, 200)
+        self.assertEqual(server.tasks[self.task_id]["permission_mode"], "full-access")
+
     def test_api_token_cannot_choose_it(self):
         full_access.set_enabled(True, "admin-fixture")
         response = self.client.post(f"/tasks/{self.task_id}/settings",

@@ -6978,6 +6978,39 @@ def full_access_payload() -> dict[str, Any]:
             "warning": full_access.WARNING, "warning_id": full_access.WARNING_ID}
 
 
+def return_full_access_chats_to_default() -> None:
+    """Set each chat and each waiting message that asks for Full access back to Default.
+
+    Runs when Full access is turned off. Turning it on again later then starts every
+    chat at Default, and the owner chooses Full access again in the chat's Permissions.
+    The turns already run keep the mode they ran with.
+    """
+    changed = False
+    with lock:
+        for task_id, task in tasks.items():
+            if task.get("permission_mode") != full_access.PERMISSION_MODE:
+                continue
+            task["permission_mode"] = "default"
+            changed = True
+            try:
+                task_dir = get_task_dir(task_id)
+                task_dir.mkdir(parents=True, exist_ok=True)
+                atomic_json_write(task_dir / "task.json", task)
+            except OSError as exc:
+                print(f"Could not save chat {task_id} with Default permissions: {exc}", flush=True)
+        for entry in message_queue:
+            if entry.get("permission_mode") == full_access.PERMISSION_MODE:
+                entry["permission_mode"] = "default"
+                changed = True
+    if not changed:
+        return
+    try:
+        save_task_index()
+        save_message_queue()
+    except OSError as exc:
+        print(f"Could not save the chats returned to Default: {exc}", flush=True)
+
+
 @app.get("/full-access")
 @require_auth
 def get_full_access() -> Response:
@@ -7008,7 +7041,10 @@ def change_full_access() -> Response | tuple[Response, int]:
     except (OSError, ValueError) as exc:
         print(f"Could not change Full access: {exc}", flush=True)
         full_access.set_enabled(False, admin["user_id"])
+        return_full_access_chats_to_default()
         return jsonify({"ok": False, "error": "Could not change Full access. It is off."}), 503
+    if not payload["enabled"]:
+        return_full_access_chats_to_default()
     print(f"Full access turned {'on' if payload['enabled'] else 'off'} by an administrator.", flush=True)
     if remote_control_supervisor.enabled():
         remote_control_supervisor.stop()

@@ -23,8 +23,20 @@ function renderFullAccess(setting) {
     ? "Commands run outside the sandbox, with the app's full access."
     : "Off. An administrator can turn it on in Settings.";
   setSectionStatus("full-access-section", on ? "On" : "Off", on);
-  // A chat set to Full access now shows Default (chat.js, selectedPermissionMode).
+  if (!on) forgetFullAccessChoices();
   updateStudio();
+}
+
+/**
+ * Turning Full access off returns each chat set to it to Default; the worker does the
+ * same for the saved chats. So turning it on again starts every chat at Default, and
+ * the owner chooses Full access again in the chat's Permissions.
+ */
+function forgetFullAccessChoices() {
+  for (const [id, mode] of state.permissionModes) {
+    if (mode === "full-access") state.permissionModes.delete(id);
+  }
+  if (state.task?.permission_mode === "full-access") state.task.permission_mode = "default";
 }
 
 /** Save the setting; turning it on sends the id of the warning the owner confirmed. */

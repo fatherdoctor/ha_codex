@@ -1077,9 +1077,9 @@ The Permissions picker starts at Default permissions: use the add-on's configure
 approval flow. Read only narrows the next turn to the read-only sandbox, including a resumed or queued turn.
 Neither choice expands a configured read-only sandbox, suppresses native approval, or changes managed
 security refusals. A queued message keeps the choice submitted with it. Full access can be chosen only by an
-administrator, and only while Full access is on in Settings. After it is turned off, a chat set to Full access shows
-Default permissions, and its next message runs with Default permissions, as does a queued Full access message.
-Turning Full access on again does not bring back a chat that ran with Default; an administrator sets it again. Auto-review is shown as Coming and cannot be selected. Camera and Plan mode are not offered in this build.
+administrator, and only while Full access is on in Settings. Turning it off returns every chat set to Full access,
+and every queued Full access message, to Default permissions. Turning Full access on again starts every chat at
+Default; an administrator chooses Full access again in the chat's Permissions. Auto-review is shown as Coming and cannot be selected. Camera and Plan mode are not offered in this build.
 
 The thread menu includes Pin, Rename, Copy thread ID, Archive and Status. A thread without a native ID
 reports that it is unavailable instead of substituting the page's task ID. Status shows the workspace,
