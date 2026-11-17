@@ -41,7 +41,13 @@
 # sets (a flag value of one character that Python reads as a blank and the shell reads as a letter, a removed
 # flag value before a flag, a redirection or another value pair, a nullglob or {,} value, a quoted script in two
 # pieces or after an escaped quote, a variable that holds the flag value and the family word); closerws-* are
-# that closure's white space probe (18 characters in 7 forms).
+# that closure's white space probe (18 characters in 7 forms). closer16-* and closer17-* are the ninth closure's
+# two sets (a value with an odd blank and then a quote, a variable value after a redirection, and the forms
+# that the closure found outside the rules). Their passes are stated limits: a family word that is not whole
+# in the text (v='x s'; ha --log-level ${v}u info, or a $ joined to the flag), a quoted script with a piece
+# outside quotes (eval 'setsid ha' --log-level '"" s${x}u info'), a nested brace word, an extended glob with
+# nullglob, a redirection before a second flag's value, and a brace word or a glob that holds the value and
+# the family word (touch a su; ha --log-level * info).
 # n/a: Unicode look-alike letters (ha is a fixed ASCII program name; the shell does not fold them);
 # aliases and functions (DOCS names them as a limit: the check reads text, not shell state).
 # Left out on purpose, as limits DOCS states (the check cannot see a program that the command builds or that
@@ -4436,3 +4442,494 @@ closerws-0116	su:bash,dash	eval 'setsid ha --config \u2029 su info'
 closerws-0117	su:bash,dash	eval 'setsid ha --config \u202f su info'
 closerws-0118	su:bash,dash	eval 'setsid ha --config \u205f su info'
 closerws-0119	su:bash,dash	eval 'setsid ha --config \u3000 su info'
+closer16-0001	su:bash,dash	setsid ha --log-level \r\r su info
+closer16-0002	su:bash,dash	setsid ha --log-level \r --config \r su info
+closer16-0003	su:bash,dash	setsid ha --log-level=\r su info
+closer16-0004	su:bash,dash	setsid ha --log-level \r s${x}u info
+closer16-0005	su:bash,dash	setsid ha --log-level $nope \r s${x}u info
+closer16-0006	su:bash,dash	eval 'setsid ha --log-level \r s${x}u info'
+closer16-0007	su:bash,dash	setsid ha --log-level '\r' su info
+closer16-0008	su:bash,dash	setsid ha 2>\r --log-level x su info
+closer16-0009	su:bash,dash	setsid ha --log-level \x0b\x0b su info
+closer16-0010	su:bash,dash	setsid ha --log-level \x0b --config \x0b su info
+closer16-0011	su:bash,dash	setsid ha --log-level=\x0b su info
+closer16-0012	su:bash,dash	setsid ha --log-level \x0b s${x}u info
+closer16-0013	su:bash,dash	setsid ha --log-level $nope \x0b s${x}u info
+closer16-0014	su:bash,dash	eval 'setsid ha --log-level \x0b s${x}u info'
+closer16-0015	su:bash,dash	setsid ha --log-level '\x0b' su info
+closer16-0016	su:bash,dash	setsid ha 2>\x0b --log-level x su info
+closer16-0017	su:bash,dash	setsid ha --log-level \x0c\x0c su info
+closer16-0018	su:bash,dash	setsid ha --log-level \x0c --config \x0c su info
+closer16-0019	su:bash,dash	setsid ha --log-level=\x0c su info
+closer16-0020	su:bash,dash	setsid ha --log-level \x0c s${x}u info
+closer16-0021	su:bash,dash	setsid ha --log-level $nope \x0c s${x}u info
+closer16-0022	su:bash,dash	eval 'setsid ha --log-level \x0c s${x}u info'
+closer16-0023	su:bash,dash	setsid ha --log-level '\x0c' su info
+closer16-0024	su:bash,dash	setsid ha 2>\x0c --log-level x su info
+closer16-0025	su:bash,dash	setsid ha --log-level \x1f\x1f su info
+closer16-0026	su:bash,dash	setsid ha --log-level \x1f --config \x1f su info
+closer16-0027	su:bash,dash	setsid ha --log-level=\x1f su info
+closer16-0028	su:bash,dash	setsid ha --log-level \x1f s${x}u info
+closer16-0029	su:bash,dash	setsid ha --log-level $nope \x1f s${x}u info
+closer16-0030	su:bash,dash	eval 'setsid ha --log-level \x1f s${x}u info'
+closer16-0031	su:bash,dash	setsid ha --log-level '\x1f' su info
+closer16-0032	su:bash,dash	setsid ha 2>\x1f --log-level x su info
+closer16-0033	su:bash,dash	setsid ha --log-level \x85\x85 su info
+closer16-0034	su:bash,dash	setsid ha --log-level \x85 --config \x85 su info
+closer16-0035	su:bash,dash	setsid ha --log-level=\x85 su info
+closer16-0036	su:bash,dash	setsid ha --log-level \x85 s${x}u info
+closer16-0037	su:bash,dash	setsid ha --log-level $nope \x85 s${x}u info
+closer16-0038	su:bash,dash	eval 'setsid ha --log-level \x85 s${x}u info'
+closer16-0039	su:bash,dash	setsid ha --log-level '\x85' su info
+closer16-0040	su:bash,dash	setsid ha 2>\x85 --log-level x su info
+closer16-0041	su:bash,dash	setsid ha --log-level \xa0\xa0 su info
+closer16-0042	su:bash,dash	setsid ha --log-level \xa0 --config \xa0 su info
+closer16-0043	su:bash,dash	setsid ha --log-level=\xa0 su info
+closer16-0044	su:bash,dash	setsid ha --log-level \xa0 s${x}u info
+closer16-0045	su:bash,dash	setsid ha --log-level $nope \xa0 s${x}u info
+closer16-0046	su:bash,dash	eval 'setsid ha --log-level \xa0 s${x}u info'
+closer16-0047	su:bash,dash	setsid ha --log-level '\xa0' su info
+closer16-0048	su:bash,dash	setsid ha 2>\xa0 --log-level x su info
+closer16-0049	su:bash,dash	setsid ha --log-level \u2003\u2003 su info
+closer16-0050	su:bash,dash	setsid ha --log-level \u2003 --config \u2003 su info
+closer16-0051	su:bash,dash	setsid ha --log-level=\u2003 su info
+closer16-0052	su:bash,dash	setsid ha --log-level \u2003 s${x}u info
+closer16-0053	su:bash,dash	setsid ha --log-level $nope \u2003 s${x}u info
+closer16-0054	su:bash,dash	eval 'setsid ha --log-level \u2003 s${x}u info'
+closer16-0055	su:bash,dash	setsid ha --log-level '\u2003' su info
+closer16-0056	su:bash,dash	setsid ha 2>\u2003 --log-level x su info
+closer16-0057	su:bash,dash	setsid ha --log-level \u3000\u3000 su info
+closer16-0058	su:bash,dash	setsid ha --log-level \u3000 --config \u3000 su info
+closer16-0059	su:bash,dash	setsid ha --log-level=\u3000 su info
+closer16-0060	su:bash,dash	setsid ha --log-level \u3000 s${x}u info
+closer16-0061	su:bash,dash	setsid ha --log-level $nope \u3000 s${x}u info
+closer16-0062	su:bash,dash	eval 'setsid ha --log-level \u3000 s${x}u info'
+closer16-0063	su:bash,dash	setsid ha --log-level '\u3000' su info
+closer16-0064	su:bash,dash	setsid ha 2>\u3000 --log-level x su info
+closer16-0065	su:bash,dash	setsid ha --log-level \u200b\u200b su info
+closer16-0066	su:bash,dash	setsid ha --log-level \u200b --config \u200b su info
+closer16-0067	su:bash,dash	setsid ha --log-level=\u200b su info
+closer16-0068	su:bash,dash	setsid ha --log-level \u200b s${x}u info
+closer16-0069	su:bash,dash	setsid ha --log-level $nope \u200b s${x}u info
+closer16-0070	su:bash,dash	eval 'setsid ha --log-level \u200b s${x}u info'
+closer16-0071	su:bash,dash	setsid ha --log-level '\u200b' su info
+closer16-0072	su:bash,dash	setsid ha 2>\u200b --log-level x su info
+closer16-0073	su:bash,dash	setsid ha --log-level \ufeff\ufeff su info
+closer16-0074	su:bash,dash	setsid ha --log-level \ufeff --config \ufeff su info
+closer16-0075	su:bash,dash	setsid ha --log-level=\ufeff su info
+closer16-0076	su:bash,dash	setsid ha --log-level \ufeff s${x}u info
+closer16-0077	su:bash,dash	setsid ha --log-level $nope \ufeff s${x}u info
+closer16-0078	su:bash,dash	eval 'setsid ha --log-level \ufeff s${x}u info'
+closer16-0079	su:bash,dash	setsid ha --log-level '\ufeff' su info
+closer16-0080	su:bash,dash	setsid ha 2>\ufeff --log-level x su info
+closer16-0081	su:bash,dash	setsid ha\tsu\tinfo
+closer16-0082	su:bash,dash	setsid ha --log-level\tx\tsu info
+closer16-0083	none	setsid ha --log-level x su\r\n
+closer16-0084	su:bash,dash	setsid ha --log-level \\\n\r su info
+closer16-0085	su:bash,dash	setsid ha --log-level \r\\\n su info
+closer16-0086	su:bash,dash	setsid ha --log-level x\\\r su info
+closer16-0087	su:bash,dash	setsid ha --log-level \\\r su info
+closer16-0088	su:bash,dash	setsid ha --log-level \\  su info
+closer16-0089	su:bash,dash	setsid ha --log-level $nope x  s${x}u info
+closer16-0090	su:bash,dash	setsid ha --log-level $nope x 2>&1 s${x}u info
+closer16-0091	su:bash	setsid ha --log-level $nope x &>/dev/null s${x}u info
+closer16-0092	su:bash,dash	setsid ha --log-level $nope x >|f s${x}u info
+closer16-0093	su:bash,dash	setsid ha --log-level $nope x 2>>f s${x}u info
+closer16-0094	su:bash,dash	setsid ha --log-level $nope x > /dev/null s${x}u info
+closer16-0095	su:bash	setsid ha --log-level $nope x <<<foo s${x}u info
+closer16-0096	su:bash,dash	setsid ha --log-level $nope x --no-progress >f --raw-json s${x}u info
+closer16-0097	su:bash,dash	setsid ha --log-level $nope x --config y --endpoint z s${x}u info
+closer16-0098	none	setsid ha --log-level $nope x -- -- s${x}u info
+closer16-0099	su:bash,dash	setsid ha --log-level $nope x --config=y s${x}u info
+closer16-0100	none	setsid ha --log-level $nope x >$f s${x}u info
+closer16-0101	su:bash,dash	setsid ha --log-level "$@" x  s${x}u info
+closer16-0102	su:bash,dash	setsid ha --log-level "$@" x 2>&1 s${x}u info
+closer16-0103	su:bash	setsid ha --log-level "$@" x &>/dev/null s${x}u info
+closer16-0104	su:bash,dash	setsid ha --log-level "$@" x >|f s${x}u info
+closer16-0105	su:bash,dash	setsid ha --log-level "$@" x 2>>f s${x}u info
+closer16-0106	su:bash,dash	setsid ha --log-level "$@" x > /dev/null s${x}u info
+closer16-0107	su:bash	setsid ha --log-level "$@" x <<<foo s${x}u info
+closer16-0108	su:bash,dash	setsid ha --log-level "$@" x --no-progress >f --raw-json s${x}u info
+closer16-0109	su:bash,dash	setsid ha --log-level "$@" x --config y --endpoint z s${x}u info
+closer16-0110	none	setsid ha --log-level "$@" x -- -- s${x}u info
+closer16-0111	su:bash,dash	setsid ha --log-level "$@" x --config=y s${x}u info
+closer16-0112	none	setsid ha --log-level "$@" x >$f s${x}u info
+closer16-0113	su:bash,dash	setsid ha --log-level $IFS x  s${x}u info
+closer16-0114	su:bash,dash	setsid ha --log-level $IFS x 2>&1 s${x}u info
+closer16-0115	su:bash	setsid ha --log-level $IFS x &>/dev/null s${x}u info
+closer16-0116	su:bash,dash	setsid ha --log-level $IFS x >|f s${x}u info
+closer16-0117	su:bash,dash	setsid ha --log-level $IFS x 2>>f s${x}u info
+closer16-0118	su:bash,dash	setsid ha --log-level $IFS x > /dev/null s${x}u info
+closer16-0119	su:bash	setsid ha --log-level $IFS x <<<foo s${x}u info
+closer16-0120	su:bash,dash	setsid ha --log-level $IFS x --no-progress >f --raw-json s${x}u info
+closer16-0121	su:bash,dash	setsid ha --log-level $IFS x --config y --endpoint z s${x}u info
+closer16-0122	none	setsid ha --log-level $IFS x -- -- s${x}u info
+closer16-0123	su:bash,dash	setsid ha --log-level $IFS x --config=y s${x}u info
+closer16-0124	none	setsid ha --log-level $IFS x >$f s${x}u info
+closer16-0125	su:bash,dash	setsid ha --log-level ${nope} x  s${x}u info
+closer16-0126	su:bash,dash	setsid ha --log-level ${nope} x 2>&1 s${x}u info
+closer16-0127	su:bash	setsid ha --log-level ${nope} x &>/dev/null s${x}u info
+closer16-0128	su:bash,dash	setsid ha --log-level ${nope} x >|f s${x}u info
+closer16-0129	su:bash,dash	setsid ha --log-level ${nope} x 2>>f s${x}u info
+closer16-0130	su:bash,dash	setsid ha --log-level ${nope} x > /dev/null s${x}u info
+closer16-0131	su:bash	setsid ha --log-level ${nope} x <<<foo s${x}u info
+closer16-0132	su:bash,dash	setsid ha --log-level ${nope} x --no-progress >f --raw-json s${x}u info
+closer16-0133	su:bash,dash	setsid ha --log-level ${nope} x --config y --endpoint z s${x}u info
+closer16-0134	none	setsid ha --log-level ${nope} x -- -- s${x}u info
+closer16-0135	su:bash,dash	setsid ha --log-level ${nope} x --config=y s${x}u info
+closer16-0136	none	setsid ha --log-level ${nope} x >$f s${x}u info
+closer16-0137	su:bash,dash	setsid ha --log-level $* x  s${x}u info
+closer16-0138	su:bash,dash	setsid ha --log-level $* x 2>&1 s${x}u info
+closer16-0139	su:bash	setsid ha --log-level $* x &>/dev/null s${x}u info
+closer16-0140	su:bash,dash	setsid ha --log-level $* x >|f s${x}u info
+closer16-0141	su:bash,dash	setsid ha --log-level $* x 2>>f s${x}u info
+closer16-0142	su:bash,dash	setsid ha --log-level $* x > /dev/null s${x}u info
+closer16-0143	su:bash	setsid ha --log-level $* x <<<foo s${x}u info
+closer16-0144	su:bash,dash	setsid ha --log-level $* x --no-progress >f --raw-json s${x}u info
+closer16-0145	su:bash,dash	setsid ha --log-level $* x --config y --endpoint z s${x}u info
+closer16-0146	none	setsid ha --log-level $* x -- -- s${x}u info
+closer16-0147	su:bash,dash	setsid ha --log-level $* x --config=y s${x}u info
+closer16-0148	none	setsid ha --log-level $* x >$f s${x}u info
+closer16-0149	su:bash,dash	setsid ha --log-level $(:) x  s${x}u info
+closer16-0150	su:bash,dash	setsid ha --log-level $(:) x 2>&1 s${x}u info
+closer16-0151	su:bash	setsid ha --log-level $(:) x &>/dev/null s${x}u info
+closer16-0152	su:bash,dash	setsid ha --log-level $(:) x >|f s${x}u info
+closer16-0153	su:bash,dash	setsid ha --log-level $(:) x 2>>f s${x}u info
+closer16-0154	su:bash,dash	setsid ha --log-level $(:) x > /dev/null s${x}u info
+closer16-0155	su:bash	setsid ha --log-level $(:) x <<<foo s${x}u info
+closer16-0156	su:bash,dash	setsid ha --log-level $(:) x --no-progress >f --raw-json s${x}u info
+closer16-0157	su:bash,dash	setsid ha --log-level $(:) x --config y --endpoint z s${x}u info
+closer16-0158	none	setsid ha --log-level $(:) x -- -- s${x}u info
+closer16-0159	su:bash,dash	setsid ha --log-level $(:) x --config=y s${x}u info
+closer16-0160	none	setsid ha --log-level $(:) x >$f s${x}u info
+closer16-0161	su:bash,dash	setsid ha --log-level ${nope:+y} x  s${x}u info
+closer16-0162	su:bash,dash	setsid ha --log-level ${nope:+y} x 2>&1 s${x}u info
+closer16-0163	su:bash	setsid ha --log-level ${nope:+y} x &>/dev/null s${x}u info
+closer16-0164	su:bash,dash	setsid ha --log-level ${nope:+y} x >|f s${x}u info
+closer16-0165	su:bash,dash	setsid ha --log-level ${nope:+y} x 2>>f s${x}u info
+closer16-0166	su:bash,dash	setsid ha --log-level ${nope:+y} x > /dev/null s${x}u info
+closer16-0167	su:bash	setsid ha --log-level ${nope:+y} x <<<foo s${x}u info
+closer16-0168	su:bash,dash	setsid ha --log-level ${nope:+y} x --no-progress >f --raw-json s${x}u info
+closer16-0169	su:bash,dash	setsid ha --log-level ${nope:+y} x --config y --endpoint z s${x}u info
+closer16-0170	none	setsid ha --log-level ${nope:+y} x -- -- s${x}u info
+closer16-0171	su:bash,dash	setsid ha --log-level ${nope:+y} x --config=y s${x}u info
+closer16-0172	none	setsid ha --log-level ${nope:+y} x >$f s${x}u info
+closer16-0173	su:bash,dash	setsid ha --log-level $nope$nope2 x  s${x}u info
+closer16-0174	su:bash,dash	setsid ha --log-level $nope$nope2 x 2>&1 s${x}u info
+closer16-0175	su:bash	setsid ha --log-level $nope$nope2 x &>/dev/null s${x}u info
+closer16-0176	su:bash,dash	setsid ha --log-level $nope$nope2 x >|f s${x}u info
+closer16-0177	su:bash,dash	setsid ha --log-level $nope$nope2 x 2>>f s${x}u info
+closer16-0178	su:bash,dash	setsid ha --log-level $nope$nope2 x > /dev/null s${x}u info
+closer16-0179	su:bash	setsid ha --log-level $nope$nope2 x <<<foo s${x}u info
+closer16-0180	su:bash,dash	setsid ha --log-level $nope$nope2 x --no-progress >f --raw-json s${x}u info
+closer16-0181	su:bash,dash	setsid ha --log-level $nope$nope2 x --config y --endpoint z s${x}u info
+closer16-0182	none	setsid ha --log-level $nope$nope2 x -- -- s${x}u info
+closer16-0183	su:bash,dash	setsid ha --log-level $nope$nope2 x --config=y s${x}u info
+closer16-0184	none	setsid ha --log-level $nope$nope2 x >$f s${x}u info
+closer16-0185	su:bash,dash	setsid ha --log-level "${@}" x  s${x}u info
+closer16-0186	su:bash,dash	setsid ha --log-level "${@}" x 2>&1 s${x}u info
+closer16-0187	su:bash	setsid ha --log-level "${@}" x &>/dev/null s${x}u info
+closer16-0188	su:bash,dash	setsid ha --log-level "${@}" x >|f s${x}u info
+closer16-0189	su:bash,dash	setsid ha --log-level "${@}" x 2>>f s${x}u info
+closer16-0190	su:bash,dash	setsid ha --log-level "${@}" x > /dev/null s${x}u info
+closer16-0191	su:bash	setsid ha --log-level "${@}" x <<<foo s${x}u info
+closer16-0192	su:bash,dash	setsid ha --log-level "${@}" x --no-progress >f --raw-json s${x}u info
+closer16-0193	su:bash,dash	setsid ha --log-level "${@}" x --config y --endpoint z s${x}u info
+closer16-0194	none	setsid ha --log-level "${@}" x -- -- s${x}u info
+closer16-0195	su:bash,dash	setsid ha --log-level "${@}" x --config=y s${x}u info
+closer16-0196	none	setsid ha --log-level "${@}" x >$f s${x}u info
+closer16-0197	su:bash,dash	ha --log-level 2>&1 $nope x s${x}u info
+closer16-0198	su:bash	ha --log-level &>/dev/null $nope x s${x}u info
+closer16-0199	su:bash,dash	ha --log-level > /dev/null $nope x s${x}u info
+closer16-0200	su:bash	ha --log-level <<<foo $nope x s${x}u info
+closer16-0201	su:bash,dash	ha --log-level >f 2>g $nope x s${x}u info
+closer16-0202	su:bash,dash	ha --log-level $nope >f $nope2 x s${x}u info
+closer16-0203	none	ha --log-level $a --config $b x y s${x}u info
+closer16-0204	none	ha --config $a --log-level $b --endpoint $c x y z s${x}u info
+closer16-0205	su:bash,dash	ha --log-level $nope $nope x --config $nope y s${x}u info
+closer16-0206	su:bash	ha --log-level {,,} x s${x}u info
+closer16-0207	su:bash	ha --log-level {,}{,} x s${x}u info
+closer16-0208	su:bash	shopt -s nullglob; ha --log-level /nope/[a]* x s${x}u info
+closer16-0209	none	shopt -s nullglob extglob; ha --log-level /nope/@(a) x s${x}u info
+closer16-0210	su:bash	shopt -s nullglob; ha --log-level /nope/* /nope/? x s${x}u info
+closer16-0211	su:bash	shopt -s nullglob; ha --log-level /nope/* x --no-progress s${x}u info
+closer16-0212	su:bash	ha --log-level {,} x 2>/dev/null s${x}u info
+closer16-0213	su:bash	ha --log-level {x,su} info
+closer16-0214	su:bash	setsid ha --log-level {x,su} info
+closer16-0215	su-limit:bash	ha --log-level {x,s${y}u} info
+closer16-0216	su:bash	ha {--log-level,x,su} info
+closer16-0217	su:dash	ha --log-level x{,} su info
+closer16-0218	su-limit:bash,dash	touch a su; ha --log-level * info
+closer16-0219	su-limit:bash,dash	touch a s''u; setsid ha --log-level * info
+closer16-0220	su:bash,dash	touch a s''u; setsid ha --log-level ? ?? info
+closer16-0221	su:bash,dash	touch a s''u; ha --log-level [a] [s]u info
+closer16-0222	su:bash,dash	ha --log-level $nope x s${x}u info 2>&1 | cat
+closer16-0223	su:bash,dash	ha --log-level $nope x -h s${x}u info
+closer16-0224	su:bash,dash	ha --log-level $nope x --log-level $nope y s${x}u info
+closer16-0225	su:bash,dash	ha --log-level $nope x --log-level s${x}u su info
+closer16-0226	none	ha --log-level $nope x y s${x}u info
+closer16-0227	su:bash,dash	eval "setsid ha --log-level"' "" s${x}u info'
+closer16-0228	su:bash,dash	eval setsid\\ ha\\ --log-level\\ \\"\\"\\ s\\${x}u\\ info
+closer16-0229	su:bash	eval $'setsid ha --log-level \\'\\' s${x}u info'
+closer16-0230	su:bash,dash	bash -c $'setsid ha --log-level "" s${x}u info'
+closer16-0231	su:bash	bash <<< 'setsid ha --log-level "" s${x}u info'
+closer16-0232	su:bash,dash	bash <<'EOF'\nsetsid ha --log-level "" s${x}u info\nEOF
+closer16-0233	su:bash,dash	sh <<EOF\nsetsid ha --log-level "" s\\${x}u info\nEOF
+closer16-0234	su:bash,dash	echo 'setsid ha --log-level "" s${x}u info' | sh
+closer16-0235	su:bash,dash	sh -c 'setsid ha --log-level "" s$1u info' _ ""
+closer16-0236	su:bash,dash	sh -c 'setsid ha --log-level "" $1 info' _ su
+closer16-0237	su:bash,dash	sh -c '"$@"' _ setsid ha --log-level '' su info
+closer16-0238	su:bash,dash	eval 'setsid ha --log-level' "''" 's${x}u info'
+closer16-0239	su:bash,dash	eval "$(echo 'setsid ha --log-level "" s${x}u info')"
+closer16-0240	su:bash,dash	eval 'setsid ha --log-level '"''"' s${x}u info'
+closer16-0241	su:bash,dash	c='setsid ha --log-level "" s${x}u info'; eval $c
+closer16-0242	su:bash,dash	eval 'setsid ha --log-level "" s'"$x"'u info'
+closer16-0243	su:bash,dash	eval 'setsid ha --log-level "" s'\\u' info'
+closer16-0244	su:bash,dash	eval 'setsid ha --log-level "" 's'u info'
+closer16-0245	su:bash,dash	trap 'setsid ha --log-level "" s${x}u info' EXIT
+closer16-0246	su:bash,dash	: | bash -c 'setsid ha --log-level "" s${x}u info'
+closer16-0247	su:bash,dash	env bash -c 'setsid ha --log-level "" s${x}u info'
+closer16-0248	su:bash,dash	sh -ec 'setsid ha --log-level "" s${x}u info'
+closer16-0249	su:bash,dash	bash --norc -c 'setsid ha --log-level "" s${x}u info'
+closer16-0250	su:bash,dash	timeout 5 sh -c 'setsid ha --log-level "" s${x}u info'
+closer16-0251	su:bash,dash	find . -maxdepth 0 -exec sh -c 'setsid ha --log-level "" s${x}u info' \\;
+closer16-0252	su:bash,dash	echo x | xargs -I{} sh -c 'setsid ha --log-level "" s${x}u info'
+closer16-0253	su:bash,dash	eval "setsid ha --log-level \\"\\" s`echo`u info"
+closer16-0254	su:bash,dash	eval "setsid ha --log-level \\"\\" s${x}u info"
+closer16-0255	none	eval 'setsid ha --log-level "" s${x}u info'\\'
+closer16-0256	su:bash,dash	echo \\\\\\'; eval 'setsid ha --log-level "" s${x}u info'
+closer16-0257	su:bash,dash	echo "\\""; eval 'setsid ha --log-level "" s${x}u info'
+closer16-0258	su:bash	echo $'\\''; eval 'setsid ha --log-level "" s${x}u info'
+closer16-0259	su:bash,dash	echo "it's"; eval 'setsid ha --log-level "" s${x}u info'
+closer16-0260	su:bash,dash	echo 'a'\\''b'; eval 'setsid ha --log-level "" s${x}u info'
+closer16-0261	su:bash,dash	eval 'setsid ha' '--log-level' "\\"\\"" 's${x}u' info
+closer16-0262	su:bash,dash	eval 'setsid h''a --log-level "" s${x}u info'
+closer16-0263	su-limit:bash,dash	eval 'setsid h'a' --log-level "" s${x}u info'
+closer16-0264	none	eval 'setsid ha --log-level "" s${x}u info' 'x
+closer16-0265	su-limit:bash,dash	a='setsid ha --log-level'; b='"" s${x}u info'; eval "$a $b"
+closer16-0266	su:bash,dash	eval 'eval "eval '\\''setsid ha --log-level \\"\\" s\\${x}u info'\\''"'
+closer16-0267	su:bash,dash	eval 'setsid ha --log-level "" s${x}u info'
+closer16-0268	su:bash,dash	eval 'eval '"'"'setsid ha --log-level "" s${x}u info'"'"''
+closer16-0269	su:bash,dash	eval 'eval '"'"'eval '"'"'"'"'"'"'"'"'setsid ha --log-level "" s${x}u info'"'"'"'"'"'"'"'"''"'"''
+closer16-0270	su:bash,dash	eval 'eval '"'"'eval '"'"'"'"'"'"'"'"'eval '"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'setsid ha --log-level "" s${x}u info'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"''"'"'"'"'"'"'"'"''"'"''
+closer16-0271	su:bash,dash	eval 'eval '"'"'eval '"'"'"'"'"'"'"'"'eval '"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'eval '"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'setsid ha --log-level "" s${x}u info'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"''"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"''"'"'"'"'"'"'"'"''"'"''
+closer16-0272	su:bash,dash	eval 'eval '"'"'eval '"'"'"'"'"'"'"'"'eval '"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'eval '"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'eval '"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'setsid ha --log-level "" s${x}u info'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"''"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"''"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"''"'"'"'"'"'"'"'"''"'"''
+closer16-0273	su:bash,dash	eval 'eval '"'"'eval '"'"'"'"'"'"'"'"'eval '"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'eval '"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'eval '"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'eval '"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'setsid ha --log-level "" s${x}u info'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"''"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"''"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"''"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"''"'"'"'"'"'"'"'"''"'"''
+closer16-0274	su:bash,dash	eval 'eval '"'"'eval '"'"'"'"'"'"'"'"'eval '"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'eval '"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'eval '"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'eval '"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'eval '"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'setsid ha --log-level "" s${x}u info'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"''"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"''"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"''"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"''"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"''"'"'"'"'"'"'"'"''"'"''
+closer16-0275	su:bash,dash	bash -c 'sh -c '"'"'setsid ha --log-level x su info'"'"''
+closer16-0276	su:bash,dash	sh -c 'bash -c '"'"'sh -c '"'"'"'"'"'"'"'"'setsid ha --log-level x su info'"'"'"'"'"'"'"'"''"'"''
+closer16-0277	su:bash,dash	bash -c 'sh -c '"'"'bash -c '"'"'"'"'"'"'"'"'sh -c '"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'setsid ha --log-level x su info'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"''"'"'"'"'"'"'"'"''"'"''
+closer16-0278	su:bash,dash	sh -c 'bash -c '"'"'sh -c '"'"'"'"'"'"'"'"'bash -c '"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'sh -c '"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'setsid ha --log-level x su info'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"''"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"''"'"'"'"'"'"'"'"''"'"''
+closer16-0279	su:bash,dash	bash -c 'sh -c '"'"'bash -c '"'"'"'"'"'"'"'"'sh -c '"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'bash -c '"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'sh -c '"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'setsid ha --log-level x su info'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"''"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"''"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"''"'"'"'"'"'"'"'"''"'"''
+closer16-0280	su:bash,dash	sh -c 'bash -c '"'"'sh -c '"'"'"'"'"'"'"'"'bash -c '"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'sh -c '"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'bash -c '"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'sh -c '"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'setsid ha --log-level x su info'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"''"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"''"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"''"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"''"'"'"'"'"'"'"'"''"'"''
+closer16-0281	su:bash,dash	bash -c 'sh -c '"'"'bash -c '"'"'"'"'"'"'"'"'sh -c '"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'bash -c '"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'sh -c '"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'bash -c '"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'sh -c '"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'setsid ha --log-level x su info'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"''"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"''"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"''"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"''"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"'"''"'"'"'"'"'"'"'"''"'"''
+closer16-0282	su:bash,dash	v='x su'; ha --log-level ${v} info
+closer16-0283	su:bash,dash	v='x su'; ha --log-level=$v info
+closer16-0284	su-limit:bash,dash	v='=x su'; ha --log-level$v info
+closer16-0285	su:bash,dash	v='--log-level x su'; ha $v info
+closer16-0286	su:bash,dash	f=--log-level; v='x su'; ha $f $v info
+closer16-0287	su:bash,dash	v="x s""u"; ha --log-level $v info
+closer16-0288	su-limit:bash,dash	v='x s'; ha --log-level ${v}u info
+closer16-0289	su-limit:bash,dash	v=$(printf 'x s\\165'); ha --log-level $v info
+closer16-0290	su:bash,dash	set -- x s''u; ha --log-level $* info
+closer16-0291	su:bash,dash	ha --log-level $(echo x s''u) info
+closer16-0292	su:bash,dash	ha --log-level `echo x s\\u` info
+closer16-0293	su:bash,dash	echo x s''u > f; ha --log-level $(cat f) info
+closer16-0294	su-limit:bash,dash	ha --log-level $(echo eCBzdQo= | base64 -d) info
+closer16-0295	su:bash,dash	v='x su'; setsid ha --log-level 2>/dev/null $v info
+closer16-0296	su:bash,dash	v='x su'; ha --no-progress --log-level $v info
+closer16-0297	su:bash,dash	v='x su'; ha --log-level ""$v info
+closer16-0298	su:bash,dash	v=' su'; ha --log-level x$v info
+closer16-0299	su:bash,dash	v='x su'; while ha --config $v info; do break; done
+closer16-0300	su:bash,dash	v='x su'; eval 'ha --log-level $v info'
+closer16-0301	su:bash,dash	v='x su'; eval "ha --log-level $v info"
+closer16-0302	su:bash,dash	export v='x su'; sh -c 'ha --log-level $v info'
+closer16-0303	remote:bash,dash	v='x host'; ha --log-level $v reboot
+closer16-0304	remote:bash,dash	v='x core'; setsid ha --endpoint $v stop
+closer16-0305	su:bash,dash	v='x supervisor'; ha --api-token $v info
+closer16-0306	none	v='y x su'; ha --log-level $nope $v info
+closer16-0307	su:bash,dash	v='x'; w='su'; ha --log-level $v $w info
+closer16-0308	su:bash,dash	su=1; v='x s'; ha --log-level ${v}u info
+closer16-0309	su-limit:bash	v='x S'; ha --log-level ${v,,}u info
+closer16-0310	su:bash,dash	IFS=:; v=x:s''u; ha --log-level $v info
+closer16-0311	su:bash,dash	for v in 'x su'; do ha --log-level $v info; done
+closer16-0312	su:bash,dash	read v <<EOF\nx s\\u\nEOF\nha --log-level $v info
+closer16-0313	remote:bash,dash	v=debug; ha --log-level $v core info
+closer16-0314	remote:bash,dash	ha --log-level debug core info
+closer16-0315	none	echo 'it'\\''s ha time'
+closer16-0316	none	git commit -m "ha: fix $x"
+closer16-0317	none	grep -r "ha " . | head
+closer16-0318	remote:bash,dash	echo "super $x"; ha core info
+closer16-0319	none	ha --config $dir core info
+closer16-0320	remote:bash,dash	result=$(ha --log-level "$lvl" core info)
+closer16-0321	remote:bash,dash	ha core info\r
+closer16-0322	none	printf 'ha\\r\\n'
+closer16-0323	none	sh -c 'echo ha "$1"' _ x
+closer16-0324	none	eval 'echo "ha $x"'
+closer16-0325	remote:bash,dash	echo su; ha --log-level "$lvl" core info
+closer16-0326	none	sudo true; ha --log-level $lvl core info
+closer16-0327	none	ha --log-level $lvl core info # super
+closer16-0328	none	ls /usr/share/ha*; echo $HOME
+closer16-0329	none	bash -c 'echo "a'\\''b" ha'
+closer16-0330	remote:bash,dash	ha addons info $slug
+closer16-0331	remote:bash,dash	ha core logs | grep "$pat"
+closer17-0001	su-limit:bash,dash	eval 'setsid ha' --log-level '"" s${x}u info'
+closer17-0002	su-limit:bash,dash	eval setsid ha '--log-level "" s${x}u info'
+closer17-0003	su-limit:bash,dash	eval setsid ha --log-level '"" s${x}u info'
+closer17-0004	su:bash,dash	eval 'setsid ha --log-level ""' s'${x}u info'
+closer17-0005	su:bash,dash	eval 'setsid ha --log-level ""' s\\${x}u info
+closer17-0006	su:bash,dash	eval 'setsid ha --log-level' \\"\\" 's${x}u info'
+closer17-0007	su:bash,dash	eval 'setsid ha --log-level' \\\n'"" s${x}u info'
+closer17-0008	su:bash,dash	eval 'setsid ha --log-level'\\\n '"" s${x}u info'
+closer17-0009	none	eval 'setsid ha' x'"" s${x}u info'
+closer17-0010	none	eval 'setsid ha --log-level' x '"" s${x}u info'
+closer17-0011	su-limit:bash,dash	eval 'setsid ha' --log-level '"a b" s${x}u info'
+closer17-0012	su:bash,dash	eval setsid ha --log-level '"a b"' 's${x}u' info
+closer17-0013	su:bash,dash	eval setsid ha --log-level \\"\\" s\\${x}u info
+closer17-0014	su:bash,dash	eval setsid ha --log-level \\"a b\\" s\\${x}u info
+closer17-0015	su-limit:bash,dash	bash -c 'setsid ha '--log-level' "" s${x}u info'
+closer17-0016	su:bash,dash	eval 'setsid ha' --log-level "'' s\\${x}u info"
+closer17-0017	su-limit:bash,dash	eval "setsid ha" --log-level '"" s${x}u info'
+closer17-0018	su-limit:bash,dash	eval 'setsid ha' --config=x --log-level '"" s${x}u info'
+closer17-0019	su-limit:bash,dash	eval 'setsid ha' 2>/dev/null --log-level '"" s${x}u info'
+closer17-0020	su:bash,dash	eval 'setsid ha' --log-level '"" su info'
+closer17-0021	su:bash,dash	eval setsid ha --log-level '"a b" su info'
+closer17-0022	su:bash,dash	eval setsid ha --log-level \\"a b\\" su info
+closer17-0023	su:bash,dash	eval 'while ha' --log-level '"" supervisor info; do break; done'
+closer17-0024	remote:bash,dash	eval 'setsid ha' --endpoint '"" host reboot'
+closer17-0025	su:bash,dash	eval setsid ha '--log-level "" s${x}u' info
+closer17-0026	su:bash,dash	eval 'eval setsid ha' --log-level "'\\"\\" s\\${x}u info'"
+closer17-0027	su-limit:bash,dash	sh -c 'eval setsid ha --log-level '\\''"" s${x}u info'\\'
+closer17-0028	su:bash,dash	eval '' 'setsid ha' --log-level '"" s${x}u info'
+closer17-0029	su:bash,dash	eval 'setsid ha' '' --log-level '"" s${x}u info'
+closer17-0030	su:bash,dash	eval 'setsid ha' --log-level '' '"" s${x}u info'
+closer17-0031	none	x=1; eval 'setsid ha' --log-level '"" s${x}u info' # two 'quoted' texts
+closer17-0032	su-limit:bash	ha --log-level {{,},} x s${x}u info
+closer17-0033	su-limit:bash	setsid ha --log-level {{,},} x s${x}u info
+closer17-0034	su:bash	ha --log-level {,{,}} x s${x}u info
+closer17-0035	none	ha --log-level {"",}{,} x s${x}u info
+closer17-0036	su-limit:bash	shopt -s extglob nullglob\nha --log-level /nope/@(a) x s${x}u info
+closer17-0037	su-limit:bash	shopt -s extglob nullglob\nsetsid ha --log-level /nope/+(a) x s${x}u info
+closer17-0038	su-limit:bash	shopt -s extglob nullglob\nha --log-level /nope/!(a) x s${x}u info
+closer17-0039	su:bash	ha --log-level {,} x {su,} info
+closer17-0040	su:bash	ha --log-level $nope x s{u,} info
+closer17-0041	su:bash	setsid ha --log-level {{,},} x su info
+closer17-0042	su:bash	shopt -s nullglob; ha --log-level /nope/* x s{u,} info
+closer17-0043	su:bash	ha --log-level {,}$nope x s${x}u info
+closer17-0044	none	ha --log-level x{,}y z s${x}u info
+closer17-0045	none	ha --log-level -$nope x s${x}u info
+closer17-0046	su:bash,dash	ha --log-level $nope -x s${x}u info
+closer17-0047	su:bash,dash	ha --log-level $nope 2 >f s${x}u info
+closer17-0048	none	ha --log-level $nope x 2 s${x}u info
+closer17-0049	su:bash,dash	ha --log-level $nope x > f s${x}u info
+closer17-0050	su:bash,dash	ha --log-level $nope x 2> f --config y s${x}u info
+closer17-0051	su-limit:bash,dash	ha --log-level $nope x --config > f y s${x}u info
+closer17-0052	none	ha --log-level $nope x --config=y z s${x}u info
+closer17-0053	none	ha --log-level $nope --config x y s${x}u info
+closer17-0054	su:bash,dash	ha --log-level $nope --config --endpoint x s${x}u info
+closer17-0055	none	ha --log-level $nope x --CONFIG y s${x}u info
+closer17-0056	none	ha --log-level $nope x -c y s${x}u info
+closer17-0057	none	ha --log-level $nope x --raw-json y s${x}u info
+closer17-0058	none	ha --log-level $nope $nope x y s${x}u info
+closer17-0059	su:bash,dash	ha --config $a x --log-level $b y s${x}u info
+closer17-0060	su:bash,dash	ha --log-level $nope x >&2 s${x}u info
+closer17-0061	su:bash,dash	ha --log-level $nope x 2>&1 >f --no-progress s${x}u info
+closer17-0062	none	ha --log-level $nope x <f s${x}u info
+closer17-0063	su:bash,dash	ha --log-level $nope x << E s${x}u info\nE
+closer17-0064	su:bash,dash	ha --log-level $nope x <<E s${x}u info\nE
+closer17-0065	su:bash,dash	ha --log-level $nope x --config "" s${x}u info
+closer17-0066	su:bash,dash	ha --log-level $nope x --config "a b" s${x}u info
+closer17-0067	su:bash,dash	ha --log-level $nope x --config a\\ b s${x}u info
+closer17-0068	su:bash,dash	ha --log-level $nope "" s${x}u info
+closer17-0069	none	ha --log-level $nope '' x s${x}u info
+closer17-0070	none	ha --log-level $nope x '' s${x}u info
+closer17-0071	su:bash,dash	setsid ha --log-level $nope x --config y --endpoint z --api-token w s${x}u info
+closer17-0072	su:bash,dash	v='x su'; ha --log-level 2>/dev/null $v info
+closer17-0073	su:bash,dash	v='x su'; ha --log-level >f $v info
+closer17-0074	su:bash,dash	v='x su'; ha --log-level \\\n$v info
+closer17-0075	su:bash,dash	v='x su'; ha --log-level\t$v info
+closer17-0076	su:bash,dash	v='x su'; ha --log-level ""$v info
+closer17-0077	su:bash,dash	v='x su'; ha --log-level a$v info
+closer17-0078	su-limit:bash,dash	v='=x su'; ha --log-level$v info
+closer17-0079	su-limit:bash,dash	v='-level x su'; ha --log$v info
+closer17-0080	su:bash,dash	v='x su'; f=--log-level; ha $f $v info
+closer17-0081	su-limit:bash,dash	v='x s'; ha --log-level ${v}u info
+closer17-0082	su-limit:bash,dash	v='x s'; setsid ha --log-level ${v}u info
+closer17-0083	su-limit:bash,dash	v='x s'; w=u; ha --log-level $v$w info
+closer17-0084	su:bash	v='x SU'; ha --log-level ${v,,} info
+closer17-0085	su-limit:bash,dash	v='x us'; ha --log-level $(echo $v | rev | sed 's/^\\(..\\) \\(.\\)$/\\2 \\1/') info
+closer17-0086	su:bash,dash	v='x supervisor'; ha --log-level $v info
+closer17-0087	su:bash,dash	v='x super'; ha --config=$v info
+closer17-0088	remote:bash,dash	v='x host'; setsid ha --log-level 2>/dev/null $v reboot
+closer17-0089	remote-limit:bash,dash	v='x ho'; ha --endpoint ${v}st reboot
+closer17-0090	su:bash,dash	set -- x su; ha --log-level "$@" info
+closer17-0091	su:bash,dash	set -- x su; ha --log-level 2>/dev/null "$@" info
+closer17-0092	su:bash,dash	set -- x s; ha --log-level $1 $2\\u info
+closer17-0093	su:bash,dash	v='x su'; ha --no-progress 2>/dev/null --log-level 2>&1 $v info
+closer17-0094	su:bash	v='x su'; ha --log-level {$v,} info
+closer17-0095	su:bash,dash	v='x su'; ha -$nope-log-level $v info
+closer17-0096	su:bash,dash	v=x; ha --log-level $v su info
+closer17-0097	su:bash,dash	v='x su'; eval 'setsid ha --log-level >f $v info'
+closer17-0098	su:bash,dash	v='su'; ha --log-level x $v info
+closer17-0099	su:bash,dash	ha --log-level `echo x; echo s\\\\u` info
+closer17-0100	su:bash,dash	ha --log-level $(echo x; echo s''u) info
+closer17-0101	su:bash,dash	ha --log-level 2>/dev/null $(echo x; echo su) info
+closer17-0102	su:bash,dash	setsid ha --log-level x\r"a b" su info
+closer17-0103	su:bash,dash	setsid ha --log-level x\r'' su info
+closer17-0104	su:bash,dash	setsid ha --log-level=x\r"a b" su info
+closer17-0105	remote:bash,dash	setsid ha --endpoint x\r"a b" host reboot
+closer17-0106	su:bash,dash	while ha --log-level x\ry"a b" supervisor info; do break; done
+closer17-0107	su:bash,dash	setsid ha --log-level \rx"a b" su info
+closer17-0108	su:bash,dash	setsid ha >x\r"a b" su info
+closer17-0109	none	setsid ha {x\r,} su info
+closer17-0110	su:bash,dash	setsid ha --log-level x\r$nope su info
+closer17-0111	su:bash,dash	setsid ha --log-level $nope x\r s${x}u info
+closer17-0112	su:bash,dash	setsid ha --log-level x\x0c"a b" su info
+closer17-0113	su:bash,dash	setsid ha --log-level x\x0c'' su info
+closer17-0114	su:bash,dash	setsid ha --log-level=x\x0c"a b" su info
+closer17-0115	remote:bash,dash	setsid ha --endpoint x\x0c"a b" host reboot
+closer17-0116	su:bash,dash	while ha --log-level x\x0cy"a b" supervisor info; do break; done
+closer17-0117	su:bash,dash	setsid ha --log-level \x0cx"a b" su info
+closer17-0118	su:bash,dash	setsid ha >x\x0c"a b" su info
+closer17-0119	none	setsid ha {x\x0c,} su info
+closer17-0120	su:bash,dash	setsid ha --log-level x\x0c$nope su info
+closer17-0121	su:bash,dash	setsid ha --log-level $nope x\x0c s${x}u info
+closer17-0122	su:bash,dash	setsid ha --log-level x\xa0"a b" su info
+closer17-0123	su:bash,dash	setsid ha --log-level x\xa0'' su info
+closer17-0124	su:bash,dash	setsid ha --log-level=x\xa0"a b" su info
+closer17-0125	remote:bash,dash	setsid ha --endpoint x\xa0"a b" host reboot
+closer17-0126	su:bash,dash	while ha --log-level x\xa0y"a b" supervisor info; do break; done
+closer17-0127	su:bash,dash	setsid ha --log-level \xa0x"a b" su info
+closer17-0128	su:bash,dash	setsid ha >x\xa0"a b" su info
+closer17-0129	none	setsid ha {x\xa0,} su info
+closer17-0130	su:bash,dash	setsid ha --log-level x\xa0$nope su info
+closer17-0131	su:bash,dash	setsid ha --log-level $nope x\xa0 s${x}u info
+closer17-0132	su:bash,dash	setsid ha --log-level x\u2003"a b" su info
+closer17-0133	su:bash,dash	setsid ha --log-level x\u2003'' su info
+closer17-0134	su:bash,dash	setsid ha --log-level=x\u2003"a b" su info
+closer17-0135	remote:bash,dash	setsid ha --endpoint x\u2003"a b" host reboot
+closer17-0136	su:bash,dash	while ha --log-level x\u2003y"a b" supervisor info; do break; done
+closer17-0137	su:bash,dash	setsid ha --log-level \u2003x"a b" su info
+closer17-0138	su:bash,dash	setsid ha >x\u2003"a b" su info
+closer17-0139	none	setsid ha {x\u2003,} su info
+closer17-0140	su:bash,dash	setsid ha --log-level x\u2003$nope su info
+closer17-0141	su:bash,dash	setsid ha --log-level $nope x\u2003 s${x}u info
+closer17-0142	su:bash,dash	setsid ha --log-level x\x1f"a b" su info
+closer17-0143	su:bash,dash	setsid ha --log-level x\x1f'' su info
+closer17-0144	su:bash,dash	setsid ha --log-level=x\x1f"a b" su info
+closer17-0145	remote:bash,dash	setsid ha --endpoint x\x1f"a b" host reboot
+closer17-0146	su:bash,dash	while ha --log-level x\x1fy"a b" supervisor info; do break; done
+closer17-0147	su:bash,dash	setsid ha --log-level \x1fx"a b" su info
+closer17-0148	su:bash,dash	setsid ha >x\x1f"a b" su info
+closer17-0149	none	setsid ha {x\x1f,} su info
+closer17-0150	su:bash,dash	setsid ha --log-level x\x1f$nope su info
+closer17-0151	su:bash,dash	setsid ha --log-level $nope x\x1f s${x}u info
+closer17-0152	remote:bash,dash	ha --log-level $lvl --config $dir core info
+closer17-0153	remote:dash	ha --config {a,b} core info
+closer17-0154	none	eval 'echo ha' --flag 'x'
+closer17-0155	none	echo 'ha' and 'su'
+closer17-0156	remote:bash,dash	v='x su'; echo --log-level $v; ha core info
+closer17-0157	none	echo su; ha --config $dir core info
+closer17-0158	none	git log --grep 'ha' --format '%s $x'
+closer17-0159	remote:bash,dash	ha core info\r\nha core stats\r\n
+closer17-0160	remote:bash,dash	x='it'\\''s'; ha --config "$x" core info

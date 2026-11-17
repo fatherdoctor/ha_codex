@@ -39,13 +39,13 @@
   built family word after it (`ha --log-level $nope x s${x}u info`), also with flags, redirections or another
   flag and its value before that word (`ha --log-level $nope x --no-progress s${x}u info`) or a redirection
   before the value; a built word after such a value is refused, so
-  `ha --config $dir --api-token $token core info` is refused too. A flag value with a `$` or a backtick is
-  refused when `su`, `super` or `supervisor` stands anywhere in the command, before `ha` too, because a variable
+  `ha --config $dir --api-token $token core info` is refused too. A flag value with a `$` or a backtick, also
+  past a redirection, is refused when the whole word `su`, `super` or `supervisor` stands anywhere in the command, before `ha` too, because a variable
   can hold both the value and the family word (`v='x su'; ha --log-level $v info`). The check ends a word only at
   a space, a tab or a newline, as the shell does: a flag value of one carriage return or no-break space no longer
   hides the family word after it (`ha --log-level <CR> su info`). A quoted script is read with the shell's own
   quote rules (a backslash outside quotes escapes a quote), and also as a second shell gets the words joined
-  (`eval 'setsid ha' '--log-level "" s${x}u info'`). A global
+  where two quoted texts meet (`eval 'setsid ha' '--log-level "" s${x}u info'`). A global
   flag with `=` and an empty value is read as that flag (`setsid ha --config= su info` is refused). A `(` in the family's place is refused,
   for bash's extended globs (`ha @(su) info`), and so is a `$'...'` script with a backslash escape in a command that
   holds the word `ha` (`bash -c $'ha \x73u info'`). `ls -ha *` and `du -ha $dir` are allowed: letters `ha` after
@@ -59,7 +59,11 @@
   blank can then hide a built family word; a brace word with an escaped brace and a quote kept for a second
   shell (`eval ha \{-x'" y"',s}u info`); the program word in the `$'...'` or `$"..."` form (`h$'a' su info`);
   a built family word in a nested backtick; and a flag `ha` does not know, with a quoted blank, before the family
-  word (the real `ha` stops at it). Substitutions and quoted scripts nested more than six deep, or more text than
+  word (the real `ha` stops at it); a variable that holds only part of the family word (`v='x s'; ha --log-level
+  ${v}u info`) or a `$` joined to the flag (`ha --log-level$v info`); a quoted script for a second shell with a
+  piece outside quotes (`eval 'setsid ha' --log-level '"" s${x}u info'`); a removed flag value in a nested brace
+  word, an extended glob with `nullglob`, or before a redirection between a second flag and its value; and a
+  brace word or a glob that holds both the value and the family word. Substitutions and quoted scripts nested more than six deep, or more text than
   four times the command's length plus 64 KB in all, are not read further: the command is refused when it holds
   the word `ha`.
 - The text check's match time no longer doubles with each repeated global flag or heredoc operator, and many

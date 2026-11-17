@@ -92,7 +92,7 @@ The floor cannot see where a quoted, escaped or computed word ends. `_ha_unknown
 `ha`. A global-flag value with a quote, a backslash or a substitution is refused with remote control on, and with
 it off when a Supervisor family word follows. A redirection target with a quote, a backslash or a backtick, a
 process substitution, or any word with a `$`, a backtick, a glob character or a brace expansion is refused when a
-family word that the mode refuses follows (`HA_UNREADABLE_WORD_RE`). "Follows" means anywhere later in the command
+family word that the mode refuses follows (`HA_UNREADABLE_WORD_RE`). Both patterns end a word at the shell's blanks only, as the floor does, so `ha --log-level x<CR>"a b" su info` is read as one quoted value. "Follows" means anywhere later in the command
 text, not only on the line: a quoted word, `${...}` or `$(...)` can hold a newline (`_last_family_word`). The rule
 finds `ha` on lines that end at a newline only, as the shell's do. A brace word after the first `ha` that bash can
 expand into a family word (`s{u,}`) is refused too (`_brace_word_names_family`, using `_brace_choices`). It fails
@@ -132,8 +132,10 @@ it (`eval 'setsid ha --log-level "" s${x}u info'`). That function follows the
 quotes as the shell does (a backslash outside quotes escapes a quote: `echo \'; eval '...'`), and it also returns
 the whole text with one level of quotes removed, which is what `eval` or `bash -c` reads when the words are joined
 (`eval 'setsid ha' '--log-level "" s${x}u info'`, `eval 'eval '\''...'\'`). That joined text is read only where a
-quote opens after another quoted text with only blanks between, or right after an escaped quote. Each such reading
-can double the work below it, and a hook that runs past Codex's timeout lets the command run, so the rule reads at
+quote opens after another quoted text with only blanks between, or right after an escaped quote. A piece outside
+quotes is not joined (`eval 'setsid ha' --log-level '"" s${x}u info'`), a limit DOCS.md states. Each such reading
+can double the work below it, and a hook that runs past Codex's timeout lets the command run (the hook's own
+1.5-second deadline refuses first, DOCS.md "Hook deadline"), so the rule reads at
 most four times the command's length plus 64 KB in all (`_SCRIPT_READ_BUDGET_FACTOR`, `_SCRIPT_READ_BUDGET_EXTRA`);
 past that, and past six levels, a script is refused when it holds the word `ha` (fail closed;
 `test_quoted_scripts_past_the_limits_are_refused_with_the_word_ha`, `test_quoted_script_time_stays_linear`). A quoted text is read when the word `ha` stands
@@ -144,7 +146,11 @@ word up to the floor's family position, and one plain word more for each such va
 refused. A flag, a redirection, its target and another flag's value are not plain words and do not use up that
 count (`ha --log-level $nope x --no-progress s${x}u info`). A flag value with a `$` or a backtick is refused in
 `_ha_unknown_flag` when a family word this mode refuses stands anywhere in the text, before `ha` too
-(`HA_EXPANDED_FLAG_VALUE_RE`): `v='x su'; ha --log-level $v info`. It follows quotes through the whole text and does not know a comment, a heredoc body or a
+(`HA_EXPANDED_FLAG_VALUE_RE`, also past redirections before the value): `v='x su'; ha --log-level $v info`. The family
+word must stand whole in the text, and the `$` must start the value: `v='x s'; ha --log-level ${v}u info` and
+`ha --log-level$v info` are limits DOCS.md states. The removed-value rule does not know a nested brace word, an
+extended glob or a redirection between a second flag and its value; DOCS.md states these too, with stated-limit rows
+in the corpus. It follows quotes through the whole text and does not know a comment, a heredoc body or a
 substitution: an odd quote in one of them (`echo x # it's`) can turn every later blank into a quoted one, and the
 reading then finds no word `ha` after it (the joined reading above catches some of these forms, not all). DOCS.md states this limit, with a built family word in a nested
 backtick and the program word in the `$'...'` form. Substitutions and quoted scripts nested more than six deep

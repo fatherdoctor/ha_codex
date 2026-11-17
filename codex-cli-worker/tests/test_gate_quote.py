@@ -1250,6 +1250,103 @@ class RedirectionTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(refusal(command, False), '')
 
+    # N1 of the ninth closure: a value with a character that Python reads as a blank, then a quote.
+    # The shell reads the whole value as one word, and the family word follows it.
+    NINTH_ODD_BLANKS = ('\r', '\x0c', '\x1f', '\xa0', ' ')
+    QUOTE_AFTER_ODD_BLANK_FORMS = (
+        'setsid ha --log-level x{}"a b" su info', 'setsid ha --log-level=x{}"a b" su info',
+        'while ha --log-level x{}y"a b" supervisor info; do break; done', 'setsid ha >x{}"a b" su info')
+    QUOTE_AFTER_ODD_BLANK_REMOTE_FORM = 'setsid ha --endpoint x{}"a b" host reboot'
+    # N2 of the ninth closure: a redirection between the flag and the value that holds the family word.
+    REDIRECTED_VARIABLE_VALUE_FORMS = (
+        "v='x su'; ha --log-level 2>/dev/null $v info", "v='x su'; ha --log-level >f $v info",
+        "v='x su'; ha --no-progress 2>/dev/null --log-level 2>&1 $v info",
+        'set -- x su; ha --log-level 2>/dev/null "$@" info',
+        "v='x su'; eval 'setsid ha --log-level >f $v info'",
+        "v='x su'; setsid ha --log-level 2>/dev/null $v info")
+    # Limits that DOCS.md states (corpus rows su-limit): the family word is not whole in the text, a quoted
+    # script with a piece outside quotes, a nested brace, an extended glob, and a redirection before a
+    # second flag's value. They run the family, and the hook lets them pass.
+    NINTH_STATED_LIMITS = (
+        "v='x s'; ha --log-level ${v}u info", "v='=x su'; ha --log-level$v info",
+        """eval 'setsid ha' --log-level '"" s${x}u info'""",
+        'ha --log-level $nope x --config > f y s${x}u info')
+
+    def _ninth_round_forms(self) -> list[str]:
+        return [form.format(blank) for form in self.QUOTE_AFTER_ODD_BLANK_FORMS for blank in self.NINTH_ODD_BLANKS]
+
+    def test_print_only_shell_runs_each_ninth_round_form(self) -> None:
+        for command in self._ninth_round_forms() + list(self.REDIRECTED_VARIABLE_VALUE_FORMS):
+            self._runs(command, 'supervisor' if ' supervisor ' in command else 'su', ('bash', 'dash'))
+        for blank in self.NINTH_ODD_BLANKS:
+            self._runs(self.QUOTE_AFTER_ODD_BLANK_REMOTE_FORM.format(blank), 'host', ('bash', 'dash'))
+
+    def test_hook_refuses_each_ninth_round_form(self) -> None:
+        for command in self._ninth_round_forms() + list(self.REDIRECTED_VARIABLE_VALUE_FORMS):
+            for remote_on in (False, True):
+                with self.subTest(command=command, remote_on=remote_on):
+                    self.assertNotEqual(refusal(command, remote_on), '')
+        for blank in self.NINTH_ODD_BLANKS:
+            with self.subTest(blank=blank):
+                self.assertNotEqual(refusal(self.QUOTE_AFTER_ODD_BLANK_REMOTE_FORM.format(blank), True), '')
+
+    def test_unknown_flag_and_unreadable_word_rules_end_a_word_at_the_shell_blanks(self) -> None:
+        """N1: the two patterns read a carriage return or a no-break space as a letter, as the shell does."""
+        for blank in self.NINTH_ODD_BLANKS:
+            with self.subTest(blank=blank):
+                self.assertTrue(gate_rules.HA_UNKNOWN_FLAG_RE.search(f'--log-level x{blank}"a b"'))
+                self.assertTrue(gate_rules.HA_UNREADABLE_WORD_RE.search(f'>x{blank}"a b"'))
+        # A space, a tab or a newline still ends the word: the quote is then in the next word.
+        for blank in (' ', '\t', '\n'):
+            with self.subTest(blank=blank):
+                self.assertIsNone(gate_rules.HA_UNKNOWN_FLAG_RE.search(f'--log-level x{blank}"a b"'))
+
+    def test_expanded_flag_value_is_read_past_redirections_and_blanks(self) -> None:
+        """N2: the $ value may follow redirections, and a tab or a newline before it is a blank too."""
+        rule = gate_rules.HA_EXPANDED_FLAG_VALUE_RE
+        for text in ('--log-level 2>/dev/null $v', '--log-level >f $v', '--log-level > f 2>&1 $v',
+                     '--log-level\t$v', '--log-level\n$v', '--log-level\t2>x\t$v', '--config=$v'):
+            with self.subTest(text=text):
+                self.assertTrue(rule.search(text))
+        for text in ('--log-level x $v', '--log-level$v', '--log-level 2>/dev/null x'):
+            with self.subTest(text=text):
+                self.assertIsNone(rule.search(text))
+        self._runs("v='x su'; ha --log-level\t$v info", 'su', ('bash', 'dash'))
+        self.assertNotEqual(refusal("v='x su'; ha --log-level\t$v info", False), '')
+
+    def test_ninth_round_stated_limits_run_the_family_and_pass(self) -> None:
+        """N2 to N4: limits that DOCS.md names. When the hook comes to refuse one, change the texts."""
+        for command in self.NINTH_STATED_LIMITS:
+            self._runs(command, 'su', ('bash', 'dash'))
+            with self.subTest(command=command):
+                self.assertEqual(refusal(command, False), '')
+
+    def test_built_word_rules_end_a_word_at_the_shell_blanks(self) -> None:
+        """N6: the next-word and ha-word patterns read a carriage return as a letter, as the shell does."""
+        # The flag takes x<CR>y as one value after $nope is removed, so s${x}u is the family word.
+        command = 'ha --log-level $nope x\ry s${x}u info'
+        self._runs(command, 'su', ('bash', 'dash'))
+        self.assertTrue(gate_rules._built_word_after_ha(gate_rules._space_redirections(command)))
+        # ha<CR> is one word, not the word ha: nothing after it is a family word.
+        self.assertFalse(gate_rules._built_word_after_ha('echo ha\r$HOME'))
+        self.assertFalse(gate_rules._built_word_after_ha('echo ha\rs${x}u info'))
+
+    def test_value_flags_are_read_in_any_case_after_a_removed_value(self) -> None:
+        """N6: --CONFIG takes the next word as its value in the count, as the floor reads flags in any case."""
+        text = 'ha --log-level $nope x --CONFIG y s${x}u info'
+        start = text.index('ha ') + 2
+        end = gate_rules._HA_BEFORE_FAMILY_RE.match(text, start).end()
+        self.assertTrue(gate_rules._built_word_after_removable_value(text, start, end))
+
+    def test_second_shell_texts_join_over_spaces_and_tabs_only(self) -> None:
+        """N6: a joined reading only where blanks stand between two quoted texts; a continuation is removed."""
+        texts = gate_rules._second_shell_texts
+        self.assertEqual(texts("eval 'a' \t'b'"), (['a', 'b'], 'eval a \tb'))
+        # A carriage return is a letter, so the two quoted texts and it are one word: no join to read.
+        self.assertEqual(texts("eval 'a'\r'b'"), (['a', 'b'], None))
+        # A backslash-newline in double quotes is a continuation: the shell removes both characters.
+        self.assertEqual(texts('eval "b\\\nc"'), (['bc'], None))
+
     def test_many_dash_ha_words_stay_fast(self) -> None:
         """K6: letters ha after a dash do not start a floor match, so many -ha words stay linear."""
         command = 'echo ' + ' '.join(['-ha'] * 10_000)

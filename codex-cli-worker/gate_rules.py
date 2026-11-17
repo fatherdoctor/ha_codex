@@ -557,7 +557,8 @@ REDIRECTION_TEXT_RE = re.compile(
 # The shell's blanks, the only characters that end a word outside quotes. Python's \s matches
 # 25 characters (a carriage return, a form feed, a no-break space, ...); to the shell those are
 # letters of a word, so `ha --log-level <CR> su info` gives the flag the value <CR> and runs the
-# su family. Every pattern below that finds a word after ha uses these two instead of \s and \S.
+# su family. Every pattern below that finds a word after ha uses these two, or the same three
+# characters in a wider class, instead of \s and \S.
 _BLANK = r"[ \t\n]"
 _NOT_BLANK = r"[^ \t\n]"
 _HA_REDIRECTION_TEXT = (
@@ -583,21 +584,25 @@ HA_ALWAYS_TEXT_RE = re.compile(HA_TEXT_PREFIX + r"(?:supervisor|super|su)\b", re
 # always-refused families remain protected even when they follow such values.
 HA_SHELL_WORD_RE = re.compile(r"\bh[\"'\\]*a\b", re.IGNORECASE)
 HA_UNKNOWN_FLAG_RE = re.compile(
-    r"--(?:log-level|api-token|endpoint|config)(?:=|\s+)"
-    r"[^\s;]*(?:[\"'`\\]|\$\()", re.IGNORECASE)
-# A global-flag value with a $ or a backtick. A variable can hold the value and the family word
+    r"--(?:log-level|api-token|endpoint|config)(?:=|" + _BLANK + r"+)"
+    r"[^ \t\n;]*(?:[\"'`\\]|\$\()", re.IGNORECASE)
+# A global-flag value with a $ or a backtick, also past redirections before it (the shell removes
+# them: ha --log-level 2>/dev/null $v info). A variable can hold the value and the family word
 # with it (v='x su'; ha --log-level $v info runs ha --log-level x su info), so such a value is
 # refused when a family word that this mode refuses stands anywhere in the command text, before
-# ha too.
+# ha too. The family word must stand whole in the text: a variable that holds part of it
+# (v='x s'; ha --log-level ${v}u info) or a $ joined to the flag (ha --log-level$v info) is a
+# limit that DOCS.md states.
 HA_EXPANDED_FLAG_VALUE_RE = re.compile(
-    r"--(?:log-level|api-token|endpoint|config)(?:=|[ \t\n]+)[^ \t\n;]*[$`]", re.IGNORECASE)
+    _HA_VALUE_FLAG_TEXT + r"(?:=|(?:" + _BLANK + r"+" + _HA_REDIRECTION_TEXT + r")*" + _BLANK + r"+)"
+    + r"[^ \t\n;]*[$`]", re.IGNORECASE)
 # A word after ha whose end or value the floor cannot read: a redirection target with a quote
 # or a backslash, a process substitution as the target, any word with a $ or a backtick (a
 # variable that is empty or holds a blank, ${x:- a}, $(...), `...`), a glob (with nullglob, a
 # glob that matches nothing is removed) or a bash brace expansion ({,} expands to nothing).
 # The shell can then put the family word where the floor does not look.
 HA_UNREADABLE_WORD_RE = re.compile(
-    _REDIRECTION_OPERATOR + r"\s*(?:\(|[^\s;<>]*[\"'\\])|[$`*?\[]|\{[^\s{}]*(?:,|\.\.)")
+    _REDIRECTION_OPERATOR + _BLANK + r"*(?:\(|[^ \t\n;<>]*[\"'\\])|[$`*?\[]|\{[^ \t\n{}]*(?:,|\.\.)")
 # A family word that the shell builds while it runs: a $ (s${x}u, $'\163u', s$""u), a
 # substitution or a glob (s[u] names /bin/su when the command runs in /bin). It is refused in the
 # family position whatever it could become, in both remote-control modes. A brace word is read
@@ -623,6 +628,9 @@ _SCRIPT_QUOTE_DEPTH = 6
 # a fixed part. Quoted scripts and joined quoted pieces are read again at each level, so nested
 # quotes can multiply the work; past this budget the rule refuses any text that holds the word ha,
 # so the time stays within the hook's timeout (Codex lets a command run when its hook times out).
+# The hook process also has its own deadline of 1.5 seconds and refuses a command whose check is
+# late (DOCS.md, "Hook deadline"); a long text that the budget does not count, such as many ha
+# words as flag values, is then refused, not let through.
 _SCRIPT_READ_BUDGET_FACTOR = 4
 _SCRIPT_READ_BUDGET_EXTRA = 64 * 1024
 # A value-taking flag, then (past any redirections) a value word that the shell can remove: a word
