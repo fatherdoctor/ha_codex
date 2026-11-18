@@ -12,6 +12,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from contextlib import ExitStack
 from itertools import pairwise
 from pathlib import Path
 from types import SimpleNamespace
@@ -302,6 +303,87 @@ class LaunchTests(unittest.TestCase):
 
 GATE_HOOK = Path(__file__).resolve().parents[1] / "gate" / "gate_hook.py"
 CALL_ARGUMENTS = {"domain": "light", "service": "turn_on", "target": {"entity_id": ["light.sample_room"]}}
+
+
+class Launched(BaseException):
+    """Stops run_task at the moment it starts Codex, so the test can read what it would have started."""
+
+
+class RunTaskLaunchTests(unittest.TestCase):
+    """run_task itself, not only build_app_server_args, gives the tool and its key to a page chat only."""
+
+    def launch(self, task_source):
+        task = {"task_id": "t", "turns": [], "status": "queued", "task_source": task_source,
+                "chat_settings": server.DEFAULT_CHAT_SETTINGS}
+        started = {}
+
+        def popen(args, env, **_):
+            started.update(args=args, env=env)
+            raise Launched
+
+        temp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (temp / server.BASELINE_FILE).write_text("{}", encoding="utf-8")
+        replaced = {
+            "tasks": {"t": task}, "ha_call": HomeAssistantCall(call_worker()), "get_run_dir": temp,
+            "read_options": {}, "task_options": {}, "codex_backup_dir": None, "model_pin_error": "",
+            "uses_user_approvals": True, "sandbox_readiness": {"required": False, "ready": True},
+        }
+        quiet = ("record_diagnostic", "write_task_log", "update_task", "note_task_sign_in", "start_activity",
+                 "refresh_core_address", "start_phase", "prepare_ha_docs")
+        with ExitStack() as stack:
+            for name, value in replaced.items():
+                if name in ("tasks", "ha_call"):
+                    stack.enter_context(patch.object(server, name, value))
+                else:
+                    stack.enter_context(patch.object(server, name, return_value=value))
+            for name in quiet:
+                stack.enter_context(patch.object(server, name))
+            stack.enter_context(patch.object(server.protected_policy, "policy_problem", return_value=""))
+            stack.enter_context(patch.object(server.ha_data, "set_exchange_info"))
+            stack.enter_context(patch.object(server.subprocess, "Popen", side_effect=popen))
+            with self.assertRaises(Launched):
+                server.run_task("t", "Turn off the kitchen ceiling.")
+            started["key_held"] = "t" in server.ha_call.capabilities
+        return started
+
+    def test_a_scheduled_or_lead_run_gets_neither_the_tool_nor_its_key(self):
+        for source in ("schedule", "lead"):
+            with self.subTest(task_source=source):
+                started = self.launch(source)
+                self.assertFalse([value for value in configured(started["args"])
+                                  if value.startswith("mcp_servers.home_assistant_call.")])
+                self.assertNotIn("HA_CALL_CAPABILITY", started["env"])
+                self.assertFalse(started["key_held"])
+
+    def test_a_page_chat_gets_the_tool_and_its_key(self):
+        for source in ("page", None):
+            with self.subTest(task_source=source):
+                started = self.launch(source)
+                self.assertIn('mcp_servers.home_assistant_call.env_vars=["HA_CALL_CAPABILITY"]',
+                              configured(started["args"]))
+                self.assertTrue(started["env"]["HA_CALL_CAPABILITY"])
+                self.assertTrue(started["key_held"])
+
+    def test_the_key_is_withdrawn_when_the_exchange_ends(self):
+        calls = HomeAssistantCall(call_worker())
+
+        def run_task(task_id, *_):
+            calls.begin(task_id)
+
+        with patch.object(server, "ha_call", calls), patch.object(server, "run_task", side_effect=run_task), \
+                patch.object(server, "record_diagnostic"), patch.object(server, "tasks", {"t": {"task_id": "t"}}), \
+                patch.object(server, "running_processes", {}):
+            server._run_background_task("t", "Turn off the kitchen ceiling.", None, None)
+        self.assertNotIn("t", calls.capabilities)
+
+
+    def test_only_a_page_chat_is_told_to_use_the_tool(self):
+        for source, has_tool in (("page", True), ("schedule", False), ("lead", False)):
+            task = {"task_id": "t", "turns": [], "task_source": source}
+            with self.subTest(task_source=source), patch.object(server, "tasks", {"t": task}), \
+                    patch.object(server, "read_options", return_value={"HA_TOKEN": "invented-token"}):
+                text = server.exchange_info("t", None)["home_assistant_api"]
+            self.assertEqual("home_assistant_call" in text, has_tool)
 
 
 class CommandCheckTests(unittest.TestCase):

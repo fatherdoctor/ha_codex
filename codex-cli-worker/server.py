@@ -92,7 +92,7 @@ def record_diagnostic(method, *args, **kwargs):
 
 
 ha_data = HomeAssistantData(_ToolWorker(), DATA_ROOT / "ha-data")
-# The one tool that changes the house; its audit log holds service, target and result, never the data.
+# The one tool that changes the house; the worker sends each call with its own access and keeps no log of it.
 ha_call = HomeAssistantCall(_ToolWorker())
 CODEX_HOME = DATA_ROOT / "codex-home"
 OPTIONS_PATH = DATA_ROOT / "options.json"
@@ -4327,7 +4327,9 @@ def exchange_info(task_id: str, backup_dir: Path | None, include_rules: bool = F
         or "This message has no backup folder. Make no backup copies.",
         "owner_instructions": owner_instructions_note(),
         "attachments": attached_image_note(task_id).strip(),
-        "home_assistant_api": home_assistant_api_instructions(read_options()).strip(),
+        # A scheduled or lead run has no call tool (run_task), so its text must not send changes to one.
+        "home_assistant_api": home_assistant_api_instructions(
+            read_options(), call_tool=not background_task(task_id)).strip(),
         "documentation": ha_docs_note().strip(),
         "github": github_service.prompt_note().strip(),
     }
