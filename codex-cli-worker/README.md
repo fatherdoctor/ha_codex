@@ -4,7 +4,7 @@ Use Codex CLI to inspect and edit your configuration through a chat in Home Assi
 
 The assistant can act on any device the owner confirms. Put limits specific to your installation in `/config/AGENTS.md`. Codex uses its defaults and your workspace instructions; the app bundles no house rules. Its permission policy, approval checks and other enforced safeguards remain in place.
 
-The app provides a responsive chat UI with saved conversations, a resizable desktop sidebar, and a mobile chat drawer. It also provides a token-protected local API for the Codex integration, device-code sign-in, backup tracking, task logs, and notifications when work completes or needs input.
+The app provides a responsive chat UI with saved conversations, a resizable desktop sidebar, and a mobile chat drawer. It also provides a token-protected local API for the Codex integration, device-code sign-in, backup tracking, task logs, and notifications when work needs input or fails.
 
 Codex always runs in a sandbox: `workspace-write` (the default) or `read-only`. This fork has no full-access mode. Commands and file changes that need extra access ask a Home Assistant administrator to **Allow once** or **Deny** in the chat. See [sandbox modes, safeguards, and permission requests](https://github.com/fatherdoctor/ha_codex/blob/main/codex-cli-worker/DOCS.md#sandbox).
 
@@ -40,8 +40,6 @@ Open an existing chat to continue with its saved Codex context, or choose **New 
 
 The chat formats Markdown in your messages and in Codex's answers. Wrap code in triple backticks to send it as a code block; inline code, headings, lists, tables, and links are formatted too.
 
-Use **Copy response** below an answer, including a saved answer, to copy its original Markdown with code blocks and YAML indentation. If automatic copying is blocked, a dialog offers selectable text for manual copying. Images, activity logs, and separate configuration, backup, and verification cards are not included.
-
 While one chat is working, messages you send in other chats wait in a queue and start in order when it finishes. You can edit or remove a waiting message until it starts.
 
 When Codex needs a decision, it can offer up to three answers as buttons under its question, and on the notification if you use a mobile app notify service. Pick one, or type a different answer.
@@ -54,4 +52,4 @@ Hover over a chat and use its **⋯** button, right-click the row, or long-press
 
 Use the model name and reasoning label below the message box to customize each conversation. The shipped `model_pin` option limits the picker and runs to its pinned model; set `model_pin` to `none` in the app configuration to use the other available models. Choices are saved across restarts and apply to the next message. A chat that has no model of its own shows the model set in the app options, or the one Codex picks when that option is `default`. Choosing that model in the menu restores the app's model setting; the reasoning picker's reset button separately restores the app's reasoning setting. The slider only offers reasoning levels supported by the selected model.
 
-![Saved conversations in the desktop chat UI](https://raw.githubusercontent.com/fatherdoctor/ha_codex/main/examples/chat-ui/desktop.png)
+![Saved conversations in the desktop chat UI](https://raw.githubusercontent.com/fatherdoctor/ha_codex/main/screenshots/chat-light-desktop.png)

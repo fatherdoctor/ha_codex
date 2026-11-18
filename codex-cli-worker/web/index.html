@@ -40,6 +40,7 @@
         <button id="new-chat" class="new-chat">
           <span aria-hidden="true">＋</span> New chat
         </button>
+        <section class="chats-card" aria-label="Your chats">
         <div class="list-heading">
           <span>Your chats</span
           ><button id="refresh" class="icon" aria-label="Refresh conversations">
@@ -53,18 +54,16 @@
         </p>
         <button id="archive-list" class="subtle">Archived chats</button>
         <button id="load-more" class="subtle" hidden>Load older chats</button>
+        </section>
         <div class="sidebar-footer">
-          <div class="workspace-label">
-            <span class="workspace-dot" aria-hidden="true"></span
-            ><span>Home Assistant workspace</span
-            ><button
-              id="settings-button"
-              class="icon"
-              aria-label="Open settings"
-            >
-              ⚙
-            </button>
-          </div>
+          <button id="ha-status-row" class="foot-row" type="button" data-state="loading">
+            <span class="status-dot" aria-hidden="true"></span
+            ><span class="foot-label">Home Assistant · <span id="ha-status-summary">Loading…</span></span>
+          </button>
+          <button id="connection-manage" class="foot-row" type="button">
+            <span class="status-dot" aria-hidden="true"></span
+            ><span class="foot-label">Remote connection · <span id="connection-summary">Loading…</span></span>
+          </button>
           <div id="usage" class="usage" aria-label="Remaining account quota">
             <span>5h</span>
             <span class="usage-bar unknown" aria-hidden="true"
@@ -77,7 +76,12 @@
             ></span>
             <strong id="usage-weekly">Unavailable</strong>
           </div>
+          <p id="usage-plan" class="usage-plan">Plan unknown</p>
           <p id="usage-note" class="usage-note" role="status">Loading quota…</p>
+          <button id="settings-button" class="foot-row" type="button" aria-label="Open settings">
+            <span class="mdi-icon mdi-cog" aria-hidden="true"></span
+            ><span class="foot-label">Settings</span>
+          </button>
         </div>
       </aside>
       <div
@@ -85,9 +89,9 @@
         role="separator"
         aria-label="Resize conversations sidebar"
         aria-orientation="vertical"
-        aria-valuemin="220"
-        aria-valuemax="440"
-        aria-valuenow="280"
+        aria-valuemin="200"
+        aria-valuemax="480"
+        aria-valuenow="260"
         tabindex="0"
       ></div>
       <main>
@@ -100,68 +104,58 @@
           >
             ☰
           </button>
-          <div class="chat-heading">
-            <h1 id="chat-title">New chat</h1>
-            <p id="chat-status">Your Home Assistant, with a little help.</p>
-          </div>
-          <div class="header-actions">
-            <button id="connection-chip" class="connection-chip">Home Assistant · Loading</button>
-            <button id="header-status" class="subtle">Status</button>
-            <button id="thread-actions" class="icon" aria-label="Thread menu" aria-haspopup="menu">⋯</button>
-            <div id="text-size-picker" class="text-size-picker">
-              <button
-                id="text-size-button"
-                class="icon"
-                type="button"
-                aria-label="Text size"
-                title="Text size"
-                aria-expanded="false"
-                aria-controls="text-size-popover"
+          <h1 id="chat-title">New chat</h1>
+          <p id="chat-status" class="sr-only" role="status">Your Home Assistant, with a little help.</p>
+          <button id="thread-actions" class="icon" aria-label="Thread menu" aria-haspopup="menu">⋯</button>
+          <div id="text-size-picker" class="text-size-picker">
+            <button
+              id="text-size-button"
+              class="icon"
+              type="button"
+              aria-label="Text size"
+              title="Text size"
+              aria-expanded="false"
+              aria-controls="text-size-popover"
+            >
+              <span aria-hidden="true">Aa</span>
+            </button>
+            <div
+              id="text-size-popover"
+              class="text-size-popover"
+              role="dialog"
+              aria-label="Text size"
+              hidden
+            >
+              <fieldset class="text-size-options">
+                <legend class="picker-heading">Text size</legend>
+              <label class="text-size-option"
+                ><input type="radio" name="text-size-quick" value="normal" data-text-size-choice /><span
+                  >Normal</span
+                ></label
               >
-                <span aria-hidden="true">Aa</span>
-              </button>
-              <div
-                id="text-size-popover"
-                class="text-size-popover"
-                role="dialog"
-                aria-label="Text size"
-                hidden
+              <label class="text-size-option"
+                ><input type="radio" name="text-size-quick" value="larger" data-text-size-choice /><span
+                  >Larger</span
+                ><small>115 %</small></label
               >
-                <fieldset class="text-size-options">
-                  <legend class="picker-heading">Text size</legend>
-                <label class="text-size-option"
-                  ><input type="radio" name="text-size-quick" value="normal" data-text-size-choice /><span
-                    >Normal</span
-                  ></label
-                >
-                <label class="text-size-option"
-                  ><input type="radio" name="text-size-quick" value="larger" data-text-size-choice /><span
-                    >Larger</span
-                  ><small>115 %</small></label
-                >
-                <label class="text-size-option"
-                  ><input type="radio" name="text-size-quick" value="largest" data-text-size-choice /><span
-                    >Largest</span
-                  ><small>130 %</small></label
-                >
-                </fieldset>
-                <p class="text-size-note">Saved on this device.</p>
-              </div>
+              <label class="text-size-option"
+                ><input type="radio" name="text-size-quick" value="largest" data-text-size-choice /><span
+                  >Largest</span
+                ><small>130 %</small></label
+              >
+              </fieldset>
+              <p class="text-size-note">Saved on this device.</p>
             </div>
-            <button id="header-settings" class="icon" aria-label="Settings">⚙</button>
           </div>
-          <button id="cancel" class="subtle" hidden>Stop task</button>
         </header>
-        <div class="connection-strip" role="status">
-          <span class="status-dot" aria-hidden="true"></span><strong>Remote connection</strong>
-          <span id="connection-summary">Loading…</span>
-          <button id="connection-manage" class="text-button">Manage</button>
-          <button id="strip-pair" class="text-button" hidden>Pair a device</button>
-        </div>
         <div class="phone-thread-tools"><button id="phone-history" class="icon" aria-label="Open conversations">☰</button>
           <span id="phone-title">New chat</span><button id="phone-new" class="icon" aria-label="New chat">＋</button>
           <button id="phone-thread-actions" class="icon" aria-label="Thread menu" aria-haspopup="menu">⋯</button></div>
         <p id="integration-notice" role="status" hidden></p>
+        <section id="session-banner" class="page-banner" role="alert" hidden>
+          <p><strong>Your Home Assistant session expired.</strong> Reload the page to continue.</p>
+          <div class="settings-actions"><button id="session-reload">Reload</button></div>
+        </section>
         <section id="signin-banner" class="page-banner" role="status" hidden>
           <p><strong id="signin-banner-text">The assistant is not signed in to ChatGPT.</strong></p>
           <div id="signin-banner-card"></div>
@@ -169,6 +163,10 @@
             <button id="banner-login">Sign in</button
             ><button id="banner-cancel" class="subtle" hidden>Cancel</button>
           </div>
+        </section>
+        <section id="github-banner" class="page-banner" role="status" hidden>
+          <p><strong id="github-banner-text">The add-on's GitHub sign-in needs attention.</strong></p>
+          <div class="settings-actions"><button id="github-banner-open">Open GitHub settings</button></div>
         </section>
         <section id="paused-banner" class="page-banner" role="status" hidden>
           <p><strong>The assistant is paused.</strong> New messages are refused until you resume it.</p>
@@ -183,6 +181,12 @@
           <div class="welcome"><h2 id="greeting">Good evening</h2></div>
         </div>
         <div class="compose-area">
+          <!-- The hint sits above the composer, not above the chat: the integration notice stays next to the list. -->
+          <section id="agents-hint" class="page-banner" role="status" hidden>
+            <p><strong>No workspace instructions yet.</strong> Codex works without /config/AGENTS.md. Write one to tell it the rules of your home.</p>
+            <div class="settings-actions"><button id="agents-hint-open">Write instructions</button
+              ><button id="agents-hint-dismiss" class="subtle">Dismiss</button></div>
+          </section>
           <p id="notice" role="status" hidden></p>
           <p id="error" role="alert" hidden></p>
           <form id="composer">
@@ -197,7 +201,7 @@
             <label class="sr-only" for="message">Message Codex</label
             ><textarea
               id="message"
-              rows="2"
+              rows="1"
               placeholder="Ask Codex about your Home Assistant…"
               aria-autocomplete="list"
               aria-controls="slash-popover"
@@ -251,13 +255,9 @@
                       class="picker-chevron"
                       aria-hidden="true"
                       viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
+                      fill="currentColor"
                     >
-                      <path d="m6 9 6 6 6-6" />
+                      <path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z" />
                     </svg>
                   </button>
                 </div>
@@ -328,6 +328,9 @@
               <button id="send" type="submit" aria-label="Send message">
                 ↑
               </button>
+              <button id="cancel" type="button" class="stop-button" aria-label="Stop task" title="Stop task" hidden>
+                <span class="mdi-icon mdi-stop" aria-hidden="true"></span>
+              </button>
             </div>
           </form>
           <p id="compose-hint">A new chat starts a separate conversation.</p>
@@ -395,26 +398,8 @@
         </button>
       </div>
     </dialog>
-    <dialog
-      id="copy-dialog"
-      class="small-dialog copy-dialog"
-      aria-labelledby="copy-title"
-      aria-describedby="copy-help"
-    >
-      <h2 id="copy-title">Copy response</h2>
-      <p id="copy-help">
-        Automatic copying is unavailable in this browser. Copy the selected
-        Markdown using your browser's Copy action or Ctrl+C / Cmd+C.
-      </p>
-      <label class="sr-only" for="copy-text">Response Markdown</label>
-      <textarea id="copy-text" rows="12" readonly spellcheck="false"></textarea>
-      <div class="dialog-actions">
-        <button type="button" id="copy-select" class="subtle">Select all</button>
-        <button type="button" id="copy-close">Close</button>
-      </div>
-    </dialog>
     <dialog id="permissions-dialog" class="studio-sheet" aria-labelledby="permissions-title">
-      <div class="dialog-header"><h2 id="permissions-title">Permissions</h2><button class="icon" data-close="permissions-dialog" aria-label="Close permissions">✕</button></div>
+      <div class="dialog-header"><h2 id="permissions-title">Permissions</h2><button class="icon icon-close" data-close="permissions-dialog" aria-label="Close permissions"></button></div>
       <p class="muted">Choose how this chat starts its next turn. A choice cannot expand the add-on's configured permissions.</p>
       <button class="permission-option" data-mode="default"><strong>Default permissions</strong><span>Use the configured sandbox and ask for native approval when needed.</span></button>
       <button class="permission-option" data-mode="read-only"><strong>Read only</strong><span>Inspect and explain. Changes require a specific owner approval.</span></button>
@@ -422,17 +407,17 @@
       <button class="permission-option" disabled><strong>Full access · Coming</strong><span>Not available in this build.</span></button>
       <p id="permission-result" role="status"></p>
     </dialog>
-    <dialog id="status-dialog" class="studio-sheet" aria-labelledby="status-title"><div class="dialog-header"><h2 id="status-title">Status</h2><button class="icon" data-close="status-dialog" aria-label="Close status">✕</button></div><dl id="status-details"></dl></dialog>
-    <dialog id="connection-dialog" class="studio-sheet" aria-labelledby="connection-title"><div class="dialog-header"><h2 id="connection-title">Remote connection</h2><button class="icon" data-close="connection-dialog" aria-label="Close remote connection">✕</button></div><div id="connection-content"></div><p id="connection-result" role="alert"></p></dialog>
-    <dialog id="workspace-dialog" class="studio-sheet" aria-labelledby="workspace-title"><div class="dialog-header"><h2 id="workspace-title">Workspace rules</h2><button class="icon" data-close="workspace-dialog" aria-label="Close workspace rules">✕</button></div><div id="workspace-content"></div><p id="workspace-result" role="status"></p></dialog>
+    <dialog id="status-dialog" class="studio-sheet" aria-labelledby="status-title"><div class="dialog-header"><h2 id="status-title">Status</h2><button class="icon icon-close" data-close="status-dialog" aria-label="Close status"></button></div><dl id="status-details"></dl></dialog>
+    <dialog id="connection-dialog" class="studio-sheet" aria-labelledby="connection-title"><div class="dialog-header"><h2 id="connection-title">Remote connection</h2><button class="icon icon-close" data-close="connection-dialog" aria-label="Close remote connection"></button></div><div id="connection-content"></div><p id="connection-result" role="alert"></p></dialog>
+    <dialog id="workspace-dialog" class="studio-sheet" aria-labelledby="workspace-title"><div class="dialog-header"><h2 id="workspace-title">Workspace rules</h2><button class="icon icon-close" data-close="workspace-dialog" aria-label="Close workspace rules"></button></div><div id="workspace-content"><label for="agents">AGENTS.md</label
+      ><textarea id="agents" rows="12" spellcheck="false"></textarea
+      ><button id="save-agents">Save instructions</button></div><p id="workspace-result" role="status"></p></dialog>
     <dialog id="settings">
       <div class="dialog-header">
         <h2>Settings</h2>
-        <button id="close-settings" class="icon" aria-label="Close settings">
-          ✕
-        </button>
+        <button id="close-settings" class="icon icon-close" aria-label="Close settings"></button>
       </div>
-      <section>
+      <section id="text-size-section">
         <h3>Text size</h3>
         <p class="muted">
           Makes the messages, buttons, code and lists larger. Saved on this
@@ -466,40 +451,79 @@
         </p>
         <dl id="command-list" class="command-list"></dl>
       </section>
-      <section>
-        <h3>ChatGPT account</h3>
-        <p id="login-status" class="muted">Loading account status…</p>
-        <div class="settings-actions">
-          <p class="muted">A ChatGPT account with Codex access is required. As of November 13, 2026, OpenAI includes Codex across plans, including Free and Go; limits and workspace access vary. <a href="https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan" target="_blank" rel="noopener noreferrer">Check current availability</a>.</p>
-          <button id="login">Sign in</button
-          ><button id="login-cancel" class="subtle" hidden>Cancel</button
-          ><button id="logout" class="subtle">Sign out</button>
-        </div>
-        <div id="login-card"></div>
+      <section id="accounts-section" aria-labelledby="accounts-title">
+        <h3 id="accounts-title">Accounts and connections</h3>
+        <section id="chatgpt-section">
+          <h4>ChatGPT account</h4>
+          <p id="login-status" class="muted">Loading account status…</p>
+          <p id="login-requirement" class="muted">A ChatGPT account with Codex access is required. As of November 13, 2026, OpenAI includes Codex across plans, including Free and Go; limits and workspace access vary. <a href="https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan" target="_blank" rel="noopener noreferrer">Check current availability</a>.</p>
+          <div class="settings-actions">
+            <button id="login">Sign in</button
+            ><button id="login-cancel" class="subtle" hidden>Cancel</button
+            ><button id="logout" class="subtle">Sign out</button>
+          </div>
+          <div id="login-card"></div>
+        </section>
+        <section id="github-section" aria-labelledby="github-title">
+          <h4 id="github-title">GitHub</h4>
+          <p id="github-status" class="muted">Loading GitHub status…</p>
+          <p class="muted">Lets the assistant fetch, pull and push the GitHub repositories you choose. The add-on keeps the sign-in; the assistant never sees it, and every push goes through the push guard first.</p>
+          <dl id="github-details" class="github-details" hidden></dl>
+          <ul id="github-repositories" class="github-repositories" hidden></ul>
+          <div id="github-flow"></div>
+          <div class="settings-actions">
+            <button id="github-connect">Connect GitHub</button
+            ><button id="github-cancel" class="subtle" hidden>Cancel</button
+            ><button id="github-test" class="subtle" hidden>Read test</button
+            ><button id="github-check" class="subtle" hidden>Check now</button
+            ><button id="github-accept" class="subtle" hidden>Accept this access</button
+            ><button id="github-disconnect" class="subtle" hidden>Disconnect</button>
+          </div>
+          <p id="github-test-result" class="muted" role="status" hidden></p>
+          <details id="github-token" class="disclosure">
+            <summary>Use a token instead</summary>
+            <p class="muted">For an account that cannot install the GitHub App. On github.com open Settings, Developer settings, Fine-grained tokens. Choose Only select repositories with one repository, Contents: Read and write, and an expiry of 90 days or less. Paste it here once. It is not shown again.</p>
+            <form id="github-token-form" class="github-form" autocomplete="off">
+              <label>Repository (owner/name)<input id="github-token-repository" name="repository" autocomplete="off" spellcheck="false" placeholder="owner/repository" required></label>
+              <label>Token<input id="github-token-value" name="token" type="password" autocomplete="off" spellcheck="false" required></label>
+              <button id="github-token-save" type="submit">Use this token</button>
+            </form>
+          </details>
+          <details id="github-local" class="disclosure" hidden>
+            <summary>Repositories on this box</summary>
+            <p class="muted">Git on this box uses the add-on's sign-in only through the add-on. No credential is written into a repository.</p>
+            <form id="github-clone-form" class="github-form" autocomplete="off">
+              <label>Repository<select id="github-clone-repository" name="repository" required></select></label>
+              <label>New folder under /share<input id="github-clone-folder" name="folder" autocomplete="off" spellcheck="false" placeholder="repository name" pattern="[A-Za-z0-9][A-Za-z0-9_\-]{0,99}" required></label>
+              <button id="github-clone" type="submit">Clone</button>
+            </form>
+            <form id="github-link-form" class="github-form" autocomplete="off">
+              <label>Repository<select id="github-link-repository" name="repository" required></select></label>
+              <label>Existing folder under /share or /config<input id="github-link-path" name="path" autocomplete="off" spellcheck="false" placeholder="/share/repository" required></label>
+              <button id="github-link" type="submit">Link</button>
+            </form>
+          </details>
+          <p id="github-result" role="alert"></p>
+        </section>
+        <section id="app-pairing-section" aria-labelledby="app-pairing-title">
+          <h4 id="app-pairing-title">ChatGPT app pairing</h4>
+          <p id="app-pairing-status" class="muted" role="status">Loading…</p>
+          <p class="muted">The pairing code and its QR code open in their own window. The worker does not know how long a pairing code lasts, so no countdown shows. If the app refuses a code, get a new one. Turn off stops the ChatGPT app from reaching this Home Assistant until you turn it on again.</p>
+          <div class="settings-actions">
+            <button id="app-pairing-new" hidden>Get a pairing code</button
+            ><button id="remote-connection-open" class="subtle">Manage remote connection</button
+            ><button id="app-pairing-off" class="subtle" hidden>Turn off</button>
+          </div>
+        </section>
       </section>
-      <section id="permission-overrides">
-        <h3>Permissions overrides</h3>
-        <p class="muted">Choose which actions can run without a prompt in Default permissions. Your guard rails still apply. Remote turns require normal approval in this version.</p>
-        <label class="permission-row"><span><strong>Apply my changes</strong><span class="permission-description">Reload YAML, check configuration, and set up integrations.</span></span><input type="checkbox" role="switch" data-permission-group="apply" disabled aria-label="Apply my changes"><span class="ha-permission-switch" aria-hidden="true"></span></label>
-        <label class="permission-row"><span><strong>Everyday control</strong><span class="permission-description">Lights, switches, scenes, automations, and helper values.</span></span><input type="checkbox" role="switch" data-permission-group="everyday" disabled aria-label="Everyday control"><span class="ha-permission-switch" aria-hidden="true"></span></label>
-        <label class="permission-row"><span><strong>Organize</strong><span class="permission-description">Names, areas, labels, and dashboard edits with a backup.</span></span><input type="checkbox" role="switch" data-permission-group="organize" disabled aria-label="Organize"><span class="ha-permission-switch" aria-hidden="true"></span></label>
-        <label class="permission-row"><span><strong>Bigger changes</strong><span class="permission-description">Scripts, entity IDs, backups, restarts, and deletions.</span></span><input type="checkbox" role="switch" data-permission-group="bigger" disabled aria-label="Bigger changes"><span class="ha-permission-switch" aria-hidden="true"></span></label>
-        <label class="permission-row"><span><strong>Security and people</strong><span class="permission-description">Locks, alarms, covers, cameras, and messages.</span></span><input type="checkbox" role="switch" data-permission-group="security" disabled aria-label="Security and people"><span class="ha-permission-switch" aria-hidden="true"></span></label>
-        <p class="muted">Only the marked guard-rails block controls these switches. Other instructions remain for the assistant to follow in chat. Everyday control includes anything exposed as a switch.</p>
-        <button id="confirm-permission-rules" class="subtle">Review and confirm house rules</button>
-        <p id="permissions-overrides-guard-note" role="status" class="muted" hidden></p>
-        <p id="permissions-overrides-result" role="status" class="muted">Available to administrators.</p>
-      </section>
-      <section>
+      <section id="interaction-logs-section">
         <h3>Interaction logs</h3>
         <p class="muted">Export recent worker metadata. Remote ChatGPT threads are not recorded. Review the file before sharing it.</p>
-        <label for="diagnostic-retention">Interactions to keep (10–100)</label>
-        <input id="diagnostic-retention" type="number" min="10" max="100" value="25" step="1">
-        <button id="save-diagnostic-retention" class="subtle">Save log retention</button>
+        <p id="diagnostic-retention-note" class="muted">Set how many interactions to keep with Interactions to keep in Add-on configuration.</p>
         <button id="export-interaction-logs" class="subtle">Export logs</button>
         <p id="export-logs-status" class="muted" role="status"></p>
       </section>
-      <section id="remote-control-section">
+      <section id="remote-control-section" data-own-dialog>
         <h3>Remote control from the ChatGPT app</h3>
         <p class="muted">
           Lets the ChatGPT app on your phone or iPad work on this Home
@@ -531,24 +555,26 @@
           thread warning reaches this page; a missing warning does not prove
           the requested permissions were granted.
         </p>
+        <p id="remote-control-name-line" class="muted">Name in the ChatGPT app: <strong id="remote-control-name"></strong>.
+          Change it with Remote control machine name in Add-on configuration.</p>
         <div class="settings-actions">
           <button id="remote-control-start">Turn on</button
           ><button id="remote-control-pair" class="subtle">New pairing code</button
           ><button id="remote-control-stop" class="subtle">Turn off</button>
         </div>
-        <details id="remote-control-log-box">
+        <details id="remote-control-log-box" class="disclosure">
           <summary>Recent remote-control messages</summary>
           <pre id="remote-control-log"></pre>
         </details>
       </section>
-      <section>
+      <section id="assistant-section">
         <h3>Assistant</h3>
         <p id="pause-status" class="muted">Loading…</p>
         <div class="settings-actions">
           <button id="pause">Pause the assistant</button>
         </div>
       </section>
-      <section>
+      <section id="browser-permissions-section">
         <h3>Browser permissions</h3>
         <p class="muted">Requests you chose to remember for a dashboard. Revoking a permission stops captures using saved access.</p>
         <div id="browser-permissions"></div>
@@ -586,12 +612,12 @@
           Codex follows these instructions when working in your Home Assistant
           configuration.
         </p>
-        <label for="agents">AGENTS.md</label
-        ><textarea id="agents" rows="12" spellcheck="false"></textarea
-        ><button id="save-agents">Save instructions</button>
+        <button id="workspace-open" class="subtle">Workspace rules</button>
       </section>
-      <section><h3>Appearance</h3><p class="muted">Follow Home Assistant</p></section>
-      <details class="advanced"><summary>Advanced</summary><button id="workspace-open" class="subtle">Workspace rules</button></details>
+      <a id="addon-configuration" class="ha-row ha-nav-row" target="_top"
+         aria-label="Add-on configuration" aria-describedby="addon-configuration-description"
+        ><span><strong>Add-on configuration</strong><span id="addon-configuration-description" class="ha-row-description">Model, sandbox, logs to keep, the remote control name and the other options.</span></span
+        ><span class="ha-nav-chevron" aria-hidden="true"></span></a>
       <p id="settings-result" role="status"></p>
     </dialog>
   </body>

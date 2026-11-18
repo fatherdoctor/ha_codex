@@ -11,7 +11,6 @@ Each screenshot exists in four versions: `light` and `dark` color scheme, `deskt
 |---|---|
 | `chat` | The chat page with one saved conversation open: a question about an automation and the answer that explains the change. |
 | `confirm` | A command that waits for one confirmation: what changes, where, the effect, the working folder, the command, and **Allow once** and **Deny**. The phone versions start lower in the card, so that both buttons are in view. |
-| `action-groups` | **Settings** > **Permissions overrides**: the five action groups and their switches. |
 | `schedule-proposal` | **Settings** > **Scheduled runs**: a schedule that an agent proposed, which stays off until you approve it, and an approved schedule. |
 | `mailbox` | **Settings** > **Local mailbox**: a message from the lead agent and the owner's reply. |
 | `sign-in` | **Settings** > **ChatGPT account** while a sign-in waits for its code. The code and the QR code are blurred. |
@@ -49,9 +48,3 @@ kill %1
 ```
 
 The script writes to `screenshots/`. Set `SCREENSHOT_DIR` to write somewhere else.
-
-## Other files in this folder
-
-- `permissions-overrides-*.png`, `permissions-guard-note-*.png` and `permissions-peer2-native-*.png` are design
-  comparisons for [docs/designs/permissions-overrides.md](../docs/designs/permissions-overrides.md).
-- `cx-ui/` holds page-state renders from the test fixture that the chat-page changes were reviewed with.

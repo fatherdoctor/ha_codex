@@ -34,7 +34,7 @@ Details and other ways to install: [Installation](#installation).
 - [Updating](#updating)
 - [Uninstalling](#uninstalling)
 - [An example, step by step](#an-example-step-by-step)
-- [Permission modes and action groups](#permission-modes-and-action-groups)
+- [Permission modes](#permission-modes)
 - [Safety](#safety)
 - [Sign-in](#sign-in)
 - [Mailbox and schedules](#mailbox-and-schedules)
@@ -81,7 +81,7 @@ says so once in a notification.
 
 Every app option is in [codex-cli-worker/DOCS.md](codex-cli-worker/DOCS.md).
 
-Put rules for your house in `/config/AGENTS.md`. The chat has an editor for it under **Settings** > **Advanced** >
+Put rules for your house in `/config/AGENTS.md`. The chat has an editor for it under **Settings** > **Workspace instructions** >
 **Workspace rules**. Codex uses its defaults and your workspace instructions; the app bundles no house rules.
 
 ## Updating
@@ -121,13 +121,13 @@ flowchart LR
    question and offer two or three short answers as buttons.
 2. Codex edits the automation file. In the default `workspace-write` mode, an edit inside your configuration folder
    needs no permission. It saves the earlier copy first.
-3. Codex runs a configuration check on the changed YAML and reloads automations. The reload is in the **Apply my
-   changes** group, which starts on. If you turned that group off, a permission card asks you first.
+3. Codex runs a configuration check on the changed YAML and asks to reload automations. A permission card shows the
+   command, and you choose **Allow once** or **Deny**.
 4. You read the summary. If you do not like it, ask Codex to undo it, or restore the saved earlier copy.
 
 Screenshots of these screens are listed in [SCREENSHOTS.md](SCREENSHOTS.md).
 
-## Permission modes and action groups
+## Permission modes
 
 Each chat turn runs in one of two modes.
 
@@ -139,29 +139,6 @@ Each chat turn runs in one of two modes.
 Anything else shows a **Permission needed** card with the full command or file change, and the buttons **Allow once**
 and **Deny**. Only a Home Assistant administrator can answer it. This fork has no full-access mode; an old setting that
 names it stops the app at startup, with a log line that says why.
-
-### Pre-approved action groups
-
-In **Settings** > **Permissions overrides**, an administrator turns five groups of Home Assistant actions on or off.
-
-| Group | Starts | What it covers |
-|---|---|---|
-| Apply my changes | On | Reload automations, scripts, scenes, templates and groups. Run the configuration check. Start or continue an integration setup. |
-| Everyday control | On | Turn lights and switches on, off or toggle. Activate scenes. Enable, disable or trigger automations. Set helper values. |
-| Organize | On | Change a device or entity name, area and labels. Save a dashboard after its backup succeeds. |
-| Bigger changes | Off | Run a script. Change an entity ID, with a report of what refers to it. Back up or restart Core. Delete a device, entity, automation, script or dashboard. |
-| Security and people | Off | Locks, alarms, covers and garage doors, cameras, notifications and messages. |
-
-- The groups apply only to a turn that a person starts on the chat page in `workspace-write`. Scheduled runs, runs
-  started by another agent and `read-only` turns never use them. Turns started from the ChatGPT app also use the
-  normal permission card.
-- A group judges the service and the things it directly targets. What a scene or a script does next is your own setup.
-- Unknown limits, templated values, mixed targets and missing data fall back to the normal permission card.
-- A successful action is named in the answer, and the event is recorded before the action runs.
-
-You can add limits in a marked block in `/config/AGENTS.md`. If the block changes, all groups pause until an
-administrator uses **Review and confirm** in Settings. Details:
-[Permissions overrides](codex-cli-worker/DOCS.md#permissions-overrides).
 
 ## Safety
 
@@ -197,8 +174,8 @@ Codex uses your ChatGPT account.
    managed workspace, an administrator may need to allow device-code sign-in; see
    [Codex Sign-In](codex-cli-worker/DOCS.md#codex-sign-in).
 2. In the chat, open **Settings** and choose **Sign in**.
-3. Scan the QR code, or open the link, and enter the one-time code. The code stays on screen until the sign-in ends or
-   you cancel it.
+3. Scan the QR code, or open the link, and enter the one-time code. The code stays on screen, with the time it still
+   works, until the sign-in ends or you cancel it. If it runs out, choose **Get a new code**.
 
 When the sign-in is missing, ended or rejected, a banner returns above the chat, the integration raises a Home
 Assistant repair, and the **Signed in** sensor turns off. A good sign-in clears all three. The Codex program does not
@@ -239,14 +216,13 @@ The integration adds actions that scripts, automations and Assist can call.
 | `codex_cli.start_login`, `codex_cli.logout`, `codex_cli.get_login_status` | Manage the sign-in. |
 
 The actions refuse a caller who is not an administrator. A task started this way still uses the normal permission
-cards; the integration cannot answer them. Home Assistant
-sends a notification when a task finishes or waits for you. Set `notify_service` in the app options for phone pushes,
-or leave it empty for persistent notifications.
+cards; the integration cannot answer them. Home Assistant sends a notification when a task waits for you or fails; a
+completed answer sends none. Set `notify_service` in the app options for phone pushes, or leave it empty for persistent
+notifications.
 
 The event `codex_cli_task_result` carries the result for automations. The full list of entities and actions, the task
-output format and an Assist example are in the [integration README](custom_components/codex_cli/README.md) and in
-[docs/upstream-README.md](docs/upstream-README.md). A starter Assist script is in
-[examples/scripts.yaml](examples/scripts.yaml).
+output format and an Assist example are in the [integration README](custom_components/codex_cli/README.md). A
+starter Assist script is in [examples/scripts.yaml](examples/scripts.yaml).
 
 ## Troubleshooting
 
@@ -267,7 +243,7 @@ A daily workflow opens one issue when upstream releases something newer.
 
 | Version | Changes |
 |---|---|
-| 0.1.81.3 (unreleased) | The app installs and updates its own integration (one install and one restart); setup from discovery asks for confirmation. |
+| 0.3.0 (unreleased) | GitHub sign-in on the page (device sign-in, clone and link under /share or /config, every push through the push guard, a Repairs issue when access changes). The app installs and updates its own integration (one install and one restart); setup from discovery asks for confirmation. |
 | 0.1.81.2 (unreleased) | No full-access mode; a protected permission policy in the image, no bundled house rules and owner workspace instructions; permission answers and the integration's actions only from Home Assistant administrators; a permission-prompt sensor. |
 | 0.1.81.1 (unreleased) | Codex CLI 0.166.0 pinned by checksum, no self-update, base image pinned by digest, links and maintainer for the fork. |
 
@@ -286,13 +262,13 @@ Include the app, integration and Home Assistant versions, the steps that cause i
 and the integration diagnostics file. Remove tokens, device codes, private URLs and personal configuration before you
 post. Steps to collect logs: [Reporting a bug](codex-cli-worker/DOCS.md#reporting-a-bug).
 
-To try new versions before they are released to everyone, open an issue and ask to join as a beta tester. To report a
+There is no public beta. Each version is tested on a Home Assistant OS test machine before it is released. To report a
 security problem, use the **Report a vulnerability** button on the Security tab. See [SECURITY.md](SECURITY.md).
 
 ## Credit
 
 This project is a fork of [moryoav/home-assistant-codex](https://github.com/moryoav/home-assistant-codex) by Yoav Mor
-(MIT). The upstream reference sections are kept in [docs/upstream-README.md](docs/upstream-README.md).
+(MIT).
 
 ## Contributing
 

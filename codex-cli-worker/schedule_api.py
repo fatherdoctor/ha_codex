@@ -27,6 +27,14 @@ class Worker:
         with w.lock:
             return w.assistant_paused() or bool(w._active_task_ids_locked()) or bool(w.message_queue)
 
+    def paused(self):
+        """Expose the worker's owner-controlled pause state."""
+        return self.worker.assistant_paused()
+
+    def redact(self, value):
+        """Remove sensitive text before a task result reaches the mailbox."""
+        return self.worker.redact(value)
+
     def snapshot(self, task_id):
         with self.worker.lock:
             return copy.deepcopy(self.worker.tasks.get(task_id))
@@ -43,6 +51,7 @@ class Worker:
                 raise scheduling.Busy('The assistant is busy or paused.')
             settings = dict(w.DEFAULT_CHAT_SETTINGS)
             turn = w.new_turn(prompt)
+            turn['task_source'] = 'schedule' if schedule_id else 'lead'
             turn['execution_settings'] = w.resolve_chat_settings(settings, options)
             w.active_task_runners.add(task_id)
             try:
@@ -72,7 +81,7 @@ def page_arguments(operation, args):
     if operation == 'list_schedules':
         maximum = scheduling.MAX_SCHEDULES + scheduling.MAX_PROPOSALS
     else:
-        maximum = scheduling.MAX_MESSAGES
+        maximum = 500  # Legacy unread mail may temporarily exceed the new 128-copy cap.
     offset = args.get('offset', 0)
     limit = args.get('limit', DEFAULT_PAGE_LIMIT)
     # bool is a subclass of int; true and false are not page numbers.
@@ -136,8 +145,13 @@ class Service:
                         'message': 'Waiting for owner approval on the Codex page.'}
             if operation in ('list_schedules', 'read_mailbox'):
                 offset, limit = page_arguments(operation, args)
-                rows = store.schedules() if operation == 'list_schedules' else store.messages()
+                rows = store.schedules() if operation == 'list_schedules' else store.messages(reader='codex')
                 page = rows[offset:offset + limit]
+                if operation == 'read_mailbox':
+                    store.mark_mail_read('codex', [row['id'] for row in page])
+                    return {'ok': True, 'items': [{'id': row['id'], 'parent': row['parent'], 'origin': row['origin'],
+                        'envelope': {**scheduling.mail_envelope(row), 'message': w.redact(row['body'])[:512]}} for row in page],
+                        'next_offset': offset + limit if offset + limit < len(rows) else None, 'text_limit': 512}
                 for row in page:
                     for key in ('prompt', 'body'):
                         if key in row:
@@ -147,13 +161,19 @@ class Service:
                 return {'ok': True, 'items': page, 'next_offset': offset + limit if offset + limit < len(rows) else None,
                         'text_limit': 512}
             if operation == 'post_mailbox':
-                if set(args) - {'body', 'parent'}:
-                    raise ValueError('post_mailbox accepts only body and parent.')
+                if set(args) - {'body', 'parent', 'to', 'due'}:
+                    raise ValueError('post_mailbox accepts only body, parent, to and due.')
                 parent = args.get('parent')
                 if parent is not None and (not isinstance(parent, str) or len(parent) != 32):
                     raise ValueError('parent must be the 32-character id of a mailbox message.')
                 turn_id = str(w.tasks[task_id]['current_turn_id'])
-                message_id = store.mail(args.get('body'), 'codex', time.time(), parent, task_id + ':' + turn_id)
+                turn = next((row for row in w.tasks[task_id].get('turns') or []
+                             if isinstance(row, dict) and str(row.get('turn_id')) == turn_id), {})
+                origin = turn.get('task_source', '')
+                if origin not in ('schedule', 'lead'):
+                    origin = ''
+                message_id = store.mail(args.get('body'), 'codex', time.time(), parent, task_id + ':' + turn_id,
+                    to=args.get('to', 'all'), due=args.get('due'), origin=origin)
                 return {'ok': True, 'message_id': message_id}
             raise ValueError('Unsupported scheduling operation; approvals are owner-only.')
 
@@ -170,11 +190,16 @@ class Service:
             payload = json.loads(raw)
         except ValueError:
             return {'ok': False, 'error': 'The request is not valid JSON.'}
+        # The order of these branches matters. KeyError and IndexError are LookupErrors, and
+        # UnicodeError is a ValueError; their first argument is a key, an index or a codec
+        # name, not a sentence, so they are caught before the branch that passes it on.
         try:
             return self.dispatch(payload)
         except (KeyError, IndexError):
-            # Their message is a key or index, not a sentence for the caller.
             return {'ok': False, 'error': 'Invalid, refused or expired scheduling request.'}
+        except UnicodeError:
+            # A lone surrogate, such as JSON "\ud800", cannot be encoded for storage.
+            return {'ok': False, 'error': 'The text holds a character that cannot be stored.'}
         except (ValueError, LookupError) as exc:
             reason = exc.args[0] if exc.args and isinstance(exc.args[0], str) else ''
             return {'ok': False, 'error': reason or 'Invalid, refused or expired scheduling request.'}
@@ -254,6 +279,8 @@ def register(worker):
                 return func(*args, **kwargs)
             except scheduling.RateLimit as exc:
                 return jsonify(ok=False, error=str(exc)), 429
+            except scheduling.MailboxFull as exc:
+                return jsonify(ok=False, error=str(exc)), 409
             except scheduling.Busy as exc:
                 return jsonify(ok=False, error=str(exc)), 409
             except LookupError:
@@ -295,8 +322,18 @@ def register(worker):
         # refresh must not mark that tiny in-flight gap interrupted.
         with engine.tick_lock:
             engine.reconcile()
+            reader = mailbox_reader()
+            mailbox = engine.store.messages(reader=reader, limit=scheduling.MAX_MESSAGES + 1)
+            if reader == 'owner' and len(mailbox) > scheduling.MAX_MESSAGES:
+                # Settings acknowledges its visible owner page. Prefer unread
+                # legacy copies so that refresh reaches the next page without
+                # deleting read history to advance it.
+                unread = engine.store.messages(reader=reader, unread_only=True, limit=scheduling.MAX_MESSAGES)
+                mailbox = unread or mailbox
             return jsonify(ok=True, schedules=[schedule_payload(row) for row in engine.store.schedules()], runs=clean(engine.store.runs()),
-                           mailbox=clean(engine.store.messages()), timezone=engine.store.timezone,
+                           mailbox=[mail_payload(row, engine.store.timezone) for row in
+                                    mailbox[:scheduling.MAX_MESSAGES]],
+                           mailbox_reader=reader, mailbox_status=engine.store.mail_status(), timezone=engine.store.timezone,
                            timezone_error='' if engine.store.timezone else 'Home Assistant time zone unavailable; schedule entry and dispatch are paused.',
                            lead_token_configured=engine.store.has_token(),
                            limits={'proposals': scheduling.MAX_PROPOSALS, 'mail_per_turn': scheduling.MAX_MAIL_PER_TURN,
@@ -384,13 +421,20 @@ def register(worker):
         data = body()
         if set(data) - {'prompt', 'mode'}:
             raise ValueError('A task accepts only prompt and mode.')
-        task_id = service.engine().lead_task(data.get('prompt'), data.get('mode', 'default'))
-        return jsonify(ok=True, task_id=task_id, status='queued'), 202
+        engine = service.engine()
+        task_id = engine.lead_task(data.get('prompt'), data.get('mode', 'default'))
+        pending = engine.store.pending_lead()
+        return jsonify(ok=True, task_id=task_id, status='waiting' if pending and pending['task_id'] == task_id else 'queued'), 202
 
     @app.get('/lead/tasks/<task_id>')
     @guarded
     @lead
     def lead_task_result(task_id):
+        pending = service.engine().store.pending_lead()
+        if pending and pending['task_id'] == task_id:
+            return jsonify(ok=True, task={'task_id': task_id, 'task_source': 'lead', 'status': 'waiting',
+                                         'background_mode': pending['mode'],
+                                         'summary': 'Waiting for a free worker slot and the daily run limit.'})
         with worker.lock:
             task = worker.tasks.get(task_id)
             if task is None or task.get('task_source') not in {'lead', 'schedule'}:
@@ -401,29 +445,94 @@ def register(worker):
                 result['run_status'] = 'waiting_for_approval'
         return jsonify(ok=True, task=clean(result))
 
+    def mail_payload(row, zone, *, excerpt=False):
+        """Return a redacted envelope and optional plain-text view."""
+        envelope = scheduling.mail_envelope(row)
+        envelope['message'] = worker.redact(envelope['message'])[:512] if excerpt else worker.redact(envelope['message'])
+        result = {'id': row['id'], 'parent': row['parent'], 'envelope': envelope, 'origin': row['origin']}
+        if not excerpt:
+            result['text'] = worker.redact(scheduling.mail_plain(row, zone))
+        return result
+
+    def mailbox_reader():
+        """Accept only a named mailbox reader."""
+        reader = request.args.get('mailbox', 'owner')
+        if reader not in scheduling.READERS:
+            raise ValueError('mailbox must name owner, lead or codex.')
+        return reader
+
+    def mail_page(reader, *, mark_read):
+        """Return a bounded reader page and acknowledge only that page when permitted."""
+        allowed = {'offset', 'limit', 'unread_only'}
+        if not (reader == 'lead' and request.path.startswith('/lead/')):
+            allowed.add('mailbox')
+        if set(request.args) - allowed:
+            raise ValueError('Mailbox reads accept only offset, limit and unread_only (administrators may select mailbox).')
+        unread = request.args.get('unread_only', 'false')
+        if unread not in ('true', 'false'):
+            raise ValueError('unread_only must be true or false.')
+        args = {}
+        for key in ('offset', 'limit'):
+            if key in request.args:
+                try:
+                    args[key] = int(request.args[key])
+                except (ValueError, TypeError):
+                    raise ValueError(key+' must be a whole number.') from None
+        offset, limit = page_arguments('read_mailbox', args)
+        engine = service.engine()
+        # Store.messages acknowledges only the selected page atomically. The
+        # separate count is a continuation hint, not a shared transaction.
+        rows = engine.store.messages(reader=reader, unread_only=unread == 'true')
+        page = engine.store.messages(reader=reader, unread_only=unread == 'true', mark_read=mark_read, offset=offset, limit=limit)
+        following = offset + len(page) < len(rows)
+        return jsonify(ok=True, mailbox=[mail_payload(row, engine.store.timezone) for row in page],
+                       next_offset=(0 if unread == 'true' and mark_read else offset + limit) if following else None,
+                       timezone=engine.store.timezone or 'UTC')
+
     @app.get('/lead/mailbox')
     @guarded
     @lead
     def lead_mail_list():
-        value = request.args.get('unread_only', 'false')
-        if value not in ('true', 'false'):
-            raise ValueError('unread_only must be true or false.')
-        rows = service.engine().store.messages(reader='lead', unread_only=value == 'true', mark_read=True)
-        return jsonify(ok=True, mailbox=clean(rows))
+        return mail_page('lead', mark_read=True)
 
-    def mail_send(author, parent=None):
+    def mail_fields(author, parent=None, *, allow_task=False):
+        """Validate message fields and permit attached tasks only on the dedicated lead route."""
         data = body()
-        fields = {'body', 'turn_id'} if author == 'lead' else {'body'}
-        if set(data) != fields:
-            raise ValueError('A lead message needs body and turn_id; an owner message needs body only.')
-        message_id = service.engine().store.mail(data['body'], author, time.time(), parent, data.get('turn_id'))
+        allowed = {'body', 'message', 'to', 'due', 'turn_id'} if author == 'lead' else {'body', 'message', 'to', 'due'}
+        if allow_task:
+            allowed.add('task')
+        if set(data) - allowed or ('message' in data) == ('body' in data):
+            raise ValueError('Use one message field (body is a legacy alias), to and optional due; lead mail also needs turn_id.')
+        if author == 'lead' and 'turn_id' not in data:
+            raise ValueError('A lead message needs turn_id.')
+        return data, {'message': data.get('message', data.get('body')), 'to': data.get('to', 'all'),
+                      'due': data.get('due'), 'turn_id': data.get('turn_id')}
+
+    def mail_send(author, parent=None, *, allow_task=False):
+        data, fields = mail_fields(author, parent, allow_task=allow_task)
+        engine = service.engine()
+        attached = data.get('task')
+        if 'task' in data:
+            if not isinstance(attached, dict) or set(attached) - {'prompt', 'mode'}:
+                raise ValueError('task accepts only prompt and mode.')
+            fields['to'] = data.get('to', 'codex')
+            if fields['to'] not in ('codex', 'all'):
+                raise ValueError('A task-carrying message must be addressed to codex or all.')
+            task_id = engine.lead_task(attached.get('prompt'), attached.get('mode', 'default'), mail=fields)
+            with engine.store.connect() as db:
+                message_id = db.execute('SELECT thread_id FROM lead_threads WHERE task_id=?', (task_id,)).fetchone()[0]
+            pending = engine.store.pending_lead()
+            return jsonify(ok=True, message_id=message_id, task_id=task_id,
+                           status='waiting' if pending and pending['task_id'] == task_id else 'queued'), 202
+        message_id = engine.store.mail(fields['message'], author, time.time(), parent, fields['turn_id'],
+                                      to=fields['to'], due=fields['due'])
         return jsonify(ok=True, message_id=message_id), 201
 
     @app.post('/lead/mailbox')
     @guarded
     @lead
     def lead_mail_send():
-        return mail_send('lead')
+        return mail_send('lead', allow_task=True)
 
     @app.post('/lead/mailbox/<message_id>/reply')
     @guarded
@@ -431,10 +540,30 @@ def register(worker):
     def lead_mail_reply(message_id):
         return mail_send('lead', message_id)
 
+    @app.patch('/lead/mailbox/<message_id>')
+    @guarded
+    @lead
+    def lead_mail_edit(message_id):
+        """Edit only the lead's own message through its authenticated route."""
+        data = body()
+        if set(data) - {'message', 'due'} or 'message' not in data:
+            raise ValueError('An edit needs message and optional due.')
+        service.engine().store.edit_mail(message_id, 'lead', data['message'], data.get('due'), time.time())
+        return jsonify(ok=True)
+
+    @app.get('/schedule-mailbox')
+    @guarded
+    @owner
+    def owner_mail_list():
+        """Let an administrator inspect a mailbox without acknowledging its reader copies."""
+        return mail_page(mailbox_reader(), mark_read=False)
+
     @app.post('/schedule-mailbox/read')
     @guarded
     @owner
     def owner_mail_read():
+        if mailbox_reader() != 'owner':
+            raise ValueError("Only the owner's mailbox can be acknowledged here.")
         data = body()
         if set(data) != {'ids'}:
             raise ValueError('A mailbox acknowledgement needs ids only.')
@@ -453,28 +582,45 @@ def register(worker):
     def owner_mail_reply(message_id):
         return mail_send('owner', message_id)
 
+    @app.patch('/schedule-mailbox/<message_id>')
+    @guarded
+    @owner
+    def owner_mail_edit(message_id):
+        """Apply an authenticated administrator edit without executing its body."""
+        data = body()
+        if set(data) - {'message', 'due'} or 'message' not in data:
+            raise ValueError('An edit needs message and optional due.')
+        service.engine().store.edit_mail(message_id, 'owner', data['message'], data.get('due'), time.time())
+        return jsonify(ok=True)
+
     @app.delete('/schedule-mailbox')
     @guarded
     @owner
     def owner_mail_clear():
-        return jsonify(ok=True, removed=service.engine().store.clear_mail())
+        if body() != {'confirm': True}:
+            raise ValueError('Confirm clearing this mailbox.')
+        return jsonify(ok=True, removed=service.engine().store.clear_mail(reader=mailbox_reader()))
 
     @app.delete('/schedule-mailbox/<message_id>')
     @guarded
     @owner
     def owner_mail_delete(message_id):
-        return jsonify(ok=True, removed=service.engine().store.clear_mail(parent=message_id))
+        return jsonify(ok=True, removed=service.engine().store.clear_mail(reader=mailbox_reader(), parent=message_id))
 
     @app.delete('/lead/mailbox')
     @guarded
     @lead
     def lead_mail_clear():
-        return jsonify(ok=True, removed=service.engine().store.clear_mail(author='lead'))
+        if request.args or body() != {'confirm': True}:
+            raise ValueError('Confirm clearing the lead mailbox only.')
+        return jsonify(ok=True, removed=service.engine().store.clear_mail(reader='lead'))
 
     @app.delete('/lead/mailbox/<message_id>')
     @guarded
     @lead
     def lead_mail_delete(message_id):
-        return jsonify(ok=True, removed=service.engine().store.clear_mail(author='lead', parent=message_id))
+        if request.args:
+            raise ValueError('The lead may clear only its own mailbox.')
+        return jsonify(ok=True, removed=service.engine().store.clear_mail(reader='lead', parent=message_id))
 
     return service

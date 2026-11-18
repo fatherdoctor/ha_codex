@@ -104,15 +104,24 @@ async function testSlash(browser, output, errors) {
     await page.locator("#message").pressSequentially("h");
     assert.deepEqual(await listed(page), ["/help"]);
 
-    // The tap path: tap /size, the box empties and the Aa pop-up opens.
+    // The tap path: tap /size, the box empties and the size choice opens:
+    // the Aa pop-up where the title row shows, Settings > Text size on a phone.
     await typeMessage(page, "/si");
     if (touch) await page.locator("#slash-size").tap();
     else await page.locator("#slash-size").click();
     assert.equal(await page.locator("#message").inputValue(), "");
     assert.equal(await page.locator("#slash-popover").isHidden(), true);
-    await page.locator("#text-size-popover").waitFor();
-    await page.locator("#text-size-popover").getByLabel("Largest").check();
-    await page.locator("#text-size-picker").press("Escape");
+    if (viewport.width > 700) {
+      await page.locator("#text-size-popover").waitFor();
+      await page.locator("#text-size-popover").getByLabel("Largest").check();
+      await page.locator("#text-size-picker").press("Escape");
+    } else {
+      await page.locator("#settings").waitFor();
+      const choice = page.locator("#text-size-section").getByLabel("Largest");
+      await choice.waitFor();
+      await choice.check();
+      await page.locator("#close-settings").click();
+    }
 
     // At Largest the list still fits the screen with no sideways scroll.
     await typeMessage(page, "/");
@@ -161,6 +170,10 @@ async function testSlash(browser, output, errors) {
         "Stop the chat that is working (while a chat is working)",
       ),
     );
+    // /help opens the Commands section, which starts closed like every section.
+    assert.equal(await page.locator("#command-list").isVisible(), true);
+    const sizeToggle = page.locator("#text-size-section .settings-toggle");
+    if ((await sizeToggle.getAttribute("aria-expanded")) !== "true") await sizeToggle.click();
     await page.locator("#settings").getByLabel("Normal").check();
     await page.locator("#close-settings").click();
 

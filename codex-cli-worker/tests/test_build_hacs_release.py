@@ -76,6 +76,22 @@ class BuildHacsReleaseTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "has no heading for v0.1.81.2"):
                 bhr.build("v0.1.81.2", self.out, allow_unreleased=allow)
 
+    def test_beta_tag_builds(self) -> None:
+        self.make("0.2.0-beta.1", "## 0.2.0-beta.1")
+        self.assertTrue(bhr.build("v0.2.0-beta.1", self.out).is_file())
+        self.assertEqual((self.out / "release_notes.md").read_text(encoding="utf-8"), "- Changes.\n")
+
+    def test_beta_needs_matching_versions(self) -> None:
+        self.make("0.2.0", "## 0.2.0-beta.1")
+        with self.assertRaisesRegex(ValueError, "Manifest version '0.2.0' does not match v0.2.0-beta.1"):
+            bhr.build("v0.2.0-beta.1", self.out)
+
+    def test_beta_on_four_numbers_is_refused(self) -> None:
+        # Home Assistant cannot compare 0.1.81.3-beta.1 with 0.1.81.3, so such a tag is never built.
+        self.make("0.1.81.3-beta.1", "## 0.1.81.3-beta.1")
+        with self.assertRaisesRegex(ValueError, "Expected a vX.Y.Z"):
+            bhr.build("v0.1.81.3-beta.1", self.out)
+
     def test_command_line(self) -> None:
         self.make("0.1.81.2", "## 0.1.81.2 (unreleased)")
         # The script finds the repository from its own path, so run a copy placed inside the test repository.

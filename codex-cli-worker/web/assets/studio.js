@@ -22,7 +22,6 @@ document.addEventListener("chat-view", updateStudio);
 
 for (const button of document.querySelectorAll("[data-close]"))
   button.onclick = () => $(button.dataset.close).close();
-$("header-settings").onclick = () => $("settings-button").click();
 $("phone-history").onclick = () => sidebar(true);
 $("phone-new").onclick = () => selectChat(null);
 $("permission-button").onclick = () => {
@@ -88,9 +87,6 @@ retryConnection.onclick = async () => {
   finally { retryConnection.disabled = false; }
 };
 $("connection-content").append(retryConnection);
-const remoteLink = textNode("button", "Manage remote connection", "subtle");
-remoteLink.type = "button";
-$("settings").querySelector("section").after(remoteLink);
 let connectionTimer;
 let lastRemoteState = null;
 function connectionLabel(rc) {
@@ -108,9 +104,8 @@ function renderStudioRemote(rc) {
   $("remote-control-pair").disabled = label.state !== "ready";
   retryConnection.hidden = label.state !== "error" || !rc.enabled || !rc.available;
   $("connection-summary").textContent = label.text;
-  $("connection-chip").textContent = `Home Assistant · ${label.text}`;
+  $("connection-manage").title = `Remote connection · ${label.text}`;
   document.body.dataset.connection = label.state;
-  $("strip-pair").hidden = label.state !== "ready";
   $("connection-title").textContent = `Remote connection · ${label.text}`;
   const card = $("remote-control-card");
   let pairingURL = null;
@@ -159,17 +154,17 @@ function openConnection() {
   if (!$("connection-dialog").open) $("connection-dialog").showModal();
   pollConnection();
 }
-for (const id of ["connection-chip", "connection-manage"])
-  $(id).onclick = openConnection;
-$("strip-pair").onclick = () => {
+// The Remote connection row at the foot of the side bar; its window holds Get a pairing code.
+$("connection-manage").onclick = openConnection;
+// The ChatGPT app pairing part of Accounts and connections in Settings opens the same window.
+$("remote-connection-open").onclick = openConnection;
+$("app-pairing-new").onclick = () => {
   openConnection();
   $("remote-control-pair").click();
 };
-remoteLink.onclick = openConnection;
 $("connection-dialog").addEventListener("close", () => clearTimeout(remoteTimer));
 
-// Workspace rules are loaded only when Advanced opens their dedicated editor.
-$("workspace-content").append($("workspace-section"));
+// Workspace rules are loaded only when Workspace instructions in Settings opens their dedicated editor.
 $("workspace-open").onclick = async () => {
   $("settings").close();
   $("workspace-dialog").showModal();
@@ -191,6 +186,26 @@ $("save-agents").onclick = async () => {
   finally { $("save-agents").disabled = false; }
 };
 
+// A missing /config/AGENTS.md is a setup hint above the chat, shown until it is dismissed in this browser.
+const AGENTS_HINT_KEY = "codex-agents-hint-dismissed";
+function agentsHintDismissed() {
+  try { return Boolean(localStorage.getItem(AGENTS_HINT_KEY)); } catch (_error) { return false; }
+}
+async function loadAgentsHint() {
+  if (agentsHintDismissed()) return;
+  try { $("agents-hint").hidden = (await api("agents")).exists !== false; }
+  catch (_error) { $("agents-hint").hidden = true; }
+}
+$("agents-hint-dismiss").onclick = () => {
+  $("agents-hint").hidden = true;
+  try { localStorage.setItem(AGENTS_HINT_KEY, "1"); } catch (_error) { /* The hint returns on the next visit. */ }
+};
+$("agents-hint-open").onclick = () => {
+  $("agents-hint").hidden = true;
+  $("workspace-open").click();
+};
+loadAgentsHint();
+
 function showStudioStatus() {
   const details = $("status-details");
   details.replaceChildren();
@@ -211,7 +226,8 @@ function showStudioStatus() {
     access.textContent = data.account_access?.message || "Codex access cannot be confirmed by a passive read.";
   }).catch(() => { access.textContent = "Codex access could not be checked."; });
 }
-$("header-status").onclick = showStudioStatus;
+// The Home Assistant row at the foot of the side bar opens the Status window.
+$("ha-status-row").onclick = showStudioStatus;
 for (const id of ["thread-actions", "phone-thread-actions"])
   $(id).onclick = event => openChatMenu(state.id, event.currentTarget);
 document.addEventListener("thread-action", async event => {
@@ -223,7 +239,7 @@ document.addEventListener("thread-action", async event => {
     try {
       const task = id === state.id ? state.task : (await api(`tasks/${encodeURIComponent(id)}`)).task;
       if (!task?.session_id) throw new Error("This conversation has no native thread ID yet.");
-      await copyResponseText(task.session_id);
+      await copyText(task.session_id);
     } catch (error) { showError(error); }
   } else if (action === "archive") {
     try {
@@ -241,32 +257,12 @@ $("archive-list").onclick = async () => {
   try { await loadList(); } catch (error) { sidebarError(error); }
 };
 
-/** Copy HA's exposed theme tokens across the iframe boundary when permitted. */
-const themeTokens = ["primary-color", "primary-background-color", "secondary-background-color", "card-background-color",
-  "primary-text-color", "secondary-text-color", "divider-color", "error-color", "text-light-primary-color"];
-function followTheme() {
-  let dark = matchMedia("(prefers-color-scheme: dark)").matches;
-  try {
-    if (parent !== window) {
-      const host = parent.document.querySelector("home-assistant") || parent.document.documentElement;
-      const style = parent.getComputedStyle(host);
-      if (typeof host.hass?.themes?.darkMode === "boolean") dark = host.hass.themes.darkMode;
-      else if (style.colorScheme === "dark") dark = true;
-      else if (style.colorScheme === "light") dark = false;
-      for (const token of themeTokens) {
-        const value = style.getPropertyValue("--" + token).trim();
-        if (value) document.documentElement.style.setProperty("--" + token, value);
-        else document.documentElement.style.removeProperty("--" + token);
-      }
-    }
-  } catch (_) { /* Cross-origin hosts use standalone system-theme fallbacks. */ }
-  document.documentElement.dataset.theme = dark ? "dark" : "light";
-}
-followTheme();
-matchMedia("(prefers-color-scheme: dark)").addEventListener("change", followTheme);
+/** Follow Home Assistant's theme now and whenever it changes (haTheme() is in chat.js). */
+haTheme();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", haTheme);
 try {
   if (parent !== window) {
-    const observer = new MutationObserver(followTheme);
+    const observer = new MutationObserver(haTheme);
     observer.observe(parent.document.documentElement, {attributes:true, attributeFilter:["style", "class"]});
     const host = parent.document.querySelector("home-assistant");
     if (host) observer.observe(host, {attributes:true, attributeFilter:["style", "class"]});

@@ -405,16 +405,15 @@ class ConversationTests(unittest.TestCase):
         self.assertEqual(server.tasks[task_id]["turns"][1]["status"], "cancelled")
 
     def test_followup_prompt_does_not_reissue_original_request(self):
-        """The prompt for a follow-up message carries that message and not the chat's original request."""
-        prompt = server.build_prompt("ORIGINAL_REQUEST", "task", reply="CURRENT_MESSAGE")
-        self.assertIn("CURRENT_MESSAGE", prompt)
-        self.assertNotIn("ORIGINAL_REQUEST", prompt)
+        """The text of a follow-up message is that message only, not the chat's original request."""
+        self.assertEqual(server.page_message("ORIGINAL_REQUEST", reply="CURRENT_MESSAGE"), "CURRENT_MESSAGE")
 
     def test_prompt_names_the_api_address_only_when_codex_has_a_token(self):
-        """With the HA_TOKEN option the prompt tells Codex to call Home Assistant at HA_URL; without it, nothing is said."""
-        self.assertNotIn("HA_URL", server.build_prompt("Reload the automations", "task"))
+        """With the HA_TOKEN option exchange_info tells Codex to call Home Assistant at HA_URL; without it, nothing is said."""
+        self.assertNotIn("home_assistant_api", server.exchange_info("task", None))
+        self.assertNotIn("HA_URL", server.PAGE_INSTRUCTIONS)
         with patch.object(server, "read_options", return_value={"HA_TOKEN": "token-value"}):
-            prompt = server.build_prompt("Reload the automations", "task")
+            prompt = server.exchange_info("task", None)["home_assistant_api"]
         self.assertIn('$HA_URL/api/services/automation/reload, with the header "Authorization: Bearer $HA_TOKEN"', prompt)
         self.assertIn("Do not use http://supervisor/core, which does not accept this token", prompt)
         # The token itself is never written into the prompt.
