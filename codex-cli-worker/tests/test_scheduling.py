@@ -150,7 +150,7 @@ class ScheduleStoreTests(unittest.TestCase):
         self.worker.tasks[task_id] = {'status': 'failed', 'approvals': [{'status': 'expired'}]}
         self.engine.reconcile(); self.assertEqual(self.store.runs()[0]['status'], 'failed')
 
-    def test_once_disables_after_claim_and_busy_or_paused_skips(self):
+    def test_once_disables_after_claim_and_busy_skips(self):
         self.save(spec={'kind': 'once', 'at': NOW + 60})
         self.worker.blocked = True; self.engine.tick(NOW + 61)
         self.assertFalse(self.worker.sent); self.assertFalse(self.store.runs())
@@ -369,9 +369,7 @@ class SchedulingApiTests(unittest.TestCase):
         self.assertEqual(result.status_code, 400); server.start_background_task.assert_not_called()
         self.assertEqual(self.service.engine().store.runs()[0]['status'], 'failed')
 
-    def test_paused_worker_and_oversized_or_malformed_json_do_not_launch(self):
-        with patch.object(server, 'assistant_paused', return_value=True):
-            self.assertEqual(self.client.post('/lead/tasks', json={'prompt': 'Sample'}, headers=self.lead).status_code, 409)
+    def test_oversized_or_malformed_json_do_not_launch(self):
         self.assertEqual(self.client.post('/lead/tasks', data='not json', content_type='application/json', headers=self.lead).status_code, 400)
         self.assertEqual(self.client.post('/lead/tasks', json={'prompt': 'x' * 70000}, headers=self.lead).status_code, 400)
         server.start_background_task.assert_not_called()

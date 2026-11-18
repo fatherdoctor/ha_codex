@@ -286,15 +286,18 @@ function pngBuffer(width = 8, height = 6) {
         document.querySelector(".row-main").dataset.taskId === "preview-05",
     );
     assert.equal(await page.locator(".pin-icon").count(), 1);
-    // Keyboard: Shift+F10 opens the menu, arrows move, Enter activates.
+    // Keyboard: Shift+F10 opens the menu with its first item, Rename, focused;
+    // arrows move, Enter activates.
+    const focusedAction = () =>
+      page.evaluate(() => document.activeElement.dataset.action);
     await page.locator('[data-task-id="preview-06"]').focus();
     await page.keyboard.press("Shift+F10");
     await page.locator("#chat-menu").waitFor({ state: "visible" });
+    assert.equal(await focusedAction(), "rename");
     await page.keyboard.press("ArrowDown");
-    assert.equal(
-      await page.evaluate(() => document.activeElement.dataset.action),
-      "rename",
-    );
+    assert.equal(await focusedAction(), "pin");
+    await page.keyboard.press("ArrowUp");
+    assert.equal(await focusedAction(), "rename");
     await page.keyboard.press("Enter");
     await page.locator("#rename-dialog").waitFor({ state: "visible" });
     await page.locator("#rename-input").fill("  Porch   lights ");

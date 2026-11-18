@@ -61,7 +61,6 @@ def main():
         server.AGENTS_PATH = root / "AGENTS.md"
         server.CODEX_HOME = root / "codex-home"
         server.api_token = lambda: "preview-only"
-        server.PAUSE_FILE = root / "paused.json"
         signed_in = {"status_ok": True, "message": "Signed in (local preview)"}
         server.auth_status_payload = lambda: {
             "status": "authenticated", "message": "Signed in (local preview)", "pending": False, "codex_login": signed_in,

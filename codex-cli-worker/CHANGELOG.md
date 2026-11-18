@@ -72,6 +72,35 @@
   gate, and a call can reach the Supervisor (for example `update.install`) or run your own `shell_command`. A
   scheduled run does not get the tool. The keys of the app's tools are now kept out of the commands Codex runs. The
   instructions point changes to the tool; `HA_TOKEN` is now only for an API call that is not a service.
+- The message box no longer has a hint line under it ("Continue this conversation with its saved context." and the
+  new-chat and queue versions); the note above the box still says when a message waits in the queue. The Permissions
+  button's chevron and the send button's arrow are now icons centered on their buttons, as in the ChatGPT desktop app,
+  instead of text characters that sat low on the line. `tests/browser_composer.cjs` checks both on a phone and a
+  desktop, in light and dark.
+- A chat's menu now lists Rename, Pin, Share, Archive and Delete, in the ChatGPT app's order. **Share** downloads
+  the whole chat, or its last lines, as a Markdown file with every message, the steps Codex printed (thinking
+  included) and each answer, with values that look like keys or tokens masked, and also a bare JSON Web Token, an `sk-` key, a labeled password, secret or pin and the password in a URL (`GET /tasks/<task_id>/share`). The menu no longer has New chat, Conversations, Copy
+  thread ID or Status, and the conversation header no longer has its own menu. Settings no longer has Interaction logs with its Export logs button; the
+  integration's Download diagnostics carries the same anonymized data.
+- The foot of the chat list shows **Codex**, **GitHub** and **Remote**, each with a word or two (for example
+  "Codex · Ready", "GitHub · Not connected", "Remote · Off") and a dot. Selecting one opens Settings at that part
+  of Accounts and connections. They replace the Home Assistant row and the Remote connection row; the integration's
+  state still shows as a line at the top of the chat when it needs you. The Status window is removed: its Context
+  and Usage and reset fields always showed Unavailable, because the app reads no context figure from Codex, and the
+  quota and reset times already show under the rows. The Codex access line moves to the ChatGPT account part of
+  Settings. `tests/browser_fb2_band.cjs` and `tests/browser_account_access.cjs` check the rows, their states and
+  where each one opens.
+- In **Settings**, one top-level section is open at a time: opening one closes the others. **Browser permissions**
+  moves into a new **Advanced** section at the bottom of Settings, folded by default; nothing about it is removed.
+  The **Add-on configuration** row now opens the app's Configuration tab. It linked to `/hassio/addon/<slug>/config`,
+  a page Home Assistant 2026.2 moved to `/config/app/<slug>/config` and 2026.5, this app's minimum, removed, so the
+  row opened a page that does not exist. `tests/browser_fb2_split.cjs` checks the sections and the link.
+- **Pause the assistant** is removed: the Assistant part of Settings, the banner above the chat with **Resume the
+  assistant**, the `GET` and `POST /pause` routes and the `pause` field of `GET /status`. New chats, replies, queued
+  messages, scheduled runs and lead-agent tasks no longer wait on it. To hold the work that starts on its own, pause
+  each schedule in **Settings > Scheduled runs**, and rotate the lead token to stop the lead agent. **Stop task**
+  still stops a running task. A `/data/paused.json` left by an earlier build is no longer read; an install that was
+  paused runs again after the update, and you can delete the file.
 - The chat page shows Codex's own permission request for the Home Assistant tool (`call` of the `home_assistant_call` server) as a card:
   the tool, the action in plain words (naming each entity, area, device, floor and label of its target), and every argument as JSON, including the full text of a message, with
   **Allow once** and **Deny**. **Allow once** allows that one call; Codex asks again before the next one. A request

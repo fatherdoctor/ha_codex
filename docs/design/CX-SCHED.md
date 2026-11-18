@@ -18,7 +18,7 @@ A permission request parks the native exchange: no automatic answer, no permanen
 
 The administrator creates or rotates a separate token on the page and copies it directly to the other agent's private configuration. It is returned once; the worker stores only its SHA-256 hash. Rotation revokes the old token. It is not the integration token, and Ingress headers cannot authenticate a lead API call. Every `/lead/` route requires a bearer token, bounds its inputs and returns redacted text. The token cannot approve native actions, approve schedules, change policy or impersonate an administrator.
 
-- `POST /lead/tasks`: submit a bounded prompt as an ordinary task, with Default or Read only; busy/paused workers refuse without silently creating duplicate work.
+- `POST /lead/tasks`: submit a bounded prompt as an ordinary task, with Default or Read only; a busy worker holds one waiting task and refuses more, without silently creating duplicate work.
 - `GET /lead/tasks/<id>`: read background work's normal result and pending approval state; unrelated human chats are refused.
 - `GET/POST /lead/schedules`, `PATCH /lead/schedules/<id>`: list or propose a schedule; only the lead’s own unapproved proposals may be edited or deleted; exact revisions require owner approval on the page.
 - `GET/POST /lead/mailbox`, `POST /lead/mailbox/<id>/reply`: exchange plain-text messages and replies with the owner/other agent. Messages are data, not executable commands. The same mailbox is visible on the page. The worker does not send them to people or execute them. A lead must explicitly submit a task to request work.
@@ -29,7 +29,7 @@ Page management routes require authenticated Home Assistant Ingress and administ
 
 A settings section offers a schedule form, a list with edit/pause/approve/delete, next due time and run history, plus token rotation and mailbox controls. All stored prompts and messages are rendered as text. A bounded refresh updates parked outcomes without opening a second runner.
 
-Tests use temporary databases, a fixed clock and a synthetic worker. They cover cron/date edges, validation, proposal ownership and approval revisions, limits, restart/crash gaps, no duplicate claims, persistence, paused/busy workers, refusal of unapproved schedules, read-only propagation, pending native approval parking, token isolation/rotation, administrator-only management, task-result readback and mailbox replies. The full worker suite and repository container/browser jobs validate integration. Live-box and phone acceptance remain the lead's.
+Tests use temporary databases, a fixed clock and a synthetic worker. They cover cron/date edges, validation, proposal ownership and approval revisions, limits, restart/crash gaps, no duplicate claims, persistence, busy workers, refusal of unapproved schedules, read-only propagation, pending native approval parking, token isolation/rotation, administrator-only management, task-result readback and mailbox replies. The full worker suite and repository container/browser jobs validate integration. Live-box and phone acceptance remain the lead's.
 
 ## Accepted phone surface and review fixes
 

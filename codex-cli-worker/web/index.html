@@ -57,13 +57,17 @@
         <button id="load-more" class="subtle" hidden>Load older chats</button>
         </section>
         <div class="sidebar-footer">
-          <button id="ha-status-row" class="foot-row" type="button" data-state="loading">
+          <button id="codex-status-row" class="foot-row" type="button" data-state="loading" data-section="chatgpt-section">
             <span class="status-dot" aria-hidden="true"></span
-            ><span class="foot-label">Home Assistant · <span id="ha-status-summary">Loading…</span></span>
+            ><span class="foot-label">Codex · <span id="codex-status-summary">Loading…</span></span>
           </button>
-          <button id="connection-manage" class="foot-row" type="button">
+          <button id="github-status-row" class="foot-row" type="button" data-state="loading" data-section="github-section">
             <span class="status-dot" aria-hidden="true"></span
-            ><span class="foot-label">Remote connection · <span id="connection-summary">Loading…</span></span>
+            ><span class="foot-label">GitHub · <span id="github-status-summary">Loading…</span></span>
+          </button>
+          <button id="remote-status-row" class="foot-row" type="button" data-state="loading" data-section="app-pairing-section">
+            <span class="status-dot" aria-hidden="true"></span
+            ><span class="foot-label">Remote · <span id="remote-status-summary">Loading…</span></span>
           </button>
           <div id="usage" class="usage" aria-label="Remaining account quota">
             <span>5h</span>
@@ -107,11 +111,9 @@
           </button>
           <h1 id="chat-title">New chat</h1>
           <p id="chat-status" class="sr-only" role="status">Your Home Assistant, with a little help.</p>
-          <button id="thread-actions" class="icon" aria-label="Thread menu" aria-haspopup="menu">⋯</button>
         </header>
         <div class="phone-thread-tools"><button id="phone-history" class="icon" aria-label="Open conversations">☰</button>
-          <span id="phone-title">New chat</span><button id="phone-new" class="icon" aria-label="New chat">＋</button>
-          <button id="phone-thread-actions" class="icon" aria-label="Thread menu" aria-haspopup="menu">⋯</button></div>
+          <span id="phone-title">New chat</span><button id="phone-new" class="icon" aria-label="New chat">＋</button></div>
         <p id="integration-notice" role="status" hidden></p>
         <section id="session-banner" class="page-banner" role="alert" hidden>
           <p><strong>Your Home Assistant session expired.</strong> Reload the page to continue.</p>
@@ -131,10 +133,6 @@
         </section>
         <section id="full-access-banner" class="page-banner" role="status" hidden>
           <p><strong>Full access is on.</strong> A chat set to Full access, and a ChatGPT app thread that asks for it, runs commands outside the sandbox.</p>
-        </section>
-        <section id="paused-banner" class="page-banner" role="status" hidden>
-          <p><strong>The assistant is paused.</strong> New messages are refused until you resume it.</p>
-          <div class="settings-actions"><button id="resume">Resume the assistant</button></div>
         </section>
         <div
           id="messages"
@@ -189,7 +187,10 @@
                   multiple
                   hidden
                 />
-                <button id="permission-button" type="button" class="permission-pill" aria-haspopup="dialog">Default permissions⌄</button>
+                <button id="permission-button" type="button" class="permission-pill" aria-haspopup="dialog"
+                  ><span id="permission-label">Default permissions</span
+                  ><svg class="picker-chevron" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z" /></svg
+                ></button>
                 <div id="plus-menu" class="picker-popover" role="menu" aria-label="Add to message" hidden>
                   <button id="upload-photo" type="button" role="menuitem">Upload photo</button>
                   <button id="upload-document" type="button" role="menuitem">Upload file</button>
@@ -290,14 +291,13 @@
               </div>
               </div>
               <button id="send" type="submit" aria-label="Send message">
-                ↑
+                <span class="mdi-icon mdi-arrow-up" aria-hidden="true"></span>
               </button>
               <button id="cancel" type="button" class="stop-button" aria-label="Stop task" title="Stop task" hidden>
                 <span class="mdi-icon mdi-stop" aria-hidden="true"></span>
               </button>
             </div>
           </form>
-          <p id="compose-hint">A new chat starts a separate conversation.</p>
 
         </div>
       </main>
@@ -316,19 +316,12 @@
       hidden
     >
       <p id="chat-menu-title" class="chat-menu-title"></p>
+      <button type="button" role="menuitem" data-action="rename">Rename</button>
       <button type="button" role="menuitem" data-action="pin">Pin chat</button>
-      <button type="button" role="menuitem" data-action="rename">
-        Rename
-      </button>
-      <button type="button" role="menuitem" data-action="delete" class="danger">
-        Delete
-      </button>
-      <button type="button" role="menuitem" data-action="copy-id">Copy thread ID</button>
+      <button type="button" role="menuitem" data-action="share">Share</button>
       <button type="button" role="menuitem" data-action="schedule">Schedule</button>
       <button type="button" role="menuitem" data-action="archive">Archive</button>
-      <button type="button" role="menuitem" data-action="status">Status</button>
-      <button type="button" role="menuitem" data-action="history">Conversations</button>
-      <button type="button" role="menuitem" data-action="new-chat">New chat</button>
+      <button type="button" role="menuitem" data-action="delete" class="danger">Delete</button>
       <button type="button" role="menuitem" data-action="close">Cancel</button>
     </div>
     <dialog id="rename-dialog" class="small-dialog" aria-labelledby="rename-title">
@@ -349,6 +342,23 @@
             Cancel
           </button>
           <button type="submit" id="rename-save">Save</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="share-dialog" class="small-dialog" aria-labelledby="share-title">
+      <form id="share-form" novalidate>
+        <h2 id="share-title">Share chat</h2>
+        <p>Download this chat as a Markdown file, with the steps Codex printed. Keys, tokens and passwords with a label are masked. Names, addresses and a secret with no label are not. Read the file before you send it to anyone.</p>
+        <fieldset class="share-range">
+          <legend class="sr-only">What to include</legend>
+          <label><input type="radio" name="share-range" value="all" checked /> The whole chat</label>
+          <label><input type="radio" name="share-range" value="last" /> The last
+            <input id="share-lines" type="number" min="1" max="100000" step="1" value="200" aria-label="Number of lines" /> lines</label>
+        </fieldset>
+        <p id="share-error" class="dialog-error" role="alert" hidden></p>
+        <div class="dialog-actions">
+          <button type="button" id="share-cancel" class="subtle">Cancel</button>
+          <button type="submit" id="share-download">Download</button>
         </div>
       </form>
     </dialog>
@@ -413,7 +423,6 @@
         <button type="button" id="full-access-confirm">Turn on Full access</button>
       </div>
     </dialog>
-    <dialog id="status-dialog" class="studio-sheet" aria-labelledby="status-title"><div class="dialog-header"><h2 id="status-title">Status</h2><button class="icon icon-close" data-close="status-dialog" aria-label="Close status"></button></div><dl id="status-details"></dl></dialog>
     <dialog id="connection-dialog" class="studio-sheet" aria-labelledby="connection-title"><div class="dialog-header"><h2 id="connection-title">Remote connection</h2><button class="icon icon-close" data-close="connection-dialog" aria-label="Close remote connection"></button></div><div id="connection-content"></div><p id="connection-result" role="alert"></p></dialog>
     <dialog id="workspace-dialog" class="studio-sheet" aria-labelledby="workspace-title"><div class="dialog-header"><h2 id="workspace-title">Workspace rules</h2><button class="icon icon-close" data-close="workspace-dialog" aria-label="Close workspace rules"></button></div><div id="workspace-content"><label for="agents">AGENTS.md</label
       ><textarea id="agents" rows="12" spellcheck="false"></textarea
@@ -428,6 +437,7 @@
         <section id="chatgpt-section">
           <h4>ChatGPT account</h4>
           <p id="login-status" class="muted">Loading account status…</p>
+          <p id="codex-access" class="muted" hidden></p>
           <p id="login-requirement" class="muted">A ChatGPT account with Codex access is required. As of November 13, 2026, OpenAI includes Codex across plans, including Free and Go; limits and workspace access vary. <a href="https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan" target="_blank" rel="noopener noreferrer">Check current availability</a>.</p>
           <div class="settings-actions">
             <button id="login">Sign in</button
@@ -529,13 +539,6 @@
         </p>
         <dl id="command-list" class="command-list"></dl>
       </section>
-      <section id="interaction-logs-section">
-        <h3>Interaction logs</h3>
-        <p class="muted">Export recent worker metadata. Remote ChatGPT threads are not recorded. Review the file before sharing it.</p>
-        <p id="diagnostic-retention-note" class="muted">Set how many interactions to keep with Interactions to keep in Add-on configuration.</p>
-        <button id="export-interaction-logs" class="subtle">Export logs</button>
-        <p id="export-logs-status" class="muted" role="status"></p>
-      </section>
       <section id="remote-control-section" data-own-dialog>
         <h3>Remote control from the ChatGPT app</h3>
         <p class="muted">
@@ -572,18 +575,6 @@
           <pre id="remote-control-log"></pre>
         </details>
       </section>
-      <section id="assistant-section">
-        <h3>Assistant</h3>
-        <p id="pause-status" class="muted">Loading…</p>
-        <div class="settings-actions">
-          <button id="pause">Pause the assistant</button>
-        </div>
-      </section>
-      <section id="browser-permissions-section">
-        <h3>Browser permissions</h3>
-        <p class="muted">Requests you chose to remember for a dashboard. Revoking a permission stops captures using saved access.</p>
-        <div id="browser-permissions"></div>
-      </section>
       <section id="scheduled-work">
         <h3>Scheduled runs</h3>
         <p class="muted">To schedule a chat, open its menu in the chat list and choose Schedule. Proposals from agents stay off until you approve them here.</p>
@@ -607,6 +598,14 @@
           configuration.
         </p>
         <button id="workspace-open" class="subtle">Workspace rules</button>
+      </section>
+      <section id="advanced-section" aria-labelledby="advanced-title">
+        <h3 id="advanced-title">Advanced</h3>
+        <section id="browser-permissions-section" aria-labelledby="browser-permissions-title">
+          <h4 id="browser-permissions-title">Browser permissions</h4>
+          <p class="muted">Requests you chose to remember for a dashboard. Revoking a permission stops captures using saved access.</p>
+          <div id="browser-permissions"></div>
+        </section>
       </section>
       <a id="addon-configuration" class="ha-row ha-nav-row" target="_top"
          aria-label="Add-on configuration" aria-describedby="addon-configuration-description"

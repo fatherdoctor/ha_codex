@@ -8,8 +8,8 @@ function updateStudio() {
   if (greeting) greeting.textContent = hour < 12 ? "Good morning" : hour < 18 ? "Nice to see you again" : "Good evening";
   $("phone-title").textContent = state.task?.title || "New chat";
   const permissionLabel = permissionNames[selectedPermissionMode()];
-  $("permission-button").textContent = (innerWidth <= 700 && selectedPermissionMode() === 'default'
-    ? 'Default' : permissionLabel) + '⌄';
+  $("permission-label").textContent = innerWidth <= 700 && selectedPermissionMode() === 'default'
+    ? 'Default' : permissionLabel;
   $("permission-button").setAttribute('aria-label', permissionLabel);
   $("permission-button").title = permissionLabel;
   $("permission-button").classList.toggle("full-access", selectedPermissionMode() === "full-access");
@@ -101,13 +101,22 @@ function connectionLabel(rc) {
   if (rc.state === "reconnecting") return {state: "reconnecting", text: "Reconnecting"};
   return {state: "error", text: rc.message || "Connection error"};
 }
+/** The Remote row's dot and words. A version that cannot turn remote control on shows a gray dot. */
+function remoteFootRow(rc, label) {
+  if (!rc.available) return ["off", "Unavailable"];
+  if (label.state === "ready") return ["ready", "Ready"];
+  if (label.state === "reconnecting") return ["needs-owner", "Reconnecting"];
+  if (label.state === "error") return ["error", "Connection error"];
+  return [label.state, label.text];
+}
 function renderStudioRemote(rc) {
   lastRemoteState = rc;
   const label = connectionLabel(rc);
   $("remote-control-pair").disabled = label.state !== "ready";
   retryConnection.hidden = label.state !== "error" || !rc.enabled || !rc.available;
-  $("connection-summary").textContent = label.text;
-  $("connection-manage").title = `Remote connection · ${label.text}`;
+  // The Remote row at the foot of the side bar keeps to a word or two; its tooltip and the window's title say more.
+  setFootRow("remote-status-row", ...remoteFootRow(rc, label));
+  $("remote-status-row").title = `Remote · ${label.text}`;
   document.body.dataset.connection = label.state;
   $("connection-title").textContent = `Remote connection · ${label.text}`;
   const card = $("remote-control-card");
@@ -149,7 +158,10 @@ document.addEventListener("remote-view", event => renderStudioRemote(event.detai
 async function pollConnection() {
   clearTimeout(connectionTimer);
   try { await loadRemoteControl(); $("connection-result").textContent = ""; }
-  catch (error) { $("connection-result").textContent = error.message; }
+  catch (error) {
+    $("connection-result").textContent = error.message;
+    setFootRow("remote-status-row", "error", "Unavailable");
+  }
   connectionTimer = setTimeout(pollConnection, $("connection-dialog").open ? 5000 : 15000);
 }
 function openConnection() {
@@ -157,8 +169,6 @@ function openConnection() {
   if (!$("connection-dialog").open) $("connection-dialog").showModal();
   pollConnection();
 }
-// The Remote connection row at the foot of the side bar; its window holds Get a pairing code.
-$("connection-manage").onclick = openConnection;
 // The ChatGPT app pairing part of Accounts and connections in Settings opens the same window.
 $("remote-connection-open").onclick = openConnection;
 $("app-pairing-new").onclick = () => {
@@ -209,43 +219,9 @@ $("agents-hint-open").onclick = () => {
 };
 loadAgentsHint();
 
-function showStudioStatus() {
-  const details = $("status-details");
-  details.replaceChildren();
-  for (const [name, value] of [
-    ["Thread", state.task?.session_id || "Unavailable"], ["Workspace", "/config"],
-    ["Model", modelLabel()], ["Permissions", permissionNames[selectedPermissionMode()]],
-    ["Full access", document.body.dataset.fullAccess === "on" ? "On for this app" : "Off"],
-    ["Context", "Unavailable"], ["Usage and reset", "Unavailable"],
-    ["Connection", lastRemoteState ? connectionLabel(lastRemoteState).text : "Unavailable"],
-  ]) details.append(textNode("dt", name), textNode("dd", value));
-  const plan = textNode("dd", "Unavailable");
-  const access = textNode("dd", "Checking sign-in…");
-  details.append(textNode("dt", "ChatGPT plan (information only)"), plan,
-    textNode("dt", "Codex access"), access);
-  $("status-dialog").showModal();
-  // Start with unavailable fields so switching accounts never displays an old plan.
-  api("status").then(data => {
-    plan.textContent = data.account_access?.plan_type || "Unavailable";
-    access.textContent = data.account_access?.message || "Codex access cannot be confirmed by a passive read.";
-  }).catch(() => { access.textContent = "Codex access could not be checked."; });
-}
-// The Home Assistant row at the foot of the side bar opens the Status window.
-$("ha-status-row").onclick = showStudioStatus;
-for (const id of ["thread-actions", "phone-thread-actions"])
-  $(id).onclick = event => openChatMenu(state.id, event.currentTarget);
 document.addEventListener("thread-action", async event => {
   const {action, id} = event.detail;
-  if (action === "status") showStudioStatus();
-  else if (action === "history") sidebar(true);
-  else if (action === "new-chat") await selectChat(null);
-  else if (action === "copy-id") {
-    try {
-      const task = id === state.id ? state.task : (await api(`tasks/${encodeURIComponent(id)}`)).task;
-      if (!task?.session_id) throw new Error("This conversation has no native thread ID yet.");
-      await copyText(task.session_id);
-    } catch (error) { showError(error); }
-  } else if (action === "archive") {
+  if (action === "archive") {
     try {
       const chat = chatById(id) || (id === state.id ? state.task : null);
       await api(`tasks/${encodeURIComponent(id)}/archive`, {archived: !chat?.archived});

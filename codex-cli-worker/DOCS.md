@@ -539,7 +539,7 @@ After you choose **Sign in**, the app posts a Home Assistant persistent notifica
 
 While the app is not signed in, a banner above the chat offers **Sign in**. During a sign-in, the banner and **Settings** show the one-time code in large letters, a QR code of the sign-in page served by the app itself, and the link. The code stays on screen, unchanged, until the sign-in completes or you press **Cancel**; pressing **Sign in** again keeps the running sign-in and its code. Under the code, a countdown shows how long it still works (Codex 0.166.0 gives codes 15 minutes); each status reply from the app sets it again, so it stays right after the phone sleeps. When it runs out, the page says so and offers **Get a new code**. If a sign-in stops without signing in, **Settings** says why when it can, and **Sign in** becomes **Get a new code**. The GitHub code in **Settings > Accounts and connections > GitHub** has the same countdown and button.
 
-Every section of **Settings** starts collapsed. The window keeps one size; an open section scrolls inside it. Its header shows a one-line status, such as **Signed in**, **Connected as owner, 1 repository** or **Keeps 25**. A section that needs attention shows its status in red: a sign-in that waits or failed, a schedule that waits for your approval, or schedules paused because the Home Assistant time zone is unknown. Tap a header to open the section. When a saved sign-in expires or is revoked, the banner returns and the integration raises a Home Assistant repair; the integration's **Signed in** binary sensor turns off. **Accounts and connections** holds the three sign-ins and pairings: **ChatGPT account**, **GitHub** and **ChatGPT app pairing**, each under its own collapsed header. Its header joins their states, for example "ChatGPT signed in · GitHub connected · app off"; when one of them needs you, the header names only that one. The app pairing part shows the remote connection state, **Get a pairing code** while remote control is on, **Manage remote connection** and **Turn off**. Turn off stops the connection; it does not remove the pairing in the ChatGPT app. A pairing code shows no countdown, because the worker does not know how long Codex keeps it.
+Every section of **Settings** starts collapsed, and one top-level section is open at a time: opening one closes the others. The parts inside a section, such as **GitHub**, keep their own state. The window keeps one size; an open section scrolls inside it. Its header shows a one-line status, such as **Signed in**, **Connected as owner, 1 repository** or **Keeps 25**. A section that needs attention shows its status in red: a sign-in that waits or failed, a schedule that waits for your approval, or schedules paused because the Home Assistant time zone is unknown. Tap a header to open the section. When a saved sign-in expires or is revoked, the banner returns and the integration raises a Home Assistant repair; the integration's **Signed in** binary sensor turns off. **Accounts and connections** holds the three sign-ins and pairings: **ChatGPT account**, **GitHub** and **ChatGPT app pairing**, each under its own collapsed header. Its header joins their states, for example "ChatGPT signed in · GitHub connected · app off"; when one of them needs you, the header names only that one. The app pairing part shows the remote connection state, **Get a pairing code** while remote control is on, **Manage remote connection** and **Turn off**. Turn off stops the connection; it does not remove the pairing in the ChatGPT app. A pairing code shows no countdown, because the worker does not know how long Codex keeps it.
 
 The page reaches the app through a Home Assistant ingress session, which the Home Assistant tab renews. If a request finds that session expired (for example after a phone slept), the page asks Home Assistant for a new session once and sends the request again. If that fails, a banner says the session expired and offers **Reload**; the page never shows the bare HTTP error.
 
@@ -619,10 +619,6 @@ Open **Settings > Accounts and connections > GitHub** in the app page. The card 
 ### Backups
 
 `/data/github` is not in the app backup. After a restore, the card shows **Not connected**; press **Connect GitHub** again.
-
-## Pausing the assistant
-
-**Settings > Pause the assistant** stops the app from taking new messages: new chats and replies are refused, and queued messages wait. A banner above the chat says so and offers **Resume the assistant**, which also starts the oldest queued message. A running task is not stopped; use **Stop task** for that. The pause is kept across app restarts.
 
 ## AGENTS.md and HA_TOKEN
 
@@ -923,6 +919,18 @@ API: `POST /tasks`, `POST /tasks/<task_id>/continue`, and `POST /tasks/<task_id>
 
 From **0.1.50**, each chat in the sidebar has an actions menu. On desktop, hover over a chat and choose the **⋯** button, or right-click the row. On phones, long-press the chat to open a bottom sheet. With a keyboard, focus a chat and press Shift+F10; arrow keys move between items and Escape closes the menu.
 
+The menu lists, in this order: **Rename**, **Pin chat**, **Share**, **Archive** and **Delete**, as the ChatGPT app
+orders them. The conversation header has no menu of its own; open a chat's menu from the chat list.
+
+**Share** downloads the chat as a Markdown file: the whole chat, or only its last lines (a number from 1 to
+100,000). The file has each of your messages, the steps Codex printed for it (thinking, commands, file changes and
+tool calls, with the marks the page shows) and Codex's answer. The file masks what the task log masks, and also a
+JSON Web Token (the form of a Home Assistant long-lived access token), an `sk-` API key, a value after a key such
+as `password`, `passwd`, `secret` or `pin`, and the password in a URL; each one becomes `[redacted]`. A quoted value
+is masked inside its quotes; a value with no quotes is masked to the end of its line, so the rest of that line is
+hidden too. The mask cannot know names, addresses, or a secret that has no label and no known form. Nothing is sent anywhere; read the
+file before you give it to anyone. API: `GET /tasks/<task_id>/share` returns the file, and `?lines=<n>` keeps only the last `n` lines.
+
 **Pin chat** keeps the conversation at the top of the list under a **Pinned** heading, ahead of the recently active chats; **Unpin chat** returns it to the recent list. **Rename** opens a dialog for a new title, which appears in the sidebar and the conversation header. Neither action changes the chat's `updated_at` time or its saved messages. **Delete** asks for confirmation, then removes the conversation and its saved history. The delete action is unavailable while that chat is running; stop the task first.
 
 Deleting a chat removes `<task_root>/<task_id>/`, including prompts, output, backups, and attachments, and the entry from the task index. The worker also attempts to remove the Codex session rollout file under `/data/codex-home/sessions` and generated images under `/data/codex-home/generated_images/<session_id>/`. Failures to remove those session files are logged. Deletion cannot be undone in the chat UI and does not erase copies in separate Home Assistant backups.
@@ -956,7 +964,7 @@ Each run starts a new chat; the chat you scheduled does not grow. **Schedule** i
 
 Intervals accept whole minutes or hours, with a minimum of one minute. Hourly is an interval of one hour, counted from the time you save. Daily and Weekly are cron lines at the time you chose. One-off entry and displayed dates use Home Assistant’s configured IANA time zone, named under the trigger. Cron follows that local wall time across daylight-saving changes: missing minutes are skipped and repeated minutes run once, at the first occurrence. One-off nonexistent local times are refused; repeated times use their first occurrence. Entry and scheduled dispatch pause if the Home Assistant time zone is unavailable. Explicit API timestamps with an offset remain absolute instants. Cron uses five numeric local fields: minute, hour, day of month, month and weekday. Lists, ranges and steps are supported. Sunday is 0 or 7. When neither day field starts with a wildcard, either can match. A leading wildcard, including a step such as `*/2`, keeps the other day field restrictive. The next occurrence must be within 366 days. A cron schedule disables after its last occurrence if no next occurrence lies within that horizon; edit it to enable it again. One-off schedules disable after their occurrence is reserved. Pause, resume, edit or delete schedules from the editor or the list; deleting a schedule stops future runs, not a task already in progress. Cancel a running task in its chat.
 
-The worker checks due schedules every five seconds. It uses the ordinary task launcher, backups, validation and permission checks, and starts at most one scheduled task per check. Due work waits while the assistant is busy or paused. A missed interval coalesces into one run, without a burst of catch-up tasks. Limits are 100 approved schedules plus 20 unapproved proposals, 24 runs per schedule per UTC day, and 64 scheduled or lead-submitted runs total per UTC day. A run that reaches a limit waits until a later UTC day. Completed run history retains the latest 500 records; active records are kept separately. Schedules, occurrence reservations, run history and mailbox data live in `/data/schedules.sqlite3` and survive app restarts and updates. Reservation and launch share the normal chat-slot lock; a busy launch restores the due occurrence without overwriting a concurrent owner edit. A crash after reservation but before saving the ordinary task records an interrupted run and does not retry it automatically.
+The worker checks due schedules every five seconds. It uses the ordinary task launcher, backups, validation and permission checks, and starts at most one scheduled task per check. Due work waits while the assistant is busy. A missed interval coalesces into one run, without a burst of catch-up tasks. Limits are 100 approved schedules plus 20 unapproved proposals, 24 runs per schedule per UTC day, and 64 scheduled or lead-submitted runs total per UTC day. A run that reaches a limit waits until a later UTC day. Completed run history retains the latest 500 records; active records are kept separately. Schedules, occurrence reservations, run history and mailbox data live in `/data/schedules.sqlite3` and survive app restarts and updates. Reservation and launch share the normal chat-slot lock; a busy launch restores the due occurrence without overwriting a concurrent owner edit. A crash after reservation but before saving the ordinary task records an interrupted run and does not retry it automatically.
 
 **Permission requests remain human decisions.** The run log shows **waiting for approval** while a native request is pending. Open its chat to review the command or diff and choose **Allow once** or **Deny** as an administrator. No scheduler, lead token or mailbox reply can answer it. The parked exchange keeps the worker's normal execution slot; other schedules do not bypass it. Existing task timeouts, cancellation and restart expiration still apply. A question instead shows **waiting for input**. Scheduled and lead tasks report completion, failure, cancellation and questions in the run log/chat without pushes. Only their existing permission-wait notification uses `notify_service` (or persistent Home Assistant notifications). The lead accepted Home Assistant phone notification and the responsive permission page; a ChatGPT approval mirror is not required or provided.
 
@@ -972,7 +980,7 @@ The API is served by the same worker HTTP listener as the existing local API. Th
 
 | Method and path | Purpose and fields |
 |---|---|
-| `POST /lead/tasks` | `{"prompt":"Inspect the sample configuration.","mode":"read-only"}` starts an ordinary task and returns `task_id`. A busy worker durably holds one waiting task; a second waiting task returns 409 with a reason. A paused worker refuses new tasks; an already waiting task remains held. The response includes `status: queued` or `waiting`; the waiting handle can be polled below. The daily unattended-run limit applies. |
+| `POST /lead/tasks` | `{"prompt":"Inspect the sample configuration.","mode":"read-only"}` starts an ordinary task and returns `task_id`. A busy worker durably holds one waiting task; a second waiting task returns 409 with a reason. The response includes `status: queued` or `waiting`; the waiting handle can be polled below. The daily unattended-run limit applies. |
 | `GET /lead/tasks/<task_id>` | Read a lead-submitted or scheduled task's saved result and pending-approval status. Unrelated human chats return not found. It cannot answer an approval. |
 | `GET /lead/schedules` | Read saved schedules and proposals. The chat and the model an owner gave a schedule are left out, and a proposal cannot set them. |
 | `POST /lead/schedules` | Propose `{"name":"Sample inspection","prompt":"Inspect the sample configuration.","mode":"read-only","spec":{"kind":"interval","seconds":3600}}`. The result has `approved:false` and `enabled:false`. |
@@ -1014,14 +1022,16 @@ A task note without `to` goes to Codex and the lead. The owner can inspect that 
 
 Schedule prompts containing recognized credentials are masked in responses and marked `prompt_redacted`; Edit is disabled, and the editor opened from a chat shows such a schedule read-only, so masked text cannot replace the saved prompt. Create a replacement with a complete prompt instead. All save routes reject the literal `[redacted]` marker. The private database and its journal/WAL/SHM paths are protected like the worker token from tool file access and native permission grants. A persistent SQLite journal is materialized before tasks or remote control start, so its mask remains present across transactions. Schema version 3 adds first-read retention timestamps. Version 2 added per-reader deliveries, UTC message envelopes and durable lead task/thread records; version 1 added proposal authorship; legacy proposals without an attributable author remain owner-owned.
 
-## Export logs for a bug report
+## Interaction logs for a bug report
 
-In the add-on page, open Settings and choose **Export logs**. Home Assistant's
-integration **Download diagnostics** button includes the same anonymized data
-inside Home Assistant's own diagnostics envelope. The whole files differ:
-Home Assistant adds system information, including the time zone, component
-information and the integration manifest. Review the entire downloaded file
-before sharing it. Neither button sends a report to another service.
+Home Assistant's integration **Download diagnostics** button (Settings, Devices
+& services, Codex, three-dot menu) downloads the anonymized interaction logs
+inside Home Assistant's own diagnostics envelope, with system information,
+including the time zone, component information and the integration manifest.
+Review the entire downloaded file before sharing it. The button does not send a
+report to another service. The add-on page no longer has its own Export logs
+button (removed in 0.3.6); `GET /diagnostics/export` still returns the same data
+to an administrator.
 
 The worker's data excludes connection settings, accounts, task titles, prompts,
 answers and raw tool output. The former integration entry/coordinator snapshot
@@ -1078,13 +1088,19 @@ message or connection address.
 The page follows Home Assistant colors in light and dark when its host exposes them; otherwise it follows
 the device appearance. Recent conversations stay alongside the writing canvas on tablets and desktop.
 Above the messages is one thin row with the chat's title and its menu. The foot of the side bar holds, top to
-bottom: **Home Assistant** with the state of the Codex integration (it opens the Status window), **Remote
-connection** with its state (it opens the window that pairs the ChatGPT app), the 5-hour and weekly quota with a
-line for the plan type and the reset times, and **Settings**. A row that needs you shows an amber dot. While a task
+bottom: **Codex** (the ChatGPT sign-in), **GitHub** and **Remote** (the ChatGPT app connection), each with a word
+or two such as Ready, Off or Not signed in; the 5-hour and weekly quota with a line for the plan type and the reset
+times; and **Settings**. Select Codex, GitHub or Remote to open Settings at that part of Accounts and connections;
+**Manage remote connection** there opens the window that pairs the ChatGPT app. A row that needs you shows an amber
+dot, and a row whose state could not be read shows a red dot and Unavailable. The ChatGPT account part says whether
+a turn has confirmed Codex access with the current sign-in. The integration's state shows only when it needs you, as
+a line at the top of the chat. While a task
 runs, the send button is the stop button, even with a draft or a file in the message box. On a phone, a slim row holds the
 conversations button, the title, New chat and the thread menu; the foot rows are at the bottom of the
-conversations drawer. The composer stays at the bottom. Its model and reasoning controls show the saved chat choice
-or configured default, rather than a sample selection.
+conversations drawer. The composer stays at the bottom, with no hint line under it. Its bottom row holds the plus
+menu, the Permissions button, the model and reasoning controls and the send button; the Permissions button's chevron
+and the send button's arrow are icons centered on their buttons. The model and reasoning controls show the saved chat
+choice or configured default, rather than a sample selection.
 
 The plus menu uploads photos or files. A message accepts at most six attachments, up to 10 MB each.
 Photos retain their existing resizing and image checks. File uploads support UTF-8 text, Markdown, YAML,
@@ -1124,8 +1140,8 @@ own to any of them.
 - Scheduled runs use Default or Read only only.
 - A queued message keeps the choice submitted with it. Camera and Plan mode are not offered in this build.
 
-The thread menu includes Pin, Rename, Copy thread ID, Archive and Status. A thread without a native ID
-reports that it is unavailable instead of substituting the page's task ID. Status shows the workspace,
+A chat's menu holds Rename, Pin, Share, Archive and Delete ([Managing chats](#managing-chats)). The Status
+window opens from the Home Assistant row at the foot of the chat list. Status shows the workspace,
 selected model and permissions; context and usage/reset remain unavailable in this view until verified
 window data is wired. No quota is inferred from activity.
 
@@ -1138,8 +1154,10 @@ or start pairing. No live account enrollment or device handoff is implied by loc
 
 Settings → Workspace instructions → Workspace rules opens a separate editor. The file is read only when that editor
 opens, and Save remains an explicit action. Existing account, diagnostic, scheduling and browser-permission
-controls remain in Settings. The **Add-on configuration** row at the foot of Settings opens the app's
-Configuration tab in Home Assistant, where the plain options are set. When Supervisor cannot name the app, the row
+controls remain in Settings; **Browser permissions** is a part of **Advanced**, the last section, which starts
+collapsed and shows in its header how many permissions are remembered, or that they could not be read. The
+**Add-on configuration** row at the foot of Settings opens the app's Configuration tab in Home Assistant
+(`/config/app/<slug>/config`), where the plain options are set. When Supervisor cannot name the app, the row
 is not a link and says to open the Configuration tab from the Home Assistant settings.
 
 

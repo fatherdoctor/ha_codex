@@ -84,7 +84,8 @@ async function task(page) {
     assert.equal(await page.locator('.verification-result').last().evaluate(node => node.open), true);
     await page.setViewportSize({width: 1440, height: 1000});
     await page.getByRole('button', {name: 'Open settings', exact: true}).click();
-    // Settings sections start collapsed; this one stays open once opened.
+    // Settings sections start collapsed; Browser permissions is a part of Advanced, and stays open once opened.
+    await page.locator('#advanced-section > h3 .settings-toggle').click();
     await page.locator('#browser-permissions-section .settings-toggle').click();
     const list = page.locator('#browser-permissions');
     await list.getByRole('button').first().waitFor();

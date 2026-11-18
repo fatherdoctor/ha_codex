@@ -106,7 +106,7 @@ class GitHubRouteTests(unittest.TestCase):
     def test_status_carries_github_without_the_token(self):
         self.service._complete_app(APP_TOKEN)
         quiet = {name: patch.object(server, name, return_value={}) for name in (
-            "codex_login_status", "auth_status_payload", "pause_payload", "model_pin", "usage_status_payload",
+            "codex_login_status", "auth_status_payload", "model_pin", "usage_status_payload",
             "integration_status", "remote_control_summary", "mailbox_status_payload", "refresh_usage_status_async")}
         quiet["account_access"] = patch.object(server.account_access, "snapshot", return_value={})
         quiet["tasks"] = patch.object(server, "tasks", {})

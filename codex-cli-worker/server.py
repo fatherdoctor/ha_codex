@@ -190,8 +190,6 @@ DEFAULT_CHAT_SETTINGS = {"model": None, "reasoning_effort": None}
 # A chat, a saved turn or the `codex_model` option naming any other model is
 # refused instead of running on it; the option set to "none" turns the pin off.
 DEFAULT_MODEL_PIN = "gpt-6.1-sol"
-# Present while the assistant is paused: new messages are refused and queued ones wait.
-PAUSE_FILE = DATA_ROOT / "paused.json"
 
 AGENTS_MAX_BYTES = 256 * 1024
 SNAPSHOT_MAX_BYTES = 8 * 1024 * 1024
@@ -6186,37 +6184,6 @@ def start_queued_message(entry: dict[str, Any]) -> Exception | None:
     return None
 
 
-def assistant_paused() -> bool:
-    """Return whether the user has paused the assistant from its page."""
-    return PAUSE_FILE.exists()
-
-
-def pause_payload() -> dict[str, Any]:
-    """Return the pause state for the API: whether it is paused, since when, and the reason the page shows."""
-    if not assistant_paused():
-        return {"paused": False}
-    try:
-        saved = json.loads(PAUSE_FILE.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        saved = {}
-    return {"paused": True, "since": str(saved.get("since") or ""), "message": PAUSED_MESSAGE}
-
-
-PAUSED_MESSAGE = "The assistant is paused. Resume it on its page to send messages again."
-
-
-def set_assistant_paused(paused: bool) -> dict[str, Any]:
-    """Pause or resume the assistant; on resume, start the oldest queued message if nothing is running."""
-    if paused:
-        if not assistant_paused():
-            PAUSE_FILE.parent.mkdir(parents=True, exist_ok=True)
-            PAUSE_FILE.write_text(json.dumps({"since": utc_now()}), encoding="utf-8")
-    else:
-        PAUSE_FILE.unlink(missing_ok=True)
-        start_next_queued()
-    return pause_payload()
-
-
 def start_next_queued(release: str | None = None) -> None:
     """Start the oldest queued message once no task is active.
 
@@ -6230,7 +6197,7 @@ def start_next_queued(release: str | None = None) -> None:
             if release is not None:
                 active_task_runners.discard(release)
                 release = None
-            if not message_queue or _active_task_ids_locked() or assistant_paused():
+            if not message_queue or _active_task_ids_locked():
                 return
             entry = message_queue.pop(0)
             failure = start_queued_message(entry)
@@ -6302,7 +6269,6 @@ def status() -> Response:
             "codex_login": login,
             "account_access": account_access.snapshot(login),
             "auth_flow": auth_status_payload(),
-            "pause": pause_payload(),
             "model_pin": model_pin(read_options()),
             "codex_usage": usage_status_payload(),
             "integration": integration_status(),
@@ -6424,23 +6390,6 @@ def auth_qr() -> Response:
     response = Response(login_qr_svg(url), mimetype="image/svg+xml")
     response.headers["Cache-Control"] = "no-store"
     return response
-
-
-@app.get("/pause")
-@require_auth
-def get_pause() -> Response:
-    """Return whether the assistant is paused."""
-    return jsonify({"ok": True, **pause_payload()})
-
-
-@app.post("/pause")
-@require_auth
-def post_pause() -> Response:
-    """Pause the assistant with {"paused": true}, or resume it with {"paused": false}."""
-    payload = request.get_json(silent=True)
-    if not isinstance(payload, dict) or not isinstance(payload.get("paused"), bool):
-        return jsonify({"ok": False, "error": "paused must be true or false"}), 400
-    return jsonify({"ok": True, **set_assistant_paused(payload["paused"])})
 
 
 @app.post("/auth/logout")
@@ -6651,8 +6600,6 @@ def create_task() -> Response:
     prompt = payload["prompt"].strip()
     if not prompt:
         return jsonify({"ok": False, "error": "prompt is required"}), 400
-    if assistant_paused():
-        return jsonify({"ok": False, "error": PAUSED_MESSAGE, "paused": True}), 409
     try:
         settings = parse_chat_settings(payload)
         permission_mode = parse_permission_mode(payload)
@@ -6765,6 +6712,118 @@ def get_activity(task_id: str) -> Response:
         "ok": True, "turn_id": str(stored.get("turn_id") or turn_id), "seq": int(stored.get("seq") or 0),
         "running": False, "total": len(stored["steps"]), "steps": steps,
     })
+
+
+# The marks the chat page shows in front of each kind of step, so a shared
+# transcript reads like the page.
+SHARE_STEP_MARKS = {
+    "reasoning": "✦", "message": "❝", "command": "›", "file_change": "✎", "web_search": "⌕",
+    "tool_call": "⚙", "plan": "☰", "error": "!", "outcome": "■", "notice": "…", "phase": "◦",
+}
+SHARE_MAX_LINES = 100_000
+# The Share file is made to be sent to another person, so it gets these rules on top of redact(). They mask
+# secrets that carry no "token" or "api_key" label. The cases they must hold are SHARE_MASK_CORPUS in
+# tests/test_share_chat.py; add a new shape there first.
+# A key is at most eight words of at most 32 letters or digits around the secret word, and a URL scheme at most
+# 32 characters, so each start in a long run of words joined by "-" scans a fixed length, not the rest of the run.
+SHARE_SECRET_KEY = (
+    r"\b(?:[A-Za-z0-9]{1,32}[_-]){0,8}(?:password|passwd|secret|pin)(?:[_-][A-Za-z0-9]{1,32}){0,8}\b"
+)
+# Between a key and its value: an optional closing quote (escaped, as in JSON inside a command line), ":" or "=",
+# and at most one line break, so a YAML value on the next line is masked but the next paragraph is not.
+SHARE_SECRET_SEPARATOR = r"\\?[\"']?[ \t]*[:=][ \t]*(?:\r?\n[ \t]*)?"
+SHARE_SECRET_REPLACEMENTS = [
+    # A JSON Web Token, such as a Home Assistant long-lived access token: three base64url parts, the first
+    # starting with eyJ (the encoding of '{"').
+    (re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"), "[redacted]"),
+    # An API key of the sk- form (OpenAI, Anthropic and others).
+    (re.compile(r"\bsk-[A-Za-z0-9_-]{20,}"), "[redacted]"),
+    # A quoted value after a password, passwd, secret or pin key, spaces and escaped quotes (\") and all.
+    (re.compile(rf"(?i)({SHARE_SECRET_KEY}{SHARE_SECRET_SEPARATOR})\"(?:[^\"\\\r\n]|\\.)+\""), r'\1"[redacted]"'),
+    (re.compile(rf"(?i)({SHARE_SECRET_KEY}{SHARE_SECRET_SEPARATOR})'(?:[^'\\\r\n]|\\.)+'"), r"\1'[redacted]'"),
+    # An unquoted value after the same keys runs to the end of its line: a password may hold spaces, ";" or "&",
+    # and masking the rest of a line costs only its readability. A YAML !secret reference names a secret without
+    # holding it, so it stays readable, and a value a rule above masked is not masked again.
+    (re.compile(rf"(?i)({SHARE_SECRET_KEY}{SHARE_SECRET_SEPARATOR})(?!!secret\b|[\"']?\[redacted\])\S[^\r\n]*"),
+     r"\1[redacted]"),
+    # The password of a URL: scheme://user:password@host, where the user name may be empty (redis://:password@).
+    (re.compile(r"(?i)(\b[a-z][a-z0-9+.-]{0,31}://[^\s/:@]*:)[^\s/@]+(@)"), r"\1[redacted]\2"),
+]
+
+
+def share_redact(text: str) -> str:
+    """Mask a Share file: everything redact() masks, then the secrets of SHARE_SECRET_REPLACEMENTS."""
+    redacted = redact(text)
+    for pattern, replacement in SHARE_SECRET_REPLACEMENTS:
+        redacted = pattern.sub(replacement, redacted)
+    return redacted
+
+
+def share_step_line(step: dict[str, Any]) -> str:
+    """Write one step as the page lists it: its mark and text, and a failed command's exit code."""
+    text = str(step.get("text") or "").strip()
+    if step.get("kind") == "command" and step.get("exit_code"):
+        text += f" (exit {step['exit_code']})"
+    # Later lines of a long step are indented so they stay under their mark.
+    return f"{SHARE_STEP_MARKS.get(step.get('kind'), '•')} " + text.replace("\n", "\n  ")
+
+
+def share_transcript(title: str, turns: list[dict[str, Any]], steps_by_turn: dict[str, list[dict[str, Any]]]) -> str:
+    """Write a chat as Markdown: each message, the steps Codex printed for it, and its answer."""
+    parts = [f"# {title or 'Untitled chat'}"]
+    for turn in turns:
+        parts.append(f"## You · {turn.get('created_at') or ''}".rstrip(" ·"))
+        if turn.get("message"):
+            parts.append(str(turn["message"]).strip())
+        steps = steps_by_turn.get(str(turn.get("turn_id") or ""), [])
+        if steps:
+            parts.append("### Steps")
+            parts.append("\n".join(share_step_line(step) for step in steps))
+        answer = [str(turn.get(key) or "").strip() for key in ("summary", "details", "question")]
+        answer = [text for index, text in enumerate(answer) if text and text not in answer[:index]]
+        if answer:
+            parts.append("## Codex")
+            parts.extend(answer)
+    return "\n\n".join(parts) + "\n"
+
+
+@app.get("/tasks/<task_id>/share")
+@require_auth
+def share_task(task_id: str) -> Response:
+    """Download a chat as Markdown, whole or its last `lines` lines, with the steps of every exchange."""
+    if TASK_ID_RE.fullmatch(task_id) is None:
+        return jsonify({"ok": False, "error": "task not found"}), 404
+    raw_lines = request.args.get("lines")
+    try:
+        lines = 0 if raw_lines is None else int(raw_lines)
+    except ValueError:
+        lines = -1
+    if raw_lines is not None and not 1 <= lines <= SHARE_MAX_LINES:
+        return jsonify({"ok": False, "error": f"lines must be a whole number from 1 to {SHARE_MAX_LINES}"}), 400
+    with lock:
+        task = tasks.get(task_id)
+        if task is None:
+            return jsonify({"ok": False, "error": "task not found"}), 404
+        payload = task_payload(task, private=is_ingress_request())
+        record = task_activity.get(task_id)
+        live = {record["turn_id"]: [public_activity_step(step) for step in record["steps"]]} if record else {}
+    steps_by_turn = {}
+    for turn in payload["turns"]:
+        turn_id = str(turn.get("turn_id") or "")
+        if turn_id in live:
+            steps_by_turn[turn_id] = live[turn_id]
+        elif not turn.get("legacy"):
+            stored = load_stored_activity(task_id, turn_id)
+            if stored is not None:
+                steps_by_turn[turn_id] = [step for step in stored["steps"] if isinstance(step, dict)]
+    # The file is meant to be passed on, so it gets the codex.log mask and the Share rules on top.
+    text = share_redact(share_transcript(str(payload.get("title") or ""), payload["turns"], steps_by_turn))
+    if lines:
+        text = "\n".join(text.rstrip("\n").split("\n")[-lines:]) + "\n"
+    response = Response(text, mimetype="text/markdown")
+    response.headers["Content-Disposition"] = f'attachment; filename="codex-chat-{task_id}.md"'
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.get("/tasks/<task_id>/attachments/<attachment_id>")
@@ -7069,7 +7128,7 @@ _addon_slug: str | None = None
 def addon_slug() -> str | None:
     """Return this app's slug as Supervisor knows it, with its repository prefix, or None when Supervisor cannot say.
 
-    The page links to the app's Configuration tab at /hassio/addon/<slug>/config, and the prefix differs from one
+    The page links to the app's Configuration tab at /config/app/<slug>/config, and the prefix differs from one
     install to the next. Only a successful answer is kept, so a later call tries Supervisor again.
     """
     global _addon_slug
@@ -7094,7 +7153,9 @@ def addon_configuration() -> Response:
     # settings, this one changes nothing and its reply holds only the slug path,
     # which is no secret, so it needs no Ingress administrator.
     slug = addon_slug()
-    return jsonify({"ok": True, "url": f"/hassio/addon/{slug}/config" if slug else None})
+    # Home Assistant 2026.2 moved an app's pages to /config/app/<slug>/, and 2026.5 removed the old
+    # /hassio/addon/<slug>/ panel, so that path opens a page that does not exist.
+    return jsonify({"ok": True, "url": f"/config/app/{slug}/config" if slug else None})
 
 
 @app.post("/remote-control/<action>")
@@ -7313,8 +7374,6 @@ def continue_task_request(task_id: str, field: str, *, waiting_only: bool = Fals
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
         return jsonify({"ok": False, "error": f"{field} must be non-empty text"}), 400
-    if assistant_paused():
-        return jsonify({"ok": False, "error": PAUSED_MESSAGE, "paused": True}), 409
     choice = payload.get("choice")
     turn_id = payload.get("turn_id")
     if choice is None and (not isinstance(payload.get(field), str) or not payload[field].strip()):

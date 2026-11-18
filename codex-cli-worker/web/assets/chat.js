@@ -391,21 +391,27 @@ function planLine(usage, planType) {
   }
   return parts.join(" · ");
 }
-// The Home Assistant row at the foot of the side bar: the state of the Codex integration.
-const HOME_ASSISTANT_STATES = {
-  ok: ["ready", "Ready"],
-  starting: ["starting", "Starting"],
-  not_installed: ["needs-owner", "Integration not installed"],
-  outdated: ["needs-owner", "Integration out of date"],
-  not_connected: ["needs-owner", "Integration not connected"],
-};
-/** Show the integration state in the side bar row; a failed status read shows Unavailable. */
-function renderHomeAssistantStatus(integration) {
-  const [dot, text] = integration === undefined
-    ? ["error", "Unavailable"]
-    : HOME_ASSISTANT_STATES[integration?.state] || ["error", "Unavailable"];
-  $("ha-status-row").dataset.state = dot;
-  $("ha-status-summary").textContent = text;
+/*
+ * The three rows at the foot of the side bar: Codex (the ChatGPT sign-in),
+ * GitHub and Remote (the ChatGPT app connection). Each shows one word or two
+ * and a dot: ready, starting, needs-owner, error or off.
+ */
+function setFootRow(id, dot, text) {
+  $(id).dataset.state = dot;
+  $(id.replace("-row", "-summary")).textContent = text;
+}
+/** Open Settings at one part of Accounts and connections, as a foot row or a banner asks. */
+async function openAccountItem(sectionId) {
+  await $("settings-button").onclick();
+  openSettingsSection($(sectionId));
+  $(sectionId).scrollIntoView({ block: "start" });
+}
+for (const id of ["codex-status-row", "github-status-row", "remote-status-row"])
+  $(id).onclick = () => openAccountItem($(id).dataset.section);
+/** The ChatGPT account part says whether a turn has confirmed Codex access with this sign-in. */
+function renderCodexAccess(access) {
+  $("codex-access").textContent = access?.message || "";
+  $("codex-access").hidden = !access?.message;
 }
 // Where the line at the top of the chat sends someone to install the integration.
 const INTEGRATION_INSTALL_URL =
@@ -465,14 +471,14 @@ async function loadUsage() {
       document.dispatchEvent(new CustomEvent("worker-status", { detail: data }));
       renderUsage(data.codex_usage, data.account_access?.plan_type);
       renderIntegration(data.integration);
-      renderHomeAssistantStatus(data.integration || null);
+      renderCodexAccess(data.account_access);
       // The quota check also tells the worker which model Codex picks when the add-on names none.
       // Not awaited: the quota shown must not depend on it.
       if (state.catalog) loadChatOptions(true);
     }
   } catch (_) {
     renderUsage();
-    renderHomeAssistantStatus(undefined);
+    renderCodexAccess({ message: "Codex access could not be checked." });
   } finally {
     usageLoading = false;
     usageTimer = setTimeout(loadUsage, 60000);
@@ -591,28 +597,6 @@ async function api(path, body, method) {
   return data;
 }
 
-document.getElementById("export-interaction-logs").addEventListener("click", async () => {
-  const button = document.getElementById("export-interaction-logs");
-  const status = document.getElementById("export-logs-status");
-  button.disabled = true;
-  try {
-    const response = await pageFetch("diagnostics/export", { cache: "no-store" });
-    if (!response.ok) throw new Error("The export could not be downloaded. Try again.");
-    const data = await response.json();
-    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "codex-interactions.json";
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    status.textContent = "Downloaded. Open the file to review it before attaching it to a bug report. Nothing was sent.";
-  } catch (_error) {
-    status.textContent = "The export could not be downloaded. Try again.";
-  } finally {
-    button.disabled = false;
-  }
-});
-
 /** Build an error that keeps the HTTP status so callers can tell 404 apart. */
 function workerError(message, status) {
   const error = new Error(message);
@@ -717,11 +701,6 @@ function controls() {
   $("attach").disabled =
     state.busy ||
     state.files.length + preparingCount(state.files) >= UPLOADS_PER_MESSAGE;
-  $("compose-hint").textContent = state.id
-    ? task?.status === "in_queue"
-      ? "This chat starts when its message leaves the queue."
-      : "Continue this conversation with its saved context."
-    : "A new chat starts a separate conversation.";
   let notice = "";
   if (waiting)
     notice =
@@ -1406,7 +1385,9 @@ async function loadBrowserPermissions() {
     if (load !== browserPermissionLoad) return;
     area.replaceChildren();
     if (!permissions.length) area.append(textNode("p", "No browser permissions remembered.", "muted"));
-    setSectionStatus("browser-permissions-section", permissions.length ? `${permissions.length} remembered` : "None remembered");
+    const remembered = permissions.length ? `${permissions.length} remembered` : "None remembered";
+    setSectionStatus("browser-permissions-section", remembered);
+    setSectionStatus("advanced-section", `Browser permissions: ${remembered.toLowerCase()}`);
     for (const permission of permissions) {
       const row = textNode("div", "", "saved-browser-permission");
       const info = textNode("div", "", "saved-browser-permission-info");
@@ -1435,6 +1416,8 @@ async function loadBrowserPermissions() {
     if (load !== browserPermissionLoad) return;
     area.replaceChildren(textNode("p", String(error.message || error)));
     setSectionStatus("browser-permissions-section", "Could not be read", true);
+    // Advanced is closed by default, so its header carries the problem too.
+    setSectionStatus("advanced-section", "Browser permissions could not be read", true);
     // An unreadable permissions file can only be replaced, never edited here.
     if (error.status === 503) {
       const clear = textNode("button", "Remove all saved permissions", "subtle");
@@ -1459,43 +1442,6 @@ async function loadBrowserPermissions() {
  */
 function showsQuestionApart(turn) {
   return Boolean(turn.question) && !(turn.summary || "").includes(turn.question);
-}
-/** Try the browser clipboard, then the selection-based copy used on local HTTP. */
-async function copyText(text) {
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch (_) {
-    // Ingress, browser permissions, or a WebView can deny the modern API.
-  }
-  const focus = document.activeElement;
-  const selection = window.getSelection();
-  const ranges = selection
-    ? Array.from({ length: selection.rangeCount }, (_, index) =>
-        selection.getRangeAt(index).cloneRange(),
-      )
-    : [];
-  const buffer = textNode("textarea", "", "copy-buffer");
-  buffer.value = text;
-  buffer.readOnly = true;
-  buffer.tabIndex = -1;
-  document.body.append(buffer);
-  try {
-    buffer.focus({ preventScroll: true });
-    buffer.select();
-    return document.execCommand("copy");
-  } catch (_) {
-    return false;
-  } finally {
-    buffer.remove();
-    if (focus?.isConnected) focus.focus({ preventScroll: true });
-    if (selection) {
-      selection.removeAllRanges();
-      for (const range of ranges) selection.addRange(range);
-    }
-  }
 }
 /** Draw the open chat: every exchange with its answer, checks, saved copies, and steps. */
 function renderTask(force = false) {
@@ -2369,7 +2315,7 @@ function openChatMenu(id, trigger, point = null) {
   if (!sheet) positionChatMenu();
   menu.trigger?.setAttribute("aria-expanded", "true");
   menu.trigger?.closest(".chat-row")?.classList.add("menu-open");
-  for (const action of ["pin", "rename", "delete", "copy-id", "schedule", "archive"])
+  for (const action of ["pin", "rename", "share", "schedule", "delete", "archive"])
     panel.querySelector(`[data-action="${action}"]`).disabled = !id ||
       (["delete", "archive"].includes(action) && (working || Boolean(state.task?.queued_message)));
   panel.querySelector('[data-action="archive"]').textContent = chat?.archived ? "Restore chat" : "Archive";
@@ -2503,6 +2449,7 @@ $("chat-menu").addEventListener("click", async (event) => {
   if (action === "pin") await togglePin(id);
   else if (action === "rename") openRename(id);
   else if (action === "delete") openDelete(id);
+  else if (action === "share") openShare(id);
   else document.dispatchEvent(new CustomEvent("thread-action", {detail: {action, id}}));
 });
 /** Pin or unpin a chat through the worker API and re-sort the list. */
@@ -2556,6 +2503,48 @@ $("rename-form").addEventListener("submit", async (event) => {
     $("rename-save").disabled = false;
   }
 });
+/** Open the Share dialog for a chat: the whole chat, or its last lines. */
+function openShare(id) {
+  if (!chatById(id) && id !== state.id) return;
+  $("share-dialog").dataset.chatId = id;
+  $("share-download").disabled = false;
+  dialogError("share", null);
+  $("share-dialog").showModal();
+  $("share-download").focus();
+}
+$("share-cancel").onclick = () => $("share-dialog").close();
+$("share-lines").addEventListener("focus", () => {
+  $("share-form").elements["share-range"].value = "last";
+});
+$("share-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const id = $("share-dialog").dataset.chatId;
+  let query = "";
+  if ($("share-form").elements["share-range"].value === "last") {
+    const lines = Number($("share-lines").value);
+    if (!Number.isInteger(lines) || lines < 1 || lines > 100000) {
+      dialogError("share", "Enter a number of lines from 1 to 100000.");
+      return;
+    }
+    query = `?lines=${lines}`;
+  }
+  $("share-download").disabled = true;
+  try {
+    const response = await pageFetch(`tasks/${encodeURIComponent(id)}/share${query}`, { cache: "no-store" });
+    if (!response.ok) throw new Error("The chat could not be downloaded. Try again.");
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `codex-chat-${id}.md`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    $("share-dialog").close();
+  } catch (error) {
+    dialogError("share", error);
+  } finally {
+    $("share-download").disabled = false;
+  }
+});
 /** Open the delete confirmation dialog for a chat. */
 function openDelete(id) {
   const chat = chatById(id);
@@ -2569,7 +2558,7 @@ function openDelete(id) {
   $("delete-cancel").focus();
 }
 $("delete-cancel").onclick = () => $("delete-dialog").close();
-for (const name of ["rename", "delete"])
+for (const name of ["rename", "share", "delete"])
   $(name + "-dialog").addEventListener("close", () => {
     // Return focus to the row's menu button, or to New chat when the row is gone.
     const trigger = menu.returnId
@@ -3216,13 +3205,14 @@ renderCommandList();
  * Settings sections start collapsed (add-on 0.3.2). Each section's first
  * heading becomes a button with the title and a one-line status; the rest of
  * the section opens under it on tap. A section that needs the owner says so
- * in its header, so nothing important hides in a closed section.
+ * in its header, so nothing important hides in a closed section. One
+ * top-level section is open at a time: opening one closes the others.
  */
 function collapseSettingsSections() {
   // Sections marked data-own-dialog move to a dialog of their own (studio.js) and stay open there.
-  // The three parts of Accounts and connections collapse too, inside it, each under its own header.
+  // The parts of Accounts and connections and of Advanced collapse too, inside them, each under its own header.
   const sections = document.querySelectorAll(
-    "#settings > section:not([data-own-dialog]), #accounts-section > section",
+    "#settings > section:not([data-own-dialog]), #accounts-section > section, #advanced-section > section",
   );
   sections.forEach((section, index) => {
     const heading = section.querySelector(":scope > h3, :scope > h4");
@@ -3243,7 +3233,10 @@ function collapseSettingsSections() {
     heading.replaceChildren(toggle);
   });
 }
-/** Open or close one settings section; opening a part of Accounts and connections opens that section too. */
+/**
+ * Open or close one settings section. Opening a part, such as GitHub, opens the section that holds it too.
+ * Opening a top-level section closes the other top-level sections, so one is open at a time.
+ */
 function openSettingsSection(section, open = true) {
   const toggle = section.querySelector(":scope > :is(h3, h4) > .settings-toggle");
   const body = section.querySelector(":scope > .settings-body");
@@ -3252,6 +3245,13 @@ function openSettingsSection(section, open = true) {
   body.hidden = !open;
   const parent = section.parentElement?.closest("#settings section");
   if (open && parent) openSettingsSection(parent);
+  if (open && !parent) closeOtherSettingsSections(section);
+}
+/** Close every top-level settings section except the one given. Parts inside a closed section keep their state. */
+function closeOtherSettingsSections(keep) {
+  for (const other of document.querySelectorAll("#settings > section")) {
+    if (other !== keep) openSettingsSection(other, false);
+  }
 }
 /** Put a one-line status in a section's header; attention marks one that needs the owner. */
 function setSectionStatus(sectionId, text, attention = false) {
@@ -3455,6 +3455,9 @@ async function loadLogin() {
   let auth;
   try {
     ({ auth } = await api("auth/status"));
+  } catch (error) {
+    setFootRow("codex-status-row", "error", "Unavailable");
+    throw error;
   } finally {
     loginTimer = setTimeout(
       () => loadLogin().catch(() => {}),
@@ -3498,6 +3501,11 @@ function renderLogin(auth) {
   const sectionStatus = chatgptSectionStatus({ signedIn, pending, failed, lapsed });
   setSectionStatus("chatgpt-section", sectionStatus, !signedIn);
   setAccountPart("chatgpt-section", sectionStatus.toLowerCase(), !signedIn);
+  setFootRow(
+    "codex-status-row",
+    signedIn ? "ready" : failed ? "error" : "needs-owner",
+    signedIn ? "Ready" : pending ? "Signing in" : sectionStatus,
+  );
   for (const id of ["login", "banner-login"]) $(id).textContent = failed ? "Get a new code" : "Sign in";
   const key = JSON.stringify([
     signedIn,
@@ -3643,6 +3651,13 @@ function githubAccountWord({ waiting, connected, bad, retry }) {
   if (retry) return "sign-in did not finish";
   return "not connected";
 }
+/** The GitHub row at the foot of the side bar: its dot and its words. */
+function githubFootRow({ waiting, connected, bad, retry }) {
+  if (connected) return bad ? ["needs-owner", "Needs attention"] : ["ready", "Ready"];
+  if (waiting) return ["needs-owner", "Enter the code"];
+  if (retry) return ["error", "Sign-in did not finish"];
+  return ["off", "Not connected"];
+}
 /** Put the GitHub status on the card and the banner. Only the contract's fields are read. */
 function renderGithub(github) {
   githubStatus = github;
@@ -3734,6 +3749,7 @@ function renderGithub(github) {
     bad || waiting || retry,
   );
   setAccountPart("github-section", githubAccountWord({ waiting, connected, bad, retry }), bad || waiting || retry);
+  setFootRow("github-status-row", ...githubFootRow({ waiting, connected, bad, retry }));
   $("github-banner-text").textContent = `The add-on's GitHub sign-in needs attention: ${githubStateText(state, kind).replace(/\.$/, "")}.`;
   $("github-banner").hidden = !bad;
 }
@@ -3748,6 +3764,7 @@ function githubUnavailable() {
   $("github-banner").hidden = true;
   setSectionStatus("github-section", "Not available in this version");
   setAccountPart("github-section", "not available");
+  setFootRow("github-status-row", "off", "Not available");
 }
 /** Read the GitHub status. Every 5 seconds while a code waits, else every 5 minutes, so a lost sign-in shows. */
 async function loadGithub() {
@@ -3761,6 +3778,9 @@ async function loadGithub() {
     $("github-token").hidden = false;
     renderGithub(data.github);
     waiting = data.github.flow?.status === "waiting_for_user";
+  } catch (error) {
+    setFootRow("github-status-row", "error", "Unavailable");
+    throw error;
   } finally {
     githubTimer = setTimeout(() => loadGithub().catch(() => {}), waiting ? 5000 : 300000);
   }
@@ -3833,26 +3853,7 @@ $("github-link-form").onsubmit = (event) => {
     { repository: $("github-link-repository").value, path: $("github-link-path").value.trim() },
     (data) => githubResult(data.text || "Linked."));
 };
-$("github-banner-open").onclick = async () => {
-  await $("settings-button").onclick();
-  openSettingsSection($("github-section"));
-  $("github-section").scrollIntoView({ block: "start" });
-};
-/** Show whether the assistant is paused, in the settings dialog and above the chat. */
-function renderPause(pause) {
-  const paused = Boolean(pause?.paused);
-  $("pause-status").textContent = paused
-    ? "Paused. New messages are refused and queued ones wait."
-    : "Running.";
-  $("pause").textContent = paused ? "Resume the assistant" : "Pause the assistant";
-  $("pause").dataset.paused = paused ? "1" : "";
-  $("paused-banner").hidden = !paused;
-  setSectionStatus("assistant-section", paused ? "Paused" : "Running", paused);
-}
-/** Read the pause state from the worker and show it. */
-async function loadPause() {
-  renderPause(await api("pause"));
-}
+$("github-banner-open").onclick = () => openAccountItem("github-section");
 let remoteTimer;
 let remoteCardKey = "";
 /**
@@ -3933,7 +3934,7 @@ async function loadAddonConfiguration() {
   const description = $("addon-configuration-description");
   description.dataset.usual ??= description.textContent;
   const data = await api("addon-configuration").catch(() => ({}));
-  if (typeof data.url === "string" && data.url.startsWith("/hassio/addon/")) {
+  if (typeof data.url === "string" && data.url.startsWith("/config/app/")) {
     row.href = data.url;
     description.textContent = description.dataset.usual;
   } else {
@@ -4027,12 +4028,6 @@ function haTheme() {
   document.documentElement.dataset.theme = dark ? "dark" : "light";
 }
 $("settings-button").onclick = async () => {
-  try {
-    const data = await api("diagnostics/settings");
-    setSectionStatus("interaction-logs-section", `Keeps ${data.capacity}`);
-  } catch (_error) {
-    setSectionStatus("interaction-logs-section", "Administrators only");
-  }
   sidebar(false);
   haTheme();
   $("settings").showModal();
@@ -4043,7 +4038,6 @@ $("settings-button").onclick = async () => {
     loadLogin(),
     loadGithub(),
     loadRemoteControl(),
-    loadPause(),
     loadBrowserPermissions(),
     loadAddonConfiguration(),
   ]);
@@ -4077,20 +4071,6 @@ for (const [id, path] of [
     }
   };
 }
-for (const id of ["pause", "resume"]) {
-  $(id).onclick = async () => {
-    $(id).disabled = true;
-    try {
-      const paused = id === "pause" && !$("pause").dataset.paused;
-      renderPause(await api("pause", { paused }));
-    } catch (error) {
-      if ($("settings").open) settingsError(error);
-      else showError(error);
-    } finally {
-      $(id).disabled = false;
-    }
-  };
-}
 let restore = Promise.resolve();
 /** Poll the list and the open chat; the first pass waits for the restored chat. */
 async function refresh() {
@@ -4114,5 +4094,4 @@ refresh();
 loadUsage();
 loadLogin().catch(() => {});
 loadGithub().catch(() => {});
-loadPause().catch(() => {});
 setInterval(tickElapsed, 1000);
