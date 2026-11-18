@@ -414,7 +414,9 @@ class ConversationTests(unittest.TestCase):
         self.assertNotIn("HA_URL", server.PAGE_INSTRUCTIONS)
         with patch.object(server, "read_options", return_value={"HA_TOKEN": "token-value"}):
             prompt = server.exchange_info("task", None)["home_assistant_api"]
-        self.assertIn('$HA_URL/api/services/automation/reload, with the header "Authorization: Bearer $HA_TOKEN"', prompt)
+        # From 0.3.6 a reload goes through the call tool; the token is only for an API call that is not a service.
+        self.assertIn("a reload and a restart included, use the home_assistant_call call tool", prompt)
+        self.assertIn('$HA_URL/api/template, with the header "Authorization: Bearer $HA_TOKEN"', prompt)
         self.assertIn("Do not use http://supervisor/core, which does not accept this token", prompt)
         # The token itself is never written into the prompt.
         self.assertNotIn("token-value", prompt)
@@ -581,8 +583,8 @@ class ConversationTests(unittest.TestCase):
         self.assertIn(b'assets/chat.js', response.data)
         # The Markdown parser is bundled, so the chat never loads a script from another server.
         scripts = re.findall(rb'<script src="([^"]+)"', response.data)
-        self.assertEqual(scripts, [b"assets/vendor/marked.umd.js", b"assets/markdown.js", b"assets/chat.js", b"assets/studio.js", b"assets/schedules.js", b"assets/full_access.js"])
-        for name in ("chat.js", "chat.css", "studio.js", "studio.css", "markdown.js", "vendor/marked.umd.js", "vendor/marked.LICENSE.md"):
+        self.assertEqual(scripts, [b"assets/text-size.js", b"assets/vendor/marked.umd.js", b"assets/markdown.js", b"assets/chat.js", b"assets/studio.js", b"assets/schedules.js", b"assets/full_access.js"])
+        for name in ("text-size.js", "chat.js", "chat.css", "studio.js", "studio.css", "markdown.js", "vendor/marked.umd.js", "vendor/marked.LICENSE.md"):
             with self.client.get("/assets/" + name) as asset:
                 self.assertEqual(asset.status_code, 200)
 

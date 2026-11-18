@@ -182,6 +182,7 @@ async function openThemedSections(target) {
         {title: 'GitHub', status: 'Connected as synthetic-owner, 1 repository', attention: false},
         {title: 'ChatGPT app pairing', status: 'Unavailable', attention: false},
         {title: 'Full access', status: 'Off', attention: false},
+        {title: 'Text size', status: 'Normal', attention: false},
         {title: 'Interaction logs', status: 'Keeps 25', attention: false},
         {title: 'Assistant', status: 'Running', attention: false},
         {title: 'Browser permissions', status: 'None remembered', attention: false},

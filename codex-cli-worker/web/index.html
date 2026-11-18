@@ -10,6 +10,7 @@
     <title>Codex for Home Assistant</title>
     <link rel="stylesheet" href="assets/chat.css" />
     <link rel="stylesheet" href="assets/studio.css" />
+    <script src="assets/text-size.js"></script>
     <script src="assets/vendor/marked.umd.js" defer></script>
     <script src="assets/markdown.js" defer></script>
     <script src="assets/chat.js" defer></script>
@@ -449,6 +450,31 @@
         <p id="full-access-state" role="status">Checking…</p>
         <button id="full-access-toggle" class="subtle" disabled>Turn on Full access</button>
         <p id="full-access-result" role="status" class="muted">Available to administrators.</p>
+      </section>
+      <section id="text-size-section">
+        <h3>Text size</h3>
+        <p class="muted">
+          Makes the messages, buttons, code and lists larger. Saved on this
+          device only.
+        </p>
+        <fieldset class="text-size-options settings-text-size">
+          <legend class="sr-only">Text size</legend>
+              <label class="text-size-option"
+                ><input type="radio" name="text-size-settings" value="normal" data-text-size-choice /><span
+                  >Normal</span
+                ></label
+              >
+              <label class="text-size-option"
+                ><input type="radio" name="text-size-settings" value="larger" data-text-size-choice /><span
+                  >Larger</span
+                ><small>115 %</small></label
+              >
+              <label class="text-size-option"
+                ><input type="radio" name="text-size-settings" value="largest" data-text-size-choice /><span
+                  >Largest</span
+                ><small>130 %</small></label
+              >
+        </fieldset>
       </section>
       <section id="interaction-logs-section">
         <h3>Interaction logs</h3>
