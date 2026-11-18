@@ -129,6 +129,40 @@ class MailReaderApiTests(unittest.TestCase):
                 self.assertEqual(store.mail_status()['unread'][reader], 1)
         self.assertEqual(self.request_owner('POST', '/schedule-mailbox/read', {'ids': [message]}).status_code, 200)
 
+    def test_codex_walks_every_legacy_message_above_capacity(self):
+        engine = self.service.engine()
+        capability = self.exchange()
+        read_at = NOW + 3 * 86400
+        expected = [f'{i:032x}' for i in range(150)]
+        for limit in (10, 20):
+            with self.subTest(limit=limit):
+                path = self.root / f'legacy-{limit}.sqlite3'
+                with sqlite3.connect(path) as db:
+                    db.execute('CREATE TABLE mailbox(id TEXT PRIMARY KEY,parent TEXT,author TEXT,body TEXT,created REAL)')
+                    db.executemany('INSERT INTO mailbox VALUES(?,?,?,?,?)',
+                                   [(mid, None, 'owner', f'Legacy note {i}', NOW + i)
+                                    for i, mid in enumerate(expected)])
+                with patch.object(scheduling.time, 'time', return_value=read_at):
+                    engine.store = scheduling.Store(path)
+                    offset, seen = 0, []
+                    for _ in range(16):
+                        result = self.service.dispatch({'operation': 'read_mailbox', 'capability': capability,
+                                                        'arguments': {'offset': offset, 'limit': limit}})
+                        seen.extend(row['id'] for row in result['items'])
+                        offset = result['next_offset']
+                        if offset is None:
+                            break
+                    self.assertIsNone(offset)
+                    self.assertEqual(seen, expected)
+                    self.assertEqual(engine.store.mail_status()['unread']['codex'], 0)
+                    self.assertEqual(len(engine.store.messages(reader='codex')), 150)
+                    newest = engine.store.mail('After the walk', 'owner', read_at + 1, to='codex')
+                    rows = engine.store.messages(reader='codex')
+                    self.assertEqual(len(rows), scheduling.MAX_MESSAGES)
+                    self.assertEqual(rows[-1]['id'], newest)
+                    self.assertEqual(engine.store.mail_status()['unread']['codex'], 1)
+                    self.assertEqual(engine.store.mail_status()['unread']['lead'], 150)
+
     def test_mail_origin_comes_from_the_current_turn(self):
         store = self.service.engine().store
         for turn_origin in ('lead', None, 'schedule'):
