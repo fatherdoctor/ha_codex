@@ -11,6 +11,15 @@
   `/data/codex-home/house-rules/permission-overrides.json`, `/data/house-rules/confirmed.json`,
   `/data/permission-overrides-backups` and `/data/permission-overrides.sock` behind; the app no longer reads them, and you can delete them.
 
+- A chat on the page changes the house through one new tool, `home_assistant_call` `call`: one Home Assistant action
+  (a service call), reloads and restarts included. Codex asks you each time, with no remembered answer, and shows
+  the service, the target and the data; the command check gives the request no decision. The tool gives Codex no
+  token: the worker sends the call once, with its own access. It refuses no service by name: your answer is the
+  gate, and a call can reach the Supervisor (for example `update.install`) or run your own `shell_command`. A
+  scheduled run does not get the tool. The keys of the app's tools are now kept out of the commands Codex runs. The
+  instructions point changes to the tool; `HA_TOKEN` is now only for an API call that is not a service. The page
+  shows Codex's request for the tool in a later step; until then the page can only decline it.
+
 ## 0.3.5 (unreleased)
 
 - The GitHub messages say what still works and what to do next. The Home Assistant repair for a sign-in that
