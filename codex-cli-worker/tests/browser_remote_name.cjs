@@ -1,4 +1,4 @@
-// The remote-control name field and the missing AGENTS.md hint, at 400 px in light and dark. Run with
+// The remote-control name line and the missing AGENTS.md hint, at 400 px in light and dark. Run with
 // tests/web_fixture.py serving the page. Every name is synthetic. Screenshots go to REMOTE_NAME_SHOTS
 // (default /tmp/codex-remote-name-qa).
 const {chromium} = require('playwright');
@@ -18,14 +18,8 @@ const off = {enabled: false, available: true, state: 'off', configured_name: 'Ho
       const page = await context.newPage();
       const errors = []; page.on('pageerror', e => errors.push(e.message));
       let remote = off;
-      const renames = [];
       await page.route('**/agents', route => route.fulfill({json: {ok: true, exists: false, content: ''}}));
       await page.route('**/remote-control', route => route.fulfill({json: {ok: true, remote_control: remote}}));
-      await page.route('**/remote-control/name', route => {
-        renames.push(route.request().postDataJSON());
-        remote = {...off, configured_name: 'Lake house'};
-        return route.fulfill({json: {ok: true, remote_control: remote}});
-      });
       await page.goto('http://127.0.0.1:9137/preview/');
 
       // A missing AGENTS.md is a hint above the chat, not a chat message; Dismiss keeps it away in this browser.
@@ -44,32 +38,26 @@ const off = {enabled: false, available: true, state: 'off', configured_name: 'Ho
       await page.waitForTimeout(1000);
       assert.equal(await hint.isVisible(), false, 'a dismissed hint stays away after a reload');
 
-      // The name field shows the configured name, saves a new one, and fits the phone.
+      // The name shows as text with where to change it (0.3.5: the Configuration tab only), and fits the phone.
       await page.evaluate(() => document.querySelector('#connection-manage').click());
-      const input = page.locator('#remote-control-name');
-      await page.waitForFunction(() => document.querySelector('#remote-control-name').value === 'Home Assistant');
-      assert.equal(await input.isDisabled(), false);
-      await input.fill('Lake house');
-      await page.locator('#remote-control-name-save').click();
-      await page.waitForFunction(() => /Saved/.test(document.querySelector('#remote-control-name-note').textContent));
-      assert.deepEqual(renames, [{name: 'Lake house'}]);
-      assert.equal(await input.inputValue(), 'Lake house');
+      await page.waitForFunction(() => document.querySelector('#remote-control-name').textContent === 'Home Assistant');
+      assert.equal(await page.locator('#remote-control-name-line input, #remote-control-name-line button').count(), 0);
+      assert.match(await page.locator('#remote-control-name-line').textContent(), /Remote control machine name in Add-on configuration/);
       const fits = await page.evaluate(() => {
         const dialog = document.querySelector('#connection-dialog');
-        const form = document.querySelector('#remote-control-name-form').getBoundingClientRect();
-        return dialog.scrollWidth <= dialog.clientWidth && form.right <= dialog.getBoundingClientRect().right + 0.5;
+        const line = document.querySelector('#remote-control-name-line').getBoundingClientRect();
+        return dialog.scrollWidth <= dialog.clientWidth && line.right <= dialog.getBoundingClientRect().right + 0.5;
       });
-      assert.equal(fits, true, 'the name field fits the dialog at 400 px');
-      await page.locator('#remote-control-name-form').screenshot({path: path.join(SHOTS, `remote-name-${colorScheme}-400.png`)});
+      assert.equal(fits, true, 'the name line fits the dialog at 400 px');
+      await page.locator('#remote-control-name-line').screenshot({path: path.join(SHOTS, `remote-name-${colorScheme}-400.png`)});
 
-      // While remote control is on, the name is locked and the page says why.
+      // The poll shows a name changed on the Configuration tab after the app restarts.
       remote = {...off, enabled: true, state: 'ready', configured_name: 'Lake house'};
-      await page.waitForFunction(() => document.querySelector('#remote-control-name').disabled, null, {timeout: 20000});
-      assert.equal(await page.locator('#remote-control-name-note').textContent(), 'Turn remote control off to change the name.');
+      await page.waitForFunction(() => document.querySelector('#remote-control-name').textContent === 'Lake house', null, {timeout: 20000});
       assert.deepEqual(errors, []);
       await context.close();
     }
-    console.log(`PASS: remote-control name field and AGENTS.md hint at 400 px in light and dark. Screenshots: ${SHOTS}`);
+    console.log(`PASS: remote-control name line and AGENTS.md hint at 400 px in light and dark. Screenshots: ${SHOTS}`);
   } finally {
     await browser.close();
   }

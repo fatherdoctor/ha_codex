@@ -1,7 +1,38 @@
 # Changelog
 
+## 0.3.6 (unreleased)
+
+- The app's own grant layer is removed: the five pre-approved action groups (Settings > Permissions overrides), the
+  guard-rails block they read from `/config/AGENTS.md`, and the `home_assistant_actions` `act` tool with its
+  **Allow once** card. Codex's own permission requests are now the only way a change to the house is approved. A
+  device command still finds the entity and reads its state back with the `home_assistant` tools; the change itself
+  now needs your normal **Allow once**, as every other action does. The sandbox, the command check, the protected
+  places and the check after each exchange are unchanged. A test build that used the groups leaves
+  `/data/codex-home/house-rules/permission-overrides.json`, `/data/house-rules/confirmed.json`,
+  `/data/permission-overrides-backups` and `/data/permission-overrides.sock` behind; the app no longer reads them, and you can delete them.
+
 ## 0.3.5 (unreleased)
 
+- Settings and its windows (Status, Remote connection, Permissions, Workspace rules) look more like Home Assistant's
+  own settings pages. Text, number and list fields are filled fields with a line under them, as on the add-on's
+  Configuration tab. Each part's main button is filled in the primary color, and the other buttons are text buttons.
+  The close buttons and the check mark of the chosen permission mode use Home Assistant's icons. The page now takes
+  Home Assistant's font, and an answer's lines sit a little closer. The page copies its theme from Home Assistant,
+  so a custom theme and dark mode reach every field, switch and button. Opened alone, outside Home Assistant, the
+  page keeps its own colors. No setting, permission or approval rule changed.
+- The two bands above the chat move to the foot of the side bar. One thin row above the messages keeps the
+  chat title and the chat menu. The foot of the side bar holds Home Assistant with the integration state (opens
+  Status), Remote connection with its state (opens the pairing window), the 5-hour and weekly quota with the plan
+  type and reset times, and Settings. A row that needs your attention shows an amber dot. While a task runs, the
+  send button is the stop button, even with a draft or a file in the message box.
+- "Your chats" is one list card with one line for each chat: an icon, the title and its age. The open chat has a
+  light tint. The divider between the side bar and the chat is now visible, resizes from 200 to 480 px, and goes
+  back to 260 px on a double-click.
+- The chat reads more like the desktop app. A gray "Worked for" line above each answer opens its checks, and on the
+  latest answer its steps too (the worker keeps the steps of the latest exchange only). A failed check keeps one
+  short line under the answer. An answered or expired permission request is one
+  closed line that opens to the same details. On a wide screen the chat and the prompt box share one 720 px
+  column. These are display changes only: no approval, permission or sign-in rule changed.
 - A permission request that waits for you now shows at the bottom of the chat, below the "Working" lines, and the
   chat scrolls to it once when it first appears. Before, it sat above those lines and was easy to miss. A request
   you already answered stays where it was. No approval or permission rule changed.
@@ -13,6 +44,14 @@
   the text is redacted like every other step. A chat rebuilt from the task index after its `task.json` was lost
   keeps the turn id of its latest exchange, so the steps saved for it stay linked. Nothing from upstream's Full
   access changes is included.
+- Settings keeps what needs a button, a sign-in or a confirm step. Plain values move to the app's Configuration
+  tab, so each value has one place to change it. A new option, Interactions to keep (10 to 100), replaces the field
+  on the page; an install that saved a number keeps it, and a new install keeps 25. The remote control machine name
+  is set on the Configuration tab only, so the worker no longer writes any app option. The empty Appearance and
+  Advanced sections are gone, and Workspace rules opens from Workspace instructions. A new Add-on configuration row
+  at the foot of Settings opens the Configuration tab; when Supervisor cannot name the app, the row says where to
+  find the tab and is not a link. The number of interactions to keep now applies before the worker closes the
+  records an interrupted run left open, so a restart keeps as many records as the option says.
 
 ## 0.3.4 (unreleased)
 
@@ -185,6 +224,12 @@
   the integration raises the repair `github_access_lost` until the check is OK or the sign-in is disconnected.
   The new option `github_client_id` is for an owner who registered their own GitHub App.
 
+- Integration actions and browser-session endpoints now require a loaded config entry. The browser broker
+  belongs to that entry and revokes its sessions on unload or failed setup. Initial worker authentication
+  rejection now requests reauthentication instead of retrying as a connection failure.
+- The sign-in action explains its `force` default and how it handles an existing sign-in or a flow already
+  running. The integration quality checklist now distinguishes implemented rules from unfinished work.
+
 - The app now installs its own integration. At each start it copies the Codex integration of the same
   release, carried in the app image, to `/config/custom_components/codex_cli`, then asks for one restart of
   Home Assistant in a notification. It writes only when the folder is missing or was written by the app
@@ -211,8 +256,8 @@
   up; a file name that cannot be encoded is reported like any failed copy; a damaged notice record is not
   replayed; the documentation says how to go back to a version before 0.3.0.
 
-## 0.1.81.2 (unreleased)
-
+- A legacy mailbox above 128 messages now keeps stable page offsets during a read.
+  Read copies leave to make room only when a new message arrives.
 - Expire agent copies 48 hours after their first read so old mailbox pages keep stable positions.
   Settings acknowledges only the owner mailbox; agent labels follow the active turn.
   Prior read marks receive a one-time upgrade grace period.
@@ -226,6 +271,8 @@
 - Give each reader a 128-message mailbox, retain unread mail across absences, expire only read agent mail
   after 48 hours, and refuse all-unread full delivery with a visible status. Add per-mailbox clear confirmation,
   UTC message envelopes, local-time/plain views, due status, source labels and bounded lead mailbox pages.
+
+## 0.1.81.2 (unreleased)
 
 - Document why the pinned CLI cannot supply a ChatGPT sign-in deadline: access tokens refresh and
   refresh-grant expiry is not exposed. Keep the existing signed-out Repair without a guessed expiry
