@@ -693,6 +693,11 @@ class Engine:
         except Busy:
             self.store.defer(run)
             raise
+        except ValueError as error:
+            # The worker refused the request and its text says why, for example that the schedule's model is no
+            # longer the pinned one. The owner needs that reason in the run line to fix the schedule.
+            self.store.finish(run['id'], 'failed', f'{str(error)[:500]} Not retried.')
+            raise
         except Exception:
             self.store.finish(run['id'], 'failed', 'Could not start the ordinary task. Not retried.')
             raise

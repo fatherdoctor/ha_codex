@@ -3,12 +3,14 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import test_scheduling as fixtures
 from test_scheduling import NOW, proposal, scheduling
 from test_server import server
 
 MODEL = server.CHAT_MODELS[0][0]
+OTHER_MODEL = server.CHAT_MODELS[1][0]
 CHAT = 'sample-chat'
 
 
@@ -126,6 +128,16 @@ class OwnerFieldApiTests(unittest.TestCase):
         self.assertEqual(task['chat_settings']['model'], MODEL)
         self.assertEqual(task['turns'][0]['execution_settings']['model'], MODEL)
         self.assertEqual(task['task_source'], 'schedule')
+
+    def test_a_run_says_why_when_a_later_model_pin_refuses_the_model_of_its_schedule(self):
+        self.request_owner('POST', '/schedules', proposal(model=MODEL))
+        pinned = {**server.read_options(), 'model_pin': OTHER_MODEL}
+        with patch.object(server, 'read_options', return_value=pinned), self.assertRaises(ValueError):
+            self.service.engine().tick(NOW + 10 ** 9)
+        run = self.service.engine().store.runs()[0]
+        self.assertEqual(run['status'], 'failed')
+        self.assertEqual(run['error'], server.model_pin_message(MODEL, OTHER_MODEL) + ' Not retried.')
+        self.assertNotIn(run['task_id'], server.tasks)
 
     def test_the_lead_cannot_set_or_read_the_chat_and_the_model(self):
         self.add_chat()
