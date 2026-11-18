@@ -221,6 +221,12 @@
   the integration raises the repair `github_access_lost` until the check is OK or the sign-in is disconnected.
   The new option `github_client_id` is for an owner who registered their own GitHub App.
 
+- Integration actions and browser-session endpoints now require a loaded config entry. The browser broker
+  belongs to that entry and revokes its sessions on unload or failed setup. Initial worker authentication
+  rejection now requests reauthentication instead of retrying as a connection failure.
+- The sign-in action explains its `force` default and how it handles an existing sign-in or a flow already
+  running. The integration quality checklist now distinguishes implemented rules from unfinished work.
+
 - The app now installs its own integration. At each start it copies the Codex integration of the same
   release, carried in the app image, to `/config/custom_components/codex_cli`, then asks for one restart of
   Home Assistant in a notification. It writes only when the folder is missing or was written by the app
@@ -247,8 +253,8 @@
   up; a file name that cannot be encoded is reported like any failed copy; a damaged notice record is not
   replayed; the documentation says how to go back to a version before 0.3.0.
 
-## 0.1.81.2 (unreleased)
-
+- A legacy mailbox above 128 messages now keeps stable page offsets during a read.
+  Read copies leave to make room only when a new message arrives.
 - Expire agent copies 48 hours after their first read so old mailbox pages keep stable positions.
   Settings acknowledges only the owner mailbox; agent labels follow the active turn.
   Prior read marks receive a one-time upgrade grace period.
@@ -262,6 +268,8 @@
 - Give each reader a 128-message mailbox, retain unread mail across absences, expire only read agent mail
   after 48 hours, and refuse all-unread full delivery with a visible status. Add per-mailbox clear confirmation,
   UTC message envelopes, local-time/plain views, due status, source labels and bounded lead mailbox pages.
+
+## 0.1.81.2 (unreleased)
 
 - Document why the pinned CLI cannot supply a ChatGPT sign-in deadline: access tokens refresh and
   refresh-grant expiry is not exposed. Keep the existing signed-out Repair without a guessed expiry

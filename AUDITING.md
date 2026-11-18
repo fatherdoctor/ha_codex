@@ -41,6 +41,7 @@ Paths are under `codex-cli-worker/` unless they start with `custom_components/`.
 | A sandboxed command cannot see the add-on's GitHub sign-in (`/data/github`); the token is never in an environment the worker builds, never in a git argument, remote URL or log, and the folder is left out of the add-on backup | `codex-bwrap: HIDDEN_DIRS`; `github_access.py: GitRunner.env`, `Store`; `github_askpass.py`; `config.yaml: backup_exclude` | `tests/test_bwrap.py` (`test_the_github_folder_is_hidden_in_every_sandbox`), `tests/test_github_access.py` |
 | The relay runs under its own AppArmor label with all capabilities dropped, entered only through one fixed launcher | `apparmor.txt`, `relay-launcher`, `relay-tool-launcher` | `tests/apparmor_317_check.py`, `.github/workflows/apparmor-317.yaml` |
 | The worker's memory cannot be read by a process it starts | `server.py: make_worker_undumpable` | `tests/test_gate.py` (`test_the_flag_is_set`) |
+| Each way in (the chat page, the ChatGPT app, `codex_cli.start_task`) gets the Home Assistant tools that DOCS.md "Ways in" lists, and no others | `server.py: build_app_server_args`, `build_codex_args`, `relay_read_mcp_args`; `remote_control.py: Supervisor._command` | `tests/test_surface_matrix.py` |
 | Full access is not available, whatever a client or an option asks for | `gate/requirements.toml` (Codex's managed requirements) and `policy.py: load_policy`, `policy_problem`; checked before each exchange at the top of `server.py: run_task` | `tests/test_policy.py` |
 
 ### Layer 2: what the hook refuses
@@ -91,6 +92,15 @@ and the worker.
 | The GitHub sign-in can be connected, tested, accepted or disconnected only by an administrator on the chat page; the worker's API token can read its status and nothing else | `github_access.py: register` (the `/github` routes) | `tests/test_github_routes.py` |
 | A push Codex asks for runs the kit's push guard first, from the read-only copy in the image, and pushes only the commit it checked; a push that adds a `guard: allow` mark is refused, since an allow mark needs the owner; no force, delete or tag push; read-only chats and schedules can only list and fetch | `github_access.py: GitRunner.push`, `valid_branch`, `GitHubService.dispatch`; `push_guard.py` (byte-identical to the kit's) | `tests/test_github_access.py` |
 | Schedules and the mailbox are owner-managed: the page routes need the worker's API token and an administrator on the chat page (`owner`). The local lead channel under `/lead/` is separate: it needs its own token, not Ingress, and reads only background work, not people's chats. The scheduling tools a chat-page task can call use a third path: a Unix socket (mode 0600) where each request must carry the exchange's running-turn capability, which ends with the exchange; a proposal is saved disabled until an administrator approves it | `schedule_api.py: register` (`owner`, `lead`), `schedule_api.py: Service.dispatch`, `Service.serve`, `scheduling.py: Store.token_ok` | `tests/test_scheduling.py` (`test_lead_requires_separate_token_and_ingress_alone_is_not_a_token`, `test_tool_transport_roundtrip_and_expired_capability`), `tests/test_sched_review.py` |
+
+### Mailbox and lead task boundaries
+
+| protection | enforced in | shown by |
+|---|---|---|
+| A worker can post mailbox text but cannot start lead work or attach a task to its mail | `schedule_api.py: Service.dispatch` | `tests/test_lead_direct.py: test_worker_mail_can_notify_lead_but_cannot_dispatch_lead_work` |
+| Only the separate, authenticated lead task routes accept work: `/lead/tasks` and an explicit task on `/lead/mailbox`. Owner messages and replies cannot attach tasks | `schedule_api.py: lead`, `lead_task_submit`, `lead_mail_send`, `mail_fields` | `tests/test_scheduling.py: test_lead_requires_separate_token_and_ingress_alone_is_not_a_token`; `tests/test_lead_mail_review.py: test_owner_messages_and_replies_never_accept_tasks` |
+| Retention and capacity enforcement never remove unread mail. A full unread recipient refuses the entire delivery; a new arrival can evict read copies only | `scheduling.py: Store._prune_mail`, `Store._make_mail_room` | `tests/test_lead_direct.py: test_unread_survives_days_full_refuses_atomically_read_evicts_first`; `tests/test_lead_mail_review.py: test_codex_walks_every_legacy_message_above_capacity` |
+| An administrator who views an agent's mailbox does not acknowledge it. The page acknowledges only the owner's mailbox | `schedule_api.py: owner_mail_list`, `mail_page`, `owner_mail_read` | `tests/test_lead_mail_review.py: test_owner_cannot_acknowledge_another_readers_mailbox`; `tests/test_scheduling.py: test_owner_acknowledges_only_displayed_ids_and_requires_admin` |
 
 ### Layer 4: what the worker checks afterwards
 

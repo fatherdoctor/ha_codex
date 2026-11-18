@@ -9,6 +9,7 @@ import pytest
 from homeassistant.components.image import Image, ImageEntity
 from homeassistant.components.image.const import DATA_COMPONENT
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -49,7 +50,9 @@ async def kiosk_view(hass):
     hass.config.internal_url = "http://192.168.1.229:8123"
     sessions = auth.BrowserSessions(hass, "paired-worker")
     await sessions.setup()
-    hass.data.setdefault(auth.DOMAIN, {})["browser_sessions"] = sessions
+    entry = MockConfigEntry(domain=auth.DOMAIN, state=ConfigEntryState.LOADED)
+    entry.add_to_hass(hass)
+    entry.runtime_data = types.SimpleNamespace(browser_sessions=sessions)
     hass.http.register_view(kiosk.KioskScreenshotsView(hass))
     yield sessions
     sessions.close()
