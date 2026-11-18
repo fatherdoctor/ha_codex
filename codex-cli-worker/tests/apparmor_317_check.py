@@ -271,7 +271,7 @@ def enforce(stage, worker):
         fixture_script.chmod(0o555)
         modules = BINDIR / 'fixture-worker'
         modules.mkdir()
-        for source in ('remote_control.py', 'gate_rules.py', 'shell_words.py', 'relay_diagnostics.py'):
+        for source in ('remote_control.py', 'relay_diagnostics.py'):
             shutil.copyfile(worker / source, modules / source)
             (modules / source).chmod(0o444)
         shutil.copytree(stage / 'cli', BINDIR / 'cli')

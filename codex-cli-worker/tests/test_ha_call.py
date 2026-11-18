@@ -7,8 +7,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
-import sys
 import tempfile
 import threading
 import unittest
@@ -301,10 +299,6 @@ class LaunchTests(unittest.TestCase):
         self.assertNotIn("HA_CALL_SOCKET", env)
 
 
-GATE_HOOK = Path(__file__).resolve().parents[1] / "gate" / "gate_hook.py"
-CALL_ARGUMENTS = {"domain": "light", "service": "turn_on", "target": {"entity_id": ["light.sample_room"]}}
-
-
 class Launched(BaseException):
     """Stops run_task at the moment it starts Codex, so the test can read what it would have started."""
 
@@ -384,38 +378,6 @@ class RunTaskLaunchTests(unittest.TestCase):
                     patch.object(server, "read_options", return_value={"HA_TOKEN": "invented-token"}):
                 text = server.exchange_info("t", None)["home_assistant_api"]
             self.assertEqual("home_assistant_call" in text, has_tool)
-
-
-class CommandCheckTests(unittest.TestCase):
-    """The command check gives the call tool no decision: an allow would skip the person, a refusal every call."""
-
-    def run_hook(self, event, remote_on, tool_name="mcp__home_assistant_call__call", tool_input=None):
-        """Run the hook as Codex runs it (managed_config.toml), with the event on stdin."""
-        with tempfile.TemporaryDirectory() as tmp:
-            state = Path(tmp) / "remote_control.json"
-            state.write_text(json.dumps({"enabled": remote_on}), encoding="utf-8")
-            payload = {"hook_event_name": event, "tool_name": tool_name,
-                       "tool_input": CALL_ARGUMENTS if tool_input is None else tool_input}
-            return subprocess.run([sys.executable, "-I", str(GATE_HOOK), "--event", event, "--state", str(state)],
-                                  input=json.dumps(payload), capture_output=True, text=True, timeout=30,
-                                  check=False)
-
-    def test_the_hook_gives_the_call_tool_no_decision(self):
-        for event in ("PermissionRequest", "PreToolUse"):
-            for remote_on in (False, True):
-                with self.subTest(event=event, remote_control=remote_on):
-                    result = self.run_hook(event, remote_on)
-                    self.assertEqual((result.returncode, result.stdout), (0, ""))
-
-    def test_text_in_the_call_does_not_make_the_hook_refuse_it(self):
-        data = {**CALL_ARGUMENTS, "data": {"message": "danger-full-access"}}
-        result = self.run_hook("PreToolUse", True, tool_input=data)
-        self.assertEqual((result.returncode, result.stdout), (0, ""))
-
-    def test_another_tool_with_the_same_input_is_still_checked(self):
-        result = self.run_hook("PermissionRequest", True, tool_name="mcp__other__call")
-        self.assertEqual(result.returncode, 2)
-        self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"]["decision"]["behavior"], "deny")
 
 
 class InstructionTests(unittest.TestCase):

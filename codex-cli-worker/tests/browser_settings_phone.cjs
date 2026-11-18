@@ -180,7 +180,7 @@ async function openThemedSections(target) {
         {title: 'Accounts and connections', status: 'ChatGPT signing in: enter the code', attention: true},
         {title: 'ChatGPT account', status: 'Signing in: enter the code', attention: true},
         {title: 'GitHub', status: 'Connected as synthetic-owner, 1 repository', attention: false},
-        {title: 'ChatGPT app pairing', status: 'Unavailable', attention: false},
+        {title: 'ChatGPT app pairing', status: 'Off', attention: false},
         {title: 'Text size', status: 'Normal', attention: false},
         {title: 'Interaction logs', status: 'Keeps 25', attention: false},
         {title: 'Assistant', status: 'Running', attention: false},

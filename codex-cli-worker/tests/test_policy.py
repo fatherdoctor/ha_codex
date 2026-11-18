@@ -9,7 +9,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 from test_server import server
-import approvals
 import policy
 
 
@@ -131,43 +130,6 @@ class ProtectedPolicyTests(unittest.TestCase):
         baseline.assert_not_called()
         self.assertEqual(status, "failed")
         self.assertIn("needs support", summary)
-
-
-class ProtectedPathTests(unittest.TestCase):
-    """A proposed file change to the policy, the rules or the app's settings can only be denied."""
-
-    def test_protected_paths(self) -> None:
-        """The policy folder, Codex's rules and config, and the options file are protected, however written."""
-        for path in ("/usr/share/ha_codex/policy.json", "/data/codex-home/AGENTS.md", "/data/codex-home/config.toml",
-                     "/data/options.json", "../usr/share/ha_codex/AGENTS.md", "/config/../data/options.json"):
-            with self.subTest(path=path):
-                self.assertTrue(approvals.touches_protected_path(path))
-        for path in ("/config/automations.yaml", "AGENTS.md", "/config/AGENTS.md", "/data/codex-home/sessions/x"):
-            with self.subTest(path=path):
-                self.assertFalse(approvals.touches_protected_path(path))
-
-
-    def test_protected_paths_in_a_command(self) -> None:
-        """A command's text is checked for the same places, quoted, globbed or with doubled slashes."""
-        for command in ("sed -i x /usr/share/ha_codex/AGENTS.md", 'cp a "/usr/share/ha_codex/policy.json"',
-                        "cat /usr/share/ha_c*", "ls /usr//share//ha_codex", "cat /data/options.json",
-                        "cat /data/worker_api_token", "cd /data/codex-home; vi config.toml", "rm /data/codex-home/*"):
-            with self.subTest(command=command):
-                self.assertTrue(approvals.command_names_protected_path(command))
-        for command in ("ls /config", "cat /config/AGENTS.md", "ls /data/codex-home/sessions",
-                        "ha core check", "grep -r light. /config/automations.yaml"):
-            with self.subTest(command=command):
-                self.assertFalse(approvals.command_names_protected_path(command))
-
-    def test_managed_requirements_path_in_a_command_is_protected(self) -> None:
-        for command in ('cat /etc/codex/requirements.toml',
-                        'sed -i x /etc//codex/"requirements.toml"',
-                        'cat /etc/codex/requirements.toml.example', 'cat /config/requirements.toml'):
-            with self.subTest(command=command):
-                self.assertTrue(approvals.command_names_protected_path(command))
-        for command in ('cat /config/settings.toml',):
-            with self.subTest(command=command):
-                self.assertFalse(approvals.command_names_protected_path(command))
 
 
 if __name__ == "__main__":

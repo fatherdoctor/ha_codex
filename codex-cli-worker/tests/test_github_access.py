@@ -109,7 +109,7 @@ class ServiceCase(unittest.TestCase):
             fire_event=lambda event, data: self.events.append((event, data)),
             notify=lambda title, message: self.notices.append((title, message)),
             find_task=lambda cap: "task-1" if cap == "cap-live" else None,
-            read_only=lambda task: False, log=self.logs.append)
+            log=self.logs.append)
 
     def connect_app(self):
         self.service._complete_app(APP_TOKEN)
@@ -986,10 +986,9 @@ class DispatchTests(ServiceCase):
                 self.assertFalse(answer["ok"])
                 self.assertIn("ended", answer["text"])
 
-    def test_read_only_chats_get_repos_and_fetch_only(self):
-        """F5."""
+    def test_every_operation_reaches_the_runner_in_a_read_only_chat(self):
+        """0.3.6: the GitHub read-only limit is gone; Read only is Codex's read-only sandbox only."""
         self.connect_app()
-        self.service.read_only = lambda task: True
         calls = []
 
         class Runner:
@@ -999,20 +998,18 @@ class DispatchTests(ServiceCase):
 
             def pull(self, path, branch=None):
                 calls.append(("pull", path))
+                return gh.reply(True, "pulled")
 
             def push(self, path, branch=None):
                 calls.append(("push", path))
+                return gh.reply(True, "pushed")
 
         self.service.runner = Runner()
-        for operation, args in (("push", {"path": "/config"}), ("pull", {"path": "/config"}),
-                                ("clone", {"repository": REPO, "folder": "x"}),
-                                ("link", {"repository": REPO, "path": "/config"})):
-            answer = self.service.answer(json.dumps(self.payload(operation, **args)).encode())
-            self.assertFalse(answer["ok"])
-            self.assertIn("read only", answer["text"])
-        self.assertTrue(self.service.answer(json.dumps(self.payload("repos")).encode())["ok"])
-        self.assertTrue(self.service.answer(json.dumps(self.payload("fetch", path="/config")).encode())["ok"])
-        self.assertEqual(calls, [("fetch", "/config")])
+        self.assertFalse(hasattr(self.service, "read_only"))
+        for operation in ("fetch", "pull", "push"):
+            answer = self.service.answer(json.dumps(self.payload(operation, path="/config")).encode())
+            self.assertTrue(answer["ok"], answer)
+        self.assertEqual(calls, [("fetch", "/config"), ("pull", "/config"), ("push", "/config")])
 
     def test_no_reply_ever_holds_the_token(self):
         """F9: the socket has no operation that returns the credential."""
@@ -1041,15 +1038,6 @@ class DispatchTests(ServiceCase):
 class GuardRowsTests(unittest.TestCase):
     """The text checks name the folder too; the mask in codex-bwrap is the one that holds."""
 
-    def test_approvals_and_gate_protect_the_github_folder(self):
-        import approvals
-        import gate_rules
-        for path in ("/data/github/credential.json", "/data/github", "/data/github.sock", "/data//github/state.json"):
-            with self.subTest(path=path):
-                self.assertTrue(approvals.touches_protected_path(path))
-                self.assertEqual(gate_rules._policy_restriction(f"cat {path}"), "accesses the add-on's GitHub sign-in")
-        self.assertEqual(gate_rules._policy_restriction("cat '/data/git''hub/credential.json'"),
-                         "accesses the add-on's GitHub sign-in")
 
     def test_the_backup_leaves_the_github_folder_out(self):
         lines = (WORKER / "config.yaml").read_text().split("backup_exclude:\n", 1)[1].splitlines()

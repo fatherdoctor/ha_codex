@@ -31,6 +31,11 @@ approval for shell networking, while `danger-full-access` does not. Review each
 approved command and keep connections short-lived. See [SSH setup and
 limits](codex-cli-worker/DOCS.md#ssh-connections).
 
+From 0.3.6 the app has no command check of its own: Codex's permission modes and the
+sandbox are the protection. A command you allow once runs outside the sandbox and can
+read private files or change the app's settings, and the app does not scan what Codex
+writes in `/config`. Read each permission card before you allow it.
+
 To check these protections in the code, see [AUDITING.md](AUDITING.md).
 
 ## Supported Versions

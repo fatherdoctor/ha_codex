@@ -19,7 +19,6 @@ import sys
 import subprocess
 import tarfile
 import threading
-import tempfile
 import time
 import uuid
 import warnings
@@ -46,7 +45,6 @@ from ha_data import HomeAssistantData
 from ha_call import HomeAssistantCall
 import ha_data_mcp
 import remote_control
-import gate_rules
 from core_address import CoreAddress, probe_core
 from relay_reads import RelayReads, ReadError as RelayReadError
 import schedule_api
@@ -2865,67 +2863,6 @@ def previous_versions(run_dir: Path, paths: list[str], before: dict[str, Any]) -
     return entries
 
 
-def refuse_planted_edits(run_dir: Path, changes: dict[str, list[str]], before: dict[str, Any]) -> list[dict[str, Any]]:
-    """Undo new Core escape paths in every exchange.
-
-    Restores use only hash-verified earlier bytes. An edit without a verified
-    copy is reported as unchecked; existing lines are never presumed new.
-    """
-    rules = gate_rules.load_rules()
-    added = set(changes.get("added", []))
-    paths = sorted(added | set(changes.get("changed", [])))
-    paths = [rel for rel in paths if safe_relative_path(rel) and not snapshot_secret_path(rel)
-             and Path(rel).suffix.lower() in gate_rules.YAML_SUFFIXES]
-    saved = {entry["path"]: entry for entry in previous_versions(run_dir, [p for p in paths if p not in added], before)}
-    watch = remote_control.ConfigWatch(CONFIG_ROOT, run_dir / "unused-baseline.json")
-    texts = {path.relative_to(CONFIG_ROOT).as_posix(): path.read_text(encoding="utf-8", errors="replace")
-             for path in watch.files() if should_include_file(path)}
-    scripts = watch.refused_scripts(texts, rules)
-    results = []
-    root = CONFIG_ROOT.resolve()
-    for rel in paths:
-        target = CONFIG_ROOT / rel
-        if target.is_symlink() or not target.resolve().is_relative_to(root):
-            continue
-        if snapshot_secret_path(target.resolve().relative_to(root).as_posix()) or not should_include_file(target):
-            continue
-        after = target.read_text(encoding="utf-8", errors="replace")
-        earlier_bytes = b"" if rel in added else None
-        entry = saved.get(rel) or {}
-        if entry.get("status") == "saved" and entry.get("copy"):
-            candidate = Path(entry["copy"]).read_bytes()
-            if hashlib.sha256(candidate).hexdigest() == (before.get(rel) or {}).get("sha256"):
-                earlier_bytes = candidate
-        if earlier_bytes is None:
-            results.append({"path": rel, "checked": False, "undone": "", "findings": []})
-            continue
-        earlier = earlier_bytes.decode("utf-8", errors="replace")
-        found = gate_rules.new_refused(earlier, after, rules, scripts)
-        if not found:
-            continue
-        undone = ""
-        temporary = None
-        try:
-            if rel in added:
-                target.unlink()
-                undone = "removed"
-            elif earlier_bytes is not None:
-                with tempfile.NamedTemporaryFile(dir=target.parent, prefix=".codex-restore-", delete=False) as handle:
-                    temporary = Path(handle.name)
-                    handle.write(earlier_bytes)
-                temporary.chmod(target.stat().st_mode & 0o777)
-                os.replace(temporary, target)
-                undone = "restored"
-        except OSError as exc:
-            print(f"Could not undo {rel}: {redact(str(exc))}", flush=True)
-        finally:
-            if temporary is not None:
-                temporary.unlink(missing_ok=True)
-        results.append({"path": rel, "undone": undone,
-                        "findings": [{"line": item.line, "reason": item.reason} for item in found]})
-    return results
-
-
 def review_backups(run_dir: Path, before: dict[str, Any], changes: dict[str, list[str]], edited: set[str]) -> list[dict[str, str]]:
     """Report which changed files have a copy of their previous version.
 
@@ -4549,8 +4486,6 @@ def reader_thread(task_id: str, stream_name: str, handle, session_holder: dict[s
         if not line:
             break
         write_task_log(task_id, stream_name, line)
-        if stream_name == "stderr":
-            record_diagnostic("gate_message", task_id, line)
         if stream_name == "stdout":
             try:
                 event = json.loads(line)
@@ -5433,40 +5368,6 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
         stdout_thread.join(timeout=5)
         stderr_thread.join(timeout=5)
 
-    # This runs before cancellation/transport-failure returns too: a stopped
-    # exchange may already have planted a command that Core would execute later.
-    planted_edits = []
-    unchecked_edits = []
-    planted_error = ""
-    reviewed_manifest = None
-    try:
-        after = build_manifest()
-        reviewed_manifest = after
-        try:
-            before = json.loads(before_manifest_path.read_text(encoding="utf-8"))
-            changed = diff_manifests(before, after)
-        except (OSError, ValueError):
-            before = {}
-            # Without a baseline, existing files must never be mistaken for new files and removed.
-            changed = {"changed": sorted(after), "added": []}
-        edit_checks = refuse_planted_edits(task_dir, changed, before)
-        unchecked_edits = [item["path"] for item in edit_checks if item.get("checked") is False]
-        planted_edits = [item for item in edit_checks if item.get("checked") is not False]
-        if planted_edits:
-            record_diagnostic("event", task_id, {"kind": "gate", "rule": "planted_definition"},
-                              paths=[str(CONFIG_ROOT / p["path"]) for p in planted_edits])
-        if planted_edits or unchecked_edits:
-            fields = {"refused_edits": planted_edits, "unchecked_edits": unchecked_edits}
-            if any(not item["undone"] for item in planted_edits):
-                fields["error"] = "Configuration edits could not be restored; review them before a reload or restart."
-            if not update_task(task_id, **fields) and task_cancellation_requested(task_id):
-                # Keep cancellation terminal while recording the safety result it must not hide.
-                save_task_fields(task_id, **fields)
-    except Exception as exc:
-        planted_error = "The configuration edit check could not finish: " + redact(str(exc))
-        if not update_task(task_id, error=planted_error) and task_cancellation_requested(task_id):
-            save_task_fields(task_id, error=planted_error)
-
     if task_cancellation_requested(task_id):
         return
     if lifecycle_error is not None and not (approval_session and approval_session.turn_id):
@@ -5486,7 +5387,7 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
         write_task_log(task_id, "worker", f"Codex permission connection failed: {lifecycle_error}")
     final, codex_failure = apply_status_calls(parse_final(final_file, returncode), status_calls)
     start_phase(task_id, "review", "Checking the changes")
-    after_manifest = build_manifest() if planted_edits or reviewed_manifest is None else reviewed_manifest
+    after_manifest = build_manifest()
     try:
         before_manifest = json.loads(before_manifest_path.read_text(encoding="utf-8"))
     except Exception:
@@ -5544,19 +5445,6 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     if final.get("status") == "failed" and task_failed_on_sign_in(
             task_id, reason, final.get("summary"), final.get("details"), lifecycle_error):
         final["summary"] = SIGN_IN_EXPIRED_SUMMARY
-    if unchecked_edits:
-        note = ("The configuration edit check could not check these files without a verified earlier copy: "
-                + ", ".join(unchecked_edits) + "; review these before any reload or restart.")
-        final["details"] = "\n\n".join(part for part in (str(final.get("details") or "").strip(), note) if part)
-    if planted_edits or planted_error:
-        unrestored = [item["path"] for item in planted_edits if not item["undone"]]
-        note = planted_error or "Configuration edits that add refused actions were undone."
-        if unrestored:
-            note = "Configuration edits could not be restored; review these files before any reload or restart: " + ", ".join(unrestored)
-        reason = note
-        final.update(status="failed", summary=note,
-                     details="\n\n".join(part for part in (note, str(final.get("details") or "").strip()) if part),
-                     question="", choices=[])
     status = str(final.get("status") or "failed")
     # Files the validation details already report as having no saved copy.
     named: set[str] = set()
@@ -6867,14 +6755,13 @@ remote_control_supervisor = remote_control.Supervisor(
     name_factory=lambda: read_options().get("remote_control_name"),
     instructions_factory=lambda: remote_control_instructions(read_options()),
     tool_args_factory=relay_read_mcp_args,
-    watch=remote_control.ConfigWatch(CONFIG_ROOT, DATA_ROOT / "remote_control_baseline.json"),
 )
 
 
 def remote_control_summary() -> dict[str, Any]:
-    """Return what the integration needs for its repair: on or off, and the config changes not yet reviewed."""
+    """Return what the integration needs: whether remote control is on, and its state."""
     state = remote_control_supervisor.snapshot()
-    return {key: state.get(key) for key in ("enabled", "state", "config_findings", "config_findings_count")}
+    return {key: state.get(key) for key in ("enabled", "state")}
 
 
 @app.get("/remote-control")
@@ -6934,7 +6821,7 @@ def addon_configuration() -> Response:
 @require_auth
 @require_ingress
 def change_remote_control(action: str) -> Response | tuple[Response, int]:
-    """Turn remote control on or off, ask for a new pairing code, or mark config changes reviewed.
+    """Turn remote control on or off, or ask for a new pairing code.
 
     Only from an administrator on the app page, never with the API token.
     """
@@ -6942,14 +6829,9 @@ def change_remote_control(action: str) -> Response | tuple[Response, int]:
     if admin is None:
         return jsonify({"ok": False, "error": refusal}), 403
     if action == "start":
-        ok, state = remote_control_supervisor.start()
-        if not ok:
-            return jsonify({"ok": False, "error": state.get("blocked_reason") or "Remote control could not start.",
-                            "remote_control": state}), 409
+        state = remote_control_supervisor.start()
     elif action == "stop":
         state = remote_control_supervisor.stop()
-    elif action == "review":
-        state = remote_control_supervisor.review()
     elif action == "pair":
         ok, state = remote_control_supervisor.pair()
         if not ok:
@@ -7203,18 +7085,12 @@ def schedule_timezone():
 schedule_service = schedule_api.register(_ToolWorker())
 
 
-def github_task_read_only(task_id: str) -> bool:
-    """F5: a read-only chat or read-only scheduled work gets only the github_git reads."""
-    return task_options(task_id).get('codex_sandbox') == 'read-only'
-
-
 github_service = github_access.register(_ToolWorker(), github_access.GitHubService(
     lambda: DATA_ROOT / "github",
     client_id=lambda: str(read_options().get("github_client_id") or ""),
     fire_event=lambda event, data: fire_ha_event(event, data),
     notify=lambda title, message: notify(title, message, notification_id="codex_cli_github"),
     find_task=lambda capability: github_access.find_task_by_capability(ha_data, capability),
-    read_only=github_task_read_only,
 ))
 
 
@@ -7283,7 +7159,7 @@ def main() -> None:
     threading.Thread(target=account_access_loop, daemon=True).start()
     # The GitHub access check: at start, then hourly; it never runs a model.
     threading.Thread(target=github_service.loop, daemon=True, name="github-access").start()
-    # Remote control runs again only if the owner left it on and the command gate is installed.
+    # Remote control runs again only if the owner left it on.
     remote_control_supervisor.resume()
     threading.Thread(target=stdin_reader, daemon=True).start()
     # Messages that were waiting when the worker stopped carry on in order.

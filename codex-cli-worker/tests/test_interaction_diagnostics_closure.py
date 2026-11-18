@@ -7,7 +7,6 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import approvals
 from interaction_diagnostics import InteractionRecorder, RollingDiagnostics
 from test_server import server
 
@@ -90,14 +89,6 @@ class DiagnosticsClosureTests(unittest.TestCase):
             store.export()
             self.assertEqual(len(list(self.root.glob(self.path.name + '.corrupt-*'))), 1)
 
-    def test_key_settings_and_set_aside_paths_are_protected(self):
-        paths = ('/data/interaction-diagnostics.key', '/data/interaction-diagnostics.settings.json',
-                 '/data/interaction-diagnostics.json.corrupt-123456abcdef')
-        for path in paths:
-            with self.subTest(path=path):
-                self.assertTrue(approvals.touches_protected_path(path))
-                self.assertTrue(approvals.command_names_protected_path(f'cat {path}'))
-        self.assertTrue(approvals.command_names_protected_path('cat /data/interaction-diagnostics*'))
 
     def test_policy_causes_survive_the_export_allowlist(self):
         cases = (

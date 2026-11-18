@@ -3689,17 +3689,6 @@ function renderRemoteControl(rc) {
   $("remote-control-stop").hidden = !rc.enabled;
   $("remote-control-pair").hidden = !rc.enabled;
   $("remote-control-note").hidden = !rc.available;
-  const findings = rc.config_findings || [];
-  const list = $("remote-control-findings-list");
-  list.replaceChildren(
-    ...findings.map((item) =>
-      textNode("li", `${item.file || "config"}${item.line ? `, line ${item.line}` : ""}: ${item.reason}${item.undone ? ` — ${item.undone}` : item.undo_note ? ` — ${item.undo_note}` : ""}${item.recovery_copy ? ` — replaced version saved at ${item.recovery_copy}` : ""}${item.text ? ` (${item.text})` : ""}`),
-    ),
-  );
-  if ((rc.config_findings_count || 0) > findings.length) {
-    list.append(textNode("li", `… and ${rc.config_findings_count - findings.length} more`));
-  }
-  $("remote-control-findings").hidden = !findings.length;
   $("remote-control-log").textContent = (rc.log || []).join("\n");
   $("remote-control-log-box").hidden = !(rc.log || []).length;
   document.dispatchEvent(new CustomEvent("remote-view", {detail: rc}));
@@ -3731,7 +3720,6 @@ for (const [id, action] of [
   ["remote-control-start", "start"],
   ["remote-control-stop", "stop"],
   ["remote-control-pair", "pair"],
-  ["remote-control-review", "review"],
 ]) {
   $(id).onclick = async () => {
     $(id).disabled = true;

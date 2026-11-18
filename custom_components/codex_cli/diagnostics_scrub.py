@@ -24,7 +24,7 @@ ERRORS = {
     'ValueError': 'Invalid operation.',
     'RuntimeError': 'Operation failed.',
 }
-RULES = frozenset(('credential', 'process_environment', 'protected_policy', 'full_access', 'approval_policy_never', 'policy_parse', 'planted_definition', 'template_action', 'other'))
+RULES = frozenset(('credential', 'full_access', 'approval_policy_never', 'policy_parse', 'other'))
 MODELS = frozenset(('gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-5.3-codex', 'gpt-5.4', 'gpt-5.5', 'gpt-6.1', 'gpt-6-astra', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'default'))
 
 

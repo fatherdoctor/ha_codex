@@ -180,15 +180,6 @@ class GitHubRegistrationTests(unittest.TestCase):
         with patch.object(server.github_service, "current_state", return_value="ok"):
             self.assertIn("github_git", server.github_service.prompt_note())
 
-    def test_read_only_chats_and_schedules_are_read_only_for_the_tool(self):
-        """F5: the same narrowing task_options applies to the sandbox."""
-        with patch.object(server, "tasks", {"chat": {"permission_mode": "read-only"},
-                                            "lead": {"task_source": "lead", "background_mode": "read-only"},
-                                            "free": {}}), \
-                patch.object(server, "read_options", return_value=dict(server.DEFAULT_OPTIONS)):
-            self.assertTrue(server.github_task_read_only("chat"))
-            self.assertTrue(server.github_task_read_only("lead"))
-            self.assertFalse(server.github_task_read_only("free"))
 
     def test_worker_redaction_knows_github_tokens(self):
         self.assertNotIn(APP_TOKEN, server.redact(f"remote: {APP_TOKEN}"))
