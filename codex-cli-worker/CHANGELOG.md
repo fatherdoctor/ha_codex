@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.6 (2026-11-18)
+## 0.3.6 - 2026-11-18
 
 - The app's own guards are removed. Codex's own permission modes and the sandbox are now the whole protection, as in
   the Claude add-on. Gone: the command check that ran before each tool call (the hook and its rules), the managed
