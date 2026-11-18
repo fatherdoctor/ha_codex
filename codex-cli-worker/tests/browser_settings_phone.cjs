@@ -128,8 +128,9 @@ const themeLook = target => target.evaluate(() => {
     fieldHeight: document.querySelector('#schedule-value').getBoundingClientRect().height,
     // The Add-on configuration row at the foot of Settings: a name and a description line.
     rowHeight: document.querySelector('.ha-row').getBoundingClientRect().height,
-    filled: css('#pause', 'background-color'),
-    filledText: css('#pause', 'color'),
+    // The form's submit button, the filled kind next to the text button below.
+    filled: css('#schedule-form button[type=submit]', 'background-color'),
+    filledText: css('#schedule-form button[type=submit]', 'color'),
     textButton: css('#schedule-reset', 'color'),
     textButtonFill: css('#schedule-reset', 'background-color'),
     // Every close button of Settings and its dialogs is the mdiClose icon, with no text glyph.
@@ -140,7 +141,7 @@ const themeLook = target => target.evaluate(() => {
 
 /** Open the sections that hold a field and both kinds of button. */
 async function openThemedSections(target) {
-  for (const id of ['assistant-section', 'scheduled-work'])
+  for (const id of ['scheduled-work'])
     await target.locator(`#${id} > h3 .settings-toggle`).click();
 }
 
@@ -182,7 +183,6 @@ async function openThemedSections(target) {
         {title: 'GitHub', status: 'Connected as synthetic-owner, 1 repository', attention: false},
         {title: 'ChatGPT app pairing', status: 'Unavailable', attention: false},
         {title: 'Full access', status: 'Off', attention: false},
-        {title: 'Assistant', status: 'Running', attention: false},
         {title: 'Browser permissions', status: 'None remembered', attention: false},
         {title: 'Scheduled runs', status: 'Paused: time zone unavailable', attention: true},
         {title: 'Workspace instructions', status: 'AGENTS.md', attention: false},
@@ -246,7 +246,7 @@ async function openThemedSections(target) {
       const size = await windowSize(page);
       await checkLayout(page);
       await page.screenshot({path: path.join(SHOTS, `settings-collapsed-${colorScheme}-1280.png`)});
-      for (const id of ['accounts-section', 'app-pairing-section', 'assistant-section', 'workspace-section']) {
+      for (const id of ['accounts-section', 'app-pairing-section', 'workspace-section']) {
         await page.locator(`#${id} > :is(h3, h4) .settings-toggle`).click();
         assert.deepEqual(await windowSize(page), size, `the window keeps its size after ${id} opens`);
       }

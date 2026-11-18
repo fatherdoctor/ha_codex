@@ -3579,21 +3579,6 @@ $("github-link-form").onsubmit = (event) => {
     (data) => githubResult(data.text || "Linked."));
 };
 $("github-banner-open").onclick = () => openAccountItem("github-section");
-/** Show whether the assistant is paused, in the settings dialog and above the chat. */
-function renderPause(pause) {
-  const paused = Boolean(pause?.paused);
-  $("pause-status").textContent = paused
-    ? "Paused. New messages are refused and queued ones wait."
-    : "Running.";
-  $("pause").textContent = paused ? "Resume the assistant" : "Pause the assistant";
-  $("pause").dataset.paused = paused ? "1" : "";
-  $("paused-banner").hidden = !paused;
-  setSectionStatus("assistant-section", paused ? "Paused" : "Running", paused);
-}
-/** Read the pause state from the worker and show it. */
-async function loadPause() {
-  renderPause(await api("pause"));
-}
 let remoteTimer;
 let remoteCardKey = "";
 /**
@@ -3790,7 +3775,6 @@ $("settings-button").onclick = async () => {
     loadLogin(),
     loadGithub(),
     loadRemoteControl(),
-    loadPause(),
     loadBrowserPermissions(),
     loadAddonConfiguration(),
   ]);
@@ -3824,20 +3808,6 @@ for (const [id, path] of [
     }
   };
 }
-for (const id of ["pause", "resume"]) {
-  $(id).onclick = async () => {
-    $(id).disabled = true;
-    try {
-      const paused = id === "pause" && !$("pause").dataset.paused;
-      renderPause(await api("pause", { paused }));
-    } catch (error) {
-      if ($("settings").open) settingsError(error);
-      else showError(error);
-    } finally {
-      $(id).disabled = false;
-    }
-  };
-}
 let restore = Promise.resolve();
 /** Poll the list and the open chat; the first pass waits for the restored chat. */
 async function refresh() {
@@ -3861,5 +3831,4 @@ refresh();
 loadUsage();
 loadLogin().catch(() => {});
 loadGithub().catch(() => {});
-loadPause().catch(() => {});
 setInterval(tickElapsed, 1000);

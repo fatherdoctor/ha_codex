@@ -35,14 +35,10 @@ class LeadStoreTests(unittest.TestCase):
         self.assertEqual(self.worker.sent[0][:3], (task, 'Inspect synthetic data', 'read-only'))
         self.assertIsNone(engine.store.pending_lead())
 
-    def test_pending_waits_through_pause_and_daily_cap(self):
+    def test_pending_waits_through_the_daily_cap(self):
         self.worker.blocked = True
         task = self.engine.lead_task('Wait', 'default', NOW)
-        self.worker.blocked = False; self.worker.paused = lambda: True
-        self.engine.tick(NOW + 1); self.assertFalse(self.worker.sent)
-        with self.assertRaisesRegex(scheduling.Busy, 'paused'):
-            self.engine.lead_task('Other', 'default', NOW)
-        self.worker.paused = lambda: False
+        self.worker.blocked = False
         with patch.object(scheduling, 'MAX_DAILY_RUNS', 1):
             claim = self.store.reserve(NOW); self.store.finish(claim['id'], 'completed')
             self.engine.tick(NOW + 2); self.assertFalse(self.worker.sent)

@@ -184,8 +184,6 @@ DEFAULT_CHAT_SETTINGS = {"model": None, "reasoning_effort": None}
 # A chat, a saved turn or the `codex_model` option naming any other model is
 # refused instead of running on it; the option set to "none" turns the pin off.
 DEFAULT_MODEL_PIN = "gpt-6.1-sol"
-# Present while the assistant is paused: new messages are refused and queued ones wait.
-PAUSE_FILE = DATA_ROOT / "paused.json"
 
 AGENTS_MAX_BYTES = 256 * 1024
 SNAPSHOT_MAX_BYTES = 8 * 1024 * 1024
@@ -6061,37 +6059,6 @@ def start_queued_message(entry: dict[str, Any]) -> Exception | None:
     return None
 
 
-def assistant_paused() -> bool:
-    """Return whether the user has paused the assistant from its page."""
-    return PAUSE_FILE.exists()
-
-
-def pause_payload() -> dict[str, Any]:
-    """Return the pause state for the API: whether it is paused, since when, and the reason the page shows."""
-    if not assistant_paused():
-        return {"paused": False}
-    try:
-        saved = json.loads(PAUSE_FILE.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        saved = {}
-    return {"paused": True, "since": str(saved.get("since") or ""), "message": PAUSED_MESSAGE}
-
-
-PAUSED_MESSAGE = "The assistant is paused. Resume it on its page to send messages again."
-
-
-def set_assistant_paused(paused: bool) -> dict[str, Any]:
-    """Pause or resume the assistant; on resume, start the oldest queued message if nothing is running."""
-    if paused:
-        if not assistant_paused():
-            PAUSE_FILE.parent.mkdir(parents=True, exist_ok=True)
-            PAUSE_FILE.write_text(json.dumps({"since": utc_now()}), encoding="utf-8")
-    else:
-        PAUSE_FILE.unlink(missing_ok=True)
-        start_next_queued()
-    return pause_payload()
-
-
 def start_next_queued(release: str | None = None) -> None:
     """Start the oldest queued message once no task is active.
 
@@ -6105,7 +6072,7 @@ def start_next_queued(release: str | None = None) -> None:
             if release is not None:
                 active_task_runners.discard(release)
                 release = None
-            if not message_queue or _active_task_ids_locked() or assistant_paused():
+            if not message_queue or _active_task_ids_locked():
                 return
             entry = message_queue.pop(0)
             failure = start_queued_message(entry)
@@ -6177,7 +6144,6 @@ def status() -> Response:
             "codex_login": login,
             "account_access": account_access.snapshot(login),
             "auth_flow": auth_status_payload(),
-            "pause": pause_payload(),
             "model_pin": model_pin(read_options()),
             "codex_usage": usage_status_payload(),
             "integration": integration_status(),
@@ -6299,23 +6265,6 @@ def auth_qr() -> Response:
     response = Response(login_qr_svg(url), mimetype="image/svg+xml")
     response.headers["Cache-Control"] = "no-store"
     return response
-
-
-@app.get("/pause")
-@require_auth
-def get_pause() -> Response:
-    """Return whether the assistant is paused."""
-    return jsonify({"ok": True, **pause_payload()})
-
-
-@app.post("/pause")
-@require_auth
-def post_pause() -> Response:
-    """Pause the assistant with {"paused": true}, or resume it with {"paused": false}."""
-    payload = request.get_json(silent=True)
-    if not isinstance(payload, dict) or not isinstance(payload.get("paused"), bool):
-        return jsonify({"ok": False, "error": "paused must be true or false"}), 400
-    return jsonify({"ok": True, **set_assistant_paused(payload["paused"])})
 
 
 @app.post("/auth/logout")
@@ -6524,8 +6473,6 @@ def create_task() -> Response:
     prompt = payload["prompt"].strip()
     if not prompt:
         return jsonify({"ok": False, "error": "prompt is required"}), 400
-    if assistant_paused():
-        return jsonify({"ok": False, "error": PAUSED_MESSAGE, "paused": True}), 409
     try:
         settings = parse_chat_settings(payload)
         permission_mode = parse_permission_mode(payload)
@@ -7207,8 +7154,6 @@ def continue_task_request(task_id: str, field: str, *, waiting_only: bool = Fals
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
         return jsonify({"ok": False, "error": f"{field} must be non-empty text"}), 400
-    if assistant_paused():
-        return jsonify({"ok": False, "error": PAUSED_MESSAGE, "paused": True}), 409
     choice = payload.get("choice")
     turn_id = payload.get("turn_id")
     if choice is None and (not isinstance(payload.get(field), str) or not payload[field].strip()):

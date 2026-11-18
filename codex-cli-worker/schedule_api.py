@@ -25,11 +25,7 @@ class Worker:
     def busy(self):
         w = self.worker
         with w.lock:
-            return w.assistant_paused() or bool(w._active_task_ids_locked()) or bool(w.message_queue)
-
-    def paused(self):
-        """Expose the worker's owner-controlled pause state."""
-        return self.worker.assistant_paused()
+            return bool(w._active_task_ids_locked()) or bool(w.message_queue)
 
     def redact(self, value):
         """Remove sensitive text before a task result reaches the mailbox."""
@@ -48,7 +44,7 @@ class Worker:
             raise ValueError('The configured sandbox policy refuses this task.')
         with w.lock:
             if self.busy():
-                raise scheduling.Busy('The assistant is busy or paused.')
+                raise scheduling.Busy('The assistant is busy.')
             settings = dict(w.DEFAULT_CHAT_SETTINGS)
             turn = w.new_turn(prompt)
             turn['task_source'] = 'schedule' if schedule_id else 'lead'

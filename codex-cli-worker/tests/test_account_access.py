@@ -174,7 +174,7 @@ def status_from_usage_failure(error, screen_error='Usage unavailable'):
             ('active_task_id', lambda: None), ('codex_binary_path', lambda: 'synthetic-codex'),
             ('api_token', lambda: 'synthetic-worker-auth'), ('read_options', lambda: {}),
             ('integration_status', lambda: {}), ('remote_control_summary', lambda: {}),
-            ('auth_status_payload', lambda: {}), ('pause_payload', lambda: {})):
+            ('auth_status_payload', lambda: {})):
             stack.enter_context(patch.object(server, name, value))
         stack.enter_context(patch.object(server, 'tasks', {}))
         stack.enter_context(patch.object(server, 'message_queue', []))

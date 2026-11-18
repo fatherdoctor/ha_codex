@@ -232,7 +232,6 @@ starter Assist script is in [examples/scripts.yaml](examples/scripts.yaml).
 |---|---|
 | A line at the top of the chat says the integration is missing, old or not connected | Restart Home Assistant if a notification asks for it, then add **Codex** under **Devices & services**. If you installed the integration yourself, update it to the app's version. |
 | A banner offers **Sign in** | The sign-in is missing, ended or rejected. Sign in again. |
-| The chat does not take new messages | The assistant may be paused. Choose **Resume the assistant** in the banner. |
 | A request waits and nothing moves | A permission card is open. Open the chat and answer it. |
 | A task stops with no output for 10 minutes | The stall limit (`task_stall_seconds`) ended it. A quiet long command can trigger it. Raise the limit. |
 | A task fails before it starts, with a sandbox error | The host may not allow the sandbox. See [the sandbox test steps](codex-cli-worker/SANDBOX_TESTING.md). |

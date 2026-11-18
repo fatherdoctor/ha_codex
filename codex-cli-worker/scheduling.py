@@ -706,9 +706,9 @@ class Engine:
                 pass
 
     def _start_pending_lead(self, now):
-        """Dispatch the waiting task once when pause, capacity, and daily limits allow."""
+        """Dispatch the waiting task once when capacity and daily limits allow."""
         pending = self.store.pending_lead()
-        if pending is None or getattr(self.worker, 'paused', lambda: False)() or self.worker.busy():
+        if pending is None or self.worker.busy():
             return
         with self.store.connect() as db:
             prior = db.execute("SELECT status FROM runs WHERE task_id=?", (pending['task_id'],)).fetchone()
@@ -739,8 +739,6 @@ class Engine:
             raise ValueError('Mode must be default or read-only.')
         now = time.time() if now is None else now
         with self.tick_lock, getattr(self.worker, 'dispatch_slot', contextlib.nullcontext)():
-            if getattr(self.worker, 'paused', lambda: False)():
-                raise Busy('The assistant is paused. Resume it before submitting lead work.')
             # A durable single slot is also the handoff record for an immediate
             # launch. Reserve daily usage only at dispatch, never while waiting.
             task_id, message_id = self.store.hold_lead(prompt, mode, now, mail)

@@ -38,6 +38,12 @@
   quota and reset times already show under the rows. The Codex access line moves to the ChatGPT account part of
   Settings. `tests/browser_fb2_band.cjs` and `tests/browser_account_access.cjs` check the rows, their states and
   where each one opens.
+- **Pause the assistant** is removed: the Assistant part of Settings, the banner above the chat with **Resume the
+  assistant**, the `GET` and `POST /pause` routes and the `pause` field of `GET /status`. New chats, replies, queued
+  messages, scheduled runs and lead-agent tasks no longer wait on it. To hold the work that starts on its own, pause
+  each schedule in **Settings > Scheduled runs**, and rotate the lead token to stop the lead agent. **Stop task**
+  still stops a running task. A `/data/paused.json` left by an earlier build is no longer read; an install that was
+  paused runs again after the update, and you can delete the file.
 - The chat page shows Codex's own permission request for the Home Assistant tool (`call` of the `home_assistant_call` server) as a card:
   the tool, the action in plain words (naming each entity, area, device, floor and label of its target), and every argument as JSON, including the full text of a message, with
   **Allow once** and **Deny**. **Allow once** allows that one call; Codex asks again before the next one. A request
