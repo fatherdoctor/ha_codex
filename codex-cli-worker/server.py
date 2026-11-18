@@ -6566,8 +6566,13 @@ def lookup_ha_users() -> list[dict[str, Any]]:
                 pass
 
 
-def ingress_admin() -> tuple[dict[str, str] | None, str]:
+UNVERIFIED_ACCOUNT = "Home Assistant could not verify your account. Reopen Codex through Home Assistant, then try again."
+
+
+def ingress_admin(action: str = "answer permission requests") -> tuple[dict[str, str] | None, str]:
     """Return the Home Assistant administrator behind this Ingress request, or None and the reason it is refused.
+
+    action names what the person tried to do, for the refusal text only; it never changes who passes.
 
     Ingress names the signed-in user in X-Remote-User-Id; the worker then asks
     Home Assistant whether that user is an active administrator. The worker API
@@ -6575,10 +6580,10 @@ def ingress_admin() -> tuple[dict[str, str] | None, str]:
     failure refuses: nothing is allowed on an identity the worker could not check.
     """
     if not is_ingress_request():
-        return None, "Permission requests can only be answered by a Home Assistant administrator on the Codex page."
+        return None, f"Open Codex through Home Assistant and sign in as an administrator to {action}."
     user_id = request.headers.get("X-Remote-User-Id", "").strip()
     if not user_id:
-        return None, "Home Assistant did not say who is signed in, so this answer was not accepted."
+        return None, UNVERIFIED_ACCOUNT
     now = time.monotonic()
     with admin_cache_lock:
         cached = admin_cache.get(user_id)
@@ -6588,11 +6593,11 @@ def ingress_admin() -> tuple[dict[str, str] | None, str]:
         users = lookup_ha_users()
     except RuntimeError as exc:
         print(f"Could not check the Home Assistant user for a permission answer: {exc}", flush=True)
-        return None, "Could not confirm that you are a Home Assistant administrator. Try again."
+        return None, UNVERIFIED_ACCOUNT
     user = next((item for item in users if isinstance(item, dict) and item.get("id") == user_id), None)
     if (not user or not user.get("is_active") or user.get("system_generated")
             or "system-admin" not in (user.get("group_ids") or [])):
-        return None, "Only a Home Assistant administrator can answer permission requests."
+        return None, f"Only a Home Assistant administrator can {action}."
     identity = {"user_id": user_id, "name": str(user.get("name") or request.headers.get("X-Remote-User-Display-Name") or "")}
     with admin_cache_lock:
         admin_cache[user_id] = (now, identity)
@@ -6636,7 +6641,7 @@ def require_ingress(func):
     def wrapper(*args, **kwargs):
         """Run the route only for an Ingress request."""
         if not is_ingress_request():
-            return jsonify({"ok": False, "error": "Browser permissions must be managed through Home Assistant Ingress"}), 403
+            return jsonify({"ok": False, "error": "Open Codex through Home Assistant to make this change."}), 403
         return func(*args, **kwargs)
 
     return wrapper

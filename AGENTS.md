@@ -57,7 +57,9 @@ Pre-release: nothing is tagged or published from this fork yet, and no change he
 - Keep the pins: the base image by digest, the packaged Codex CLI by version and checksum, no self-update
   (`codex-cli-worker/tests/test_fork_pins.py` checks them). Moving a pin is its own pull request.
 - The app and the integration carry one version: `codex-cli-worker/config.yaml` and `manifest.json` change
-  together, with a `## <version> (unreleased)` entry in `codex-cli-worker/CHANGELOG.md`.
+  together. Version bumps happen only in the release pull request, never in a feature merge: a feature adds its notes
+  under the `## <version> (unreleased)` entry in `codex-cli-worker/CHANGELOG.md` and leaves both version lines alone
+  (`scripts/check_version_bump.py` fails it otherwise).
 - Update the documentation a behavior change touches, in the same pull request (the list is in CONTRIBUTING.md).
 - Screenshots are never faked or mocked up; a missing one is listed in `screenshots/NEEDED.md`.
 - Tests and fixtures use invented data only: no real tokens, device codes, logs or Home Assistant configuration.
@@ -68,9 +70,10 @@ Pre-release: nothing is tagged or published from this fork yet, and no change he
 Not released yet: nothing is tagged or published, and the release and image workflows stay disabled until the
 first release is planned. When one is:
 
-1. Set the same version in `codex-cli-worker/config.yaml` and `custom_components/codex_cli/manifest.json`; a fork
-   version is upstream's version plus one more number, counted from 1 for each upstream release. A beta is
-   `<three numbers>-beta.<n>`, made on the `beta` branch for the test machine only
+1. In a pull request titled `Release <version>`, set the same version in `codex-cli-worker/config.yaml` and
+   `custom_components/codex_cli/manifest.json`; a fork version is upstream's version plus one more number, counted
+   from 1 for each upstream release. A beta is `<three numbers>-beta.<n>`, made on the `beta` branch for the test
+   machine only
    ([Versions](docs/updates-and-rollback.md#versions)).
 2. The version passes on a Home Assistant OS test machine, and its lab-pass record is committed.
 3. The commit that removes `(unreleased)` from the changelog heading is the one tagged, by the maintainer, with

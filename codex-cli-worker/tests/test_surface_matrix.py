@@ -35,10 +35,8 @@ WAYS_IN = {
     "Read history or long-term statistics": {
         PAGE: ("home_assistant_data.history", "home_assistant_data.statistics"), APP: NONE,
         SERVICE: ("home_assistant_data.history", "home_assistant_data.statistics")},
-    "Control a device or call a service": {
-        PAGE: ("home_assistant_actions.act",), APP: NONE, SERVICE: ("home_assistant_actions.act",)},
-    "Send a notification": {
-        PAGE: ("home_assistant_actions.act",), APP: NONE, SERVICE: ("home_assistant_actions.act",)},
+    "Control a device or call a service": {PAGE: NONE, APP: NONE, SERVICE: NONE},
+    "Send a notification": {PAGE: NONE, APP: NONE, SERVICE: NONE},
     "Ask the owner a question or report the turn's state": {
         PAGE: ("home_assistant_data.ask_owner", "home_assistant_data.report_failure", "home_assistant_data.exchange_info"),
         APP: NONE,

@@ -623,7 +623,7 @@ class GitRunner:
         if refused:
             names = ", ".join(sorted(set(refused))[:12])
             raise GitHubError("This repository has git settings the add-on does not use with your GitHub sign-in: "
-                              + names + ".")
+                              + names + ". Use a fresh copy instead: Clone on the add-on page, Settings, GitHub.")
 
     def origin_repository(self, repo: Path) -> str:
         """F1: the effective fetch and push URLs (rewrites applied) must both be a connected GitHub repository."""
@@ -633,7 +633,8 @@ class GitRunner:
             proc = self._git(repo, *args)
             urls = [line for line in proc.stdout.splitlines() if line.strip()]
             if proc.returncode != 0 or len(urls) != 1:
-                raise GitHubError("The repository needs one origin remote at https://github.com/<owner>/<repository>.")
+                raise GitHubError("The repository needs one origin remote at https://github.com/<owner>/<repository>. "
+                                  "Set it with Link on the add-on page, Settings, GitHub.")
             match = re.fullmatch(r"https://github\.com/([A-Za-z0-9-]+/[A-Za-z0-9._-]+?)(?:\.git)?/?", urls[0].strip())
             if not match or match.group(1).lower() not in connected:
                 raise GitHubError("The origin remote is not one of the connected GitHub repositories.")
@@ -934,6 +935,10 @@ class GitHubService:
                               "it cannot read the repository") + ". Make one for this repository only, with "
                               "Contents read and write and nothing else.")
         self._save_connection("token", token, live, repository)
+        with self.lock:
+            # The result of an earlier App sign-in no longer describes the connection, so the page stops showing it.
+            if self.flow and self.flow.public.get("status") != "waiting_for_user":
+                self.flow = None
         self.log("GitHub sign-in connected (token).")
         return self.status()
 
@@ -1052,15 +1057,16 @@ class GitHubService:
             try:
                 response = self.http.get(f"{API}/repos/{name}", credential["token"])
             except Exception:
-                failure = failure or f"{name}: GitHub could not be reached"
+                failure = failure or f"GitHub could not be reached for {name}"
                 continue
             if response.status_code == 200:
                 good += 1
             else:
-                failure = failure or f"{name}: HTTP {response.status_code}"
+                failure = failure or f"GitHub did not return {name} (HTTP {response.status_code})"
         ok = bool(names) and not failure
         text = (f"Read OK: {good} repositor{'y' if good == 1 else 'ies'}." if ok
-                else "Read failed: " + (failure or "no repository is connected") + ".")
+                else "Read failed: " + (failure or "no repository is connected") + ". Choose Check now to see "
+                "which repositories the sign-in reaches, or try again later.")
         self.last_test = {"at": iso(utc_now()), "ok": ok, "text": text}
         return self.status()
 
@@ -1183,7 +1189,7 @@ def register(worker, service: GitHubService) -> GitHubService:
         @worker.require_ingress
         @wraps(func)
         def run(*args, **kwargs):
-            person, refusal = worker.ingress_admin()
+            person, refusal = worker.ingress_admin("manage GitHub")
             if person is None:
                 return jsonify(ok=False, error=refusal), 403
             try:

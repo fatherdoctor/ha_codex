@@ -1,0 +1,33 @@
+name: Version rule
+
+# Only the release pull request changes the version (CONTRIBUTING.md, "Releases"). The add-on store offers an
+# update as soon as main names a newer version, so a feature pull request that raises it offers a release that
+# does not exist yet. This is its own workflow so that a title edit re-runs this check only, not every job.
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  version-rule:
+    name: Version changes only in a release pull request
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Check the version lines
+        env:
+          # The title is passed through the environment, never written into the script, so no title runs as code.
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python scripts/check_version_bump.py --base "$BASE_SHA" --head "$HEAD_SHA" --title "$PR_TITLE"

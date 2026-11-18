@@ -284,6 +284,9 @@ class CheckTests(ServiceCase):
         result = self.service.read_test()["last_test"]
         self.assertFalse(result["ok"])
         self.assertIn("HTTP 404", result["text"])
+        # Astro F5: a plain summary and a next step, with the HTTP number kept as the detail.
+        self.assertTrue(result["text"].startswith(f"Read failed: GitHub did not return {REPO} (HTTP 404)."))
+        self.assertIn("Choose Check now", result["text"])
 
 
 class TokenFallbackTests(ServiceCase):
@@ -296,6 +299,20 @@ class TokenFallbackTests(ServiceCase):
         self.assertEqual(status["expires_at"], "2026-12-20T12:00:00+00:00")
         self.assertEqual(status["revoke_url"], gh.TOKEN_REVOKE_URL)
         self.assertNotIn(PAT, json.dumps(status) + "\n".join(self.logs))
+
+    def test_a_token_ends_the_page_message_of_an_earlier_app_sign_in(self):
+        """Astro F2: a failed App sign-in no longer shows once a token connected; a waiting one stays."""
+        self.http.gets = token_answers()
+        self.service.flow = gh.DeviceFlow(self.http, "Iv23liExampleClient", self.service._complete_app)
+        self.service.flow.finish("failed", "The sign-in was refused on GitHub.")
+        status = self.service.paste_token(PAT, REPO)
+        self.assertEqual(status["flow"]["status"], "idle")
+        self.assertIsNone(self.service.flow)
+        waiting = gh.DeviceFlow(self.http, "Iv23liExampleClient", self.service._complete_app)
+        waiting.public = {**waiting.public, "status": "waiting_for_user", "user_code": "WXYZ-1234"}
+        self.service.flow = waiting
+        self.service.paste_token(PAT, REPO)
+        self.assertIs(self.service.flow, waiting)
 
     def test_a_wider_token_is_refused_and_never_echoed(self):
         for name, answers in (("administration", token_answers(hooks=200)),
