@@ -12,6 +12,13 @@
   requirements (no full access, only `on-request` approvals, and no hooks, so a hook planted in `/config` never
   runs), the read tools, the GitHub push guard and the schedule tools. Review what a chat changed before a reload or
   restart: an edit that adds a command now stays as Codex wrote it.
+- Home Assistant shows a Codex notification only while a chat waits for you: a question, or a permission request. A
+  failed action or a failed chat no longer makes one; the failure shows in the chat. Each waiting chat has one
+  notification, `codex_cli_wait_<task_id>`, and the app dismisses it when you answer, stop or delete the chat, when
+  the request expires, or when the app restarts, unless the chat waits again by then. With a companion app notify
+  service, the push carries the same id as its tag, and the app clears it from the phone at the same time. A tap on a
+  phone notification that the worker refuses no longer makes a notification either; the integration logs why. The
+  sign-in and GitHub notifications are not about a chat and are unchanged.
 - **Text size** for the chat page: Normal, Larger (115 %) or Largest (130 %), from **Settings > Text size**. It
   scales the messages, code, buttons, the chat list, Settings, the sign-in text, the schedule dialog and the list of
   steps together, is remembered on each device, and still fits a phone screen at Largest.
