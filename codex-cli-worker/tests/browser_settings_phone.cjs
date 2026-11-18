@@ -274,7 +274,7 @@ async function openThemedSections(target) {
       assert.equal(look.textButtonFill, 'rgba(0, 0, 0, 0)', 'a text button has no fill');
       for (const part of ['fieldFill', 'fieldLine'])
         assert.ok(!['', 'rgba(0, 0, 0, 0)'].includes(look[part]), `${part} has a color: ${look[part]}`);
-      assert.ok(look.closeIcons.length >= 5 && look.closeIcons.every(icon => icon === 'true true'), `close icons: ${look.closeIcons}`);
+      assert.ok(look.closeIcons.length >= 4 && look.closeIcons.every(icon => icon === 'true true'), `close icons: ${look.closeIcons}`);
       await page.locator('#scheduled-work').screenshot({path: path.join(SHOTS, `theme-standalone-${colorScheme}-1280.png`)});
       assert.deepEqual(errors, []);
       await page.close();

@@ -67,10 +67,10 @@ async function showSidebar(page, phone) {
           .filter(node => node.getBoundingClientRect().width > 1).map(node => node.id)), ['chat-title']);
       }
 
-      // 2. The side bar's foot, top to bottom: Home Assistant, remote connection, quota, Settings.
+      // 2. The side bar's foot, top to bottom: Codex, GitHub, Remote, quota, Settings.
       assert.deepEqual(await page.evaluate(() => [...document.querySelector('.sidebar-footer').children]
         .filter(node => !node.hidden).map(node => node.id)),
-      ['ha-status-row', 'connection-manage', 'usage', 'usage-plan', 'settings-button']);
+      ['codex-status-row', 'github-status-row', 'remote-status-row', 'usage', 'usage-plan', 'settings-button']);
       // The quota bars show; the studio layout used to hide them.
       assert.ok((await page.locator('#usage').boundingBox())?.height > 0, 'the quota bars show');
       // One way into Settings: no other gear or Settings button on the page.
@@ -84,24 +84,40 @@ async function showSidebar(page, phone) {
       assert.ok(masks[0].includes(MDI_COG_START), 'the Settings row uses mdiCog');
       assert.ok(masks[1].includes(MDI_STOP), 'the stop button uses mdiStop');
 
-      // 3. The Home Assistant row: Ready, a state that needs the owner (amber), and a failed status read.
-      let row = await footRow(page, '#ha-status-row');
-      assert.equal(row.text, 'Home Assistant · Ready');
+      // 3. The Codex, GitHub and Remote rows: one or two words and a dot; each opens Settings at its part.
+      await page.locator('#codex-status-summary').filter({hasText: /^Ready$/}).waitFor({state: 'attached'});
+      await page.locator('#remote-status-summary').filter({hasText: /^(Ready|Off|Unavailable)$/}).waitFor({state: 'attached'});
+      await page.locator('#github-status-summary').filter({hasNotText: 'Loading'}).waitFor({state: 'attached'});
+      let row = await footRow(page, '#codex-status-row');
+      assert.equal(row.text, 'Codex · Ready');
       assert.equal(row.state, 'ready');
-      await setIntegration(page, 'not_connected');
-      row = await footRow(page, '#ha-status-row');
-      assert.equal(row.text, 'Home Assistant · Integration not connected');
+      assert.match((await footRow(page, '#remote-status-row')).text, /^Remote · (Ready|Off|Unavailable)$/, 'the machine name stays off the row');
+      await page.evaluate(() => renderLogin({codex_login: {status_ok: false}}));
+      row = await footRow(page, '#codex-status-row');
+      assert.equal(row.text, 'Codex · Not signed in');
       assert.equal(row.dot, AMBER_FALLBACK, 'with no host window the amber dot uses the page fallback');
-      await page.route('**/status', route => route.fulfill({status: 500, json: {ok: false}}));
-      await page.evaluate(() => loadUsage());
-      assert.equal((await footRow(page, '#ha-status-row')).text, 'Home Assistant · Unavailable');
-      assert.equal((await footRow(page, '#ha-status-row')).state, 'error');
-      await page.unroute('**/status');
-      await setIntegration(page, 'ok');
-      await showSidebar(page, phone);
-      await page.locator('#ha-status-row').click();
-      await page.locator('#status-dialog[open]').waitFor();
-      await page.locator('[data-close="status-dialog"]').click();
+      await page.route('**/auth/status', route => route.fulfill({status: 500, json: {ok: false}}));
+      await page.evaluate(() => loadLogin().catch(() => {}));
+      assert.equal((await footRow(page, '#codex-status-row')).text, 'Codex · Unavailable');
+      assert.equal((await footRow(page, '#codex-status-row')).state, 'error');
+      await page.unroute('**/auth/status');
+      await page.evaluate(() => loadLogin());
+      for (const [id, part] of [['codex-status-row', 'chatgpt-section'], ['github-status-row', 'github-section'],
+        ['remote-status-row', 'app-pairing-section']]) {
+        await showSidebar(page, phone);
+        await page.locator(`#${id}`).click();
+        await page.locator('#settings[open]').waitFor();
+        // Settings reads every part first, then opens the one asked for.
+        await page.locator(`#${part} > .settings-body`).waitFor();
+        const open = await page.evaluate(() => [...document.querySelectorAll('#accounts-section, #accounts-section > .settings-body > section')]
+          .filter(section => section.querySelector(':scope > :is(h3, h4) > .settings-toggle')?.getAttribute('aria-expanded') === 'true')
+          .map(section => section.id));
+        assert.ok(open.includes('accounts-section') && open.includes(part), `${id} opens ${part} (${open})`);
+        assert.equal(await page.locator(`#${part} > .settings-body`).isVisible(), true, `${part} shows`);
+        await page.locator('#close-settings').click();
+      }
+      // No Status window is left: its Context and Usage fields had no source, and the quota shows below.
+      assert.equal(await page.locator('#status-dialog').count(), 0);
 
       // 4. The plan line: plan type, weekly and 5-hour reset times as text; Unknown for a window not reported.
       const shown = await page.evaluate(() => {
@@ -116,9 +132,10 @@ async function showSidebar(page, phone) {
       assert.equal(shown[2], 'Unknown');
       await page.evaluate(() => loadUsage());
 
-      // 5. The remote connection row opens its window, which holds Get a pairing code.
+      // 5. Manage remote connection in the Remote part opens the window that holds Get a pairing code.
       await showSidebar(page, phone);
-      await page.locator('#connection-manage').click();
+      await page.locator('#remote-status-row').click();
+      await page.locator('#remote-connection-open').click();
       await page.locator('#connection-dialog[open]').waitFor();
       assert.equal(await page.locator('#remote-control-pair').count(), 1);
       await page.locator('[data-close="connection-dialog"]').click();
@@ -160,7 +177,7 @@ async function showSidebar(page, phone) {
 
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
       assert.deepEqual(errors, []);
-      console.log(`PASS ${theme}/${width}: bands gone, foot rows in order, one Settings, MDI icons, Home Assistant states, plan line, remote window, stop button`);
+      console.log(`PASS ${theme}/${width}: bands gone, foot rows in order, one Settings, MDI icons, Codex, GitHub and Remote rows open their parts, plan line, remote window, stop button`);
       await context.close();
     }
 
@@ -173,11 +190,10 @@ async function showSidebar(page, phone) {
     await host.goto(base + 'band-host');
     const frame = host.frames().find(item => item.url() === base);
     await frame.locator('.chat-row').first().waitFor();
-    await setIntegration(frame, 'outdated');
-    const hosted = await footRow(frame, '#ha-status-row');
-    assert.equal(hosted.text, 'Home Assistant · Integration out of date');
+    await frame.evaluate(() => renderLogin({codex_login: {status_ok: false}}));
+    const hosted = await footRow(frame, '#codex-status-row');
+    assert.equal(hosted.text, 'Codex · Not signed in');
     assert.equal(hosted.dot, 'rgb(255, 152, 0)', 'the amber dot follows the host warning color');
-    await setIntegration(frame, 'ok');
     console.log('PASS host window: the amber dot takes --warning-color');
     await hostContext.close();
   } finally {

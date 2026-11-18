@@ -39,7 +39,7 @@ const off = {enabled: false, available: true, state: 'off', configured_name: 'Ho
       assert.equal(await hint.isVisible(), false, 'a dismissed hint stays away after a reload');
 
       // The name shows as text with where to change it (0.3.5: the Configuration tab only), and fits the phone.
-      await page.evaluate(() => document.querySelector('#connection-manage').click());
+      await page.evaluate(() => openConnection());
       await page.waitForFunction(() => document.querySelector('#remote-control-name').textContent === 'Home Assistant');
       assert.equal(await page.locator('#remote-control-name-line input, #remote-control-name-line button').count(), 0);
       assert.match(await page.locator('#remote-control-name-line').textContent(), /Remote control machine name in Add-on configuration/);

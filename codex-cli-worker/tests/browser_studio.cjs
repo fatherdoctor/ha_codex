@@ -29,9 +29,10 @@ fs.mkdirSync(output,{recursive:true});
     await page.screenshot({path:`${output}/before-${theme}-${width}.png`});
     assert.deepEqual(errors,[]);await context.close();continue;
    }
-   await page.locator('#connection-summary').filter({hasText:'Ready as'}).waitFor();
+   await page.locator('#remote-status-summary').filter({hasText:/^Ready$/}).waitFor();
+   assert.match(await page.locator('#remote-status-row').getAttribute('title'),/^Remote · Ready as /);
    // The side bar's foot holds the status rows; on a phone they are inside the chats drawer.
-   for (const id of ['#ha-status-row','#connection-manage','#settings-button']) {
+   for (const id of ['#codex-status-row','#github-status-row','#remote-status-row','#settings-button']) {
     const box=await page.locator(id).boundingBox();
     assert.equal(box.x>=0 && box.x+box.width<=width, width>700, `${id} in view at ${width}`);
    }
@@ -79,11 +80,6 @@ fs.mkdirSync(output,{recursive:true});
     await page.locator(`.row-main[data-task-id="${id}"]`).click({button:'right'});
     await page.locator('#chat-menu').waitFor();
    };
-   if(width>700) {
-    await page.locator('#ha-status-row').click();
-    assert.match(await page.locator('#status-details').textContent(),/Usage and resetUnavailable/);
-    await page.locator('[data-close="status-dialog"]').click();
-   }
    const taskId = await page.evaluate(()=>state.id);
    await page.route('**/tasks/*/settings', async route=>{await new Promise(resolve=>setTimeout(resolve,250));await route.continue();});
    await page.locator('#permission-button').click();
@@ -124,6 +120,11 @@ fs.mkdirSync(output,{recursive:true});
    if(width===390) await page.locator('#close-sidebar').click();
 
    // On a phone the foot rows are reached through the chats drawer.
+   // The Remote row opens Settings at its part; Manage remote connection there opens the connection window.
+   const openRemote = async () => {
+    await footRow('#remote-status-row');
+    await page.locator('#remote-connection-open').click();
+   };
    const footRow = async id => {
     if(width===390 && !(await page.evaluate(()=>document.body.classList.contains('sidebar-open')))) await page.locator('#phone-history').click();
     await page.locator(id).click();
@@ -140,14 +141,14 @@ fs.mkdirSync(output,{recursive:true});
    // Five real state shapes, all from a synthetic intercepted status response.
    for (const state of ['off','starting','ready','reconnecting','error']) {
     remote={...remote,enabled:state!=='off',state,message:state==='error'?'Synthetic connection error':'Connected',pairing_code:'',pairing_url:''};
-    await footRow('#connection-manage');
+    await openRemote();
     await page.waitForFunction(expected=>document.body.dataset.connection===expected,state);
     await page.screenshot({path:`${output}/connection-${state}-${theme}-${width}.png`});
     await page.locator('[data-close="connection-dialog"]').click();
    }
    remote={...remote,enabled:true,state:'ready',message:'Connected'};
    await page.evaluate(()=>pollConnection());
-   await footRow('#connection-manage');
+   await openRemote();
    await page.locator('#remote-control-pair').click();
    await page.locator('.pairing-continue').waitFor();
    assert.equal(await page.locator('.pairing-continue').getAttribute('href'),'https://chatgpt.com/codex/pair?pairing_code=SAMPLE-NOT-VALID');

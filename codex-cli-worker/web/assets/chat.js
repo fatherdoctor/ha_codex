@@ -391,21 +391,27 @@ function planLine(usage, planType) {
   }
   return parts.join(" · ");
 }
-// The Home Assistant row at the foot of the side bar: the state of the Codex integration.
-const HOME_ASSISTANT_STATES = {
-  ok: ["ready", "Ready"],
-  starting: ["starting", "Starting"],
-  not_installed: ["needs-owner", "Integration not installed"],
-  outdated: ["needs-owner", "Integration out of date"],
-  not_connected: ["needs-owner", "Integration not connected"],
-};
-/** Show the integration state in the side bar row; a failed status read shows Unavailable. */
-function renderHomeAssistantStatus(integration) {
-  const [dot, text] = integration === undefined
-    ? ["error", "Unavailable"]
-    : HOME_ASSISTANT_STATES[integration?.state] || ["error", "Unavailable"];
-  $("ha-status-row").dataset.state = dot;
-  $("ha-status-summary").textContent = text;
+/*
+ * The three rows at the foot of the side bar: Codex (the ChatGPT sign-in),
+ * GitHub and Remote (the ChatGPT app connection). Each shows one word or two
+ * and a dot: ready, starting, needs-owner, error or off.
+ */
+function setFootRow(id, dot, text) {
+  $(id).dataset.state = dot;
+  $(id.replace("-row", "-summary")).textContent = text;
+}
+/** Open Settings at one part of Accounts and connections, as a foot row or a banner asks. */
+async function openAccountItem(sectionId) {
+  await $("settings-button").onclick();
+  openSettingsSection($(sectionId));
+  $(sectionId).scrollIntoView({ block: "start" });
+}
+for (const id of ["codex-status-row", "github-status-row", "remote-status-row"])
+  $(id).onclick = () => openAccountItem($(id).dataset.section);
+/** The ChatGPT account part says whether a turn has confirmed Codex access with this sign-in. */
+function renderCodexAccess(access) {
+  $("codex-access").textContent = access?.message || "";
+  $("codex-access").hidden = !access?.message;
 }
 // Where the line at the top of the chat sends someone to install the integration.
 const INTEGRATION_INSTALL_URL =
@@ -465,14 +471,14 @@ async function loadUsage() {
       document.dispatchEvent(new CustomEvent("worker-status", { detail: data }));
       renderUsage(data.codex_usage, data.account_access?.plan_type);
       renderIntegration(data.integration);
-      renderHomeAssistantStatus(data.integration || null);
+      renderCodexAccess(data.account_access);
       // The quota check also tells the worker which model Codex picks when the add-on names none.
       // Not awaited: the quota shown must not depend on it.
       if (state.catalog) loadChatOptions(true);
     }
   } catch (_) {
     renderUsage();
-    renderHomeAssistantStatus(undefined);
+    renderCodexAccess({ message: "Codex access could not be checked." });
   } finally {
     usageLoading = false;
     usageTimer = setTimeout(loadUsage, 60000);
@@ -3190,6 +3196,9 @@ async function loadLogin() {
   let auth;
   try {
     ({ auth } = await api("auth/status"));
+  } catch (error) {
+    setFootRow("codex-status-row", "error", "Unavailable");
+    throw error;
   } finally {
     loginTimer = setTimeout(
       () => loadLogin().catch(() => {}),
@@ -3233,6 +3242,11 @@ function renderLogin(auth) {
   const sectionStatus = chatgptSectionStatus({ signedIn, pending, failed, lapsed });
   setSectionStatus("chatgpt-section", sectionStatus, !signedIn);
   setAccountPart("chatgpt-section", sectionStatus.toLowerCase(), !signedIn);
+  setFootRow(
+    "codex-status-row",
+    signedIn ? "ready" : failed ? "error" : "needs-owner",
+    signedIn ? "Ready" : pending ? "Signing in" : sectionStatus,
+  );
   for (const id of ["login", "banner-login"]) $(id).textContent = failed ? "Get a new code" : "Sign in";
   const key = JSON.stringify([
     signedIn,
@@ -3368,6 +3382,13 @@ function githubAccountWord({ waiting, connected, bad, retry }) {
   if (retry) return "sign-in did not finish";
   return "not connected";
 }
+/** The GitHub row at the foot of the side bar: its dot and its words. */
+function githubFootRow({ waiting, connected, bad, retry }) {
+  if (connected) return bad ? ["needs-owner", "Needs attention"] : ["ready", "Ready"];
+  if (waiting) return ["needs-owner", "Enter the code"];
+  if (retry) return ["error", "Sign-in did not finish"];
+  return ["off", "Not connected"];
+}
 /** Put the GitHub status on the card and the banner. Only the contract's fields are read. */
 function renderGithub(github) {
   githubStatus = github;
@@ -3453,6 +3474,7 @@ function renderGithub(github) {
     bad || waiting || retry,
   );
   setAccountPart("github-section", githubAccountWord({ waiting, connected, bad, retry }), bad || waiting || retry);
+  setFootRow("github-status-row", ...githubFootRow({ waiting, connected, bad, retry }));
   $("github-banner-text").textContent = `The add-on's GitHub sign-in needs attention: ${(GITHUB_STATE_TEXT[state] || state).replace(/\.$/, "")}.`;
   $("github-banner").hidden = !bad;
 }
@@ -3467,6 +3489,7 @@ function githubUnavailable() {
   $("github-banner").hidden = true;
   setSectionStatus("github-section", "Not available in this version");
   setAccountPart("github-section", "not available");
+  setFootRow("github-status-row", "off", "Not available");
 }
 /** Read the GitHub status. Every 5 seconds while a code waits, else every 5 minutes, so a lost sign-in shows. */
 async function loadGithub() {
@@ -3480,6 +3503,9 @@ async function loadGithub() {
     $("github-token").hidden = false;
     renderGithub(data.github);
     waiting = data.github.flow?.status === "waiting_for_user";
+  } catch (error) {
+    setFootRow("github-status-row", "error", "Unavailable");
+    throw error;
   } finally {
     githubTimer = setTimeout(() => loadGithub().catch(() => {}), waiting ? 5000 : 300000);
   }
@@ -3552,11 +3578,7 @@ $("github-link-form").onsubmit = (event) => {
     { repository: $("github-link-repository").value, path: $("github-link-path").value.trim() },
     (data) => githubResult(data.text || "Linked."));
 };
-$("github-banner-open").onclick = async () => {
-  await $("settings-button").onclick();
-  openSettingsSection($("github-section"));
-  $("github-section").scrollIntoView({ block: "start" });
-};
+$("github-banner-open").onclick = () => openAccountItem("github-section");
 /** Show whether the assistant is paused, in the settings dialog and above the chat. */
 function renderPause(pause) {
   const paused = Boolean(pause?.paused);

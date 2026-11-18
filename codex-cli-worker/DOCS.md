@@ -1040,9 +1040,13 @@ message or connection address.
 The page follows Home Assistant colors in light and dark when its host exposes them; otherwise it follows
 the device appearance. Recent conversations stay alongside the writing canvas on tablets and desktop.
 Above the messages is one thin row with the chat's title and its menu. The foot of the side bar holds, top to
-bottom: **Home Assistant** with the state of the Codex integration (it opens the Status window), **Remote
-connection** with its state (it opens the window that pairs the ChatGPT app), the 5-hour and weekly quota with a
-line for the plan type and the reset times, and **Settings**. A row that needs you shows an amber dot. While a task
+bottom: **Codex** (the ChatGPT sign-in), **GitHub** and **Remote** (the ChatGPT app connection), each with a word
+or two such as Ready, Off or Not signed in; the 5-hour and weekly quota with a line for the plan type and the reset
+times; and **Settings**. Select Codex, GitHub or Remote to open Settings at that part of Accounts and connections;
+**Manage remote connection** there opens the window that pairs the ChatGPT app. A row that needs you shows an amber
+dot, and a row whose state could not be read shows a red dot and Unavailable. The ChatGPT account part says whether
+a turn has confirmed Codex access with the current sign-in. The integration's state shows only when it needs you, as
+a line at the top of the chat. While a task
 runs, the send button is the stop button, even with a draft or a file in the message box. On a phone, a slim row holds the
 conversations button, the title, New chat and the thread menu; the foot rows are at the bottom of the
 conversations drawer. The composer stays at the bottom, with no hint line under it. Its bottom row holds the plus

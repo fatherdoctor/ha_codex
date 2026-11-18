@@ -2240,18 +2240,14 @@ main > .chat-header h1 {
   border-radius: 50%;
   background: var(--muted);
 }
-#ha-status-row[data-state="ready"] .status-dot,
-#ha-status-row[data-state="starting"] .status-dot,
-body[data-connection="ready"] #connection-manage .status-dot,
-body[data-connection="starting"] #connection-manage .status-dot {
+.foot-row[data-state="ready"] .status-dot,
+.foot-row[data-state="starting"] .status-dot {
   background: var(--accent);
 }
-#ha-status-row[data-state="needs-owner"] .status-dot,
-body[data-connection="reconnecting"] #connection-manage .status-dot {
+.foot-row[data-state="needs-owner"] .status-dot {
   background: var(--needs-owner);
 }
-#ha-status-row[data-state="error"] .status-dot,
-body[data-connection="error"] #connection-manage .status-dot {
+.foot-row[data-state="error"] .status-dot {
   background: var(--error);
 }
 .sidebar-footer .usage {

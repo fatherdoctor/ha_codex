@@ -56,13 +56,17 @@
         <button id="load-more" class="subtle" hidden>Load older chats</button>
         </section>
         <div class="sidebar-footer">
-          <button id="ha-status-row" class="foot-row" type="button" data-state="loading">
+          <button id="codex-status-row" class="foot-row" type="button" data-state="loading" data-section="chatgpt-section">
             <span class="status-dot" aria-hidden="true"></span
-            ><span class="foot-label">Home Assistant · <span id="ha-status-summary">Loading…</span></span>
+            ><span class="foot-label">Codex · <span id="codex-status-summary">Loading…</span></span>
           </button>
-          <button id="connection-manage" class="foot-row" type="button">
+          <button id="github-status-row" class="foot-row" type="button" data-state="loading" data-section="github-section">
             <span class="status-dot" aria-hidden="true"></span
-            ><span class="foot-label">Remote connection · <span id="connection-summary">Loading…</span></span>
+            ><span class="foot-label">GitHub · <span id="github-status-summary">Loading…</span></span>
+          </button>
+          <button id="remote-status-row" class="foot-row" type="button" data-state="loading" data-section="app-pairing-section">
+            <span class="status-dot" aria-hidden="true"></span
+            ><span class="foot-label">Remote · <span id="remote-status-summary">Loading…</span></span>
           </button>
           <div id="usage" class="usage" aria-label="Remaining account quota">
             <span>5h</span>
@@ -378,7 +382,6 @@
         <button type="button" id="full-access-confirm">Turn on Full access</button>
       </div>
     </dialog>
-    <dialog id="status-dialog" class="studio-sheet" aria-labelledby="status-title"><div class="dialog-header"><h2 id="status-title">Status</h2><button class="icon icon-close" data-close="status-dialog" aria-label="Close status"></button></div><dl id="status-details"></dl></dialog>
     <dialog id="connection-dialog" class="studio-sheet" aria-labelledby="connection-title"><div class="dialog-header"><h2 id="connection-title">Remote connection</h2><button class="icon icon-close" data-close="connection-dialog" aria-label="Close remote connection"></button></div><div id="connection-content"></div><p id="connection-result" role="alert"></p></dialog>
     <dialog id="workspace-dialog" class="studio-sheet" aria-labelledby="workspace-title"><div class="dialog-header"><h2 id="workspace-title">Workspace rules</h2><button class="icon icon-close" data-close="workspace-dialog" aria-label="Close workspace rules"></button></div><div id="workspace-content"><label for="agents">AGENTS.md</label
       ><textarea id="agents" rows="12" spellcheck="false"></textarea
@@ -393,6 +396,7 @@
         <section id="chatgpt-section">
           <h4>ChatGPT account</h4>
           <p id="login-status" class="muted">Loading account status…</p>
+          <p id="codex-access" class="muted" hidden></p>
           <p id="login-requirement" class="muted">A ChatGPT account with Codex access is required. As of November 13, 2026, OpenAI includes Codex across plans, including Free and Go; limits and workspace access vary. <a href="https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan" target="_blank" rel="noopener noreferrer">Check current availability</a>.</p>
           <div class="settings-actions">
             <button id="login">Sign in</button

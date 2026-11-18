@@ -27,10 +27,17 @@
 - A chat's menu now lists Rename, Pin, Share, Archive and Delete, in the ChatGPT app's order. **Share** downloads
   the whole chat, or its last lines, as a Markdown file with every message, the steps Codex printed (thinking
   included) and each answer, with values that look like keys or tokens masked (`GET /tasks/<task_id>/share`). The menu no longer has New chat, Conversations, Copy
-  thread ID or Status, and the conversation header no longer has its own menu; Status opens from the Home Assistant
-  row at the foot of the chat list. Settings no longer has Interaction logs with its Export logs button; the
+  thread ID or Status, and the conversation header no longer has its own menu. Settings no longer has Interaction logs with its Export logs button; the
   integration's Download diagnostics carries the same anonymized data.
 
+- The foot of the chat list shows **Codex**, **GitHub** and **Remote**, each with a word or two (for example
+  "Codex · Ready", "GitHub · Not connected", "Remote · Off") and a dot. Selecting one opens Settings at that part
+  of Accounts and connections. They replace the Home Assistant row and the Remote connection row; the integration's
+  state still shows as a line at the top of the chat when it needs you. The Status window is removed: its Context
+  and Usage and reset fields always showed Unavailable, because the app reads no context figure from Codex, and the
+  quota and reset times already show under the rows. The Codex access line moves to the ChatGPT account part of
+  Settings. `tests/browser_fb2_band.cjs` and `tests/browser_account_access.cjs` check the rows, their states and
+  where each one opens.
 - The chat page shows Codex's own permission request for the Home Assistant tool (`call` of the `home_assistant_call` server) as a card:
   the tool, the action in plain words (naming each entity, area, device, floor and label of its target), and every argument as JSON, including the full text of a message, with
   **Allow once** and **Deny**. **Allow once** allows that one call; Codex asks again before the next one. A request
