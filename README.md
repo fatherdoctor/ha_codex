@@ -221,7 +221,8 @@ The integration adds actions that scripts, automations and Assist can call.
 
 The actions refuse a caller who is not an administrator. A task started this way still uses the normal permission
 cards; the integration cannot answer them. A notification about a chat shows only while the chat waits for you, and
-goes away when the wait ends; a completed answer or a failure sends none. Set `notify_service` in the app options for
+goes away when the wait ends; a completed answer or a failure sends none. The one exception is a block by OpenAI's
+safety filter, which sends one notification that stays until you dismiss it. Set `notify_service` in the app options for
 phone pushes, or leave it empty for persistent notifications.
 
 The event `codex_cli_task_result` carries the result for automations. The full list of entities and actions, the task

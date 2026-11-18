@@ -1,6 +1,7 @@
 """A Home Assistant notice exists only while a chat waits on the owner.
 
-A failure makes no notice; it shows in the chat. A question or a permission request makes one notice per chat,
+A failure makes no notice; it shows in the chat. The one exception is a block by OpenAI's safety filter, which
+makes one notice of its own (see test_safety_block.py). A question or a permission request makes one notice per chat,
 under the chat's own id, and the notice is dismissed when the owner answers, the chat is stopped, the chat is
 deleted, or the wait ends in another way.
 """
@@ -72,6 +73,21 @@ class WaitNoticeTests(unittest.TestCase):
             with patch.object(server, "read_options", return_value=options):
                 server.notify_task_outcome(TASK_ID, "failed", "The entity light.porch does not exist.", TURN_ID)
         self.assertEqual(self.calls, [])
+
+    def test_only_a_safety_block_makes_a_notice_for_a_failed_chat(self):
+        """A chat that fails for another reason sends nothing; a safety block sends exactly one notice.
+
+        The safety-block notice is the one exception to the rule above. It has its own id and stays until the
+        owner dismisses it, so no wait ends it.
+        """
+        server.update_task(TASK_ID, status="failed", current_turn_id=TURN_ID)
+        server.notify_task_outcome(TASK_ID, "failed", "The entity light.porch does not exist.", TURN_ID)
+        self.assertEqual(self.calls, [])
+        with patch.object(server, "fire_ha_event", return_value=(True, "ok")), \
+                patch.object(server, "write_task_log"):
+            server.publish_safety_block(TASK_ID, TURN_ID)
+        self.assertEqual(self.created(), [f"codex_safety_block_{TASK_ID}"])
+        self.assertEqual(len(self.calls), 1)
 
     def test_a_waiting_question_makes_one_notice_under_the_chat_id(self):
         """The question goes out once, as a persistent notification with the chat's own id."""

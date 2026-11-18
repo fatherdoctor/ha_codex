@@ -13,7 +13,8 @@
   runs), the read tools, the GitHub push guard and the schedule tools. Review what a chat changed before a reload or
   restart: an edit that adds a command now stays as Codex wrote it.
 - Home Assistant shows a Codex notification only while a chat waits for you: a question, or a permission request. A
-  failed action or a failed chat no longer makes one; the failure shows in the chat. Each waiting chat has one
+  failed action or a failed chat no longer makes one; the failure shows in the chat. The one exception is a block by
+  OpenAI's safety filter, which still makes one notification, `codex_safety_block_<task_id>`, until you dismiss it. Each waiting chat has one
   notification, `codex_cli_wait_<task_id>`, and the app dismisses it when you answer, stop or delete the chat, when
   the request expires, or when the app restarts, unless the chat waits again by then. With a companion app notify
   service, the push carries the same id as its tag, and the app clears it from the phone at the same time. A tap on a

@@ -736,7 +736,7 @@ A report with logs is much easier to fix. On Home Assistant 2026.11:
 
 ## Notifications
 
-A notification about a chat goes out only while the chat waits for you: a question to answer, or a permission request to decide. A completed answer and a failure send nothing; read both in the chat. A chat has one notification at a time, with the id `codex_cli_wait_<task_id>`. The app dismisses the persistent notification as soon as the chat no longer waits: you answer, you stop the chat, you delete it, the request expires, or the app restarts. With a companion app service (`notify.mobile_app_...`), the push carries the same id as its `tag`, and the app clears it from your phone at the same time. Any other notify service cannot clear a push, so that push stays until you clear it; a tap on it after the wait ended does nothing. An answer that waits in the queue behind another chat keeps the notification until the answer starts. A dismissal that Home Assistant does not take is not tried again.
+A notification about a chat goes out only while the chat waits for you: a question to answer, or a permission request to decide. A completed answer and a failure send nothing; read both in the chat. The one exception is a block by OpenAI's safety filter: it sends one notification, with the id `codex_safety_block_<task_id>`, and that notification stays until you dismiss it (see [When OpenAI's safety filter blocks a task](#when-openais-safety-filter-blocks-a-task)). A chat has one notification at a time, with the id `codex_cli_wait_<task_id>`. The app dismisses the persistent notification as soon as the chat no longer waits: you answer, you stop the chat, you delete it, the request expires, or the app restarts. With a companion app service (`notify.mobile_app_...`), the push carries the same id as its `tag`, and the app clears it from your phone at the same time. Any other notify service cannot clear a push, so that push stays until you clear it; a tap on it after the wait ended does nothing. An answer that waits in the queue behind another chat keeps the notification until the answer starts. A dismissal that Home Assistant does not take is not tried again.
 
 Some notifications are not about a chat. **Codex CLI is not signed in** and the sign-in code (id `codex_cli_login`) go away when you sign in or stop the sign-in. **Codex sign-in complete**, **Codex sign-in failed** and **Codex signed out** (id `codex_cli_worker`) and the GitHub notice (id `codex_cli_github`) stay until you dismiss them. Leave `notify_service` unset or empty to use Home Assistant persistent notifications. If you want push notifications, set it to a Home Assistant notify service such as `notify.mobile_app_your_phone`.
 
@@ -752,7 +752,7 @@ Tasks run without an interactive terminal. If Codex needs a decision, it calls t
 
 The worker stops the exchange when Codex reports its typed cybersecurity safety block.
 The task fails, and you get one notice with the task id: through the notify service when one is set, or as a
-persistent notification otherwise. The general "Codex task failed" notice is not sent for a block.
+persistent notification otherwise. Its id is `codex_safety_block_<task_id>`, and it stays until you dismiss it.
 Rephrase the request or retry it yourself. Normal use needs no special access.
 The worker does not retry this block automatically or change any permission.
 Any file changes made before the block still receive the usual backup and configuration checks.
