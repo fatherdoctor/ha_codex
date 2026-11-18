@@ -346,12 +346,14 @@ is valid for the running message only. The worker sends the call to Home Assista
 checks these things first, in every mode:
 
 - A request without the current key of a running chat sends nothing.
-- A `hassio` service (the Supervisor through Home Assistant) or a `codex_cli` service (this app's own actions) is
-  refused.
-- `entity_id`, `device_id`, `area_id`, `floor_id` and `label_id` go in `target`, the other fields in `data`.
+- The service must be `domain.service`. `entity_id`, `device_id`, `area_id`, `floor_id` and `label_id` go in
+  `target`, the other fields in `data`. A request in any other form sends nothing.
 
-Every call with a valid key writes one line to `/data/ha-call-audit.jsonl`: the time, the chat, the service, the
-target and the result. The line never holds the data, so a message text or a code stays out of the log.
+The tool refuses no service by name. Your answer to Codex's question is the only gate, so read the service before
+you allow it. A call can reach the Supervisor: a `hassio` service, `update.install` on an update entity (an app,
+Home Assistant OS or Core, this app too) or `backup.create`. A call can also run code that you wrote, for example a
+`shell_command`, `python_script`, `pyscript` or `rest_command` service. The app keeps no log of its own of the
+calls; Home Assistant's logbook and history show what changed.
 
 The keys of the app's tools (`HA_*_CAPABILITY`) are kept out of the commands that Codex runs, with Codex's
 `shell_environment_policy` setting. So a command cannot write to the socket and skip Codex's question. In a mode
@@ -386,21 +388,21 @@ Codex can be reached three ways: the chat page, the ChatGPT app paired through r
 |---|---|---|---|
 | Read an entity's state or find an entity | `home_assistant.verify` | `home_assistant_relay.read` | `home_assistant.verify` |
 | Read history or long-term statistics | `home_assistant_data.history`, `home_assistant_data.statistics` | not available | `home_assistant_data.history`, `home_assistant_data.statistics` |
-| Control a device or call a service | `home_assistant_actions.act` | not available | `home_assistant_actions.act` |
-| Send a notification | `home_assistant_actions.act` | not available | `home_assistant_actions.act` |
+| Control a device or call a service | `home_assistant_call.call` | not available | `home_assistant_call.call` |
+| Send a notification | `home_assistant_call.call` | not available | `home_assistant_call.call` |
 | Ask the owner a question or report the turn's state | `home_assistant_data.ask_owner`, `home_assistant_data.report_failure`, `home_assistant_data.exchange_info` | not available | `home_assistant_data.ask_owner`, `home_assistant_data.report_failure`, `home_assistant_data.exchange_info` |
 | Propose a schedule or use the mailbox | `codex_scheduling.propose_schedule`, `codex_scheduling.list_schedules`, `codex_scheduling.read_mailbox`, `codex_scheduling.post_mailbox` | not available | `codex_scheduling.propose_schedule`, `codex_scheduling.list_schedules`, `codex_scheduling.read_mailbox`, `codex_scheduling.post_mailbox` |
 | Work with a GitHub repository | `codex_github.github_git` | not available | `codex_github.github_git` |
 
 - `codex_cli.start_task` starts the same kind of task as the chat page, so it gets the same tools.
-- A notification goes through the `act` tool only when the Security and people group is on
-  ([Permissions overrides](#permissions-overrides)).
+- Codex asks you before each `call`, on the chat page
+  ([Changes to the house: the `call` tool](#changes-to-the-house-the-call-tool)).
 - File edits and shell commands use Codex's own tools on every way in, and the [sandbox](#sandbox) applies on every
   way in. On the chat page and for `codex_cli.start_task`, a request for more access shows on the chat page as a
   [permission request](#permission-requests). The ChatGPT app shows Codex's own requests in the app instead, as
   [Remote control from the ChatGPT app](#remote-control-from-the-chatgpt-app) describes.
 - A scheduled run and a message on the lead agent channel also start a task. They use the same launcher as the chat
-  page and get the page's tools. A Read only schedule narrows the sandbox, not the tools
+  page and get the page's tools, except the `call` tool: nobody is there to answer. A Read only schedule narrows the sandbox, not the tools
   ([Scheduled runs and the lead agent channel](#scheduled-runs-and-the-lead-agent-channel)).
 - "Not available" means the way in has no tool for that request.
 
@@ -683,8 +685,8 @@ The optional `HA_TOKEN` app option is passed to Codex subprocesses as the `HA_TO
 
 From **0.3.6**, the instructions tell Codex to change the house with the `call` tool, reloads and restarts
 included, and to use `HA_TOKEN` only for an API call that is not a service. A command that uses the token is still
-a command: in the sandboxed modes it needs network access, so Codex asks first. The `call` tool's refusals and its
-audit line do not cover such a command; the command check (hook) reads it.
+a command: in the sandboxed modes it needs network access, so Codex asks first. The `call` tool's checks do not
+cover such a command; the command check (hook) reads it.
 
 From **0.1.68**, a task that has `HA_TOKEN` also gets `HA_URL`, the address those calls go to, and the worker's instructions tell Codex to use the two together. The app's own calls to Home Assistant keep using the Supervisor proxy with the app's own token and do not use this option.
 

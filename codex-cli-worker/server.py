@@ -93,7 +93,7 @@ def record_diagnostic(method, *args, **kwargs):
 
 ha_data = HomeAssistantData(_ToolWorker(), DATA_ROOT / "ha-data")
 # The one tool that changes the house; its audit log holds service, target and result, never the data.
-ha_call = HomeAssistantCall(_ToolWorker(), DATA_ROOT / "ha-call-audit.jsonl")
+ha_call = HomeAssistantCall(_ToolWorker())
 CODEX_HOME = DATA_ROOT / "codex-home"
 OPTIONS_PATH = DATA_ROOT / "options.json"
 WORKER_TOKEN_PATH = DATA_ROOT / "worker_api_token"
@@ -4392,7 +4392,7 @@ def call_mcp_args() -> list[str]:
     normalize_approval_decision_for_mode, at rust-v0.166.0).
 
     Its key, HA_CALL_CAPABILITY, is its own: no read tool holds it, and shell_exclude_args keeps it out of
-    shell commands. The worker behind the socket holds the refusals and the audit line (ha_call.py).
+    shell commands. The worker behind the socket checks the key and the form of the request (ha_call.py).
     """
     settings = {
         "command": sys.executable,

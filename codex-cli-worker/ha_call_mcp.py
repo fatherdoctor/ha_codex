@@ -1,8 +1,8 @@
 """Stdio MCP bridge for the home_assistant_call tool: one Home Assistant action per call.
 
-The tool is registered without an approval mode, so Codex asks the person before each call.
+The tool is registered with the approval mode "prompt", so Codex asks the person before each call.
 This bridge only forwards the request and the turn's call key (HA_CALL_CAPABILITY) to the
-worker's socket. The worker holds the refusals and writes the audit line (ha_call.py).
+worker's socket. The worker checks the key and the form of the request (ha_call.py).
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ TOOL = {
         "Send one Home Assistant action (a service call) that changes the house, for example light.turn_off, "
         "automation.reload or homeassistant.restart. Codex asks the person before each call. "
         "Put entity_id, device_id, area_id, floor_id or label_id in target, and the other fields in data. "
-        "Read the new state back afterwards with home_assistant.verify. hassio and codex_cli services are refused."
+        "Read the new state back afterwards with home_assistant.verify."
     ),
     "inputSchema": {
         "type": "object", "additionalProperties": False,

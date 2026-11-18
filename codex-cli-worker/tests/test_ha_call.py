@@ -6,18 +6,21 @@ not only the tool's answer (plan CX-SIMPLE, section 6).
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import threading
 import unittest
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from itertools import pairwise
 from pathlib import Path
 from types import SimpleNamespace
+from typing import ClassVar
 from unittest.mock import patch
 
-from test_server import server
+from test_server import server  # First: it puts the worker's folder on sys.path.
+
+# isort: split
 import ha_call
 import ha_call_mcp
 from ha_call import HomeAssistantCall
@@ -26,37 +29,20 @@ WORKER_TOKEN = "invented-supervisor-token"
 
 
 class FakeHomeAssistant:
-    """An HTTP server that records each request and answers with a fixed status and body."""
+    """Stands in for requests.post in ha_call: records each request and answers with a fixed status and body.
+
+    No socket is opened, so the test plugin of Home Assistant, which blocks the network, lets it run.
+    """
 
     def __init__(self, status=200, answer=None):
         self.requests = []
         self.status = status
         self.answer = answer if answer is not None else []
-        fake = self
 
-        class Handler(BaseHTTPRequestHandler):
-            def do_POST(self):
-                length = int(self.headers.get("Content-Length") or 0)
-                fake.requests.append({"method": "POST", "path": self.path,
-                                      "authorization": self.headers.get("Authorization"),
-                                      "body": json.loads(self.rfile.read(length) or b"null")})
-                payload = json.dumps(fake.answer).encode()
-                self.send_response(fake.status)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(payload)))
-                self.end_headers()
-                self.wfile.write(payload)
-
-            def log_message(self, *args):
-                pass
-
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
-        self.url = f"http://127.0.0.1:{self.server.server_address[1]}/api/services/"
-
-    def close(self):
-        self.server.shutdown()
-        self.server.server_close()
+    def post(self, url, **options):
+        """Record the request as Home Assistant would receive it, and answer it."""
+        self.requests.append({"method": "POST", "url": url, **options})
+        return SimpleNamespace(status_code=self.status, json=lambda: self.answer, text=json.dumps(self.answer))
 
 
 def call_worker(status="running"):
@@ -66,67 +52,65 @@ def call_worker(status="running"):
 
 
 class CallTestCase(unittest.TestCase):
-    """A call service with an audit file in a temporary folder and a fake Home Assistant."""
+    """A call service with a fake Home Assistant in place of requests.post."""
 
-    answer = [{"entity_id": "light.kitchen_ceiling", "state": "off"}]
+    answer: ClassVar[object] = [{"entity_id": "light.kitchen_ceiling", "state": "off"}]
     status = 200
 
     def setUp(self):
-        folder = tempfile.TemporaryDirectory()
-        self.addCleanup(folder.cleanup)
-        self.folder = Path(folder.name)
         self.fake = FakeHomeAssistant(self.status, self.answer)
-        self.addCleanup(self.fake.close)
-        patcher = patch.object(ha_call, "CORE_SERVICES_URL", self.fake.url)
+        patcher = patch.object(ha_call.requests, "post", self.fake.post)
         patcher.start()
         self.addCleanup(patcher.stop)
         self.worker = call_worker()
-        self.calls = HomeAssistantCall(self.worker, self.folder / "audit.jsonl")
+        self.calls = HomeAssistantCall(self.worker)
         self.key = self.calls.begin("t1")
 
     def call(self, arguments, key=None):
         return self.calls.dispatch({"capability": self.key if key is None else key, "arguments": arguments})
 
-    def audit_lines(self):
-        path = self.folder / "audit.jsonl"
-        return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+    def sent(self):
+        """Return (path, body) of each request Home Assistant received."""
+        return [(item["url"].removeprefix("http://supervisor/core"), item["json"]) for item in self.fake.requests]
 
 
 class ExactRequestTests(CallTestCase):
 
     def test_light_turn_off_sends_that_entity_and_nothing_else(self):
         result = self.call({"service": "light.turn_off", "target": {"entity_id": "light.kitchen_ceiling"}})
-        self.assertEqual(self.fake.requests, [{"method": "POST", "path": "/api/services/light/turn_off",
-                                               "authorization": f"Bearer {WORKER_TOKEN}",
-                                               "body": {"entity_id": "light.kitchen_ceiling"}}])
+        self.assertEqual(self.fake.requests, [{"method": "POST",
+                                               "url": "http://supervisor/core/api/services/light/turn_off",
+                                               "json": {"entity_id": "light.kitchen_ceiling"},
+                                               "headers": {"Authorization": f"Bearer {WORKER_TOKEN}"},
+                                               "timeout": ha_call.CALL_TIMEOUT_SECONDS,
+                                               "allow_redirects": False}])
         self.assertEqual(result, {"status": "ok", "service": "light.turn_off", "changed": ["light.kitchen_ceiling"]})
 
     def test_notify_keeps_its_target_and_its_full_message(self):
         message = "The garage door is still open. " * 200
         self.call({"service": "notify.mobile_app_example_phone", "data": {"title": "Garage", "message": message}})
-        self.assertEqual(len(self.fake.requests), 1)
-        self.assertEqual(self.fake.requests[0]["path"], "/api/services/notify/mobile_app_example_phone")
-        self.assertEqual(self.fake.requests[0]["body"], {"title": "Garage", "message": message})
+        self.assertEqual(self.sent(), [("/api/services/notify/mobile_app_example_phone",
+                                        {"title": "Garage", "message": message})])
 
     def test_data_and_target_go_side_by_side(self):
         self.call({"service": "light.turn_on", "target": {"area_id": "kitchen", "entity_id": ["light.a", "light.b"]},
                    "data": {"brightness_pct": 10}})
-        self.assertEqual(self.fake.requests[0]["body"],
-                         {"brightness_pct": 10, "area_id": "kitchen", "entity_id": ["light.a", "light.b"]})
+        self.assertEqual(self.sent(), [("/api/services/light/turn_on",
+                                        {"brightness_pct": 10, "area_id": "kitchen",
+                                         "entity_id": ["light.a", "light.b"]})])
 
     def test_a_reload_is_a_service_too(self):
         self.call({"service": "automation.reload"})
-        self.assertEqual(self.fake.requests[0]["path"], "/api/services/automation/reload")
-        self.assertEqual(self.fake.requests[0]["body"], {})
+        self.assertEqual(self.sent(), [("/api/services/automation/reload", {})])
 
-    def test_every_call_writes_an_audit_line_without_the_data(self):
-        self.call({"service": "notify.mobile_app_example_phone", "data": {"message": "invented private text"}})
-        self.call({"service": "light.turn_off", "target": {"entity_id": "light.kitchen_ceiling"}})
-        lines = self.audit_lines()
-        self.assertEqual([(line["task_id"], line["service"], line["target"], line["result"]) for line in lines],
-                         [("t1", "notify.mobile_app_example_phone", {}, "ok"),
-                          ("t1", "light.turn_off", {"entity_id": "light.kitchen_ceiling"}, "ok")])
-        self.assertNotIn("invented private text", (self.folder / "audit.jsonl").read_text())
+    def test_any_domain_is_sent_once_the_person_allows_it(self):
+        """The tool refuses no service by name: Codex's question to the person is the gate."""
+        for service in ("hassio.addon_restart", "codex_cli.run_task", "update.install", "lock.unlock"):
+            with self.subTest(service=service):
+                self.assertEqual(self.call({"service": service})["status"], "ok")
+        self.assertEqual([path for path, _ in self.sent()],
+                         ["/api/services/hassio/addon_restart", "/api/services/codex_cli/run_task",
+                          "/api/services/update/install", "/api/services/lock/unlock"])
 
 
 class NothingSentTests(CallTestCase):
@@ -143,7 +127,6 @@ class NothingSentTests(CallTestCase):
                 if key is not None:
                     payload["capability"] = key
                 self.assert_nothing_sent(self.calls.dispatch(payload))
-        self.assertEqual(self.audit_lines(), [])
 
     def test_a_key_of_an_ended_turn_sends_nothing(self):
         self.calls.end("t1")
@@ -164,14 +147,6 @@ class NothingSentTests(CallTestCase):
         self.worker.task_cancellation_requested = lambda task_id: True
         self.assert_nothing_sent(self.call({"service": "light.turn_off"}))
 
-    def test_refused_services_send_nothing_and_write_an_audit_line(self):
-        for service in ("hassio.addon_stop", "hassio.host_reboot", "codex_cli.run_task"):
-            with self.subTest(service=service):
-                self.assert_nothing_sent(self.call({"service": service}), status="refused")
-        self.assertEqual([(line["service"], line["result"]) for line in self.audit_lines()],
-                         [("hassio.addon_stop", "refused"), ("hassio.host_reboot", "refused"),
-                          ("codex_cli.run_task", "refused")])
-
     def test_malformed_requests_send_nothing(self):
         cases = [
             {"service": "light"}, {"service": "Light.Turn_Off"}, {"service": "light.turn_off/../x"},
@@ -184,12 +159,11 @@ class NothingSentTests(CallTestCase):
             {"service": "light.turn_off", "extra": 1},
             "light.turn_off",
         ]
-        # Hostile spellings of a refused or invalid service: none may reach Home Assistant.
+        # Spellings that are not domain.service: none may reach Home Assistant as some other path.
         cases += [{"service": service} for service in (
-            "hassio.addon_stop\n", " hassio.addon_stop", "HASSIO.addon_stop", "Hassio.addon_stop",
-            "hassio .addon_stop", "hassio..addon_stop", "\u04bbassio.addon_stop", "hassio.addon_stop?x=1",
-            "hassio/addon_stop", "../hassio.addon_stop", "codex_cli.run_task#", "codex_cli.\u0440un_task",
-            "light.turn_off.extra", "light.", ".turn_off", "", "x" * 201)]
+            "light.turn_off\n", " light.turn_off", "LIGHT.turn_off", "light .turn_off", "light..turn_off",
+            "\u04bbassio.addon_stop", "light.turn_off?x=1", "light/turn_off", "../light.turn_off", "light.turn_off#",
+            "light.\u0440un", "light.turn_off.extra", "light.", ".turn_off", "", "x" * 201)]
         for arguments in cases:
             with self.subTest(arguments=arguments):
                 self.assert_nothing_sent(self.call(arguments), status="refused")
@@ -197,14 +171,28 @@ class NothingSentTests(CallTestCase):
 
 class FailedCallTests(CallTestCase):
     status = 400
-    answer = {"message": "invented validation error"}
+    answer: ClassVar[object] = {"message": "invented validation error"}
 
     def test_a_failed_call_is_reported_and_not_sent_again(self):
         result = self.call({"service": "light.turn_on", "data": {"brightness_pct": 500}})
         self.assertEqual(len(self.fake.requests), 1)
         self.assertEqual(result["status"], "failed")
         self.assertEqual(result["http_status"], 400)
-        self.assertEqual(self.audit_lines()[0]["result"], "failed")
+
+
+class NoAnswerTests(CallTestCase):
+
+    def test_no_answer_is_reported_and_not_sent_again(self):
+        attempts = []
+
+        def unreachable(url, **options):
+            attempts.append(url)
+            raise ha_call.requests.ConnectionError("invented")
+
+        with patch.object(ha_call.requests, "post", unreachable):
+            result = self.call({"service": "light.turn_off"})
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(result, {"status": "failed", "message": "No answer from Home Assistant (ConnectionError)"})
 
 
 class BridgeTests(CallTestCase):
@@ -212,6 +200,10 @@ class BridgeTests(CallTestCase):
 
     def setUp(self):
         super().setUp()
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            # The Home Assistant test plugin blocks sockets: allow the Unix socket only, the network stays blocked.
+            import pytest_socket
+            pytest_socket.socket_allow_hosts([], allow_unix_socket=True)
         sock = Path(tempfile.mkdtemp(dir="/tmp")) / "call.sock"
         self.addCleanup(lambda: (sock.unlink(missing_ok=True), sock.parent.rmdir()))
         self.socket_server = self.calls.serve(sock)
@@ -229,11 +221,10 @@ class BridgeTests(CallTestCase):
         error, result = self.tool_call({"service": "light.turn_off", "target": {"entity_id": "light.kitchen_ceiling"}})
         self.assertFalse(error)
         self.assertEqual(result["status"], "ok")
-        self.assertEqual([(item["path"], item["body"]) for item in self.fake.requests],
-                         [("/api/services/light/turn_off", {"entity_id": "light.kitchen_ceiling"})])
+        self.assertEqual(self.sent(), [("/api/services/light/turn_off", {"entity_id": "light.kitchen_ceiling"})])
 
-    def test_a_refused_service_through_the_bridge_sends_nothing(self):
-        error, result = self.tool_call({"service": "hassio.addon_stop", "data": {"addon": "core_ssh"}})
+    def test_a_malformed_request_through_the_bridge_sends_nothing(self):
+        error, result = self.tool_call({"service": "light.turn_off", "target": {"code": "invented"}})
         self.assertTrue(error)
         self.assertEqual(result["status"], "refused")
         self.assertEqual(self.fake.requests, [])
@@ -243,8 +234,6 @@ class BridgeTests(CallTestCase):
         with patch.dict("os.environ", {"HA_CALL_CAPABILITY": "guessed"}):
             _, result = self.tool_call({"service": "light.turn_off"})
         self.assertEqual(result["status"], "unavailable")
-        _, result = self.tool_call({"service": "codex_cli.run_task"})
-        self.assertEqual(result["status"], "refused")
         self.assertEqual(self.fake.requests, [])
 
     def test_the_tool_is_marked_as_one_that_changes_things(self):
@@ -271,7 +260,8 @@ class LaunchTests(unittest.TestCase):
 
     def test_only_an_attended_page_chat_gets_the_tool(self):
         launches = self.launches()
-        call_values = {name: [value for value in configured(args) if value.startswith("mcp_servers.home_assistant_call.")]
+        prefix = "mcp_servers.home_assistant_call."
+        call_values = {name: [value for value in configured(args) if value.startswith(prefix)]
                        for name, args in launches.items()}
         self.assertTrue(call_values["page"])
         self.assertEqual(call_values["schedule"], [])
