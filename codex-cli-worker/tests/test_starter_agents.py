@@ -69,6 +69,21 @@ class StarterAgentsWrite(unittest.TestCase):
         self.assertFalse(self.write())
         self.assertTrue(self.agents.is_dir())
 
+    def test_a_failed_write_leaves_no_file_and_the_next_start_tries_again(self):
+        real_fdopen = server.os.fdopen
+
+        def full_disk(descriptor, mode):
+            stream = real_fdopen(descriptor, mode)
+            stream.write = lambda data: (_ for _ in ()).throw(OSError(28, "No space left on device"))
+            return stream
+
+        with patch.object(server.os, "fdopen", side_effect=full_disk):
+            self.assertFalse(self.write())
+        self.assertFalse(self.agents.exists())
+        self.assertIn("No space left on device", self.log.getvalue())
+        self.assertTrue(self.write())
+        self.assertEqual(self.agents.read_bytes(), STARTER.read_bytes())
+
     def test_a_later_start_writes_nothing(self):
         self.codex_config.write_text("", encoding="utf-8")
         self.assertFalse(self.write())

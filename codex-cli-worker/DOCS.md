@@ -650,8 +650,8 @@ The app web UI includes an editor for `/config/AGENTS.md` under **Settings** > *
 none. The text is `starter_agents.md` in the app's source. It tells Codex what `/config` is and gives seven general
 rules. Four of them matter most: change the home only on the owner's word, keep secrets secret, keep the old version
 of a changed file, and check the configuration before a restart. The app never replaces a file that is already there,
-a link included. It writes the starter once: when you delete the file, it stays deleted, and an update of an app
-that has started before writes nothing. The rules are instructions to Codex and not a safeguard; the sandbox, the
+a link included. It writes the starter once: when you delete the file, it stays deleted while the app keeps
+its data, and an update of an app that has started before writes nothing. The rules are instructions to Codex and not a safeguard; the sandbox, the
 command check and the approval cards work the same with or without them. To get the starter on an older install,
 copy the text from `starter_agents.md` into the editor.
 

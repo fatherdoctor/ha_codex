@@ -823,8 +823,17 @@ def write_starter_agents_file() -> bool:
     except OSError as error:
         print(f"Could not write the starter {AGENTS_PATH}: {error}", flush=True)
         return False
-    with os.fdopen(descriptor, "wb") as stream:
-        stream.write(starter)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(starter)
+    except OSError as error:
+        print(f"Could not write the starter {AGENTS_PATH}: {error}", flush=True)
+        # O_EXCL above means this call created the file. An empty or cut-off file would block the next try.
+        try:
+            AGENTS_PATH.unlink()
+        except OSError as unlink_error:
+            print(f"Could not remove the unfinished {AGENTS_PATH}: {unlink_error}", flush=True)
+        return False
     print(f"Wrote the starter workspace instructions to {AGENTS_PATH}.", flush=True)
     return True
 
