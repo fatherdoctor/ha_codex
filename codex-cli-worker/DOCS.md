@@ -336,8 +336,10 @@ Authenticated API clients can answer a live request using `POST /tasks/<task_id>
 
 From **0.3.6**, a chat on the page changes the house through one tool, `home_assistant_call` `call`. It sends one
 Home Assistant action (a service call), for example `light.turn_off` with a target, `automation.reload` or
-`homeassistant.restart`. The app does not approve the tool ahead, so Codex asks you before each call, with the
-service, the target and the data. A scheduled run does not get the tool, since nobody is there to answer.
+`homeassistant.restart`. The app sets the tool's approval mode to `prompt`, so Codex asks you each time, with no
+remembered answer: the question has no "Allow for this session" and no "don't ask again". It shows the service,
+the target and the data. The command check gives the tool's request no decision, so the answer is always yours.
+A scheduled run does not get the tool, since nobody is there to answer.
 
 The tool gives Codex no token. Its bridge passes the request to the worker over a private socket, with a key that
 is valid for the running message only. The worker sends the call to Home Assistant once, with its own access, and

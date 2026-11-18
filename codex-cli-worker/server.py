@@ -4384,7 +4384,12 @@ def data_mcp_args() -> list[str]:
 
 
 def call_mcp_args() -> list[str]:
-    """Register the one tool that changes the house. It has no approval mode, so Codex asks before each call.
+    """Register the one tool that changes the house, with the approval mode "prompt".
+
+    With no mode a tool is "auto", and Codex's question then offers "Allow for this session", which ends the
+    questions for the rest of the thread. In "prompt" Codex asks before each call and keeps no remembered
+    answer (codex-rs/core/src/mcp_tool_call.rs, session_mcp_tool_approval_key and
+    normalize_approval_decision_for_mode, at rust-v0.166.0).
 
     Its key, HA_CALL_CAPABILITY, is its own: no read tool holds it, and shell_exclude_args keeps it out of
     shell commands. The worker behind the socket holds the refusals and the audit line (ha_call.py).
@@ -4397,6 +4402,7 @@ def call_mcp_args() -> list[str]:
         "required": True,
         "startup_timeout_sec": 10,
         "tool_timeout_sec": 90,
+        "tools.call.approval_mode": "prompt",
     }
     return [argument for name, value in settings.items()
             for argument in ("--config", f"mcp_servers.home_assistant_call.{name}={json.dumps(value)}")]

@@ -115,13 +115,14 @@ The worker can open a Home Assistant dashboard in a headless browser to look at 
 
 ### The one tool that changes the house
 
-The `home_assistant_call` `call` tool (0.3.6) sends one Home Assistant action. Codex asks the person before each
-call; the worker, behind the socket, holds the checks below, so a request that reaches the socket by any path
+The `home_assistant_call` `call` tool (0.3.6) sends one Home Assistant action. Codex asks the person each time,
+with no remembered answer; the worker, behind the socket, holds the checks below, so a request that reaches the socket by any path
 meets them. They do not cover a command that uses the owner's `HA_TOKEN` option.
 
 | protection | enforced in | shown by |
 |---|---|---|
-| No launch approves the tool ahead (no `approval_mode`), it is marked as a tool that changes things, and only an attended chat on the page gets it: a scheduled run does not | `server.py: call_mcp_args`, `build_app_server_args` (`attended`), `run_task`; `ha_call_mcp.py: TOOL` | `tests/test_ha_call.py` (`LaunchTests`, `test_the_tool_is_marked_as_one_that_changes_things`) |
+| The tool's approval mode is `prompt`, so Codex asks each time, with no remembered answer; no launch approves it ahead; it is marked as a tool that changes things, and only an attended chat on the page gets it: a scheduled run does not | `server.py: call_mcp_args`, `build_app_server_args` (`attended`), `run_task`; `ha_call_mcp.py: TOOL` | `tests/test_ha_call.py` (`LaunchTests`, `test_the_tool_is_marked_as_one_that_changes_things`) |
+| The command check gives the tool's `PreToolUse` and `PermissionRequest` no decision, with remote control on or off: an allow would skip the person, and a refusal would block every call | `gate_rules.py: CALL_TOOL_HOOK_NAME`, `check_tool_call` | `tests/test_ha_call.py` (`CommandCheckTests`) |
 | The tool has its own key, issued per message and withdrawn when the exchange ends; no read tool holds it, and a request without the current key of a running, uncancelled chat sends nothing | `ha_call.py: HomeAssistantCall.begin`, `end`, `task_for`; `server.py: _run_background_task` | `tests/test_ha_call.py` (`NothingSentTests`, `test_no_read_tool_holds_the_call_key`) |
 | `hassio` and `codex_cli` services are refused in every mode; a malformed request sends nothing; target ids and data cannot overlap | `ha_call.py: REFUSED_DOMAINS`, `parse_request`, `parse_target` | `tests/test_ha_call.py` (`test_refused_services_send_nothing_and_write_an_audit_line`, `test_malformed_requests_send_nothing`) |
 | The request Home Assistant receives is exactly the service, the target and the data, sent once with the worker's own access (never retried, no redirects); Codex never gets a token | `ha_call.py: HomeAssistantCall.send` | `tests/test_ha_call.py` (`ExactRequestTests`, `test_a_failed_call_is_reported_and_not_sent_again`) |
