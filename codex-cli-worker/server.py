@@ -5604,21 +5604,28 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     if not ok:
         print(f"Codex task result event failed: {detail}", flush=True)
 
-    notify_task_outcome(task_id, status, str(final.get('summary') or ''), turn_id,
-                        str(final.get('question') or ''), choices)
+    # A safety block already sent its own notice; one cause gets one notice.
+    if not safety_blocked:
+        notify_task_outcome(task_id, status, str(final.get('summary') or ''), turn_id,
+                            str(final.get('question') or ''), choices)
     refresh_usage_status_async(force=True)
 
 
 def publish_safety_block(task_id: str, turn_id: str) -> None:
-    """Name the task by id, without copying its prompt or provider error into HA."""
+    """Name the task by id, without copying its prompt or provider error into HA.
+
+    This is the only notice for a blocked task: run_task skips the generic
+    "Codex task failed" one. It goes through notify, so it reaches the
+    configured notify service like any other failure.
+    """
     write_task_log(task_id, "worker", safety_block.MESSAGE + " No automatic retry.")
     ok, _ = fire_ha_event("codex_cli_safety_blocked", {"task_id": task_id, "turn_id": turn_id})
     if not ok:
         print("Could not send the safety-block event to Home Assistant.", flush=True)
-    create_persistent_notification(
+    notify(
         "Codex task blocked by the safety filter",
         f"Task {task_id}: {safety_block.MESSAGE}",
-        f"codex_safety_block_{task_id}",
+        notification_id=f"codex_safety_block_{task_id}",
     )
 
 

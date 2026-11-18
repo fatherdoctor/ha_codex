@@ -11,6 +11,11 @@
   `/data/codex-home/house-rules/permission-overrides.json`, `/data/house-rules/confirmed.json`,
   `/data/permission-overrides-backups` and `/data/permission-overrides.sock` behind; the app no longer reads them, and you can delete them.
 
+- A typed OpenAI safety-filter block now stops the task and sends one notice, through the notify service when one is
+  set and as a persistent notification otherwise; the general "Codex task failed" notice is not sent for it.
+  The notice names the task by id and says to rephrase or retry. The worker does not retry the block automatically.
+  It also fires `codex_cli_safety_blocked`, without the prompt or provider error text.
+
 ## 0.3.5 (unreleased)
 
 - The GitHub messages say what still works and what to do next. The Home Assistant repair for a sign-in that
@@ -54,10 +59,6 @@
   records an interrupted run left open, so a restart keeps as many records as the option says.
 
 ## 0.3.4 (unreleased)
-
-- A typed OpenAI safety-filter block now stops the task and creates a Home Assistant persistent notification.
-  The notice names the task by id and says to rephrase or retry. The worker does not retry the block automatically.
-  It also fires `codex_cli_safety_blocked`, without the prompt or provider error text.
 
 - A plain device command such as "set the office overhead to 50%" is faster. On 0.3.3 Codex had no tool on the
   chat page that finds an entity by name, so it searched `.storage/core.entity_registry` with shell commands, and

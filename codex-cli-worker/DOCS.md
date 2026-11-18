@@ -758,7 +758,8 @@ Tasks run without an interactive terminal. If Codex needs a decision, it calls t
 ### When OpenAI's safety filter blocks a task
 
 The worker stops the exchange when Codex reports its typed cybersecurity safety block.
-The task fails, and Home Assistant shows a persistent notification with the task id.
+The task fails, and you get one notice with the task id: through the notify service when one is set, or as a
+persistent notification otherwise. The general "Codex task failed" notice is not sent for a block.
 Rephrase the request or retry it yourself. Normal use needs no special access.
 The worker does not retry this block automatically or change any permission.
 Any file changes made before the block still receive the usual backup and configuration checks.
