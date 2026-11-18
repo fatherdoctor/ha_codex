@@ -6706,7 +6706,8 @@ def share_task(task_id: str) -> Response:
             stored = load_stored_activity(task_id, turn_id)
             if stored is not None:
                 steps_by_turn[turn_id] = [step for step in stored["steps"] if isinstance(step, dict)]
-    text = share_transcript(str(payload.get("title") or ""), payload["turns"], steps_by_turn)
+    # The file is meant to be passed on, so values that look like keys or tokens are masked, as in codex.log.
+    text = redact(share_transcript(str(payload.get("title") or ""), payload["turns"], steps_by_turn))
     if lines:
         text = "\n".join(text.rstrip("\n").split("\n")[-lines:]) + "\n"
     response = Response(text, mimetype="text/markdown")

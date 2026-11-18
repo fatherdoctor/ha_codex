@@ -884,8 +884,8 @@ orders them. The conversation header has no menu of its own; open a chat's menu 
 
 **Share** downloads the chat as a Markdown file: the whole chat, or only its last lines (a number from 1 to
 100,000). The file has each of your messages, the steps Codex printed for it (thinking, commands, file changes and
-tool calls, with the marks the page shows) and Codex's answer. Nothing is sent anywhere; read the file before you
-give it to anyone. API: `GET /tasks/<task_id>/share` returns the file, and `?lines=<n>` keeps only the last `n` lines.
+tool calls, with the marks the page shows) and Codex's answer. Values that look like keys or tokens are masked as
+`[redacted]`, as in the task log. Nothing is sent anywhere; read the file before you give it to anyone. API: `GET /tasks/<task_id>/share` returns the file, and `?lines=<n>` keeps only the last `n` lines.
 
 **Pin chat** keeps the conversation at the top of the list under a **Pinned** heading, ahead of the recently active chats; **Unpin chat** returns it to the recent list. **Rename** opens a dialog for a new title, which appears in the sidebar and the conversation header. Neither action changes the chat's `updated_at` time or its saved messages. **Delete** asks for confirmation, then removes the conversation and its saved history. The delete action is unavailable while that chat is running; stop the task first.
 

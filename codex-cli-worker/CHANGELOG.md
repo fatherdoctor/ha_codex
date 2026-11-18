@@ -26,7 +26,7 @@
 
 - A chat's menu now lists Rename, Pin, Share, Archive and Delete, in the ChatGPT app's order. **Share** downloads
   the whole chat, or its last lines, as a Markdown file with every message, the steps Codex printed (thinking
-  included) and each answer (`GET /tasks/<task_id>/share`). The menu no longer has New chat, Conversations, Copy
+  included) and each answer, with values that look like keys or tokens masked (`GET /tasks/<task_id>/share`). The menu no longer has New chat, Conversations, Copy
   thread ID or Status, and the conversation header no longer has its own menu; Status opens from the Home Assistant
   row at the foot of the chat list. Settings no longer has Interaction logs with its Export logs button; the
   integration's Download diagnostics carries the same anonymized data.

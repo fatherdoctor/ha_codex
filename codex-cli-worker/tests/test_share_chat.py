@@ -80,6 +80,14 @@ class ShareChatTests(unittest.TestCase):
         self.assertIn("› grep porch (exit 1)", text)
         self.assertIn("And the garage?\n\n### Steps\n\n✦ Checking the garage", text)
 
+    def test_values_that_look_like_tokens_are_masked(self):
+        """A token pasted into a message is masked in the file, as the worker masks codex.log."""
+        response = self.client.post("/tasks", json={"prompt": "Use token: synthetictokenvalue0123456789"},
+                                    headers=self.headers)
+        text = self.share(response.json["task_id"]).get_data(as_text=True)
+        self.assertNotIn("synthetictokenvalue0123456789", text)
+        self.assertIn("[redacted]", text)
+
     def test_last_lines(self):
         """lines keeps only the end of the file; a bad number is refused."""
         task_id = self.finished_chat()
