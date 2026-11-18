@@ -118,7 +118,7 @@ The Supervisor never offers an older version, so a rollback is a new release who
 git checkout -b rollback-0.1.81.3 origin/main
 python3 scripts/fork_release.py rollback 0.1.81.1          # the version to go back to
 git commit -m "Roll back to 0.1.81.1 as 0.1.81.3"
-# open a pull request, merge it, then on main:
+# open a pull request titled "Release 0.1.81.3: roll back to 0.1.81.1", merge it, then on main:
 python3 scripts/fork_release.py tag 0.1.81.3 --push
 ```
 
