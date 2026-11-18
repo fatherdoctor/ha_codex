@@ -717,11 +717,6 @@ function controls() {
   $("attach").disabled =
     state.busy ||
     state.files.length + preparingCount(state.files) >= UPLOADS_PER_MESSAGE;
-  $("compose-hint").textContent = state.id
-    ? task?.status === "in_queue"
-      ? "This chat starts when its message leaves the queue."
-      : "Continue this conversation with its saved context."
-    : "A new chat starts a separate conversation.";
   let notice = "";
   if (waiting)
     notice =

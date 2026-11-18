@@ -1035,8 +1035,10 @@ connection** with its state (it opens the window that pairs the ChatGPT app), th
 line for the plan type and the reset times, and **Settings**. A row that needs you shows an amber dot. While a task
 runs, the send button is the stop button, even with a draft or a file in the message box. On a phone, a slim row holds the
 conversations button, the title, New chat and the thread menu; the foot rows are at the bottom of the
-conversations drawer. The composer stays at the bottom. Its model and reasoning controls show the saved chat choice
-or configured default, rather than a sample selection.
+conversations drawer. The composer stays at the bottom, with no hint line under it. Its bottom row holds the plus
+menu, the Permissions button, the model and reasoning controls and the send button; the Permissions button's chevron
+and the send button's arrow are icons centered on their buttons. The model and reasoning controls show the saved chat
+choice or configured default, rather than a sample selection.
 
 The plus menu uploads photos or files. A message accepts at most six attachments, up to 10 MB each.
 Photos retain their existing resizing and image checks. File uploads support UTF-8 text, Markdown, YAML,

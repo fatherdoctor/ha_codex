@@ -18,6 +18,12 @@
   `/data/codex-home/house-rules/permission-overrides.json`, `/data/house-rules/confirmed.json`,
   `/data/permission-overrides-backups` and `/data/permission-overrides.sock` behind; the app no longer reads them, and you can delete them.
 
+- The message box no longer has a hint line under it ("Continue this conversation with its saved context." and the
+  new-chat and queue versions); the note above the box still says when a message waits in the queue. The Permissions
+  button's chevron and the send button's arrow are now icons centered on their buttons, as in the ChatGPT desktop app,
+  instead of text characters that sat low on the line. `tests/browser_composer.cjs` checks both on a phone and a
+  desktop, in light and dark.
+
 - The chat page shows Codex's own permission request for the Home Assistant tool (`call` of the `home_assistant_call` server) as a card:
   the tool, the action in plain words (naming each entity, area, device, floor and label of its target), and every argument as JSON, including the full text of a message, with
   **Allow once** and **Deny**. **Allow once** allows that one call; Codex asks again before the next one. A request

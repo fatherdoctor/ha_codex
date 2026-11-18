@@ -44,7 +44,8 @@ main { min-width: 0; background: var(--bg); }
 .compose-bottom { align-items: center; gap: 8px; }
 .compose-tools { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; }
 #attach { background: transparent; color: var(--text); width: 32px; height: 32px; padding: 0; font-size: 26px; flex-shrink: 0; }
-.permission-pill { color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: 20px; padding: 7px 10px; font-size: 12px; white-space: nowrap; }
+/* The chevron is the same icon as the effort picker's, centered on the label rather than set on its baseline. */
+.permission-pill { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: 20px; padding: 7px 8px 7px 10px; font-size: 12px; white-space: nowrap; }
 #chat-picker { margin-left: auto; min-width: 0; }
 .picker-pill { border: 0; background: transparent; }
 #model-button, #effort-button { font-size: 12px; }
@@ -52,7 +53,6 @@ main { min-width: 0; background: var(--bg); }
 #plus-menu { left: 0; bottom: 50px; width: 210px; padding: 8px; }
 #plus-menu button { display: block; width: 100%; background: transparent; color: var(--text); text-align: left; }
 #plus-menu button:hover { background: var(--hover); }
-body[data-new-chat="true"] #compose-hint { display: none; }
 #archive-list { font-size: 12px; margin-top: 8px; }
 .document-attachment { display: block; padding: 12px 16px; border: 1px solid var(--line); border-radius: 12px; color: var(--text); background: var(--sidebar); overflow-wrap: anywhere; }
 .studio-sheet, #settings { background: var(--sidebar); color: var(--text); border: 1px solid var(--line); max-height: 88dvh; width: min(640px, calc(100vw - 32px)); border-radius: 20px; padding: 24px; }
