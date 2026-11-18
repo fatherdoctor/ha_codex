@@ -186,7 +186,7 @@ class ReviewApiTests(unittest.TestCase):
             notify.assert_not_called(); question.assert_not_called()
             server.tasks['chat']={}
             server.notify_task_outcome('chat','completed','sample'); notify.assert_not_called()
-            server.notify_task_outcome('chat','failed','sample'); notify.assert_called_once()
+            server.notify_task_outcome('chat','failed','sample'); notify.assert_not_called()
             server.notify_task_outcome('chat','needs_input','sample','turn','question',['choice']); question.assert_called_once()
 
     def test_f7_masked_prompt_flag_and_edit_rejection(self):

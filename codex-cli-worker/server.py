@@ -882,11 +882,7 @@ def load_task_index() -> None:
                 task = json.loads(task_file.read_text(encoding="utf-8"))
                 task_id = str(task.get("task_id") or task_file.parent.name)
                 task["task_id"] = task_id
-                expire_saved_approvals(task)
-                if task.get("status") in {"queued", "running"}:
-                    task["status"] = "failed"
-                    task["summary"] = task["error"] = "Worker restarted while this task was active."
-                    sync_current_turn(task)
+                restore_saved_task(task_id, task)
                 tasks[task_id] = task
             except Exception as exc:
                 print(f"Could not load task metadata from {task_file}: {exc}", flush=True)
@@ -896,14 +892,27 @@ def load_task_index() -> None:
         loaded = json.loads(TASK_STATE_FILE.read_text(encoding="utf-8"))
         if isinstance(loaded, dict):
             for task_id, task in loaded.items():
-                expire_saved_approvals(task)
-                if task.get("status") in {"queued", "running"}:
-                    task["status"] = "failed"
-                    task["summary"] = task["error"] = "Worker restarted while this task was active."
-                    sync_current_turn(task)
+                if task_id not in tasks:
+                    restore_saved_task(task_id, task)
                 tasks.setdefault(task_id, task)
     except Exception as exc:
         print(f"Could not load task index: {exc}", flush=True)
+
+
+def restore_saved_task(task_id: str, task: dict[str, Any]) -> None:
+    """Restore a saved task after a restart: its prompts expire and a task that was active has failed.
+
+    A task that waited for a permission decision no longer waits, so its notice
+    is dismissed. A question still waits for its answer and keeps its notice.
+    """
+    waited = task_waits_on_owner(task)
+    expire_saved_approvals(task)
+    if task.get("status") in {"queued", "running"}:
+        task["status"] = "failed"
+        task["summary"] = task["error"] = "Worker restarted while this task was active."
+        sync_current_turn(task)
+    if waited and not task_waits_on_owner(task):
+        dismiss_wait_notice_async(task_id)
 
 
 def expire_saved_approvals(task: dict[str, Any]) -> None:
@@ -2255,7 +2264,9 @@ def _save_task_update(task_id: str, updates: dict[str, Any], *, touch: bool) -> 
         task = tasks.setdefault(task_id, {"task_id": task_id})
         if task.get("cancellation_requested") and updates.get("status") != "cancelled" and updates.get("cancellation_requested") is not False:
             return False
+        waited = task_waits_on_owner(task)
         task.update(updates)
+        wait_ended = waited and not task_waits_on_owner(task)
         if touch:
             task["updated_at"] = utc_now()
         sync_current_turn(task)
@@ -2263,6 +2274,8 @@ def _save_task_update(task_id: str, updates: dict[str, Any], *, touch: bool) -> 
         task_dir.mkdir(parents=True, exist_ok=True)
         atomic_json_write(task_dir / "task.json", task)
     save_task_index()
+    if wait_ended:
+        dismiss_wait_notice_async(task_id)
     return True
 
 
@@ -3247,17 +3260,54 @@ def background_task(task_id: str) -> bool:
 
 
 def notify_task_outcome(task_id, status, summary, turn_id='', question='', choices=None):
-    """Notify about a finished turn only when it needs the owner: a question or a failure.
+    """Notify about a finished turn only when it waits on the owner: a question.
 
-    A completed answer sends nothing; the owner reads it in the chat. Background
-    work reports in its run log; only its permission requests push.
+    A completed answer and a failure send nothing; the owner reads both in the
+    chat. Background work reports in its run log; only its permission requests
+    push.
     """
     if background_task(task_id):
         return
     if status == 'needs_input':
         notify_question(task_id, turn_id, question or 'Codex needs your input.', choices or [])
-    elif status != 'completed':
-        notify('Codex task failed', f'{summary} Task: {task_id}')
+
+
+# A chat that waits on the owner, for an answer or for a permission decision, has one notice, under its own id.
+# The notice is dismissed as soon as the chat no longer waits. A failure or a finished answer makes no notice.
+WAIT_NOTIFY_PREFIX = "codex_cli_wait_"
+
+
+def wait_notification_id(task_id: str) -> str:
+    """Return the id of the one notice a waiting chat has."""
+    return f"{WAIT_NOTIFY_PREFIX}{task_id}"
+
+
+def task_waits_on_owner(task: dict[str, Any] | None) -> bool:
+    """Return whether a chat waits on the owner: a question to answer, or a permission request still pending."""
+    if not task:
+        return False
+    status = task.get("status")
+    if status == "waiting_for_input":
+        return True
+    if status in {"completed", "failed", "cancelled", "canceled"}:
+        return False
+    return any(isinstance(item, dict) and item.get("status") == "pending" for item in task.get("approvals") or [])
+
+
+def dismiss_wait_notice(task_id: str) -> None:
+    """Dismiss the notice of a chat that no longer waits.
+
+    It takes the notification lock, so a notice that was being sent when the
+    wait ended is sent first and then dismissed; one that was not sent yet sees
+    that the wait ended and is dropped.
+    """
+    with notification_lock:
+        dismiss_persistent_notification(wait_notification_id(task_id))
+
+
+def dismiss_wait_notice_async(task_id: str) -> None:
+    """Dismiss the notice from its own thread, so a slow Home Assistant cannot hold up the caller."""
+    threading.Thread(target=dismiss_wait_notice, args=(task_id,), daemon=True).start()
 
 
 def notify_question(task_id: str, turn_id: str, question: str, choices: list[str]) -> None:
@@ -3268,7 +3318,15 @@ def notify_question(task_id: str, turn_id: str, question: str, choices: list[str
     the persistent notification, lists the choices in the text.
     """
     title = "Codex needs input"
+
+    def still_waiting() -> bool:
+        """Whether the question still waits; read without the worker lock, which the caller may hold."""
+        task = tasks.get(task_id)
+        return task_waits_on_owner(task) and str((task or {}).get("current_turn_id") or "") == turn_id
+
     with notification_lock:
+        if not still_waiting():
+            return
         service = str(read_options().get("notify_service") or "")
         if choices and turn_id and service.startswith("notify.mobile_app_"):
             actions = [
@@ -3282,7 +3340,8 @@ def notify_question(task_id: str, turn_id: str, question: str, choices: list[str
                 return
             print(f"Notification with choices through {service} failed: {detail}", flush=True)
         options = f" Options: {'; '.join(choices)}." if choices else ""
-        notify(title, f"{question}{options} Task: {task_id}")
+        notify(title, f"{question}{options} Task: {task_id}", still_wanted=still_waiting,
+               notification_id=wait_notification_id(task_id))
 
 
 PERMISSION_REASON_MAX = 200
@@ -3308,6 +3367,7 @@ def notify_permission(task_id: str, approval: dict[str, Any], withdrawn: threadi
         "Codex needs permission",
         f"Codex is waiting for your decision on {subject}.{detail} Open the Codex chat to review it. Task: {task_id}",
         still_wanted=lambda: not withdrawn.is_set(),
+        notification_id=wait_notification_id(task_id),
     )
 
 
@@ -4840,6 +4900,7 @@ def request_task_cancellation(
         if status not in CANCELLABLE_TASK_STATUSES:
             return False, None, f"task is not active (status={status or 'unknown'})"
 
+        waited = task_waits_on_owner(task)
         completed_at = str(task.get("completed_at") or utc_now())
         task.update(
             {
@@ -4870,6 +4931,9 @@ def request_task_cancellation(
         if approval_session is not None:
             approval_session.close()
     save_task_index()
+    if waited:
+        # A stopped chat no longer waits for a permission decision.
+        dismiss_wait_notice_async(task_id)
     return True, proc, ""
 
 
@@ -6428,6 +6492,8 @@ def delete_task(task_id: str) -> Response:
         tasks.pop(task_id, None)
         task_activity.pop(task_id, None)
         save_task_index()
+        if task_waits_on_owner(task):
+            dismiss_wait_notice_async(task_id)
         if queue_payload_locked(task_id):
             # Its waiting message went with the chat's files.
             message_queue[:] = [entry for entry in message_queue if entry["task_id"] != task_id]
