@@ -28,3 +28,9 @@ ATTR_TASK_ID: Final = "task_id"
 ATTR_REPLY: Final = "reply"
 ATTR_TURN_ID: Final = "turn_id"
 ATTR_FORCE: Final = "force"
+
+# The GitHub sign-in (add-on 0.3): the worker reports it under "github" in /status.
+ISSUE_GITHUB_ACCESS_LOST: Final = "github_access_lost"
+EVENT_GITHUB_ACCESS: Final = "codex_cli_github_access"
+GITHUB_ERROR_STATES: Final = ("expired", "revoked", "failed")
+GITHUB_WARNING_STATES: Final = ("near_expiry", "access_changed")

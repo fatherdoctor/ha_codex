@@ -50,22 +50,25 @@ class ReviewStoreTests(unittest.TestCase):
         self.store.mail('next day', 'lead', NOW + 86400, turn_id='next')
         self.store.mail('owner can still communicate', 'owner', NOW)
 
-    def test_f2_full_mailbox_prunes_threads_and_cannot_brick_channel(self):
+    def test_f2_full_unread_refuses_until_reader_clears(self):
         with patch.object(scheduling, 'MAX_MESSAGES', 3):
             first = self.store.mail('root', 'owner', NOW)
             self.store.mail('reply', 'owner', NOW+1, first)
             self.store.mail('second', 'owner', NOW+2)
+            with self.assertRaisesRegex(scheduling.MailboxFull, 'unread'):
+                self.store.mail('new', 'owner', NOW+3)
+            self.store.clear_mail(reader='codex'); self.store.clear_mail(reader='lead')
             self.store.mail('new', 'owner', NOW+3)
-            self.assertEqual([m['body'] for m in self.store.messages()], ['second', 'new'])
-            self.assertEqual(self.store.clear_mail(), 2)
+            self.assertEqual([m['body'] for m in self.store.messages(reader='owner')], ['reply', 'second', 'new'])
 
-    def test_f2_lead_clear_only_own_threads(self):
+    def test_f2_lead_clear_only_own_delivery_copies(self):
         owner = self.store.mail('owner', 'owner', NOW)
         lead = self.store.mail('lead', 'lead', NOW+1, turn_id='turn')
         self.store.mail('reply', 'owner', NOW+2, lead)
-        with self.assertRaises(LookupError): self.store.clear_mail(author='lead', parent=owner)
-        self.assertEqual(self.store.clear_mail(author='lead'), 2)
-        self.assertEqual([m['id'] for m in self.store.messages()], [owner])
+        self.assertEqual(self.store.clear_mail(reader='lead'), 3)
+        self.assertEqual(self.store.messages(reader='lead'), [])
+        self.assertEqual(len(self.store.messages(reader='owner')), 3)
+        self.assertEqual(self.store.messages(reader='owner')[0]['id'], owner)
 
     def test_f4_database_and_persistent_journal_exist_before_task(self):
         self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
@@ -74,7 +77,7 @@ class ReviewStoreTests(unittest.TestCase):
         self.assertEqual(journal.stat().st_mode & 0o777, 0o600)
         with self.store.connect() as db:
             self.assertEqual(db.execute('PRAGMA journal_mode').fetchone()[0], 'persist')
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 1)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 3)
 
     def test_f6_once_uses_home_assistant_wall_time(self):
         item = scheduling.validate(proposal(spec={'kind':'once','at':'2027-03-02T09:00:00'}), NOW, 'America/Chicago')
@@ -154,9 +157,9 @@ class ReviewApiTests(unittest.TestCase):
         for i in range(20):
             self.assertEqual(self.client.post('/lead/mailbox',json={'body':'sample','turn_id':'turn'},headers=self.lead).status_code,201)
         self.assertEqual(self.client.post('/lead/mailbox',json={'body':'sample','turn_id':'turn'},headers=self.lead).status_code,429)
-        self.assertEqual(self.client.delete('/lead/mailbox',headers=self.lead).json['removed'],20)
+        self.assertEqual(self.client.delete('/lead/mailbox',json={'confirm':True},headers=self.lead).json['removed'],20)
         self.assertEqual(self.request_owner('POST','/schedule-mailbox',{'body':'owner'}).status_code,201)
-        self.assertEqual(self.request_owner('DELETE','/schedule-mailbox').json['removed'],1)
+        self.assertEqual(self.request_owner('DELETE','/schedule-mailbox',{'confirm':True}).json['removed'],21)
 
     def test_f2_codex_verified_turn_limit(self):
         task_id='sample'; server.tasks[task_id]={'status':'running','current_turn_id':'verified-turn'}
@@ -174,7 +177,7 @@ class ReviewApiTests(unittest.TestCase):
         result=self.service.dispatch({'operation':'list_schedules','arguments':{'offset':110,'limit':10},'capability':cap})
         self.assertEqual(len(result['items']),10); self.assertIsNone(result['next_offset'])
 
-    def test_f3_background_outcomes_are_log_only_and_chat_still_pushes(self):
+    def test_f3_background_outcomes_are_log_only_and_chat_pushes_only_what_needs_the_owner(self):
         with patch.object(server,'notify') as notify, patch.object(server,'notify_question') as question:
             for source in ('lead','schedule'):
                 server.tasks['background']={'task_source':source}
@@ -182,7 +185,8 @@ class ReviewApiTests(unittest.TestCase):
                     server.notify_task_outcome('background',status,'sample','turn','question',['choice'])
             notify.assert_not_called(); question.assert_not_called()
             server.tasks['chat']={}
-            server.notify_task_outcome('chat','completed','sample'); notify.assert_called_once()
+            server.notify_task_outcome('chat','completed','sample'); notify.assert_not_called()
+            server.notify_task_outcome('chat','failed','sample'); notify.assert_called_once()
             server.notify_task_outcome('chat','needs_input','sample','turn','question',['choice']); question.assert_called_once()
 
     def test_f7_masked_prompt_flag_and_edit_rejection(self):

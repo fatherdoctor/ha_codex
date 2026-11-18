@@ -188,9 +188,9 @@ class ScheduleStoreTests(unittest.TestCase):
             self.store.mail('No such thread.', 'lead', NOW, 'missing')
         with self.assertRaises(LookupError):
             self.store.mail('Reply to a reply is not a root.', 'lead', NOW, reply)
-        with patch.object(scheduling, 'MAX_MESSAGES', 2):
+        with patch.object(scheduling, 'MAX_MESSAGES', 2), self.assertRaises(scheduling.MailboxFull):
             self.store.mail('Full mailbox.', 'lead', NOW, turn_id='turn')
-        self.assertEqual(len(self.store.messages()), 1)
+        self.assertEqual(len(self.store.messages()), 2)
 
     def test_token_hash_only_rotation_and_private_database(self):
         first = self.store.rotate_token(); self.assertTrue(self.store.token_ok(first))
@@ -231,12 +231,12 @@ class SchedulingApiTests(unittest.TestCase):
         first = store.mail('Synthetic message body', 'codex', NOW, turn_id='mail-test')
         reply = store.mail('Synthetic reply', 'owner', NOW + 1, first)
         status = store.mail_status()
-        self.assertEqual(status['unread'], {'lead': 2, 'owner': 1})
+        self.assertEqual(status['unread'], {'lead': 2, 'owner': 1, 'codex': 1})
         self.assertNotIn('body', str(status))
         result = self.client.get('/lead/mailbox?unread_only=true', headers=self.lead)
         self.assertEqual([row['id'] for row in result.json['mailbox']], [first, reply])
         self.assertEqual(self.client.get('/lead/mailbox?unread_only=true', headers=self.lead).json['mailbox'], [])
-        self.assertEqual(store.mail_status()['unread'], {'lead': 0, 'owner': 1})
+        self.assertEqual(store.mail_status()['unread'], {'lead': 0, 'owner': 1, 'codex': 1})
         self.assertEqual(self.client.get('/lead/mailbox?unread_only=maybe', headers=self.lead).status_code, 400)
 
     def test_status_mail_metadata_has_no_body_or_core_timezone_lookup(self):
@@ -267,15 +267,16 @@ class SchedulingApiTests(unittest.TestCase):
     def test_read_tracking_is_pruned_with_existing_mailbox_limits(self):
         store = self.service.engine().store
         first = store.mail('First', 'codex', NOW, turn_id='mail-test')
-        store.mark_mail_read('owner', [first])
+        store.mark_mail_read('owner', [first]); store.mark_mail_read('lead', [first])
         with patch.object(scheduling, 'MAX_MESSAGES', 1):
             store.mail('Second', 'codex', NOW + 1, turn_id='mail-test')
         self.assertEqual(len(store.messages()), 1)
         with store.connect() as db:
-            self.assertEqual(db.execute('SELECT count(*) FROM mailbox_reads').fetchone()[0], 0)
+            self.assertEqual(db.execute('SELECT count(*) FROM mailbox_reads WHERE message_id=?', (first,)).fetchone()[0], 0)
         self.assertEqual(store.mail_status()['unread']['lead'], 1)
         store.clear_mail()
-        self.assertEqual(store.mail_status(), {'unread': {'lead': 0, 'owner': 0}, 'messages': []})
+        self.assertEqual(store.mail_status()['unread'], {'lead': 0, 'owner': 0, 'codex': 0})
+        self.assertEqual(store.mail_status()['messages'], [])
 
     def test_lead_requires_separate_token_and_ingress_alone_is_not_a_token(self):
         self.assertEqual(self.client.get('/lead/mailbox').status_code, 401)
@@ -332,7 +333,8 @@ class SchedulingApiTests(unittest.TestCase):
         self.assertEqual(server.task_options(task_id)['codex_sandbox'], 'read-only')
         self.assertEqual(server.read_options()['codex_sandbox'], 'workspace-write')
         server.start_background_task.assert_called_once_with(task_id, 'Inspect sample.')
-        self.assertEqual(self.client.post('/lead/tasks', json={'prompt': 'No parallel slot.'}, headers=self.lead).status_code, 409)
+        self.assertEqual(self.client.post('/lead/tasks', json={'prompt': 'One waiting slot.'}, headers=self.lead).status_code, 202)
+        self.assertEqual(self.client.post('/lead/tasks', json={'prompt': 'No second waiting slot.'}, headers=self.lead).status_code, 409)
         server.tasks[task_id]['status'] = 'running'; server.tasks[task_id]['approvals'] = [{'status': 'pending'}]
         result = self.client.get('/lead/tasks/' + task_id, headers=self.lead)
         self.assertEqual(result.json['task']['run_status'], 'waiting_for_approval')

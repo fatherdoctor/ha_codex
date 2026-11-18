@@ -1,6 +1,230 @@
 # Changelog
 
-## 0.1.81.3 (unreleased)
+## 0.3.6 (unreleased)
+
+- **Text size** for the chat page: Normal, Larger (115 %) or Largest (130 %), from **Settings > Text size** or, on a
+  computer, the **Aa** button in the title row above the chat. It scales the messages, code, buttons, the chat list,
+  Settings, the sign-in text, the schedule dialog and the list of steps together, is remembered on each device, and
+  still fits a phone screen at Largest.
+- The app's own grant layer is removed: the five pre-approved action groups (Settings > Permissions overrides), the
+  guard-rails block they read from `/config/AGENTS.md`, and the `home_assistant_actions` `act` tool with its
+  **Allow once** card. Codex's own permission requests are now the only way a change to the house is approved. A
+  device command still finds the entity and reads its state back with the `home_assistant` tools; the change itself
+  now needs your normal **Allow once**, as every other action does. The sandbox, the command check, the protected
+  places and the check after each exchange are unchanged. A test build that used the groups leaves
+  `/data/codex-home/house-rules/permission-overrides.json`, `/data/house-rules/confirmed.json`,
+  `/data/permission-overrides-backups` and `/data/permission-overrides.sock` behind; the app no longer reads them, and you can delete them.
+
+## 0.3.5 (unreleased)
+
+- Settings and its windows (Status, Remote connection, Permissions, Workspace rules) look more like Home Assistant's
+  own settings pages. Text, number and list fields are filled fields with a line under them, as on the add-on's
+  Configuration tab. Each part's main button is filled in the primary color, and the other buttons are text buttons.
+  The close buttons and the check mark of the chosen permission mode use Home Assistant's icons. The page now takes
+  Home Assistant's font, and an answer's lines sit a little closer. The page copies its theme from Home Assistant,
+  so a custom theme and dark mode reach every field, switch and button. Opened alone, outside Home Assistant, the
+  page keeps its own colors. No setting, permission or approval rule changed.
+- The two bands above the chat move to the foot of the side bar. One thin row above the messages keeps the
+  chat title and the chat menu. The foot of the side bar holds Home Assistant with the integration state (opens
+  Status), Remote connection with its state (opens the pairing window), the 5-hour and weekly quota with the plan
+  type and reset times, and Settings. A row that needs your attention shows an amber dot. While a task runs, the
+  send button is the stop button, even with a draft or a file in the message box.
+- "Your chats" is one list card with one line for each chat: an icon, the title and its age. The open chat has a
+  light tint. The divider between the side bar and the chat is now visible, resizes from 200 to 480 px, and goes
+  back to 260 px on a double-click.
+- The chat reads more like the desktop app. A gray "Worked for" line above each answer opens its checks, and on the
+  latest answer its steps too (the worker keeps the steps of the latest exchange only). A failed check keeps one
+  short line under the answer. An answered or expired permission request is one
+  closed line that opens to the same details. On a wide screen the chat and the prompt box share one 720 px
+  column. These are display changes only: no approval, permission or sign-in rule changed.
+- A permission request that waits for you now shows at the bottom of the chat, below the "Working" lines, and the
+  chat scrolls to it once when it first appears. Before, it sat above those lines and was easy to miss. A request
+  you already answered stays where it was. No approval or permission rule changed.
+- Settings keeps what needs a button, a sign-in or a confirm step. Plain values move to the app's Configuration
+  tab, so each value has one place to change it. A new option, Interactions to keep (10 to 100), replaces the field
+  on the page; an install that saved a number keeps it, and a new install keeps 25. The remote control machine name
+  is set on the Configuration tab only, so the worker no longer writes any app option. The empty Appearance and
+  Advanced sections are gone, and Workspace rules opens from Workspace instructions. A new Add-on configuration row
+  at the foot of Settings opens the Configuration tab; when Supervisor cannot name the app, the row says where to
+  find the tab and is not a link. The number of interactions to keep now applies before the worker closes the
+  records an interrupted run left open, so a restart keeps as many records as the option says.
+
+## 0.3.4 (unreleased)
+
+- A plain device command such as "set the office overhead to 50%" is faster. On 0.3.3 Codex had no tool on the
+  chat page that finds an entity by name, so it searched `.storage/core.entity_registry` with shell commands, and
+  the page's rules told it to look for `/config/AGENTS.md` in every message. The `home_assistant` `verify` tool
+  has a new read-only `find` operation: it takes the words you used and an optional domain, and returns at most
+  10 matching entities with their entity id, friendly name and state. Entities with a credential-like name and
+  password-mode text entities are left out, as they are for the ChatGPT app's state reads. The page's rules now
+  send a device command through three tool calls (find, act, read the state back) and tell Codex not to search
+  files for an entity.
+- Codex reads `/config/AGENTS.md` again only when it changed. The `exchange_info` tool now says in each message
+  whether the file exists and when it last changed. A change to the file still reaches an open chat on its next
+  message, and a removed file stops applying. The guard-rails block is still read by the worker before every
+  pre-approved action. No approval, sandbox or permission rule changed.
+- "Set the light to 100%" works again without an approval. A pre-approved light action now accepts
+  `brightness_pct` and Home Assistant's other common light fields: `brightness_step`, `brightness_step_pct`,
+  `hs_color`, `xy_color`, `color_name` and `flash`, next to `brightness`, `color_temp_kelvin`, `transition` and
+  `rgb_color`. Each value must have the right type and stay in the range Home Assistant's light service accepts;
+  a value outside it is refused.
+- When a device action is refused only because its permission group is off or because its data has a field
+  that is not on the list, the `act` tool now shows the owner an **Allow once** / **Deny** request in the chat
+  and waits up to three minutes. Allow once runs that one action after every check runs again; it turns on no
+  group and allows no later action. Deny, or no answer, leaves everything unchanged. Before, the refusal asked
+  for an approval that the page could not show, so the exchange ended with nothing done. The owner is
+  asked only when every other check passes. Security and people actions (locks, alarm, covers, cameras,
+  notifications) never ask, because their data can hold a code; while that group is off, the refusal tells the
+  owner how to turn it on in Settings → Permissions overrides. A target in the action data (`entity_id`,
+  `device_id`, `area_id`, `floor_id`, `label_id`) is refused and never asks, so Allow once can only reach the
+  target the request names. Guard rails, templates, unknown targets and the other refusals are unchanged.
+- A task that ends with a plain answer no longer sends a Home Assistant notification; the answer is in the
+  chat. A notification still goes out when a task asks a question, waits for a permission decision, or fails.
+  Before, every completed chat task sent a **Codex task completed** notification with its answer.
+  A chat task the owner cancels sends no notification either; before, it sent **Codex task cancelled**. The
+  `codex_cli_task_result` event still reports the cancel.
+- The **Copy response** button under each answer is gone, with its manual copy dialog. **Copy thread ID** in the
+  thread menu still copies.
+- The message box starts at one line of text above the control row, as in the ChatGPT desktop app, and grows as you
+  type, up to 180 pixels.
+- The **Settings** window keeps one size. Opening a section scrolls inside the window instead of making it taller.
+- **ChatGPT app pairing** has its own collapsed header inside **Accounts and connections**, like **ChatGPT account**
+  and **GitHub**. Its header shows the state in one word, for example "Off", in red when the connection failed.
+- **Advanced** is a section like the others, with the same arrow and a status line.
+- Every section header in **Settings** has the same arrow size and the same space to the divider above and below it.
+  An open section has the same space between its last line or button and the next divider.
+- The bold **Verification** box under an answer is gone. The checks, the readback and the note on screenshots sit in
+  one closed **Checks and readback** line. The line names a bad result, for example "1 failed", in the error color.
+  It opens by itself only while a batch of blocked browser requests needs a decision, while a retry runs, and to
+  show the result of a retry just started from the page. A saved chat opened later shows it closed.
+- Every arrow in **Settings**, **Scheduled runs**, the thread step list, the checks block and the reasoning picker
+  is a Material Design Icons arrow, the icon set Home Assistant uses (Apache-2.0; see `web/NOTICE`). The browser's own
+  triangle is gone from the last collapsed parts that still had it, such as **Use a token instead**.
+- The GitHub sign-in notice in Home Assistant names the new place: **Settings > Accounts and connections > GitHub**.
+- A question about Codex cloud tasks, such as "Can you see my cloud tasks?", now gets an answer from
+  `codex cloud list --json` and `codex cloud status`. On 0.3.3 Codex looked at document sessions instead and
+  said it could see none. The page's rules now name the two commands, say that the list holds only Codex cloud
+  tasks of the signed-in account, and tell Codex to say so plainly when the list is empty. In a sandboxed mode
+  each command still raises the usual Allow once card. No approval, sandbox or permission rule changed.
+
+## 0.3.3 (unreleased)
+
+- The approval card and the remote-control hook now read command text with one shared copy of the comment
+  and word code (`shell_words.py`), so a later fix cannot leave the two checks reading a command differently.
+  Each still answers unreadable text its own way. No command is judged differently.
+- When the approval card refuses **Allow once** because it cannot read a command's heredoc or quoting, it now
+  says that, instead of saying the command touches the app's permission policy.
+- A scheduling or mailbox request whose text holds a character that cannot be stored (a lone surrogate) is now
+  refused with a sentence that says so, instead of the bare word `utf-8`.
+- Settings has one **Accounts and connections** section for every sign-in and pairing: ChatGPT account, GitHub,
+  and the ChatGPT app pairing. It starts collapsed. Its header joins the three states ("ChatGPT signed in · GitHub
+  connected · app off"), and when one needs the owner the header names only that one, in red. ChatGPT and GitHub
+  keep their own collapsed headers, codes and countdowns inside it. The app pairing part shows the remote
+  connection state with **Get a pairing code**, **Manage remote connection** and **Turn off**; it replaces the
+  separate **Manage remote connection** row. A pairing code has no countdown: the worker does not know how long
+  Codex keeps it. **Turn off** stops the connection and does not remove the pairing in the ChatGPT app.
+- When a request gets HTTP 401 because the Home Assistant ingress session expired (a tab that slept), the page
+  asks Home Assistant for a new session once, through the parent window as the Home Assistant frontend does, and
+  sends the request again. Requests that fail together share one renewal. If the renewal fails, a banner says the
+  session expired and offers **Reload**; the page no longer shows "The worker returned HTTP 401".
+- A thread started from the chat page no longer shows the page's instructions as your message in the ChatGPT app.
+  The page sends its fixed rules as Codex developer instructions, and the message holds only your text, so the
+  app shows your words as the message and the title. The details of each message (the backup folder, attached
+  documents and images, and the notes on direct API calls, the local documentation and GitHub) come from a new
+  read-only `exchange_info` tool on the Home Assistant data server. A page message on a thread that the page did
+  not start (a ChatGPT app thread, or one from 0.3.2 or earlier) begins with a one-line note to call that tool,
+  which then also returns the rules. Threads from 0.3.2 or earlier keep their old instructions in their history.
+- Codex's answers are stored in the thread as plain text, so the ChatGPT app shows the answer and not a JSON
+  object. The page no longer sends an output format. Codex calls two new tools on the Home Assistant data server
+  instead: `ask_owner` with a question and up to three choices, and `report_failure` with a reason. Neither asks
+  for permission. The page takes its status, question and choices from these calls. A failure that the worker
+  finds itself (an exit with an error, a timeout, a stall, a configuration that fails its check) still comes
+  first; it now also wins over a question, so a task that leaves a broken configuration is reported as failed and
+  does not ask a question. A JSON answer from a thread of 0.3.2 or earlier still shows as before. The page shows a
+  question on its own line only when the answer text does not already hold it.
+
+## 0.3.2 (unreleased)
+
+- Codex now refuses risky commands in two layers. Managed Codex command rules refuse six literal command
+  prefixes: the Supervisor (`ha supervisor`, `ha super`, `ha su`), credentials, the app's policy folder and
+  full access. They apply with Remote Control off too. The command hook stays the main check. The app tests
+  that Codex loads the rules before Remote Control starts. A rules warning stops chat turns and keeps Remote
+  Control off until the app restarts after a repair. A failed or timed-out rule test is tried again on the next
+  **Turn on**. The probe's process group is always stopped. DOCS says how an owner allow rule and the prefix
+  limits change these checks.
+- A Turn on request that races a rules warning now leaves Remote Control saved as off.
+- The command hook joins a backslash and newline inside a word, as the shell does, so `h\` on one line and
+  `a su info` on the next is read as `ha su info`. Continuations it cannot read (in a heredoc, a substitution or
+  unreadable quoting) are refused with a request for a one-line command. Its text floor also reads the command
+  with every backslash and newline removed, in any quote or comment state. So a Supervisor command spelled
+  across lines is refused also in single quotes, after a carriage return, inside `${...}`, and in a shell or
+  wrapper that the parser does not open (`dash -c`, `setsid sh -c`, `bash --norc -c`).
+- The app no longer makes a ChatGPT sign-in code by itself at start. A code works for 15 minutes and only
+  while its sign-in runs, so a code made at start was often stale before anyone used it. While Codex is not
+  signed in, the Home Assistant notification now points to **Sign in**, and the owner starts a sign-in there
+  when ready. A mark file that older versions left in the app's storage is removed at start.
+- The ChatGPT and GitHub sign-in codes show how long they still work, with a live countdown. The worker sends
+  the seconds left by its own clock, so a phone with a wrong clock still shows the right time, and the page sets
+  the time again from each status reply, so a phone that slept catches up. When a code runs out, the page says so and offers **Get a new code**, which cancels the old sign-in and starts a new one.
+- A ChatGPT sign-in that stops without signing in now says why when it can: the code expired, or the error line
+  that Codex printed (with any code in it replaced). The page shows the reason, and **Sign in** becomes
+  **Get a new code**. A canceled sign-in can no longer mark the next one as failed or clear its process.
+- **Cancel** on a ChatGPT sign-in no longer raises a false "Codex sign-in failed" notification. The app now
+  marks the sign-in canceled before it stops the sign-in process.
+- Settings on a phone: every settings section starts collapsed, with a one-line status in its header (for
+  example "Connected as owner, 1 repository" or "3 of 5 on"); a section that needs attention says so in red:
+  a sign-in that waits or failed, house rules that wait for review, a schedule that waits for approval, or
+  schedules paused without the Home Assistant time zone. Tap a header to
+  open its section. Button rows wrap, and at phone width the buttons of a row share it in equal columns, so the
+  ChatGPT buttons no longer render tall and narrow and the GitHub buttons no longer run past the edge.
+- The name the ChatGPT app shows for this Home Assistant can be changed on the page, under remote control,
+  while remote control is off. The page saves it as the **Remote control machine name** option through
+  Supervisor, so the app's Configuration tab shows the same name. Only that option changes; the other options are
+  sent back as Supervisor reports them (defaults merged with the stored values, as Save in the Configuration tab
+  does), with any `!secret` reference kept. A name can have up to 63 characters.
+- A first message such as "Test" now gets a normal reply. The task prompt asks Codex to write its summary as a
+  reply to the person, not as a report from the worker, and it names `/config/AGENTS.md` only when that file
+  exists, in chat tasks and in remote-control sessions. Before, a missing file could show in the answer as
+  "/config/AGENTS.md was not found". The page now shows a missing `AGENTS.md` once, above the message box, as a
+  setup hint that you can dismiss.
+
+## 0.3.1 (unreleased)
+
+- A repository in `/share` whose name starts with `ha_` can be used again with Remote Control on. The check
+  that keeps Codex out of the app's policy folder `/usr/share/ha_codex` refused every command that named
+  `/share/ha_` anywhere, so even `git -C /share/ha_<name> status` was refused as a policy change. The check now
+  allows the plain absolute `/share/ha_<name>` and its subfolders. Every other way to reach the policy folder is
+  still refused: a relative `share/ha_...` (the text cannot tell whether the command runs in `/usr`),
+  `../share/ha_...`, globs such as `/usr/sh*/ha_*`, braces, quotes, backslashes, and a variable or command
+  substitution before `/share/ha_` or `/ha_codex`. The command check and the approval check use the same rule.
+- The credentialed `git fetch` and `git push` now pin the TLS trust: the system CA bundle and CA folder are set
+  for git, and `http.sslCAInfo`, `http.sslCAPath`, `http.proxy`, `http.extraHeader`, `http.cookieFile`,
+  `http.saveCookies` and `http.curloptResolve` are reset for the run. A CA file or folder left in a repository's
+  git settings, in any `http.<url>` form, is never trusted for the GitHub sign-in.
+
+## 0.3.0 (unreleased)
+
+- GitHub sign-in (release 0.3). **Settings > GitHub**, beside the ChatGPT account, connects GitHub with
+  buttons only: **Connect GitHub** shows GitHub's device code and the `github.com/login/device` link on the
+  page, then **Read test**, **Check now**, **Accept this access**, **Disconnect** (with the link to revoke on
+  GitHub) and **Use a token instead** for one fine-grained token. **Clone** (into `/share/<repository>`) and **Link**
+  (a folder under `/share` or `/config`) set up a repository. The code and the token are never logged or kept in browser storage.
+- The app keeps the sign-in in `/data/github`, hidden in every Codex sandbox and left out of the app backup.
+  Codex never holds it: the new `github_git` tool (repos, fetch, pull, push, clone, link) asks the app to run
+  git, and every push runs the kit's push guard first. Read-only chats and schedules can only list and fetch.
+  A push that adds a `guard: allow` mark is refused, because an allow mark needs the owner. GitHub refuses
+  changes to `.github/workflows/*` with Contents-only access. A page button for allow marks and a list of the
+  git folders on this box come in 0.3.1.
+- The app checks the sign-in at start, hourly and on **Check now**. A change fires the event
+  `codex_cli_github_access`, sends one notification (`codex_cli_github`), shows a banner above the chat, and
+  the integration raises the repair `github_access_lost` until the check is OK or the sign-in is disconnected.
+  The new option `github_client_id` is for an owner who registered their own GitHub App.
+
+- Integration actions and browser-session endpoints now require a loaded config entry. The browser broker
+  belongs to that entry and revokes its sessions on unload or failed setup. Initial worker authentication
+  rejection now requests reauthentication instead of retrying as a connection failure.
+- The sign-in action explains its `force` default and how it handles an existing sign-in or a flow already
+  running. The integration quality checklist now distinguishes implemented rules from unfinished work.
 
 - The app now installs its own integration. At each start it copies the Codex integration of the same
   release, carried in the app image, to `/config/custom_components/codex_cli`, then asks for one restart of
@@ -26,7 +250,23 @@
   signed in.
 - Smaller fixes: the install notice no longer says to finish setup for an integration that may already be set
   up; a file name that cannot be encoded is reported like any failed copy; a damaged notice record is not
-  replayed; the documentation says how to go back to a version before 0.1.81.3.
+  replayed; the documentation says how to go back to a version before 0.3.0.
+
+- A legacy mailbox above 128 messages now keeps stable page offsets during a read.
+  Read copies leave to make room only when a new message arrives.
+- Expire agent copies 48 hours after their first read so old mailbox pages keep stable positions.
+  Settings acknowledges only the owner mailbox; agent labels follow the active turn.
+  Prior read marks receive a one-time upgrade grace period.
+- Upgrade note: legacy messages without a Codex read mark remain unread. If its mailbox is full,
+  read those messages through Codex or clear its mailbox in Settings. Then send more mail to `all`.
+  This preserves unread history without an assumed read date.
+
+- Let the authenticated lead direct worker tasks on its own initiative, including an explicit task attached
+  to a mailbox note. Hold one durable waiting task while busy and report start/result in the same thread;
+  keep native human approval and unattended daily limits. The worker cannot start lead work.
+- Give each reader a 128-message mailbox, retain unread mail across absences, expire only read agent mail
+  after 48 hours, and refuse all-unread full delivery with a visible status. Add per-mailbox clear confirmation,
+  UTC message envelopes, local-time/plain views, due status, source labels and bounded lead mailbox pages.
 
 ## 0.1.81.2 (unreleased)
 
@@ -154,7 +394,7 @@ Permissions that ask, and only an administrator can answer. Sign-in without a te
 - A command check outside the model for remote control: managed Codex requirements, the hook, its self-test and the configuration watch. Credential and explicit full-access checks stay on. Device and message category refusals are removed; planted-command and templated-action checks remain on. The hook fixtures follow the captured Codex 0.166 input format. Every sandboxed command sees masked paths for `secrets.yaml`, Home Assistant's sign-in store and the app's options and API token; reads fail with `Permission denied`. `/run/s6` is an empty tmpfs, and the worker is marked not dumpable, to limit process-environment access; loaded-profile proc-view isolation is a separate lead lab check.
 - **Parity with the Claude add-on.** Remove the category-refusal option and device/message lists. The owner can confirm any device action; limits specific to an installation belong in `/config/AGENTS.md`. Credential, protected-policy and named remote security checks stay on. Definition and platform bodies and templated action names remain checked; templated targets and unchanged call lines follow normal approval.
 - Permission cards show what changes, where and the possible effect. Shipped practice asks an ambiguity question before acting and keeps privacy, backups, the configuration check and honest reporting. This preserves the surviving confirmation guidance from draft #9.
-- **Text size** for the chat page: Normal, Larger (115 %) or Largest (130 %), from the **Aa** button above the chat or under **Settings**. It scales the messages, code, buttons, sign-in text and the list of steps together, is remembered on each device, and still fits a phone screen at Largest.
+
 
 ## 0.1.81.1
 

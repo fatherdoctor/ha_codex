@@ -36,9 +36,9 @@ Pre-release: nothing is tagged or published from this fork yet, and no change he
 | `codex-cli-worker/tests/` | every test: `test_*.py`, the Home Assistant tests in `ha/`, browser checks `browser_*.cjs` |
 | `custom_components/codex_cli/` | the integration; `manifest.json` holds its version |
 | `scripts/` | `build_hacs_release.py`, `fork_release.py` (tag after a lab pass, rollback) |
-| `docs/` | `updates-and-rollback.md`; `upstream-README.md` is upstream's README, kept for reference only |
+| `docs/` | `updates-and-rollback.md`, design notes under `design/` and `designs/` |
 | `ci/` | workflow files staged for the maintainer to copy into `.github/workflows/` |
-| `examples/`, `screenshots/`, `brand/` | example scripts and images; `screenshots/NEEDED.md` lists shots still to take |
+| `examples/`, `screenshots/` | the example script; the README screenshots that `SCREENSHOTS.md` says how to retake |
 
 ## Rules
 
@@ -69,7 +69,9 @@ Not released yet: nothing is tagged or published, and the release and image work
 first release is planned. When one is:
 
 1. Set the same version in `codex-cli-worker/config.yaml` and `custom_components/codex_cli/manifest.json`; a fork
-   version is upstream's version plus one more number, counted from 1 for each upstream release.
+   version is upstream's version plus one more number, counted from 1 for each upstream release. A beta is
+   `<three numbers>-beta.<n>`, made on the `beta` branch for the test machine only
+   ([Versions](docs/updates-and-rollback.md#versions)).
 2. The version passes on a Home Assistant OS test machine, and its lab-pass record is committed.
 3. The commit that removes `(unreleased)` from the changelog heading is the one tagged, by the maintainer, with
    `python scripts/fork_release.py tag <version> --push`; the release workflow then builds the images and the HACS ZIP.
@@ -85,7 +87,7 @@ first release is planned. When one is:
 - `codex-cli-worker/policy/` - what the packaged Codex is allowed to do on an install (`house-rules.md` becomes
   that Codex's own `AGENTS.md`). It is product code, not guidance for working here; change it only when the task
   is a policy change, with the review above.
-- `docs/upstream-README.md`, `LICENSE`, `codex-cli-worker/web/assets/vendor/` - upstream's and third parties' text.
+- `LICENSE`, `codex-cli-worker/web/assets/vendor/` - upstream's and third parties' text.
 - Any real Home Assistant install: nothing in this repository is to be tested against a home that people live in.
 
 ## Read more
