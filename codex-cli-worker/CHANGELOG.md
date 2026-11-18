@@ -2,10 +2,9 @@
 
 ## 0.3.6 (unreleased)
 
-- **Text size** for the chat page: Normal, Larger (115 %) or Largest (130 %), from **Settings > Text size** or, on a
-  computer, the **Aa** button in the title row above the chat. It scales the messages, code, buttons, the chat list,
-  Settings, the sign-in text, the schedule dialog and the list of steps together, is remembered on each device, and
-  still fits a phone screen at Largest.
+- **Text size** for the chat page: Normal, Larger (115 %) or Largest (130 %), from **Settings > Text size**. It
+  scales the messages, code, buttons, the chat list, Settings, the sign-in text, the schedule dialog and the list of
+  steps together, is remembered on each device, and still fits a phone screen at Largest.
 - **Slash commands** in the message box: typing `/` lists `/new`, `/stop`, `/model`, `/reasoning`, `/rename`,
   `/usage` (or `/status`), `/size`, `/settings` and `/help` with a line on each, filtered as you type and picked by a
   tap or with the arrow keys and Enter. Only the commands the page can run at that moment are listed. The page runs

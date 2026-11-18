@@ -23,6 +23,9 @@ const PARTS = [
   ["code", "#messages pre code"],
   ["send", "#send"],
   ["chat list", ".chat-row"],
+  // studio.css styles these two, so they prove its sizes scale too.
+  ["message box", "#message"],
+  ["dialog title", "#status-title"],
 ];
 
 /** Parts inside Settings: a section header, the sign-in text and the schedule form's two selects. */
@@ -67,32 +70,22 @@ async function openSettings(page) {
   await page.locator("#settings").waitFor();
 }
 
-/**
- * Pick a size the way a person does. On a computer: tap Aa, tap the choice.
- * On a phone the title row is hidden, so: Settings, Text size, the choice.
- */
+/** Pick a size the way a person does, on every screen: Settings, Text size, the choice. */
 async function pickSize(page, size) {
-  const aa = page.getByRole("button", { name: "Text size", exact: true });
-  if (await aa.isVisible()) {
-    await aa.click();
-    await page.locator("#text-size-popover").waitFor();
-    await page.locator("#text-size-popover").getByLabel(label(size)).check();
-    return true;
-  }
   await openSettings(page);
   const toggle = page.locator("#text-size-section .settings-toggle");
   if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
   await page.locator("#settings").getByLabel(label(size)).check();
   await page.locator("#close-settings").click();
-  return false;
 }
 
 /**
- * Check the three sizes: one tap from the chat on a computer, Settings on a
- * phone; every part scales together (messages, code, buttons, the chat list,
- * the activity list, Settings with the sign-in text and the schedule selects), the choice
- * is kept per device and matches Settings, Escape and an outside tap close
- * the pop-up, and the page fits a phone with no sideways scroll at Largest.
+ * Check the three sizes, chosen in Settings on every screen: the title row
+ * holds no text size button; every part scales together (messages, code,
+ * buttons, the chat list, the message box, a dialog title, the activity list,
+ * Settings with the sign-in text and the schedule selects), the choice is
+ * kept per device and ticked in Settings, and the page fits a phone with no
+ * sideways scroll at Largest.
  * Screenshots of each size on a phone and an iPad go to the output folder.
  */
 async function testTextSize(browser, output, errors) {
@@ -120,9 +113,10 @@ async function testTextSize(browser, output, errors) {
     const base = {};
     for (const [part, selector] of PARTS)
       base[part] = await fontSize(page, selector);
+    // The thin title row holds the title and the chat menu only.
+    assert.equal(await page.locator(".chat-header #text-size-button").count(), 0, `${name}: no text size button`);
     for (const [size, scale] of Object.entries(SIZES)) {
-      const popover = await pickSize(page, size);
-      assert.equal(popover, !touch || viewport.width > 700, `${name}: Aa shows on wide screens only`);
+      await pickSize(page, size);
       assert.equal(
         await page.evaluate(
           () => document.documentElement.dataset.textSize || "normal",
@@ -134,21 +128,7 @@ async function testTextSize(browser, output, errors) {
           Math.abs((await fontSize(page, selector)) - base[part] * scale) < 0.6,
           `${name} ${size}: ${part} is not ${scale}x`,
         );
-      // The pop-up stays on screen and the page needs no sideways scroll.
-      if (popover) {
-        const box = await page.locator("#text-size-popover").boundingBox();
-        assert(
-          box.x >= 0 && box.x + box.width <= viewport.width,
-          `${name} ${size} pop-up`,
-        );
-        if (touch)
-          await page.screenshot({
-            path: path.join(output, `text-size-${name}-${size}-picker.png`),
-            animations: "disabled",
-          });
-        await page.keyboard.press("Escape");
-        assert.equal(await page.locator("#text-size-popover").isHidden(), true);
-      }
+      // The page needs no sideways scroll.
       assert.equal(await fits(page), true, `${name} ${size} scrolls sideways`);
       if (touch)
         await page.screenshot({
@@ -190,15 +170,11 @@ async function testTextSize(browser, output, errors) {
       largest[part] = await fontSize(page, selector);
     const toggle = page.locator("#text-size-section .settings-toggle");
     if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
-    // A choice in Settings applies at once and ticks the pop-up too.
+    // A choice in Settings applies at once and is saved.
     await page.locator("#settings").getByLabel("Larger").check();
     assert.equal(
       await page.evaluate(() => localStorage.getItem("codex-text-size")),
       "larger",
-    );
-    assert.equal(
-      await page.locator("#text-size-popover").getByLabel("Larger").isChecked(),
-      true,
     );
     if (touch)
       await page.screenshot({
@@ -216,11 +192,8 @@ async function testTextSize(browser, output, errors) {
       null,
     );
     await page.locator("#close-settings").click();
-    // An outside tap closes the pop-up and leaves the size as chosen.
-    if (await pickSize(page, "larger")) {
-      await page.locator("#messages").click({ position: { x: 5, y: 5 } });
-      assert.equal(await page.locator("#text-size-popover").isHidden(), true);
-    }
+    // Closing Settings keeps the size as chosen.
+    await pickSize(page, "larger");
     assert.equal(
       await page.evaluate(() => document.documentElement.dataset.textSize),
       "larger",

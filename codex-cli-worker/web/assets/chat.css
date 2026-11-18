@@ -33,7 +33,7 @@
   );
   font-size: calc(var(--ha-font-size-m, 14px) * var(--text-scale));
 }
-/* Text size (Settings > Text size, or the Aa button): every font size in
+/* Text size (Settings > Text size): every font size in
    this file is a multiple of --text-scale, so one setting scales the
    messages, buttons, code, sign-in text and activity list together. */
 :root[data-text-size="larger"] {
@@ -1911,37 +1911,11 @@ dialog :is(h3, h4):has(> .settings-toggle) {
 .verification-result pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: calc(12px * var(--text-scale)); max-height: 260px; overflow: auto; }
 .verification-result.is-failed, .verification-result.is-issues { border-color: #d18a48; }
 .verification-note { font-size: calc(12px * var(--text-scale)); opacity: .7; }
-.text-size-picker {
-  position: relative;
-  flex: none;
-}
-#text-size-button {
-  font-size: calc(15px * var(--text-scale));
-  font-weight: 600;
-  padding: 6px 8px;
-}
-.text-size-popover {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  width: min(220px, calc(100vw - 28px));
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  box-shadow:
-    0 5px 22px #00000012,
-    0 1px 4px #00000008;
-  padding: 6px;
-  z-index: 20;
-}
 .text-size-options {
   border: 0;
   margin: 0;
   padding: 0;
   min-width: 0;
-}
-.text-size-options legend.picker-heading {
-  padding: 0;
 }
 .text-size-option {
   display: flex;
@@ -1966,11 +1940,6 @@ dialog :is(h3, h4):has(> .settings-toggle) {
 .text-size-option small {
   color: var(--muted);
   font-size: calc(11px * var(--text-scale));
-}
-.text-size-note {
-  color: var(--muted);
-  font-size: calc(11px * var(--text-scale));
-  margin: 4px 8px 6px;
 }
 .settings-text-size {
   max-width: 260px;
@@ -2324,7 +2293,7 @@ details.disclosure > summary::-webkit-details-marker {
   mask: var(--mdi-stop) center / 20px no-repeat;
 }
 
-/* The thin title row above the messages: the title, the chat menu and the Aa text size button. */
+/* The thin title row above the messages: the title and the chat menu. */
 main > .chat-header {
   height: 44px;
   min-height: 44px;

@@ -3052,11 +3052,7 @@ const SLASH_COMMANDS = [
     description: "Change the text size",
     when: "always",
     available: () => true,
-    // A phone hides the title row with the Aa button, so it opens Settings > Text size instead.
-    run: () => {
-      if ($("text-size-button").offsetParent) return textSizePopover(true);
-      openSettingsAt("text-size-section");
-    },
+    run: () => openSettingsAt("text-size-section"),
   },
   {
     name: "settings",
@@ -3284,9 +3280,9 @@ setSectionStatus("workspace-section", "AGENTS.md");
 const TEXT_SIZES = ["normal", "larger", "largest"];
 const TEXT_SIZE_KEY = "codex-text-size";
 /**
- * Show the page at one of the three text sizes and tick that choice in the
- * Aa pop-up and in Settings. The stylesheet multiplies every font size by
- * --text-scale, which the data-text-size attribute on the root sets.
+ * Show the page at one of the three text sizes and tick that choice in
+ * Settings. The stylesheet multiplies every font size by --text-scale,
+ * which the data-text-size attribute on the root sets.
  * With save, remember the choice on this device for the next visit.
  */
 function setTextSize(value, save = false) {
@@ -3304,36 +3300,9 @@ function setTextSize(value, save = false) {
     /* Storage may be disabled: the size lasts until the page is reloaded. */
   }
 }
-/** Open or close the Aa pop-up; closing can return focus to its button. */
-function textSizePopover(open, focus = false) {
-  $("text-size-popover").hidden = !open;
-  $("text-size-button").setAttribute("aria-expanded", String(open));
-  if (open)
-    document.querySelector("#text-size-popover input[data-text-size-choice]:checked")?.focus();
-  else if (focus) $("text-size-button").focus();
-}
 setTextSize(document.documentElement.dataset.textSize);
 for (const input of document.querySelectorAll("input[data-text-size-choice]"))
   input.addEventListener("change", () => setTextSize(input.value, true));
-$("text-size-button").onclick = () =>
-  textSizePopover($("text-size-popover").hidden);
-document.addEventListener("pointerdown", (event) => {
-  if (
-    !$("text-size-popover").hidden &&
-    !$("text-size-picker").contains(event.target)
-  )
-    textSizePopover(false);
-});
-$("text-size-picker").addEventListener("focusout", (event) => {
-  if (event.relatedTarget && !$("text-size-picker").contains(event.relatedTarget))
-    textSizePopover(false);
-});
-$("text-size-picker").addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !$("text-size-popover").hidden) {
-    event.preventDefault();
-    textSizePopover(false, true);
-  }
-});
 /*
  * The time left on a sign-in code. The worker sends the seconds left, by its
  * own clock; the page counts down from when that reply arrived, so a phone

@@ -107,46 +107,6 @@
           <h1 id="chat-title">New chat</h1>
           <p id="chat-status" class="sr-only" role="status">Your Home Assistant, with a little help.</p>
           <button id="thread-actions" class="icon" aria-label="Thread menu" aria-haspopup="menu">⋯</button>
-          <div id="text-size-picker" class="text-size-picker">
-            <button
-              id="text-size-button"
-              class="icon"
-              type="button"
-              aria-label="Text size"
-              title="Text size"
-              aria-expanded="false"
-              aria-controls="text-size-popover"
-            >
-              <span aria-hidden="true">Aa</span>
-            </button>
-            <div
-              id="text-size-popover"
-              class="text-size-popover"
-              role="dialog"
-              aria-label="Text size"
-              hidden
-            >
-              <fieldset class="text-size-options">
-                <legend class="picker-heading">Text size</legend>
-              <label class="text-size-option"
-                ><input type="radio" name="text-size-quick" value="normal" data-text-size-choice /><span
-                  >Normal</span
-                ></label
-              >
-              <label class="text-size-option"
-                ><input type="radio" name="text-size-quick" value="larger" data-text-size-choice /><span
-                  >Larger</span
-                ><small>115 %</small></label
-              >
-              <label class="text-size-option"
-                ><input type="radio" name="text-size-quick" value="largest" data-text-size-choice /><span
-                  >Largest</span
-                ><small>130 %</small></label
-              >
-              </fieldset>
-              <p class="text-size-note">Saved on this device.</p>
-            </div>
-          </div>
         </header>
         <div class="phone-thread-tools"><button id="phone-history" class="icon" aria-label="Open conversations">☰</button>
           <span id="phone-title">New chat</span><button id="phone-new" class="icon" aria-label="New chat">＋</button>
@@ -417,40 +377,6 @@
         <h2>Settings</h2>
         <button id="close-settings" class="icon icon-close" aria-label="Close settings"></button>
       </div>
-      <section id="text-size-section">
-        <h3>Text size</h3>
-        <p class="muted">
-          Makes the messages, buttons, code and lists larger. Saved on this
-          device only.
-        </p>
-        <fieldset class="text-size-options settings-text-size">
-          <legend class="sr-only">Text size</legend>
-              <label class="text-size-option"
-                ><input type="radio" name="text-size-settings" value="normal" data-text-size-choice /><span
-                  >Normal</span
-                ></label
-              >
-              <label class="text-size-option"
-                ><input type="radio" name="text-size-settings" value="larger" data-text-size-choice /><span
-                  >Larger</span
-                ><small>115 %</small></label
-              >
-              <label class="text-size-option"
-                ><input type="radio" name="text-size-settings" value="largest" data-text-size-choice /><span
-                  >Largest</span
-                ><small>130 %</small></label
-              >
-        </fieldset>
-      </section>
-      <section id="settings-commands">
-        <h3>Commands</h3>
-        <p class="muted">
-          Type <kbd>/</kbd> at the start of the message box to see them, then
-          tap one or pick it with the arrow keys and Enter. The page runs them
-          itself; they are not sent to Codex.
-        </p>
-        <dl id="command-list" class="command-list"></dl>
-      </section>
       <section id="accounts-section" aria-labelledby="accounts-title">
         <h3 id="accounts-title">Accounts and connections</h3>
         <section id="chatgpt-section">
@@ -515,6 +441,40 @@
             ><button id="app-pairing-off" class="subtle" hidden>Turn off</button>
           </div>
         </section>
+      </section>
+      <section id="text-size-section">
+        <h3>Text size</h3>
+        <p class="muted">
+          Makes the messages, buttons, code and lists larger. Saved on this
+          device only.
+        </p>
+        <fieldset class="text-size-options settings-text-size">
+          <legend class="sr-only">Text size</legend>
+              <label class="text-size-option"
+                ><input type="radio" name="text-size-settings" value="normal" data-text-size-choice /><span
+                  >Normal</span
+                ></label
+              >
+              <label class="text-size-option"
+                ><input type="radio" name="text-size-settings" value="larger" data-text-size-choice /><span
+                  >Larger</span
+                ><small>115 %</small></label
+              >
+              <label class="text-size-option"
+                ><input type="radio" name="text-size-settings" value="largest" data-text-size-choice /><span
+                  >Largest</span
+                ><small>130 %</small></label
+              >
+        </fieldset>
+      </section>
+      <section id="settings-commands">
+        <h3>Commands</h3>
+        <p class="muted">
+          Type <kbd>/</kbd> at the start of the message box to see them, then
+          tap one or pick it with the arrow keys and Enter. The page runs them
+          itself; they are not sent to Codex.
+        </p>
+        <dl id="command-list" class="command-list"></dl>
       </section>
       <section id="interaction-logs-section">
         <h3>Interaction logs</h3>

@@ -104,24 +104,17 @@ async function testSlash(browser, output, errors) {
     await page.locator("#message").pressSequentially("h");
     assert.deepEqual(await listed(page), ["/help"]);
 
-    // The tap path: tap /size, the box empties and the size choice opens:
-    // the Aa pop-up where the title row shows, Settings > Text size on a phone.
+    // The tap path: tap /size, the box empties and Settings opens at Text size, on every screen.
     await typeMessage(page, "/si");
     if (touch) await page.locator("#slash-size").tap();
     else await page.locator("#slash-size").click();
     assert.equal(await page.locator("#message").inputValue(), "");
     assert.equal(await page.locator("#slash-popover").isHidden(), true);
-    if (viewport.width > 700) {
-      await page.locator("#text-size-popover").waitFor();
-      await page.locator("#text-size-popover").getByLabel("Largest").check();
-      await page.locator("#text-size-picker").press("Escape");
-    } else {
-      await page.locator("#settings").waitFor();
-      const choice = page.locator("#text-size-section").getByLabel("Largest");
-      await choice.waitFor();
-      await choice.check();
-      await page.locator("#close-settings").click();
-    }
+    await page.locator("#settings").waitFor();
+    const choice = page.locator("#text-size-section").getByLabel("Largest");
+    await choice.waitFor();
+    await choice.check();
+    await page.locator("#close-settings").click();
 
     // At Largest the list still fits the screen with no sideways scroll.
     await typeMessage(page, "/");
