@@ -80,6 +80,40 @@ class ToolCardTests(unittest.TestCase):
         self.assertEqual(plain["where"], "light.kitchen_ceiling.")
         self.assertEqual(plain["effect"], "This turns off light.kitchen_ceiling.")
 
+    def test_plain_words_name_every_id_the_target_holds(self):
+        """The three plain lines never name fewer places than the call reaches (review F1)."""
+        cases = {  # target: (where, what the effect line says it turns off)
+            "an entity and an area": (
+                {"entity_id": "light.kitchen_ceiling", "area_id": "upstairs"},
+                "light.kitchen_ceiling, every light in area upstairs."),
+            "an entity, a floor and a label": (
+                {"entity_id": "light.kitchen_ceiling", "floor_id": "first", "label_id": "all_lights"},
+                "light.kitchen_ceiling, every light on floor first, every light with label all_lights."),
+            "entities of two domains": (
+                {"entity_id": ["light.desk", "switch.desk_fan"]}, "light.desk, switch.desk_fan."),
+            "only an area": ({"area_id": "upstairs"}, "Every light in area upstairs."),
+            "two devices": ({"device_id": ["device_one", "device_two"]},
+                            "Every light of device device_one, every light of device device_two."),
+            "every entity of the domain": ({"entity_id": "all"}, "Every light."),
+        }
+        for number, (name, (target, where)) in enumerate(cases.items(), start=20):
+            with self.subTest(name):
+                self.ask(request_id=number, arguments=tool_params(target=target))
+                plain = self.record()["confirmation"]
+                self.assertEqual(plain["where"], where)
+                self.assertEqual(plain["effect"], "This turns off " + where[0].lower() + where[1:])
+
+    def test_plain_words_claim_no_limit_for_a_target_they_cannot_read(self):
+        """No target, an unknown field or a value that is not an id: the words say every light the action reaches."""
+        targets = [None, {}, {"code": "invented"}, {"entity_id": [1]}, "light.desk",
+                   {"entity_id": "light.desk", "code": "invented"}, {"entity_id": "light.desk", "area_id": [1]}]
+        for number, target in enumerate(targets, start=30):
+            with self.subTest(target=target):
+                self.ask(request_id=number, arguments=tool_params(target=target))
+                plain = self.record()["confirmation"]
+                self.assertEqual(plain["where"], "Every light the action reaches.")
+                self.assertEqual(plain["effect"], "This turns off every light the action reaches.")
+
     def test_allow_once_accepts_this_call_only(self):
         self.ask()
         self.session.decide(self.record()["approval_id"], "allow")
@@ -131,6 +165,13 @@ class ToolCardTests(unittest.TestCase):
                 reply = self.ask(request_id=number, **overrides)
                 self.assertEqual(reply, [{"id": number, "result": {"action": "decline"}}])
                 self.assertEqual(self.events[-1]["type"], "error")
+        self.assertEqual(self.saved, [])
+
+    def test_question_without_the_approval_kind_is_declined(self):
+        """The exact sentence, form mode and the arguments, but no codex_approval_kind: no card (review F4)."""
+        reply = self.ask(_meta={"tool_params": tool_params()})
+        self.assertEqual(reply, [{"id": 7, "result": {"action": "decline"}}])
+        self.assertEqual(self.events[-1]["type"], "error")
         self.assertEqual(self.saved, [])
 
     def test_request_for_another_turn_is_refused(self):

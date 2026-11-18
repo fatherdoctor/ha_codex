@@ -398,17 +398,17 @@ def _entity_ids(text: str) -> list[str]:
     """Return the entity ids a command names, in order, without repeats."""
     return list(dict.fromkeys(_ENTITY_ID.findall(text)))
 
-def _service_confirmation(domain: str, service: str, text: str) -> dict[str, str]:
-    """Plain words for one Home Assistant action, with the entity ids that the text names as its targets."""
+def _service_confirmation(domain: str, service: str, targets: list[str]) -> dict[str, str]:
+    """Plain words for one Home Assistant action on the named targets, or on all it reaches when none is named."""
     if (domain, service) in _RELOADS:
         what, effect = _RELOADS[(domain, service)]
         return {"what": what, "where": "This Home Assistant.", "effect": effect}
-    targets = [entity for entity in _entity_ids(text) if entity.split(".")[0] == domain] or _entity_ids(text)
     where = ", ".join(targets) if targets else f"every {domain} the action reaches"
     verb = _SERVICE_WORDS.get(service, f"runs {domain}.{service} on")
     if domain == "scene" and service == "turn_on":
         verb = "applies"
-    return {"what": f"Run the Home Assistant action {domain}.{service}.", "where": (where if targets else where.capitalize()) + ".",
+    return {"what": f"Run the Home Assistant action {domain}.{service}.",
+            "where": (where[0].upper() + where[1:] if where.startswith("every ") else where) + ".",
             "effect": f"This {verb} {where}."}
 
 def _command_confirmation(command: str, cwd: str, network: str) -> dict[str, str]:
@@ -416,12 +416,38 @@ def _command_confirmation(command: str, cwd: str, network: str) -> dict[str, str
     lower = (command or "").lower()
     call = _SERVICE_PATH.search(lower)
     if call:
-        return _service_confirmation(*call.groups(), lower)
+        domain = call.group(1)
+        targets = [entity for entity in _entity_ids(lower) if entity.split(".")[0] == domain] or _entity_ids(lower)
+        return _service_confirmation(domain, call.group(2), targets)
     where = f"In {cwd}" + (f", reaching {network}" if network else "") + "." if cwd else "On this Home Assistant."
     return {"what": "Run one command outside the sandbox, shown below.", "where": where,
             "effect": "Only what that command does; it may read files and use the network."}
 
 _SERVICE_NAME = re.compile(r"([a-z0-9_]+)\.([a-z0-9_]+)")
+
+# The id fields a target can hold besides entity_id, and how the card names each of their ids.
+_TARGET_WORDS = {"device_id": "of device", "area_id": "in area", "floor_id": "on floor", "label_id": "with label"}
+
+def _target_names(domain: str, target: Any) -> list[str]:
+    """Name every id the target holds, so the card says no less than the call reaches.
+
+    Entity ids are named as they are, of any domain; an area, device, floor or label id as "every <domain> in area
+    <id>" and so on. A target that is not an object of these fields, each one id or a list of ids, gives no names,
+    so the words fall back to every <domain> the action reaches; the JSON on the card still shows it in full.
+    """
+    if not isinstance(target, dict) or not set(target) <= {"entity_id", *_TARGET_WORDS}:
+        return []
+    names: list[str] = []
+    for key in ("entity_id", *_TARGET_WORDS):
+        value = target.get(key, [])
+        ids = [value] if isinstance(value, str) else value
+        if not isinstance(ids, list) or not all(isinstance(item, str) for item in ids):
+            return []
+        if key == "entity_id":
+            names += [f"every {domain}" if item == "all" else item for item in ids]
+        else:
+            names += [f"every {domain} {_TARGET_WORDS[key]} {item}" for item in ids]
+    return names
 
 def _tool_confirmation(tool: str, arguments: str) -> dict[str, str]:
     """Plain words for a tool request: the Home Assistant action it names, else the tool and its arguments."""
@@ -432,8 +458,9 @@ def _tool_confirmation(tool: str, arguments: str) -> dict[str, str]:
     service = parsed.get("service") if isinstance(parsed, dict) else None
     call = _SERVICE_NAME.fullmatch(service) if isinstance(service, str) else None
     if call:
-        # Only the target names the entities; an entity id inside data (a message, say) is not one.
-        return _service_confirmation(*call.groups(), json.dumps(parsed.get("target")))
+        # Only the target names what the action reaches; an entity id inside data (a message, say) is not one.
+        domain = call.group(1)
+        return _service_confirmation(domain, call.group(2), _target_names(domain, parsed.get("target")))
     return {"what": f"Run the tool {tool}, with the arguments shown below.", "where": "This Home Assistant.",
             "effect": "Only what the tool does with these arguments."}
 
@@ -659,7 +686,7 @@ class AppServerSession:
                 for change in record["changes"])
             clipped |= any(change.get("truncated") or change.get("redacted") for change in record["changes"])
         if kind == "tool":
-            # The worker behind the tool holds its own refusals; no file path is part of this request.
+            # The request names a Home Assistant action and holds no file path, so no protected-path check applies.
             protected = False
         elif method == COMMAND_APPROVAL:
             # A command allowed once runs outside the sandbox, so it is held to the same protected places.

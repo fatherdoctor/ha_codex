@@ -3297,7 +3297,7 @@ def notify_permission(task_id: str, approval: dict[str, Any], withdrawn: threadi
     waits; a notification not delivered by then is dropped, so it cannot replace
     a later one about the task's question or failure.
     """
-    subject = "a file change" if approval.get("kind") == "file_change" else "a command"
+    subject = {"file_change": "a file change", "tool": "a tool request"}.get(approval.get("kind"), "a command")
     reason = " ".join(str(approval.get("reason") or "").split())
     if len(reason) > PERMISSION_REASON_MAX:
         reason = reason[:PERMISSION_REASON_MAX].rstrip() + "…"
