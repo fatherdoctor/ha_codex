@@ -27,6 +27,10 @@
   `/data/codex-home/house-rules/permission-overrides.json`, `/data/house-rules/confirmed.json`,
   `/data/permission-overrides-backups` and `/data/permission-overrides.sock` behind; the app no longer reads them, and you can delete them.
 
+- A typed OpenAI safety-filter block now stops the task and sends one notice, through the notify service when one is
+  set and as a persistent notification otherwise; the general "Codex task failed" notice is not sent for it.
+  The notice names the task by id and says to rephrase or retry. The worker does not retry the block automatically.
+  It also fires `codex_cli_safety_blocked`, without the prompt or provider error text.
 - A chat on the page changes the house through one new tool, `home_assistant_call` `call`: one Home Assistant action
   (a service call), reloads and restarts included. Codex asks you each time, with no remembered answer, and shows
   the service, the target and the data. The tool gives Codex no

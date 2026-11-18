@@ -713,6 +713,33 @@ Home Assistant app configuration schemas do not currently provide a Home Assista
 
 Tasks run without an interactive terminal. If Codex needs a decision, it calls the `ask_owner` tool with a question, ends its turn and writes the same question as its answer. The task is marked `waiting_for_input`, and your answer continues it as the next message. If the task cannot be done, Codex calls `report_failure` with the reason, and the task is marked failed with that reason. Up to 0.3.2, Codex returned the status `needs_input` or `failed` in a JSON answer instead; the page still reads that answer from an older thread. Sandbox permission requests use the separate [approval flow](#permission-requests) during the running exchange.
 
+### When OpenAI's safety filter blocks a task
+
+The worker stops the exchange when Codex reports its typed cybersecurity safety block.
+The task fails, and you get one notice with the task id: through the notify service when one is set, or as a
+persistent notification otherwise. The general "Codex task failed" notice is not sent for a block.
+Rephrase the request or retry it yourself. Normal use needs no special access.
+The worker does not retry this block automatically or change any permission.
+Any file changes made before the block still receive the usual backup and configuration checks.
+
+The worker also fires `codex_cli_safety_blocked`, with `task_id` and `turn_id` only.
+These are the worker's ids, as in `codex_cli_task_result`.
+The notification and event do not copy the prompt, chat title, or provider error text.
+The notification stays until you dismiss it; another block in the same task replaces it.
+
+Detection uses `codexErrorInfo: "cyberPolicy"` from the pinned Codex 0.166.0 app-server.
+It accepts an `error` notification or a failed `turn/completed` notification for the current thread and turn.
+It does not guess from an assistant's answer, a screenshot, a generic error or an exit code.
+It covers tasks the worker launches, including scheduled tasks.
+The paired ChatGPT app's own remote threads are not observed through this transport.
+Other filter errors without this typed signal keep the normal error path.
+
+The source contract is Codex's [TurnError](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/app-server-protocol/src/protocol/v2/thread_data.rs#L439),
+[ErrorNotification](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/app-server-protocol/src/protocol/v2/notification.rs#L62),
+and [CyberPolicy translation](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/app-server-protocol/src/protocol/v2/shared.rs#L86).
+The older `codex exec` JSONL path drops the type and exposes only a message; it cannot prove this block.
+No test sends a request to a model to cause a block. Tests simulate the source-defined notifications.
+
 The worker reads these calls from the exchange's events and decides the status in this order:
 
 1. A failure that the worker finds itself: no answer, an exit with an error, a timeout, a stall, or a configuration that fails its check. A question is not asked over a broken configuration.
