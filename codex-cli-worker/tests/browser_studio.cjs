@@ -72,10 +72,13 @@ fs.mkdirSync(output,{recursive:true});
    assert.equal(await page.locator('.document-attachment').textContent(),'sample.md · 1 KB ↓');
    // The fixture never invokes Codex; its synthetic worker completes this turn.
    await page.waitForFunction(()=>!document.getElementById('permission-button').disabled);
-   await page.locator(width===390?'#phone-thread-actions':'#thread-actions').click();
-   await page.locator('[data-action="status"]').click();
-   assert.match(await page.locator('#status-details').textContent(),/Usage and resetUnavailable/);
-   await page.locator('[data-close="status-dialog"]').click();
+   // The conversation header has no menu; a chat's menu opens from its row in the chat list.
+   assert.equal(await page.locator('#thread-actions, #phone-thread-actions').count(),0);
+   const openRowMenu = async id => {
+    if(width===390 && !(await page.evaluate(()=>document.body.classList.contains('sidebar-open')))) await page.locator('#phone-history').click();
+    await page.locator(`.row-main[data-task-id="${id}"]`).click({button:'right'});
+    await page.locator('#chat-menu').waitFor();
+   };
    if(width>700) {
     await page.locator('#ha-status-row').click();
     assert.match(await page.locator('#status-details').textContent(),/Usage and resetUnavailable/);
@@ -94,12 +97,7 @@ fs.mkdirSync(output,{recursive:true});
    await page.locator('[data-mode="default"]').click();
    await page.waitForFunction(()=>!document.getElementById('permissions-dialog').open);
 
-   const threadId = (await (await page.request.get(base+'tasks/'+taskId)).json()).task.session_id;
-   await page.evaluate(()=>{window.studioCopied=null;Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{window.studioCopied=text;}}});});
-   await page.locator(width===390?'#phone-thread-actions':'#thread-actions').click();
-   await page.locator('[data-action="copy-id"]').click();
-   await page.waitForFunction(expected=>window.studioCopied===expected,threadId);
-   await page.locator(width===390?'#phone-thread-actions':'#thread-actions').click();
+   await openRowMenu(taskId);
    await page.locator('[data-action="archive"]').click();
    await page.waitForFunction(()=>state.id===null);
    assert.equal((await (await page.request.get(base+'tasks/'+taskId)).json()).task.archived,true);
@@ -111,19 +109,19 @@ fs.mkdirSync(output,{recursive:true});
    if(reloadArchived) {
     await page.reload();
     await page.waitForFunction(expected=>state.id===expected&&!state.loading,taskId);
+    // A reload lists recent chats again; the archived chat's row is in the archived list.
+    await page.locator('#archive-list').click();
    }
 
-   await page.locator(width===390?'#phone-thread-actions':'#thread-actions').click();
+   await openRowMenu(taskId);
    await page.getByRole('menuitem',{name:'Restore chat',exact:true}).click();
    await page.waitForFunction(()=>state.id===null);
    const restored=(await (await page.request.get(base+'tasks/'+taskId)).json()).task;
    assert.equal(restored.archived,false);
    assert.equal(restored.turns[0].prompt_attachments[0].name,'sample.md');
-   if(!reloadArchived) {
-    if(width===390) await page.locator('#phone-history').click();
-    await page.locator('#archive-list').click();
-    if(width===390) await page.locator('#close-sidebar').click();
-   }
+   if(width===390) await page.locator('#phone-history').click();
+   await page.locator('#archive-list').click();
+   if(width===390) await page.locator('#close-sidebar').click();
 
    // On a phone the foot rows are reached through the chats drawer.
    const footRow = async id => {

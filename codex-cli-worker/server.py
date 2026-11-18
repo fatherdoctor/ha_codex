@@ -6640,6 +6640,81 @@ def get_activity(task_id: str) -> Response:
     })
 
 
+# The marks the chat page shows in front of each kind of step, so a shared
+# transcript reads like the page.
+SHARE_STEP_MARKS = {
+    "reasoning": "✦", "message": "❝", "command": "›", "file_change": "✎", "web_search": "⌕",
+    "tool_call": "⚙", "plan": "☰", "error": "!", "outcome": "■", "notice": "…", "phase": "◦",
+}
+SHARE_MAX_LINES = 100_000
+
+
+def share_step_line(step: dict[str, Any]) -> str:
+    """Write one step as the page lists it: its mark and text, and a failed command's exit code."""
+    text = str(step.get("text") or "").strip()
+    if step.get("kind") == "command" and step.get("exit_code"):
+        text += f" (exit {step['exit_code']})"
+    # Later lines of a long step are indented so they stay under their mark.
+    return f"{SHARE_STEP_MARKS.get(step.get('kind'), '•')} " + text.replace("\n", "\n  ")
+
+
+def share_transcript(title: str, turns: list[dict[str, Any]], steps_by_turn: dict[str, list[dict[str, Any]]]) -> str:
+    """Write a chat as Markdown: each message, the steps Codex printed for it, and its answer."""
+    parts = [f"# {title or 'Untitled chat'}"]
+    for turn in turns:
+        parts.append(f"## You · {turn.get('created_at') or ''}".rstrip(" ·"))
+        if turn.get("message"):
+            parts.append(str(turn["message"]).strip())
+        steps = steps_by_turn.get(str(turn.get("turn_id") or ""), [])
+        if steps:
+            parts.append("### Steps")
+            parts.append("\n".join(share_step_line(step) for step in steps))
+        answer = [str(turn.get(key) or "").strip() for key in ("summary", "details", "question")]
+        answer = [text for index, text in enumerate(answer) if text and text not in answer[:index]]
+        if answer:
+            parts.append("## Codex")
+            parts.extend(answer)
+    return "\n\n".join(parts) + "\n"
+
+
+@app.get("/tasks/<task_id>/share")
+@require_auth
+def share_task(task_id: str) -> Response:
+    """Download a chat as Markdown, whole or its last `lines` lines, with the steps of every exchange."""
+    if TASK_ID_RE.fullmatch(task_id) is None:
+        return jsonify({"ok": False, "error": "task not found"}), 404
+    raw_lines = request.args.get("lines")
+    try:
+        lines = 0 if raw_lines is None else int(raw_lines)
+    except ValueError:
+        lines = -1
+    if raw_lines is not None and not 1 <= lines <= SHARE_MAX_LINES:
+        return jsonify({"ok": False, "error": f"lines must be a whole number from 1 to {SHARE_MAX_LINES}"}), 400
+    with lock:
+        task = tasks.get(task_id)
+        if task is None:
+            return jsonify({"ok": False, "error": "task not found"}), 404
+        payload = task_payload(task, private=is_ingress_request())
+        record = task_activity.get(task_id)
+        live = {record["turn_id"]: [public_activity_step(step) for step in record["steps"]]} if record else {}
+    steps_by_turn = {}
+    for turn in payload["turns"]:
+        turn_id = str(turn.get("turn_id") or "")
+        if turn_id in live:
+            steps_by_turn[turn_id] = live[turn_id]
+        elif not turn.get("legacy"):
+            stored = load_stored_activity(task_id, turn_id)
+            if stored is not None:
+                steps_by_turn[turn_id] = [step for step in stored["steps"] if isinstance(step, dict)]
+    text = share_transcript(str(payload.get("title") or ""), payload["turns"], steps_by_turn)
+    if lines:
+        text = "\n".join(text.rstrip("\n").split("\n")[-lines:]) + "\n"
+    response = Response(text, mimetype="text/markdown")
+    response.headers["Content-Disposition"] = f'attachment; filename="codex-chat-{task_id}.md"'
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.get("/tasks/<task_id>/attachments/<attachment_id>")
 @require_auth
 def get_attachment(task_id: str, attachment_id: str) -> Response:

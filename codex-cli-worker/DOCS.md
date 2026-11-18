@@ -879,6 +879,14 @@ API: `POST /tasks`, `POST /tasks/<task_id>/continue`, and `POST /tasks/<task_id>
 
 From **0.1.50**, each chat in the sidebar has an actions menu. On desktop, hover over a chat and choose the **⋯** button, or right-click the row. On phones, long-press the chat to open a bottom sheet. With a keyboard, focus a chat and press Shift+F10; arrow keys move between items and Escape closes the menu.
 
+The menu lists, in this order: **Rename**, **Pin chat**, **Share**, **Archive** and **Delete**, as the ChatGPT app
+orders them. The conversation header has no menu of its own; open a chat's menu from the chat list.
+
+**Share** downloads the chat as a Markdown file: the whole chat, or only its last lines (a number from 1 to
+100,000). The file has each of your messages, the steps Codex printed for it (thinking, commands, file changes and
+tool calls, with the marks the page shows) and Codex's answer. Nothing is sent anywhere; read the file before you
+give it to anyone. API: `GET /tasks/<task_id>/share` returns the file, and `?lines=<n>` keeps only the last `n` lines.
+
 **Pin chat** keeps the conversation at the top of the list under a **Pinned** heading, ahead of the recently active chats; **Unpin chat** returns it to the recent list. **Rename** opens a dialog for a new title, which appears in the sidebar and the conversation header. Neither action changes the chat's `updated_at` time or its saved messages. **Delete** asks for confirmation, then removes the conversation and its saved history. The delete action is unavailable while that chat is running; stop the task first.
 
 Deleting a chat removes `<task_root>/<task_id>/`, including prompts, output, backups, and attachments, and the entry from the task index. The worker also attempts to remove the Codex session rollout file under `/data/codex-home/sessions` and generated images under `/data/codex-home/generated_images/<session_id>/`. Failures to remove those session files are logged. Deletion cannot be undone in the chat UI and does not erase copies in separate Home Assistant backups.
@@ -966,14 +974,16 @@ A task note without `to` goes to Codex and the lead. The owner can inspect that 
 
 Schedule prompts containing recognized credentials are masked in responses and marked `prompt_redacted`; Edit is disabled so masked text cannot replace the saved prompt. Create a replacement with a complete prompt instead. All save routes reject the literal `[redacted]` marker. The private database and its journal/WAL/SHM paths are protected like the worker token from tool file access and native permission grants. A persistent SQLite journal is materialized before tasks or remote control start, so its mask remains present across transactions. Schema version 3 adds first-read retention timestamps. Version 2 added per-reader deliveries, UTC message envelopes and durable lead task/thread records; version 1 added proposal authorship; legacy proposals without an attributable author remain owner-owned.
 
-## Export logs for a bug report
+## Interaction logs for a bug report
 
-In the add-on page, open Settings and choose **Export logs**. Home Assistant's
-integration **Download diagnostics** button includes the same anonymized data
-inside Home Assistant's own diagnostics envelope. The whole files differ:
-Home Assistant adds system information, including the time zone, component
-information and the integration manifest. Review the entire downloaded file
-before sharing it. Neither button sends a report to another service.
+Home Assistant's integration **Download diagnostics** button (Settings, Devices
+& services, Codex, three-dot menu) downloads the anonymized interaction logs
+inside Home Assistant's own diagnostics envelope, with system information,
+including the time zone, component information and the integration manifest.
+Review the entire downloaded file before sharing it. The button does not send a
+report to another service. The add-on page no longer has its own Export logs
+button (removed in 0.3.6); `GET /diagnostics/export` still returns the same data
+to an administrator.
 
 The worker's data excludes connection settings, accounts, task titles, prompts,
 answers and raw tool output. The former integration entry/coordinator snapshot
@@ -1076,8 +1086,8 @@ own to any of them.
 - Scheduled runs use Default or Read only only.
 - A queued message keeps the choice submitted with it. Camera and Plan mode are not offered in this build.
 
-The thread menu includes Pin, Rename, Copy thread ID, Archive and Status. A thread without a native ID
-reports that it is unavailable instead of substituting the page's task ID. Status shows the workspace,
+A chat's menu holds Rename, Pin, Share, Archive and Delete ([Managing chats](#managing-chats)). The Status
+window opens from the Home Assistant row at the foot of the chat list. Status shows the workspace,
 selected model and permissions; context and usage/reset remain unavailable in this view until verified
 window data is wired. No quota is inferred from activity.
 

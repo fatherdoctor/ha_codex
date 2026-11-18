@@ -64,7 +64,7 @@ async function showSidebar(page, phone) {
       else {
         assert.ok(header.height <= 44, `the title row is thin (${header.height} px)`);
         assert.deepEqual(await page.evaluate(() => [...document.querySelector('.chat-header').children]
-          .filter(node => node.getBoundingClientRect().width > 1).map(node => node.id)), ['chat-title', 'thread-actions']);
+          .filter(node => node.getBoundingClientRect().width > 1).map(node => node.id)), ['chat-title']);
       }
 
       // 2. The side bar's foot, top to bottom: Home Assistant, remote connection, quota, Settings.

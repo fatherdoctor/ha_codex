@@ -140,7 +140,7 @@ const themeLook = target => target.evaluate(() => {
 
 /** Open the sections that hold a field and both kinds of button. */
 async function openThemedSections(target) {
-  for (const id of ['interaction-logs-section', 'assistant-section', 'scheduled-work'])
+  for (const id of ['assistant-section', 'scheduled-work'])
     await target.locator(`#${id} > h3 .settings-toggle`).click();
 }
 
@@ -182,7 +182,6 @@ async function openThemedSections(target) {
         {title: 'GitHub', status: 'Connected as synthetic-owner, 1 repository', attention: false},
         {title: 'ChatGPT app pairing', status: 'Unavailable', attention: false},
         {title: 'Full access', status: 'Off', attention: false},
-        {title: 'Interaction logs', status: 'Keeps 25', attention: false},
         {title: 'Assistant', status: 'Running', attention: false},
         {title: 'Browser permissions', status: 'None remembered', attention: false},
         {title: 'Scheduled runs', status: 'Paused: time zone unavailable', attention: true},

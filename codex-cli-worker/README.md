@@ -48,7 +48,7 @@ When Codex generates an image, the chat shows it with a full-size link and a dow
 
 Attach screenshots, photos, or design mockups to a message with the paperclip button, by pasting, or by dropping files onto the composer. Codex sees them with your message, and they stay with the conversation.
 
-Hover over a chat and use its **⋯** button, right-click the row, or long-press it on a phone to pin, rename, or delete the conversation. Pinned chats stay at the top of the list, and deleting asks for confirmation first.
+Hover over a chat and use its **⋯** button, right-click the row, or long-press it on a phone to rename, pin, share, archive or delete the conversation. **Share** downloads the chat, or its last lines, as a Markdown file with the steps Codex printed. Pinned chats stay at the top of the list, and deleting asks for confirmation first.
 
 Use the model name and reasoning label below the message box to customize each conversation. The shipped `model_pin` option limits the picker and runs to its pinned model; set `model_pin` to `none` in the app configuration to use the other available models. Choices are saved across restarts and apply to the next message. A chat that has no model of its own shows the model set in the app options, or the one Codex picks when that option is `default`. Choosing that model in the menu restores the app's model setting; the reasoning picker's reset button separately restores the app's reasoning setting. The slider only offers reasoning levels supported by the selected model.
 

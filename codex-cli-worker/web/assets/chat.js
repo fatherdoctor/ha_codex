@@ -591,28 +591,6 @@ async function api(path, body, method) {
   return data;
 }
 
-document.getElementById("export-interaction-logs").addEventListener("click", async () => {
-  const button = document.getElementById("export-interaction-logs");
-  const status = document.getElementById("export-logs-status");
-  button.disabled = true;
-  try {
-    const response = await pageFetch("diagnostics/export", { cache: "no-store" });
-    if (!response.ok) throw new Error("The export could not be downloaded. Try again.");
-    const data = await response.json();
-    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "codex-interactions.json";
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    status.textContent = "Downloaded. Open the file to review it before attaching it to a bug report. Nothing was sent.";
-  } catch (_error) {
-    status.textContent = "The export could not be downloaded. Try again.";
-  } finally {
-    button.disabled = false;
-  }
-});
-
 /** Build an error that keeps the HTTP status so callers can tell 404 apart. */
 function workerError(message, status) {
   const error = new Error(message);
@@ -1454,43 +1432,6 @@ async function loadBrowserPermissions() {
  */
 function showsQuestionApart(turn) {
   return Boolean(turn.question) && !(turn.summary || "").includes(turn.question);
-}
-/** Try the browser clipboard, then the selection-based copy used on local HTTP. */
-async function copyText(text) {
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch (_) {
-    // Ingress, browser permissions, or a WebView can deny the modern API.
-  }
-  const focus = document.activeElement;
-  const selection = window.getSelection();
-  const ranges = selection
-    ? Array.from({ length: selection.rangeCount }, (_, index) =>
-        selection.getRangeAt(index).cloneRange(),
-      )
-    : [];
-  const buffer = textNode("textarea", "", "copy-buffer");
-  buffer.value = text;
-  buffer.readOnly = true;
-  buffer.tabIndex = -1;
-  document.body.append(buffer);
-  try {
-    buffer.focus({ preventScroll: true });
-    buffer.select();
-    return document.execCommand("copy");
-  } catch (_) {
-    return false;
-  } finally {
-    buffer.remove();
-    if (focus?.isConnected) focus.focus({ preventScroll: true });
-    if (selection) {
-      selection.removeAllRanges();
-      for (const range of ranges) selection.addRange(range);
-    }
-  }
 }
 /** Draw the open chat: every exchange with its answer, checks, saved copies, and steps. */
 function renderTask(force = false) {
@@ -2364,7 +2305,7 @@ function openChatMenu(id, trigger, point = null) {
   if (!sheet) positionChatMenu();
   menu.trigger?.setAttribute("aria-expanded", "true");
   menu.trigger?.closest(".chat-row")?.classList.add("menu-open");
-  for (const action of ["pin", "rename", "delete", "copy-id", "archive"])
+  for (const action of ["pin", "rename", "share", "delete", "archive"])
     panel.querySelector(`[data-action="${action}"]`).disabled = !id ||
       (["delete", "archive"].includes(action) && (working || Boolean(state.task?.queued_message)));
   panel.querySelector('[data-action="archive"]').textContent = chat?.archived ? "Restore chat" : "Archive";
@@ -2498,6 +2439,7 @@ $("chat-menu").addEventListener("click", async (event) => {
   if (action === "pin") await togglePin(id);
   else if (action === "rename") openRename(id);
   else if (action === "delete") openDelete(id);
+  else if (action === "share") openShare(id);
   else document.dispatchEvent(new CustomEvent("thread-action", {detail: {action, id}}));
 });
 /** Pin or unpin a chat through the worker API and re-sort the list. */
@@ -2551,6 +2493,48 @@ $("rename-form").addEventListener("submit", async (event) => {
     $("rename-save").disabled = false;
   }
 });
+/** Open the Share dialog for a chat: the whole chat, or its last lines. */
+function openShare(id) {
+  if (!chatById(id) && id !== state.id) return;
+  $("share-dialog").dataset.chatId = id;
+  $("share-download").disabled = false;
+  dialogError("share", null);
+  $("share-dialog").showModal();
+  $("share-download").focus();
+}
+$("share-cancel").onclick = () => $("share-dialog").close();
+$("share-lines").addEventListener("focus", () => {
+  $("share-form").elements["share-range"].value = "last";
+});
+$("share-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const id = $("share-dialog").dataset.chatId;
+  let query = "";
+  if ($("share-form").elements["share-range"].value === "last") {
+    const lines = Number($("share-lines").value);
+    if (!Number.isInteger(lines) || lines < 1 || lines > 100000) {
+      dialogError("share", "Enter a number of lines from 1 to 100000.");
+      return;
+    }
+    query = `?lines=${lines}`;
+  }
+  $("share-download").disabled = true;
+  try {
+    const response = await pageFetch(`tasks/${encodeURIComponent(id)}/share${query}`, { cache: "no-store" });
+    if (!response.ok) throw new Error("The chat could not be downloaded. Try again.");
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `codex-chat-${id}.md`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    $("share-dialog").close();
+  } catch (error) {
+    dialogError("share", error);
+  } finally {
+    $("share-download").disabled = false;
+  }
+});
 /** Open the delete confirmation dialog for a chat. */
 function openDelete(id) {
   const chat = chatById(id);
@@ -2564,7 +2548,7 @@ function openDelete(id) {
   $("delete-cancel").focus();
 }
 $("delete-cancel").onclick = () => $("delete-dialog").close();
-for (const name of ["rename", "delete"])
+for (const name of ["rename", "share", "delete"])
   $(name + "-dialog").addEventListener("close", () => {
     // Return focus to the row's menu button, or to New chat when the row is gone.
     const trigger = menu.returnId
@@ -3774,12 +3758,6 @@ function haTheme() {
   document.documentElement.dataset.theme = dark ? "dark" : "light";
 }
 $("settings-button").onclick = async () => {
-  try {
-    const data = await api("diagnostics/settings");
-    setSectionStatus("interaction-logs-section", `Keeps ${data.capacity}`);
-  } catch (_error) {
-    setSectionStatus("interaction-logs-section", "Administrators only");
-  }
   sidebar(false);
   haTheme();
   $("settings").showModal();

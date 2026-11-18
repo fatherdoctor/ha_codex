@@ -232,20 +232,9 @@ function showStudioStatus() {
 }
 // The Home Assistant row at the foot of the side bar opens the Status window.
 $("ha-status-row").onclick = showStudioStatus;
-for (const id of ["thread-actions", "phone-thread-actions"])
-  $(id).onclick = event => openChatMenu(state.id, event.currentTarget);
 document.addEventListener("thread-action", async event => {
   const {action, id} = event.detail;
-  if (action === "status") showStudioStatus();
-  else if (action === "history") sidebar(true);
-  else if (action === "new-chat") await selectChat(null);
-  else if (action === "copy-id") {
-    try {
-      const task = id === state.id ? state.task : (await api(`tasks/${encodeURIComponent(id)}`)).task;
-      if (!task?.session_id) throw new Error("This conversation has no native thread ID yet.");
-      await copyText(task.session_id);
-    } catch (error) { showError(error); }
-  } else if (action === "archive") {
+  if (action === "archive") {
     try {
       const chat = chatById(id) || (id === state.id ? state.task : null);
       await api(`tasks/${encodeURIComponent(id)}/archive`, {archived: !chat?.archived});

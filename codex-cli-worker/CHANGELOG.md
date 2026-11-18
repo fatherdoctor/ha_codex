@@ -24,6 +24,13 @@
   instead of text characters that sat low on the line. `tests/browser_composer.cjs` checks both on a phone and a
   desktop, in light and dark.
 
+- A chat's menu now lists Rename, Pin, Share, Archive and Delete, in the ChatGPT app's order. **Share** downloads
+  the whole chat, or its last lines, as a Markdown file with every message, the steps Codex printed (thinking
+  included) and each answer (`GET /tasks/<task_id>/share`). The menu no longer has New chat, Conversations, Copy
+  thread ID or Status, and the conversation header no longer has its own menu; Status opens from the Home Assistant
+  row at the foot of the chat list. Settings no longer has Interaction logs with its Export logs button; the
+  integration's Download diagnostics carries the same anonymized data.
+
 - The chat page shows Codex's own permission request for the Home Assistant tool (`call` of the `home_assistant_call` server) as a card:
   the tool, the action in plain words (naming each entity, area, device, floor and label of its target), and every argument as JSON, including the full text of a message, with
   **Allow once** and **Deny**. **Allow once** allows that one call; Codex asks again before the next one. A request
