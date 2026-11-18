@@ -320,6 +320,7 @@
         Delete
       </button>
       <button type="button" role="menuitem" data-action="copy-id">Copy thread ID</button>
+      <button type="button" role="menuitem" data-action="schedule">Schedule</button>
       <button type="button" role="menuitem" data-action="archive">Archive</button>
       <button type="button" role="menuitem" data-action="status">Status</button>
       <button type="button" role="menuitem" data-action="history">Conversations</button>
@@ -357,6 +358,39 @@
           Delete
         </button>
       </div>
+    </dialog>
+    <dialog id="schedule-dialog" class="studio-sheet" aria-labelledby="schedule-title">
+      <div class="dialog-header"><h2 id="schedule-title">Schedule this chat</h2><button type="button" class="icon icon-close" data-close="schedule-dialog" aria-label="Close schedule"></button></div>
+      <form id="schedule-form">
+        <input id="schedule-id" type="hidden" /><input id="schedule-chat" type="hidden" />
+        <label for="schedule-name">Name</label><input id="schedule-name" maxlength="80" autocomplete="off" required />
+        <label for="schedule-prompt">Prompt</label><textarea id="schedule-prompt" rows="6" maxlength="16000" required></textarea>
+        <p id="schedule-masked" class="muted" hidden>This prompt contains masked credentials, so it cannot be edited here. Delete this schedule and make a new one with a complete prompt.</p>
+        <label for="schedule-model">Model</label><select id="schedule-model"></select>
+        <div class="schedule-trigger">
+          <div><label for="schedule-trigger">Trigger</label><select id="schedule-trigger"><option value="hourly">Hourly</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="custom">Custom</option></select></div>
+          <div id="schedule-weekday-field"><label for="schedule-weekday">Day</label><select id="schedule-weekday"><option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option><option value="0">Sunday</option></select></div>
+          <div id="schedule-time-field"><label for="schedule-time">Time</label><input id="schedule-time" type="time" value="09:00" /></div>
+        </div>
+        <div id="schedule-custom">
+          <label for="schedule-kind">Repeat</label><select id="schedule-kind"><option value="minutes">Every N minutes</option><option value="hours">Every N hours</option><option value="cron">Cron (Home Assistant time)</option><option value="once">Once (Home Assistant time)</option></select>
+          <label for="schedule-value" id="schedule-value-label">Minutes</label><input id="schedule-value" value="60" />
+        </div>
+        <p id="schedule-format-note" class="muted"></p>
+        <details id="schedule-advanced" class="disclosure">
+          <summary>Advanced settings</summary>
+          <label for="schedule-mode">Permissions</label><select id="schedule-mode"><option value="default">Default</option><option value="read-only">Read only</option></select>
+          <p class="muted">Each run starts a new chat. A permission request waits in that chat; it is never allowed automatically.</p>
+          <p class="muted">Up to 24 runs per schedule and 64 scheduled or lead runs per UTC day. The assistant runs one task at a time.</p>
+          <div id="schedule-saved" hidden>
+            <p id="schedule-state" class="muted"></p>
+            <div class="settings-actions"><button id="schedule-toggle" type="button" class="subtle">Pause</button><button id="schedule-delete" type="button" class="subtle">Delete schedule</button></div>
+            <h3>Recent runs</h3><div id="schedule-own-runs"></div>
+          </div>
+        </details>
+        <p id="schedule-error" class="dialog-error" role="alert" hidden></p>
+        <div class="dialog-actions"><button type="button" class="subtle" data-close="schedule-dialog">Cancel</button><button id="schedule-save" type="submit">Create schedule</button></div>
+      </form>
     </dialog>
     <dialog id="permissions-dialog" class="studio-sheet" aria-labelledby="permissions-title">
       <div class="dialog-header"><h2 id="permissions-title">Permissions</h2><button class="icon icon-close" data-close="permissions-dialog" aria-label="Close permissions"></button></div>
@@ -532,20 +566,9 @@
       </section>
       <section id="scheduled-work">
         <h3>Scheduled runs</h3>
-        <p class="muted">Schedules follow Home Assistant time. Proposals from agents stay off until you approve them. A permission request waits in its chat; it is never allowed automatically.</p>
-        <p class="muted">Up to 24 runs per schedule and 64 scheduled or lead runs per UTC day. The assistant runs one task at a time.</p>
+        <p class="muted">To schedule a chat, open its menu in the chat list and choose Schedule. Proposals from agents stay off until you approve them here.</p>
         <p id="schedule-timezone" class="muted"></p>
         <div id="schedule-list"></div>
-        <form id="schedule-form">
-          <input id="schedule-id" type="hidden" />
-          <label for="schedule-name">Name</label><input id="schedule-name" maxlength="80" required />
-          <label for="schedule-prompt">Prompt</label><textarea id="schedule-prompt" rows="3" maxlength="16000" required></textarea>
-          <label for="schedule-mode">Mode</label><select id="schedule-mode"><option value="default">Default</option><option value="read-only">Read only</option></select>
-          <label for="schedule-kind">When</label><select id="schedule-kind"><option value="minutes">Every N minutes</option><option value="hours">Every N hours</option><option value="cron">Cron (Home Assistant time)</option><option value="once">Once (Home Assistant time)</option></select>
-          <label for="schedule-value" id="schedule-value-label">Minutes</label><input id="schedule-value" value="60" required />
-          <p id="schedule-format-note" class="muted">Use a whole number, at least 1.</p>
-          <div class="settings-actions"><button type="submit">Save and approve schedule</button><button id="schedule-reset" type="button" class="subtle">Clear form</button></div>
-        </form>
         <h4>Run log</h4><div id="schedule-runs"></div>
         <h3>Lead agent channel</h3>
         <p class="muted">Create a separate token for the other agent on this box. Copy it to that agent's private configuration. It can propose schedules and exchange local messages, but cannot approve actions or schedules. Rotation revokes the old token.</p>

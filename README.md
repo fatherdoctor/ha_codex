@@ -192,8 +192,9 @@ Settings. The token shows once, and the app stores only a hash.
 - A sensor counts unread messages for the other agent, and an event announces each new message without its text.
 - Limits: 500 messages, and 20 writes per turn and 64 per UTC day for each writer.
 
-**Schedules.** In **Settings** > **Scheduled runs**, you save a name, a prompt and a time rule: an interval, a cron
-rule or a single time, in your Home Assistant time zone.
+**Schedules.** Open a chat's menu and choose **Schedule**. You save a name, a prompt, a model and a trigger: hourly,
+daily, weekly, or a custom interval, cron rule or single time, in your Home Assistant time zone. Each run starts a
+new chat. **Settings** > **Scheduled runs** lists every schedule.
 
 - A schedule you save is approved when you save it. An agent can only propose one; it stays off until an
   administrator reads the full prompt and approves it.

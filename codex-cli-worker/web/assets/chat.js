@@ -2362,7 +2362,7 @@ function openChatMenu(id, trigger, point = null) {
   if (!sheet) positionChatMenu();
   menu.trigger?.setAttribute("aria-expanded", "true");
   menu.trigger?.closest(".chat-row")?.classList.add("menu-open");
-  for (const action of ["pin", "rename", "delete", "copy-id", "archive"])
+  for (const action of ["pin", "rename", "delete", "copy-id", "schedule", "archive"])
     panel.querySelector(`[data-action="${action}"]`).disabled = !id ||
       (["delete", "archive"].includes(action) && (working || Boolean(state.task?.queued_message)));
   panel.querySelector('[data-action="archive"]').textContent = chat?.archived ? "Restore chat" : "Archive";

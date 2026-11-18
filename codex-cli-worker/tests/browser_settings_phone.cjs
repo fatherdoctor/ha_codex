@@ -120,18 +120,18 @@ const themeLook = target => target.evaluate(() => {
   };
   return {
     font: getComputedStyle(document.body).fontFamily,
-    // A list field takes the same font as the page (#schedule-mode, Scheduled runs).
-    selectFont: css('#schedule-mode', 'font-family'),
-    // A text field and a text button of Scheduled runs (the log number field moved to the Configuration tab).
-    fieldFill: css('#schedule-value', 'background-color'),
-    fieldLine: css('#schedule-value', 'border-bottom-color'),
-    fieldHeight: document.querySelector('#schedule-value').getBoundingClientRect().height,
+    // A list field takes the same font as the page (the mailbox list of Scheduled runs).
+    selectFont: css('#schedule-mail-reader', 'font-family'),
+    // A text field and a text button of Scheduled runs (the schedule's own fields moved to the schedule editor).
+    fieldFill: css('#schedule-mail-due', 'background-color'),
+    fieldLine: css('#schedule-mail-due', 'border-bottom-color'),
+    fieldHeight: document.querySelector('#schedule-mail-due').getBoundingClientRect().height,
     // The Add-on configuration row at the foot of Settings: a name and a description line.
     rowHeight: document.querySelector('.ha-row').getBoundingClientRect().height,
     filled: css('#pause', 'background-color'),
     filledText: css('#pause', 'color'),
-    textButton: css('#schedule-reset', 'color'),
-    textButtonFill: css('#schedule-reset', 'background-color'),
+    textButton: css('#schedule-mail-reset', 'color'),
+    textButtonFill: css('#schedule-mail-reset', 'background-color'),
     // Every close button of Settings and its dialogs is the mdiClose icon, with no text glyph.
     closeIcons: [...document.querySelectorAll('#close-settings, dialog.studio-sheet .dialog-header .icon')].map(b =>
       `${b.textContent.trim() === ''} ${getComputedStyle(b, '::before').maskImage.includes('svg') || getComputedStyle(b, '::before').webkitMaskImage.includes('svg')}`),

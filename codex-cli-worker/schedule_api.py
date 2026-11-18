@@ -39,8 +39,11 @@ class Worker:
         with self.worker.lock:
             return copy.deepcopy(self.worker.tasks.get(task_id))
 
-    def submit(self, task_id, prompt, mode, name, schedule_id):
-        """Use the normal task path; metadata is durable before the runner starts."""
+    def submit(self, task_id, prompt, mode, name, schedule_id, model=None):
+        """Use the normal task path; metadata is durable before the runner starts.
+
+        model is the schedule's own model, or None to follow the add-on's.
+        """
         w = self.worker
         options = w.read_options()
         problem = w.protected_policy.policy_problem(options)
@@ -50,6 +53,8 @@ class Worker:
             if self.busy():
                 raise scheduling.Busy('The assistant is busy or paused.')
             settings = dict(w.DEFAULT_CHAT_SETTINGS)
+            if model:
+                settings['model'] = model
             turn = w.new_turn(prompt)
             turn['task_source'] = 'schedule' if schedule_id else 'lead'
             turn['execution_settings'] = w.resolve_chat_settings(settings, options)
@@ -153,6 +158,8 @@ class Service:
                         'envelope': {**scheduling.mail_envelope(row), 'message': w.redact(row['body'])[:512]}} for row in page],
                         'next_offset': offset + limit if offset + limit < len(rows) else None, 'text_limit': 512}
                 for row in page:
+                    for key in scheduling.OWNER_FIELDS:
+                        row.pop(key, None)  # The owner's chat and model are not Codex's to read.
                     for key in ('prompt', 'body'):
                         if key in row:
                             row[key] = w.redact(row[key])[:512]
@@ -316,6 +323,28 @@ def register(worker):
         result['prompt_redacted'] = result['prompt'] != row['prompt']
         return result
 
+    def for_agent(row):
+        """A schedule as the lead and Codex see it: without the owner's chat and model."""
+        return {key: value for key, value in schedule_payload(row).items() if key not in scheduling.OWNER_FIELDS}
+
+    def owner_schedule(data, schedule_id=None):
+        """Check what only the worker knows about an owner's schedule, then return it.
+
+        A named model must be one the chat page offers. A chat must exist when the
+        schedule first names it; a schedule outlives a chat that is deleted later.
+        """
+        if data.get('model') is not None:
+            worker.parse_chat_settings({'chat_settings': {'model': data['model']}})
+        chat_id = data.get('chat_id')
+        if chat_id and isinstance(chat_id, str):
+            store = service.engine().store
+            saved = next((row['chat_id'] for row in store.schedules() if row['id'] == schedule_id), '')
+            with worker.lock:
+                known = chat_id in worker.tasks
+            if chat_id != saved and not known:
+                raise ValueError('That chat no longer exists. Open the schedule from another chat or from Settings.')
+        return data
+
     def state():
         engine = service.engine()
         # Tick/lead dispatch owns this lock while reserving and saving a task. A page
@@ -350,14 +379,14 @@ def register(worker):
     @guarded
     @owner
     def schedules_create():
-        value = service.engine().store.save(body(), owner=True, now=time.time())
+        value = service.engine().store.save(owner_schedule(body()), owner=True, now=time.time())
         return jsonify(ok=True, schedule=schedule_payload(value)), 201
 
     @app.patch('/schedules/<schedule_id>')
     @guarded
     @owner
     def schedules_edit(schedule_id):
-        value = service.engine().store.save(body(), owner=True, now=time.time(), schedule_id=schedule_id)
+        value = service.engine().store.save(owner_schedule(body(), schedule_id), owner=True, now=time.time(), schedule_id=schedule_id)
         return jsonify(ok=True, schedule=schedule_payload(value))
 
     @app.post('/schedules/<schedule_id>/<action>')
@@ -391,21 +420,21 @@ def register(worker):
     @guarded
     @lead
     def lead_schedules_list():
-        return jsonify(ok=True, schedules=[schedule_payload(row) for row in service.engine().store.schedules()])
+        return jsonify(ok=True, schedules=[for_agent(row) for row in service.engine().store.schedules()])
 
     @app.post('/lead/schedules')
     @guarded
     @lead
     def lead_schedules_propose():
         value = service.engine().store.save(body(), owner=False, now=time.time())
-        return jsonify(ok=True, schedule=schedule_payload(value)), 201
+        return jsonify(ok=True, schedule=for_agent(value)), 201
 
     @app.patch('/lead/schedules/<schedule_id>')
     @guarded
     @lead
     def lead_schedules_edit(schedule_id):
         value = service.engine().store.save(body(), owner=False, now=time.time(), schedule_id=schedule_id)
-        return jsonify(ok=True, schedule=schedule_payload(value))
+        return jsonify(ok=True, schedule=for_agent(value))
 
     @app.delete('/lead/schedules/<schedule_id>')
     @guarded
