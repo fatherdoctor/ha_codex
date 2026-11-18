@@ -165,6 +165,26 @@ async function testSlash(browser, output, errors) {
     );
     // /help opens the Commands section, which starts closed like every section.
     assert.equal(await page.locator("#command-list").isVisible(), true);
+    // At Largest, even on a 320 px phone, the open section does not scroll
+    // sideways and each description has room for more than a word a line.
+    const fit = await page.evaluate(() => {
+      const list = document.querySelector("#command-list");
+      const settings = document.querySelector("#settings");
+      return {
+        settings: settings.scrollWidth <= settings.clientWidth,
+        list: list.scrollWidth <= list.clientWidth,
+        narrowest: Math.min(
+          ...[...list.querySelectorAll("dd")].map((dd) => dd.getBoundingClientRect().width),
+        ),
+      };
+    });
+    assert(fit.settings && fit.list, `${name}: the Commands section scrolls sideways at Largest`);
+    assert(fit.narrowest >= 120, `${name}: a command description is ${fit.narrowest} px wide`);
+    if (touch)
+      await page.screenshot({
+        path: path.join(output, `slash-${name}-commands-largest.png`),
+        animations: "disabled",
+      });
     const sizeToggle = page.locator("#text-size-section .settings-toggle");
     if ((await sizeToggle.getAttribute("aria-expanded")) !== "true") await sizeToggle.click();
     await page.locator("#settings").getByLabel("Normal").check();

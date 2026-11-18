@@ -3277,6 +3277,7 @@ function setAccountPart(sectionId, word, attention = false) {
 }
 collapseSettingsSections();
 setSectionStatus("workspace-section", "AGENTS.md");
+setSectionStatus("settings-commands", `${SLASH_COMMANDS.length} commands`);
 const TEXT_SIZES = ["normal", "larger", "largest"];
 const TEXT_SIZE_KEY = "codex-text-size";
 /**
