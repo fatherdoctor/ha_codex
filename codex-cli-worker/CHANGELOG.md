@@ -75,6 +75,8 @@
 
 ## 0.3.4 (unreleased)
 
+- Add a Repair and body-free event for unanswered task, approval and mailbox requests.
+  The reminder comes no later than half the task timeout. Answers and ended tasks clear it; it never answers automatically.
 - A plain device command such as "set the office overhead to 50%" is faster. On 0.3.3 Codex had no tool on the
   chat page that finds an entity by name, so it searched `.storage/core.entity_registry` with shell commands, and
   the page's rules told it to look for `/config/AGENTS.md` in every message. The `home_assistant` `verify` tool

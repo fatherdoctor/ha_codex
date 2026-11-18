@@ -1214,3 +1214,46 @@ to `/lead/mailbox`. A worker may send mail back but cannot start lead work. A pl
 never executes a task, grants authority or answers a human permission prompt. This signal
 adds no task dispatch, notification send, permission bypass or new agent connection. An unavailable mailbox
 leaves the sensor unknown and does not create arrival events.
+
+
+## A notice for an unanswered task
+
+The integration raises a Repair for an unanswered task request at the notice deadline.
+Set `unanswered_wait_minutes` in the app's Configuration tab. The default upper limit is 60 minutes; the range is 1 to 10080.
+The effective delay is the smaller of that limit and half `task_timeout_seconds`: 30 minutes with the default 3600-second timeout.
+
+For a running exchange, the deadline is no later than that delay after the exchange starts.
+A permission request that arrives after this deadline is due immediately, rather than starting a new delay.
+For a chat question after the exchange, the delay starts when the question appears.
+
+The next successful integration poll checks the timer, normally within 30 seconds.
+The worker and integration must both be installed and connected.
+The hard task timeout and its permission-wait behavior stay unchanged. A very late request can end before the next poll.
+
+The notice identifies the task by its ID and says whether it needs a question answer, permission decision or mailbox reply.
+It does not include the question, message body, command, permission reason or task title.
+Open Codex to inspect the full request before answering. The chat list shows titles, not these IDs; this notice has no direct task link.
+Answer permission cards and chat questions through their usual controls.
+For a mailbox question, reply in the owner mailbox.
+
+A task uses `post_mailbox` with `await_reply: true` only when it needs an owner's reply.
+Post each awaited question as a new thread, without `parent`. The page's Reply button then targets that exact question.
+The service refuses an awaited question inside an existing thread; ordinary notes and replies can still use those threads.
+Ordinary mailbox notes do not start this timer. Only one such mailbox question can be outstanding per task turn.
+A direct owner or lead reply to that exact message clears the mailbox wait, without marking the agent's mail read.
+An unrelated update elsewhere in the same thread does not count as the answer.
+New turns, cancellations and completed or failed tasks clear their old waits too.
+A reply never starts a task or supplies an approval automatically.
+
+Each wait produces at most one arrival event, including across integration reloads.
+The Repair remains until the wait ends. Changing the delay does not withdraw an existing notice.
+The event `codex_cli_unanswered_wait` has `active: true`, `wait_id`, `task_id`, `kind` and `waiting_since` (UTC epoch seconds).
+An automation can use that event to send a phone notice through the owner's chosen notification service.
+The integration does not send a phone message on its own.
+
+When the wait ends, the same event has `active: false` and its `wait_id`.
+Store that ID if an automation must clear its own phone notice.
+Cleanup retains the saved ID until the Repair and clear event are processed, so a restart can retry an interrupted clear.
+An interrupted cleanup may repeat the inactive event; automations should clear by wait ID without sending another arrival notice.
+If storage fails or the worker supplies no complete wait snapshot, the integration defers the notice or keeps the existing one.
+It does not treat a connection failure as an answer.
