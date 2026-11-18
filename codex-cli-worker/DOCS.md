@@ -357,6 +357,24 @@ Home Assistant OS or Core, this app too) or `backup.create`. A call can also run
 `shell_command`, `python_script`, `pyscript` or `rest_command` service. The app keeps no log of its own of the
 calls; Home Assistant's logbook and history show what changed.
 
+For a device you name, Codex can give your words in place of a target, for example `light.turn_on` with the name
+`kitchen ceiling`. Codex still asks you first, and the question shows the name. The worker then reads the entity
+list and sends the call only when exactly one entity of the service's domain fits the name:
+
+- Each word must be a whole word of the entity's name or entity id: "lamp" does not fit "Lamppost". A vowel or
+  tone mark (as in Thai or Hindi) is part of its word, so two names that differ only in a mark do not fit.
+- An entity whose name is exactly the words given wins over longer names: "office overhead" picks "Office
+  Overhead", not "Office Overhead Fan". Two entities with the same exact name are two candidates.
+- The service picks the domain: `light.turn_on` with a name never changes a switch. `homeassistant` services
+  act on many domains, so they need the entity id.
+- Credential-like and password-mode entities never match.
+
+When no entity fits, or more than one, nothing is sent: the answer lists up to 10 candidates and the full count,
+and Codex asks you which one. After a call whose target is entity ids, the answer also holds the state right after
+the call of up to 5 of them, so Codex does not need a second step to read it back. A light that fades or a cover
+that moves can still show its old state there. The answer names the entity that changed. If Home Assistant does
+not answer these reads, the answer can come up to 40 seconds late; the call itself is sent once.
+
 The keys of the app's tools (`HA_*_CAPABILITY`) are kept out of the commands that Codex runs, with Codex's
 `shell_environment_policy` setting. So a command cannot write to the socket and skip Codex's question. In a mode
 without a sandbox, a command can read the environment of the Codex process; that mode has no question to skip,
