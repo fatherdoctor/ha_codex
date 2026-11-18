@@ -39,7 +39,6 @@ import sys
 import tempfile
 import threading
 import time
-import tomllib
 from collections import deque
 from collections.abc import Callable
 from pathlib import Path
@@ -94,33 +93,6 @@ def exec_rules_problem() -> str:
         return ""
     with _exec_rules_lock:
         return _exec_rules_warning
-
-
-def managed_exec_rules_problem(data: dict[str, Any]) -> str:
-    """Reject a missing catalogue or a permissive/malformed managed rule."""
-    if not exec_rules_enabled():
-        return ""
-    rules = data.get("rules")
-    prefixes = rules.get("prefix_rules") if isinstance(rules, dict) else None
-    if not isinstance(prefixes, list) or not prefixes:
-        return "the managed command-prefix rules are missing"
-    for rule in prefixes:
-        if not isinstance(rule, dict) or rule.get("decision") not in {"forbidden", "prompt"}:
-            return "a managed command rule has no explicit forbidden or prompt decision"
-        pattern = rule.get("pattern")
-        if not isinstance(pattern, list) or not pattern:
-            return "a managed command rule has an empty pattern"
-        for token in pattern:
-            if not isinstance(token, dict):
-                return "a managed command rule has an invalid token"
-            literal, alternatives = token.get("token"), token.get("any_of")
-            is_literal = set(token) == {"token"} and isinstance(literal, str) and bool(literal)
-            is_choice = (set(token) == {"any_of"} and isinstance(alternatives, list)
-                         and bool(alternatives) and all(isinstance(t, str) and t for t in alternatives))
-            if is_literal or is_choice:
-                continue
-            return "a managed command rule has an invalid token"
-    return ""
 
 
 def _stop_exec_rules_probe(proc: Any) -> bool:
@@ -335,23 +307,6 @@ def remote_env(base: dict[str, str]) -> dict[str, str]:
     return env
 
 
-def requirements_problem(path: Path) -> str:
-    """Return what is wrong with the managed requirements file, or an empty string when it holds."""
-    try:
-        data = tomllib.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        return f"the managed requirements could not be read ({exc})"
-    modes = data.get("allowed_sandbox_modes")
-    if not isinstance(modes, list) or not modes or "danger-full-access" in modes:
-        return "the managed requirements do not rule out the full-access sandbox"
-    approvals = data.get("allowed_approval_policies")
-    if not isinstance(approvals, list) or not approvals or "never" in approvals:
-        return "the managed requirements do not rule out the never approval policy"
-    if data.get("allow_managed_hooks_only") is not True:
-        return "the managed requirements do not keep hooks to the managed ones"
-    return managed_exec_rules_problem(data)
-
-
 # What the hook must refuse, and let through, before remote control may start: (event, remote on, input, refused).
 SELF_TEST_CASES = (
     ("PermissionRequest", True, {"hook_event_name": "PermissionRequest", "tool_name": "Bash",
@@ -399,9 +354,9 @@ def hook_problem(hook: Path, run: Callable[..., Any] = subprocess.run) -> str:
 def gate_problem(marker: Path | None = None) -> str:
     """Return why remote control may not start, or an empty string when the command gate is installed and holds.
 
-    The marker must list the gate's files, every one must exist, the managed
-    requirements it names must rule out full access and outside hooks, and the
-    hook it names must refuse and pass the self-test requests.
+    The marker must list the gate's files, every one must exist, and the hook it
+    names must refuse and pass the self-test requests. The managed requirements
+    are Codex's own list of the four modes' values; the worker does not check them.
     """
     marker = marker or GATE_MARKER
     try:
@@ -417,7 +372,7 @@ def gate_problem(marker: Path | None = None) -> str:
     hook, requirements = data.get("hook"), data.get("requirements")
     if not isinstance(hook, str) or not isinstance(requirements, str) or not {hook, requirements} <= set(files):
         return GATE_MISSING
-    problem = requirements_problem(Path(requirements)) or hook_problem(Path(hook))
+    problem = hook_problem(Path(hook))
     if problem:
         return GATE_BROKEN + problem + "."
     return ""

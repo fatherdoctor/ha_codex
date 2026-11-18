@@ -1,10 +1,8 @@
 """CX-RC-START regressions using disposable configuration and fake transports."""
-import io
 import json
 import subprocess
 import sys
 import tempfile
-import threading
 import types
 import unittest
 from pathlib import Path
@@ -12,7 +10,6 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-import approvals
 import gate_rules as rules
 import remote_control as rc
 
@@ -38,15 +35,6 @@ class StartRegressions(unittest.TestCase):
             self.assertIn('without', sup.snapshot()['name_warning'])
             self.assertEqual(sup._command('remote-control', 'pair'), [rc.RELAY_LAUNCHER, '--plain', 'codex', 'remote-control', 'pair'])
 
-    def test_requirements_exclude_never_and_self_test_checks_it(self):
-        import tomllib
-        text = (ROOT/'gate/requirements.toml').read_text()
-        self.assertNotIn('never', tomllib.loads(text)['allowed_approval_policies'])
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp)/'req.toml'
-            path.write_text(text.replace('["on-request"]', '["on-request", "never"]'))
-            self.assertIn('approval', rc.requirements_problem(path))
-
     def test_relay_fallback_is_honest_without_inventing_observation(self):
         with tempfile.TemporaryDirectory() as tmp:
             sup = rc.Supervisor('codex', Path(tmp)/'state', dict, lambda: '', gate=lambda: '')
@@ -54,19 +42,6 @@ class StartRegressions(unittest.TestCase):
             self.assertIn('downgraded', sup.snapshot()['policy_warning'])
             self.assertTrue(any('downgraded' in line for line in sup.snapshot()['log']))
             self.assertTrue('read-only' in (ROOT/'web/index.html').read_text())
-
-    def test_adapter_refuses_full_access_before_initialization(self):
-        for thread, turn in [({'sandbox':'danger-full-access'}, {}),
-                             ({'config':{'sandbox_mode':'danger-full-access'}}, {}),
-                             ({}, {'sandboxPolicy':{'type':'dangerFullAccess'}})]:
-            with self.subTest(thread=thread, turn=turn):
-                writer = io.StringIO()
-                session = approvals.AppServerSession(writer, lock=threading.RLock(), thread_params=thread,
-                    turn_params=turn, on_event=lambda _:None, on_approvals=lambda _:None,
-                    on_final=lambda _:None, is_active=lambda:True, redact=lambda v:v)
-                with self.assertRaisesRegex(ValueError, '(?i)full.access'):
-                    session.start()
-                self.assertEqual(writer.getvalue(), '')
 
 
 class PatchRegressions(unittest.TestCase):

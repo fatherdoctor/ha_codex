@@ -1,5 +1,4 @@
 """Managed rules and startup refusal use real protocol boundaries, without accounts."""
-import copy
 import io
 import itertools
 import json
@@ -33,7 +32,6 @@ class ManagedRulesTests(unittest.TestCase):
         self.data = tomllib.loads((ROOT / 'gate/requirements.toml').read_text())
 
     def test_catalogue_is_managed_and_never_allows(self):
-        self.assertEqual(rc.managed_exec_rules_problem(self.data), '')
         self.assertTrue(rc.exec_rules_enabled())
         self.assertEqual(len(self.data['rules']['prefix_rules']), 6)
         self.assertEqual({r['decision'] for r in self.data['rules']['prefix_rules']}, {'forbidden'})
@@ -51,27 +49,6 @@ class ManagedRulesTests(unittest.TestCase):
             result = subprocess.run([sys.executable, '-I', '-c', code, tmp],
                                     capture_output=True, text=True, timeout=10)
             self.assertEqual(result.returncode, 0, result.stderr)
-
-    def test_missing_and_permissive_rules_fail_readiness(self):
-        cases = [{}, {'prefix_rules': []}]
-        for decision in (None, 'allow', 'unknown'):
-            rule = copy.deepcopy(self.data['rules']['prefix_rules'][0]); rule['decision'] = decision
-            cases.append({'prefix_rules': [rule]})
-        for rules in cases:
-            with self.subTest(rules=rules):
-                self.assertTrue(rc.managed_exec_rules_problem({**self.data, 'rules': rules}))
-
-    def test_invalid_tokens_fail_readiness(self):
-        for token in ({}, {'token': ''}, {'any_of': []}, {'any_of': ['ha', None]},
-                      {'token': 'ha', 'any_of': ['ha']}, 'ha'):
-            data = copy.deepcopy(self.data); data['rules']['prefix_rules'][0]['pattern'] = [token]
-            with self.subTest(token=token):
-                self.assertTrue(rc.managed_exec_rules_problem(data))
-
-    def test_malformed_managed_file_fails_existing_gate(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / 'requirements.toml'; p.write_text('[[rules.prefix_rules]\n')
-            self.assertIn('could not be read', rc.requirements_problem(p))
 
     def test_every_catalogued_literal_is_already_refused_by_the_hook(self):
         for rule in self.data['rules']['prefix_rules']:
@@ -430,14 +407,6 @@ class ExecRulesReviewTests(unittest.TestCase):
         self.assertFalse(supervisor.enabled())
         self.assertEqual(json.loads(self.state.read_text()), {'enabled': False})
         self.assertEqual(supervisor.snapshot()['blocked_reason'], rc.EXEC_RULES_WARNING)
-
-    def test_requirements_entry_point_refuses_a_missing_catalogue(self):
-
-        """Exercise the real requirements entry point with a header-only file."""
-        text = (ROOT / 'gate/requirements.toml').read_text().split('[[rules.prefix_rules]]', 1)[0]
-        path = Path(self.temp.name) / 'requirements.toml'
-        path.write_text(text)
-        self.assertIn('command-prefix rules are missing', rc.requirements_problem(path))
 
     def test_kind_off_ignores_new_and_cached_rule_warnings(self):
 

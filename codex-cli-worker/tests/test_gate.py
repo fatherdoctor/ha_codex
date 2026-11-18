@@ -559,12 +559,6 @@ class MarkerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertEqual(rc.gate_problem(self.marker(tmp)), "")
 
-    def test_full_access_or_outside_hooks_block(self) -> None:
-        for text in ('allowed_sandbox_modes = ["workspace-write", "danger-full-access"]\nallow_managed_hooks_only = true\n',
-                     'allowed_sandbox_modes = ["workspace-write"]\n', "not = [toml"):
-            with tempfile.TemporaryDirectory() as tmp, self.subTest(text):
-                self.assertTrue(rc.gate_problem(self.marker(tmp, requirements=text)).startswith(rc.GATE_BROKEN))
-
     def test_a_hook_that_lets_everything_through_blocks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             hook = Path(tmp) / "hook.py"

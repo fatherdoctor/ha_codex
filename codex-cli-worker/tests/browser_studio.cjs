@@ -52,7 +52,8 @@ fs.mkdirSync(output,{recursive:true});
    if(width===390) assert.equal(await page.locator('.chat-header #menu').isVisible(),false);
    await page.screenshot({path:`${output}/after-${theme}-${width}.png`});
    await page.locator('#permission-button').click();
-   assert.equal(await page.locator('.permission-option:disabled').count(),2);
+   // Only Full access, while its switch is off; Auto-review can be chosen.
+   assert.equal(await page.locator('.permission-option:disabled').count(),1);
    await page.locator('[data-mode="read-only"]').click();
    assert.equal(await page.locator('#permission-button').textContent(),'Read only⌄');
    await page.locator('#permission-button').click();

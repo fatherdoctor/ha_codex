@@ -416,16 +416,38 @@ def confirmation(record: dict[str, Any]) -> dict[str, str]:
     return text
 
 
-def require_supported_policy(params: dict[str, Any]) -> None:
-    """Integration-owned requests must refuse full access instead of relying on Codex's fallback."""
-    config = params.get("config") or {}
-    policy = params.get("sandboxPolicy") or {}
-    modes = [params.get("sandbox"), config.get("sandbox_mode") if isinstance(config, dict) else None,
-             policy.get("type") if isinstance(policy, dict) else policy]
-    if any(mode in ("danger-full-access", "dangerFullAccess") for mode in modes):
-        raise ValueError("Full-access requests are refused by this integration; use workspace-write or read-only.")
-    if params.get("approvalPolicy") == "never" or (isinstance(config, dict) and config.get("approval_policy") == "never"):
-        raise ValueError("The never approval policy is refused by this integration; use on-request.")
+# Codex's reviewer reports each review it makes in an Auto-review chat (app-server-protocol common.rs at
+# rust-v0.166.0). It sends no request: it allows or denies in place of the person.
+AUTO_REVIEW_EVENTS = {"item/autoApprovalReview/started", "item/autoApprovalReview/completed"}
+AUTO_REVIEW_STATUSES = {"inProgress", "approved", "denied", "timedOut", "aborted"}
+AUTO_REVIEW_RISKS = {"low", "medium", "high", "critical"}
+AUTO_REVIEW_RATIONALE_LIMIT = 500
+
+
+def auto_review_event(method: str, params: dict[str, Any], redact: Callable[[str], str]) -> dict[str, Any]:
+    """Return the chat event for one review by Codex's reviewer: its id, status, risk, what it checked and why.
+
+    Only known words pass: an unknown status reads as "unknown" and is shown as
+    not allowed. The reviewer's reason is model text, so it is redacted and
+    clipped like any other text the chat shows.
+    """
+    review = params.get("review") if isinstance(params.get("review"), dict) else {}
+    action = params.get("action") if isinstance(params.get("action"), dict) else {}
+    status = review.get("status")
+    if method.endswith("/started"):
+        status = "inProgress"
+    elif status not in AUTO_REVIEW_STATUSES - {"inProgress"}:
+        status = "unknown"
+    risk = review.get("riskLevel")
+    rationale = review.get("rationale") if isinstance(review.get("rationale"), str) else ""
+    return {
+        "type": "auto_review",
+        "review_id": str(params.get("reviewId") or "")[:128],
+        "status": status,
+        "risk_level": risk if risk in AUTO_REVIEW_RISKS else "",
+        "action": str(action.get("type") or "")[:40],
+        "rationale": redact(rationale)[:AUTO_REVIEW_RATIONALE_LIMIT],
+    }
 
 
 class AppServerSession:
@@ -477,8 +499,6 @@ class AppServerSession:
 
     def _request(self, method: str, params: dict[str, Any]) -> None:
         """Send a client request with a namespace distinct from server request IDs."""
-        if method in {"thread/start", "thread/resume", "turn/start"}:
-            require_supported_policy(params)
         self._next_id += 1
         request_id = f"worker-{self._next_id}"
         self._requests[request_id] = method
@@ -490,8 +510,6 @@ class AppServerSession:
             if self._closed or not self.is_active():
                 self.close()
                 return
-            require_supported_policy(self.thread_params)
-            require_supported_policy(self.turn_params)
             self._request("initialize", {"clientInfo": {
                 "name": "home_assistant_worker", "title": "Home Assistant", "version": "1",
             }})
@@ -711,6 +729,8 @@ class AppServerSession:
                     self.on_event({"type": "turn.started"})
             elif params.get("threadId") == self.thread_id and params.get("turnId") == self.turn_id and method in {"item/started", "item/completed"}:
                 self._item(method, params["item"])
+            elif method in AUTO_REVIEW_EVENTS and params.get("threadId") == self.thread_id and params.get("turnId") == self.turn_id:
+                self.on_event(auto_review_event(method, params, self.redact))
             elif method == "item/fileChange/patchUpdated" and params.get("threadId") == self.thread_id and params.get("turnId") == self.turn_id:
                 self._cache_file_changes(str(params["itemId"]), params.get("changes") or [])
             elif method == "turn/completed" and params.get("threadId") == self.thread_id:
@@ -737,9 +757,6 @@ class AppServerSession:
             self._write({"method": "initialized"})
             self._request("thread/resume" if self.thread_params.get("threadId") else "thread/start", self.thread_params)
         elif method in {"thread/start", "thread/resume"}:
-            if result.get("approvalPolicy") != "on-request" or result.get("approvalsReviewer") != "user":
-                raise ValueError("Codex did not enable user approval requests")
-            require_supported_policy(result)
             self.thread_id = result["thread"]["id"]
             expected = self.thread_params.get("threadId")
             if expected and self.thread_id != expected:

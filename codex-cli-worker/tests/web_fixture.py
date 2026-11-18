@@ -46,6 +46,9 @@ def main():
         root = Path(temp)
         server.DATA_ROOT = root
         server.CONFIG_ROOT = root
+        # Full access keeps its setting and writes the requirements in the temporary folder, never in /data or /etc.
+        server.full_access.SETTING_PATH = root / "full_access.json"
+        server.full_access.REQUIREMENTS_PATH = root / "codex-etc" / "requirements.toml"
         from interaction_diagnostics import RollingDiagnostics, InteractionRecorder
         server.interaction_logs = RollingDiagnostics(root / "interaction-diagnostics.json")
         server.diagnostics = InteractionRecorder(server.interaction_logs, "0.1.81.2", "0.166.0")

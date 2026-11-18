@@ -15,6 +15,7 @@
     <script src="assets/chat.js" defer></script>
     <script src="assets/studio.js" defer></script>
     <script src="assets/schedules.js" defer></script>
+    <script src="assets/full_access.js" defer></script>
   </head>
   <body>
     <div class="app">
@@ -126,6 +127,9 @@
         <section id="github-banner" class="page-banner" role="status" hidden>
           <p><strong id="github-banner-text">The add-on's GitHub sign-in needs attention.</strong></p>
           <div class="settings-actions"><button id="github-banner-open">Open GitHub settings</button></div>
+        </section>
+        <section id="full-access-banner" class="page-banner" role="status" hidden>
+          <p><strong>Full access is on.</strong> A chat set to Full access, and a ChatGPT app thread that asks for it, runs commands outside the sandbox.</p>
         </section>
         <section id="paused-banner" class="page-banner" role="status" hidden>
           <p><strong>The assistant is paused.</strong> New messages are refused until you resume it.</p>
@@ -349,12 +353,20 @@
     </dialog>
     <dialog id="permissions-dialog" class="studio-sheet" aria-labelledby="permissions-title">
       <div class="dialog-header"><h2 id="permissions-title">Permissions</h2><button class="icon icon-close" data-close="permissions-dialog" aria-label="Close permissions"></button></div>
-      <p class="muted">Choose how this chat starts its next turn. A choice cannot expand the add-on's configured permissions.</p>
-      <button class="permission-option" data-mode="default"><strong>Default permissions</strong><span>Use the configured sandbox and ask for native approval when needed.</span></button>
-      <button class="permission-option" data-mode="read-only"><strong>Read only</strong><span>Inspect and explain. Changes require a specific owner approval.</span></button>
-      <button class="permission-option" disabled><strong>Auto-review · Coming</strong><span>Not available in this build.</span></button>
-      <button class="permission-option" disabled><strong>Full access · Coming</strong><span>Not available in this build.</span></button>
+      <p class="muted">Choose how this chat starts its next turn. These are the four modes of the ChatGPT app, with Codex's own settings.</p>
+      <button class="permission-option" data-mode="default"><strong>Default permissions</strong><span>Codex works in the sandbox and asks you before a change it needs permission for.</span></button>
+      <button class="permission-option" data-mode="auto-review"><strong>Auto-review</strong><span>As Default, but Codex's own reviewer allows or denies each request. It does not ask you.</span></button>
+      <button class="permission-option" data-mode="read-only"><strong>Read only</strong><span>Codex reads in a read-only sandbox and asks you before any change.</span></button>
+      <button class="permission-option" data-mode="full-access" disabled><strong>Full access</strong><span id="full-access-option-text">Off. An administrator can turn it on in Settings.</span></button>
       <p id="permission-result" role="status"></p>
+    </dialog>
+    <dialog id="full-access-dialog" aria-labelledby="full-access-title">
+      <div class="dialog-header"><h2 id="full-access-title">Turn on Full access?</h2></div>
+      <p id="full-access-warning"></p>
+      <div class="dialog-actions">
+        <button type="button" id="full-access-cancel" class="subtle">Cancel</button>
+        <button type="button" id="full-access-confirm">Turn on Full access</button>
+      </div>
     </dialog>
     <dialog id="status-dialog" class="studio-sheet" aria-labelledby="status-title"><div class="dialog-header"><h2 id="status-title">Status</h2><button class="icon icon-close" data-close="status-dialog" aria-label="Close status"></button></div><dl id="status-details"></dl></dialog>
     <dialog id="connection-dialog" class="studio-sheet" aria-labelledby="connection-title"><div class="dialog-header"><h2 id="connection-title">Remote connection</h2><button class="icon icon-close" data-close="connection-dialog" aria-label="Close remote connection"></button></div><div id="connection-content"></div><p id="connection-result" role="alert"></p></dialog>
@@ -430,6 +442,13 @@
             ><button id="app-pairing-off" class="subtle" hidden>Turn off</button>
           </div>
         </section>
+      </section>
+      <section id="full-access-section">
+        <h3>Full access</h3>
+        <p class="muted">Lets a chat set to Full access run Codex without its sandbox and without questions. Off by default.</p>
+        <p id="full-access-state" role="status">Checking…</p>
+        <button id="full-access-toggle" class="subtle" disabled>Turn on Full access</button>
+        <p id="full-access-result" role="status" class="muted">Available to administrators.</p>
       </section>
       <section id="interaction-logs-section">
         <h3>Interaction logs</h3>
