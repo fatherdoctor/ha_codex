@@ -206,10 +206,10 @@ async function testSlash(browser, output, errors) {
     assert.deepEqual(sent, [], `${name}: a command was sent as a message`);
 
     // With a chat open, /rename is listed and opens the rename dialog.
-    await page.evaluate(() =>
-      localStorage.setItem("codex-last-chat", "preview-01"),
-    );
-    await page.reload();
+    // Open the first chat in the list: chats that earlier checks in the same
+    // fixture run start push older ones, such as preview-01, off the first page,
+    // and the page lists /rename only for a chat it has in its list.
+    await page.locator(".chat-row .row-main").first().evaluate((el) => el.click());
     await page.locator("#messages .message").first().waitFor();
     await typeMessage(page, "/re");
     assert.deepEqual(await listed(page), ["/reasoning", "/rename"]);

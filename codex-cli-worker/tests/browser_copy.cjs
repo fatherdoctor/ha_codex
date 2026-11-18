@@ -1,6 +1,6 @@
 // Run against web_fixture.py with Playwright available on NODE_PATH.
 // Answers have no Copy response button (removed in 0.3.4). A chat's menu lists
-// Rename, Pin, Share, Archive and Delete in the ChatGPT app's order (0.3.6), the
+// Rename, Pin, Share, Schedule, Archive and Delete (Schedule since 0.3.6), the
 // conversation header has no menu of its own, and Share downloads the chat as
 // Markdown, whole or its last lines, with the steps Codex printed.
 const { chromium } = require("playwright");
@@ -52,7 +52,7 @@ async function openSavedChat(page) {
     const items = await page.locator("#chat-menu [role=menuitem]").evaluateAll((nodes) =>
       nodes.filter((node) => node.offsetParent !== null).map((node) => node.textContent.trim()),
     );
-    assert.deepEqual(items, ["Rename", "Pin chat", "Share", "Archive", "Delete"]);
+    assert.deepEqual(items, ["Rename", "Pin chat", "Share", "Schedule", "Archive", "Delete"]);
     for (const gone of ["New chat", "Conversations", "Copy thread ID", "Status"])
       assert.equal(await page.locator("#chat-menu").getByRole("menuitem", { name: gone, exact: true }).count(), 0, gone);
 
@@ -89,7 +89,7 @@ async function openSavedChat(page) {
     await page.locator("#share-cancel").click();
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: answers have no Copy response button; the chat menu is Rename, Pin, Share, Archive, Delete; Share downloads the chat.",
+      "PASS: answers have no Copy response button; the chat menu is Rename, Pin, Share, Schedule, Archive, Delete; Share downloads the chat.",
     );
   } finally {
     await browser.close();
