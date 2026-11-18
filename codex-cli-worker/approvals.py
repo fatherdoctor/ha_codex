@@ -326,6 +326,16 @@ def command_names_protected_path(command: str) -> bool:
 
 
 FILE_APPROVAL = "item/fileChange/requestApproval"
+TOOL_APPROVAL = "mcpServer/elicitation/request"
+
+# The tool servers whose action requests get a page card: the plain Home Assistant tool, home_assistant.call.
+# A question from any other server is still declined (see _elicitation_refusal).
+TOOL_CARD_SERVERS = frozenset({"home_assistant"})
+
+# Codex 0.166.0 asks before a tool call with a form whose _meta has codex_approval_kind "mcp_tool_call" and the full
+# arguments in tool_params. The tool name is only in its message, which for a tool outside the ChatGPT apps is always
+# this sentence (codex-rs/core/src/mcp_tool_call.rs, build_mcp_tool_approval_fallback_message).
+_TOOL_QUESTION = re.compile(r'Allow the ([A-Za-z0-9_-]{1,64}) MCP server to run tool "([A-Za-z0-9_-]{1,64})"\?')
 
 
 _SERVER_NAME = re.compile(r"[A-Za-z0-9_-]{1,64}")
@@ -336,6 +346,26 @@ def _elicitation_refusal(params: dict[str, Any]) -> str:
     name = params.get("serverName")
     source = f"The {name} tool" if isinstance(name, str) and _SERVER_NAME.fullmatch(name) else "A tool"
     return f"{source} asked a question this page cannot show, so it was declined and nothing was changed."
+
+
+def decision_result(kind: str, allow: bool) -> dict[str, Any]:
+    """The reply Codex reads for a request of this kind: a tool's form, or a command's or file change's decision."""
+    if kind == "tool":
+        # Accept with no remember option is one approval; Codex asks again before the next call.
+        return {"action": "accept" if allow else "decline", "content": None, "_meta": None}
+    return {"decision": "accept" if allow else "decline"}
+
+
+def tool_request(params: dict[str, Any]) -> tuple[str, str] | None:
+    """Return (server, tool) when this is Codex's own request to run a tool of a card server, else None."""
+    meta = params.get("_meta")
+    if params.get("mode") != "form" or not isinstance(meta, dict) or meta.get("codex_approval_kind") != "mcp_tool_call":
+        return None
+    question = _TOOL_QUESTION.fullmatch(str(params.get("message") or ""))
+    server = params.get("serverName")
+    if not question or server not in TOOL_CARD_SERVERS or question.group(1) != server:
+        return None
+    return server, question.group(2)
 
 
 _SERVICE_PATH = re.compile(r"/api/services/([a-z0-9_]+)/([a-z0-9_]+)")
@@ -368,25 +398,44 @@ def _entity_ids(text: str) -> list[str]:
     """Return the entity ids a command names, in order, without repeats."""
     return list(dict.fromkeys(_ENTITY_ID.findall(text)))
 
+def _service_confirmation(domain: str, service: str, text: str) -> dict[str, str]:
+    """Plain words for one Home Assistant action, with the entity ids that the text names as its targets."""
+    if (domain, service) in _RELOADS:
+        what, effect = _RELOADS[(domain, service)]
+        return {"what": what, "where": "This Home Assistant.", "effect": effect}
+    targets = [entity for entity in _entity_ids(text) if entity.split(".")[0] == domain] or _entity_ids(text)
+    where = ", ".join(targets) if targets else f"every {domain} the action reaches"
+    verb = _SERVICE_WORDS.get(service, f"runs {domain}.{service} on")
+    if domain == "scene" and service == "turn_on":
+        verb = "applies"
+    return {"what": f"Run the Home Assistant action {domain}.{service}.", "where": (where if targets else where.capitalize()) + ".",
+            "effect": f"This {verb} {where}."}
+
 def _command_confirmation(command: str, cwd: str, network: str) -> dict[str, str]:
     """Plain words for a command: a Home Assistant action when one is named, else the command itself."""
     lower = (command or "").lower()
     call = _SERVICE_PATH.search(lower)
     if call:
-        domain, service = call.groups()
-        if (domain, service) in _RELOADS:
-            what, effect = _RELOADS[(domain, service)]
-            return {"what": what, "where": "This Home Assistant.", "effect": effect}
-        targets = [entity for entity in _entity_ids(lower) if entity.split(".")[0] == domain] or _entity_ids(lower)
-        where = ", ".join(targets) if targets else f"every {domain} the action reaches"
-        verb = _SERVICE_WORDS.get(service, f"runs {domain}.{service} on")
-        if domain == "scene" and service == "turn_on":
-            verb = "applies"
-        return {"what": f"Run the Home Assistant action {domain}.{service}.", "where": (where if targets else where.capitalize()) + ".",
-                "effect": f"This {verb} {where}."}
+        return _service_confirmation(*call.groups(), lower)
     where = f"In {cwd}" + (f", reaching {network}" if network else "") + "." if cwd else "On this Home Assistant."
     return {"what": "Run one command outside the sandbox, shown below.", "where": where,
             "effect": "Only what that command does; it may read files and use the network."}
+
+_SERVICE_NAME = re.compile(r"([a-z0-9_]+)\.([a-z0-9_]+)")
+
+def _tool_confirmation(tool: str, arguments: str) -> dict[str, str]:
+    """Plain words for a tool request: the Home Assistant action it names, else the tool and its arguments."""
+    try:
+        parsed = json.loads(arguments)
+    except ValueError:
+        parsed = None
+    service = parsed.get("service") if isinstance(parsed, dict) else None
+    call = _SERVICE_NAME.fullmatch(service) if isinstance(service, str) else None
+    if call:
+        # Only the target names the entities; an entity id inside data (a message, say) is not one.
+        return _service_confirmation(*call.groups(), json.dumps(parsed.get("target")))
+    return {"what": f"Run the tool {tool}, with the arguments shown below.", "where": "This Home Assistant.",
+            "effect": "Only what the tool does with these arguments."}
 
 def _file_effect(paths: list[str]) -> str:
     """The plain effect of changing these files: the most specific one that applies to each, without repeats."""
@@ -409,8 +458,12 @@ def _changes_confirmation(changes: list[dict[str, Any]]) -> dict[str, str]:
 
 def confirmation(record: dict[str, Any]) -> dict[str, str]:
     """Describe the redacted action without making or suppressing its approval decision."""
-    text = (_command_confirmation(record["command"], record["cwd"], record.get("network", ""))
-            if record["kind"] == "command" else _changes_confirmation(record["changes"]))
+    if record["kind"] == "command":
+        text = _command_confirmation(record["command"], record["cwd"], record.get("network", ""))
+    elif record["kind"] == "tool":
+        text = _tool_confirmation(record["tool"], record["arguments"])
+    else:
+        text = _changes_confirmation(record["changes"])
     if not record["can_allow"]:
         text["effect"] = "This request cannot be allowed here. " + record["note"]
     return text
@@ -556,8 +609,9 @@ class AppServerSession:
         """Expose only a request for the active thread and turn, with an opaque UI ID."""
         if params.get("threadId") != self.thread_id or params.get("turnId") != self.turn_id:
             raise ValueError("permission request does not belong to the active exchange")
+        kind = {COMMAND_APPROVAL: "command", FILE_APPROVAL: "file_change", TOOL_APPROVAL: "tool"}[method]
         if len(self._records) >= REQUEST_LIMIT:
-            self._write({"id": request_id, "result": {"decision": "decline"}})
+            self._write({"id": request_id, "result": decision_result(kind, False)})
             self.on_event({"type": "error", "message": "Too many permission requests in this exchange; request denied."})
             return
         if request_id in self._pending.values():
@@ -566,15 +620,24 @@ class AppServerSession:
         clipped = False
         # Anything but a new command, such as input typed into a running one, is shown but never allowed.
         request_kind = params.get("kind", "command") if method == COMMAND_APPROVAL else ""
+        # The counter's kind: a new command, input to a running one, a file change, or another request (a tool's too).
+        prompt_kind = "file_change" if kind == "file_change" else "other"
+        if kind == "command":
+            prompt_kind = {"command": "command", "writeStdin": "command_input"}.get(request_kind, "other")
         record: dict[str, Any] = {
-            "approval_id": uuid.uuid4().hex, "status": "pending", "reason": reason,
-            "kind": "command" if method == COMMAND_APPROVAL else "file_change",
-            # The counter's kind: a new command, input to a running one, another command request, or a file change.
-            "prompt_kind": ("file_change" if method != COMMAND_APPROVAL else "command" if request_kind == "command"
-                            else "command_input" if request_kind == "writeStdin" else "other"),
-            "can_allow": True, "command": "", "cwd": "", "changes": [],
+            "approval_id": uuid.uuid4().hex, "status": "pending", "reason": reason, "kind": kind,
+            "prompt_kind": prompt_kind, "can_allow": True, "command": "", "cwd": "", "changes": [],
         }
-        if method == COMMAND_APPROVAL:
+        if kind == "tool":
+            # Shown in full or not allowed: the arguments Codex will send, as JSON, after credentials are hidden.
+            server, tool = tool_request(params)
+            record["tool"] = f"{server}.{tool}"
+            arguments = params["_meta"].get("tool_params")
+            record["arguments"], clipped = self._display(
+                json.dumps(arguments, indent=2, sort_keys=True, ensure_ascii=False))
+            record["scope"] = "Allow this one tool call once. Codex asks again before the next one."
+            record["can_allow"] = isinstance(arguments, dict)
+        elif method == COMMAND_APPROVAL:
             record["command"], truncated = self._display(params.get("command"))
             record["cwd"], folder_truncated = self._display(params.get("cwd"))
             clipped |= truncated or folder_truncated
@@ -595,7 +658,10 @@ class AppServerSession:
                 change.get("path") and change.get("diff") and change.get("kind") in {"add", "update", "delete"}
                 for change in record["changes"])
             clipped |= any(change.get("truncated") or change.get("redacted") for change in record["changes"])
-        if method == COMMAND_APPROVAL:
+        if kind == "tool":
+            # The worker behind the tool holds its own refusals; no file path is part of this request.
+            protected = False
+        elif method == COMMAND_APPROVAL:
             # A command allowed once runs outside the sandbox, so it is held to the same protected places.
             protected = command_names_protected_path(params.get("command") or "")
         else:
@@ -613,6 +679,9 @@ class AppServerSession:
             record["note"] = "This request touches the app's permission policy or settings, which Codex may not edit. Deny it."
         elif request_kind == "writeStdin":
             record["note"] = "Input to a running command cannot be allowed here. Deny it and ask for the whole action as one command."
+        elif kind == "tool" and record["can_allow"]:
+            record["note"] = ("Known credentials are hidden. Allow once runs this call only; it does not change your "
+                              "permission mode or approve the next call.")
         elif request_kind not in ("", "command"):
             record["note"] = "This kind of request cannot be allowed here. Deny it and ask for a single command or file change."
         elif not record["can_allow"]:
@@ -656,7 +725,7 @@ class AppServerSession:
                 record["decided_by"] = dict(decided_by)
             try:
                 self.on_approvals(copy.deepcopy(self._records))
-                self._write({"id": request_id, "result": {"decision": "accept" if decision == "allow" else "decline"}})
+                self._write({"id": request_id, "result": decision_result(record["kind"], decision == "allow")})
             except (OSError, ValueError):
                 record["status"] = "expired"
                 self.fail("Could not deliver the permission decision. The exchange was stopped.")
@@ -684,8 +753,10 @@ class AppServerSession:
                     # Broad turn/session grants are deliberately unsupported.
                     self._write({"id": message["id"], "result": {"permissions": {}, "scope": "turn"}})
                     self.on_event({"type": "error", "message": "Broad permission grant denied. Request a single command or file change instead."})
-                elif method == "mcpServer/elicitation/request":
-                    # The page has no card for a tool's own questions, so say so in the chat
+                elif method == TOOL_APPROVAL and tool_request(params):
+                    self._publish_approval(message["id"], method, params)
+                elif method == TOOL_APPROVAL:
+                    # The page has no card for any other tool question, so say so in the chat
                     # instead of declining where nobody can see it.
                     self._write({"id": message["id"], "result": {"action": "decline"}})
                     self.on_event({"type": "error", "message": _elicitation_refusal(params)})
