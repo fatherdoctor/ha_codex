@@ -35,8 +35,10 @@ WAYS_IN = {
     "Read history or long-term statistics": {
         PAGE: ("home_assistant_data.history", "home_assistant_data.statistics"), APP: NONE,
         SERVICE: ("home_assistant_data.history", "home_assistant_data.statistics")},
-    "Control a device or call a service": {PAGE: NONE, APP: NONE, SERVICE: NONE},
-    "Send a notification": {PAGE: NONE, APP: NONE, SERVICE: NONE},
+    "Control a device or call a service": {
+        PAGE: ("home_assistant_call.call",), APP: NONE, SERVICE: ("home_assistant_call.call",)},
+    "Send a notification": {
+        PAGE: ("home_assistant_call.call",), APP: NONE, SERVICE: ("home_assistant_call.call",)},
     "Ask the owner a question or report the turn's state": {
         PAGE: ("home_assistant_data.ask_owner", "home_assistant_data.report_failure", "home_assistant_data.exchange_info"),
         APP: NONE,
@@ -50,6 +52,9 @@ WAYS_IN = {
     "Work with a GitHub repository": {
         PAGE: ("codex_github.github_git",), APP: NONE, SERVICE: ("codex_github.github_git",)},
 }
+
+# The one tool that changes the house: Codex asks for it each time, so only a launch that can ask gets it.
+CALL_TOOL = "home_assistant_call.call"
 
 CONFIG = re.compile(r"mcp_servers\.([a-z_]+)\.(.+?)=(.*)", re.S)
 
@@ -165,15 +170,19 @@ class WaysInTests(unittest.TestCase):
         self.assertEqual(self.app, table_tools(APP))
 
     def test_both_page_launches_register_the_same_tools(self):
-        """A turn runs through app-server or exec by an option, never by way in; both give the same tools."""
-        self.assertEqual(tools_of(exec_args()), self.page)
+        """A turn runs through app-server or exec by an option, never by way in; both give the same read tools.
 
-    def test_every_page_tool_is_preapproved(self):
-        """The page cannot show Codex's own request for a tool call, so a tool without approval_mode would fail there."""
+        The exec launch has no live permission requests, so it never gets the call tool.
+        """
+        self.assertEqual(tools_of(exec_args()), self.page - {CALL_TOOL})
+
+    def test_every_page_tool_is_preapproved_except_the_call_tool(self):
+        """A read tool is approved ahead; the call tool asks each time ("prompt"), so the person is the gate."""
         for name, settings in registered_servers(page_args()).items():
             for tool in listed_tools(settings):
                 with self.subTest(tool=f"{name}.{tool}"):
-                    self.assertEqual(settings.get(f"tools.{tool}.approval_mode"), "approve")
+                    expected = "prompt" if f"{name}.{tool}" == CALL_TOOL else "approve"
+                    self.assertEqual(settings.get(f"tools.{tool}.approval_mode"), expected)
 
     def test_a_task_from_the_service_action_launches_with_the_page_tools(self):
         """The task that the service's request opens on /tasks gets the page's tools on either launch.
@@ -182,7 +191,7 @@ class WaysInTests(unittest.TestCase):
         and build_codex_args is built here from the task that the request really opened.
         """
         task = task_started_by_service("Turn on a light")
-        self.assertEqual(tools_of(exec_args(task)), self.page)
+        self.assertEqual(tools_of(exec_args(task)), self.page - {CALL_TOOL})
         self.assertEqual(tools_of(page_args()), self.page)
 
     def test_the_service_action_starts_the_same_task_as_the_page(self):

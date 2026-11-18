@@ -3060,6 +3060,32 @@ function setAccountPart(sectionId, word, attention = false) {
 }
 collapseSettingsSections();
 setSectionStatus("workspace-section", "AGENTS.md");
+const TEXT_SIZES = ["normal", "larger", "largest"];
+const TEXT_SIZE_KEY = "codex-text-size";
+/**
+ * Show the page at one of the three text sizes and tick that choice in
+ * Settings. The stylesheet multiplies every font size by --text-scale,
+ * which the data-text-size attribute on the root sets.
+ * With save, remember the choice on this device for the next visit.
+ */
+function setTextSize(value, save = false) {
+  const size = TEXT_SIZES.includes(value) ? value : "normal";
+  if (size === "normal") delete document.documentElement.dataset.textSize;
+  else document.documentElement.dataset.textSize = size;
+  for (const input of document.querySelectorAll("input[data-text-size-choice]"))
+    input.checked = input.value === size;
+  setSectionStatus("text-size-section", size[0].toUpperCase() + size.slice(1));
+  if (!save) return;
+  try {
+    if (size === "normal") localStorage.removeItem(TEXT_SIZE_KEY);
+    else localStorage.setItem(TEXT_SIZE_KEY, size);
+  } catch (_) {
+    /* Storage may be disabled: the size lasts until the page is reloaded. */
+  }
+}
+setTextSize(document.documentElement.dataset.textSize);
+for (const input of document.querySelectorAll("input[data-text-size-choice]"))
+  input.addEventListener("change", () => setTextSize(input.value, true));
 /*
  * The time left on a sign-in code. The worker sends the seconds left, by its
  * own clock; the page counts down from when that reply arrived, so a phone
