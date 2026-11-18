@@ -1,6 +1,7 @@
 """Live activity steps for the running exchange."""
 from __future__ import annotations
 
+import io
 import json
 import tempfile
 import unittest
@@ -232,6 +233,73 @@ class ActivityApiTests(unittest.TestCase):
         server.finish_activity(task_id)
         steps = self.get(task_id).json["steps"]
         self.assertEqual([step["text"] for step in steps], ["Failed: Codex timed out after 5 seconds."])
+
+    def test_recovered_chat_keeps_its_turn_id_and_saved_steps(self):
+        """A chat rebuilt from the task index after task.json was lost keeps the turn id of its saved steps."""
+        task_id = self.create()
+        turn_id = server.tasks[task_id]["current_turn_id"]
+        server.update_task(task_id, status="running")
+        server.start_activity(task_id, turn_id)
+        server.record_activity_event(task_id, command("c1", "/bin/sh -lc 'ls'"))
+        server.update_task(task_id, status="completed", session_id=self.session_id, summary="Done",
+                           completed_at=server.utc_now())
+        server.finish_activity(task_id)
+        server.active_task_runners.discard(task_id)
+        saved = self.get(task_id).json
+        self.assertEqual([step["text"] for step in saved["steps"]], ["ls"])
+
+        (self.root / "tasks" / task_id / "task.json").unlink()
+        server.tasks.clear()
+        server.load_task_index()
+        recovered = server.tasks[task_id]
+        self.assertNotIn("turns", recovered)
+        self.assertEqual([turn["turn_id"] for turn in server.task_turns(recovered)], [turn_id])
+
+        response = self.client.post(f"/tasks/{task_id}/continue", json={"message": "Go on"}, headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        turns = server.tasks[task_id]["turns"]
+        self.assertEqual(turns[0]["turn_id"], turn_id)
+        self.assertNotEqual(turns[1]["turn_id"], turn_id)
+        self.assertEqual(server.load_stored_activity(task_id, turns[0]["turn_id"])["steps"], saved["steps"])
+
+    def test_a_turn_id_from_the_index_is_used_only_when_it_has_the_turn_id_form(self):
+        """An index entry with a missing or malformed turn id still gets the legacy turn."""
+        for current in (None, "", "turn-1", "../other", "A" * 32, 32):
+            with self.subTest(current=current):
+                task = {"task_id": "t", "prompt": "Hello", "current_turn_id": current}
+                self.assertEqual([turn["turn_id"] for turn in server.task_turns(task)], ["legacy"])
+
+    def test_plan_updates_from_codex_are_one_redacted_step_at_its_first_place(self):
+        """Codex's plan becomes one to-do step that keeps its place, with credentials redacted."""
+        task_id = self.create()
+        turn_id = server.tasks[task_id]["current_turn_id"]
+        server.update_task(task_id, status="running")
+        server.start_activity(task_id, turn_id)
+        stdin = type("Transport", (io.StringIO,), {"close": lambda self: None})()
+        proc = type("Process", (), {"stdin": stdin, "poll": lambda _: None})()
+        session = server.create_approval_session(
+            task_id, proc, "Review", self.root / "final.json", None, {}, server.DEFAULT_OPTIONS)
+        session.thread_id, session.turn_id = "thread", "turn"
+
+        def update(*steps, turn="turn"):
+            session.receive({"method": "turn/plan/updated", "params": {
+                "threadId": "thread", "turnId": turn,
+                "plan": [{"step": text, "status": status} for text, status in steps]}})
+
+        update(("Read the automation", "pending"), ("Call the API with test-token", "pending"))
+        first = self.get(task_id).json["steps"]
+        self.assertEqual([step["text"] for step in first],
+                         ["☐ Read the automation\n☐ Call the API with [redacted]"])
+        server.record_activity_event(task_id, command("c1", "/bin/sh -lc 'ls'"))
+        update(("Read the automation", "completed"), turn="old")
+        session.receive({"method": "turn/plan/updated", "params": {
+            "threadId": "thread", "turnId": "turn", "plan": [{"step": "Read the automation"}]}})
+        self.assertEqual(self.get(task_id).json["steps"][0]["text"], first[0]["text"])
+        update(("Read the automation", "completed"), ("Call the API with test-token", "inProgress"))
+        steps = self.get(task_id).json["steps"]
+        self.assertEqual([(step["kind"], step["text"]) for step in steps],
+                         [("plan", "☑ Read the automation\n☐ Call the API with [redacted]"), ("command", "ls")])
+        self.assertEqual(steps[0]["index"], first[0]["index"])
 
     def test_deleting_a_chat_forgets_its_steps(self):
         """Deleting a chat also drops the steps held in memory for it."""
