@@ -418,7 +418,7 @@ class ApprovalApiTests(unittest.TestCase):
         with patch.object(server, "lookup_ha_users", side_effect=RuntimeError("offline")):
             refused = self.answer()
         self.assertEqual(refused.status_code, 403)
-        self.assertIn("Could not confirm", refused.get_json()["error"])
+        self.assertEqual(refused.get_json()["error"], server.UNVERIFIED_ACCOUNT)
         # Nothing reached Codex and the request still waits.
         self.assertEqual(self.writer.messages(), [])
         self.assertEqual(server.tasks["task"]["approvals"][0]["status"], "pending")
@@ -907,76 +907,3 @@ class ApprovalRunTests(unittest.TestCase):
         self.assertFalse(any("result" in message for message in proc.stdin.messages()))
         self.assertNotIn("task", server.running_processes)
 
-
-class OwnerActionTests(unittest.TestCase):
-    """An Allow once request from the act tool: shown in the chat, answered once, never sent to Codex."""
-
-    setUp = ApprovalTests.setUp
-    question = {"what": "Run the Home Assistant action light.turn_on.", "where": '["light.sample"].',
-                "detail": '{"data": {"effect": "colorloop"}, "service": "light.turn_on"}'}
-
-    def ask(self, timeout=5):
-        """Ask from a second thread, as the act tool does, and return its result holder and thread."""
-        result = {}
-        thread = threading.Thread(target=lambda: result.update(answer=self.session.ask_owner_action(self.question, timeout)))
-        thread.start()
-        for _ in range(500):
-            if self.records:
-                break
-            threading.Event().wait(0.01)
-        return result, thread
-
-    def test_allow_once_answers_the_tool_and_writes_nothing_to_codex(self):
-        sent = len(self.writer.messages())
-        result, thread = self.ask()
-        record = self.records[-1]
-        self.assertEqual((record["kind"], record["status"], record["can_allow"]), ("action", "pending", True))
-        self.assertIn("colorloop", record["action"])
-        self.assertEqual(record["confirmation"]["what"], self.question["what"])
-        self.assertTrue(self.session.waiting_for_user())
-        self.session.decide(record["approval_id"], "allow", decided_by={"user_id": ADMIN_ID, "name": "Owner"})
-        thread.join(5)
-        self.assertIs(result["answer"], True)
-        self.assertEqual(self.records[-1]["status"], "allowed")
-        self.assertEqual(len(self.writer.messages()), sent)
-        self.assertFalse(self.session.waiting_for_user())
-        with self.assertRaises(LookupError):
-            self.session.decide(record["approval_id"], "allow")
-
-    def test_deny_answers_the_tool(self):
-        result, thread = self.ask()
-        self.session.decide(self.records[-1]["approval_id"], "deny")
-        thread.join(5)
-        self.assertIs(result["answer"], False)
-        self.assertEqual(self.records[-1]["status"], "denied")
-
-    def test_no_answer_in_time_expires_the_request(self):
-        result, thread = self.ask(timeout=0.05)
-        thread.join(5)
-        self.assertIsNone(result["answer"])
-        self.assertEqual(self.records[-1]["status"], "expired")
-        with self.assertRaises(LookupError):
-            self.session.decide(self.records[-1]["approval_id"], "allow")
-
-    def test_a_closed_exchange_answers_none(self):
-        result, thread = self.ask()
-        self.session.close()
-        thread.join(5)
-        self.assertIsNone(result["answer"])
-        self.assertEqual(self.records[-1]["status"], "expired")
-
-    def test_an_inactive_exchange_asks_nothing(self):
-        self.active = False
-        self.assertIsNone(self.session.ask_owner_action(self.question, 0.05))
-        self.assertEqual(self.records, [])
-
-    def test_a_clipped_action_can_only_be_denied(self):
-        self.question = {**self.question, "detail": "x" * (DISPLAY_LIMIT + 1)}
-        result, thread = self.ask()
-        record = self.records[-1]
-        self.assertFalse(record["can_allow"])
-        with self.assertRaises(ValueError):
-            self.session.decide(record["approval_id"], "allow")
-        self.session.decide(record["approval_id"], "deny")
-        thread.join(5)
-        self.assertIs(result["answer"], False)

@@ -16,6 +16,27 @@ async function testApprovals(browser, output, errors) {
   await approvalPage.locator("#message").fill("Request permission to read sensor history");
   await approvalPage.getByRole("button", {name: "Send message", exact: true}).click();
   await approvalPage.getByRole("button", {name: "Allow once", exact: true}).waitFor();
+  // CX-FB4-APPROVE: the waiting request is the last child of the latest exchange, below the working lines.
+  assert.equal(await approvalPage.locator(".exchange:last-child > :last-child").evaluate(el => el.classList.contains("permission-card")), true);
+  const pendingBox = await approvalPage.locator(".permission-card").boundingBox();
+  const messagesBox = await approvalPage.locator("#messages").boundingBox();
+  assert.ok(pendingBox.y + pendingBox.height <= messagesBox.y + messagesBox.height + 1, "pending request is in view");
+  assert.equal(await approvalPage.evaluate(() => document.querySelectorAll(".permission-card").length), 1);
+  // CX-FB4-APPROVE: the chat scrolls to a request once. A later redraw of the same request leaves the owner's place alone.
+  await approvalPage.setViewportSize({width: 1440, height: 420});
+  const overflow = await approvalPage.evaluate(() => {
+    const area = document.getElementById("messages");
+    area.scrollTop = 0;
+    return area.scrollHeight - area.clientHeight;
+  });
+  assert.ok(overflow > 150, `the chat must overflow for the scroll check (${overflow})`);
+  await approvalPage.evaluate(() => {
+    const retention = state.catalog?.backup_retention_days;
+    state.catalog = {...state.catalog, backup_retention_days: (retention || 0) + 1};
+    renderTask();
+  });
+  assert.equal(await approvalPage.evaluate(() => document.getElementById("messages").scrollTop), 0, "a redraw must not scroll to a request already shown");
+  await approvalPage.setViewportSize({width: 1440, height: 950});
   const plain = approvalPage.locator(".permission-plain");
   assert.equal(await plain.count(), 3);
   assert.match(await plain.nth(0).textContent(), /^What changes:/);
@@ -81,18 +102,6 @@ async function testApprovals(browser, output, errors) {
   assert.match(await approvalPage.locator(".permission-card").textContent(), /Move to: \/other\/renamed.yaml/);
   await approvalPage.getByRole("button", {name: "Allow once", exact: true}).click();
   await approvalPage.locator(".permission-card strong").filter({hasText: /^Allowed once$/}).waitFor();
-  // The act tool's own request: the card shows the exact action and its data, with both answers.
-  await approvalPage.locator("#new-chat").click();
-  await approvalPage.locator("#message").fill("Request permission to run a light action");
-  await approvalPage.getByRole("button", {name: "Send message", exact: true}).click();
-  await approvalPage.getByRole("button", {name: "Allow once", exact: true}).waitFor();
-  assert.equal(await approvalPage.getByRole("button", {name: "Deny", exact: true}).count(), 1);
-  const actionCard = await approvalPage.locator(".permission-card").textContent();
-  assert.match(actionCard, /Run the Home Assistant action light\.turn_on\./);
-  assert.match(actionCard, /"effect": "colorloop"/);
-  assert.match(actionCard, /light\.sample_lamp/);
-  await approvalPage.getByRole("button", {name: "Allow once", exact: true}).click();
-  await approvalPage.locator(".permission-card strong").filter({hasText: /^Allowed once$/}).waitFor();
   await approvalPage.close();
 }
 module.exports = testApprovals;
@@ -106,7 +115,7 @@ async function main() {
     const errors = [];
     await testApprovals(browser, output, errors);
     assert.deepEqual(errors, []);
-    console.log("PASS: permission UI on desktop and mobile, allow/deny, stale replies, cancellation, drafts, safe text, and the act tool's Allow once card.");
+    console.log("PASS: permission UI on desktop and mobile, allow/deny, stale replies, cancellation, drafts, and safe text.");
   } finally {
     await browser.close();
   }

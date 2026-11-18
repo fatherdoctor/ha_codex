@@ -141,11 +141,21 @@ class DeviceCommandSpeedTests(unittest.TestCase):
     def test_rules_send_a_device_command_to_the_home_assistant_tools(self):
         rules = server.PAGE_INSTRUCTIONS
         line = next(line for line in rules.splitlines() if line.startswith('For a device command'))
-        for step in ('home_assistant.verify find', 'home_assistant_actions.act', 'home_assistant.verify entity'):
+        for step in ('home_assistant.verify find', "request the owner's normal approval", 'home_assistant.verify entity'):
             self.assertIn(step, line)
-        self.assertLess(line.index('verify find'), line.index('actions.act'))
+        self.assertLess(line.index('verify find'), line.index('normal approval'))
+        self.assertLess(line.index('normal approval'), line.index('verify entity'))
+        self.assertNotIn('home_assistant_actions', rules)
         self.assertIn('Do not search files under /config or .storage or run shell commands to find an entity', line)
         self.assertIn('{"operation":"find","name":"kitchen ceiling","domain":"light"}', rules)
+
+    def test_rules_answer_a_cloud_task_question_with_codex_cloud(self):
+        rules = server.PAGE_INSTRUCTIONS
+        line = next(line for line in rules.splitlines() if line.startswith('For a question about Codex cloud tasks'))
+        for text in ('codex cloud list --json', 'codex cloud status', 'request approval for the command',
+                     'Do not answer from document sessions', 'shows only Codex cloud tasks',
+                     'If it returns no tasks, say so plainly and do not guess'):
+            self.assertIn(text, line)
 
     def test_rules_no_longer_ask_for_the_owner_file_in_each_message(self):
         rules = server.PAGE_INSTRUCTIONS
