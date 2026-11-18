@@ -32,8 +32,12 @@
   token: the worker sends the call once, with its own access. It refuses no service by name: your answer is the
   gate, and a call can reach the Supervisor (for example `update.install`) or run your own `shell_command`. A
   scheduled run does not get the tool. The keys of the app's tools are now kept out of the commands Codex runs. The
-  instructions point changes to the tool; `HA_TOKEN` is now only for an API call that is not a service. The page
-  shows Codex's request for the tool in a later step; until then the page can only decline it.
+  instructions point changes to the tool; `HA_TOKEN` is now only for an API call that is not a service.
+- The chat page shows Codex's own permission request for the Home Assistant tool (`call` of the `home_assistant_call` server) as a card:
+  the tool, the action in plain words (naming each entity, area, device, floor and label of its target), and every argument as JSON, including the full text of a message, with
+  **Allow once** and **Deny**. **Allow once** allows that one call; Codex asks again before the next one. A request
+  that cannot be shown in full has **Allow once** turned off. Questions from every other tool are still declined, and the
+  chat says so.
 
 - The ChatGPT app gets the same `call` tool while remote control is on. Codex asks in the app before each call; the
   tool is not approved ahead. Its key is new at each start of remote control and stops working when remote control

@@ -1665,7 +1665,7 @@ function renderTask(force = false) {
 function approvalHeadline(approval) {
   const plain = approval.confirmation || {};
   const first = [
-    approval.command, approval.action, plain.what, approval.network,
+    approval.command, approval.action, plain.what, approval.tool, approval.network,
     approval.changes?.[0]?.path, approval.scope,
   ].find(value => typeof value === "string" && value.trim());
   return first ? first.trim().split("\n")[0] : "";
@@ -1699,6 +1699,9 @@ function renderApproval(approval, taskId, turnId, active) {
   if (approval.cwd) card.append(textNode("p", `Working folder: ${approval.cwd}`, "permission-folder"));
   if (approval.network) card.append(textNode("p", `Network host: ${approval.network}`));
   if (approval.command) card.append(textNode("pre", approval.command, "permission-command"));
+  // A tool request: the tool's name and every argument it will send, as the worker recorded them.
+  if (approval.tool) card.append(textNode("p", `Tool: ${approval.tool}`, "permission-folder"));
+  if (approval.arguments) card.append(textNode("pre", approval.arguments, "permission-command"));
   for (const change of approval.changes || []) {
     card.append(textNode("p", `${change.kind}: ${change.path}`, "permission-folder"));
     if (change.move_path) card.append(textNode("p", `Move to: ${change.move_path}`, "permission-folder"));
