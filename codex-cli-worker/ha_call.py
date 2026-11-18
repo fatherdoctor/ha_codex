@@ -38,6 +38,9 @@ MAX_CHANGED_REPORTED = 50
 MAX_READBACK = 5
 CALL_TIMEOUT_SECONDS = 60
 CORE_SERVICES_URL = "http://supervisor/core/api/services/"
+# The task name of the ChatGPT app's remote control. A page chat's id never has this form (it starts with a
+# date). The relay's key holds while the relay process runs, not for one turn.
+RELAY_TASK = "remote-control"
 
 
 class CallRefused(ValueError):
@@ -109,14 +112,21 @@ def changed_entities(answer):
 class HomeAssistantCall:
     """Issue each running turn a call key, and send the calls that present it to Home Assistant."""
 
-    def __init__(self, worker):
-        """Keep the worker that provides tasks and the token."""
+    def __init__(self, worker, relay_running=lambda: False):
+        """Keep the worker that provides tasks and the token.
+
+        relay_running says whether the remote-control process runs now; the relay's key holds only then.
+        """
         self.worker = worker
+        self.relay_running = relay_running
         self.capabilities = {}
         self.lock = threading.Lock()
 
     def begin(self, task_id):
-        """Issue a new call key for the task's turn and return it; an earlier key of the task stops working."""
+        """Issue a new call key for the task's turn, or for a relay launch, and return it.
+
+        An earlier key of the same task stops working.
+        """
         capability = secrets.token_urlsafe(32)
         with self.lock:
             self.capabilities[task_id] = capability
@@ -134,7 +144,12 @@ class HomeAssistantCall:
         with self.lock:
             task_id = next((key for key, value in self.capabilities.items()
                             if hmac.compare_digest(supplied, value)), None)
-        if not task_id or self.worker.task_cancellation_requested(task_id):
+        if not task_id:
+            return None
+        if task_id == RELAY_TASK:
+            # The app has no chat on the page. Codex in the relay asks the person before each call.
+            return task_id if self.relay_running() else None
+        if self.worker.task_cancellation_requested(task_id):
             return None
         with self.worker.lock:
             if self.worker.tasks.get(task_id, {}).get("status") != "running":

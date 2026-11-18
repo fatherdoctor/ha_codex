@@ -44,7 +44,7 @@ from approvals import APPROVAL_GONE, AppServerSession
 import full_access
 import policy as protected_policy
 from ha_data import HomeAssistantData
-from ha_call import HomeAssistantCall
+from ha_call import RELAY_TASK as RELAY_CALL_TASK, HomeAssistantCall
 import ha_data_mcp
 import remote_control
 import gate_rules
@@ -94,7 +94,8 @@ def record_diagnostic(method, *args, **kwargs):
 
 ha_data = HomeAssistantData(_ToolWorker(), DATA_ROOT / "ha-data")
 # The one tool that changes the house; the worker sends each call with its own access and keeps no log of it.
-ha_call = HomeAssistantCall(_ToolWorker())
+# The app's relay has one key per launch, good while that process runs (relay_running is defined below).
+ha_call = HomeAssistantCall(_ToolWorker(), relay_running=lambda: relay_running())
 CODEX_HOME = DATA_ROOT / "codex-home"
 OPTIONS_PATH = DATA_ROOT / "options.json"
 WORKER_TOKEN_PATH = DATA_ROOT / "worker_api_token"
@@ -4267,7 +4268,8 @@ def backup_instructions(backup_dir: Path | None) -> str:
 def home_assistant_api_instructions(options: dict[str, Any], call_tool: bool = True) -> str:
     """Tell Codex where its own Home Assistant API calls go; empty when the add-on gives it no token for them.
 
-    call_tool says whether this launch has the home_assistant_call tool; the app's launch gets it in a later step.
+    call_tool says whether this launch has the home_assistant_call tool: a chat on the page and the ChatGPT app
+    have it, a scheduled run does not.
     """
     if not str(options.get("HA_TOKEN") or "").strip():
         return ""
@@ -4297,14 +4299,18 @@ def remote_control_instructions(options: dict[str, Any]) -> str:
         "Use the home_assistant_relay.read tool for entity listings and state readback; it needs no hand-made HA_TOKEN. "
         "Use operation states with a domain and bounded page, or state with an exact entity_id. It is read-only: "
         "no service calls, reloads or credential access. A state read does not prove automation behavior. "
+        "To change the house, a reload and a restart included, use the home_assistant_call call tool when the user "
+        "asked for the change: Codex asks the owner before each call, and the request shows the service, target and "
+        "data. Then read the new state back with home_assistant_relay.read. "
         "The chat page's per-turn verification/history capabilities are separate and must not be reused. "
         "For a supported read, prefer this tool instead of a shell socket command. If a different read needs shell networking, "
         "request native approval for that specific network command on your own; do not silently give up after a sandbox network denial. "
         "Keep API credentials private. A sandboxed command needing network or file access outside its sandbox must request "
         "native approval for that specific action. Never bypass a denial or request permanent permission rules. "
         "Native approval does not supply credentials. If HA_URL is unset, report address discovery unavailable instead of guessing a port. "
-        + (home_assistant_api_instructions(options, call_tool=False) or
-           "No Core API token is configured for direct commands. The read tool still works through the worker. "
+        + (home_assistant_api_instructions(options) or
+           "No Core API token is configured for direct commands. The read tool and the call tool still work through "
+           "the worker. "
            "Direct API commands require a separately configured HA_TOKEN; do not obtain credentials from stores or process environments.")
     )
 
@@ -4466,7 +4472,7 @@ def call_mcp_args() -> list[str]:
 
 # The tool keys reach each bridge through its env_vars; a sandboxed shell command must not see them,
 # or it could write to a socket itself and skip Codex's question (plan CX-SIMPLE, review F1).
-SHELL_EXCLUDED_ENV = ("HA_*_CAPABILITY",)
+SHELL_EXCLUDED_ENV = (remote_control.TOOL_KEY_EXCLUDE,)
 
 
 def shell_exclude_args() -> list[str]:
@@ -6926,9 +6932,25 @@ def record_relay_read(metadata, result, error, started):
 relay_reads = RelayReads(relay_process_state, ha_token, relay_read_redact, observer=record_relay_read)
 
 
+def relay_running() -> bool:
+    """Return whether the remote-control process runs now and is not stopping; the relay's call key holds only then."""
+    proc, stopping = relay_process_state()
+    return proc is not None and not stopping and proc.poll() is None
+
+
+def relay_probe_env() -> dict[str, str]:
+    """Return the environment of a relay probe: no tool key, so a probe never ends the keys of a running relay."""
+    return codex_env()
+
+
 def relay_env() -> dict[str, str]:
+    """Return the environment of one relay launch with fresh keys; the keys of the earlier launch stop working.
+
+    Only Supervisor._loop calls it, just before the process starts (launch_env_factory); the probes use
+    relay_probe_env.
+    """
     refresh_core_address()
-    return relay_reads.environment(codex_env())
+    return {**relay_reads.environment(codex_env()), "HA_CALL_CAPABILITY": ha_call.begin(RELAY_CALL_TASK)}
 
 
 def relay_read_mcp_args() -> list[str]:
@@ -6942,13 +6964,23 @@ def relay_read_mcp_args() -> list[str]:
             for argument in ('--config', f'mcp_servers.home_assistant_relay.{name}={json.dumps(value)}')]
 
 
+def relay_tool_args() -> list[str]:
+    """The app's tools: the read tool, approved ahead, and the call tool, which Codex asks for each time.
+
+    The relay holds both keys for its whole run, so the shell exclude matters as much as on the page;
+    /etc/codex/managed_config.toml holds the same exclude for every client (remote_control.gate_problem checks it).
+    """
+    return [*shell_exclude_args(), *relay_read_mcp_args(), *call_mcp_args()]
+
+
 remote_control_supervisor = remote_control.Supervisor(
     codex_binary=CODEX_BINARY,
     state_path=DATA_ROOT / "remote_control.json",
-    env_factory=lambda: relay_env(),
+    env_factory=lambda: relay_probe_env(),
+    launch_env_factory=lambda: relay_env(),
     name_factory=lambda: read_options().get("remote_control_name"),
     instructions_factory=lambda: remote_control_instructions(read_options()),
-    tool_args_factory=relay_read_mcp_args,
+    tool_args_factory=relay_tool_args,
     watch=remote_control.ConfigWatch(CONFIG_ROOT, DATA_ROOT / "remote_control_baseline.json"),
 )
 

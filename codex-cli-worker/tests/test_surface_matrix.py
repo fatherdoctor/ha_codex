@@ -36,9 +36,9 @@ WAYS_IN = {
         PAGE: ("home_assistant_data.history", "home_assistant_data.statistics"), APP: NONE,
         SERVICE: ("home_assistant_data.history", "home_assistant_data.statistics")},
     "Control a device or call a service": {
-        PAGE: ("home_assistant_call.call",), APP: NONE, SERVICE: ("home_assistant_call.call",)},
+        PAGE: ("home_assistant_call.call",), APP: ("home_assistant_call.call",), SERVICE: ("home_assistant_call.call",)},
     "Send a notification": {
-        PAGE: ("home_assistant_call.call",), APP: NONE, SERVICE: ("home_assistant_call.call",)},
+        PAGE: ("home_assistant_call.call",), APP: ("home_assistant_call.call",), SERVICE: ("home_assistant_call.call",)},
     "Ask the owner a question or report the turn's state": {
         PAGE: ("home_assistant_data.ask_owner", "home_assistant_data.report_failure", "home_assistant_data.exchange_info"),
         APP: NONE,
@@ -168,6 +168,14 @@ class WaysInTests(unittest.TestCase):
 
     def test_the_chatgpt_app_gets_exactly_the_tools_in_the_table(self):
         self.assertEqual(self.app, table_tools(APP))
+
+    def test_the_app_asks_for_the_call_tool_each_time_and_approves_only_its_read_tool(self):
+        """In the app as on the page, the call tool asks each time ("prompt") and the read tool is approved ahead."""
+        for name, settings in registered_servers(app_args()).items():
+            for tool in listed_tools(settings):
+                with self.subTest(tool=f"{name}.{tool}"):
+                    expected = "prompt" if f"{name}.{tool}" == CALL_TOOL else "approve"
+                    self.assertEqual(settings.get(f"tools.{tool}.approval_mode"), expected)
 
     def test_both_page_launches_register_the_same_tools(self):
         """A turn runs through app-server or exec by an option, never by way in; both give the same read tools.

@@ -550,8 +550,11 @@ class MarkerTests(unittest.TestCase):
         req.write_text(requirements if requirements is not None else (ROOT / "gate" / "requirements.toml").read_text(),
                        encoding="utf-8")
         hook = hook or HOOK
+        managed = Path(tmp) / "managed_config.toml"
+        managed.write_text((ROOT / "gate" / "managed_config.toml").read_text(), encoding="utf-8")
         marker = Path(tmp) / "gate.json"
-        marker.write_text(json.dumps({"files": [str(req), str(hook)], "hook": str(hook), "requirements": str(req)}),
+        marker.write_text(json.dumps({"files": [str(req), str(hook), str(managed)], "hook": str(hook),
+                                      "requirements": str(req), "managed_config": str(managed)}),
                           encoding="utf-8")
         return marker
 

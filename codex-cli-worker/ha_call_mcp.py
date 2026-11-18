@@ -21,7 +21,7 @@ TOOL = {
         "For a device the person named, give name (their words) in place of target: the action is sent only "
         "when exactly one entity of the service's domain fits, else the answer lists the candidates. "
         "When target is only entity ids, the answer reads back the new state of the first 5 of them; "
-        "for other targets, or more entities, read the state with home_assistant.verify."
+        "for other targets, or more entities, read the state with a read tool."
     ),
     "inputSchema": {
         "type": "object", "additionalProperties": False,

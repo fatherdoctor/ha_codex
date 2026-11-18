@@ -39,6 +39,7 @@ import sys
 import tempfile
 import threading
 import time
+import tomllib
 from collections import deque
 from collections.abc import Callable
 from pathlib import Path
@@ -307,6 +308,33 @@ def remote_env(base: dict[str, str]) -> dict[str, str]:
     return env
 
 
+# The tool keys a command must never see; server.SHELL_EXCLUDED_ENV sets the same pattern on each launch.
+TOOL_KEY_EXCLUDE = "HA_*_CAPABILITY"
+
+
+def managed_config_problem(path: Path) -> str:
+    """Return what is wrong with the managed config file, or an empty string when it keeps the tool keys from commands.
+
+    The relay holds the call key for its whole run, and a thread from the app can send its own settings.
+    The managed config outranks them, so the exclude must be there, and no filters table may replace it.
+    """
+    try:
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return f"the managed config could not be read ({exc})"
+    problem = "the managed config does not keep the tool keys out of commands"
+    policy = data.get("shell_environment_policy")
+    if not isinstance(policy, dict):
+        return problem
+    exclude = policy.get("exclude")
+    if not isinstance(exclude, list) or TOOL_KEY_EXCLUDE not in exclude:
+        return problem
+    if "filters" in policy:
+        # With filters in the same table, Codex does not read exclude at all.
+        return problem
+    return ""
+
+
 # What the hook must refuse, and let through, before remote control may start: (event, remote on, input, refused).
 SELF_TEST_CASES = (
     ("PermissionRequest", True, {"hook_event_name": "PermissionRequest", "tool_name": "Bash",
@@ -354,7 +382,8 @@ def hook_problem(hook: Path, run: Callable[..., Any] = subprocess.run) -> str:
 def gate_problem(marker: Path | None = None) -> str:
     """Return why remote control may not start, or an empty string when the command gate is installed and holds.
 
-    The marker must list the gate's files, every one must exist, and the hook it
+    The marker must list the gate's files, every one must exist, the managed
+    config it names must keep the tool keys out of commands, and the hook it
     names must refuse and pass the self-test requests. The managed requirements
     are Codex's own list of the four modes' values; the worker does not check them.
     """
@@ -369,10 +398,11 @@ def gate_problem(marker: Path | None = None) -> str:
     missing = [item for item in files if not Path(item).is_file()]
     if missing:
         return GATE_MISSING + " (missing: " + ", ".join(missing) + ")"
-    hook, requirements = data.get("hook"), data.get("requirements")
-    if not isinstance(hook, str) or not isinstance(requirements, str) or not {hook, requirements} <= set(files):
+    hook, requirements, managed = data.get("hook"), data.get("requirements"), data.get("managed_config")
+    named = (hook, requirements, managed)
+    if not all(isinstance(item, str) for item in named) or not set(named) <= set(files):
         return GATE_MISSING
-    problem = hook_problem(Path(hook))
+    problem = managed_config_problem(Path(managed)) or hook_problem(Path(hook))
     if problem:
         return GATE_BROKEN + problem + "."
     return ""
@@ -864,7 +894,15 @@ class Supervisor:
         control_factory: Callable[[Path], Any] = ControlClient,
         instructions_factory: Callable[[], str] = lambda: "",
         tool_args_factory: Callable[[], list[str]] = lambda: [],
+        launch_env_factory: Callable[[], dict[str, str]] | None = None,
     ) -> None:
+        """Keep the factories and fakes the process needs.
+
+        env_factory gives the environment of the probes (the rules self-test and the namespace check), which
+        run for every Start request. launch_env_factory, when given, gives the environment of a real launch
+        only; it may issue keys, because a probe or a second Start never calls it. Without it, env_factory
+        serves both.
+        """
         self.control_factory = control_factory
         self.instructions_factory = instructions_factory
         self.tool_args_factory = tool_args_factory
@@ -872,6 +910,7 @@ class Supervisor:
         self.codex_binary = codex_binary
         self.state_path = state_path
         self.env_factory = env_factory
+        self.launch_env_factory = launch_env_factory or env_factory
         self.name_factory = name_factory
         # An injected gate supplies the complete readiness check (fixtures use
         # it without launching Codex). Production also probes the native loader.
@@ -1127,7 +1166,8 @@ class Supervisor:
                 # Namespace probing and environment refresh can call Supervisor.
                 # Keep both outside the lock used by snapshot, reads and stop.
                 command = self._command("app-server", "--listen", f"unix://{path}", "--remote-control")
-                environment = remote_env(self.env_factory())
+                # The keys of a launch are made here and nowhere else: a probe must not end the running relay's.
+                environment = remote_env(self.launch_env_factory())
                 with self.lock:
                     if self.wake.is_set() or not self.enabled():
                         private.cleanup()
