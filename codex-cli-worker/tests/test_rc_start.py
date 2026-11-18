@@ -1,15 +1,12 @@
 """CX-RC-START regressions using disposable configuration and fake transports."""
-import io
 import subprocess
 import sys
 import tempfile
-import threading
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-import approvals
 import remote_control as rc
 
 
@@ -46,19 +43,6 @@ class StartRegressions(unittest.TestCase):
             self.assertIn('downgraded', sup.snapshot()['policy_warning'])
             self.assertTrue(any('downgraded' in line for line in sup.snapshot()['log']))
             self.assertTrue('read-only' in (ROOT/'web/index.html').read_text())
-
-    def test_adapter_refuses_full_access_before_initialization(self):
-        for thread, turn in [({'sandbox':'danger-full-access'}, {}),
-                             ({'config':{'sandbox_mode':'danger-full-access'}}, {}),
-                             ({}, {'sandboxPolicy':{'type':'dangerFullAccess'}})]:
-            with self.subTest(thread=thread, turn=turn):
-                writer = io.StringIO()
-                session = approvals.AppServerSession(writer, lock=threading.RLock(), thread_params=thread,
-                    turn_params=turn, on_event=lambda _:None, on_approvals=lambda _:None,
-                    on_final=lambda _:None, is_active=lambda:True, redact=lambda v:v)
-                with self.assertRaisesRegex(ValueError, '(?i)full.access'):
-                    session.start()
-                self.assertEqual(writer.getvalue(), '')
 
 
 class FurtherRegressions(unittest.TestCase):

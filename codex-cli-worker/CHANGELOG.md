@@ -9,7 +9,7 @@
   shell, REST or Python command, the config watch and its **Mark reviewed** button, the self-tests in front of remote
   control (**Turn on** is always available), and the GitHub read-only limit (a Read only chat can pull and push; Read
   only is Codex's read-only sandbox only). Kept: sign-in, the sandbox and its hidden files, Codex's managed
-  requirements (no full access, only `on-request` approvals, and no hooks, so a hook planted in `/config` never
+  requirements (no full access unless the owner turns on **Full access**, only `on-request` approvals, and no hooks, so a hook planted in `/config` never
   runs), the read tools, the GitHub push guard and the schedule tools. Review what a chat changed before a reload or
   restart: an edit that adds a command now stays as Codex wrote it.
 - Home Assistant shows a Codex notification only while a chat waits for you: a question, or a permission request. A
@@ -19,6 +19,13 @@
   service, the push carries the same id as its tag, and the app clears it from the phone at the same time. A tap on a
   phone notification that the worker refuses no longer makes a notification either; the integration logs why. The
   sign-in and GitHub notifications are not about a chat and are unchanged.
+- The Permissions button offers the four modes of the ChatGPT app: Default, Auto-review, Read only and Full access.
+  Each mode is only Codex's own settings, passed when the app starts Codex for a chat
+  (`codex-cli-worker/DOCS.md`, "Permission modes"). Auto-review hands each request to Codex's own reviewer, and
+  the chat shows what it allowed or denied. Full access runs Codex without its sandbox and without questions; it is
+  off until an administrator turns it on in **Settings > Full access** and confirms a warning. The app's own checks
+  of these settings are removed: the protected policy no longer pins the approval policy and reviewer, the chat
+  page no longer refuses a thread's settings, and remote control no longer checks the managed requirements file.
 - **Text size** for the chat page: Normal, Larger (115 %) or Largest (130 %), from **Settings > Text size**. It
   scales the messages, code, buttons, the chat list, Settings, the sign-in text, the schedule dialog and the list of
   steps together, is remembered on each device, and still fits a phone screen at Largest.

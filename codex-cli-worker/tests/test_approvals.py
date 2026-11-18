@@ -384,14 +384,6 @@ class ApprovalTests(unittest.TestCase):
         with self.assertRaises(LookupError):
             self.session.decide(approval_id, "allow")
 
-    def test_init_policy_failure_is_terminal_without_starting_a_turn(self):
-        """A server that fails to enable user approval cannot run the model silently."""
-        self.session._requests["policy"] = "thread/resume"
-        self.session.read(io.StringIO(json.dumps({"id": "policy", "result": {
-            "thread": {"id": "thread"}, "approvalPolicy": "never", "approvalsReviewer": "auto_review"}}) + "\n"))
-        self.assertTrue(self.session.finished.is_set())
-        self.assertIn("did not enable user approval", self.session.error)
-
 
 class ApprovalApiTests(unittest.TestCase):
     """The authenticated worker endpoint binds decisions to the current task turn."""
