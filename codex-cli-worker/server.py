@@ -102,6 +102,8 @@ SCHEMA_PATH = DATA_ROOT / "codex-output-schema.json"
 CODEX_CONFIG_PATH = CODEX_HOME / "config.toml"
 CODEX_BINARY = "/usr/local/bin/codex"
 AGENTS_PATH = CONFIG_ROOT / "AGENTS.md"
+# The starter text for a home with no /config/AGENTS.md; it ships beside this file in the app image.
+STARTER_AGENTS_PATH = Path(__file__).resolve().parent / "starter_agents.md"
 TASK_STATE_FILE = DATA_ROOT / "task_index.json"
 MESSAGE_QUEUE_FILE = DATA_ROOT / "message_queue.json"
 HA_DOCS_ROOT = DATA_ROOT / "ha-docs"
@@ -803,6 +805,41 @@ def write_agents_file(content: str) -> None:
     if len(encoded) > AGENTS_MAX_BYTES:
         raise ValueError(f"{AGENTS_PATH} is larger than {AGENTS_MAX_BYTES} bytes")
     AGENTS_PATH.write_text(content.rstrip() + "\n", encoding="utf-8")
+
+
+def write_starter_agents_file() -> bool:
+    """On the app's first start, give a home with no /config/AGENTS.md the starter text; return True when written.
+
+    The file is created only when nothing has that name, so an owner's file, a
+    link or a folder is never replaced. A later start writes nothing, so an
+    owner who deletes the starter does not get it back. A failure is logged and
+    never stops the start.
+    """
+    # ensure_runtime_files() writes Codex's config on every start, so the app has started before when it exists.
+    if CODEX_CONFIG_PATH.exists():
+        return False
+    try:
+        starter = STARTER_AGENTS_PATH.read_bytes()
+        # O_EXCL refuses any existing name, a dangling link included, in the same step that creates the file.
+        descriptor = os.open(AGENTS_PATH, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    except FileExistsError:
+        return False
+    except OSError as error:
+        print(f"Could not write the starter {AGENTS_PATH}: {error}", flush=True)
+        return False
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(starter)
+    except OSError as error:
+        print(f"Could not write the starter {AGENTS_PATH}: {error}", flush=True)
+        # O_EXCL above means this call created the file. An empty or cut-off file would block the next try.
+        try:
+            AGENTS_PATH.unlink()
+        except OSError as unlink_error:
+            print(f"Could not remove the unfinished {AGENTS_PATH}: {unlink_error}", flush=True)
+        return False
+    print(f"Wrote the starter workspace instructions to {AGENTS_PATH}.", flush=True)
+    return True
 
 
 # The final answer Codex must return. Codex enforces the schema strictly, so every property is required.
@@ -7279,6 +7316,7 @@ def main() -> None:
         sys.exit(1)
     if not make_worker_undumpable():
         print("Could not mark the worker process not dumpable; its environment stays readable to root.", flush=True)
+    write_starter_agents_file()  # Before ensure_runtime_files(), whose config file marks every later start.
     ensure_runtime_files()
     apply_interaction_limit(read_options())
     interaction_logs.close_abandoned()

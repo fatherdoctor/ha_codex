@@ -81,6 +81,7 @@ Paths are under `codex-cli-worker/` unless they start with `custom_components/`.
 |---|---|---|
 | After every exchange, changed files are found by comparing `/config` with the manifest taken before it | `server.py: run_task`, `build_manifest`, `diff_manifests` | `tests/test_backups.py`, `tests/test_server.py` |
 | Changed YAML is validated and Home Assistant's own config check is run | `server.py: validate_changed_files`, `check_home_assistant_config` | `tests/test_config_check.py` |
+| The starter `/config/AGENTS.md` is written only on the app's first start and only when nothing has that name; an existing file, link or folder is never replaced | `server.py: write_starter_agents_file`, called from `main` before `ensure_runtime_files` | `tests/test_starter_agents.py` |
 | A copy of each changed file is kept, without credentials | `server.py: create_snapshot`, `saved_copy`, `drop_credential_backups` | `tests/test_backups.py` |
 
 ### The browser that inspects dashboards
