@@ -164,7 +164,7 @@ async function testSlash(browser, output, errors) {
       ),
     );
     // /help opens the Commands section, which starts closed like every section.
-    assert.equal(await page.locator("#command-list").isVisible(), true);
+    await page.locator("#command-list").waitFor();
     // At Largest, even on a 320 px phone, the open section does not scroll
     // sideways and each description has room for more than a word a line.
     const fit = await page.evaluate(() => {
