@@ -348,8 +348,23 @@ checks these things first, in every mode:
   refused.
 - `entity_id`, `device_id`, `area_id`, `floor_id` and `label_id` go in `target`, the other fields in `data`.
 
+For a device you name, Codex can give your words in place of a target, for example `light.turn_on` with the name
+`kitchen ceiling`. Codex still asks you first, and the question shows the name. The worker then reads the entity
+list and sends the call only when exactly one entity of the service's domain fits the name:
+
+- Each word must be a whole word of the entity's name or entity id: "lamp" does not fit "Lamppost".
+- An entity whose name is exactly the words given wins over longer names: "office overhead" picks "Office
+  Overhead", not "Office Overhead Fan". Two entities with the same exact name are two candidates.
+- The service picks the domain: `light.turn_on` with a name never changes a switch. `homeassistant` services
+  act on many domains, so they need the entity id.
+- Credential-like and password-mode entities never match.
+
+When no entity fits, or more than one, nothing is sent: the answer lists up to 10 candidates and the full count,
+and Codex asks you which one. After a call whose target is entity ids, the answer also holds the new state of up
+to 5 of them, so Codex does not need a second step to read it back. The answer names the entity that changed.
+
 Every call with a valid key writes one line to `/data/ha-call-audit.jsonl`: the time, the chat, the service, the
-target and the result. The line never holds the data, so a message text or a code stays out of the log.
+target and the result. A call by name records the entity it matched, or `not_sent`. The line never holds the data, so a message text or a code stays out of the log.
 
 The keys of the app's tools (`HA_*_CAPABILITY`) are kept out of the commands that Codex runs, with Codex's
 `shell_environment_policy` setting. So a command cannot write to the socket and skip Codex's question. In a mode

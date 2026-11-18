@@ -6,7 +6,11 @@ turn. This module, not the bridge, holds the checks that no mode can skip:
 
 - a request without the current key of a running chat sends nothing;
 - a service of a refused domain (Supervisor, this add-on) sends nothing;
-- every request with a valid key writes one audit line: service, target, result.
+- every request with a valid key writes one audit line: service, target, result;
+- a request that names the entity ("name") is sent only when the name fits exactly one entity
+  of the service's domain (name_match.py); otherwise it sends nothing and lists the candidates.
+
+After a call that targets entity ids, the worker reads their new states back, so Codex needs no second tool call.
 
 The audit line never holds the call's data, so a message text or a code stays out of it.
 """
@@ -24,6 +28,9 @@ from pathlib import Path
 
 import requests
 
+import name_match
+from relay_reads import ATTRIBUTES, PRIVATE, fetch_states, password_state
+
 SERVICE_RE = re.compile(r"[a-z0-9_]+\.[a-z0-9_]+")
 # hassio reaches the Supervisor through Home Assistant; codex_cli is this add-on's own integration.
 REFUSED_DOMAINS = frozenset({"hassio", "codex_cli"})
@@ -31,6 +38,7 @@ TARGET_KEYS = frozenset({"entity_id", "device_id", "area_id", "floor_id", "label
 MAX_REQUEST_BYTES = 65536
 MAX_TARGET_IDS = 50
 MAX_CHANGED_REPORTED = 50
+MAX_READBACK = 5
 MAX_AUDIT_BYTES = 1024 * 1024
 CALL_TIMEOUT_SECONDS = 60
 CORE_SERVICES_URL = "http://supervisor/core/api/services/"
@@ -38,6 +46,14 @@ CORE_SERVICES_URL = "http://supervisor/core/api/services/"
 
 class CallRefused(ValueError):
     """A request the worker will not send to Home Assistant; the message says why, for Codex and the audit line."""
+
+
+class NotSent(Exception):
+    """A request by name that fits no entity, or more than one: nothing is sent, and the answer lists the candidates."""
+
+    def __init__(self, answer):
+        super().__init__(answer["message"])
+        self.answer = answer
 
 
 def parse_target(target):
@@ -142,14 +158,75 @@ class HomeAssistantCall:
         arguments = payload.get("arguments")
         service = arguments.get("service") if isinstance(arguments, dict) else None
         try:
+            if isinstance(arguments, dict) and "name" in arguments:
+                arguments = self.target_by_name(arguments)
             service, target, body = parse_request(arguments)
+        except NotSent as not_sent:
+            self.audit(task_id, service, None, "not_sent", not_sent.answer["message"])
+            return not_sent.answer
         except CallRefused as refusal:
             self.audit(task_id, service, arguments.get("target") if isinstance(arguments, dict) else None,
                        "refused", str(refusal))
             return {"status": "refused", "message": str(refusal)}
         result = self.send(service, body)
         self.audit(task_id, service, target, result["status"], result.get("message", ""))
+        if result["status"] == "ok" and set(target) == {"entity_id"}:
+            result["readback"] = self.read_back(target["entity_id"])
         return result
+
+    def target_by_name(self, arguments):
+        """Return the arguments with the named entity as the target, or raise NotSent when no one entity fits.
+
+        The service and data are checked first, so a refused service is refused before Home Assistant is read.
+        """
+        rest = {key: value for key, value in arguments.items() if key != "name"}
+        if "target" in rest:
+            raise CallRefused("give a name or a target, not both")
+        service, _, _ = parse_request(rest)
+        token = self.worker.ha_token()
+        if not token:
+            raise CallRefused("Home Assistant authentication is unavailable")
+        try:
+            states = fetch_states("/states", token)
+        except (ValueError, requests.RequestException) as exc:  # ReadError is a ValueError
+            raise CallRefused(f"Could not read the entity list ({type(exc).__name__}). Nothing was sent.") from None
+        if not isinstance(states, list):
+            raise CallRefused("Home Assistant returned an invalid entity list. Nothing was sent.")
+        try:
+            found = name_match.resolve(states, arguments["name"], service)
+        except ValueError as exc:
+            raise CallRefused(str(exc)) from None
+        if "entity_id" in found:
+            return {**rest, "target": {"entity_id": found["entity_id"]}}
+        count = found["total"]
+        message = (f"No {service.split('.', 1)[0]} entity fits this name. Nothing was sent." if not count else
+                   f"{count} entities fit this name. Nothing was sent: ask the person which one, "
+                   "then call again with target.entity_id.")
+        raise NotSent({"status": "not_sent", "message": message, "candidates": found["candidates"],
+                       "total_matches": count})
+
+    def read_back(self, entity_ids):
+        """Return the new state and the common attributes of up to MAX_READBACK target entities.
+
+        Credential-like and password-mode entities are left out, as they are for every read.
+        """
+        token = self.worker.ha_token()
+        ids = [entity_ids] if isinstance(entity_ids, str) else entity_ids
+        rows = []
+        for entity_id in ids[:MAX_READBACK]:
+            if PRIVATE.search(entity_id.split(".", 1)[-1]):
+                continue
+            try:
+                row = fetch_states(f"/states/{entity_id}", token)
+            except (ValueError, requests.RequestException) as exc:
+                rows.append({"entity_id": entity_id, "error": f"read back failed ({type(exc).__name__})"})
+                continue
+            if not isinstance(row, dict) or password_state(row):
+                continue
+            attributes = row.get("attributes") if isinstance(row.get("attributes"), dict) else {}
+            rows.append({"entity_id": entity_id, "state": str(row.get("state"))[:120],
+                         "attributes": {key: attributes[key] for key in sorted(ATTRIBUTES & set(attributes))}})
+        return rows
 
     def send(self, service, body):
         """Send one service call to Home Assistant, once, and return the result for Codex."""

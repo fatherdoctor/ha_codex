@@ -18,7 +18,9 @@ TOOL = {
         "Send one Home Assistant action (a service call) that changes the house, for example light.turn_off, "
         "automation.reload or homeassistant.restart. Codex asks the person before each call. "
         "Put entity_id, device_id, area_id, floor_id or label_id in target, and the other fields in data. "
-        "Read the new state back afterwards with home_assistant.verify. hassio and codex_cli services are refused."
+        "For a device the person named, give name (their words) in place of target: the action is sent only "
+        "when exactly one entity of the service's domain fits, else the answer lists the candidates. "
+        "The answer reads back the new state of each target entity. hassio and codex_cli services are refused."
     ),
     "inputSchema": {
         "type": "object", "additionalProperties": False,
@@ -30,6 +32,9 @@ TOOL = {
                                                       {"type": "array", "items": {"type": "string"}}]}
                                       for key in ("entity_id", "device_id", "area_id", "floor_id", "label_id")}},
             "data": {"type": "object", "description": "The service's other fields, for example brightness_pct"},
+            "name": {"type": "string", "maxLength": 120,
+                     "description": "The device's name as the person said it, for example kitchen ceiling; "
+                                    "in place of target"},
         },
         "required": ["service"],
     },

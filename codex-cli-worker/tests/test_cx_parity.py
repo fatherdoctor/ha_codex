@@ -141,10 +141,12 @@ class DeviceCommandSpeedTests(unittest.TestCase):
     def test_rules_send_a_device_command_to_the_home_assistant_tools(self):
         rules = server.PAGE_INSTRUCTIONS
         line = next(line for line in rules.splitlines() if line.startswith('For a device command'))
-        for step in ('home_assistant.verify find', 'home_assistant_call call tool', 'home_assistant.verify entity'):
-            self.assertIn(step, line)
-        self.assertLess(line.index('verify find'), line.index('home_assistant_call call tool'))
-        self.assertLess(line.index('home_assistant_call call tool'), line.index('verify entity'))
+        # One call by name that acts and reads back (CX-SPEED cut 1); find only when no entity fits.
+        self.assertIn('make one home_assistant_call call with the service, the name the user gave', line)
+        self.assertIn('"name":"kitchen ceiling"', line)
+        self.assertIn('ask the owner which one and call again with that target.entity_id', line)
+        self.assertLess(line.index('home_assistant_call call'), line.index('home_assistant.verify find'))
+        self.assertNotIn('home_assistant.verify entity', line)
         self.assertNotIn('home_assistant_actions', rules)
         self.assertIn('Do not search files under /config or .storage or run shell commands to find an entity', line)
         self.assertIn('{"operation":"find","name":"kitchen ceiling","domain":"light"}', rules)

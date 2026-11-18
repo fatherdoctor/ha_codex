@@ -78,6 +78,11 @@ class CallTestCase(unittest.TestCase):
         patcher = patch.object(ha_call, "CORE_SERVICES_URL", self.fake.url)
         patcher.start()
         self.addCleanup(patcher.stop)
+        # The read-back after a call reads one state; the fake answers it without a network.
+        reader = patch.object(ha_call, "fetch_states",
+                              lambda path, token: {"entity_id": path[8:], "state": "off", "attributes": {}})
+        reader.start()
+        self.addCleanup(reader.stop)
         self.worker = call_worker()
         self.calls = HomeAssistantCall(self.worker, self.folder / "audit.jsonl")
         self.key = self.calls.begin("t1")
@@ -97,7 +102,9 @@ class ExactRequestTests(CallTestCase):
         self.assertEqual(self.fake.requests, [{"method": "POST", "path": "/api/services/light/turn_off",
                                                "authorization": f"Bearer {WORKER_TOKEN}",
                                                "body": {"entity_id": "light.kitchen_ceiling"}}])
-        self.assertEqual(result, {"status": "ok", "service": "light.turn_off", "changed": ["light.kitchen_ceiling"]})
+        self.assertEqual(result, {"status": "ok", "service": "light.turn_off", "changed": ["light.kitchen_ceiling"],
+                                  "readback": [{"entity_id": "light.kitchen_ceiling", "state": "off",
+                                                "attributes": {}}]})
 
     def test_notify_keeps_its_target_and_its_full_message(self):
         message = "The garage door is still open. " * 200
@@ -300,6 +307,81 @@ class LaunchTests(unittest.TestCase):
             env = server.codex_env()
         self.assertNotIn("HA_CALL_CAPABILITY", env)
         self.assertNotIn("HA_CALL_SOCKET", env)
+
+
+class ByNameTests(CallTestCase):
+    """A request that gives the person's words in place of a target (CX-SPEED cut 1)."""
+
+    answer = [{"entity_id": "light.kitchen_ceiling", "state": "on"}]
+    house = [
+        {"entity_id": "light.kitchen_ceiling", "state": "off", "attributes": {"friendly_name": "Kitchen Ceiling"}},
+        {"entity_id": "light.kitchen_ceiling_fan", "state": "off",
+         "attributes": {"friendly_name": "Kitchen Ceiling Fan"}},
+        {"entity_id": "switch.kitchen_ceiling", "state": "on", "attributes": {"friendly_name": "Kitchen Ceiling"}},
+        {"entity_id": "light.porch", "state": "off", "attributes": {"friendly_name": "Porch"}},
+        {"entity_id": "light.porch_2", "state": "off", "attributes": {"friendly_name": "Porch"}},
+        {"entity_id": "light.lamppost", "state": "off", "attributes": {"friendly_name": "Lamppost"}},
+    ]
+
+    def setUp(self):
+        super().setUp()
+        self.reads = []
+
+        def fetch(path, token):
+            self.reads.append((path, token))
+            if path == "/states":
+                return self.house
+            return {"entity_id": path[8:], "state": "on",
+                    "attributes": {"friendly_name": "Kitchen Ceiling", "brightness": 26, "private_note": "x"}}
+
+        patcher = patch.object(ha_call, "fetch_states", fetch)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_one_exact_name_sends_that_entity_and_reads_it_back(self):
+        result = self.call({"service": "light.turn_on", "name": "kitchen ceiling", "data": {"brightness_pct": 10}})
+        self.assertEqual(self.fake.requests, [{"method": "POST", "path": "/api/services/light/turn_on",
+                                               "authorization": f"Bearer {WORKER_TOKEN}",
+                                               "body": {"brightness_pct": 10, "entity_id": "light.kitchen_ceiling"}}])
+        self.assertEqual(result["readback"], [{"entity_id": "light.kitchen_ceiling", "state": "on",
+                                               "attributes": {"brightness": 26, "friendly_name": "Kitchen Ceiling"}}])
+        self.assertEqual(self.audit_lines()[-1]["target"], {"entity_id": "light.kitchen_ceiling"})
+        self.assertEqual(self.reads[0], ("/states", WORKER_TOKEN))
+
+    def test_the_domain_comes_from_the_service(self):
+        self.call({"service": "switch.turn_off", "name": "kitchen ceiling"})
+        self.assertEqual(self.fake.requests[0]["body"], {"entity_id": "switch.kitchen_ceiling"})
+
+    def test_several_or_no_match_sends_nothing_and_lists_the_candidates(self):
+        several = self.call({"service": "light.turn_on", "name": "porch"})
+        self.assertEqual((several["status"], several["total_matches"]), ("not_sent", 2))
+        self.assertEqual([row["entity_id"] for row in several["candidates"]], ["light.porch", "light.porch_2"])
+        none = self.call({"service": "light.turn_on", "name": "lamp"})
+        self.assertEqual((none["status"], none["total_matches"], none["candidates"]), ("not_sent", 0, []))
+        self.assertEqual(self.fake.requests, [])
+        self.assertEqual([line["result"] for line in self.audit_lines()], ["not_sent", "not_sent"])
+
+    def test_a_name_and_a_target_together_or_a_bad_service_send_nothing(self):
+        for arguments in ({"service": "light.turn_on", "name": "porch", "target": {"entity_id": "light.porch"}},
+                          {"service": "homeassistant.turn_on", "name": "kitchen ceiling"},
+                          {"service": "hassio.host_reboot", "name": "kitchen ceiling"},
+                          {"service": "light.turn_on", "name": "kitchen ceiling", "data": {"entity_id": "light.x"}},
+                          {"service": "light.turn_on", "name": ""}):
+            with self.subTest(arguments=arguments):
+                self.assertEqual(self.call(arguments)["status"], "refused")
+        self.assertEqual(self.fake.requests, [])
+
+    def test_a_refused_service_is_refused_before_the_entity_list_is_read(self):
+        self.call({"service": "hassio.host_reboot", "name": "kitchen ceiling"})
+        self.assertEqual(self.reads, [])
+
+    def test_read_back_leaves_out_credential_like_entities(self):
+        self.call({"service": "lock.lock", "target": {"entity_id": ["lock.front_door", "lock.door_code"]}})
+        self.assertEqual([path for path, _ in self.reads], ["/states/lock.front_door"])
+
+    def test_a_target_of_areas_gets_no_read_back(self):
+        result = self.call({"service": "light.turn_on", "target": {"area_id": "kitchen"}})
+        self.assertNotIn("readback", result)
 
 
 class InstructionTests(unittest.TestCase):
