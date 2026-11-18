@@ -6597,25 +6597,30 @@ SHARE_MAX_LINES = 100_000
 # The Share file is made to be sent to another person, so it gets these rules on top of redact(). They mask
 # secrets that carry no "token" or "api_key" label. The cases they must hold are SHARE_MASK_CORPUS in
 # tests/test_share_chat.py; add a new shape there first.
-SHARE_SECRET_KEY = r"\b(?:[A-Za-z0-9]+[_-])*(?:password|passwd|secret|pin)(?:[_-][A-Za-z0-9]+)*\b"
-# Between a key and its value: an optional closing quote, ":" or "=", and at most one line break, so a YAML
-# value on the next line is masked but the next paragraph is not.
-SHARE_SECRET_SEPARATOR = r"[\"']?[ \t]*[:=][ \t]*(?:\r?\n[ \t]*)?"
+# A key is at most eight words of at most 32 letters or digits around the secret word, and a URL scheme at most
+# 32 characters, so each start in a long run of words joined by "-" scans a fixed length, not the rest of the run.
+SHARE_SECRET_KEY = (
+    r"\b(?:[A-Za-z0-9]{1,32}[_-]){0,8}(?:password|passwd|secret|pin)(?:[_-][A-Za-z0-9]{1,32}){0,8}\b"
+)
+# Between a key and its value: an optional closing quote (escaped, as in JSON inside a command line), ":" or "=",
+# and at most one line break, so a YAML value on the next line is masked but the next paragraph is not.
+SHARE_SECRET_SEPARATOR = r"\\?[\"']?[ \t]*[:=][ \t]*(?:\r?\n[ \t]*)?"
 SHARE_SECRET_REPLACEMENTS = [
     # A JSON Web Token, such as a Home Assistant long-lived access token: three base64url parts, the first
     # starting with eyJ (the encoding of '{"').
     (re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"), "[redacted]"),
     # An API key of the sk- form (OpenAI, Anthropic and others).
     (re.compile(r"\bsk-[A-Za-z0-9_-]{20,}"), "[redacted]"),
-    # A quoted value after a password, passwd, secret or pin key, spaces and all.
-    (re.compile(rf"(?i)({SHARE_SECRET_KEY}{SHARE_SECRET_SEPARATOR})\"[^\"\r\n]+\""), r'\1"[redacted]"'),
-    (re.compile(rf"(?i)({SHARE_SECRET_KEY}{SHARE_SECRET_SEPARATOR})'[^'\r\n]+'"), r"\1'[redacted]'"),
-    # An unquoted value after the same keys, up to a space, a quote, ";" or "&". A YAML !secret reference
-    # names a secret without holding it, so it stays readable.
-    (re.compile(rf"(?i)({SHARE_SECRET_KEY}{SHARE_SECRET_SEPARATOR})(?!!secret\b|\[redacted\])[^\s'\";&]+"),
+    # A quoted value after a password, passwd, secret or pin key, spaces and escaped quotes (\") and all.
+    (re.compile(rf"(?i)({SHARE_SECRET_KEY}{SHARE_SECRET_SEPARATOR})\"(?:[^\"\\\r\n]|\\.)+\""), r'\1"[redacted]"'),
+    (re.compile(rf"(?i)({SHARE_SECRET_KEY}{SHARE_SECRET_SEPARATOR})'(?:[^'\\\r\n]|\\.)+'"), r"\1'[redacted]'"),
+    # An unquoted value after the same keys runs to the end of its line: a password may hold spaces, ";" or "&",
+    # and masking the rest of a line costs only its readability. A YAML !secret reference names a secret without
+    # holding it, so it stays readable, and a value a rule above masked is not masked again.
+    (re.compile(rf"(?i)({SHARE_SECRET_KEY}{SHARE_SECRET_SEPARATOR})(?!!secret\b|[\"']?\[redacted\])\S[^\r\n]*"),
      r"\1[redacted]"),
-    # The password of a URL: scheme://user:password@host.
-    (re.compile(r"(?i)(\b[a-z][a-z0-9+.-]*://[^\s/:@]+:)[^\s/@]+(@)"), r"\1[redacted]\2"),
+    # The password of a URL: scheme://user:password@host, where the user name may be empty (redis://:password@).
+    (re.compile(r"(?i)(\b[a-z][a-z0-9+.-]{0,31}://[^\s/:@]*:)[^\s/@]+(@)"), r"\1[redacted]\2"),
 ]
 
 

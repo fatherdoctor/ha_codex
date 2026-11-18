@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 import unittest
 from contextlib import ExitStack
 from pathlib import Path
@@ -19,6 +20,9 @@ from test_server import server
 # Families not covered: invisible characters (a zero-width space inside a token splits it, and the mask keeps
 # both halves; no rule can tell such a split from two words), and secrets with no label or known shape (a
 # password written in a sentence, a name, an address), which the dialog and DOCS.md tell the owner to look for.
+# A known limit of the fixed lengths: a key word longer than 32 characters, or more than eight words around the
+# secret word, is not read as a key. After the G and T cases this corpus is the contract: a new shape is a new
+# case here, added in its own change.
 SYNTHETIC_JWT = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzeW50aGV0aWMifQ.c3ludGhldGljLXNpZ25hdHVyZS12YWx1ZQ"
 SYNTHETIC_SUPERVISOR = "synthetic-supervisor-token-value-0123456789"
 SHARE_MASK_CORPUS = [
@@ -60,7 +64,21 @@ SHARE_MASK_CORPUS = [
     ("A5", "allow", "pinned: true and spin: 3", "pinned: true and spin: 3", "kept"),
     ("A6", "allow", "Read secrets.yaml before the change", "secrets.yaml", "kept"),
     ("A7", "allow", "The task-runner-0123456789abcdefghij started", "task-runner-0123456789abcdefghij", "kept"),
+    # G cases: the closure of the fix. A value with no quotes runs to the end of its line, a quoted value may hold
+    # an escaped quote, and a URL may have an empty user name.
+    ("G1", "separators", "mqtt_password: Xy7&kd;92Zq", "kd;92Zq", "masked"),
+    ("G2", "separators", "wifi_password: blue horse battery", "horse battery", "masked"),
+    ("G3", "quotes", 'password: "ab\\"cd9"', "cd9", "masked"),
+    ("G4", "url", "redis://:synthRedis9@cache.example.invalid:6379", "synthRedis9", "masked"),
+    ("G5", "nesting", '{\\"password\\": \\"synthEsc12\\"}', "synthEsc12", "masked"),
+    # Time cases: long runs with no space, which made the key and scheme rules scan the rest of the run from
+    # each word start. Each case must take less than SHARE_MASK_TIME_LIMIT seconds.
+    ("T1", "time", "a-" * 50_000 + "done", "done", "kept"),
+    ("T2", "time", "-".join(f"id{n:04d}" for n in range(16_000)), "id15999", "kept"),
+    ("T3", "time", "x." * 50_000 + "y", "x.x.x.y", "kept"),
 ]
+# The longest time one Share file may spend in the mask for one case of the corpus.
+SHARE_MASK_TIME_LIMIT = 1.0
 
 
 class ShareMaskCorpusTests(unittest.TestCase):
@@ -71,10 +89,14 @@ class ShareMaskCorpusTests(unittest.TestCase):
         failing = []
         with patch.dict(os.environ, {"SUPERVISOR_TOKEN": SYNTHETIC_SUPERVISOR}):
             for case_id, _family, text, secret, expected in SHARE_MASK_CORPUS:
+                started = time.perf_counter()
                 result = server.share_redact(text)
+                seconds = time.perf_counter() - started
                 kept = secret in result
                 if kept != (expected == "kept"):
-                    failing.append(f"{case_id}: {result!r}")
+                    failing.append(f"{case_id}: {result[:200]!r}")
+                if seconds >= SHARE_MASK_TIME_LIMIT:
+                    failing.append(f"{case_id}: {seconds:.2f} s")
         self.assertEqual(failing, [], "failing cases:\n" + "\n".join(failing))
 
     def test_every_family_has_two_cases(self):
@@ -165,7 +187,10 @@ class ShareChatTests(unittest.TestCase):
     def test_corpus_in_every_place_of_the_file(self):
         """Each corpus case gets the same result in a message, a thinking line, a command and an answer."""
         self.stack.enter_context(patch.dict(os.environ, {"SUPERVISOR_TOKEN": SYNTHETIC_SUPERVISOR}))
-        for case_id, _family, text, secret, expected in SHARE_MASK_CORPUS:
+        for case_id, family, text, secret, expected in SHARE_MASK_CORPUS:
+            if family == "time":
+                # A time case is a run of 100,000 characters for the mask alone; the chat shortens such a text.
+                continue
             response = self.client.post("/tasks", json={"prompt": f"Message {text}"}, headers=self.headers)
             task_id = response.json["task_id"]
             server.update_task(task_id, status="running")
