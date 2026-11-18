@@ -1385,7 +1385,9 @@ async function loadBrowserPermissions() {
     if (load !== browserPermissionLoad) return;
     area.replaceChildren();
     if (!permissions.length) area.append(textNode("p", "No browser permissions remembered.", "muted"));
-    setSectionStatus("browser-permissions-section", permissions.length ? `${permissions.length} remembered` : "None remembered");
+    const remembered = permissions.length ? `${permissions.length} remembered` : "None remembered";
+    setSectionStatus("browser-permissions-section", remembered);
+    setSectionStatus("advanced-section", `Browser permissions: ${remembered.toLowerCase()}`);
     for (const permission of permissions) {
       const row = textNode("div", "", "saved-browser-permission");
       const info = textNode("div", "", "saved-browser-permission-info");
@@ -1414,6 +1416,8 @@ async function loadBrowserPermissions() {
     if (load !== browserPermissionLoad) return;
     area.replaceChildren(textNode("p", String(error.message || error)));
     setSectionStatus("browser-permissions-section", "Could not be read", true);
+    // Advanced is closed by default, so its header carries the problem too.
+    setSectionStatus("advanced-section", "Browser permissions could not be read", true);
     // An unreadable permissions file can only be replaced, never edited here.
     if (error.status === 503) {
       const clear = textNode("button", "Remove all saved permissions", "subtle");
@@ -2984,13 +2988,14 @@ window.addEventListener("resize", () => {
  * Settings sections start collapsed (add-on 0.3.2). Each section's first
  * heading becomes a button with the title and a one-line status; the rest of
  * the section opens under it on tap. A section that needs the owner says so
- * in its header, so nothing important hides in a closed section.
+ * in its header, so nothing important hides in a closed section. One
+ * top-level section is open at a time: opening one closes the others.
  */
 function collapseSettingsSections() {
   // Sections marked data-own-dialog move to a dialog of their own (studio.js) and stay open there.
-  // The three parts of Accounts and connections collapse too, inside it, each under its own header.
+  // The parts of Accounts and connections and of Advanced collapse too, inside them, each under its own header.
   const sections = document.querySelectorAll(
-    "#settings > section:not([data-own-dialog]), #accounts-section > section",
+    "#settings > section:not([data-own-dialog]), #accounts-section > section, #advanced-section > section",
   );
   sections.forEach((section, index) => {
     const heading = section.querySelector(":scope > h3, :scope > h4");
@@ -3011,7 +3016,10 @@ function collapseSettingsSections() {
     heading.replaceChildren(toggle);
   });
 }
-/** Open or close one settings section; opening a part of Accounts and connections opens that section too. */
+/**
+ * Open or close one settings section. Opening a part, such as GitHub, opens the section that holds it too.
+ * Opening a top-level section closes the other top-level sections, so one is open at a time.
+ */
 function openSettingsSection(section, open = true) {
   const toggle = section.querySelector(":scope > :is(h3, h4) > .settings-toggle");
   const body = section.querySelector(":scope > .settings-body");
@@ -3020,6 +3028,13 @@ function openSettingsSection(section, open = true) {
   body.hidden = !open;
   const parent = section.parentElement?.closest("#settings section");
   if (open && parent) openSettingsSection(parent);
+  if (open && !parent) closeOtherSettingsSections(section);
+}
+/** Close every top-level settings section except the one given. Parts inside a closed section keep their state. */
+function closeOtherSettingsSections(keep) {
+  for (const other of document.querySelectorAll("#settings > section")) {
+    if (other !== keep) openSettingsSection(other, false);
+  }
 }
 /** Put a one-line status in a section's header; attention marks one that needs the owner. */
 function setSectionStatus(sectionId, text, attention = false) {
@@ -3670,7 +3685,7 @@ async function loadAddonConfiguration() {
   const description = $("addon-configuration-description");
   description.dataset.usual ??= description.textContent;
   const data = await api("addon-configuration").catch(() => ({}));
-  if (typeof data.url === "string" && data.url.startsWith("/hassio/addon/")) {
+  if (typeof data.url === "string" && data.url.startsWith("/config/app/")) {
     row.href = data.url;
     description.textContent = description.dataset.usual;
   } else {

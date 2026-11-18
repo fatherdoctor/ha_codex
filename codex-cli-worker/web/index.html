@@ -504,11 +504,6 @@
           <pre id="remote-control-log"></pre>
         </details>
       </section>
-      <section id="browser-permissions-section">
-        <h3>Browser permissions</h3>
-        <p class="muted">Requests you chose to remember for a dashboard. Revoking a permission stops captures using saved access.</p>
-        <div id="browser-permissions"></div>
-      </section>
       <section id="scheduled-work">
         <h3>Scheduled runs</h3>
         <p class="muted">Schedules follow Home Assistant time. Proposals from agents stay off until you approve them. A permission request waits in its chat; it is never allowed automatically.</p>
@@ -543,6 +538,14 @@
           configuration.
         </p>
         <button id="workspace-open" class="subtle">Workspace rules</button>
+      </section>
+      <section id="advanced-section" aria-labelledby="advanced-title">
+        <h3 id="advanced-title">Advanced</h3>
+        <section id="browser-permissions-section" aria-labelledby="browser-permissions-title">
+          <h4 id="browser-permissions-title">Browser permissions</h4>
+          <p class="muted">Requests you chose to remember for a dashboard. Revoking a permission stops captures using saved access.</p>
+          <div id="browser-permissions"></div>
+        </section>
       </section>
       <a id="addon-configuration" class="ha-row ha-nav-row" target="_top"
          aria-label="Add-on configuration" aria-describedby="addon-configuration-description"

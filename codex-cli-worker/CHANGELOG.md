@@ -38,6 +38,11 @@
   quota and reset times already show under the rows. The Codex access line moves to the ChatGPT account part of
   Settings. `tests/browser_fb2_band.cjs` and `tests/browser_account_access.cjs` check the rows, their states and
   where each one opens.
+- In **Settings**, one top-level section is open at a time: opening one closes the others. **Browser permissions**
+  moves into a new **Advanced** section at the bottom of Settings, folded by default; nothing about it is removed.
+  The **Add-on configuration** row now opens the app's Configuration tab. It linked to `/hassio/addon/<slug>/config`,
+  a page Home Assistant 2026.2 moved to `/config/app/<slug>/config` and 2026.5, this app's minimum, removed, so the
+  row opened a page that does not exist. `tests/browser_fb2_split.cjs` checks the sections and the link.
 - **Pause the assistant** is removed: the Assistant part of Settings, the banner above the chat with **Resume the
   assistant**, the `GET` and `POST /pause` routes and the `pause` field of `GET /status`. New chats, replies, queued
   messages, scheduled runs and lead-agent tasks no longer wait on it. To hold the work that starts on its own, pause

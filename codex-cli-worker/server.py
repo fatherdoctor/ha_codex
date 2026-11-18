@@ -6935,7 +6935,7 @@ _addon_slug: str | None = None
 def addon_slug() -> str | None:
     """Return this app's slug as Supervisor knows it, with its repository prefix, or None when Supervisor cannot say.
 
-    The page links to the app's Configuration tab at /hassio/addon/<slug>/config, and the prefix differs from one
+    The page links to the app's Configuration tab at /config/app/<slug>/config, and the prefix differs from one
     install to the next. Only a successful answer is kept, so a later call tries Supervisor again.
     """
     global _addon_slug
@@ -6960,7 +6960,9 @@ def addon_configuration() -> Response:
     # settings, this one changes nothing and its reply holds only the slug path,
     # which is no secret, so it needs no Ingress administrator.
     slug = addon_slug()
-    return jsonify({"ok": True, "url": f"/hassio/addon/{slug}/config" if slug else None})
+    # Home Assistant 2026.2 moved an app's pages to /config/app/<slug>/, and 2026.5 removed the old
+    # /hassio/addon/<slug>/ panel, so that path opens a page that does not exist.
+    return jsonify({"ok": True, "url": f"/config/app/{slug}/config" if slug else None})
 
 
 @app.post("/remote-control/<action>")
