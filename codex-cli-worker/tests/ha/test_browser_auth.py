@@ -14,6 +14,8 @@ from aiohttp import FormData, web
 from homeassistant.auth.const import GROUP_ID_READ_ONLY
 from homeassistant.components.http.const import KEY_HASS_USER
 from homeassistant.setup import async_setup_component
+from homeassistant.config_entries import ConfigEntryState
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 ROOT = Path(__file__).resolve().parents[3] / "custom_components" / "codex_cli"
 package = types.ModuleType("verification_ha_test")
@@ -155,7 +157,9 @@ async def test_broker_rejects_admin_without_pairing_and_read_only_user(hass):
     """Only an administrator with the paired worker token gets the broker; the read-only browser user never does."""
     broker = auth.BrowserSessions(hass, "paired-worker")
     await broker.setup()
-    hass.data.setdefault(auth.DOMAIN, {})["browser_sessions"] = broker
+    entry = MockConfigEntry(domain=auth.DOMAIN, state=ConfigEntryState.LOADED)
+    entry.add_to_hass(hass)
+    entry.runtime_data = types.SimpleNamespace(browser_sessions=broker)
     view = auth.BrowserSessionView(hass)
     class Request(dict):
         """Minimal stand-in for the request the view receives."""
@@ -179,7 +183,9 @@ async def test_session_http_requires_pairing_and_accepts_chunked_proxy_body(hass
     assert await async_setup_component(hass, "http", {})
     broker = auth.BrowserSessions(hass, "paired-worker")
     await broker.setup()
-    hass.data.setdefault(auth.DOMAIN, {})["browser_sessions"] = broker
+    entry = MockConfigEntry(domain=auth.DOMAIN, state=ConfigEntryState.LOADED)
+    entry.add_to_hass(hass)
+    entry.runtime_data = types.SimpleNamespace(browser_sessions=broker)
     hass.http.register_view(auth.BrowserSessionView(hass))
     client = await hass_client()
     try:
@@ -303,7 +309,9 @@ async def test_diagnostic_endpoint_rejects_every_non_core_target(hass, hass_clie
     assert await async_setup_component(hass, "http", {})
     broker = auth.BrowserSessions(hass, "paired-worker")
     await broker.setup()
-    hass.data.setdefault(auth.DOMAIN, {})["browser_sessions"] = broker
+    entry = MockConfigEntry(domain=auth.DOMAIN, state=ConfigEntryState.LOADED)
+    entry.add_to_hass(hass)
+    entry.runtime_data = types.SimpleNamespace(browser_sessions=broker)
     hass.http.register_view(auth.DiagnosticView(hass))
     client = await hass_client()
     try:
