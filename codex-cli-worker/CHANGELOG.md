@@ -15,6 +15,10 @@
 - **Text size** for the chat page: Normal, Larger (115 %) or Largest (130 %), from **Settings > Text size**. It
   scales the messages, code, buttons, the chat list, Settings, the sign-in text, the schedule dialog and the list of
   steps together, is remembered on each device, and still fits a phone screen at Largest.
+- **Slash commands** in the message box: typing `/` lists `/new`, `/stop`, `/model`, `/reasoning`, `/rename`,
+  `/usage` (or `/status`), `/size`, `/settings` and `/help` with a line on each, filtered as you type and picked by a
+  tap or with the arrow keys and Enter. Only the commands the page can run at that moment are listed. The page runs
+  them itself; they are never sent to Codex. **Settings** > **Commands** lists them.
 - The app's own grant layer is removed: the five pre-approved action groups (Settings > Permissions overrides), the
   guard-rails block they read from `/config/AGENTS.md`, and the `home_assistant_actions` `act` tool with its
   **Allow once** card. Codex's own permission requests are now the only way a change to the house is approved. A
