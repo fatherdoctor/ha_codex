@@ -68,6 +68,28 @@ class GitHubRouteTests(unittest.TestCase):
                 self.assertEqual(self.ingress("POST", path, user="synthetic-user").status_code, 403)
                 self.assertEqual(self.ingress("POST", path, user="").status_code, 403)
 
+    def test_a_refused_change_says_what_the_owner_does_next(self):
+        """Astro F3: the refusal names GitHub, not permission requests or browser permissions."""
+        response = self.client.post("/github/connect", json={}, headers=self.worker)
+        self.assertEqual(response.json["error"], "Open Codex through Home Assistant to make this change.")
+        response = self.ingress("POST", "/github/connect", user="synthetic-user")
+        self.assertEqual(response.json["error"], "Only a Home Assistant administrator can manage GitHub.")
+        self.assertEqual(self.ingress("POST", "/github/connect", user="").json["error"], server.UNVERIFIED_ACCOUNT)
+        with patch.object(server, "lookup_ha_users", side_effect=RuntimeError("synthetic outage")):
+            server.admin_cache.clear()
+            self.assertEqual(self.ingress("POST", "/github/connect").json["error"], server.UNVERIFIED_ACCOUNT)
+
+    def test_a_permission_answer_keeps_its_own_refusal(self):
+        """The approval route still names permission requests, and still refuses the same people."""
+        path = "/tasks/synthetic-task/approvals/synthetic-approval"
+        response = self.client.post(path, json={"decision": "allow"}, headers=self.worker)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json["error"],
+                         "Open Codex through Home Assistant and sign in as an administrator to answer permission requests.")
+        response = self.ingress("POST", path, user="synthetic-user", body={"decision": "allow"})
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json["error"], "Only a Home Assistant administrator can answer permission requests.")
+
     def test_connect_shows_the_code_and_never_the_device_code(self):
         self.http.posts = [Response(200, {"device_code": "synthetic-device-code", "user_code": "WXYZ-1234",
                                           "verification_uri": "https://github.com/login/device",

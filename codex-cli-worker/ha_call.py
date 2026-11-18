@@ -2,17 +2,17 @@
 
 Codex asks the person before each call (the tool is not approved ahead), then its bridge,
 ha_call_mcp.py, passes the request here over a private socket with the key of the running
-turn. This module, not the bridge, holds the checks that no mode can skip:
+turn. This module, not the bridge, holds the checks:
 
 - a request without the current key of a running chat sends nothing;
-- a service of a refused domain (Supervisor, this add-on) sends nothing;
-- every request with a valid key writes one audit line: service, target, result;
+- a malformed request (a service that is not domain.service, an unknown field) sends nothing;
 - a request that names the entity ("name") is sent only when the name fits exactly one entity
   of the service's domain (name_match.py); otherwise it sends nothing and lists the candidates.
 
-After a call that targets entity ids, the worker reads their new states back, so Codex needs no second tool call.
+After a call whose target is only entity ids, the worker reads up to MAX_READBACK of them back,
+so Codex needs no second tool call.
 
-The audit line never holds the call's data, so a message text or a code stays out of it.
+It refuses no service by name: the person's answer to Codex's request is the gate.
 """
 from __future__ import annotations
 
@@ -23,7 +23,6 @@ import re
 import secrets
 import socketserver
 import threading
-import time
 from pathlib import Path
 
 import requests
@@ -32,26 +31,24 @@ import name_match
 from relay_reads import ATTRIBUTES, PRIVATE, fetch_states, password_state
 
 SERVICE_RE = re.compile(r"[a-z0-9_]+\.[a-z0-9_]+")
-# hassio reaches the Supervisor through Home Assistant; codex_cli is this add-on's own integration.
-REFUSED_DOMAINS = frozenset({"hassio", "codex_cli"})
 TARGET_KEYS = frozenset({"entity_id", "device_id", "area_id", "floor_id", "label_id"})
 MAX_REQUEST_BYTES = 65536
 MAX_TARGET_IDS = 50
 MAX_CHANGED_REPORTED = 50
 MAX_READBACK = 5
-MAX_AUDIT_BYTES = 1024 * 1024
 CALL_TIMEOUT_SECONDS = 60
 CORE_SERVICES_URL = "http://supervisor/core/api/services/"
 
 
 class CallRefused(ValueError):
-    """A request the worker will not send to Home Assistant; the message says why, for Codex and the audit line."""
+    """A request the worker will not send to Home Assistant; the message says why, for Codex."""
 
 
 class NotSent(Exception):
     """A request by name that fits no entity, or more than one: nothing is sent, and the answer lists the candidates."""
 
     def __init__(self, answer):
+        """Keep the answer for Codex; its message is the exception's text."""
         super().__init__(answer["message"])
         self.answer = answer
 
@@ -77,7 +74,7 @@ def parse_target(target):
 
 
 def parse_request(arguments):
-    """Check the tool's arguments and return (service, target, body); raise CallRefused for a request not to send.
+    """Check the tool's arguments and return (service, body); raise CallRefused for a request not to send.
 
     The body is what Home Assistant receives: the data, with the target's id fields beside it.
     """
@@ -89,8 +86,6 @@ def parse_request(arguments):
     service = arguments.get("service")
     if not isinstance(service, str) or not SERVICE_RE.fullmatch(service):
         raise CallRefused("service must be domain.service, for example light.turn_off")
-    if service.split(".", 1)[0] in REFUSED_DOMAINS:
-        raise CallRefused(f"{service} is refused in every mode: the Supervisor and this add-on are outside the tool")
     target = parse_target(arguments.get("target"))
     data = arguments.get("data")
     if data is None:
@@ -100,7 +95,7 @@ def parse_request(arguments):
     overlap = TARGET_KEYS & set(data)
     if overlap:
         raise CallRefused("put " + ", ".join(sorted(overlap)) + " in target, not in data")
-    return service, target, {**data, **target}
+    return service, {**data, **target}
 
 
 def changed_entities(answer):
@@ -114,13 +109,11 @@ def changed_entities(answer):
 class HomeAssistantCall:
     """Issue each running turn a call key, and send the calls that present it to Home Assistant."""
 
-    def __init__(self, worker, audit_path):
-        """Keep the worker that provides tasks and the token, and the file that the audit lines go to."""
+    def __init__(self, worker):
+        """Keep the worker that provides tasks and the token."""
         self.worker = worker
-        self.audit_path = Path(audit_path)
         self.capabilities = {}
         self.lock = threading.Lock()
-        self.audit_lock = threading.Lock()
 
     def begin(self, task_id):
         """Issue a new call key for the task's turn and return it; an earlier key of the task stops working."""
@@ -156,20 +149,16 @@ class HomeAssistantCall:
         if task_id is None:
             return {"status": "unavailable", "message": "No active call key: the chat turn has ended"}
         arguments = payload.get("arguments")
-        service = arguments.get("service") if isinstance(arguments, dict) else None
         try:
             if isinstance(arguments, dict) and "name" in arguments:
                 arguments = self.target_by_name(arguments)
-            service, target, body = parse_request(arguments)
+            service, body = parse_request(arguments)
         except NotSent as not_sent:
-            self.audit(task_id, service, None, "not_sent", not_sent.answer["message"])
             return not_sent.answer
         except CallRefused as refusal:
-            self.audit(task_id, service, arguments.get("target") if isinstance(arguments, dict) else None,
-                       "refused", str(refusal))
             return {"status": "refused", "message": str(refusal)}
         result = self.send(service, body)
-        self.audit(task_id, service, target, result["status"], result.get("message", ""))
+        target = arguments.get("target") or {}
         if result["status"] == "ok" and set(target) == {"entity_id"}:
             result["readback"] = self.read_back(target["entity_id"])
         return result
@@ -177,18 +166,18 @@ class HomeAssistantCall:
     def target_by_name(self, arguments):
         """Return the arguments with the named entity as the target, or raise NotSent when no one entity fits.
 
-        The service and data are checked first, so a refused service is refused before Home Assistant is read.
+        The service and data are checked first, so a malformed request is refused before Home Assistant is read.
         """
         rest = {key: value for key, value in arguments.items() if key != "name"}
         if "target" in rest:
             raise CallRefused("give a name or a target, not both")
-        service, _, _ = parse_request(rest)
+        service, _ = parse_request(rest)
         token = self.worker.ha_token()
         if not token:
             raise CallRefused("Home Assistant authentication is unavailable")
         try:
             states = fetch_states("/states", token)
-        except (ValueError, requests.RequestException) as exc:  # ReadError is a ValueError
+        except (ValueError, requests.RequestException) as exc:  # relay_reads.ReadError is a ValueError
             raise CallRefused(f"Could not read the entity list ({type(exc).__name__}). Nothing was sent.") from None
         if not isinstance(states, list):
             raise CallRefused("Home Assistant returned an invalid entity list. Nothing was sent.")
@@ -199,9 +188,11 @@ class HomeAssistantCall:
         if "entity_id" in found:
             return {**rest, "target": {"entity_id": found["entity_id"]}}
         count = found["total"]
-        message = (f"No {service.split('.', 1)[0]} entity fits this name. Nothing was sent." if not count else
-                   f"{count} entities fit this name. Nothing was sent: ask the person which one, "
-                   "then call again with target.entity_id.")
+        if count:
+            message = (f"{count} entities fit this name. Nothing was sent: ask the person which one, "
+                       "then call again with target.entity_id.")
+        else:
+            message = f"No {service.split('.', 1)[0]} entity fits this name. Nothing was sent."
         raise NotSent({"status": "not_sent", "message": message, "candidates": found["candidates"],
                        "total_matches": count})
 
@@ -249,22 +240,6 @@ class HomeAssistantCall:
         except ValueError:
             changed = []
         return {"status": "ok", "service": service, "changed": changed}
-
-    def audit(self, task_id, service, target, result, reason=""):
-        """Append one line to the audit log: time, chat, service, target, result. A failed write is not fatal."""
-        if not isinstance(target, dict) or len(json.dumps(target)) > 1000:
-            target = None  # A refused request's target may be anything; the line stays small and valid.
-        line = json.dumps({"time": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "task_id": task_id,
-                           "service": service[:200] if isinstance(service, str) else None,
-                           "target": target, "result": result, "reason": reason[:200]})
-        with self.audit_lock:
-            try:
-                if self.audit_path.exists() and self.audit_path.stat().st_size > MAX_AUDIT_BYTES:
-                    self.audit_path.replace(self.audit_path.with_suffix(".1.jsonl"))
-                with self.audit_path.open("a", encoding="utf-8") as handle:
-                    handle.write(line + "\n")
-            except OSError:
-                pass
 
     def serve(self, path):
         """Start a Unix socket server at path, readable by the worker's user only, that answers call requests."""

@@ -92,8 +92,8 @@ def record_diagnostic(method, *args, **kwargs):
 
 
 ha_data = HomeAssistantData(_ToolWorker(), DATA_ROOT / "ha-data")
-# The one tool that changes the house; its audit log holds service, target and result, never the data.
-ha_call = HomeAssistantCall(_ToolWorker(), DATA_ROOT / "ha-call-audit.jsonl")
+# The one tool that changes the house; the worker sends each call with its own access and keeps no log of it.
+ha_call = HomeAssistantCall(_ToolWorker())
 CODEX_HOME = DATA_ROOT / "codex-home"
 OPTIONS_PATH = DATA_ROOT / "options.json"
 WORKER_TOKEN_PATH = DATA_ROOT / "worker_api_token"
@@ -1877,6 +1877,11 @@ def task_turns(task: dict[str, Any]) -> list[dict[str, Any]]:
             "turn_id": f"legacy-{index + 1}", "message": reply.get("reply", ""),
             "created_at": reply.get("at", ""), "legacy": True,
         })
+    # The task index still knows the latest turn id when task.json was lost; with it, the
+    # recovered chat finds that turn's saved activity.
+    current_turn = task.get("current_turn_id")
+    if isinstance(current_turn, str) and TURN_ID_RE.fullmatch(current_turn):
+        turns[-1]["turn_id"] = current_turn
     turns[-1].update({key: copy.deepcopy(task[key]) for key in TURN_RESULT_FIELDS if key in task})
     return turns
 
@@ -4327,7 +4332,9 @@ def exchange_info(task_id: str, backup_dir: Path | None, include_rules: bool = F
         or "This message has no backup folder. Make no backup copies.",
         "owner_instructions": owner_instructions_note(),
         "attachments": attached_image_note(task_id).strip(),
-        "home_assistant_api": home_assistant_api_instructions(read_options()).strip(),
+        # A scheduled or lead run has no call tool (run_task), so its text must not send changes to one.
+        "home_assistant_api": home_assistant_api_instructions(
+            read_options(), call_tool=not background_task(task_id)).strip(),
         "documentation": ha_docs_note().strip(),
         "github": github_service.prompt_note().strip(),
     }
@@ -4384,10 +4391,15 @@ def data_mcp_args() -> list[str]:
 
 
 def call_mcp_args() -> list[str]:
-    """Register the one tool that changes the house. It has no approval mode, so Codex asks before each call.
+    """Register the one tool that changes the house, with the approval mode "prompt".
+
+    With no mode a tool is "auto", and Codex's question then offers "Allow for this session", which ends the
+    questions for the rest of the thread. In "prompt" Codex asks before each call and keeps no remembered
+    answer (codex-rs/core/src/mcp_tool_call.rs, session_mcp_tool_approval_key and
+    normalize_approval_decision_for_mode, at rust-v0.166.0).
 
     Its key, HA_CALL_CAPABILITY, is its own: no read tool holds it, and shell_exclude_args keeps it out of
-    shell commands. The worker behind the socket holds the refusals and the audit line (ha_call.py).
+    shell commands. The worker behind the socket checks the key and the form of the request (ha_call.py).
     """
     settings = {
         "command": sys.executable,
@@ -4397,6 +4409,7 @@ def call_mcp_args() -> list[str]:
         "required": True,
         "startup_timeout_sec": 10,
         "tool_timeout_sec": 90,
+        "tools.call.approval_mode": "prompt",
     }
     return [argument for name, value in settings.items()
             for argument in ("--config", f"mcp_servers.home_assistant_call.{name}={json.dumps(value)}")]
@@ -6730,8 +6743,13 @@ def lookup_ha_users() -> list[dict[str, Any]]:
                 pass
 
 
-def ingress_admin() -> tuple[dict[str, str] | None, str]:
+UNVERIFIED_ACCOUNT = "Home Assistant could not verify your account. Reopen Codex through Home Assistant, then try again."
+
+
+def ingress_admin(action: str = "answer permission requests") -> tuple[dict[str, str] | None, str]:
     """Return the Home Assistant administrator behind this Ingress request, or None and the reason it is refused.
+
+    action names what the person tried to do, for the refusal text only; it never changes who passes.
 
     Ingress names the signed-in user in X-Remote-User-Id; the worker then asks
     Home Assistant whether that user is an active administrator. The worker API
@@ -6739,10 +6757,10 @@ def ingress_admin() -> tuple[dict[str, str] | None, str]:
     failure refuses: nothing is allowed on an identity the worker could not check.
     """
     if not is_ingress_request():
-        return None, "Permission requests can only be answered by a Home Assistant administrator on the Codex page."
+        return None, f"Open Codex through Home Assistant and sign in as an administrator to {action}."
     user_id = request.headers.get("X-Remote-User-Id", "").strip()
     if not user_id:
-        return None, "Home Assistant did not say who is signed in, so this answer was not accepted."
+        return None, UNVERIFIED_ACCOUNT
     now = time.monotonic()
     with admin_cache_lock:
         cached = admin_cache.get(user_id)
@@ -6752,11 +6770,11 @@ def ingress_admin() -> tuple[dict[str, str] | None, str]:
         users = lookup_ha_users()
     except RuntimeError as exc:
         print(f"Could not check the Home Assistant user for a permission answer: {exc}", flush=True)
-        return None, "Could not confirm that you are a Home Assistant administrator. Try again."
+        return None, UNVERIFIED_ACCOUNT
     user = next((item for item in users if isinstance(item, dict) and item.get("id") == user_id), None)
     if (not user or not user.get("is_active") or user.get("system_generated")
             or "system-admin" not in (user.get("group_ids") or [])):
-        return None, "Only a Home Assistant administrator can answer permission requests."
+        return None, f"Only a Home Assistant administrator can {action}."
     identity = {"user_id": user_id, "name": str(user.get("name") or request.headers.get("X-Remote-User-Display-Name") or "")}
     with admin_cache_lock:
         admin_cache[user_id] = (now, identity)
@@ -6800,7 +6818,7 @@ def require_ingress(func):
     def wrapper(*args, **kwargs):
         """Run the route only for an Ingress request."""
         if not is_ingress_request():
-            return jsonify({"ok": False, "error": "Browser permissions must be managed through Home Assistant Ingress"}), 403
+            return jsonify({"ok": False, "error": "Open Codex through Home Assistant to make this change."}), 403
         return func(*args, **kwargs)
 
     return wrapper

@@ -40,13 +40,15 @@ Reset sensors are `unknown` when no reset time is available. Usage sensors keep 
 
 - `codex_cli.start_task`: Start a Codex task. Requires `prompt`.
 - `codex_cli.continue_task`: Continue a saved task. Requires `task_id` and `message`. Supports completed, failed, cancelled, and waiting tasks with an available Codex session.
-- `codex_cli.start_login`: Start the Codex sign-in flow; optional `force`.
+- `codex_cli.start_login`: Start the Codex device-code sign-in flow and return its current state. The optional boolean `force` defaults to `false`: if already signed in, the action returns that state without starting a new flow. Set `force: true` to start a new flow even when already signed in. An already running sign-in flow is reused in either case; this does not restart or cancel it. Complete sign-in using the returned instructions. A worker connection or request failure returns an action error.
 - `codex_cli.logout`: Remove saved Codex CLI credentials from the worker.
 - `codex_cli.get_login_status`: Return current sign-in status.
 - `codex_cli.list_tasks`: Return all tasks or filter with `limit`, `offset`, `status`, `order`, and `summary`. Use `order: updated_desc` for recent activity and `summary: true` for compact entries.
 - `codex_cli.get_task`: Return one task by task ID, including its conversation in `turns`.
 - `codex_cli.cancel_task`: Cancel one task by task ID.
 - `codex_cli.reply_task`: Send a reply to a waiting task. Requires `task_id` and `reply`. With the optional `turn_id`, taken from the `codex_cli_task_result` event or the **Last task** sensor, the reply is refused once that question is no longer the one waiting.
+
+All actions require a loaded integration entry; they return an error while it is setting up, retrying or unloading.
 
 These actions do not queue messages. Starting or continuing a task while another task is active or messages are already queued returns an error; the worker chat UI provides the queue.
 
