@@ -18,7 +18,7 @@ TOOL = {
         "Send one Home Assistant action (a service call) that changes the house, for example light.turn_off, "
         "automation.reload or homeassistant.restart. Codex asks the person before each call. "
         "Put entity_id, device_id, area_id, floor_id or label_id in target, and the other fields in data. "
-        "Read the new state back afterwards with home_assistant.verify."
+        "Read the new state back afterwards with a read tool."
     ),
     "inputSchema": {
         "type": "object", "additionalProperties": False,

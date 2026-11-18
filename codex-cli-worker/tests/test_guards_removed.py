@@ -24,7 +24,8 @@ import remote_control
 
 server = fixtures.server  # the worker module as the approval fixtures loaded it
 
-REMOVED_FILES = ("gate/gate_hook.py", "gate/managed_config.toml", "gate/remote-control-gate.json",
+# gate/managed_config.toml stays, with no hooks: it keeps the tool keys out of commands (test_ha_call_relay.py).
+REMOVED_FILES = ("gate/gate_hook.py", "gate/remote-control-gate.json",
                  "gate_rules.py", "shell_words.py", "policy/refused-domains.json")
 
 

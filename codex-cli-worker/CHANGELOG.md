@@ -44,6 +44,12 @@
   that cannot be shown in full has **Allow once** turned off. Questions from every other tool are still declined, and the
   chat says so.
 
+- The ChatGPT app gets the same `call` tool while remote control is on. Codex asks in the app before each call; the
+  tool is not approved ahead. Its key is new at each start of remote control and stops working when remote control
+  stops. The app's instructions now point changes to the tool too. The managed Codex config in the image
+  (`/etc/codex/managed_config.toml`, one setting, no hooks) keeps the tool keys out of the commands Codex runs for
+  every client.
+
 ## 0.3.5 (unreleased)
 
 - The GitHub messages say what still works and what to do next. The Home Assistant repair for a sign-in that
@@ -77,6 +83,14 @@
 - A permission request that waits for you now shows at the bottom of the chat, below the "Working" lines, and the
   chat scrolls to it once when it first appears. Before, it sat above those lines and was easy to miss. A request
   you already answered stays where it was. No approval or permission rule changed.
+- Four small fixes from upstream 0.1.82, ported by hand. A command or file request that arrives before Codex has
+  started the exchange is now refused and stops the exchange; before, a request with an empty turn id matched the
+  empty turn id of an exchange that had not started. A request that repeats the id of a request still waiting
+  stops the exchange also after the limit of 50 requests; before, it was denied like a new request. Codex's plan
+  shows as one to-do step in the activity list, updated in place; a plan update of the wrong form is ignored, and
+  the text is redacted like every other step. A chat rebuilt from the task index after its `task.json` was lost
+  keeps the turn id of its latest exchange, so the steps saved for it stay linked. Nothing from upstream's Full
+  access changes is included.
 - Settings keeps what needs a button, a sign-in or a confirm step. Plain values move to the app's Configuration
   tab, so each value has one place to change it. A new option, Interactions to keep (10 to 100), replaces the field
   on the page; an install that saved a number keeps it, and a new install keeps 25. The remote control machine name

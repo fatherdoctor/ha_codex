@@ -90,10 +90,10 @@ WORKDIR /data
 COPY run.sh /
 COPY server.py account_access.py safety_block.py /
 COPY interaction_diagnostics.py diagnostics_scrub.py /
-# Codex's managed requirements: the sandbox modes and approval policies a client may ask for, read-only,
-# outside /config and outside every sandbox's writable roots.
-COPY gate/requirements.toml /etc/codex/
-RUN chmod 0644 /etc/codex/requirements.toml && chown -R root:root /etc/codex
+# Codex's managed requirements (the sandbox modes and approval policies a client may ask for) and managed
+# config (the tool keys kept out of commands), read-only, outside /config and every sandbox's writable roots.
+COPY gate/requirements.toml gate/managed_config.toml /etc/codex/
+RUN chmod 0644 /etc/codex/requirements.toml /etc/codex/managed_config.toml && chown -R root:root /etc/codex
 
 # The GitHub sign-in (CX-GITHUB): the worker side, the stdio tool Codex calls, git's askpass helper, and the
 # kit's push guard, read-only in /usr/share/ha_codex. Every push the worker makes for Codex runs that guard first.

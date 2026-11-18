@@ -1,0 +1,9 @@
+# Managed Codex configuration for this app (/etc/codex/managed_config.toml, read-only in the image).
+# It holds one setting and no hooks (0.3.6 removed the app's command check).
+#
+# The tool keys (HA_*_CAPABILITY) reach each tool through its own env_vars; a command Codex runs must
+# not see them, or it could send a request to a tool's socket itself and skip Codex's question. The page
+# launch and the relay launch set the same exclude, and this layer outranks both, and every setting a
+# client sends with a thread (Codex 0.166.0, config/src/config_layer_source.rs, precedence 40 over 30).
+[shell_environment_policy]
+exclude = ["HA_*_CAPABILITY"]
