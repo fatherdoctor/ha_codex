@@ -583,7 +583,7 @@ def parse_chat_settings(payload: dict[str, Any], task: dict[str, Any] | None = N
     return settings
 
 
-def parse_permission_mode(payload, task=None, choosing=False):
+def parse_permission_mode(payload: dict[str, Any], task: dict[str, Any] | None = None, choosing: bool = False) -> str:
     """Return the chat's permission mode: one of the four in protected_policy.MODES, never one a model supplies.
 
     Full access needs the owner's Full access switch (full_access.py). While it
@@ -4517,7 +4517,12 @@ def github_mcp_args() -> list[str]:
 
 
 def task_options(task_id: str) -> dict[str, Any]:
-    """A chat's Read only choice or unattended mode can narrow, never expand, normal policy."""
+    """Return the app options for the chat's turn, with codex_sandbox narrowed to read-only when the chat asks.
+
+    A Read only chat, or an unattended run set to read-only, narrows the sandbox
+    option; these options never widen it. The chat's permission mode, which can
+    widen it, comes from task_mode_settings.
+    """
     options = dict(read_options())
     with lock:
         task = tasks.get(task_id, {})
@@ -4532,8 +4537,10 @@ def task_mode_settings(task_id: str, options: dict[str, Any] | None = None) -> d
 
     options are the turn's task_options; their codex_sandbox narrows Default and
     Auto-review to read-only. Scheduled and lead work always runs in Default
-    (or Read only through task_options): only a person in a chat picks
-    Auto-review or Full access. Full access needs the owner's switch to be on now.
+    (or Read only through task_options). Any other chat runs in its saved mode,
+    whoever set it: the page, or an API client with the worker's token (the
+    integration sends no mode, so its tasks run in Default). Full access needs
+    the owner's switch to be on now.
     """
     options = task_options(task_id) if options is None else options
     with lock:
@@ -4666,9 +4673,13 @@ def count_new_prompts(counts: Any, records: list[dict[str, Any]], previous: dict
 
 
 def build_app_server_args(attended: bool = True) -> list[str]:
-    """Start the bidirectional CLI transport with approvals routed to the user.
+    """Start the bidirectional CLI transport that the page uses for every permission mode.
 
-    Only a chat someone attends gets the call tool: a scheduled run has nobody to answer Codex's question.
+    The two approval flags are Default's values for the process. Each thread and
+    turn then sends its own mode's sandbox, approval policy and reviewer
+    (task_mode_settings), and those replace them, so a chat gets only its mode's
+    settings. Only a chat someone attends gets the call tool: a scheduled run
+    has nobody to answer Codex's question.
     """
     return [CODEX_BINARY, "app-server", "--config", 'approval_policy="on-request"',
             "--config", 'approvals_reviewer="user"', *shell_exclude_args(), *verification_mcp_args(),
@@ -4676,10 +4687,13 @@ def build_app_server_args(attended: bool = True) -> list[str]:
 
 
 def uses_user_approvals(options: dict[str, Any]) -> bool:
-    """Every allowed mode is sandboxed and routes its permission requests to the user.
+    """Return True when the options pass the protected policy, so the chat runs on the app server transport.
 
-    A mode the protected policy refuses never reaches Codex: run_task stops it
-    first, so the exec path without live approvals is not used for one.
+    The transport carries each mode's own settings: in Default and Read only
+    the person answers, in Auto-review Codex's reviewer answers, and in Full
+    access Codex does not ask. Options the protected policy refuses never
+    reach Codex: run_task stops them first, so the exec path without live
+    approvals is not used for them.
     """
     return not protected_policy.policy_problem(options)
 
@@ -7141,16 +7155,46 @@ def change_full_access() -> Response | tuple[Response, int]:
         full_access.write_requirements()
     except (OSError, ValueError) as exc:
         print(f"Could not change Full access: {exc}", flush=True)
-        full_access.set_enabled(False, admin["user_id"])
+        restored = turn_full_access_off_after_failure(admin["user_id"])
         return_full_access_chats_to_default()
+        restart_remote_control()
+        if not restored:
+            return jsonify({"ok": False, "error": FULL_ACCESS_STILL_ALLOWED}), 503
         return jsonify({"ok": False, "error": "Could not change Full access. It is off."}), 503
     if not payload["enabled"]:
         return_full_access_chats_to_default()
     print(f"Full access turned {'on' if payload['enabled'] else 'off'} by an administrator.", flush=True)
+    restart_remote_control()
+    return jsonify({"ok": True, "full_access": full_access_payload()})
+
+
+# Said when the switch could not be saved off, or Codex's requirements could not be written back to the shipped copy.
+FULL_ACCESS_STILL_ALLOWED = ("Could not turn Full access off completely. Chats on this page run with Default, but "
+                             "the ChatGPT app can still use Full access. Restart the app to turn it off.")
+
+
+def turn_full_access_off_after_failure(changed_by: str) -> bool:
+    """Turn the switch off and write the shipped requirements again; return True only when both worked.
+
+    Called when a change of the switch failed half way. While the requirements
+    file still allows danger-full-access, the ChatGPT app's Codex can use Full
+    access, so the caller must not say it is off. A start of the app writes
+    the file again from the saved setting (main).
+    """
+    try:
+        full_access.set_enabled(False, changed_by)
+        full_access.write_requirements()
+    except (OSError, ValueError) as exc:
+        print(f"{FULL_ACCESS_STILL_ALLOWED} ({exc})", flush=True)
+        return False
+    return True
+
+
+def restart_remote_control() -> None:
+    """Restart remote control, if it is on, so its Codex reads the managed requirements again."""
     if remote_control_supervisor.enabled():
         remote_control_supervisor.stop()
         remote_control_supervisor.start()
-    return jsonify({"ok": True, "full_access": full_access_payload()})
 
 
 @app.get("/browser-permissions")
@@ -7432,6 +7476,21 @@ def make_worker_undumpable() -> bool:
         return False
 
 
+def write_full_access_requirements_at_start() -> None:
+    """Write Codex's managed requirements for the saved Full access setting, before any Codex starts.
+
+    The image ships the strict file, so after an update the written file must
+    follow the saved setting again. When the write fails, the setting is
+    turned off and the shipped copy is written, so the log says what holds.
+    """
+    try:
+        full_access.write_requirements()
+    except (OSError, ValueError) as exc:
+        print(f"Could not write the managed requirements for Full access: {exc}", flush=True)
+        if turn_full_access_off_after_failure("worker start"):
+            print("Full access is off.", flush=True)
+
+
 def main() -> None:
     """Prepare the worker's files, start its background threads, and serve the API.
 
@@ -7446,10 +7505,7 @@ def main() -> None:
     if not make_worker_undumpable():
         print("Could not mark the worker process not dumpable; its environment stays readable to root.", flush=True)
     ensure_runtime_files()
-    try:
-        full_access.write_requirements()
-    except (OSError, ValueError) as exc:
-        print(f"Could not write the managed requirements for Full access; it stays off: {exc}", flush=True)
+    write_full_access_requirements_at_start()
     apply_interaction_limit(read_options())
     interaction_logs.close_abandoned()
     refresh_core_address()

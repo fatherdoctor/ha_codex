@@ -11,16 +11,20 @@ import threading
 import tomllib
 import unittest
 from pathlib import Path
+from typing import ClassVar
 from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import approvals
 import full_access
+import ha_call
 import policy
 import remote_control as rc
+import test_approvals as approval_tests
 import test_attachments as attachments
 import test_cx_pair_f as admin
+import test_ha_call as ha_calls
 from test_server import server
 
 SHIPPED = ROOT / "gate" / "requirements.toml"
@@ -317,6 +321,325 @@ class ChatStepTests(unittest.TestCase):
 
     def test_a_review_without_an_id_shows_nothing(self):
         self.assertIsNone(server.auto_review_step(self.event("approved", review_id="")))
+
+
+class SettingFileTests(unittest.TestCase):
+    """The setting counts as on only when the file holds exactly what set_enabled() writes (full_access.py)."""
+
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.root = Path(folder.name)
+        self.path = self.root / "full_access.json"
+
+    def saved(self, **changes):
+        """Write a setting file as set_enabled() would, with the given keys changed or added."""
+        data = {"enabled": True, "warning": full_access.WARNING_ID, "changed_at": 1.0, "changed_by": "admin-fixture"}
+        data.update(changes)
+        self.path.write_text(json.dumps(data), encoding="utf-8")
+
+    def test_the_file_set_enabled_writes_is_on(self):
+        self.saved()
+        self.assertTrue(full_access.is_on(self.path))
+
+    def test_a_linked_file_is_off(self):
+        self.saved()
+        link = self.root / "link.json"
+        link.symlink_to(self.path)
+        self.assertFalse(full_access.is_on(link))
+
+    def test_a_file_with_an_extra_key_is_off(self):
+        self.saved(note="turned on by hand")
+        self.assertFalse(full_access.is_on(self.path))
+
+    def test_enabled_must_be_true_itself(self):
+        for value in (1, "yes", "true", [True]):
+            with self.subTest(enabled=value):
+                self.saved(enabled=value)
+                self.assertFalse(full_access.is_on(self.path))
+
+    def test_changed_at_must_be_a_finite_number(self):
+        for value in (True, False, "1.0", None):
+            with self.subTest(changed_at=value):
+                self.saved(changed_at=value)
+                self.assertFalse(full_access.is_on(self.path))
+        for text in ("NaN", "Infinity"):
+            with self.subTest(changed_at=text):
+                self.path.write_text(json.dumps({"enabled": True, "warning": full_access.WARNING_ID,
+                                                 "changed_by": "admin-fixture"})[:-1] + f', "changed_at": {text}}}',
+                                     encoding="utf-8")
+                self.assertFalse(full_access.is_on(self.path))
+
+    def test_set_enabled_writes_a_file_for_the_worker_only(self):
+        full_access.set_enabled(True, "admin-fixture", self.path)
+        self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
+        self.assertTrue(full_access.is_on(self.path))
+
+
+class SwitchTests(unittest.TestCase):
+    """What turning the switch on or off does beside the setting file: waiting messages, the requirements,
+    remote control and the start of the app."""
+
+    setUp_base = attachments.AttachmentTests.setUp
+    setUp_launch = LaunchTests.setUp
+    create = attachments.AttachmentTests.create
+    switch = LaunchTests.switch
+    choose = LaunchTests.choose
+    ingress = admin.AdministratorPairingTests.ingress
+
+    def setUp(self):
+        self.setUp_launch()
+        self.queue = []
+        self.stack.enter_context(patch.object(server, "message_queue", self.queue))
+        self.stack.enter_context(patch.object(server, "MESSAGE_QUEUE_FILE", self.root / "message_queue.json"))
+        self.requirements = self.root / "etc" / "requirements.toml"
+
+    def allows_full_access(self):
+        return "danger-full-access" in tomllib.loads(self.requirements.read_text(encoding="utf-8"))["allowed_sandbox_modes"]
+
+    def test_a_waiting_message_returns_to_default_when_the_switch_goes_off(self):
+        self.assertEqual(self.switch({"enabled": True, "confirm": full_access.WARNING_ID}).status_code, 200)
+        self.queue.append({"task_id": self.task_id, "prompt": "Clean up the logs", "permission_mode": "full-access"})
+        self.assertEqual(self.switch({"enabled": False}).status_code, 200)
+        self.assertEqual(self.queue[0]["permission_mode"], "default")
+
+    def test_a_failed_write_when_turning_on_leaves_it_off(self):
+        real_text = full_access.requirements_text
+
+        def refuse_when_on(enabled, shipped):
+            if enabled:
+                raise ValueError("The shipped requirements do not hold the expected sandbox modes line.")
+            return real_text(enabled, shipped)
+
+        with patch.object(full_access, "requirements_text", side_effect=refuse_when_on):
+            response = self.switch({"enabled": True, "confirm": full_access.WARNING_ID})
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.get_json()["error"], "Could not change Full access. It is off.")
+        self.assertFalse(full_access.is_on())
+        self.assertFalse(self.allows_full_access())
+
+    def test_a_failed_write_when_turning_off_does_not_say_it_is_off(self):
+        self.assertEqual(self.switch({"enabled": True, "confirm": full_access.WARNING_ID}).status_code, 200)
+        self.assertTrue(self.allows_full_access())
+        with patch.object(full_access, "write_requirements", side_effect=OSError("disk full")):
+            response = self.switch({"enabled": False})
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.get_json()["error"], server.FULL_ACCESS_STILL_ALLOWED)
+        self.assertNotIn("It is off", response.get_json()["error"])
+        # Chats on the page are off at once; the requirements file still allows it, as the answer says.
+        self.assertFalse(full_access.is_on())
+        self.assertTrue(self.allows_full_access())
+
+    def test_a_retried_write_after_a_failure_puts_the_shipped_file_back(self):
+        self.assertEqual(self.switch({"enabled": True, "confirm": full_access.WARNING_ID}).status_code, 200)
+        real_write = full_access.write_requirements
+        calls = []
+
+        def fail_once(*args, **kwargs):
+            calls.append(1)
+            if len(calls) == 1:
+                raise OSError("busy")
+            return real_write(*args, **kwargs)
+
+        with patch.object(full_access, "write_requirements", side_effect=fail_once):
+            response = self.switch({"enabled": False})
+        self.assertEqual(response.get_json()["error"], "Could not change Full access. It is off.")
+        self.assertEqual(self.requirements.read_text(encoding="utf-8"), SHIPPED.read_text(encoding="utf-8"))
+
+    def test_remote_control_restarts_on_each_change(self):
+        supervisor = server.remote_control_supervisor
+        for body in ({"enabled": True, "confirm": full_access.WARNING_ID}, {"enabled": False}):
+            with self.subTest(body=body), patch.object(supervisor, "enabled", return_value=True), \
+                    patch.object(supervisor, "stop") as stop, patch.object(supervisor, "start") as start:
+                self.assertEqual(self.switch(body).status_code, 200)
+                stop.assert_called_once_with()
+                start.assert_called_once_with()
+
+    def test_remote_control_that_is_off_stays_off(self):
+        supervisor = server.remote_control_supervisor
+        with patch.object(supervisor, "enabled", return_value=False), patch.object(supervisor, "start") as start:
+            self.assertEqual(self.switch({"enabled": True, "confirm": full_access.WARNING_ID}).status_code, 200)
+        start.assert_not_called()
+
+    def test_the_start_of_the_app_writes_the_requirements_for_the_saved_setting(self):
+        full_access.set_enabled(True, "admin-fixture")
+        self.requirements.write_text(SHIPPED.read_text(encoding="utf-8"), encoding="utf-8")  # As a new image ships it.
+        server.write_full_access_requirements_at_start()
+        self.assertTrue(self.allows_full_access())
+        source = (ROOT / "server.py").read_text(encoding="utf-8")
+        main = source[source.index("\ndef main() -> None:"):]
+        main = main[:main.index("\nif __name__")]
+        self.assertIn("write_full_access_requirements_at_start()", main)
+        self.assertLess(main.index("write_full_access_requirements_at_start()"), main.index("load_task_index()"))
+
+    def test_a_failed_write_at_start_turns_the_setting_off(self):
+        full_access.set_enabled(True, "admin-fixture")
+        real_text = full_access.requirements_text
+
+        def refuse_when_on(enabled, shipped):
+            if enabled:
+                raise ValueError("The shipped requirements do not hold the expected sandbox modes line.")
+            return real_text(enabled, shipped)
+
+        with patch.object(full_access, "requirements_text", side_effect=refuse_when_on):
+            server.write_full_access_requirements_at_start()
+        self.assertFalse(full_access.is_on())
+        self.assertFalse(self.allows_full_access())
+
+
+class StandInCodex:
+    """What Codex 0.166.0 does before it runs the call tool, for the device-call contract tests.
+
+    A test double, not Codex. It follows the pinned source, codex-rs/core/src/mcp_tool_call.rs at rust-v0.166.0
+    (plan CX-SIMPLE, step 0): with approval policy "never" and the danger-full-access sandbox, a tool runs with
+    no question (mcp_permission_prompt_is_auto_approved). With the reviewer auto_review, the reviewer answers and
+    the client sees only its two events. Otherwise Codex sends mcpServer/elicitation/request and runs the tool once
+    only when the answer is "accept" (request_mcp_tool_user_approval, parse_mcp_tool_approval_elicitation_response).
+    Running the tool is a real request through the worker's call service, so the fake Home Assistant records it.
+    """
+
+    def __init__(self, session, transport, calls, key, thread):
+        self.session, self.transport, self.calls, self.key, self.thread = session, transport, calls, key, thread
+        self.asked = None
+
+    def run(self, arguments):
+        return self.calls.dispatch({"capability": self.key, "arguments": arguments})
+
+    def call(self, arguments, review_status=None):
+        """Ask to run the tool. Return the tool's result when it ran now, else None."""
+        if self.thread["approvalPolicy"] == "never" and self.thread["sandbox"] == "danger-full-access":
+            return self.run(arguments)
+        if self.thread["approvalsReviewer"] == "auto_review":
+            review = {"threadId": "thread", "turnId": "turn", "reviewId": "review-1", "targetItemId": "call-1",
+                      "action": {"type": "mcpToolCall", "server": "home_assistant_call", "toolName": "call"}}
+            self.session.receive({"method": "item/autoApprovalReview/started",
+                                  "params": {**review, "review": {"status": "inProgress"}}})
+            self.session.receive({"method": "item/autoApprovalReview/completed",
+                                  "params": {**review, "review": {"status": review_status, "riskLevel": "high"}}})
+            return self.run(arguments) if review_status == "approved" else None
+        self.asked = arguments
+        self.session.receive({"id": "call-1", "method": "mcpServer/elicitation/request", "params": {
+            "threadId": "thread", "turnId": "turn", "serverName": "home_assistant_call", "mode": "form",
+            "message": 'Allow the home_assistant_call MCP server to run tool "call"?', "requestedSchema": {},
+            "_meta": {"codex_approval_kind": "mcp_tool_call", "tool_params": arguments}}})
+        return None
+
+    def answered(self):
+        """Run the asked call when the client's answer to it is accept; return the tool's result, or None."""
+        replies = [message for message in self.transport.messages() if message.get("id") == "call-1"]
+        if replies and replies[-1].get("result", {}).get("action") == "accept":
+            return self.run(self.asked)
+        return None
+
+
+class DeviceCallContractTests(unittest.TestCase):
+    """Plan sections 3 and 6: in each mode, what reaches a fake Home Assistant from one device call, and when.
+
+    The mode's settings are the ones the page starts Codex with, the tool's approval mode is the launch's own,
+    the exchange is the worker's AppServerSession, and the request is the worker's call service; only Codex is a
+    stand-in (StandInCodex).
+    """
+
+    setUp_base = attachments.AttachmentTests.setUp
+    setUp_launch = LaunchTests.setUp
+    create = attachments.AttachmentTests.create
+    switch = LaunchTests.switch
+    choose = LaunchTests.choose
+    ingress = admin.AdministratorPairingTests.ingress
+    REQUEST: ClassVar[dict] = {"service": "light.turn_off", "target": {"entity_id": "light.kitchen_ceiling"}}
+
+    def setUp(self):
+        self.setUp_launch()
+        self.fake = ha_calls.FakeHomeAssistant(answer=[])
+        self.stack.enter_context(patch.object(ha_call.requests, "post", self.fake.post))
+        self.stack.enter_context(patch.object(ha_call, "fetch_states", lambda path, token: {
+            "entity_id": path[8:], "state": "off", "attributes": {}}))
+        self.calls = ha_call.HomeAssistantCall(ha_calls.call_worker())
+        self.key = self.calls.begin("t1")
+        prefix = "mcp_servers.home_assistant_call.tools.call.approval_mode="
+        modes = [value.removeprefix(prefix) for value in server.call_mcp_args() if value.startswith(prefix)]
+        self.assertEqual(modes, ['"prompt"'])
+
+    def codex(self, mode):
+        """Start the chat's exchange in this mode as the page does, with a stand-in Codex in front of it."""
+        self.assertEqual(self.choose(mode).status_code, 200)
+        options = server.task_options(self.task_id)
+        proc = type("Process", (), {"stdin": Mock(), "poll": lambda _: None})()
+        with patch.object(server, "AppServerSession") as made:
+            server.create_approval_session(self.task_id, proc, "Turn off the kitchen light", self.root / "final",
+                                           None, {}, options)
+        kwargs = made.call_args.kwargs
+        self.transport = approval_tests.Transport()
+        self.events, self.records = [], []
+        session = approvals.AppServerSession(
+            self.transport, lock=threading.RLock(), thread_params=kwargs["thread_params"],
+            turn_params=kwargs["turn_params"], on_event=self.events.append, on_approvals=self.records.append,
+            on_final=lambda text: None, is_active=lambda: True, redact=lambda text: text)
+        session.start()
+        session.receive({"id": "worker-1", "result": {}})
+        session.receive({"id": "worker-2", "result": {"thread": {"id": "thread"}}})
+        session.receive({"id": "worker-3", "result": {"turn": {"id": "turn"}}})
+        self.session = session
+        return StandInCodex(session, self.transport, self.calls, self.key, kwargs["thread_params"])
+
+    def sent(self):
+        """Return (path, body) of each request the fake Home Assistant received."""
+        return [(item["url"].removeprefix("http://supervisor/core"), item["json"]) for item in self.fake.requests]
+
+    def card(self):
+        return self.records[-1][-1]
+
+    def test_read_only_sends_nothing_while_the_question_waits(self):
+        codex = self.codex("read-only")
+        self.assertIsNone(codex.call(self.REQUEST))
+        self.assertEqual(self.card()["status"], "pending")
+        self.assertEqual(self.sent(), [])
+        self.session.close()  # The exchange ends with no answer, so the request expires.
+        self.assertIsNone(codex.answered())
+        self.assertEqual(self.sent(), [])
+
+    def test_read_only_sends_nothing_after_a_denial(self):
+        codex = self.codex("read-only")
+        codex.call(self.REQUEST)
+        self.session.decide(self.card()["approval_id"], "deny")
+        self.assertIsNone(codex.answered())
+        self.assertEqual(self.sent(), [])
+
+    def test_read_only_sends_the_exact_request_after_a_yes(self):
+        codex = self.codex("read-only")
+        codex.call(self.REQUEST)
+        self.assertEqual(self.sent(), [])
+        self.session.decide(self.card()["approval_id"], "allow")
+        self.assertEqual(codex.answered()["status"], "ok")
+        self.assertEqual(self.sent(), [("/api/services/light/turn_off", {"entity_id": "light.kitchen_ceiling"})])
+
+    def test_full_access_sends_the_exact_request_with_no_question(self):
+        self.assertEqual(self.switch({"enabled": True, "confirm": full_access.WARNING_ID}).status_code, 200)
+        codex = self.codex("full-access")
+        self.assertEqual(codex.call(self.REQUEST)["status"], "ok")
+        self.assertEqual(self.records, [])
+        self.assertEqual(self.sent(), [("/api/services/light/turn_off", {"entity_id": "light.kitchen_ceiling"})])
+
+    def test_auto_review_sends_nothing_after_a_denied_review(self):
+        codex = self.codex("auto-review")
+        self.assertIsNone(codex.call(self.REQUEST, review_status="denied"))
+        self.assertEqual(self.records, [])
+        self.assertEqual(self.sent(), [])
+        reviews = [event for event in self.events if event["type"] == "auto_review"]
+        self.assertEqual([event["status"] for event in reviews], ["inProgress", "denied"])
+        self.assertEqual(server.auto_review_step(reviews[-1])["status"], "failed")
+
+
+class ReviewEventTypeTests(unittest.TestCase):
+    """A review event whose status or risk is not text reads as unknown and does not stop the turn."""
+
+    def test_a_list_or_an_object_reads_as_unknown(self):
+        for value in (["approved"], {"status": "approved"}):
+            with self.subTest(value=value):
+                event = approvals.auto_review_event("item/autoApprovalReview/completed", {
+                    "reviewId": "r", "review": {"status": value, "riskLevel": value}, "action": {}}, lambda text: text)
+                self.assertEqual((event["status"], event["risk_level"]), ("unknown", ""))
+                self.assertEqual(server.auto_review_step(event)["status"], "failed")
 
 
 class PageTests(unittest.TestCase):

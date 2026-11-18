@@ -515,12 +515,13 @@ def auto_review_event(method: str, params: dict[str, Any], redact: Callable[[str
     """
     review = params.get("review") if isinstance(params.get("review"), dict) else {}
     action = params.get("action") if isinstance(params.get("action"), dict) else {}
-    status = review.get("status")
+    # A list or an object is not a word, and a set lookup of it would raise, so only text is looked up.
+    status = review.get("status") if isinstance(review.get("status"), str) else None
     if method.endswith("/started"):
         status = "inProgress"
     elif status not in AUTO_REVIEW_STATUSES - {"inProgress"}:
         status = "unknown"
-    risk = review.get("riskLevel")
+    risk = review.get("riskLevel") if isinstance(review.get("riskLevel"), str) else ""
     rationale = review.get("rationale") if isinstance(review.get("rationale"), str) else ""
     return {
         "type": "auto_review",

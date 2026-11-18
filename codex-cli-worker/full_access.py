@@ -21,6 +21,7 @@ A missing, unreadable, linked or edited file is off.
 from __future__ import annotations
 
 import json
+import math
 import os
 import stat
 import time
@@ -41,11 +42,6 @@ WARNING = (
     "Turn it on only if you accept that risk."
 )
 
-SANDBOX_MODE = "danger-full-access"
-APPROVAL_POLICY = "never"
-PERMISSION_MODE = "full-access"
-# Set only by the worker on the options of one chat turn that asked for Full access; never an app option.
-CHAT_OPTION = "chat_full_access"
 # The one line of the shipped requirements that names the allowed sandbox modes.
 STRICT_MODES_LINE = 'allowed_sandbox_modes = ["read-only", "workspace-write"]'
 OPEN_MODES_LINE = 'allowed_sandbox_modes = ["read-only", "workspace-write", "danger-full-access"]'
@@ -70,7 +66,11 @@ def read_setting(path: Path | None = None) -> dict[str, Any]:
         return off
     if data["enabled"] is not True or data["warning"] != WARNING_ID:
         return off
-    if not isinstance(data["changed_at"], (int, float)) or not isinstance(data["changed_by"], str):
+    # bool is a kind of int in Python, and NaN is a float, so each is refused by name.
+    changed_at = data["changed_at"]
+    if isinstance(changed_at, bool) or not isinstance(changed_at, (int, float)) or not math.isfinite(changed_at):
+        return off
+    if not isinstance(data["changed_by"], str):
         return off
     return {"enabled": True, "changed_at": data["changed_at"], "changed_by": data["changed_by"]}
 

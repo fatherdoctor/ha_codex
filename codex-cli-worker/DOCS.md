@@ -308,7 +308,7 @@ The app's `codex_sandbox` option takes only these two values. An older setting t
 
 **Protected policy.** The sandbox modes the `codex_sandbox` option may name come from `/usr/share/ha_codex/policy.json` inside the app image, outside `/config` and sandbox writable roots. A value it does not list stops startup and each task. The gate hook, refused domains, private-file masks, Supervisor-token protection and self-edit refusals remain enforced. No house rules are bundled or copied into Codex's home. Codex uses its defaults and the owner's `/config/AGENTS.md`, whose existing editor and reading path remain available. Updates remove only a byte-identical legacy bundled home copy; edited owner files and symlinks are preserved. Owners who want house practices can use the Whole Home Agent starter kit (published separately) and choose their own instructions. Native approval remains specific to the displayed request; read each action before allowing it.
 
-**Who can answer.** Only a signed-in Home Assistant administrator can answer **Allow once** or **Deny**, on the Codex page. The worker checks the user Home Assistant names for the page against its user list and records who answered on the request. The integration's API token cannot answer permission requests, and the integration's actions refuse callers who are not administrators. An automation or script that runs on its own may call the actions; one that a user who is not an administrator starts carries that user, and its call is refused too.
+**Who can answer.** Only a signed-in Home Assistant administrator can answer **Allow once** or **Deny**, on the Codex page. This holds in Default and Read only. In Auto-review, Codex's reviewer answers, and in Full access nobody is asked, whoever sent the message (see "Permission modes"). The worker checks the user Home Assistant names for the page against its user list and records who answered on the request. The integration's API token cannot answer permission requests, and the integration's actions refuse callers who are not administrators. An automation or script that runs on its own may call the actions; one that a user who is not an administrator starts carries that user, and its call is refused too.
 
 Commands that write to or search protected places, such as `/etc/codex`, lose **Allow once**. That check reads only the command text: it cannot see a path built while the command runs, a symlink, or a relative path from an unknown folder. Such a command keeps **Allow once**, so read it before you allow it.
 
@@ -1127,7 +1127,8 @@ own to any of them.
 | Full access | sandbox `danger-full-access`, `approval_policy = "never"` | runs without a question |
 
 - The app's `codex_sandbox` option stays the limit: when it is `read-only`, Default and Auto-review chats run in
-  the read-only sandbox too.
+  the read-only sandbox too. Full access does not follow that option: an administrator confirmed its warning, so
+  it runs without the sandbox. With the option at `read-only`, a Full access chat also saves no per-file backups.
 - Read only limits files and commands. A Home Assistant tool call is not a file or a command, so a device change
   in a Read only chat still happens only after you answer yes on Codex's request.
 - In Auto-review the chat shows each review: "Auto-review is checking a command", then whether it allowed it, the
@@ -1136,6 +1137,7 @@ own to any of them.
   While it is on, a banner says so. Turning it off returns every chat set to Full access to Default. While Full
   access is on, a ChatGPT app thread can also ask for it; the app never sees those threads, so such a thread can
   mix the settings (for example "never ask" with `workspace-write`). No mix reaches further than Full access itself.
+  A turn that is running when the switch goes off finishes in Full access; the chat's next turn runs in Default.
 - Scheduled runs use Default or Read only only.
 - A queued message keeps the choice submitted with it. Camera and Plan mode are not offered in this build.
 
