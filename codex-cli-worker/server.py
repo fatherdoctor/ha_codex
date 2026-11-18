@@ -19,7 +19,6 @@ import sys
 import subprocess
 import tarfile
 import threading
-import tempfile
 import time
 import uuid
 import warnings
@@ -40,18 +39,20 @@ from flask import Flask, Response, jsonify, request, send_file
 # Also support the existing importlib-based test harness.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from verification import DEFAULT_BROWSER_MEMORY_LIMIT_MIB, Verification, public_check
-from approvals import APPROVAL_GONE, AppServerSession
+from approvals import APPROVAL_GONE
+from safety_block import SafetyBlockSession as AppServerSession
+import full_access
 import policy as protected_policy
 from ha_data import HomeAssistantData
-from ha_call import HomeAssistantCall
+from ha_call import RELAY_TASK as RELAY_CALL_TASK, HomeAssistantCall
 import ha_data_mcp
 import remote_control
-import gate_rules
 from core_address import CoreAddress, probe_core
 from relay_reads import RelayReads, ReadError as RelayReadError
 import schedule_api
 import github_access
 from account_access import AccountAccess, rejected_sign_in_error
+import safety_block
 import sqlite3
 from interaction_diagnostics import RollingDiagnostics, InteractionRecorder
 
@@ -93,7 +94,8 @@ def record_diagnostic(method, *args, **kwargs):
 
 ha_data = HomeAssistantData(_ToolWorker(), DATA_ROOT / "ha-data")
 # The one tool that changes the house; the worker sends each call with its own access and keeps no log of it.
-ha_call = HomeAssistantCall(_ToolWorker())
+# The app's relay has one key per launch, good while that process runs (relay_running is defined below).
+ha_call = HomeAssistantCall(_ToolWorker(), relay_running=lambda: relay_running())
 CODEX_HOME = DATA_ROOT / "codex-home"
 OPTIONS_PATH = DATA_ROOT / "options.json"
 WORKER_TOKEN_PATH = DATA_ROOT / "worker_api_token"
@@ -101,6 +103,8 @@ SCHEMA_PATH = DATA_ROOT / "codex-output-schema.json"
 CODEX_CONFIG_PATH = CODEX_HOME / "config.toml"
 CODEX_BINARY = "/usr/local/bin/codex"
 AGENTS_PATH = CONFIG_ROOT / "AGENTS.md"
+# The starter text for a home with no /config/AGENTS.md; it ships beside this file in the app image.
+STARTER_AGENTS_PATH = Path(__file__).resolve().parent / "starter_agents.md"
 TASK_STATE_FILE = DATA_ROOT / "task_index.json"
 MESSAGE_QUEUE_FILE = DATA_ROOT / "message_queue.json"
 HA_DOCS_ROOT = DATA_ROOT / "ha-docs"
@@ -186,8 +190,6 @@ DEFAULT_CHAT_SETTINGS = {"model": None, "reasoning_effort": None}
 # A chat, a saved turn or the `codex_model` option naming any other model is
 # refused instead of running on it; the option set to "none" turns the pin off.
 DEFAULT_MODEL_PIN = "gpt-6.1-sol"
-# Present while the assistant is paused: new messages are refused and queued ones wait.
-PAUSE_FILE = DATA_ROOT / "paused.json"
 
 AGENTS_MAX_BYTES = 256 * 1024
 SNAPSHOT_MAX_BYTES = 8 * 1024 * 1024
@@ -581,11 +583,21 @@ def parse_chat_settings(payload: dict[str, Any], task: dict[str, Any] | None = N
     return settings
 
 
-def parse_permission_mode(payload, task=None):
-    """Only the two modes this build supports, never a policy supplied by a model."""
-    mode = payload.get('permission_mode', (task or {}).get('permission_mode', 'default'))
-    if not isinstance(mode, str) or mode not in {'default', 'read-only'}:
-        raise ValueError('Choose Default permissions or Read only. Other modes are not available.')
+def parse_permission_mode(payload: dict[str, Any], task: dict[str, Any] | None = None, choosing: bool = False) -> str:
+    """Return the chat's permission mode: one of the four in protected_policy.MODES, never one a model supplies.
+
+    Full access needs the owner's Full access switch (full_access.py). While it
+    is off, choosing Full access in a chat's Permissions (choosing=True) is
+    refused; a message or a saved chat that still asks for it runs with
+    Default, because the switch was turned off after the choice.
+    """
+    mode = payload.get('permission_mode', (task or {}).get('permission_mode', protected_policy.DEFAULT_MODE))
+    if not isinstance(mode, str) or mode not in protected_policy.MODES:
+        raise ValueError('Choose Default, Auto-review, Read only or Full access. Other modes are not available.')
+    if mode == protected_policy.FULL_ACCESS_MODE and not full_access.is_on():
+        if choosing:
+            raise ValueError('Full access is off. A Home Assistant administrator can turn it on in Settings.')
+        return protected_policy.DEFAULT_MODE
     return mode
 
 
@@ -804,6 +816,41 @@ def write_agents_file(content: str) -> None:
     AGENTS_PATH.write_text(content.rstrip() + "\n", encoding="utf-8")
 
 
+def write_starter_agents_file() -> bool:
+    """On the app's first start, give a home with no /config/AGENTS.md the starter text; return True when written.
+
+    The file is created only when nothing has that name, so an owner's file, a
+    link or a folder is never replaced. A later start writes nothing, so an
+    owner who deletes the starter does not get it back. A failure is logged and
+    never stops the start.
+    """
+    # ensure_runtime_files() writes Codex's config on every start, so the app has started before when it exists.
+    if CODEX_CONFIG_PATH.exists():
+        return False
+    try:
+        starter = STARTER_AGENTS_PATH.read_bytes()
+        # O_EXCL refuses any existing name, a dangling link included, in the same step that creates the file.
+        descriptor = os.open(AGENTS_PATH, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    except FileExistsError:
+        return False
+    except OSError as error:
+        print(f"Could not write the starter {AGENTS_PATH}: {error}", flush=True)
+        return False
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(starter)
+    except OSError as error:
+        print(f"Could not write the starter {AGENTS_PATH}: {error}", flush=True)
+        # O_EXCL above means this call created the file. An empty or cut-off file would block the next try.
+        try:
+            AGENTS_PATH.unlink()
+        except OSError as unlink_error:
+            print(f"Could not remove the unfinished {AGENTS_PATH}: {unlink_error}", flush=True)
+        return False
+    print(f"Wrote the starter workspace instructions to {AGENTS_PATH}.", flush=True)
+    return True
+
+
 # The final answer Codex must return. Codex enforces the schema strictly, so every property is required.
 FINAL_RESPONSE_SCHEMA = {
     "type": "object",
@@ -831,17 +878,15 @@ def ensure_runtime_files() -> None:
     if not api_token():
         set_api_token(secrets.token_urlsafe(32))
     SCHEMA_PATH.write_text(json.dumps(FINAL_RESPONSE_SCHEMA, indent=2), encoding="utf-8")
-    try:
-        approval = protected_policy.load_policy()["approval_policy"]
-    except protected_policy.PolicyError:
-        approval = protected_policy.STRICT_POLICY["approval_policy"]
+    # Default's settings; each chat turn passes its own mode's settings (mode_settings).
+    default = protected_policy.MODES[protected_policy.DEFAULT_MODE]
     CODEX_CONFIG_PATH.write_text(
         "\n".join(
             [
                 "check_for_update_on_startup = false",
-                f'approval_policy = "{approval}"',
-                'approvals_reviewer = "user"',
-                'sandbox_mode = "workspace-write"',
+                f'approval_policy = "{default["approval_policy"]}"',
+                f'approvals_reviewer = "{default["approvals_reviewer"]}"',
+                f'sandbox_mode = "{default["sandbox"]}"',
                 'web_search = "cached"',
                 # Enrollment is in Codex's SQLite state, not in the image or
                 # the transient local control socket. Pin it to durable data.
@@ -885,11 +930,7 @@ def load_task_index() -> None:
                 task = json.loads(task_file.read_text(encoding="utf-8"))
                 task_id = str(task.get("task_id") or task_file.parent.name)
                 task["task_id"] = task_id
-                expire_saved_approvals(task)
-                if task.get("status") in {"queued", "running"}:
-                    task["status"] = "failed"
-                    task["summary"] = task["error"] = "Worker restarted while this task was active."
-                    sync_current_turn(task)
+                restore_saved_task(task_id, task)
                 tasks[task_id] = task
             except Exception as exc:
                 print(f"Could not load task metadata from {task_file}: {exc}", flush=True)
@@ -899,14 +940,27 @@ def load_task_index() -> None:
         loaded = json.loads(TASK_STATE_FILE.read_text(encoding="utf-8"))
         if isinstance(loaded, dict):
             for task_id, task in loaded.items():
-                expire_saved_approvals(task)
-                if task.get("status") in {"queued", "running"}:
-                    task["status"] = "failed"
-                    task["summary"] = task["error"] = "Worker restarted while this task was active."
-                    sync_current_turn(task)
+                if task_id not in tasks:
+                    restore_saved_task(task_id, task)
                 tasks.setdefault(task_id, task)
     except Exception as exc:
         print(f"Could not load task index: {exc}", flush=True)
+
+
+def restore_saved_task(task_id: str, task: dict[str, Any]) -> None:
+    """Restore a saved task after a restart: its prompts expire and a task that was active has failed.
+
+    A task that waited for a permission decision no longer waits, so its notice
+    is dismissed. A question still waits for its answer and keeps its notice.
+    """
+    waited = task_waits_on_owner(task)
+    expire_saved_approvals(task)
+    if task.get("status") in {"queued", "running"}:
+        task["status"] = "failed"
+        task["summary"] = task["error"] = "Worker restarted while this task was active."
+        sync_current_turn(task)
+    if waited and not task_waits_on_owner(task):
+        dismiss_wait_notice_async(task_id)
 
 
 def expire_saved_approvals(task: dict[str, Any]) -> None:
@@ -1723,6 +1777,42 @@ def note_edited_files(task_id: str, step: dict[str, Any]) -> None:
             record["edited"].update(paths)
 
 
+# What Codex's reviewer checked, in plain words (the action types of app-server-protocol at rust-v0.166.0).
+AUTO_REVIEW_ACTIONS = {
+    "command": "a command", "execve": "a command", "writeStdin": "input to a command",
+    "applyPatch": "a file change", "networkAccess": "network access", "mcpToolCall": "a tool call",
+}
+
+
+def auto_review_step(event: dict[str, Any]) -> dict[str, Any] | None:
+    """Turn one review by Codex's reviewer (approvals.auto_review_event) into a chat step, or None without an id.
+
+    The started and completed events share the review id, so the step shows
+    "checking" and then the answer in one place. Only "approved" reads as
+    allowed; a denial, a timeout, an abort or an unknown status reads as not
+    allowed, as Codex treats it. The step only shows what Codex did.
+    """
+    review_id = str(event.get("review_id") or "")
+    if not review_id:
+        return None
+    what = AUTO_REVIEW_ACTIONS.get(str(event.get("action") or ""), "a request")
+    status = event.get("status")
+    risk = f" ({event['risk_level']} risk)" if event.get("risk_level") else ""
+    if status == "inProgress":
+        text, state = f"Auto-review is checking {what}.", "running"
+    elif status == "approved":
+        text, state = f"Auto-review allowed {what}{risk}.", "done"
+    else:
+        reason = {"timedOut": "it took too long", "aborted": "the review stopped"}.get(str(status), "")
+        text = f"Auto-review did not allow {what}{risk}" + (f": {reason}." if reason else ".")
+        state = "failed"
+    rationale = str(event.get("rationale") or "").strip()
+    if rationale and state != "running":
+        text = f"{text} {rationale}"
+    step_text, _ = clip_activity_text(text, ACTIVITY_TEXT_MAX)
+    return {"id": f"auto-review:{review_id}", "kind": "notice", "status": state, "text": step_text}
+
+
 def record_activity_event(task_id: str, event: Any) -> None:
     """Map one line of `codex exec --json` output onto the running exchange's steps."""
     if not isinstance(event, dict):
@@ -1748,6 +1838,10 @@ def record_activity_event(task_id: str, event: Any) -> None:
         error = event.get("error")
         message = error.get("message") if isinstance(error, dict) else error
         append_activity_error(task_id, message or "Codex could not finish this turn.")
+    elif kind == "auto_review":
+        step = auto_review_step(event)
+        if step is not None:
+            append_activity_step(task_id, step)
 
 
 def public_activity_step(step: dict[str, Any]) -> dict[str, Any]:
@@ -2263,7 +2357,9 @@ def _save_task_update(task_id: str, updates: dict[str, Any], *, touch: bool) -> 
         task = tasks.setdefault(task_id, {"task_id": task_id})
         if task.get("cancellation_requested") and updates.get("status") != "cancelled" and updates.get("cancellation_requested") is not False:
             return False
+        waited = task_waits_on_owner(task)
         task.update(updates)
+        wait_ended = waited and not task_waits_on_owner(task)
         if touch:
             task["updated_at"] = utc_now()
         sync_current_turn(task)
@@ -2271,6 +2367,8 @@ def _save_task_update(task_id: str, updates: dict[str, Any], *, touch: bool) -> 
         task_dir.mkdir(parents=True, exist_ok=True)
         atomic_json_write(task_dir / "task.json", task)
     save_task_index()
+    if wait_ended:
+        dismiss_wait_notice_async(task_id)
     return True
 
 
@@ -2870,67 +2968,6 @@ def previous_versions(run_dir: Path, paths: list[str], before: dict[str, Any]) -
     return entries
 
 
-def refuse_planted_edits(run_dir: Path, changes: dict[str, list[str]], before: dict[str, Any]) -> list[dict[str, Any]]:
-    """Undo new Core escape paths in every exchange.
-
-    Restores use only hash-verified earlier bytes. An edit without a verified
-    copy is reported as unchecked; existing lines are never presumed new.
-    """
-    rules = gate_rules.load_rules()
-    added = set(changes.get("added", []))
-    paths = sorted(added | set(changes.get("changed", [])))
-    paths = [rel for rel in paths if safe_relative_path(rel) and not snapshot_secret_path(rel)
-             and Path(rel).suffix.lower() in gate_rules.YAML_SUFFIXES]
-    saved = {entry["path"]: entry for entry in previous_versions(run_dir, [p for p in paths if p not in added], before)}
-    watch = remote_control.ConfigWatch(CONFIG_ROOT, run_dir / "unused-baseline.json")
-    texts = {path.relative_to(CONFIG_ROOT).as_posix(): path.read_text(encoding="utf-8", errors="replace")
-             for path in watch.files() if should_include_file(path)}
-    scripts = watch.refused_scripts(texts, rules)
-    results = []
-    root = CONFIG_ROOT.resolve()
-    for rel in paths:
-        target = CONFIG_ROOT / rel
-        if target.is_symlink() or not target.resolve().is_relative_to(root):
-            continue
-        if snapshot_secret_path(target.resolve().relative_to(root).as_posix()) or not should_include_file(target):
-            continue
-        after = target.read_text(encoding="utf-8", errors="replace")
-        earlier_bytes = b"" if rel in added else None
-        entry = saved.get(rel) or {}
-        if entry.get("status") == "saved" and entry.get("copy"):
-            candidate = Path(entry["copy"]).read_bytes()
-            if hashlib.sha256(candidate).hexdigest() == (before.get(rel) or {}).get("sha256"):
-                earlier_bytes = candidate
-        if earlier_bytes is None:
-            results.append({"path": rel, "checked": False, "undone": "", "findings": []})
-            continue
-        earlier = earlier_bytes.decode("utf-8", errors="replace")
-        found = gate_rules.new_refused(earlier, after, rules, scripts)
-        if not found:
-            continue
-        undone = ""
-        temporary = None
-        try:
-            if rel in added:
-                target.unlink()
-                undone = "removed"
-            elif earlier_bytes is not None:
-                with tempfile.NamedTemporaryFile(dir=target.parent, prefix=".codex-restore-", delete=False) as handle:
-                    temporary = Path(handle.name)
-                    handle.write(earlier_bytes)
-                temporary.chmod(target.stat().st_mode & 0o777)
-                os.replace(temporary, target)
-                undone = "restored"
-        except OSError as exc:
-            print(f"Could not undo {rel}: {redact(str(exc))}", flush=True)
-        finally:
-            if temporary is not None:
-                temporary.unlink(missing_ok=True)
-        results.append({"path": rel, "undone": undone,
-                        "findings": [{"line": item.line, "reason": item.reason} for item in found]})
-    return results
-
-
 def review_backups(run_dir: Path, before: dict[str, Any], changes: dict[str, list[str]], edited: set[str]) -> list[dict[str, str]]:
     """Report which changed files have a copy of their previous version.
 
@@ -3220,24 +3257,30 @@ def fire_ha_event(event_type: str, data: dict[str, Any]) -> tuple[bool, str]:
 # Every notification replaces the same persistent notification, so the last one delivered is the
 # one the user sees. They are delivered one at a time, in the order they were asked for.
 notification_lock = threading.RLock()
+# Only the companion app's notify services take buttons, a tag, and the clear_notification message.
+MOBILE_APP_NOTIFY_PREFIX = "notify.mobile_app_"
 
 
 def notify(title: str, message: str, *, still_wanted: Callable[[], bool] | None = None,
-           notification_id: str = "codex_cli_worker") -> None:
+           notification_id: str = "codex_cli_worker", push_tag: str = "") -> None:
     """Send a notification through the configured notify service; without one, or when it fails, show a persistent one.
 
     Notifications go out one at a time, so one that is slow to deliver cannot
     arrive after a later one. `still_wanted` is asked before each attempt, and a
     notification that is out of date by then is dropped. It is asked while the
     notification lock is held and must not take the worker lock, which some
-    callers hold while they send their notification.
+    callers hold while they send their notification. A `push_tag` tags a push to
+    the companion app, so that the push can be cleared later.
     """
     with notification_lock:
         service = str(read_options().get("notify_service") or "")
         if service:
             if still_wanted is not None and not still_wanted():
                 return
-            ok, detail = call_ha_service(service, {"title": title, "message": message})
+            data: dict[str, Any] = {"title": title, "message": message}
+            if push_tag and service.startswith(MOBILE_APP_NOTIFY_PREFIX):
+                data["data"] = {"tag": push_tag}
+            ok, detail = call_ha_service(service, data)
             if ok:
                 return
             print(f"Notification through {service} failed: {detail}", flush=True)
@@ -3255,17 +3298,63 @@ def background_task(task_id: str) -> bool:
 
 
 def notify_task_outcome(task_id, status, summary, turn_id='', question='', choices=None):
-    """Notify about a finished turn only when it needs the owner: a question or a failure.
+    """Notify about a finished turn only when it waits on the owner: a question.
 
-    A completed answer sends nothing; the owner reads it in the chat. Background
-    work reports in its run log; only its permission requests push.
+    A completed answer and a failure send nothing; the owner reads both in the
+    chat. Background work reports in its run log; only its permission requests
+    push.
     """
     if background_task(task_id):
         return
     if status == 'needs_input':
         notify_question(task_id, turn_id, question or 'Codex needs your input.', choices or [])
-    elif status != 'completed':
-        notify('Codex task failed', f'{summary} Task: {task_id}')
+
+
+# A chat that waits on the owner, for an answer or for a permission decision, has one notice, under its own id.
+# The notice is dismissed as soon as the chat no longer waits. A failure or a finished answer makes no notice.
+WAIT_NOTIFY_PREFIX = "codex_cli_wait_"
+
+
+def wait_notification_id(task_id: str) -> str:
+    """Return the id of the one notice a waiting chat has."""
+    return f"{WAIT_NOTIFY_PREFIX}{task_id}"
+
+
+def task_waits_on_owner(task: dict[str, Any] | None) -> bool:
+    """Return whether a chat waits on the owner: a question to answer, or a permission request still pending."""
+    if not task:
+        return False
+    status = task.get("status")
+    if status == "waiting_for_input":
+        return True
+    if status in {"completed", "failed", "cancelled"}:
+        return False
+    return any(isinstance(item, dict) and item.get("status") == "pending" for item in task.get("approvals") or [])
+
+
+def dismiss_wait_notice(task_id: str) -> None:
+    """Dismiss the notice of a chat that no longer waits, and clear its push on the companion app.
+
+    It takes the notification lock, so a notice that was being sent when the
+    wait ended is sent first and then dismissed; one that was not sent yet sees
+    that the wait ended and is dropped. The dismissal runs late, on its own
+    thread: if the chat waits again by then, its new notice stays. A dismissal
+    that fails is not tried again.
+    """
+    notice_id = wait_notification_id(task_id)
+    with notification_lock:
+        # Read without the worker lock, as still_waiting in notify_question does.
+        if task_waits_on_owner(tasks.get(task_id)):
+            return
+        dismiss_persistent_notification(notice_id)
+        service = str(read_options().get("notify_service") or "")
+        if service.startswith(MOBILE_APP_NOTIFY_PREFIX):
+            call_ha_service(service, {"message": "clear_notification", "data": {"tag": notice_id}})
+
+
+def dismiss_wait_notice_async(task_id: str) -> None:
+    """Dismiss the notice from its own thread, so a slow Home Assistant cannot hold up the caller."""
+    threading.Thread(target=dismiss_wait_notice, args=(task_id,), daemon=True).start()
 
 
 def notify_question(task_id: str, turn_id: str, question: str, choices: list[str]) -> None:
@@ -3276,21 +3365,32 @@ def notify_question(task_id: str, turn_id: str, question: str, choices: list[str
     the persistent notification, lists the choices in the text.
     """
     title = "Codex needs input"
+    notice_id = wait_notification_id(task_id)
+
+    def still_waiting() -> bool:
+        """Whether the question still waits; read without the worker lock, which the caller may hold."""
+        task = tasks.get(task_id)
+        return task_waits_on_owner(task) and str((task or {}).get("current_turn_id") or "") == turn_id
+
     with notification_lock:
+        if not still_waiting():
+            return
         service = str(read_options().get("notify_service") or "")
-        if choices and turn_id and service.startswith("notify.mobile_app_"):
+        if choices and turn_id and service.startswith(MOBILE_APP_NOTIFY_PREFIX):
             actions = [
                 {"action": f"{CHOICE_ACTION_PREFIX}{index}_{turn_id}_{task_id}", "title": choice}
                 for index, choice in enumerate(choices)
             ]
+            push = {"actions": actions, "tag": notice_id}
             ok, detail = call_ha_service(
-                service, {"title": title, "message": f"{question} Task: {task_id}", "data": {"actions": actions}}
+                service, {"title": title, "message": f"{question} Task: {task_id}", "data": push}
             )
             if ok:
                 return
             print(f"Notification with choices through {service} failed: {detail}", flush=True)
         options = f" Options: {'; '.join(choices)}." if choices else ""
-        notify(title, f"{question}{options} Task: {task_id}")
+        notify(title, f"{question}{options} Task: {task_id}", still_wanted=still_waiting,
+               notification_id=notice_id, push_tag=notice_id)
 
 
 PERMISSION_REASON_MAX = 200
@@ -3305,17 +3405,20 @@ def notify_permission(task_id: str, approval: dict[str, Any], withdrawn: threadi
     waits; a notification not delivered by then is dropped, so it cannot replace
     a later one about the task's question or failure.
     """
-    subject = "a file change" if approval.get("kind") == "file_change" else "a command"
+    subject = {"file_change": "a file change", "tool": "a tool request"}.get(approval.get("kind"), "a command")
     reason = " ".join(str(approval.get("reason") or "").split())
     if len(reason) > PERMISSION_REASON_MAX:
         reason = reason[:PERMISSION_REASON_MAX].rstrip() + "…"
     if reason and reason[-1] not in ".!?…":
         reason += "."
     detail = f" Reason: {reason}" if reason else ""
+    notice_id = wait_notification_id(task_id)
     notify(
         "Codex needs permission",
         f"Codex is waiting for your decision on {subject}.{detail} Open the Codex chat to review it. Task: {task_id}",
         still_wanted=lambda: not withdrawn.is_set(),
+        notification_id=notice_id,
+        push_tag=notice_id,
     )
 
 
@@ -4218,7 +4321,8 @@ def backup_instructions(backup_dir: Path | None) -> str:
 def home_assistant_api_instructions(options: dict[str, Any], call_tool: bool = True) -> str:
     """Tell Codex where its own Home Assistant API calls go; empty when the add-on gives it no token for them.
 
-    call_tool says whether this launch has the home_assistant_call tool; the app's launch gets it in a later step.
+    call_tool says whether this launch has the home_assistant_call tool: a chat on the page and the ChatGPT app
+    have it, a scheduled run does not.
     """
     if not str(options.get("HA_TOKEN") or "").strip():
         return ""
@@ -4248,14 +4352,18 @@ def remote_control_instructions(options: dict[str, Any]) -> str:
         "Use the home_assistant_relay.read tool for entity listings and state readback; it needs no hand-made HA_TOKEN. "
         "Use operation states with a domain and bounded page, or state with an exact entity_id. It is read-only: "
         "no service calls, reloads or credential access. A state read does not prove automation behavior. "
+        "To change the house, a reload and a restart included, use the home_assistant_call call tool when the user "
+        "asked for the change: Codex asks the owner before each call, and the request shows the service, target and "
+        "data. Then read the new state back with home_assistant_relay.read. "
         "The chat page's per-turn verification/history capabilities are separate and must not be reused. "
         "For a supported read, prefer this tool instead of a shell socket command. If a different read needs shell networking, "
         "request native approval for that specific network command on your own; do not silently give up after a sandbox network denial. "
         "Keep API credentials private. A sandboxed command needing network or file access outside its sandbox must request "
         "native approval for that specific action. Never bypass a denial or request permanent permission rules. "
         "Native approval does not supply credentials. If HA_URL is unset, report address discovery unavailable instead of guessing a port. "
-        + (home_assistant_api_instructions(options, call_tool=False) or
-           "No Core API token is configured for direct commands. The read tool still works through the worker. "
+        + (home_assistant_api_instructions(options) or
+           "No Core API token is configured for direct commands. The read tool and the call tool still work through "
+           "the worker. "
            "Direct API commands require a separately configured HA_TOKEN; do not obtain credentials from stores or process environments.")
     )
 
@@ -4417,7 +4525,7 @@ def call_mcp_args() -> list[str]:
 
 # The tool keys reach each bridge through its env_vars; a sandboxed shell command must not see them,
 # or it could write to a socket itself and skip Codex's question (plan CX-SIMPLE, review F1).
-SHELL_EXCLUDED_ENV = ("HA_*_CAPABILITY",)
+SHELL_EXCLUDED_ENV = (remote_control.TOOL_KEY_EXCLUDE,)
 
 
 def shell_exclude_args() -> list[str]:
@@ -4462,7 +4570,12 @@ def github_mcp_args() -> list[str]:
 
 
 def task_options(task_id: str) -> dict[str, Any]:
-    """A chat's Read only choice or unattended mode can narrow, never expand, normal policy."""
+    """Return the app options for the chat's turn, with codex_sandbox narrowed to read-only when the chat asks.
+
+    A Read only chat, or an unattended run set to read-only, narrows the sandbox
+    option; these options never widen it. The chat's permission mode, which can
+    widen it, comes from task_mode_settings.
+    """
     options = dict(read_options())
     with lock:
         task = tasks.get(task_id, {})
@@ -4470,6 +4583,27 @@ def task_options(task_id: str) -> dict[str, Any]:
                 or (task.get('task_source') in {'schedule', 'lead'} and task.get('background_mode') == 'read-only')):
             options['codex_sandbox'] = 'read-only'
     return options
+
+
+def task_mode_settings(task_id: str, options: dict[str, Any] | None = None) -> dict[str, str]:
+    """Return the Codex settings for the chat's permission mode (protected_policy.MODES).
+
+    options are the turn's task_options; their codex_sandbox narrows Default and
+    Auto-review to read-only. Scheduled and lead work always runs in Default
+    (or Read only through task_options). Any other chat runs in its saved mode,
+    whoever set it: the page, or an API client with the worker's token (the
+    integration sends no mode, so its tasks run in Default). Full access needs
+    the owner's switch to be on now.
+    """
+    options = task_options(task_id) if options is None else options
+    with lock:
+        task = tasks.get(task_id, {})
+        mode = task.get('permission_mode') or protected_policy.DEFAULT_MODE
+        if task.get('task_source') in {'schedule', 'lead'}:
+            mode = protected_policy.DEFAULT_MODE
+    if mode == protected_policy.FULL_ACCESS_MODE and not full_access.is_on():
+        mode = protected_policy.DEFAULT_MODE
+    return protected_policy.mode_settings(mode, str(options.get("codex_sandbox") or "workspace-write"))
 
 
 def build_codex_args(task_id: str, prompt_file: Path, final_file: Path, session_id: str | None) -> list[str]:
@@ -4554,8 +4688,6 @@ def reader_thread(task_id: str, stream_name: str, handle, session_holder: dict[s
         if not line:
             break
         write_task_log(task_id, stream_name, line)
-        if stream_name == "stderr":
-            record_diagnostic("gate_message", task_id, line)
         if stream_name == "stdout":
             try:
                 event = json.loads(line)
@@ -4592,9 +4724,13 @@ def count_new_prompts(counts: Any, records: list[dict[str, Any]], previous: dict
 
 
 def build_app_server_args(attended: bool = True) -> list[str]:
-    """Start the bidirectional CLI transport with approvals routed to the user.
+    """Start the bidirectional CLI transport that the page uses for every permission mode.
 
-    Only a chat someone attends gets the call tool: a scheduled run has nobody to answer Codex's question.
+    The two approval flags are Default's values for the process. Each thread and
+    turn then sends its own mode's sandbox, approval policy and reviewer
+    (task_mode_settings), and those replace them, so a chat gets only its mode's
+    settings. Only a chat someone attends gets the call tool: a scheduled run
+    has nobody to answer Codex's question.
     """
     return [CODEX_BINARY, "app-server", "--config", 'approval_policy="on-request"',
             "--config", 'approvals_reviewer="user"', *shell_exclude_args(), *verification_mcp_args(),
@@ -4602,10 +4738,13 @@ def build_app_server_args(attended: bool = True) -> list[str]:
 
 
 def uses_user_approvals(options: dict[str, Any]) -> bool:
-    """Every allowed mode is sandboxed and routes its permission requests to the user.
+    """Return True when the options pass the protected policy, so the chat runs on the app server transport.
 
-    A mode the protected policy refuses never reaches Codex: run_task stops it
-    first, so the exec path without live approvals is not used for one.
+    The transport carries each mode's own settings: in Default and Read only
+    the person answers, in Auto-review Codex's reviewer answers, and in Full
+    access Codex does not ask. Options the protected policy refuses never
+    reach Codex: run_task stops them first, so the exec path without live
+    approvals is not used for them.
     """
     return not protected_policy.policy_problem(options)
 
@@ -4699,9 +4838,12 @@ def create_approval_session(
             session_holder["session_id"] = found
             update_task(task_id, session_id=found)
 
-    mode = str(options.get("codex_sandbox") or "workspace-write")
+    # The chat's permission mode is only these three Codex settings (protected_policy.MODES).
+    settings = task_mode_settings(task_id, options)
+    mode = settings["sandbox"]
     thread_params: dict[str, Any] = {
-        "cwd": "/config", "sandbox": mode, "approvalPolicy": "on-request", "approvalsReviewer": "user",
+        "cwd": "/config", "sandbox": mode, "approvalPolicy": settings["approval_policy"],
+        "approvalsReviewer": settings["approvals_reviewer"],
     }
     if session_id:
         thread_params["threadId"] = session_id
@@ -4710,7 +4852,11 @@ def create_approval_session(
     model = execution["model"]
     if model not in {"default", "gpt-5.3-codex"}:
         thread_params["model"] = model
-    policy: dict[str, Any] = {"type": "readOnly" if mode == "read-only" else "workspaceWrite", "networkAccess": False}
+    policy: dict[str, Any]
+    if mode == "danger-full-access":
+        policy = {"type": "dangerFullAccess"}
+    else:
+        policy = {"type": "readOnly" if mode == "read-only" else "workspaceWrite", "networkAccess": False}
     if mode == "workspace-write":
         policy["writableRoots"] = list(TASK_WRITABLE_ROOTS)
     return AppServerSession(
@@ -4721,7 +4867,8 @@ def create_approval_session(
                      # the ask_owner and report_failure calls (apply_status_calls).
                      "effort": execution["reasoning_effort"], "summary": reasoning_summary(options),
                      "sandboxPolicy": policy,
-                     "approvalPolicy": "on-request", "approvalsReviewer": "user"},
+                     "approvalPolicy": settings["approval_policy"],
+                     "approvalsReviewer": settings["approvals_reviewer"]},
         on_event=event, on_approvals=save_approvals,
         on_final=lambda text: final_file.write_text(text, encoding="utf-8"),
         is_active=active, redact=approval_redact,
@@ -4901,6 +5048,7 @@ def request_task_cancellation(
         if status not in CANCELLABLE_TASK_STATUSES:
             return False, None, f"task is not active (status={status or 'unknown'})"
 
+        waited = task_waits_on_owner(task)
         completed_at = str(task.get("completed_at") or utc_now())
         task.update(
             {
@@ -4931,6 +5079,9 @@ def request_task_cancellation(
         if approval_session is not None:
             approval_session.close()
     save_task_index()
+    if waited:
+        # A stopped chat no longer waits for a permission decision.
+        dismiss_wait_notice_async(task_id)
     return True, proc, ""
 
 
@@ -5438,40 +5589,6 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
         stdout_thread.join(timeout=5)
         stderr_thread.join(timeout=5)
 
-    # This runs before cancellation/transport-failure returns too: a stopped
-    # exchange may already have planted a command that Core would execute later.
-    planted_edits = []
-    unchecked_edits = []
-    planted_error = ""
-    reviewed_manifest = None
-    try:
-        after = build_manifest()
-        reviewed_manifest = after
-        try:
-            before = json.loads(before_manifest_path.read_text(encoding="utf-8"))
-            changed = diff_manifests(before, after)
-        except (OSError, ValueError):
-            before = {}
-            # Without a baseline, existing files must never be mistaken for new files and removed.
-            changed = {"changed": sorted(after), "added": []}
-        edit_checks = refuse_planted_edits(task_dir, changed, before)
-        unchecked_edits = [item["path"] for item in edit_checks if item.get("checked") is False]
-        planted_edits = [item for item in edit_checks if item.get("checked") is not False]
-        if planted_edits:
-            record_diagnostic("event", task_id, {"kind": "gate", "rule": "planted_definition"},
-                              paths=[str(CONFIG_ROOT / p["path"]) for p in planted_edits])
-        if planted_edits or unchecked_edits:
-            fields = {"refused_edits": planted_edits, "unchecked_edits": unchecked_edits}
-            if any(not item["undone"] for item in planted_edits):
-                fields["error"] = "Configuration edits could not be restored; review them before a reload or restart."
-            if not update_task(task_id, **fields) and task_cancellation_requested(task_id):
-                # Keep cancellation terminal while recording the safety result it must not hide.
-                save_task_fields(task_id, **fields)
-    except Exception as exc:
-        planted_error = "The configuration edit check could not finish: " + redact(str(exc))
-        if not update_task(task_id, error=planted_error) and task_cancellation_requested(task_id):
-            save_task_fields(task_id, error=planted_error)
-
     if task_cancellation_requested(task_id):
         return
     if lifecycle_error is not None and not (approval_session and approval_session.turn_id):
@@ -5484,14 +5601,16 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
         )
         return
 
+    safety_blocked = bool(approval_session and approval_session.safety_blocked)
     if lifecycle_error is not None:
         # A started turn may already have changed files. Keep the normal review,
         # backup, validation, and recovery path even when its transport fails.
         returncode = 1
-        write_task_log(task_id, "worker", f"Codex permission connection failed: {lifecycle_error}")
+        if not safety_blocked:
+            write_task_log(task_id, "worker", f"Codex permission connection failed: {lifecycle_error}")
     final, codex_failure = apply_status_calls(parse_final(final_file, returncode), status_calls)
     start_phase(task_id, "review", "Checking the changes")
-    after_manifest = build_manifest() if planted_edits or reviewed_manifest is None else reviewed_manifest
+    after_manifest = build_manifest()
     try:
         before_manifest = json.loads(before_manifest_path.read_text(encoding="utf-8"))
     except Exception:
@@ -5520,7 +5639,11 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     # Why the task failed: the reason Codex gave with report_failure, replaced by the worker's own
     # reason when the worker turns the answer into a failure. A timeout has its own summary.
     reason = codex_failure
-    if timed_out:
+    if safety_blocked:
+        reason = safety_block.MESSAGE
+        final = {"status": "failed", "summary": safety_block.SUMMARY,
+                 "details": safety_block.NEXT_STEP, "question": "", "choices": []}
+    elif timed_out:
         record_diagnostic("event", task_id, {"kind": "error", "type": "TimeoutError"})
         record_diagnostic("finish", task_id, "timed_out")
         final = {
@@ -5549,19 +5672,6 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     if final.get("status") == "failed" and task_failed_on_sign_in(
             task_id, reason, final.get("summary"), final.get("details"), lifecycle_error):
         final["summary"] = SIGN_IN_EXPIRED_SUMMARY
-    if unchecked_edits:
-        note = ("The configuration edit check could not check these files without a verified earlier copy: "
-                + ", ".join(unchecked_edits) + "; review these before any reload or restart.")
-        final["details"] = "\n\n".join(part for part in (str(final.get("details") or "").strip(), note) if part)
-    if planted_edits or planted_error:
-        unrestored = [item["path"] for item in planted_edits if not item["undone"]]
-        note = planted_error or "Configuration edits that add refused actions were undone."
-        if unrestored:
-            note = "Configuration edits could not be restored; review these files before any reload or restart: " + ", ".join(unrestored)
-        reason = note
-        final.update(status="failed", summary=note,
-                     details="\n\n".join(part for part in (note, str(final.get("details") or "").strip()) if part),
-                     question="", choices=[])
     status = str(final.get("status") or "failed")
     # Files the validation details already report as having no saved copy.
     named: set[str] = set()
@@ -5626,6 +5736,8 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     if task_status == "completed" and returncode == 0:
         record_successful_sign_in(task_id)
     turn_id = str(tasks.get(task_id, {}).get("current_turn_id") or "")
+    if safety_blocked:
+        publish_safety_block(task_id, turn_id)
     event_data = {
         "task_id": task_id,
         "turn_id": turn_id,
@@ -5660,9 +5772,29 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     if not ok:
         print(f"Codex task result event failed: {detail}", flush=True)
 
-    notify_task_outcome(task_id, status, str(final.get('summary') or ''), turn_id,
-                        str(final.get('question') or ''), choices)
+    # A safety block already sent its own notice; one cause gets one notice.
+    if not safety_blocked:
+        notify_task_outcome(task_id, status, str(final.get('summary') or ''), turn_id,
+                            str(final.get('question') or ''), choices)
     refresh_usage_status_async(force=True)
+
+
+def publish_safety_block(task_id: str, turn_id: str) -> None:
+    """Name the task by id, without copying its prompt or provider error into HA.
+
+    This is the only notice for a blocked task: run_task skips the generic
+    "Codex task failed" one. It goes through notify, so it reaches the
+    configured notify service like any other failure.
+    """
+    write_task_log(task_id, "worker", safety_block.MESSAGE + " No automatic retry.")
+    ok, _ = fire_ha_event("codex_cli_safety_blocked", {"task_id": task_id, "turn_id": turn_id})
+    if not ok:
+        print("Could not send the safety-block event to Home Assistant.", flush=True)
+    notify(
+        "Codex task blocked by the safety filter",
+        f"Task {task_id}: {safety_block.MESSAGE}",
+        notification_id=f"codex_safety_block_{task_id}",
+    )
 
 
 TURN_ID_RE = re.compile(r"[0-9a-f]{32}")
@@ -6052,37 +6184,6 @@ def start_queued_message(entry: dict[str, Any]) -> Exception | None:
     return None
 
 
-def assistant_paused() -> bool:
-    """Return whether the user has paused the assistant from its page."""
-    return PAUSE_FILE.exists()
-
-
-def pause_payload() -> dict[str, Any]:
-    """Return the pause state for the API: whether it is paused, since when, and the reason the page shows."""
-    if not assistant_paused():
-        return {"paused": False}
-    try:
-        saved = json.loads(PAUSE_FILE.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        saved = {}
-    return {"paused": True, "since": str(saved.get("since") or ""), "message": PAUSED_MESSAGE}
-
-
-PAUSED_MESSAGE = "The assistant is paused. Resume it on its page to send messages again."
-
-
-def set_assistant_paused(paused: bool) -> dict[str, Any]:
-    """Pause or resume the assistant; on resume, start the oldest queued message if nothing is running."""
-    if paused:
-        if not assistant_paused():
-            PAUSE_FILE.parent.mkdir(parents=True, exist_ok=True)
-            PAUSE_FILE.write_text(json.dumps({"since": utc_now()}), encoding="utf-8")
-    else:
-        PAUSE_FILE.unlink(missing_ok=True)
-        start_next_queued()
-    return pause_payload()
-
-
 def start_next_queued(release: str | None = None) -> None:
     """Start the oldest queued message once no task is active.
 
@@ -6096,7 +6197,7 @@ def start_next_queued(release: str | None = None) -> None:
             if release is not None:
                 active_task_runners.discard(release)
                 release = None
-            if not message_queue or _active_task_ids_locked() or assistant_paused():
+            if not message_queue or _active_task_ids_locked():
                 return
             entry = message_queue.pop(0)
             failure = start_queued_message(entry)
@@ -6168,12 +6269,12 @@ def status() -> Response:
             "codex_login": login,
             "account_access": account_access.snapshot(login),
             "auth_flow": auth_status_payload(),
-            "pause": pause_payload(),
             "model_pin": model_pin(read_options()),
             "codex_usage": usage_status_payload(),
             "integration": integration_status(),
             "remote_control": remote_control_summary(),
             "github": github_service.status(),
+            "full_access": full_access_payload(),
         }
     )
 
@@ -6291,23 +6392,6 @@ def auth_qr() -> Response:
     return response
 
 
-@app.get("/pause")
-@require_auth
-def get_pause() -> Response:
-    """Return whether the assistant is paused."""
-    return jsonify({"ok": True, **pause_payload()})
-
-
-@app.post("/pause")
-@require_auth
-def post_pause() -> Response:
-    """Pause the assistant with {"paused": true}, or resume it with {"paused": false}."""
-    payload = request.get_json(silent=True)
-    if not isinstance(payload, dict) or not isinstance(payload.get("paused"), bool):
-        return jsonify({"ok": False, "error": "paused must be true or false"}), 400
-    return jsonify({"ok": True, **set_assistant_paused(payload["paused"])})
-
-
 @app.post("/auth/logout")
 @require_auth
 def logout_auth() -> Response:
@@ -6405,7 +6489,7 @@ def save_chat_settings(task_id: str) -> Response:
             return jsonify({"ok": False, "error": "This chat has a message in the queue. Remove it before changing the settings."}), 409
         try:
             settings = parse_chat_settings(payload, task)
-            permission_mode = parse_permission_mode(payload, task)
+            permission_mode = parse_permission_mode(payload, task, choosing="permission_mode" in payload)
         except ValueError as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
         # Changing the next run's settings must not rewrite the previous turn or
@@ -6495,6 +6579,8 @@ def delete_task(task_id: str) -> Response:
         tasks.pop(task_id, None)
         task_activity.pop(task_id, None)
         save_task_index()
+        if task_waits_on_owner(task):
+            dismiss_wait_notice_async(task_id)
         if queue_payload_locked(task_id):
             # Its waiting message went with the chat's files.
             message_queue[:] = [entry for entry in message_queue if entry["task_id"] != task_id]
@@ -6514,8 +6600,6 @@ def create_task() -> Response:
     prompt = payload["prompt"].strip()
     if not prompt:
         return jsonify({"ok": False, "error": "prompt is required"}), 400
-    if assistant_paused():
-        return jsonify({"ok": False, "error": PAUSED_MESSAGE, "paused": True}), 409
     try:
         settings = parse_chat_settings(payload)
         permission_mode = parse_permission_mode(payload)
@@ -6628,6 +6712,118 @@ def get_activity(task_id: str) -> Response:
         "ok": True, "turn_id": str(stored.get("turn_id") or turn_id), "seq": int(stored.get("seq") or 0),
         "running": False, "total": len(stored["steps"]), "steps": steps,
     })
+
+
+# The marks the chat page shows in front of each kind of step, so a shared
+# transcript reads like the page.
+SHARE_STEP_MARKS = {
+    "reasoning": "✦", "message": "❝", "command": "›", "file_change": "✎", "web_search": "⌕",
+    "tool_call": "⚙", "plan": "☰", "error": "!", "outcome": "■", "notice": "…", "phase": "◦",
+}
+SHARE_MAX_LINES = 100_000
+# The Share file is made to be sent to another person, so it gets these rules on top of redact(). They mask
+# secrets that carry no "token" or "api_key" label. The cases they must hold are SHARE_MASK_CORPUS in
+# tests/test_share_chat.py; add a new shape there first.
+# A key is at most eight words of at most 32 letters or digits around the secret word, and a URL scheme at most
+# 32 characters, so each start in a long run of words joined by "-" scans a fixed length, not the rest of the run.
+SHARE_SECRET_KEY = (
+    r"\b(?:[A-Za-z0-9]{1,32}[_-]){0,8}(?:password|passwd|secret|pin)(?:[_-][A-Za-z0-9]{1,32}){0,8}\b"
+)
+# Between a key and its value: an optional closing quote (escaped, as in JSON inside a command line), ":" or "=",
+# and at most one line break, so a YAML value on the next line is masked but the next paragraph is not.
+SHARE_SECRET_SEPARATOR = r"\\?[\"']?[ \t]*[:=][ \t]*(?:\r?\n[ \t]*)?"
+SHARE_SECRET_REPLACEMENTS = [
+    # A JSON Web Token, such as a Home Assistant long-lived access token: three base64url parts, the first
+    # starting with eyJ (the encoding of '{"').
+    (re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"), "[redacted]"),
+    # An API key of the sk- form (OpenAI, Anthropic and others).
+    (re.compile(r"\bsk-[A-Za-z0-9_-]{20,}"), "[redacted]"),
+    # A quoted value after a password, passwd, secret or pin key, spaces and escaped quotes (\") and all.
+    (re.compile(rf"(?i)({SHARE_SECRET_KEY}{SHARE_SECRET_SEPARATOR})\"(?:[^\"\\\r\n]|\\.)+\""), r'\1"[redacted]"'),
+    (re.compile(rf"(?i)({SHARE_SECRET_KEY}{SHARE_SECRET_SEPARATOR})'(?:[^'\\\r\n]|\\.)+'"), r"\1'[redacted]'"),
+    # An unquoted value after the same keys runs to the end of its line: a password may hold spaces, ";" or "&",
+    # and masking the rest of a line costs only its readability. A YAML !secret reference names a secret without
+    # holding it, so it stays readable, and a value a rule above masked is not masked again.
+    (re.compile(rf"(?i)({SHARE_SECRET_KEY}{SHARE_SECRET_SEPARATOR})(?!!secret\b|[\"']?\[redacted\])\S[^\r\n]*"),
+     r"\1[redacted]"),
+    # The password of a URL: scheme://user:password@host, where the user name may be empty (redis://:password@).
+    (re.compile(r"(?i)(\b[a-z][a-z0-9+.-]{0,31}://[^\s/:@]*:)[^\s/@]+(@)"), r"\1[redacted]\2"),
+]
+
+
+def share_redact(text: str) -> str:
+    """Mask a Share file: everything redact() masks, then the secrets of SHARE_SECRET_REPLACEMENTS."""
+    redacted = redact(text)
+    for pattern, replacement in SHARE_SECRET_REPLACEMENTS:
+        redacted = pattern.sub(replacement, redacted)
+    return redacted
+
+
+def share_step_line(step: dict[str, Any]) -> str:
+    """Write one step as the page lists it: its mark and text, and a failed command's exit code."""
+    text = str(step.get("text") or "").strip()
+    if step.get("kind") == "command" and step.get("exit_code"):
+        text += f" (exit {step['exit_code']})"
+    # Later lines of a long step are indented so they stay under their mark.
+    return f"{SHARE_STEP_MARKS.get(step.get('kind'), '•')} " + text.replace("\n", "\n  ")
+
+
+def share_transcript(title: str, turns: list[dict[str, Any]], steps_by_turn: dict[str, list[dict[str, Any]]]) -> str:
+    """Write a chat as Markdown: each message, the steps Codex printed for it, and its answer."""
+    parts = [f"# {title or 'Untitled chat'}"]
+    for turn in turns:
+        parts.append(f"## You · {turn.get('created_at') or ''}".rstrip(" ·"))
+        if turn.get("message"):
+            parts.append(str(turn["message"]).strip())
+        steps = steps_by_turn.get(str(turn.get("turn_id") or ""), [])
+        if steps:
+            parts.append("### Steps")
+            parts.append("\n".join(share_step_line(step) for step in steps))
+        answer = [str(turn.get(key) or "").strip() for key in ("summary", "details", "question")]
+        answer = [text for index, text in enumerate(answer) if text and text not in answer[:index]]
+        if answer:
+            parts.append("## Codex")
+            parts.extend(answer)
+    return "\n\n".join(parts) + "\n"
+
+
+@app.get("/tasks/<task_id>/share")
+@require_auth
+def share_task(task_id: str) -> Response:
+    """Download a chat as Markdown, whole or its last `lines` lines, with the steps of every exchange."""
+    if TASK_ID_RE.fullmatch(task_id) is None:
+        return jsonify({"ok": False, "error": "task not found"}), 404
+    raw_lines = request.args.get("lines")
+    try:
+        lines = 0 if raw_lines is None else int(raw_lines)
+    except ValueError:
+        lines = -1
+    if raw_lines is not None and not 1 <= lines <= SHARE_MAX_LINES:
+        return jsonify({"ok": False, "error": f"lines must be a whole number from 1 to {SHARE_MAX_LINES}"}), 400
+    with lock:
+        task = tasks.get(task_id)
+        if task is None:
+            return jsonify({"ok": False, "error": "task not found"}), 404
+        payload = task_payload(task, private=is_ingress_request())
+        record = task_activity.get(task_id)
+        live = {record["turn_id"]: [public_activity_step(step) for step in record["steps"]]} if record else {}
+    steps_by_turn = {}
+    for turn in payload["turns"]:
+        turn_id = str(turn.get("turn_id") or "")
+        if turn_id in live:
+            steps_by_turn[turn_id] = live[turn_id]
+        elif not turn.get("legacy"):
+            stored = load_stored_activity(task_id, turn_id)
+            if stored is not None:
+                steps_by_turn[turn_id] = [step for step in stored["steps"] if isinstance(step, dict)]
+    # The file is meant to be passed on, so it gets the codex.log mask and the Share rules on top.
+    text = share_redact(share_transcript(str(payload.get("title") or ""), payload["turns"], steps_by_turn))
+    if lines:
+        text = "\n".join(text.rstrip("\n").split("\n")[-lines:]) + "\n"
+    response = Response(text, mimetype="text/markdown")
+    response.headers["Content-Disposition"] = f'attachment; filename="codex-chat-{task_id}.md"'
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.get("/tasks/<task_id>/attachments/<attachment_id>")
@@ -6849,9 +7045,25 @@ def record_relay_read(metadata, result, error, started):
 relay_reads = RelayReads(relay_process_state, ha_token, relay_read_redact, observer=record_relay_read)
 
 
+def relay_running() -> bool:
+    """Return whether the remote-control process runs now and is not stopping; the relay's call key holds only then."""
+    proc, stopping = relay_process_state()
+    return proc is not None and not stopping and proc.poll() is None
+
+
+def relay_probe_env() -> dict[str, str]:
+    """Return the environment of a relay probe: no tool key, so a probe never ends the keys of a running relay."""
+    return codex_env()
+
+
 def relay_env() -> dict[str, str]:
+    """Return the environment of one relay launch with fresh keys; the keys of the earlier launch stop working.
+
+    Only Supervisor._loop calls it, just before the process starts (launch_env_factory); the probes use
+    relay_probe_env.
+    """
     refresh_core_address()
-    return relay_reads.environment(codex_env())
+    return {**relay_reads.environment(codex_env()), "HA_CALL_CAPABILITY": ha_call.begin(RELAY_CALL_TASK)}
 
 
 def relay_read_mcp_args() -> list[str]:
@@ -6865,21 +7077,30 @@ def relay_read_mcp_args() -> list[str]:
             for argument in ('--config', f'mcp_servers.home_assistant_relay.{name}={json.dumps(value)}')]
 
 
+def relay_tool_args() -> list[str]:
+    """The app's tools: the read tool, approved ahead, and the call tool, which Codex asks for each time.
+
+    The relay holds both keys for its whole run, so the shell exclude matters as much as on the page;
+    /etc/codex/managed_config.toml holds the same exclude for every client.
+    """
+    return [*shell_exclude_args(), *relay_read_mcp_args(), *call_mcp_args()]
+
+
 remote_control_supervisor = remote_control.Supervisor(
     codex_binary=CODEX_BINARY,
     state_path=DATA_ROOT / "remote_control.json",
-    env_factory=lambda: relay_env(),
+    env_factory=lambda: relay_probe_env(),
+    launch_env_factory=lambda: relay_env(),
     name_factory=lambda: read_options().get("remote_control_name"),
     instructions_factory=lambda: remote_control_instructions(read_options()),
-    tool_args_factory=relay_read_mcp_args,
-    watch=remote_control.ConfigWatch(CONFIG_ROOT, DATA_ROOT / "remote_control_baseline.json"),
+    tool_args_factory=relay_tool_args,
 )
 
 
 def remote_control_summary() -> dict[str, Any]:
-    """Return what the integration needs for its repair: on or off, and the config changes not yet reviewed."""
+    """Return what the integration needs: whether remote control is on, and its state."""
     state = remote_control_supervisor.snapshot()
-    return {key: state.get(key) for key in ("enabled", "state", "config_findings", "config_findings_count")}
+    return {key: state.get(key) for key in ("enabled", "state")}
 
 
 @app.get("/remote-control")
@@ -6907,7 +7128,7 @@ _addon_slug: str | None = None
 def addon_slug() -> str | None:
     """Return this app's slug as Supervisor knows it, with its repository prefix, or None when Supervisor cannot say.
 
-    The page links to the app's Configuration tab at /hassio/addon/<slug>/config, and the prefix differs from one
+    The page links to the app's Configuration tab at /config/app/<slug>/config, and the prefix differs from one
     install to the next. Only a successful answer is kept, so a later call tries Supervisor again.
     """
     global _addon_slug
@@ -6932,14 +7153,16 @@ def addon_configuration() -> Response:
     # settings, this one changes nothing and its reply holds only the slug path,
     # which is no secret, so it needs no Ingress administrator.
     slug = addon_slug()
-    return jsonify({"ok": True, "url": f"/hassio/addon/{slug}/config" if slug else None})
+    # Home Assistant 2026.2 moved an app's pages to /config/app/<slug>/, and 2026.5 removed the old
+    # /hassio/addon/<slug>/ panel, so that path opens a page that does not exist.
+    return jsonify({"ok": True, "url": f"/config/app/{slug}/config" if slug else None})
 
 
 @app.post("/remote-control/<action>")
 @require_auth
 @require_ingress
 def change_remote_control(action: str) -> Response | tuple[Response, int]:
-    """Turn remote control on or off, ask for a new pairing code, or mark config changes reviewed.
+    """Turn remote control on or off, or ask for a new pairing code.
 
     Only from an administrator on the app page, never with the API token.
     """
@@ -6947,14 +7170,9 @@ def change_remote_control(action: str) -> Response | tuple[Response, int]:
     if admin is None:
         return jsonify({"ok": False, "error": refusal}), 403
     if action == "start":
-        ok, state = remote_control_supervisor.start()
-        if not ok:
-            return jsonify({"ok": False, "error": state.get("blocked_reason") or "Remote control could not start.",
-                            "remote_control": state}), 409
+        state = remote_control_supervisor.start()
     elif action == "stop":
         state = remote_control_supervisor.stop()
-    elif action == "review":
-        state = remote_control_supervisor.review()
     elif action == "pair":
         ok, state = remote_control_supervisor.pair()
         if not ok:
@@ -6962,6 +7180,116 @@ def change_remote_control(action: str) -> Response | tuple[Response, int]:
     else:
         return jsonify({"ok": False, "error": "unknown action"}), 404
     return jsonify({"ok": True, "remote_control": state})
+
+
+def full_access_payload() -> dict[str, Any]:
+    """The Full access switch as the page shows it: on or off, when and by whom, and the warning to confirm."""
+    setting = full_access.read_setting()
+    return {"enabled": setting["enabled"], "changed_at": setting["changed_at"], "changed_by": setting["changed_by"],
+            "warning": full_access.WARNING, "warning_id": full_access.WARNING_ID}
+
+
+def return_full_access_chats_to_default() -> None:
+    """Set each chat and each waiting message that asks for Full access back to Default.
+
+    Runs when Full access is turned off, so turning it on again later starts
+    every chat at Default. The turns already run keep the mode they ran with.
+    """
+    changed = False
+    with lock:
+        for task_id, task in tasks.items():
+            if task.get("permission_mode") != protected_policy.FULL_ACCESS_MODE:
+                continue
+            task["permission_mode"] = protected_policy.DEFAULT_MODE
+            changed = True
+            try:
+                task_dir = get_task_dir(task_id)
+                task_dir.mkdir(parents=True, exist_ok=True)
+                atomic_json_write(task_dir / "task.json", task)
+            except OSError as exc:
+                print(f"Could not save chat {task_id} with Default permissions: {exc}", flush=True)
+        for entry in message_queue:
+            if entry.get("permission_mode") == protected_policy.FULL_ACCESS_MODE:
+                entry["permission_mode"] = protected_policy.DEFAULT_MODE
+                changed = True
+    if not changed:
+        return
+    try:
+        save_task_index()
+        save_message_queue()
+    except OSError as exc:
+        print(f"Could not save the chats returned to Default: {exc}", flush=True)
+
+
+@app.get("/full-access")
+@require_auth
+def get_full_access() -> Response:
+    return jsonify({"ok": True, "full_access": full_access_payload()})
+
+
+@app.post("/full-access")
+@require_auth
+@require_ingress
+def change_full_access() -> Response | tuple[Response, int]:
+    """Turn the Full access switch on or off: an administrator on the app page, and on only with the warning confirmed.
+
+    The managed requirements are written again for the new setting, and remote
+    control, if on, restarts so its Codex reads them. A chat's Codex reads them
+    at its next turn.
+    """
+    admin, refusal = ingress_admin()
+    if admin is None:
+        return jsonify({"ok": False, "error": refusal}), 403
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or not isinstance(payload.get("enabled"), bool):
+        return jsonify({"ok": False, "error": "enabled must be true or false"}), 400
+    if payload["enabled"] and payload.get("confirm") != full_access.WARNING_ID:
+        return jsonify({"ok": False, "error": "Read and confirm the Full access warning first."}), 400
+    try:
+        full_access.set_enabled(payload["enabled"], admin["user_id"])
+        full_access.write_requirements()
+    except (OSError, ValueError) as exc:
+        print(f"Could not change Full access: {exc}", flush=True)
+        restored = turn_full_access_off_after_failure(admin["user_id"])
+        return_full_access_chats_to_default()
+        restart_remote_control()
+        if not restored:
+            return jsonify({"ok": False, "error": FULL_ACCESS_STILL_ALLOWED}), 503
+        return jsonify({"ok": False, "error": "Could not change Full access. It is off."}), 503
+    if not payload["enabled"]:
+        return_full_access_chats_to_default()
+    print(f"Full access turned {'on' if payload['enabled'] else 'off'} by an administrator.", flush=True)
+    restart_remote_control()
+    return jsonify({"ok": True, "full_access": full_access_payload()})
+
+
+# Said when the switch could not be saved off, or Codex's requirements could not be written back to the shipped copy.
+FULL_ACCESS_STILL_ALLOWED = ("Could not turn Full access off completely. Chats on this page run with Default, but "
+                             "the ChatGPT app can still use Full access. Restart the app to turn it off.")
+
+
+def turn_full_access_off_after_failure(changed_by: str) -> bool:
+    """Turn the switch off and write the shipped requirements again; return True only when both worked.
+
+    Called when a change of the switch failed half way. While the requirements
+    file still allows danger-full-access, the ChatGPT app's Codex can use Full
+    access, so the caller must not say it is off. A start of the app writes
+    the file again from the saved setting (main).
+    """
+    try:
+        full_access.set_enabled(False, changed_by)
+        full_access.write_requirements()
+    except (OSError, ValueError) as exc:
+        print(f"{FULL_ACCESS_STILL_ALLOWED} ({exc})", flush=True)
+        return False
+    return True
+
+
+def restart_remote_control() -> None:
+    """Restart remote control, if it is on, so its Codex reads the managed requirements again."""
+    if remote_control_supervisor.enabled():
+        remote_control_supervisor.stop()
+        remote_control_supervisor.start()
 
 
 @app.get("/browser-permissions")
@@ -7046,8 +7374,6 @@ def continue_task_request(task_id: str, field: str, *, waiting_only: bool = Fals
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
         return jsonify({"ok": False, "error": f"{field} must be non-empty text"}), 400
-    if assistant_paused():
-        return jsonify({"ok": False, "error": PAUSED_MESSAGE, "paused": True}), 409
     choice = payload.get("choice")
     turn_id = payload.get("turn_id")
     if choice is None and (not isinstance(payload.get(field), str) or not payload[field].strip()):
@@ -7208,18 +7534,12 @@ def schedule_timezone():
 schedule_service = schedule_api.register(_ToolWorker())
 
 
-def github_task_read_only(task_id: str) -> bool:
-    """F5: a read-only chat or read-only scheduled work gets only the github_git reads."""
-    return task_options(task_id).get('codex_sandbox') == 'read-only'
-
-
 github_service = github_access.register(_ToolWorker(), github_access.GitHubService(
     lambda: DATA_ROOT / "github",
     client_id=lambda: str(read_options().get("github_client_id") or ""),
     fire_event=lambda event, data: fire_ha_event(event, data),
     notify=lambda title, message: notify(title, message, notification_id="codex_cli_github"),
     find_task=lambda capability: github_access.find_task_by_capability(ha_data, capability),
-    read_only=github_task_read_only,
 ))
 
 
@@ -7243,6 +7563,21 @@ def make_worker_undumpable() -> bool:
         return False
 
 
+def write_full_access_requirements_at_start() -> None:
+    """Write Codex's managed requirements for the saved Full access setting, before any Codex starts.
+
+    The image ships the strict file, so after an update the written file must
+    follow the saved setting again. When the write fails, the setting is
+    turned off and the shipped copy is written, so the log says what holds.
+    """
+    try:
+        full_access.write_requirements()
+    except (OSError, ValueError) as exc:
+        print(f"Could not write the managed requirements for Full access: {exc}", flush=True)
+        if turn_full_access_off_after_failure("worker start"):
+            print("Full access is off.", flush=True)
+
+
 def main() -> None:
     """Prepare the worker's files, start its background threads, and serve the API.
 
@@ -7256,7 +7591,9 @@ def main() -> None:
         sys.exit(1)
     if not make_worker_undumpable():
         print("Could not mark the worker process not dumpable; its environment stays readable to root.", flush=True)
+    write_starter_agents_file()  # Before ensure_runtime_files(), whose config file marks every later start.
     ensure_runtime_files()
+    write_full_access_requirements_at_start()
     apply_interaction_limit(read_options())
     interaction_logs.close_abandoned()
     refresh_core_address()
@@ -7288,7 +7625,7 @@ def main() -> None:
     threading.Thread(target=account_access_loop, daemon=True).start()
     # The GitHub access check: at start, then hourly; it never runs a model.
     threading.Thread(target=github_service.loop, daemon=True, name="github-access").start()
-    # Remote control runs again only if the owner left it on and the command gate is installed.
+    # Remote control runs again only if the owner left it on.
     remote_control_supervisor.resume()
     threading.Thread(target=stdin_reader, daemon=True).start()
     # Messages that were waiting when the worker stopped carry on in order.

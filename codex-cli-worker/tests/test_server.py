@@ -22,6 +22,12 @@ assert SPEC is not None and SPEC.loader is not None
 server = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(server)
 
+# When a chat stops waiting, the worker starts a thread that dismisses its notice in Home Assistant. No worker test
+# may reach Home Assistant, so every test that imports this module gets a stand-in that starts nothing.
+# tests/test_wait_notice.py tests the dismissal itself and the real thread, kept here as dismiss_wait_notice_async.
+dismiss_wait_notice_async = server.dismiss_wait_notice_async
+server.dismiss_wait_notice_async = lambda task_id: None
+
 
 class SessionIdParsingTests(unittest.TestCase):
     """The session id the worker takes from Codex's JSON events, and how a resumed task ends."""

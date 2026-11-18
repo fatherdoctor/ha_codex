@@ -542,8 +542,8 @@ class StatusRunTests(unittest.TestCase):
 class OwnerNoticeTests(unittest.TestCase):
     """A turn sends a Home Assistant notification only when it needs the owner.
 
-    A plain answer to the owner's own question sends nothing: the owner reads it in the chat. A question, a
-    permission request and a failure still send one.
+    A plain answer to the owner's own question sends nothing: the owner reads it in the chat. A failure sends
+    nothing either; it shows in the chat. A question and a permission request still send one.
     """
 
     # The same stand-in exchange as StatusRunTests, without running its tests a second time.
@@ -569,11 +569,11 @@ class OwnerNoticeTests(unittest.TestCase):
         self.assertEqual(self.titles(), ["Codex needs input"])
         self.assertIn("Remove the duplicate automation?", server.notify.call_args.args[1])
 
-    def test_a_failure_sends_one_notification(self):
-        """report_failure: one notification, as before."""
+    def test_a_failure_sends_no_notification(self):
+        """report_failure: the failure shows in the chat, and nobody is notified."""
         task = self.run_exchange([self.mcp_item(FAIL)], "I could not do this: the entity light.porch does not exist.")
         self.assertEqual(task["status"], "failed")
-        self.assertEqual(self.titles(), ["Codex task failed"])
+        self.assertEqual(self.titles(), [])
 
     def test_a_permission_request_sends_one_notification(self):
         """An approval prompt is notified on its own path, which a completed turn does not change."""

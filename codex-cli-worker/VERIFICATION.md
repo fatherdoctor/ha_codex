@@ -120,7 +120,7 @@ batches are recorded before a capture starts, so an interrupted retry cannot
 make an old approval reusable after a restart. Start a new inspection if the
 worker stops before it can record the retry result.
 
-Open **Settings > Browser permissions** to inspect and revoke saved exceptions.
+Open **Settings > Advanced > Browser permissions** to inspect and revoke saved exceptions.
 Revoking a saved exception stops captures that loaded it; other changes don't.
 Permissions are kept in private app storage, outside `/config`, with bounded,
 atomic storage. An entry a later version no longer accepts is ignored and listed

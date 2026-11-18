@@ -25,7 +25,7 @@ const PARTS = [
   ["chat list", ".chat-row"],
   // studio.css styles these two, so they prove its sizes scale too.
   ["message box", "#message"],
-  ["dialog title", "#status-title"],
+  ["dialog title", "#schedule-title"],
 ];
 
 /** Parts inside Settings: a section header, the sign-in text and the schedule form's two selects. */

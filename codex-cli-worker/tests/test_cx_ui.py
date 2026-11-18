@@ -21,7 +21,8 @@ class StudioTests(unittest.TestCase):
         task_id = self.create()
         server.tasks[task_id]['status'] = 'completed'
         server.active_task_runners.clear()
-        for invalid in ['auto-review', 'full-access', True, {}, None]:
+        # Full access is refused while the owner's switch is off (the default); never is no mode name.
+        for invalid in ['full-access', 'never', 'danger-full-access', True, {}, None]:
             response = self.client.post(f'/tasks/{task_id}/settings',
                 json={'permission_mode': invalid}, headers=self.headers)
             self.assertEqual(response.status_code, 400)
@@ -148,8 +149,7 @@ class StudioTests(unittest.TestCase):
         with patch.object(control, '_request', return_value=reply):
             self.assertEqual(control.pair(), reply)
         proc = remote.FakeProc()
-        supervisor = rc.Supervisor('codex', self.root/'remote.json', dict, lambda: 'Sample workspace',
-                                   gate=lambda: '', control_factory=lambda _path: control)
+        supervisor = rc.Supervisor('codex', self.root/'remote.json', dict, lambda: 'Sample workspace', control_factory=lambda _path: control)
         supervisor.proc, supervisor.control_socket = proc, self.root/'control.sock'
         with patch.object(supervisor, 'enabled', return_value=True), patch.object(control, '_request', return_value=reply):
             ok, state = supervisor.pair()

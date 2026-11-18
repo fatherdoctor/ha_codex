@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from homeassistant.components import persistent_notification
 from homeassistant.core import Event, HomeAssistant, callback
 
 from .api import CodexCliApiClient, CodexCliApiError
@@ -14,11 +14,12 @@ from .api import CodexCliApiClient, CodexCliApiError
 if TYPE_CHECKING:
     from .coordinator import CodexCliCoordinator
 
+_LOGGER = logging.getLogger(__name__)
+
 # The companion apps fire this when a notification button is tapped.
 EVENT_NOTIFICATION_ACTION = "mobile_app_notification_action"
 # Written by the worker: the choice's position, the turn that asked, and the task. Keep the two in step.
 CHOICE_ACTION_RE = re.compile(r"CODEX_CLI_CHOICE_(\d{1,2})_([0-9a-f]{32})_([A-Za-z0-9][A-Za-z0-9._-]{0,127})")
-NOTIFICATION_ID = "codex_cli_choice"
 
 
 def parse_choice_action(action: Any) -> tuple[str, str, int] | None:
@@ -36,7 +37,12 @@ def async_listen_for_choices(
     """Send the choice tapped on a Codex notification to the worker; return the function that stops listening."""
 
     async def handle_action(event: Event) -> None:
-        """Reply with the tapped choice, and say so in a notification when the worker does not take it."""
+        """Reply with the tapped choice; when the worker does not take it, log why.
+
+        A tap that is not taken makes no notification: Home Assistant shows a
+        Codex notification only while a chat waits on the owner, and the worker
+        keeps that one up until the chat no longer waits.
+        """
         parsed = parse_choice_action(event.data.get("action"))
         if parsed is None:
             return
@@ -44,22 +50,15 @@ def async_listen_for_choices(
         # Only an administrator's tap answers Codex; a tap with no user is not taken either.
         user = await hass.auth.async_get_user(event.context.user_id) if event.context.user_id else None
         if user is None or not user.is_active or not user.is_admin:
-            persistent_notification.async_create(
-                hass,
-                "Codex did not take that answer: only a Home Assistant administrator can answer Codex.",
-                title="Codex",
-                notification_id=NOTIFICATION_ID,
+            _LOGGER.warning(
+                "Codex did not take an answer for task %s: only a Home Assistant administrator can answer Codex",
+                task_id,
             )
             return
         try:
             await client.reply_choice(task_id, turn_id, choice)
         except CodexCliApiError as exc:
-            persistent_notification.async_create(
-                hass,
-                f"Codex did not get the answer you picked: {exc}",
-                title="Codex",
-                notification_id=NOTIFICATION_ID,
-            )
+            _LOGGER.warning("Codex did not take the answer picked for task %s: %s", task_id, exc)
             return
         await coordinator.async_request_refresh()
 

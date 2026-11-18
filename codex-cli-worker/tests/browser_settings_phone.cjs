@@ -120,18 +120,19 @@ const themeLook = target => target.evaluate(() => {
   };
   return {
     font: getComputedStyle(document.body).fontFamily,
-    // A list field takes the same font as the page (#schedule-mode, Scheduled runs).
-    selectFont: css('#schedule-mode', 'font-family'),
-    // A text field and a text button of Scheduled runs (the log number field moved to the Configuration tab).
-    fieldFill: css('#schedule-value', 'background-color'),
-    fieldLine: css('#schedule-value', 'border-bottom-color'),
-    fieldHeight: document.querySelector('#schedule-value').getBoundingClientRect().height,
+    // A list field takes the same font as the page (the mailbox list of Scheduled runs).
+    selectFont: css('#schedule-mail-reader', 'font-family'),
+    // A text field and a text button of Scheduled runs (the schedule's own fields moved to the schedule editor).
+    fieldFill: css('#schedule-mail-due', 'background-color'),
+    fieldLine: css('#schedule-mail-due', 'border-bottom-color'),
+    fieldHeight: document.querySelector('#schedule-mail-due').getBoundingClientRect().height,
     // The Add-on configuration row at the foot of Settings: a name and a description line.
     rowHeight: document.querySelector('.ha-row').getBoundingClientRect().height,
-    filled: css('#pause', 'background-color'),
-    filledText: css('#pause', 'color'),
-    textButton: css('#schedule-reset', 'color'),
-    textButtonFill: css('#schedule-reset', 'background-color'),
+    // The form's submit button, the filled kind next to the text button below.
+    filled: css('#schedule-form button[type=submit]', 'background-color'),
+    filledText: css('#schedule-form button[type=submit]', 'color'),
+    textButton: css('#schedule-mail-reset', 'color'),
+    textButtonFill: css('#schedule-mail-reset', 'background-color'),
     // Every close button of Settings and its dialogs is the mdiClose icon, with no text glyph.
     closeIcons: [...document.querySelectorAll('#close-settings, dialog.studio-sheet .dialog-header .icon')].map(b =>
       `${b.textContent.trim() === ''} ${getComputedStyle(b, '::before').maskImage.includes('svg') || getComputedStyle(b, '::before').webkitMaskImage.includes('svg')}`),
@@ -140,7 +141,7 @@ const themeLook = target => target.evaluate(() => {
 
 /** Open the sections that hold a field and both kinds of button. */
 async function openThemedSections(target) {
-  for (const id of ['interaction-logs-section', 'assistant-section', 'scheduled-work'])
+  for (const id of ['scheduled-work'])
     await target.locator(`#${id} > h3 .settings-toggle`).click();
 }
 
@@ -180,13 +181,14 @@ async function openThemedSections(target) {
         {title: 'Accounts and connections', status: 'ChatGPT signing in: enter the code', attention: true},
         {title: 'ChatGPT account', status: 'Signing in: enter the code', attention: true},
         {title: 'GitHub', status: 'Connected as synthetic-owner, 1 repository', attention: false},
-        {title: 'ChatGPT app pairing', status: 'Unavailable', attention: false},
+        {title: 'ChatGPT app pairing', status: 'Off', attention: false},
+        {title: 'Full access', status: 'Off', attention: false},
         {title: 'Text size', status: 'Normal', attention: false},
-        {title: 'Interaction logs', status: 'Keeps 25', attention: false},
-        {title: 'Assistant', status: 'Running', attention: false},
-        {title: 'Browser permissions', status: 'None remembered', attention: false},
+        {title: 'Commands', status: '9 commands', attention: false},
         {title: 'Scheduled runs', status: 'Paused: time zone unavailable', attention: true},
         {title: 'Workspace instructions', status: 'AGENTS.md', attention: false},
+        {title: 'Advanced', status: 'Browser permissions: none remembered', attention: false},
+        {title: 'Browser permissions', status: 'None remembered', attention: false},
       ]);
       assert.equal(await page.locator('#remote-control-section .settings-toggle').count(), 0, 'own dialog stays open');
       await page.screenshot({path: path.join(SHOTS, `settings-collapsed-${colorScheme}-400.png`)});
@@ -247,7 +249,7 @@ async function openThemedSections(target) {
       const size = await windowSize(page);
       await checkLayout(page);
       await page.screenshot({path: path.join(SHOTS, `settings-collapsed-${colorScheme}-1280.png`)});
-      for (const id of ['accounts-section', 'app-pairing-section', 'assistant-section', 'workspace-section']) {
+      for (const id of ['accounts-section', 'app-pairing-section', 'workspace-section']) {
         await page.locator(`#${id} > :is(h3, h4) .settings-toggle`).click();
         assert.deepEqual(await windowSize(page), size, `the window keeps its size after ${id} opens`);
       }
@@ -275,7 +277,7 @@ async function openThemedSections(target) {
       assert.equal(look.textButtonFill, 'rgba(0, 0, 0, 0)', 'a text button has no fill');
       for (const part of ['fieldFill', 'fieldLine'])
         assert.ok(!['', 'rgba(0, 0, 0, 0)'].includes(look[part]), `${part} has a color: ${look[part]}`);
-      assert.ok(look.closeIcons.length >= 5 && look.closeIcons.every(icon => icon === 'true true'), `close icons: ${look.closeIcons}`);
+      assert.ok(look.closeIcons.length >= 4 && look.closeIcons.every(icon => icon === 'true true'), `close icons: ${look.closeIcons}`);
       await page.locator('#scheduled-work').screenshot({path: path.join(SHOTS, `theme-standalone-${colorScheme}-1280.png`)});
       assert.deepEqual(errors, []);
       await page.close();

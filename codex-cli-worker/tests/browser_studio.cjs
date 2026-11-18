@@ -29,9 +29,10 @@ fs.mkdirSync(output,{recursive:true});
     await page.screenshot({path:`${output}/before-${theme}-${width}.png`});
     assert.deepEqual(errors,[]);await context.close();continue;
    }
-   await page.locator('#connection-summary').filter({hasText:'Ready as'}).waitFor();
+   await page.locator('#remote-status-summary').filter({hasText:/^Ready$/}).waitFor();
+   assert.match(await page.locator('#remote-status-row').getAttribute('title'),/^Remote · Ready as /);
    // The side bar's foot holds the status rows; on a phone they are inside the chats drawer.
-   for (const id of ['#ha-status-row','#connection-manage','#settings-button']) {
+   for (const id of ['#codex-status-row','#github-status-row','#remote-status-row','#settings-button']) {
     const box=await page.locator(id).boundingBox();
     assert.equal(box.x>=0 && box.x+box.width<=width, width>700, `${id} in view at ${width}`);
    }
@@ -52,9 +53,10 @@ fs.mkdirSync(output,{recursive:true});
    if(width===390) assert.equal(await page.locator('.chat-header #menu').isVisible(),false);
    await page.screenshot({path:`${output}/after-${theme}-${width}.png`});
    await page.locator('#permission-button').click();
-   assert.equal(await page.locator('.permission-option:disabled').count(),2);
+   // Only Full access, while its switch is off; Auto-review can be chosen.
+   assert.equal(await page.locator('.permission-option:disabled').count(),1);
    await page.locator('[data-mode="read-only"]').click();
-   assert.equal(await page.locator('#permission-button').textContent(),'Read only⌄');
+   assert.equal(await page.locator('#permission-label').textContent(),'Read only');
    await page.locator('#permission-button').click();
    await page.locator('[data-mode="default"]').click();
    await page.locator('#attach').click();
@@ -71,15 +73,13 @@ fs.mkdirSync(output,{recursive:true});
    assert.equal(await page.locator('.document-attachment').textContent(),'sample.md · 1 KB ↓');
    // The fixture never invokes Codex; its synthetic worker completes this turn.
    await page.waitForFunction(()=>!document.getElementById('permission-button').disabled);
-   await page.locator(width===390?'#phone-thread-actions':'#thread-actions').click();
-   await page.locator('[data-action="status"]').click();
-   assert.match(await page.locator('#status-details').textContent(),/Usage and resetUnavailable/);
-   await page.locator('[data-close="status-dialog"]').click();
-   if(width>700) {
-    await page.locator('#ha-status-row').click();
-    assert.match(await page.locator('#status-details').textContent(),/Usage and resetUnavailable/);
-    await page.locator('[data-close="status-dialog"]').click();
-   }
+   // The conversation header has no menu; a chat's menu opens from its row in the chat list.
+   assert.equal(await page.locator('#thread-actions, #phone-thread-actions').count(),0);
+   const openRowMenu = async id => {
+    if(width===390 && !(await page.evaluate(()=>document.body.classList.contains('sidebar-open')))) await page.locator('#phone-history').click();
+    await page.locator(`.row-main[data-task-id="${id}"]`).click({button:'right'});
+    await page.locator('#chat-menu').waitFor();
+   };
    const taskId = await page.evaluate(()=>state.id);
    await page.route('**/tasks/*/settings', async route=>{await new Promise(resolve=>setTimeout(resolve,250));await route.continue();});
    await page.locator('#permission-button').click();
@@ -93,12 +93,7 @@ fs.mkdirSync(output,{recursive:true});
    await page.locator('[data-mode="default"]').click();
    await page.waitForFunction(()=>!document.getElementById('permissions-dialog').open);
 
-   const threadId = (await (await page.request.get(base+'tasks/'+taskId)).json()).task.session_id;
-   await page.evaluate(()=>{window.studioCopied=null;Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{window.studioCopied=text;}}});});
-   await page.locator(width===390?'#phone-thread-actions':'#thread-actions').click();
-   await page.locator('[data-action="copy-id"]').click();
-   await page.waitForFunction(expected=>window.studioCopied===expected,threadId);
-   await page.locator(width===390?'#phone-thread-actions':'#thread-actions').click();
+   await openRowMenu(taskId);
    await page.locator('[data-action="archive"]').click();
    await page.waitForFunction(()=>state.id===null);
    assert.equal((await (await page.request.get(base+'tasks/'+taskId)).json()).task.archived,true);
@@ -110,21 +105,26 @@ fs.mkdirSync(output,{recursive:true});
    if(reloadArchived) {
     await page.reload();
     await page.waitForFunction(expected=>state.id===expected&&!state.loading,taskId);
+    // A reload lists recent chats again; the archived chat's row is in the archived list.
+    await page.locator('#archive-list').click();
    }
 
-   await page.locator(width===390?'#phone-thread-actions':'#thread-actions').click();
+   await openRowMenu(taskId);
    await page.getByRole('menuitem',{name:'Restore chat',exact:true}).click();
    await page.waitForFunction(()=>state.id===null);
    const restored=(await (await page.request.get(base+'tasks/'+taskId)).json()).task;
    assert.equal(restored.archived,false);
    assert.equal(restored.turns[0].prompt_attachments[0].name,'sample.md');
-   if(!reloadArchived) {
-    if(width===390) await page.locator('#phone-history').click();
-    await page.locator('#archive-list').click();
-    if(width===390) await page.locator('#close-sidebar').click();
-   }
+   if(width===390) await page.locator('#phone-history').click();
+   await page.locator('#archive-list').click();
+   if(width===390) await page.locator('#close-sidebar').click();
 
    // On a phone the foot rows are reached through the chats drawer.
+   // The Remote row opens Settings at its part; Manage remote connection there opens the connection window.
+   const openRemote = async () => {
+    await footRow('#remote-status-row');
+    await page.locator('#remote-connection-open').click();
+   };
    const footRow = async id => {
     if(width===390 && !(await page.evaluate(()=>document.body.classList.contains('sidebar-open')))) await page.locator('#phone-history').click();
     await page.locator(id).click();
@@ -141,14 +141,14 @@ fs.mkdirSync(output,{recursive:true});
    // Five real state shapes, all from a synthetic intercepted status response.
    for (const state of ['off','starting','ready','reconnecting','error']) {
     remote={...remote,enabled:state!=='off',state,message:state==='error'?'Synthetic connection error':'Connected',pairing_code:'',pairing_url:''};
-    await footRow('#connection-manage');
+    await openRemote();
     await page.waitForFunction(expected=>document.body.dataset.connection===expected,state);
     await page.screenshot({path:`${output}/connection-${state}-${theme}-${width}.png`});
     await page.locator('[data-close="connection-dialog"]').click();
    }
    remote={...remote,enabled:true,state:'ready',message:'Connected'};
    await page.evaluate(()=>pollConnection());
-   await footRow('#connection-manage');
+   await openRemote();
    await page.locator('#remote-control-pair').click();
    await page.locator('.pairing-continue').waitFor();
    assert.equal(await page.locator('.pairing-continue').getAttribute('href'),'https://chatgpt.com/codex/pair?pairing_code=SAMPLE-NOT-VALID');

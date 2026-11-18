@@ -7,8 +7,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
-import sys
 import tempfile
 import threading
 import unittest
@@ -352,7 +350,9 @@ class ByNameTests(CallTestCase):
 
     def test_the_tool_description_states_the_read_back_limit(self):
         self.assertIn("first 5", ha_call_mcp.TOOL["description"])
-        self.assertIn("home_assistant.verify", ha_call_mcp.TOOL["description"])
+        # The ChatGPT app gets this tool too, without the page's verify tool, so it names none (step C).
+        self.assertIn("read the state with a read tool", ha_call_mcp.TOOL["description"])
+        self.assertNotIn("home_assistant.verify", ha_call_mcp.TOOL["description"])
 
 
 def configured(args):
@@ -410,10 +410,6 @@ class LaunchTests(unittest.TestCase):
             env = server.codex_env()
         self.assertNotIn("HA_CALL_CAPABILITY", env)
         self.assertNotIn("HA_CALL_SOCKET", env)
-
-
-GATE_HOOK = Path(__file__).resolve().parents[1] / "gate" / "gate_hook.py"
-CALL_ARGUMENTS = {"domain": "light", "service": "turn_on", "target": {"entity_id": ["light.sample_room"]}}
 
 
 class Launched(BaseException):
@@ -497,38 +493,6 @@ class RunTaskLaunchTests(unittest.TestCase):
             self.assertEqual("home_assistant_call" in text, has_tool)
 
 
-class CommandCheckTests(unittest.TestCase):
-    """The command check gives the call tool no decision: an allow would skip the person, a refusal every call."""
-
-    def run_hook(self, event, remote_on, tool_name="mcp__home_assistant_call__call", tool_input=None):
-        """Run the hook as Codex runs it (managed_config.toml), with the event on stdin."""
-        with tempfile.TemporaryDirectory() as tmp:
-            state = Path(tmp) / "remote_control.json"
-            state.write_text(json.dumps({"enabled": remote_on}), encoding="utf-8")
-            payload = {"hook_event_name": event, "tool_name": tool_name,
-                       "tool_input": CALL_ARGUMENTS if tool_input is None else tool_input}
-            return subprocess.run([sys.executable, "-I", str(GATE_HOOK), "--event", event, "--state", str(state)],
-                                  input=json.dumps(payload), capture_output=True, text=True, timeout=30,
-                                  check=False)
-
-    def test_the_hook_gives_the_call_tool_no_decision(self):
-        for event in ("PermissionRequest", "PreToolUse"):
-            for remote_on in (False, True):
-                with self.subTest(event=event, remote_control=remote_on):
-                    result = self.run_hook(event, remote_on)
-                    self.assertEqual((result.returncode, result.stdout), (0, ""))
-
-    def test_text_in_the_call_does_not_make_the_hook_refuse_it(self):
-        data = {**CALL_ARGUMENTS, "data": {"message": "danger-full-access"}}
-        result = self.run_hook("PreToolUse", True, tool_input=data)
-        self.assertEqual((result.returncode, result.stdout), (0, ""))
-
-    def test_another_tool_with_the_same_input_is_still_checked(self):
-        result = self.run_hook("PermissionRequest", True, tool_name="mcp__other__call")
-        self.assertEqual(result.returncode, 2)
-        self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"]["decision"]["behavior"], "deny")
-
-
 class InstructionTests(unittest.TestCase):
 
     def test_the_page_rules_send_a_change_through_the_tool(self):
@@ -540,10 +504,10 @@ class InstructionTests(unittest.TestCase):
         self.assertNotIn("automation/reload", text)
         self.assertEqual(server.home_assistant_api_instructions({}), "")
 
-    def test_the_app_keeps_its_token_text_until_it_has_the_tool(self):
+    def test_the_app_token_text_points_changes_to_the_tool_too(self):
         text = server.remote_control_instructions({"HA_TOKEN": "invented-token"})
-        self.assertNotIn("home_assistant_call", text)
-        self.assertIn("automation/reload", text)
+        self.assertIn("a reload and a restart included, use the home_assistant_call call tool", text)
+        self.assertNotIn("automation/reload", text)
 
 
 if __name__ == "__main__":

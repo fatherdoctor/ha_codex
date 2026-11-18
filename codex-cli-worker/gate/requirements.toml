@@ -1,45 +1,18 @@
-# Managed requirements for Codex in this app (/etc/codex/requirements.toml, read-only in the image).
+# Managed requirements for Codex in this app (/etc/codex/requirements.toml; full_access.py writes it from this copy).
 # They hold for every client, the chat page and the ChatGPT app's remote control alike, and no
 # file under /config or CODEX_HOME can loosen them.
 #
-# - No full-access sandbox, whatever a client asks for.
-# - Only the hooks named in /etc/codex/managed_config.toml run, so a hook planted in /config or
-#   CODEX_HOME cannot replace the command check.
+# - The values of the four permission modes (policy.MODES) and nothing else. The full-access sandbox
+#   and the "never" approval policy are added only while the owner's Full access switch is on
+#   (full_access.py writes this file at start and on each change).
+# - The person answers permission requests, or Codex's own reviewer (Auto-review) where a client asks
+#   for it. The person comes first, so a thread that names no reviewer asks the person.
+# - No hooks: allow_managed_hooks_only with no managed hooks means a hook planted in /config or
+#   CODEX_HOME never runs. A hook runs outside the sandbox, so this keeps the sandbox whole.
 #
 # Codex 0.166.0 lab captures confirm these keys. Relay thread/start can warn and fall
 # back to read-only for a disallowed setting; this policy does not promise an RPC error.
 allowed_sandbox_modes = ["read-only", "workspace-write"]
 allowed_approval_policies = ["on-request"]
+allowed_approvals_reviewers = ["user", "auto_review"]
 allow_managed_hooks_only = true
-
-# Literal command refusals supplement the semantic hook. No ordinary .rules or allow rules.
-
-[[rules.prefix_rules]]
-pattern = [{ token = "ha" }, { any_of = ["supervisor", "super", "su"] }]
-decision = "forbidden"
-justification = "The managed command rule refuses Supervisor access."
-
-[[rules.prefix_rules]]
-pattern = [{ token = "printenv" }, { any_of = ["SUPERVISOR_TOKEN", "HASSIO_TOKEN"] }]
-decision = "forbidden"
-justification = "The managed command rule refuses credential access."
-
-[[rules.prefix_rules]]
-pattern = [{ token = "cat" }, { any_of = ["/proc/1/environ", "/proc/self/environ", "/run/s6/container_environment/SUPERVISOR_TOKEN", "/run/s6/container_environment/HASSIO_TOKEN", "/config/secrets.yaml", "/config/secrets.yml", "/config/.storage/auth", "/config/.storage/auth_provider.homeassistant"] }]
-decision = "forbidden"
-justification = "The managed command rule refuses credential access."
-
-[[rules.prefix_rules]]
-pattern = [{ token = "cat" }, { any_of = ["/data/options.json", "/etc/codex/requirements.toml", "/etc/codex/managed_config.toml", "/usr/share/ha_codex/policy.json", "/data/codex-home/config.toml"] }]
-decision = "forbidden"
-justification = "The managed command rule protects the app settings and policy."
-
-[[rules.prefix_rules]]
-pattern = [{ token = "codex" }, { token = "--dangerously-bypass-approvals-and-sandbox" }]
-decision = "forbidden"
-justification = "The managed command rule refuses full access."
-
-[[rules.prefix_rules]]
-pattern = [{ token = "codex" }, { token = "--sandbox" }, { token = "danger-full-access" }]
-decision = "forbidden"
-justification = "The managed command rule refuses full access."

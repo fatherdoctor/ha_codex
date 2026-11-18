@@ -1,4 +1,4 @@
-"""Remote control: the machine name, the command and its environment, the gate, the supervisor and the routes."""
+"""Remote control: the machine name, the command and its environment, the supervisor and the routes."""
 from __future__ import annotations
 
 import importlib.util
@@ -117,34 +117,8 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(env, {"HA_TOKEN": "t", "HA_URL": "u", "CODEX_HOME": "/data/codex-home", "PATH": "/bin"})
 
 
-class GateTests(unittest.TestCase):
-    """Remote control starts only when the command gate's files are in the image."""
-
-    def test_missing_marker_blocks(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            self.assertEqual(rc.gate_problem(Path(tmp) / "none.json"), rc.GATE_MISSING)
-
-    def test_marker_naming_a_missing_file_blocks(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            marker = Path(tmp) / "gate.json"
-            marker.write_text(json.dumps({"files": [str(Path(tmp) / "hook")]}), encoding="utf-8")
-            self.assertIn("missing:", rc.gate_problem(marker))
-
-    def test_empty_or_malformed_marker_blocks(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            marker = Path(tmp) / "gate.json"
-            for text in ("{}", '{"files": []}', '{"files": [1]}', "not json"):
-                marker.write_text(text, encoding="utf-8")
-                self.assertEqual(rc.gate_problem(marker), rc.GATE_MISSING)
-
-    def test_marker_without_hook_and_requirements_blocks(self) -> None:
-        # Files alone are not enough: the marker must name the hook and requirements it checks (test_gate.py).
-        with tempfile.TemporaryDirectory() as tmp:
-            hook = Path(tmp) / "hook"
-            hook.write_text("x", encoding="utf-8")
-            marker = Path(tmp) / "gate.json"
-            marker.write_text(json.dumps({"files": [str(hook)]}), encoding="utf-8")
-            self.assertEqual(rc.gate_problem(marker), rc.GATE_MISSING)
+class RedactTests(unittest.TestCase):
+    """Long opaque strings are hidden from the log shown on the page."""
 
     def test_redact_keeps_the_pairing_code_only(self) -> None:
         token = "A" * 40
@@ -159,7 +133,6 @@ class SupervisorTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.state = Path(self.tmp.name) / "remote_control.json"
-        self.gate_reason = ""
         self.procs: list[FakeProc] = []
         self.commands: list[list[str]] = []
         self.envs: list[dict[str, str]] = []
@@ -174,7 +147,7 @@ class SupervisorTests(unittest.TestCase):
         self.sup = rc.Supervisor(
             codex_binary="/usr/local/bin/codex", state_path=self.state,
             env_factory=lambda: {"HA_TOKEN": "secret", "CODEX_HOME": "/data/codex-home"},
-            name_factory=lambda: "Home Assistant", gate=lambda: self.gate_reason, popen=popen, control_factory=FakeControl)
+            name_factory=lambda: "Home Assistant", popen=popen, control_factory=FakeControl)
         patcher = patch.multiple(rc, BACKOFF_START=0.05, BACKOFF_CAP=0.1, STOP_GRACE=0.2)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -185,24 +158,24 @@ class SupervisorTests(unittest.TestCase):
         self.assertEqual(self.sup.resume()["state"], "off")
         self.assertEqual(self.procs, [])
 
-    def test_start_refused_and_not_saved_while_gate_missing(self) -> None:
-        self.gate_reason = rc.GATE_MISSING
-        ok, state = self.sup.start()
-        self.assertFalse(ok)
-        self.assertEqual(state["state"], "blocked")
-        self.assertFalse(state["available"])
-        self.assertFalse(self.sup.enabled())
-        self.assertEqual(self.procs, [])
+    def test_start_needs_no_check_of_the_apps_own(self) -> None:
+        """0.3.6: no gate marker, hook self-test or rule-load probe stands between Turn on and the process."""
+        for name in ("gate_problem", "hook_problem", "requirements_problem", "exec_rules_self_test", "ConfigWatch"):
+            self.assertFalse(hasattr(rc, name), name)
+        state = self.sup.start()
+        self.assertTrue(self.sup.enabled())
+        self.assertTrue(state["available"])
+        self.assertEqual(state["blocked_reason"], "")
+        self.assertNotIn("config_findings", state)
+        self.assertTrue(wait_for(lambda: self.procs))
 
-    def test_resume_blocked_when_gate_removed_after_being_left_on(self) -> None:
+    def test_resume_runs_when_left_on(self) -> None:
         self.sup.save_enabled(True)
-        self.gate_reason = rc.GATE_MISSING
-        self.assertEqual(self.sup.resume()["state"], "blocked")
-        self.assertEqual(self.procs, [])
+        self.sup.resume()
+        self.assertTrue(wait_for(lambda: self.procs))
 
     def test_start_runs_foreground_process_and_reports_name_and_code(self) -> None:
-        ok, _ = self.sup.start()
-        self.assertTrue(ok)
+        self.sup.start()
         self.assertTrue(self.sup.enabled())
         self.assertTrue(wait_for(lambda: self.procs))
         self.assertIn("app-server", self.commands[0])
@@ -298,17 +271,18 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
         start.assert_not_called()
 
-    def test_page_start_refused_reports_reason(self) -> None:
-        state = {"state": "blocked", "blocked_reason": rc.GATE_MISSING}
-        with patch.object(server.remote_control_supervisor, "start", return_value=(False, state)):
+    def test_page_start_returns_the_state(self) -> None:
+        with patch.object(server.remote_control_supervisor, "start", return_value={"state": "starting"}):
             response = self.client.post("/remote-control/start", json={}, **self.ingress)
-        self.assertEqual(response.status_code, 409)
-        self.assertEqual(response.get_json()["error"], rc.GATE_MISSING)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["remote_control"]["state"], "starting")
 
     def test_page_stop_and_unknown_action(self) -> None:
         with patch.object(server.remote_control_supervisor, "stop", return_value={"state": "off"}):
             self.assertEqual(self.client.post("/remote-control/stop", json={}, **self.ingress).status_code, 200)
         self.assertEqual(self.client.post("/remote-control/reboot", json={}, **self.ingress).status_code, 404)
+        # The config watch and its review action are gone (0.3.6).
+        self.assertEqual(self.client.post("/remote-control/review", json={}, **self.ingress).status_code, 404)
 
 
 if __name__ == "__main__":

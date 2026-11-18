@@ -119,15 +119,15 @@ function hostPage(sessionReply, page = base) {
     ]) {
       const page = await browser.newPage();
       const errors = []; page.on('pageerror', e => errors.push(e.message));
-      let pauseCalls = 0;
+      let probeCalls = 0;
       let armed = false;
-      // Once armed, the first two pause requests fail as an expired session would; after the renewal they succeed.
-      await page.route('**/preview/pause', route => {
-        if (!armed) return route.fulfill({json: {ok: true, paused: false}});
-        pauseCalls += 1;
-        return pauseCalls <= 2
+      // Once armed, the first two requests fail as an expired session would; after the renewal they succeed.
+      await page.route('**/preview/browser-permissions', route => {
+        if (!armed) return route.fulfill({json: {ok: true, permissions: []}});
+        probeCalls += 1;
+        return probeCalls <= 2
           ? route.fulfill({status: 401, contentType: 'text/plain', body: '401: Unauthorized'})
-          : route.fulfill({json: {ok: true, paused: false}});
+          : route.fulfill({json: {ok: true, permissions: []}});
       });
       await page.route(`http://127.0.0.1:9137/${hostPath}`, route => route.fulfill({contentType: 'text/html', body: hostPage(
         "return request.type === 'supervisor/ingress/session' || request.type === 'supervisor/api' ? {session: 'synthetic-session'} : null;")}));
@@ -136,9 +136,9 @@ function hostPage(sessionReply, page = base) {
       await frame.waitForFunction(() => typeof api === 'function');
       armed = true;
       // Two requests fail together and share one renewal.
-      const results = await frame.evaluate(() => Promise.all([api('pause'), api('pause')]).then(r => r.map(d => d.ok)));
+      const results = await frame.evaluate(() => Promise.all([api('browser-permissions'), api('browser-permissions')]).then(r => r.map(d => d.ok)));
       assert.deepEqual(results, [true, true]);
-      assert.equal(pauseCalls, 4);
+      assert.equal(probeCalls, 4);
       assert.deepEqual(await page.evaluate(() => window.wsCalls), expected);
       assert.equal(await frame.locator('#session-banner').isHidden(), true);
       assert.deepEqual(errors, []);
@@ -147,15 +147,16 @@ function hostPage(sessionReply, page = base) {
     console.log('PASS 401: one renewal through Home Assistant (with the app slug when the address shows it), then the request again');
 
     // 3. When the renewal fails, the page says so in words, with a Reload button, and never shows the HTTP code.
+    // The address names the app, so the renewal tries both requests before it gives up.
     {
       const page = await browser.newPage();
-      await page.route('**/preview/pause', route => route.fulfill({status: 401, contentType: 'text/plain', body: '401: Unauthorized'}));
-      await page.route('http://127.0.0.1:9137/ingress-host', route => route.fulfill({contentType: 'text/html', body: hostPage(
+      await page.route('**/preview/browser-permissions', route => route.fulfill({status: 401, contentType: 'text/plain', body: '401: Unauthorized'}));
+      await page.route('http://127.0.0.1:9137/app/local_codex_cli', route => route.fulfill({contentType: 'text/html', body: hostPage(
         "throw new Error('Unauthorized');")}));
-      await page.goto('http://127.0.0.1:9137/ingress-host');
+      await page.goto('http://127.0.0.1:9137/app/local_codex_cli');
       const frame = await (await page.waitForSelector('iframe')).contentFrame();
       await frame.waitForFunction(() => typeof api === 'function');
-      const message = await frame.evaluate(() => api('pause').then(() => 'no error', e => e.message));
+      const message = await frame.evaluate(() => api('browser-permissions').then(() => 'no error', e => e.message));
       assert.equal(message, 'Your Home Assistant session expired. Reload the page to continue.');
       assert.doesNotMatch(message, /401|HTTP/);
       assert.equal(await frame.locator('#session-banner').isVisible(), true);
@@ -167,16 +168,16 @@ function hostPage(sessionReply, page = base) {
     // 4. Outside Home Assistant there is no parent to ask: no renewal, the same plain message.
     {
       const page = await browser.newPage();
-      await page.route('**/preview/pause', route => route.fulfill({status: 401, contentType: 'text/plain', body: '401: Unauthorized'}));
+      await page.route('**/preview/browser-permissions', route => route.fulfill({status: 401, contentType: 'text/plain', body: '401: Unauthorized'}));
       await page.goto(base);
       await page.waitForFunction(() => typeof api === 'function');
-      const message = await page.evaluate(() => api('pause').then(() => 'no error', e => e.message));
+      const message = await page.evaluate(() => api('browser-permissions').then(() => 'no error', e => e.message));
       assert.equal(message, 'Your Home Assistant session expired. Reload the page to continue.');
       assert.equal(await page.locator('#session-banner').isVisible(), true);
       // A later request that gets through (the owner signed in again in another tab) hides the banner.
-      await page.unroute('**/preview/pause');
-      await page.route('**/preview/pause', route => route.fulfill({json: {ok: true, paused: false}}));
-      await page.evaluate(() => api('pause'));
+      await page.unroute('**/preview/browser-permissions');
+      await page.route('**/preview/browser-permissions', route => route.fulfill({json: {ok: true, permissions: []}}));
+      await page.evaluate(() => api('browser-permissions'));
       assert.equal(await page.locator('#session-banner').isHidden(), true);
       await page.close();
     }
@@ -186,14 +187,14 @@ function hostPage(sessionReply, page = base) {
     const crossOrigin = await chromium.launch({headless: true, args: ['--disable-features=LocalNetworkAccessChecks']});
     try {
       const page = await crossOrigin.newPage();
-      await page.route('**/preview/pause', route => route.fulfill({status: 401, contentType: 'text/plain', body: '401: Unauthorized'}));
+      await page.route('**/preview/browser-permissions', route => route.fulfill({status: 401, contentType: 'text/plain', body: '401: Unauthorized'}));
       // The same server under its other local name: the parent and the page are on different origins.
       await page.route('http://127.0.0.1:9137/ingress-host', route => route.fulfill({contentType: 'text/html', body: hostPage(
         "return {session: 'synthetic-session'};", 'http://localhost:9137/preview/')}));
       await page.goto('http://127.0.0.1:9137/ingress-host');
       const frame = await (await page.waitForSelector('iframe')).contentFrame();
       await frame.waitForFunction(() => typeof api === 'function');
-      const message = await frame.evaluate(() => api('pause').then(() => 'no error', e => e.message));
+      const message = await frame.evaluate(() => api('browser-permissions').then(() => 'no error', e => e.message));
       assert.equal(message, 'Your Home Assistant session expired. Reload the page to continue.');
       assert.equal(await frame.locator('#session-banner').isVisible(), true);
       assert.deepEqual(await page.evaluate(() => window.wsCalls), []);

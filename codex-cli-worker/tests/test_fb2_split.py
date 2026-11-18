@@ -40,10 +40,10 @@ class AddonConfigurationLink(unittest.TestCase):
 
     def test_the_link_uses_the_slug_with_its_repository_prefix(self):
         with patch.object(server.requests, "get", return_value=supervisor_info("a1b2c3d4_codex_cli_worker")) as get:
-            self.assertEqual(self.link(), "/hassio/addon/a1b2c3d4_codex_cli_worker/config")
+            self.assertEqual(self.link(), "/config/app/a1b2c3d4_codex_cli_worker/config")
             self.assertEqual(get.call_args.args[0], "http://supervisor/addons/self/info")
             # A known slug is kept, so a second Settings visit does not ask Supervisor again.
-            self.assertEqual(self.link(), "/hassio/addon/a1b2c3d4_codex_cli_worker/config")
+            self.assertEqual(self.link(), "/config/app/a1b2c3d4_codex_cli_worker/config")
             get.assert_called_once()
 
     def test_no_link_when_supervisor_cannot_say_and_it_asks_again_later(self):
@@ -52,7 +52,7 @@ class AddonConfigurationLink(unittest.TestCase):
         with patch.object(server.requests, "get", return_value=supervisor_info(error=requests.HTTPError("403"))):
             self.assertIsNone(self.link())
         with patch.object(server.requests, "get", return_value=supervisor_info("local_codex_cli_worker")):
-            self.assertEqual(self.link(), "/hassio/addon/local_codex_cli_worker/config")
+            self.assertEqual(self.link(), "/config/app/local_codex_cli_worker/config")
 
     def test_a_slug_that_is_not_a_slug_never_reaches_the_link(self):
         for slug in ("../../profile", "x/config?y", "Codex", "", None, 7, "a" * 65):
@@ -89,7 +89,8 @@ class SettingsPage(unittest.TestCase):
         self.studio = (WEB / "assets" / "studio.js").read_text()
 
     def test_moved_and_empty_parts_are_gone(self):
-        for gone in ('id="appearance-section"', 'id="advanced-section"', 'id="diagnostic-retention"',
+        # Advanced came back in 0.3.6 to hold Browser permissions (SettingsAccordion below).
+        for gone in ('id="appearance-section"', 'id="diagnostic-retention"',
                      'id="save-diagnostic-retention"', 'id="remote-control-name-form"'):
             with self.subTest(gone=gone):
                 self.assertNotIn(gone, self.html)
@@ -114,7 +115,36 @@ class SettingsPage(unittest.TestCase):
         self.assertIn('aria-label="Add-on configuration"', row)
         settings = self.html.split('<dialog id="settings">', 1)[1].split("</dialog>", 1)[0]
         self.assertGreater(settings.index('id="addon-configuration"'), settings.index('id="workspace-section"'))
-        self.assertIn('data.url.startsWith("/hassio/addon/")', self.chat)
+        self.assertIn('data.url.startsWith("/config/app/")', self.chat)
+        # Home Assistant 2026.5, this app's minimum, has no /hassio/ panel: a link there opens a missing page.
+        self.assertNotIn("/hassio/addon/", self.chat)
+        self.assertNotIn('"/hassio/addon/', inspect.getsource(server.addon_configuration))
+
+
+class SettingsAccordion(unittest.TestCase):
+    """One top-level Settings section open at a time, and Browser permissions folded under Advanced (0.3.6)."""
+
+    def setUp(self):
+        self.html = (WEB / "index.html").read_text()
+        self.chat = (WEB / "assets" / "chat.js").read_text()
+        self.settings = self.html.split('<dialog id="settings">', 1)[1].split("</dialog>", 1)[0]
+
+    def test_browser_permissions_is_a_part_of_advanced_the_last_section(self):
+        advanced = self.settings.split('<section id="advanced-section"', 1)[1]
+        self.assertLess(advanced.index('id="browser-permissions-section"'), advanced.index('id="addon-configuration"'))
+        self.assertEqual(self.settings.count('id="browser-permissions-section"'), 1)
+        self.assertEqual(self.settings.count('id="browser-permissions"'), 1)
+        # Advanced is the last section; only the Add-on configuration row and the result line follow it.
+        after = advanced.split('id="addon-configuration"', 1)[1]
+        self.assertNotIn("<section", after)
+        self.assertIn("#advanced-section > section", self.chat)
+
+    def test_opening_a_top_level_section_closes_the_others(self):
+        opener = self.chat.split("function openSettingsSection(", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("if (open && !parent) closeOtherSettingsSections(section);", opener)
+        closer = self.chat.split("function closeOtherSettingsSections(", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn('document.querySelectorAll("#settings > section")', closer)
+        self.assertIn("openSettingsSection(other, false)", closer)
 
 
 if __name__ == "__main__":

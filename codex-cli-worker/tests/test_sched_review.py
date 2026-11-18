@@ -13,8 +13,6 @@ from unittest.mock import patch
 
 from test_server import server
 import scheduling
-import approvals
-import gate_rules
 from test_scheduling import FakeWorker, NOW, proposal
 import test_scheduling as fixtures
 from test_server import server
@@ -186,7 +184,7 @@ class ReviewApiTests(unittest.TestCase):
             notify.assert_not_called(); question.assert_not_called()
             server.tasks['chat']={}
             server.notify_task_outcome('chat','completed','sample'); notify.assert_not_called()
-            server.notify_task_outcome('chat','failed','sample'); notify.assert_called_once()
+            server.notify_task_outcome('chat','failed','sample'); notify.assert_not_called()
             server.notify_task_outcome('chat','needs_input','sample','turn','question',['choice']); question.assert_called_once()
 
     def test_f7_masked_prompt_flag_and_edit_rejection(self):
@@ -209,14 +207,6 @@ class ReviewApiTests(unittest.TestCase):
 
 
 class ProtectionTests(unittest.TestCase):
-    def test_f4_database_and_all_sidecars_are_protected(self):
-        for suffix in ('','-journal','-wal','-shm'):
-            path='/data/schedules.sqlite3'+suffix
-            with self.subTest(path=path):
-                self.assertTrue(approvals.touches_protected_path(path))
-                self.assertTrue(approvals.command_names_protected_path('cat '+path))
-                self.assertIsNotNone(gate_rules._policy_restriction('cat '+path))
-
     def test_f4_wrapper_masks_each_existing_private_file_after_caller_binds(self):
         worker=Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmp:

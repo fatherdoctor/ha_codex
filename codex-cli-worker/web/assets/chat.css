@@ -657,11 +657,6 @@ h1 {
   margin-top: 14px;
   font-weight: 500;
 }
-.copy-buffer {
-  position: fixed;
-  top: 0;
-  left: -10000px;
-}
 /* The answers Codex offers with a question, one button each. */
 .permission-card {
   margin: 16px 0;
@@ -1209,6 +1204,7 @@ h1 {
   margin: 0 auto;
 }
 #composer {
+  position: relative;
   border: 1px solid var(--line);
   border-radius: 19px;
   padding: 14px 15px 10px;
@@ -1245,13 +1241,6 @@ textarea::placeholder {
   justify-content: space-between;
   gap: 10px;
   margin-top: 7px;
-}
-#compose-hint {
-  font-size: calc(10px * var(--text-scale));
-  color: var(--muted);
-  text-align: center;
-  margin: 8px 0 0;
-  line-height: 1.5;
 }
 .compose-tools {
   position: relative; /* Anchors the picker popovers, so they open from the left edge on phones. */
@@ -1551,8 +1540,12 @@ textarea::placeholder {
     padding-right: 8px;
   }
 }
+/* The arrow is an icon centered in the circle, not a text glyph that sits on the font's baseline. */
 #send {
   font-size: calc(22px * var(--text-scale));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 35px;
   height: 35px;
   border-radius: 50%;
@@ -1876,9 +1869,6 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   .queued-actions {
     max-width: 94%;
   }
-  #compose-hint {
-    line-height: 1.5;
-  }
   .footnote {
     font-size: calc(9px * var(--text-scale));
   }
@@ -1944,6 +1934,80 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   max-width: 260px;
 }
 
+/* The list of slash commands that opens above the message box. */
+.slash-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  max-height: min(320px, 45dvh);
+  overflow-y: auto;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow:
+    0 5px 22px #00000012,
+    0 1px 4px #00000008;
+  padding: 6px;
+  z-index: 15;
+}
+.slash-option {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  border-radius: 11px;
+  padding: 9px 9px;
+  min-height: 44px;
+  cursor: pointer;
+  color: var(--text);
+  font-size: calc(14px * var(--text-scale));
+  user-select: none;
+}
+.slash-option[aria-selected="true"] {
+  background: var(--surface);
+}
+@media (hover: hover) {
+  .slash-option:hover {
+    background: var(--surface);
+  }
+}
+.slash-name {
+  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.slash-description {
+  color: var(--muted);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.command-list {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 14px;
+  font-size: calc(14px * var(--text-scale));
+}
+.command-list dt {
+  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.command-list dd {
+  margin: 0;
+  color: var(--muted);
+  min-width: 0;
+}
+/* On a narrow phone the two columns leave each description a word wide, so
+   each command goes above its description instead. */
+@media (max-width: 480px) {
+  .command-list {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 2px;
+  }
+  .command-list dd {
+    margin-bottom: 8px;
+  }
+}
 /* Remote-control pairing code: large, steady, and in a font that tells 0 from O. */
 .pairing-code {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
@@ -1970,11 +2034,6 @@ dialog :is(h3, h4):has(> .settings-toggle) {
 
 .remote-control-warning {
   font-weight: 600;
-}
-#remote-control-findings-list {
-  margin: 0.25rem 0 0.5rem;
-  padding-left: 1.25rem;
-  overflow-wrap: anywhere;
 }
 
 /* Sign-in: a code that reads the same on every screen, with 0 and O told apart. */
@@ -2075,6 +2134,18 @@ dialog :is(h3, h4):has(> .settings-toggle) {
 :is(#settings, .studio-sheet) :is(input, select, textarea):not(#agents):focus-visible {
   outline: 0;
   border-bottom: 2px solid var(--accent);
+}
+/* The schedule editor: the trigger, its day and its time share one row, and wrap on a phone. */
+.schedule-trigger {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 12px;
+}
+.schedule-trigger > div {
+  flex: 1 1 8.5rem;
+}
+.schedule-trigger > [hidden] {
+  display: none;
 }
 #settings label,
 .studio-sheet label {
@@ -2210,6 +2281,7 @@ details.disclosure > summary::-webkit-details-marker {
   /* Material Design Icons (Apache-2.0, @mdi/js 7.4.47): mdiCog for Settings, mdiStop for the stop button. */
   --mdi-cog: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.21,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.21,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.67 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z'/%3E%3C/svg%3E");
   --mdi-stop: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M18,18H6V6H18V18Z'/%3E%3C/svg%3E");
+  --mdi-arrow-up: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M13,20H11V8L5.5,13.5L4.08,12.08L12,4.16L19.92,12.08L18.5,13.5L13,8V20Z'/%3E%3C/svg%3E");
   /* A row that needs the owner shows an amber dot: Home Assistant's warning color, else the page's own. */
   --needs-owner: var(--warning-color, #b26a00);
 }
@@ -2227,6 +2299,10 @@ details.disclosure > summary::-webkit-details-marker {
 .mdi-stop {
   -webkit-mask: var(--mdi-stop) center / 20px no-repeat;
   mask: var(--mdi-stop) center / 20px no-repeat;
+}
+.mdi-arrow-up {
+  -webkit-mask: var(--mdi-arrow-up) center / 20px no-repeat;
+  mask: var(--mdi-arrow-up) center / 20px no-repeat;
 }
 
 /* The thin title row above the messages: the title and the chat menu. */
@@ -2290,18 +2366,14 @@ main > .chat-header h1 {
   border-radius: 50%;
   background: var(--muted);
 }
-#ha-status-row[data-state="ready"] .status-dot,
-#ha-status-row[data-state="starting"] .status-dot,
-body[data-connection="ready"] #connection-manage .status-dot,
-body[data-connection="starting"] #connection-manage .status-dot {
+.foot-row[data-state="ready"] .status-dot,
+.foot-row[data-state="starting"] .status-dot {
   background: var(--accent);
 }
-#ha-status-row[data-state="needs-owner"] .status-dot,
-body[data-connection="reconnecting"] #connection-manage .status-dot {
+.foot-row[data-state="needs-owner"] .status-dot {
   background: var(--needs-owner);
 }
-#ha-status-row[data-state="error"] .status-dot,
-body[data-connection="error"] #connection-manage .status-dot {
+.foot-row[data-state="error"] .status-dot {
   background: var(--error);
 }
 .sidebar-footer .usage {
@@ -2659,4 +2731,32 @@ a.ha-nav-row:focus-visible {
   background: var(--secondary-text-color, var(--muted));
   -webkit-mask: var(--mdi-chevron-right) center / 24px no-repeat;
   mask: var(--mdi-chevron-right) center / 24px no-repeat;
+}
+
+/* Full access is on: the banner and a chat set to Full access are marked in the error color. */
+#full-access-banner {
+  border-color: var(--error);
+}
+#permission-button.full-access {
+  color: var(--error);
+}
+/* The Share dialog's two choices: the whole chat, or its last lines. */
+.share-range {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0 0;
+  padding: 0;
+  border: 0;
+}
+.share-range label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+#share-lines {
+  width: 7em;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
 }

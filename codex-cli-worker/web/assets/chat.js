@@ -391,21 +391,27 @@ function planLine(usage, planType) {
   }
   return parts.join(" · ");
 }
-// The Home Assistant row at the foot of the side bar: the state of the Codex integration.
-const HOME_ASSISTANT_STATES = {
-  ok: ["ready", "Ready"],
-  starting: ["starting", "Starting"],
-  not_installed: ["needs-owner", "Integration not installed"],
-  outdated: ["needs-owner", "Integration out of date"],
-  not_connected: ["needs-owner", "Integration not connected"],
-};
-/** Show the integration state in the side bar row; a failed status read shows Unavailable. */
-function renderHomeAssistantStatus(integration) {
-  const [dot, text] = integration === undefined
-    ? ["error", "Unavailable"]
-    : HOME_ASSISTANT_STATES[integration?.state] || ["error", "Unavailable"];
-  $("ha-status-row").dataset.state = dot;
-  $("ha-status-summary").textContent = text;
+/*
+ * The three rows at the foot of the side bar: Codex (the ChatGPT sign-in),
+ * GitHub and Remote (the ChatGPT app connection). Each shows one word or two
+ * and a dot: ready, starting, needs-owner, error or off.
+ */
+function setFootRow(id, dot, text) {
+  $(id).dataset.state = dot;
+  $(id.replace("-row", "-summary")).textContent = text;
+}
+/** Open Settings at one part of Accounts and connections, as a foot row or a banner asks. */
+async function openAccountItem(sectionId) {
+  await $("settings-button").onclick();
+  openSettingsSection($(sectionId));
+  $(sectionId).scrollIntoView({ block: "start" });
+}
+for (const id of ["codex-status-row", "github-status-row", "remote-status-row"])
+  $(id).onclick = () => openAccountItem($(id).dataset.section);
+/** The ChatGPT account part says whether a turn has confirmed Codex access with this sign-in. */
+function renderCodexAccess(access) {
+  $("codex-access").textContent = access?.message || "";
+  $("codex-access").hidden = !access?.message;
 }
 // Where the line at the top of the chat sends someone to install the integration.
 const INTEGRATION_INSTALL_URL =
@@ -462,16 +468,17 @@ async function loadUsage() {
   try {
     if (!document.hidden) {
       const data = await api("status");
+      document.dispatchEvent(new CustomEvent("worker-status", { detail: data }));
       renderUsage(data.codex_usage, data.account_access?.plan_type);
       renderIntegration(data.integration);
-      renderHomeAssistantStatus(data.integration || null);
+      renderCodexAccess(data.account_access);
       // The quota check also tells the worker which model Codex picks when the add-on names none.
       // Not awaited: the quota shown must not depend on it.
       if (state.catalog) loadChatOptions(true);
     }
   } catch (_) {
     renderUsage();
-    renderHomeAssistantStatus(undefined);
+    renderCodexAccess({ message: "Codex access could not be checked." });
   } finally {
     usageLoading = false;
     usageTimer = setTimeout(loadUsage, 60000);
@@ -590,28 +597,6 @@ async function api(path, body, method) {
   return data;
 }
 
-document.getElementById("export-interaction-logs").addEventListener("click", async () => {
-  const button = document.getElementById("export-interaction-logs");
-  const status = document.getElementById("export-logs-status");
-  button.disabled = true;
-  try {
-    const response = await pageFetch("diagnostics/export", { cache: "no-store" });
-    if (!response.ok) throw new Error("The export could not be downloaded. Try again.");
-    const data = await response.json();
-    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "codex-interactions.json";
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    status.textContent = "Downloaded. Open the file to review it before attaching it to a bug report. Nothing was sent.";
-  } catch (_error) {
-    status.textContent = "The export could not be downloaded. Try again.";
-  } finally {
-    button.disabled = false;
-  }
-});
-
 /** Build an error that keeps the HTTP status so callers can tell 404 apart. */
 function workerError(message, status) {
   const error = new Error(message);
@@ -716,11 +701,6 @@ function controls() {
   $("attach").disabled =
     state.busy ||
     state.files.length + preparingCount(state.files) >= UPLOADS_PER_MESSAGE;
-  $("compose-hint").textContent = state.id
-    ? task?.status === "in_queue"
-      ? "This chat starts when its message leaves the queue."
-      : "Continue this conversation with its saved context."
-    : "A new chat starts a separate conversation.";
   let notice = "";
   if (waiting)
     notice =
@@ -963,8 +943,14 @@ function messageAttachments(list) {
   return (Array.isArray(list) ? list : []).filter(item =>
     item && ['image', 'file'].includes(item.kind) && /^[0-9a-f]{32}$/.test(item.attachment_id));
 }
+/**
+ * The chat's permission mode for the next message. A Full access choice reads as
+ * Default once the owner's switch is off (full_access.js sets the flag), so the
+ * page shows and sends what the worker will run.
+ */
 function selectedPermissionMode() {
-  return state.permissionModes.get(state.id) || state.task?.permission_mode || 'default';
+  const mode = state.permissionModes.get(state.id) || state.task?.permission_mode || 'default';
+  return mode === 'full-access' && document.body.dataset.fullAccess !== 'on' ? 'default' : mode;
 }
 /** Return the image attachments in a list that carry a well-formed id. */
 function imageAttachments(list) {
@@ -1399,7 +1385,9 @@ async function loadBrowserPermissions() {
     if (load !== browserPermissionLoad) return;
     area.replaceChildren();
     if (!permissions.length) area.append(textNode("p", "No browser permissions remembered.", "muted"));
-    setSectionStatus("browser-permissions-section", permissions.length ? `${permissions.length} remembered` : "None remembered");
+    const remembered = permissions.length ? `${permissions.length} remembered` : "None remembered";
+    setSectionStatus("browser-permissions-section", remembered);
+    setSectionStatus("advanced-section", `Browser permissions: ${remembered.toLowerCase()}`);
     for (const permission of permissions) {
       const row = textNode("div", "", "saved-browser-permission");
       const info = textNode("div", "", "saved-browser-permission-info");
@@ -1428,6 +1416,8 @@ async function loadBrowserPermissions() {
     if (load !== browserPermissionLoad) return;
     area.replaceChildren(textNode("p", String(error.message || error)));
     setSectionStatus("browser-permissions-section", "Could not be read", true);
+    // Advanced is closed by default, so its header carries the problem too.
+    setSectionStatus("advanced-section", "Browser permissions could not be read", true);
     // An unreadable permissions file can only be replaced, never edited here.
     if (error.status === 503) {
       const clear = textNode("button", "Remove all saved permissions", "subtle");
@@ -1452,43 +1442,6 @@ async function loadBrowserPermissions() {
  */
 function showsQuestionApart(turn) {
   return Boolean(turn.question) && !(turn.summary || "").includes(turn.question);
-}
-/** Try the browser clipboard, then the selection-based copy used on local HTTP. */
-async function copyText(text) {
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch (_) {
-    // Ingress, browser permissions, or a WebView can deny the modern API.
-  }
-  const focus = document.activeElement;
-  const selection = window.getSelection();
-  const ranges = selection
-    ? Array.from({ length: selection.rangeCount }, (_, index) =>
-        selection.getRangeAt(index).cloneRange(),
-      )
-    : [];
-  const buffer = textNode("textarea", "", "copy-buffer");
-  buffer.value = text;
-  buffer.readOnly = true;
-  buffer.tabIndex = -1;
-  document.body.append(buffer);
-  try {
-    buffer.focus({ preventScroll: true });
-    buffer.select();
-    return document.execCommand("copy");
-  } catch (_) {
-    return false;
-  } finally {
-    buffer.remove();
-    if (focus?.isConnected) focus.focus({ preventScroll: true });
-    if (selection) {
-      selection.removeAllRanges();
-      for (const range of ranges) selection.addRange(range);
-    }
-  }
 }
 /** Draw the open chat: every exchange with its answer, checks, saved copies, and steps. */
 function renderTask(force = false) {
@@ -1658,7 +1611,7 @@ function renderTask(force = false) {
 function approvalHeadline(approval) {
   const plain = approval.confirmation || {};
   const first = [
-    approval.command, approval.action, plain.what, approval.network,
+    approval.command, approval.action, plain.what, approval.tool, approval.network,
     approval.changes?.[0]?.path, approval.scope,
   ].find(value => typeof value === "string" && value.trim());
   return first ? first.trim().split("\n")[0] : "";
@@ -1692,6 +1645,9 @@ function renderApproval(approval, taskId, turnId, active) {
   if (approval.cwd) card.append(textNode("p", `Working folder: ${approval.cwd}`, "permission-folder"));
   if (approval.network) card.append(textNode("p", `Network host: ${approval.network}`));
   if (approval.command) card.append(textNode("pre", approval.command, "permission-command"));
+  // A tool request: the tool's name and every argument it will send, as the worker recorded them.
+  if (approval.tool) card.append(textNode("p", `Tool: ${approval.tool}`, "permission-folder"));
+  if (approval.arguments) card.append(textNode("pre", approval.arguments, "permission-command"));
   for (const change of approval.changes || []) {
     card.append(textNode("p", `${change.kind}: ${change.path}`, "permission-folder"));
     if (change.move_path) card.append(textNode("p", `Move to: ${change.move_path}`, "permission-folder"));
@@ -2359,7 +2315,7 @@ function openChatMenu(id, trigger, point = null) {
   if (!sheet) positionChatMenu();
   menu.trigger?.setAttribute("aria-expanded", "true");
   menu.trigger?.closest(".chat-row")?.classList.add("menu-open");
-  for (const action of ["pin", "rename", "delete", "copy-id", "archive"])
+  for (const action of ["pin", "rename", "share", "schedule", "delete", "archive"])
     panel.querySelector(`[data-action="${action}"]`).disabled = !id ||
       (["delete", "archive"].includes(action) && (working || Boolean(state.task?.queued_message)));
   panel.querySelector('[data-action="archive"]').textContent = chat?.archived ? "Restore chat" : "Archive";
@@ -2493,6 +2449,7 @@ $("chat-menu").addEventListener("click", async (event) => {
   if (action === "pin") await togglePin(id);
   else if (action === "rename") openRename(id);
   else if (action === "delete") openDelete(id);
+  else if (action === "share") openShare(id);
   else document.dispatchEvent(new CustomEvent("thread-action", {detail: {action, id}}));
 });
 /** Pin or unpin a chat through the worker API and re-sort the list. */
@@ -2546,6 +2503,48 @@ $("rename-form").addEventListener("submit", async (event) => {
     $("rename-save").disabled = false;
   }
 });
+/** Open the Share dialog for a chat: the whole chat, or its last lines. */
+function openShare(id) {
+  if (!chatById(id) && id !== state.id) return;
+  $("share-dialog").dataset.chatId = id;
+  $("share-download").disabled = false;
+  dialogError("share", null);
+  $("share-dialog").showModal();
+  $("share-download").focus();
+}
+$("share-cancel").onclick = () => $("share-dialog").close();
+$("share-lines").addEventListener("focus", () => {
+  $("share-form").elements["share-range"].value = "last";
+});
+$("share-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const id = $("share-dialog").dataset.chatId;
+  let query = "";
+  if ($("share-form").elements["share-range"].value === "last") {
+    const lines = Number($("share-lines").value);
+    if (!Number.isInteger(lines) || lines < 1 || lines > 100000) {
+      dialogError("share", "Enter a number of lines from 1 to 100000.");
+      return;
+    }
+    query = `?lines=${lines}`;
+  }
+  $("share-download").disabled = true;
+  try {
+    const response = await pageFetch(`tasks/${encodeURIComponent(id)}/share${query}`, { cache: "no-store" });
+    if (!response.ok) throw new Error("The chat could not be downloaded. Try again.");
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `codex-chat-${id}.md`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    $("share-dialog").close();
+  } catch (error) {
+    dialogError("share", error);
+  } finally {
+    $("share-download").disabled = false;
+  }
+});
 /** Open the delete confirmation dialog for a chat. */
 function openDelete(id) {
   const chat = chatById(id);
@@ -2559,7 +2558,7 @@ function openDelete(id) {
   $("delete-cancel").focus();
 }
 $("delete-cancel").onclick = () => $("delete-dialog").close();
-for (const name of ["rename", "delete"])
+for (const name of ["rename", "share", "delete"])
   $(name + "-dialog").addEventListener("close", () => {
     // Return focus to the row's menu button, or to New chat when the row is gone.
     const trigger = menu.returnId
@@ -2591,6 +2590,9 @@ $("delete-confirm").onclick = async () => {
 };
 $("composer").addEventListener("submit", async (event) => {
   event.preventDefault();
+  // A message that is exactly a command the page can run is run here, not sent.
+  const command = !state.files.length && slashCommand($("message").value);
+  if (command) return runSlash(command);
   if ($("send").disabled) return;
   const message = $("message").value.trim();
   const id = state.id;
@@ -2864,9 +2866,11 @@ $("composer").addEventListener("drop", (event) => {
 });
 $("message").addEventListener("input", () => {
   resizeInput();
+  renderSlash();
   controls();
 });
 $("message").addEventListener("keydown", (event) => {
+  if (slashKeydown(event)) return;
   if (
     event.key === "Enter" &&
     !event.shiftKey &&
@@ -2985,17 +2989,230 @@ $("divider").addEventListener("keydown", (event) => {
 window.addEventListener("resize", () => {
   if (innerWidth > 700) setWidth($("divider").getAttribute("aria-valuenow"));
 });
+/**
+ * Slash commands. Messages go to Codex as plain text through `codex exec`,
+ * which does not read the TUI's slash commands, so "/new" sent as a message
+ * would only reach the model as words. The page runs these commands itself
+ * instead: typing "/" at the start of the message box lists them, filtered as
+ * you type, and a tap, or Enter or Tab on the highlighted one, runs it.
+ * A command is listed only while the page can run it (Stop only while a
+ * chat is working, Rename only with a chat open).
+ */
+const SLASH_COMMANDS = [
+  {
+    name: "new",
+    description: "Start a new chat",
+    when: "always",
+    available: () => !$("new-chat").disabled,
+    run: () => selectChat(null),
+  },
+  {
+    name: "stop",
+    description: "Stop the chat that is working",
+    when: "while a chat is working",
+    available: () => !$("cancel").hidden && !$("cancel").disabled,
+    run: () => $("cancel").click(),
+  },
+  {
+    name: "model",
+    description: "Choose the model for this chat",
+    when: "always",
+    available: () => Boolean(state.catalog) && !$("model-button").disabled,
+    run: () => openPicker("model"),
+  },
+  {
+    name: "reasoning",
+    description: "Choose how long Codex thinks before it answers",
+    when: "always",
+    available: () => Boolean(state.catalog) && !$("effort-button").disabled,
+    run: () => openPicker("effort"),
+  },
+  {
+    name: "rename",
+    description: "Rename this chat",
+    when: "with a chat open",
+    available: () => Boolean(state.id && chatById(state.id)),
+    run: () => openRename(state.id),
+  },
+  {
+    name: "usage",
+    aliases: ["status"],
+    description: "Show how much of your ChatGPT plan is used",
+    when: "always",
+    available: () => true,
+    run: () => {
+      loadUsage();
+      if (matchMedia("(max-width:700px)").matches) sidebar(true);
+      $("usage").scrollIntoView({ block: "nearest" });
+    },
+  },
+  {
+    name: "size",
+    description: "Change the text size",
+    when: "always",
+    available: () => true,
+    run: () => openSettingsAt("text-size-section"),
+  },
+  {
+    name: "settings",
+    description: "Open Settings",
+    when: "always",
+    available: () => true,
+    run: () => $("settings-button").click(),
+  },
+  {
+    name: "help",
+    description: "List these commands",
+    when: "always",
+    available: () => true,
+    run: () => openSettingsAt("settings-commands"),
+  },
+];
+/** Open Settings with one section open and in view, as the GitHub banner does. */
+async function openSettingsAt(sectionId) {
+  await $("settings-button").onclick();
+  openSettingsSection($(sectionId));
+  $(sectionId).scrollIntoView({ block: "start" });
+}
+const slash = { matches: [], index: 0, dismissed: null };
+/**
+ * Return the commands to list for a message box value: none unless the
+ * whole value is "/" and one word, else every command the page can run now
+ * whose name or alias starts with that word.
+ */
+function slashMatches(value) {
+  const typed = /^\/(\S*)$/.exec(value);
+  if (!typed) return [];
+  const word = typed[1].toLowerCase();
+  return SLASH_COMMANDS.filter(
+    (command) =>
+      [command.name, ...(command.aliases || [])].some((name) =>
+        name.startsWith(word),
+      ) && command.available(),
+  );
+}
+/** Return the runnable command a whole message names exactly, if any. */
+function slashCommand(value) {
+  const typed = /^\/(\S+)$/.exec(value.trim());
+  if (!typed) return null;
+  const word = typed[1].toLowerCase();
+  return (
+    SLASH_COMMANDS.find(
+      (command) =>
+        [command.name, ...(command.aliases || [])].includes(word) &&
+        command.available(),
+    ) || null
+  );
+}
+/** Show or hide the command list for the message box's current text. */
+function renderSlash() {
+  const value = $("message").value;
+  if (slash.dismissed !== null && slash.dismissed !== value)
+    slash.dismissed = null;
+  const previous = slash.matches[slash.index]?.name;
+  slash.matches = slash.dismissed === null ? slashMatches(value) : [];
+  const keep = slash.matches.findIndex((command) => command.name === previous);
+  slash.index = keep >= 0 ? keep : 0;
+  const list = $("slash-popover");
+  list.replaceChildren();
+  slash.matches.forEach((command, index) => {
+    const option = textNode("div", "", "slash-option");
+    option.id = `slash-${command.name}`;
+    option.setAttribute("role", "option");
+    option.setAttribute("aria-selected", String(index === slash.index));
+    option.append(
+      textNode("span", `/${command.name}`, "slash-name"),
+      textNode("span", command.description, "slash-description"),
+    );
+    // Keep the focus, and the phone keyboard, on the message box.
+    option.addEventListener("pointerdown", (event) => event.preventDefault());
+    option.addEventListener("click", () => runSlash(command));
+    list.append(option);
+  });
+  const open = slash.matches.length > 0;
+  list.hidden = !open;
+  $("message").setAttribute("aria-expanded", String(open));
+  if (open)
+    $("message").setAttribute(
+      "aria-activedescendant",
+      `slash-${slash.matches[slash.index].name}`,
+    );
+  else $("message").removeAttribute("aria-activedescendant");
+}
+/** Clear the message box and run a command, if the page can still run it. */
+function runSlash(command) {
+  $("message").value = "";
+  slash.dismissed = null;
+  resizeInput();
+  renderSlash();
+  controls();
+  if (command.available()) command.run();
+}
+/**
+ * Handle a key in the message box while the command list is open: the
+ * arrows move the highlight, Enter or Tab runs the highlighted command and
+ * Escape closes the list until the text changes. Returns true when it used
+ * the key.
+ */
+function slashKeydown(event) {
+  if ($("slash-popover").hidden || event.isComposing) return false;
+  const count = slash.matches.length;
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    slash.index =
+      (slash.index + (event.key === "ArrowDown" ? 1 : -1) + count) % count;
+  } else if ((event.key === "Enter" && !event.shiftKey) || event.key === "Tab") {
+    event.preventDefault();
+    runSlash(slash.matches[slash.index]);
+    return true;
+  } else if (event.key === "Escape") {
+    slash.dismissed = $("message").value;
+  } else return false;
+  event.preventDefault();
+  event.stopPropagation();
+  renderSlash();
+  $(`slash-${slash.matches[slash.index]?.name}`)?.scrollIntoView({
+    block: "nearest",
+  });
+  return true;
+}
+$("message").addEventListener("blur", () => {
+  if (!$("slash-popover").hidden) {
+    slash.dismissed = $("message").value;
+    renderSlash();
+  }
+});
+$("message").addEventListener("focus", () => {
+  slash.dismissed = null;
+  renderSlash();
+});
+/** Fill the Commands section of Settings from the same list. */
+function renderCommandList() {
+  const list = $("command-list");
+  list.replaceChildren();
+  for (const command of SLASH_COMMANDS) {
+    const names = [command.name, ...(command.aliases || [])]
+      .map((name) => `/${name}`)
+      .join(" or ");
+    const note = command.when === "always" ? "" : ` (${command.when})`;
+    list.append(
+      textNode("dt", names),
+      textNode("dd", command.description + note),
+    );
+  }
+}
+renderCommandList();
 /*
  * Settings sections start collapsed (add-on 0.3.2). Each section's first
  * heading becomes a button with the title and a one-line status; the rest of
  * the section opens under it on tap. A section that needs the owner says so
- * in its header, so nothing important hides in a closed section.
+ * in its header, so nothing important hides in a closed section. One
+ * top-level section is open at a time: opening one closes the others.
  */
 function collapseSettingsSections() {
   // Sections marked data-own-dialog move to a dialog of their own (studio.js) and stay open there.
-  // The three parts of Accounts and connections collapse too, inside it, each under its own header.
+  // The parts of Accounts and connections and of Advanced collapse too, inside them, each under its own header.
   const sections = document.querySelectorAll(
-    "#settings > section:not([data-own-dialog]), #accounts-section > section",
+    "#settings > section:not([data-own-dialog]), #accounts-section > section, #advanced-section > section",
   );
   sections.forEach((section, index) => {
     const heading = section.querySelector(":scope > h3, :scope > h4");
@@ -3016,7 +3233,10 @@ function collapseSettingsSections() {
     heading.replaceChildren(toggle);
   });
 }
-/** Open or close one settings section; opening a part of Accounts and connections opens that section too. */
+/**
+ * Open or close one settings section. Opening a part, such as GitHub, opens the section that holds it too.
+ * Opening a top-level section closes the other top-level sections, so one is open at a time.
+ */
 function openSettingsSection(section, open = true) {
   const toggle = section.querySelector(":scope > :is(h3, h4) > .settings-toggle");
   const body = section.querySelector(":scope > .settings-body");
@@ -3025,6 +3245,13 @@ function openSettingsSection(section, open = true) {
   body.hidden = !open;
   const parent = section.parentElement?.closest("#settings section");
   if (open && parent) openSettingsSection(parent);
+  if (open && !parent) closeOtherSettingsSections(section);
+}
+/** Close every top-level settings section except the one given. Parts inside a closed section keep their state. */
+function closeOtherSettingsSections(keep) {
+  for (const other of document.querySelectorAll("#settings > section")) {
+    if (other !== keep) openSettingsSection(other, false);
+  }
 }
 /** Put a one-line status in a section's header; attention marks one that needs the owner. */
 function setSectionStatus(sectionId, text, attention = false) {
@@ -3060,6 +3287,7 @@ function setAccountPart(sectionId, word, attention = false) {
 }
 collapseSettingsSections();
 setSectionStatus("workspace-section", "AGENTS.md");
+setSectionStatus("settings-commands", `${SLASH_COMMANDS.length} commands`);
 const TEXT_SIZES = ["normal", "larger", "largest"];
 const TEXT_SIZE_KEY = "codex-text-size";
 /**
@@ -3227,6 +3455,9 @@ async function loadLogin() {
   let auth;
   try {
     ({ auth } = await api("auth/status"));
+  } catch (error) {
+    setFootRow("codex-status-row", "error", "Unavailable");
+    throw error;
   } finally {
     loginTimer = setTimeout(
       () => loadLogin().catch(() => {}),
@@ -3270,6 +3501,11 @@ function renderLogin(auth) {
   const sectionStatus = chatgptSectionStatus({ signedIn, pending, failed, lapsed });
   setSectionStatus("chatgpt-section", sectionStatus, !signedIn);
   setAccountPart("chatgpt-section", sectionStatus.toLowerCase(), !signedIn);
+  setFootRow(
+    "codex-status-row",
+    signedIn ? "ready" : failed ? "error" : "needs-owner",
+    signedIn ? "Ready" : pending ? "Signing in" : sectionStatus,
+  );
   for (const id of ["login", "banner-login"]) $(id).textContent = failed ? "Get a new code" : "Sign in";
   const key = JSON.stringify([
     signedIn,
@@ -3415,6 +3651,13 @@ function githubAccountWord({ waiting, connected, bad, retry }) {
   if (retry) return "sign-in did not finish";
   return "not connected";
 }
+/** The GitHub row at the foot of the side bar: its dot and its words. */
+function githubFootRow({ waiting, connected, bad, retry }) {
+  if (connected) return bad ? ["needs-owner", "Needs attention"] : ["ready", "Ready"];
+  if (waiting) return ["needs-owner", "Enter the code"];
+  if (retry) return ["error", "Sign-in did not finish"];
+  return ["off", "Not connected"];
+}
 /** Put the GitHub status on the card and the banner. Only the contract's fields are read. */
 function renderGithub(github) {
   githubStatus = github;
@@ -3506,6 +3749,7 @@ function renderGithub(github) {
     bad || waiting || retry,
   );
   setAccountPart("github-section", githubAccountWord({ waiting, connected, bad, retry }), bad || waiting || retry);
+  setFootRow("github-status-row", ...githubFootRow({ waiting, connected, bad, retry }));
   $("github-banner-text").textContent = `The add-on's GitHub sign-in needs attention: ${githubStateText(state, kind).replace(/\.$/, "")}.`;
   $("github-banner").hidden = !bad;
 }
@@ -3520,6 +3764,7 @@ function githubUnavailable() {
   $("github-banner").hidden = true;
   setSectionStatus("github-section", "Not available in this version");
   setAccountPart("github-section", "not available");
+  setFootRow("github-status-row", "off", "Not available");
 }
 /** Read the GitHub status. Every 5 seconds while a code waits, else every 5 minutes, so a lost sign-in shows. */
 async function loadGithub() {
@@ -3533,6 +3778,9 @@ async function loadGithub() {
     $("github-token").hidden = false;
     renderGithub(data.github);
     waiting = data.github.flow?.status === "waiting_for_user";
+  } catch (error) {
+    setFootRow("github-status-row", "error", "Unavailable");
+    throw error;
   } finally {
     githubTimer = setTimeout(() => loadGithub().catch(() => {}), waiting ? 5000 : 300000);
   }
@@ -3605,26 +3853,7 @@ $("github-link-form").onsubmit = (event) => {
     { repository: $("github-link-repository").value, path: $("github-link-path").value.trim() },
     (data) => githubResult(data.text || "Linked."));
 };
-$("github-banner-open").onclick = async () => {
-  await $("settings-button").onclick();
-  openSettingsSection($("github-section"));
-  $("github-section").scrollIntoView({ block: "start" });
-};
-/** Show whether the assistant is paused, in the settings dialog and above the chat. */
-function renderPause(pause) {
-  const paused = Boolean(pause?.paused);
-  $("pause-status").textContent = paused
-    ? "Paused. New messages are refused and queued ones wait."
-    : "Running.";
-  $("pause").textContent = paused ? "Resume the assistant" : "Pause the assistant";
-  $("pause").dataset.paused = paused ? "1" : "";
-  $("paused-banner").hidden = !paused;
-  setSectionStatus("assistant-section", paused ? "Paused" : "Running", paused);
-}
-/** Read the pause state from the worker and show it. */
-async function loadPause() {
-  renderPause(await api("pause"));
-}
+$("github-banner-open").onclick = () => openAccountItem("github-section");
 let remoteTimer;
 let remoteCardKey = "";
 /**
@@ -3686,17 +3915,6 @@ function renderRemoteControl(rc) {
   $("remote-control-stop").hidden = !rc.enabled;
   $("remote-control-pair").hidden = !rc.enabled;
   $("remote-control-note").hidden = !rc.available;
-  const findings = rc.config_findings || [];
-  const list = $("remote-control-findings-list");
-  list.replaceChildren(
-    ...findings.map((item) =>
-      textNode("li", `${item.file || "config"}${item.line ? `, line ${item.line}` : ""}: ${item.reason}${item.undone ? ` — ${item.undone}` : item.undo_note ? ` — ${item.undo_note}` : ""}${item.recovery_copy ? ` — replaced version saved at ${item.recovery_copy}` : ""}${item.text ? ` (${item.text})` : ""}`),
-    ),
-  );
-  if ((rc.config_findings_count || 0) > findings.length) {
-    list.append(textNode("li", `… and ${rc.config_findings_count - findings.length} more`));
-  }
-  $("remote-control-findings").hidden = !findings.length;
   $("remote-control-log").textContent = (rc.log || []).join("\n");
   $("remote-control-log-box").hidden = !(rc.log || []).length;
   document.dispatchEvent(new CustomEvent("remote-view", {detail: rc}));
@@ -3716,7 +3934,7 @@ async function loadAddonConfiguration() {
   const description = $("addon-configuration-description");
   description.dataset.usual ??= description.textContent;
   const data = await api("addon-configuration").catch(() => ({}));
-  if (typeof data.url === "string" && data.url.startsWith("/hassio/addon/")) {
+  if (typeof data.url === "string" && data.url.startsWith("/config/app/")) {
     row.href = data.url;
     description.textContent = description.dataset.usual;
   } else {
@@ -3728,7 +3946,6 @@ for (const [id, action] of [
   ["remote-control-start", "start"],
   ["remote-control-stop", "stop"],
   ["remote-control-pair", "pair"],
-  ["remote-control-review", "review"],
 ]) {
   $(id).onclick = async () => {
     $(id).disabled = true;
@@ -3811,12 +4028,6 @@ function haTheme() {
   document.documentElement.dataset.theme = dark ? "dark" : "light";
 }
 $("settings-button").onclick = async () => {
-  try {
-    const data = await api("diagnostics/settings");
-    setSectionStatus("interaction-logs-section", `Keeps ${data.capacity}`);
-  } catch (_error) {
-    setSectionStatus("interaction-logs-section", "Administrators only");
-  }
   sidebar(false);
   haTheme();
   $("settings").showModal();
@@ -3827,7 +4038,6 @@ $("settings-button").onclick = async () => {
     loadLogin(),
     loadGithub(),
     loadRemoteControl(),
-    loadPause(),
     loadBrowserPermissions(),
     loadAddonConfiguration(),
   ]);
@@ -3861,20 +4071,6 @@ for (const [id, path] of [
     }
   };
 }
-for (const id of ["pause", "resume"]) {
-  $(id).onclick = async () => {
-    $(id).disabled = true;
-    try {
-      const paused = id === "pause" && !$("pause").dataset.paused;
-      renderPause(await api("pause", { paused }));
-    } catch (error) {
-      if ($("settings").open) settingsError(error);
-      else showError(error);
-    } finally {
-      $(id).disabled = false;
-    }
-  };
-}
 let restore = Promise.resolve();
 /** Poll the list and the open chat; the first pass waits for the restored chat. */
 async function refresh() {
@@ -3898,5 +4094,4 @@ refresh();
 loadUsage();
 loadLogin().catch(() => {});
 loadGithub().catch(() => {});
-loadPause().catch(() => {});
 setInterval(tickElapsed, 1000);

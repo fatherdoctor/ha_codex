@@ -70,8 +70,11 @@ async def test_tapped_choice_is_sent_to_the_worker(hass, hass_admin_user):
     assert client.reply_choice.await_count == 1
 
 
-async def test_only_an_administrator_tap_is_taken(hass, hass_read_only_user):
-    """A tap from a phone whose user is not an administrator, or with no user, is not sent to the worker."""
+async def test_only_an_administrator_tap_is_taken(hass, hass_read_only_user, caplog):
+    """A tap from a phone whose user is not an administrator, or with no user, is not sent to the worker.
+
+    It makes no notification: only a chat that waits on the owner has one, and the worker keeps that one up.
+    """
     assert await async_setup_component(hass, "persistent_notification", {})
     shown = {}
     persistent_notification.async_register_callback(hass, lambda _update, notifications: shown.update(notifications))
@@ -82,11 +85,12 @@ async def test_only_an_administrator_tap_is_taken(hass, hass_read_only_user):
                             context=context)
         await hass.async_block_till_done()
     client.reply_choice.assert_not_called()
-    assert "only a Home Assistant administrator" in shown[actions.NOTIFICATION_ID]["message"]
+    assert shown == {}
+    assert "only a Home Assistant administrator" in caplog.text
 
 
-async def test_refused_choice_is_reported_in_a_notification(hass, hass_admin_user):
-    """When the worker does not take the answer, for example because the question was answered, the user is told why."""
+async def test_refused_choice_makes_no_notification(hass, hass_admin_user, caplog):
+    """When the worker does not take the answer, for example because the question was answered, it is logged only."""
     assert await async_setup_component(hass, "persistent_notification", {})
     shown = {}
     persistent_notification.async_register_callback(hass, lambda _update, notifications: shown.update(notifications))
@@ -98,8 +102,6 @@ async def test_refused_choice_is_reported_in_a_notification(hass, hass_admin_use
                         context=Context(user_id=hass_admin_user.id))
     await hass.async_block_till_done()
 
-    assert shown[actions.NOTIFICATION_ID]["title"] == "Codex"
-    assert shown[actions.NOTIFICATION_ID]["message"] == (
-        "Codex did not get the answer you picked: This question is no longer waiting for an answer."
-    )
+    assert shown == {}
+    assert "This question is no longer waiting for an answer." in caplog.text
     coordinator.async_request_refresh.assert_not_called()

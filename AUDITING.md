@@ -12,19 +12,21 @@ place, that is a bug in this page and worth an issue.
 
 The add-on is one container. A Python worker (`codex-cli-worker/server.py`) serves the chat page through Home
 Assistant Ingress and starts the Codex CLI for each exchange. Codex runs every command inside a Bubblewrap
-sandbox whose launcher the add-on wraps (`codex-bwrap`). Before any tool call, Codex runs a hook the add-on
-ships in the image (`gate/gate_hook.py`), which can refuse but never approve. Anything the hook does not refuse
-goes to Codex's normal approval flow, and an approval has to be answered by a Home Assistant administrator on
-the chat page. After every exchange the worker compares `/config` with what it was before. A separate, optional
-process connects the ChatGPT app to Codex through OpenAI's relay ("remote control"); it has stricter rules
-because nobody is at the chat page to answer prompts.
+sandbox whose launcher the add-on wraps (`codex-bwrap`). Anything outside the sandbox goes to Codex's normal
+approval flow, and an approval has to be answered by a Home Assistant administrator on the chat page. After
+every exchange the worker validates what changed and keeps a copy of each changed file. A separate, optional
+process connects the ChatGPT app to Codex through OpenAI's relay ("remote control"); there Codex's own
+approval card on the phone answers the requests.
 
-So there are four layers, and no single one is meant to hold alone:
+The add-on has no command check of its own (removed in 0.3.6): no hook, no command-prefix rules, no refusal of
+named paths on the approval card, and no scan of `/config` after an exchange or while remote control is on.
+Codex's approval mode and the sandbox are the protection, as in the Claude add-on.
+
+So there are three layers:
 
 1. **What Codex's process can see** - its environment and the sandbox's file view.
-2. **What the hook refuses** - a text check on each command and patch.
-3. **What a person must approve** - and who counts as that person.
-4. **What the worker checks afterwards** - the config scan, the config check, the backups.
+2. **What a person must approve** - and who counts as that person.
+3. **What the worker checks afterwards** - the config check and the backups.
 
 ## Where each protection lives
 
@@ -37,47 +39,19 @@ Paths are under `codex-cli-worker/` unless they start with `custom_components/`.
 | The Supervisor token and the worker's own capabilities are not in Codex's environment | `server.py: codex_env` | `tests/test_server.py`, `tests/test_sandbox_readiness.py` |
 | A command that Codex runs on the chat page does not get the tool keys (`HA_*_CAPABILITY`), so it cannot write to a tool socket itself and skip Codex's question. Not yet recorded on the pinned Codex binary (plan step 0); in a mode without a sandbox, a command can read the Codex process's environment | `server.py: SHELL_EXCLUDED_ENV`, `shell_exclude_args`, used by `build_app_server_args` and `build_codex_args` | `tests/test_ha_call.py` (`LaunchTests`) |
 | The remote-control process gets an environment without the Supervisor token or per-exchange capabilities | `remote_control.py: STRIPPED_ENV`, `remote_env` | `tests/test_remote_control.py` |
+| A command that Codex runs for the ChatGPT app does not get the tool keys either: the relay launch sets the same exclude, and the managed config, read-only in the image, sets it for every client and outranks a thread's own settings. Not yet recorded on the pinned Codex binary (plan step D) | `server.py: relay_tool_args`; `gate/managed_config.toml` (`shell_environment_policy`, no hooks), installed by `Dockerfile` | `tests/test_ha_call_relay.py` (`RelayLaunchTests`, `ManagedConfigTests`) |
 | A sandboxed command cannot see `secrets.yaml`, Home Assistant's sign-in store, the add-on's options, its API token, the schedule database or the container's saved environment | `codex-bwrap: HIDDEN_DIRS`, `HIDDEN_FILES` | `tests/test_bwrap.py`, `tests/apparmor_317_check.py` |
 | The one case where the wrapper changes Bubblewrap's arguments (Codex's own `/bin/true` probe) | `codex-bwrap: is_codex_proc_probe`, `codex-bwrap-probe.py`; explained in `SANDBOX_TESTING.md` | `tests/test_bwrap.py`, `tests/test_proc_assertion.py` |
 | A sandboxed command cannot see the add-on's GitHub sign-in (`/data/github`); the token is never in an environment the worker builds, never in a git argument, remote URL or log, and the folder is left out of the add-on backup | `codex-bwrap: HIDDEN_DIRS`; `github_access.py: GitRunner.env`, `Store`; `github_askpass.py`; `config.yaml: backup_exclude` | `tests/test_bwrap.py` (`test_the_github_folder_is_hidden_in_every_sandbox`), `tests/test_github_access.py` |
 | The relay runs under its own AppArmor label with all capabilities dropped, entered only through one fixed launcher | `apparmor.txt`, `relay-launcher`, `relay-tool-launcher` | `tests/apparmor_317_check.py`, `.github/workflows/apparmor-317.yaml` |
-| The worker's memory cannot be read by a process it starts | `server.py: make_worker_undumpable` | `tests/test_gate.py` (`test_the_flag_is_set`) |
+| The worker's memory cannot be read by a process it starts | `server.py: make_worker_undumpable` | `tests/test_undumpable.py` (`test_the_flag_is_set`) |
 | Each way in (the chat page, the ChatGPT app, `codex_cli.start_task`) gets the Home Assistant tools that DOCS.md "Ways in" lists, and no others | `server.py: build_app_server_args`, `build_codex_args`, `relay_read_mcp_args`; `remote_control.py: Supervisor._command` | `tests/test_surface_matrix.py` |
-| Full access is not available, whatever a client or an option asks for | `gate/requirements.toml` (Codex's managed requirements) and `policy.py: load_policy`, `policy_problem`; checked before each exchange at the top of `server.py: run_task` | `tests/test_policy.py` |
+| Each permission mode is only Codex's own settings: the table `policy.py: MODES`, passed by `server.py: task_mode_settings` and `create_approval_session`; the app keeps no check of its own on them | `policy.py: MODES`, `mode_settings`; `server.py: parse_permission_mode`, `task_mode_settings` | `tests/test_four_modes.py` |
+| Full access is Codex's own `never` with the `danger-full-access` sandbox, behind the owner's warning switch: Codex's managed requirements list those two values only while the switch is on. The setting counts as on only when its file is exactly what the worker wrote (no link, no extra key, `true` itself, a finite time). A failed change turns it off and writes the shipped requirements again, and says so only when both worked; the app's start writes them for the saved setting; each change restarts remote control | `full_access.py: read_setting`, `set_enabled`, `requirements_text`, `write_requirements`; `server.py: change_full_access` (administrator and confirmed warning), `turn_full_access_off_after_failure`, `write_full_access_requirements_at_start`, `return_full_access_chats_to_default` | `tests/test_four_modes.py` (`RequirementsTests`, `SettingFileTests`, `SwitchTests`, `test_the_switch_needs_an_administrator_and_the_warning`) |
+| In each mode, one device call reaches Home Assistant only as Codex's settings for that mode allow: in Read only after the person's **Allow once** on the page card, never while the question waits, after a denial or when the exchange ends; in Auto-review not after a denied review; in Full access with no question. Codex itself is a stand-in in these tests that follows the pinned source | `server.py: task_mode_settings`, `call_mcp_args`; `approvals.py: AppServerSession`, `decision_result`; `ha_call.py: HomeAssistantCall.dispatch` | `tests/test_four_modes.py` (`DeviceCallContractTests`, `StandInCodex`) |
+| No hook runs: the managed requirements allow only managed hooks and the image ships none, so a hook planted in `/config` or Codex's home (which would run outside the sandbox) is ignored | `gate/requirements.toml` (`allow_managed_hooks_only`); the managed config in the image (`gate/managed_config.toml`, installed by `Dockerfile`) holds no hooks | `tests/test_guards_removed.py` shows the setting, and `tests/test_ha_call_relay.py` (`ManagedConfigTests.test_the_managed_config_has_no_hooks`) shows that the managed config holds no hooks. That Codex then ignores a planted hook is Codex's own behavior: no test here runs Codex, so the lab pass before a release checks it |
 
-### Layer 2: what the hook refuses
-
-| protection | enforced in | shown by |
-|---|---|---|
-| The hook runs for every tool call and permission request, from every client, and a hook planted in `/config` cannot replace it | `gate/managed_config.toml`, `gate/requirements.toml` (`allow_managed_hooks_only`) | `remote_control.py: requirements_problem`, `hook_problem`, `gate_problem` refuse to start remote control when these are not in place |
-| A request the hook cannot read or judge is refused, not passed | `gate/gate_hook.py: main` | `tests/test_gate.py` |
-| The hook answers before its own deadline, because Codex runs the action if a hook is still working when its timeout passes; an answer found after the deadline is refused | `gate/gate_hook.py: DEADLINE_SECONDS`, `wait_for_child`, `answer_before_deadline`; the Codex-side `timeout` in `gate/managed_config.toml` leaves room beyond it | `tests/test_gate.py` (`test_a_stuck_scan_is_refused_by_the_deadline`, `test_the_deadline_leaves_room_inside_the_codex_timeout` and their neighbors) |
-| Commands that read a process environment, use the Supervisor token, talk to the Supervisor, or read the sign-in store or `secrets.yaml` are refused (*) | `gate_rules.py: check_tool_call`, `PROTECTED_COMMAND_RES`, `_ha_supervisor_command` | `tests/test_gate.py`, `tests/fixtures/gate_tool_calls.json` |
-| A second layer, in Codex itself: managed command rules refuse literal `ha supervisor`, `ha super` and `ha su`, `printenv` of the two Supervisor-token names, `cat` of the credential and app-policy paths, and the two full-access spellings, with remote control off too. They match literal prefixes only; DOCS.md "Prefix limits" lists what they miss | `gate/requirements.toml` (`rules.prefix_rules`); `remote_control.py: managed_exec_rules_problem` checks the shipped rules, `exec_rules_self_test` makes Codex load them before remote control starts, and `record_exec_rules_warning` keeps remote control off after a rule-load warning until the app restarts | `tests/test_exec_rules.py`, `tests/execrules_runtime_check.py` (the pinned Codex binary) |
-| Edits that add a command which can reach anything (`shell_command`, `rest_command`, `python_script`, ...), a platform that runs on load, or a templated action are refused | `gate_rules.py: find_refused`, `STRICT_RULES`, `policy/refused-domains.json` (the file can add domains, never remove the built-in ones: `load_rules`) | `tests/test_gate.py` |
-| With remote control on: a patch is rebuilt in memory and refused if the result holds something new that is refused, or if it cannot be rebuilt with certainty | `gate_rules.py: patch_versions`, `new_refused`, `refused_blocks` | `tests/test_gate.py` |
-| With remote control on: the add-on's settings, rules, policy files, schedule database and API token cannot be named in a command | `gate_rules.py: _policy_restriction` | `tests/test_gate.py` |
-| Files the checks read are opened without following links and with a size limit | `gate_rules.py: read_config_bytes` | `tests/test_gate.py` |
-
-The hook reads text. It does not run a shell, so a path or command built while the command runs is out of its
-reach; DOCS.md lists those limits, and layers 1, 3 and 4 are what cover them.
-
-Before it splits a command, the hook joins each backslash-newline pair the way the shell does
-(`shell_words.py: join_shell_continuations`), so a command name split across lines is read whole. The join has
-its own model of quotes and comments. Where that model is not sure (a heredoc, a substitution, quoting it cannot
-read) the command is refused with a request for one line. The model can still be wrong, so the Supervisor text
-floor in `check_tool_call` reads a second form with every backslash-newline pair removed, whatever the quotes
-(`_floor_texts`). That second form does not depend on the join, and it also covers shells and wrappers that
-the parser does not open. Tests: `tests/test_gate_quote.py` (`ContinuationFloorTests` runs each form through a
-print-only shell).
-
-(*) The shell text is split by one copy of the code, `shell_words.py` (`strip_comments`, `split_words`), which
-`gate_rules.py` and `approvals.py` both import. The hook's continuation join is in the same file. Each check keeps
-its own `_shell_words` for text it cannot read: the hook reads it again line by line, the approval card refuses
-it. `tests/test_shell_words.py` checks that both use the shared code and that the image ships it next to the hook
-and the worker.
-
-### Layer 3: who can approve
+### Layer 2: who can approve
 
 | protection | enforced in | shown by |
 |---|---|---|
@@ -85,13 +59,15 @@ and the worker.
 | Every other route needs the worker's API token, compared in constant time | `server.py: require_auth` | `tests/test_api.py`, `tests/test_server.py` |
 | When an Ingress session expires, the page gets a new one only from the Home Assistant frontend that holds it, through that frontend's own signed-in connection in a same-origin parent window; the page holds no credential, a parent on another origin gets no request, and the worker's checks above are unchanged | `web/assets/chat.js: renewIngressSession`, `pageFetch` | `tests/browser_accounts.cjs` |
 | The API token (held only by the integration) can never answer a permission request; only an active Home Assistant administrator signed in on the chat page can, and a failed lookup refuses. The `action` argument of `ingress_admin` only names the attempted action in the refusal text; it never changes who passes | `server.py: ingress_admin`, `lookup_ha_users`, `decide_approval` | `tests/test_approvals.py` |
-| A native approval covers one action in the current exchange; it installs no rule and expires with the exchange. A request before the turn starts, for another thread or turn, or with the id of a request still waiting stops the exchange without a card. There is no standing permission: no launch (chat page, schedule or ChatGPT app) gives Codex a tool that changes the house without a request | `approvals.py`: `AppServerSession.decide`, `._publish_approval` and `.receive`; `server.py`: `build_codex_args`, `build_app_server_args`, `call_mcp_args`, `relay_read_mcp_args` | `tests/test_approvals.py`, `tests/test_approval_smoke.py`, `tests/test_grant_layer_removed.py`, `tests/test_ha_call.py` |
-| A change to the add-on's own policy, rules, options or credentials cannot be approved at all | `approvals.py: touches_protected_path`, `command_names_protected_path`, `PROTECTED_PREFIXES` | `tests/test_approvals.py` |
+| A native approval covers one action in the current exchange; it installs no rule and expires with the exchange. A request before the turn starts, for another thread or turn, or with the id of a request still waiting stops the exchange without a card. There is no standing permission: no launch (chat page, schedule or ChatGPT app) gives Codex a tool that changes the house without a request | `approvals.py`: `AppServerSession.decide`, `._publish_approval` and `.receive`; `server.py`: `build_codex_args`, `build_app_server_args`, `call_mcp_args`, `relay_read_mcp_args`, `relay_tool_args` | `tests/test_approvals.py`, `tests/test_approval_smoke.py`, `tests/test_grant_layer_removed.py`, `tests/test_ha_call.py`, `tests/test_ha_call_relay.py` |
+| A tool request shows on the page only for the Home Assistant tool, with every argument as JSON and plain words that name every id of the target; a request that is clipped, has a hidden credential or has no argument object shows **Allow once** turned off, and the worker refuses that answer; **Allow once** answers accept with no remember option, so Codex asks again before the next call; any other tool question is declined | `approvals.py`: `tool_request`, `TOOL_CARDS`, `decision_result`, `_target_names`, `AppServerSession._publish_approval` | `tests/test_tool_card.py`, `tests/browser_approvals.cjs` |
 | The worker writes no add-on option (0.3.5): the remote-control machine name and the number of interactions kept are set on the Configuration tab only, and the page's rename and retention-save routes are gone; the page reads the app's slug from Supervisor only to link to that tab, and a slug that is not lowercase letters, digits and underscores is not used | `server.py`: `/remote-control/<action>` (start, stop, pair, review only), `apply_interaction_limit`, `addon_slug`, `/addon-configuration` | `tests/test_remote_name_and_first_reply.py`, `tests/test_interaction_diagnostics_fix.py`, `tests/test_fb2_split.py` |
+| A Home Assistant notice about a chat exists only while the chat waits on the owner (a question, or a pending permission request), one per chat under `codex_cli_wait_<task_id>`; it carries no command or diff, has no approve button, and is dismissed when the wait ends, unless the chat waits again by then. A companion app push carries the same id as its tag and is cleared then too. A failure makes no notice, with one exception: a block by OpenAI's safety filter makes one notice, `codex_safety_block_<task_id>`, which stays until the owner dismisses it. The sign-in and GitHub notices are not about a chat and stay (DOCS.md lists them) | `server.py`: `notify_task_outcome`, `publish_safety_block`, `notify_question`, `notify_permission`, `task_waits_on_owner`, `dismiss_wait_notice` (called from `_save_task_update`, `request_task_cancellation`, `restore_saved_task`, `delete_task`) | `tests/test_wait_notice.py` (`test_only_a_safety_block_makes_a_notice_for_a_failed_chat`), `tests/test_safety_block.py` |
 | Browser permissions are managed only from the chat page | `server.py: require_ingress` | `tests/test_browser_permissions.py` |
 | The GitHub sign-in can be connected, tested, accepted or disconnected only by an administrator on the chat page; the worker's API token can read its status and nothing else | `github_access.py: register` (the `/github` routes) | `tests/test_github_routes.py` |
-| A push Codex asks for runs the kit's push guard first, from the read-only copy in the image, and pushes only the commit it checked; a push that adds a `guard: allow` mark is refused, since an allow mark needs the owner; no force, delete or tag push; read-only chats and schedules can only list and fetch | `github_access.py: GitRunner.push`, `valid_branch`, `GitHubService.dispatch`; `push_guard.py` (byte-identical to the kit's) | `tests/test_github_access.py` |
+| A push Codex asks for runs the kit's push guard first, from the read-only copy in the image, and pushes only the commit it checked; a push that adds a `guard: allow` mark is refused, since an allow mark needs the owner; no force, delete or tag push | `github_access.py: GitRunner.push`, `valid_branch`, `GitHubService.dispatch`; `push_guard.py` (byte-identical to the kit's) | `tests/test_github_access.py` |
 | Schedules and the mailbox are owner-managed: the page routes need the worker's API token and an administrator on the chat page (`owner`). The local lead channel under `/lead/` is separate: it needs its own token, not Ingress, and reads only background work, not people's chats. The scheduling tools a chat-page task can call use a third path: a Unix socket (mode 0600) where each request must carry the exchange's running-turn capability, which ends with the exchange; a proposal is saved disabled until an administrator approves it | `schedule_api.py: register` (`owner`, `lead`), `schedule_api.py: Service.dispatch`, `Service.serve`, `scheduling.py: Store.token_ok` | `tests/test_scheduling.py` (`test_lead_requires_separate_token_and_ingress_alone_is_not_a_token`, `test_tool_transport_roundtrip_and_expired_capability`), `tests/test_sched_review.py` |
+| Only the owner's schedule editor sets a schedule's chat and model. A proposal from the lead or from Codex that names either is refused, and neither agent's listing shows them. A model must be one the chat page offers; a chat must exist when a schedule first names it | `scheduling.py: validate`, `owner_fields`, `schedule_api.py: owner_schedule`, `for_agent`, `Service.dispatch` | `tests/test_schedule_chat.py` (`test_an_agent_proposal_cannot_name_a_chat_or_a_model`, `test_the_lead_cannot_set_or_read_the_chat_and_the_model`, `test_codex_cannot_read_the_chat_and_the_model`, `test_a_schedule_names_only_a_model_the_chat_page_offers`) |
 
 ### Mailbox and lead task boundaries
 
@@ -102,14 +78,14 @@ and the worker.
 | Retention and capacity enforcement never remove unread mail. A full unread recipient refuses the entire delivery; a new arrival can evict read copies only | `scheduling.py: Store._prune_mail`, `Store._make_mail_room` | `tests/test_lead_direct.py: test_unread_survives_days_full_refuses_atomically_read_evicts_first`; `tests/test_lead_mail_review.py: test_codex_walks_every_legacy_message_above_capacity` |
 | An administrator who views an agent's mailbox does not acknowledge it. The page acknowledges only the owner's mailbox | `schedule_api.py: owner_mail_list`, `mail_page`, `owner_mail_read` | `tests/test_lead_mail_review.py: test_owner_cannot_acknowledge_another_readers_mailbox`; `tests/test_scheduling.py: test_owner_acknowledges_only_displayed_ids_and_requires_admin` |
 
-### Layer 4: what the worker checks afterwards
+### Layer 3: what the worker checks afterwards
 
 | protection | enforced in | shown by |
 |---|---|---|
-| After every exchange, including a cancelled or failed one, changed files are compared with the manifest taken before it, and an edit that plants a refused command is undone and reported | `server.py: run_task` (after the process is reaped), `refuse_planted_edits`, `build_manifest`, `diff_manifests` | `tests/test_backups.py`, `tests/test_server.py` |
+| After every exchange, changed files are found by comparing `/config` with the manifest taken before it | `server.py: run_task`, `build_manifest`, `diff_manifests` | `tests/test_backups.py`, `tests/test_server.py` |
 | Changed YAML is validated and Home Assistant's own config check is run | `server.py: validate_changed_files`, `check_home_assistant_config` | `tests/test_config_check.py` |
+| The starter `/config/AGENTS.md` is written only on the app's first start and only when nothing has that name; an existing file, link or folder is never replaced | `server.py: write_starter_agents_file`, called from `main` before `ensure_runtime_files` | `tests/test_starter_agents.py` |
 | A copy of each changed file is kept, without credentials | `server.py: create_snapshot`, `saved_copy`, `drop_credential_backups` | `tests/test_backups.py` |
-| With remote control on, `/config` is watched for refused content that arrived by a route the hook cannot see, and a Home Assistant repair is raised | `remote_control.py: ConfigWatch` | `tests/test_remote_control.py` |
 
 ### The browser that inspects dashboards
 
@@ -131,9 +107,9 @@ meets them. They do not cover a command that uses the owner's `HA_TOKEN` option.
 
 | protection | enforced in | shown by |
 |---|---|---|
-| The tool's approval mode is `prompt`, so Codex asks each time, with no remembered answer; no launch approves it ahead; it is marked as a tool that changes things, and only an attended chat on the page gets it: a scheduled run does not | `server.py: call_mcp_args`, `build_app_server_args` (`attended`), `run_task`; `ha_call_mcp.py: TOOL` | `tests/test_ha_call.py` (`LaunchTests`, `RunTaskLaunchTests`, `test_the_tool_is_marked_as_one_that_changes_things`). That `prompt` means a question each time is read from the source of the pinned Codex, not yet recorded on its binary |
-| The command check gives the tool's `PreToolUse` and `PermissionRequest` no decision, with remote control on or off: an allow would skip the person, and a refusal would block every call | `gate_rules.py: CALL_TOOL_HOOK_NAME`, `check_tool_call` | `tests/test_ha_call.py` (`CommandCheckTests`) |
+| The tool's approval mode is `prompt`, so Codex asks each time, with no remembered answer; no launch approves it ahead; it is marked as a tool that changes things, and only an attended chat on the page and the ChatGPT app's remote control get it: a scheduled run does not | `server.py: call_mcp_args`, `build_app_server_args` (`attended`), `run_task`, `relay_tool_args`; `ha_call_mcp.py: TOOL` | `tests/test_ha_call.py` (`LaunchTests`, `RunTaskLaunchTests`, `test_the_tool_is_marked_as_one_that_changes_things`), `tests/test_ha_call_relay.py` (`RelayLaunchTests`). That `prompt` means a question each time is read from the source of the pinned Codex, not yet recorded on its binary |
 | The tool has its own key, issued per message and withdrawn when the exchange ends; no read tool holds it, and a request without the current key of a running, uncancelled chat sends nothing | `ha_call.py: HomeAssistantCall.begin`, `end`, `task_for`; `server.py: _run_background_task` | `tests/test_ha_call.py` (`NothingSentTests`, `test_no_read_tool_holds_the_call_key`, `test_the_key_is_withdrawn_when_the_exchange_ends`) |
+| In the ChatGPT app the tool has one key per remote-control launch, made only for a real launch (never for a probe or a second Start) and held only while that process runs and is not stopping; a new launch withdraws the old key, and a page chat's key is never the relay's. The app's answer to Codex's question is not visible to the worker | `ha_call.py: RELAY_TASK`, `HomeAssistantCall.task_for`; `server.py: relay_env`, `relay_running`; `remote_control.py: Supervisor._loop` (`launch_env`) | `tests/test_ha_call_relay.py` (`RelayKeyTests`, `RelayToolEndToEndTests`, `RepeatedStartTests`) |
 | A malformed request sends nothing; target ids and data cannot overlap. No service is refused by name: a call that reaches the Supervisor (`hassio`, `update.install`, `backup.create`) or runs the owner's code (`shell_command`, `python_script`, `pyscript`, `rest_command`) is sent once the person allows it | `ha_call.py: parse_request`, `parse_target` | `tests/test_ha_call.py` (`test_malformed_requests_send_nothing`, `test_any_domain_is_sent_once_the_person_allows_it`) |
 | The request Home Assistant receives is exactly the service, the target and the data, sent once with the worker's own access (never retried, no redirects); Codex never gets a token | `ha_call.py: HomeAssistantCall.send` | `tests/test_ha_call.py` (`ExactRequestTests`, `test_a_failed_call_is_reported_and_not_sent_again`, `test_no_answer_is_reported_and_not_sent_again`) |
 | A call by name (`name` in place of `target`) is sent only when exactly one entity of the service's own domain fits by whole words, an exact name winning over longer ones; none or several send nothing and list the candidates; `homeassistant` services need an entity id; credential-like and password-mode entities never match or show. The service and data are checked before the entity list is read. A rename between the match and the call changes the matched entity id | `name_match.py: resolve`, `name_words`; `ha_call.py: HomeAssistantCall.target_by_name` | `tests/test_name_match.py` (`CORPUS`: the hostile names; add a case there), `tests/test_ha_call.py` (`ByNameTests`) |
@@ -152,6 +128,7 @@ Codex holds no Home Assistant credential for these; it holds a short-lived capab
 | `ask_owner` and `report_failure` set only the page's status, question and choices: the bridge answers them without the worker's socket; the worker uses a call only when it finished and keeps to the limits; a failure the worker finds (exit, timeout, stall, configuration check, refused edit) wins over both | `ha_data_mcp.py`: `record_status`, `call_tool`; `server.py`: `status_call`, `apply_status_calls`, `run_task` | `tests/test_app_thread_store.py` |
 | GitHub: clone (into a new folder `/share/<folder>`, one name with no slash, `..` or leading dot; links are resolved first and nothing outside the two is accepted; `/share/HomeAssistant` is never touched), link (sets a plain https origin; no credential is written into the repository), fetch, pull (a fetch only: the worker never updates a work tree, so a filter planted in the repository never runs in the worker) and push for a repository the owner connected, per exchange; git runs in the worker with an askpass helper that answers only GitHub's own prompt, with repository settings limited to a short allowlist and hooks, fsmonitor, credential helpers and other transports switched off for every git child, and the effective push URL checked. A sandboxed shell can reach `/data/github.sock`, but it offers only this same tool, needs the running exchange's capability, and has no operation that returns the token | `github_access.py`: `GitHubService.dispatch`, `GitRunner.check_config`, `CONFIG_OVERRIDES`, `origin_repository`; `github_askpass.py`; `github_mcp.py` | `tests/test_github_access.py` (`test_planted_repo_config_cannot_run_or_redirect`) |
 | Diagnostics export: an allowlisted schema, nothing else leaves | `diagnostics_scrub.py` | `tests/test_interaction_diagnostics.py`, `tests/ha/test_diagnostics_export.py` |
+| Share file (a chat as Markdown, to pass on): behind the chat's sign-in, a known chat id only, the same messages and steps the page shows and no command output; masked by `redact()` and then by the Share rules (a JSON Web Token, an `sk-` key, a value after a `password`, `passwd`, `secret` or `pin` key, inside its quotes or to the end of its line, the password of a URL; each rule scans a fixed length from each start, and the corpus has time cases). A secret with no label or known shape is not masked, and DOCS.md says so | `server.py`: `share_task`, `share_redact`, `SHARE_SECRET_REPLACEMENTS` | `tests/test_share_chat.py` (`SHARE_MASK_CORPUS`, the place to add a case) |
 
 `diagnostics_scrub.py` exists twice, in `codex-cli-worker/` and in `custom_components/codex_cli/`, because the
 two are packaged separately. The copies must be byte-identical and a worker test fails when they are not.
@@ -160,19 +137,11 @@ two are packaged separately. The copies must be byte-identical and a worker test
 
 - Run the worker tests: `python -m unittest discover -s codex-cli-worker/tests` (they need `aiohttp`, `flask`, `requests`,
   `websocket-client` and `PyYAML`; `.github/workflows/validate.yml` shows the exact setup).
-- Ask the hook directly. It reads one event on standard input and exits 2 with a reason when it refuses, 0 with
-  no output when it has no opinion:
-
-  ```
-  echo '{"hook_event_name":"PreToolUse","tool_input":{"command":"cat /config/secrets.yaml"}}' \
-    | python3 -I codex-cli-worker/gate/gate_hook.py --state /nonexistent
-  ```
-
-- Compare the protected names. `codex-bwrap` (`HIDDEN_FILES`, `HIDDEN_DIRS`), `approvals.py` (`PROTECTED_PREFIXES`)
-  and `gate_rules.py` (`_policy_restriction`) each list them in their own notation for their own layer; the GitHub
-  sign-in (`/data/github`) is in all three.
-- The image places the hook, the rules and the policy read-only under `/usr/share/ha_codex` and `/etc/codex`;
-  the `Dockerfile` is where to confirm that.
+- The protected names live in one place: `codex-bwrap` (`HIDDEN_FILES`, `HIDDEN_DIRS`) hides them from every
+  sandboxed command. A command allowed once runs outside the sandbox, and no check of the add-on's own stands
+  behind that.
+- The image places Codex's managed requirements and the policy read-only under `/etc/codex` and
+  `/usr/share/ha_codex`; the `Dockerfile` is where to confirm that.
 
 ## Keeping this page true
 

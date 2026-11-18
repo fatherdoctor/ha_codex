@@ -2,9 +2,53 @@
 
 ## 0.3.6 (unreleased)
 
+- The app's own guards are removed. Codex's own permission modes and the sandbox are now the whole protection, as in
+  the Claude add-on. Gone: the command check that ran before each tool call (the hook and its rules), the managed
+  command-prefix rules, the refusal of named paths on the approval card (a command or file change that names the
+  app's settings or a private file can now be allowed once), the check after each exchange that undid a planted
+  shell, REST or Python command, the config watch and its **Mark reviewed** button, the self-tests in front of remote
+  control (**Turn on** is always available), and the GitHub read-only limit (a Read only chat can pull and push; Read
+  only is Codex's read-only sandbox only). Kept: sign-in, the sandbox and its hidden files, Codex's managed
+  requirements (no full access unless the owner turns on **Full access**, only `on-request` approvals, and no hooks, so a hook planted in `/config` never
+  runs), the read tools, the GitHub push guard and the schedule tools. Review what a chat changed before a reload or
+  restart: an edit that adds a command now stays as Codex wrote it.
+- Home Assistant shows a Codex notification only while a chat waits for you: a question, or a permission request. A
+  failed action or a failed chat no longer makes one; the failure shows in the chat. The one exception is a block by
+  OpenAI's safety filter, which still makes one notification, `codex_safety_block_<task_id>`, until you dismiss it. Each waiting chat has one
+  notification, `codex_cli_wait_<task_id>`, and the app dismisses it when you answer, stop or delete the chat, when
+  the request expires, or when the app restarts, unless the chat waits again by then. With a companion app notify
+  service, the push carries the same id as its tag, and the app clears it from the phone at the same time. A tap on a
+  phone notification that the worker refuses no longer makes a notification either; the integration logs why. The
+  sign-in and GitHub notifications are not about a chat and are unchanged.
+- The Permissions button offers the four modes of the ChatGPT app: Default, Auto-review, Read only and Full access.
+  Each mode is only Codex's own settings, passed when the app starts Codex for a chat
+  (`codex-cli-worker/DOCS.md`, "Permission modes"). Auto-review hands each request to Codex's own reviewer, and
+  the chat shows what it allowed or denied. Full access runs Codex without its sandbox and without questions; it is
+  off until an administrator turns it on in **Settings > Full access** and confirms a warning. The app's own checks
+  of these settings are removed: the protected policy no longer pins the approval policy and reviewer, the chat
+  page no longer refuses a thread's settings, and remote control no longer checks the managed requirements file.
 - **Text size** for the chat page: Normal, Larger (115 %) or Largest (130 %), from **Settings > Text size**. It
   scales the messages, code, buttons, the chat list, Settings, the sign-in text, the schedule dialog and the list of
   steps together, is remembered on each device, and still fits a phone screen at Largest.
+- **Slash commands** in the message box: typing `/` lists `/new`, `/stop`, `/model`, `/reasoning`, `/rename`,
+  `/usage` (or `/status`), `/size`, `/settings` and `/help` with a line on each, filtered as you type and picked by a
+  tap or with the arrow keys and Enter. Only the commands the page can run at that moment are listed. The page runs
+  them itself; they are never sent to Codex. **Settings** > **Commands** lists them.
+- A new install starts with workspace instructions. On its first start, the app writes a short starter
+  `/config/AGENTS.md` when the home has none: what `/config` is, and seven general rules for Codex (change the home
+  only on the owner's word, keep secrets secret, keep the old version of a changed file, check the configuration
+  before a restart, and three more). The file is yours to change or delete under **Settings** > **Workspace
+  instructions**. The app never replaces an existing file and writes the starter once only, so an install that has
+  started before is not changed by this update. The text is `codex-cli-worker/starter_agents.md`.
+- Scheduling moves to a chat's menu. **Schedule** opens one editor with a name, a prompt, a model and a trigger:
+  Hourly, Daily, Weekly or Custom. Custom keeps every earlier timing: every N minutes or hours, a cron line, or one
+  date and time. Permissions, the schedule's state, its recent runs, Pause and Delete are folded under **Advanced
+  settings**. A new schedule starts from the chat's title and first message, and each run still starts a new chat.
+  A schedule can now name its own model; one that names none follows the add-on's model as before. The form in
+  **Settings > Scheduled runs** is gone. The list stays there, with every schedule and the proposals that wait for
+  your approval, and its **Edit** button opens the same editor. Schedules saved by an earlier version keep running
+  unchanged: they belong to no chat, so open them from Settings or from the menu of a chat one of their runs started.
+  The lead agent and Codex can still only propose a name, a prompt, a mode and a timing.
 - A device command takes one step instead of three. Codex can give the device's name, as you said it, to the
   `home_assistant_call` `call` tool in place of the entity id. The worker sends the call only when exactly one
   entity of the service's domain has that name (whole words; an exact name wins over longer ones), and its
@@ -14,19 +58,61 @@
   guard-rails block they read from `/config/AGENTS.md`, and the `home_assistant_actions` `act` tool with its
   **Allow once** card. Codex's own permission requests are now the only way a change to the house is approved. A
   device command still finds the entity and reads its state back with the `home_assistant` tools; the change itself
-  now needs your normal **Allow once**, as every other action does. The sandbox, the command check, the protected
-  places and the check after each exchange are unchanged. A test build that used the groups leaves
+  now needs your normal **Allow once**, as every other action does. A test build that used the groups leaves
   `/data/codex-home/house-rules/permission-overrides.json`, `/data/house-rules/confirmed.json`,
   `/data/permission-overrides-backups` and `/data/permission-overrides.sock` behind; the app no longer reads them, and you can delete them.
 
+- A typed OpenAI safety-filter block now stops the task and sends one notice, through the notify service when one is
+  set and as a persistent notification otherwise; the general "Codex task failed" notice is not sent for it.
+  The notice names the task by id and says to rephrase or retry. The worker does not retry the block automatically.
+  It also fires `codex_cli_safety_blocked`, without the prompt or provider error text.
 - A chat on the page changes the house through one new tool, `home_assistant_call` `call`: one Home Assistant action
   (a service call), reloads and restarts included. Codex asks you each time, with no remembered answer, and shows
-  the service, the target and the data; the command check gives the request no decision. The tool gives Codex no
+  the service, the target and the data. The tool gives Codex no
   token: the worker sends the call once, with its own access. It refuses no service by name: your answer is the
   gate, and a call can reach the Supervisor (for example `update.install`) or run your own `shell_command`. A
   scheduled run does not get the tool. The keys of the app's tools are now kept out of the commands Codex runs. The
-  instructions point changes to the tool; `HA_TOKEN` is now only for an API call that is not a service. The page
-  shows Codex's request for the tool in a later step; until then the page can only decline it.
+  instructions point changes to the tool; `HA_TOKEN` is now only for an API call that is not a service.
+- The message box no longer has a hint line under it ("Continue this conversation with its saved context." and the
+  new-chat and queue versions); the note above the box still says when a message waits in the queue. The Permissions
+  button's chevron and the send button's arrow are now icons centered on their buttons, as in the ChatGPT desktop app,
+  instead of text characters that sat low on the line. `tests/browser_composer.cjs` checks both on a phone and a
+  desktop, in light and dark.
+- A chat's menu now lists Rename, Pin, Share, Archive and Delete, in the ChatGPT app's order. **Share** downloads
+  the whole chat, or its last lines, as a Markdown file with every message, the steps Codex printed (thinking
+  included) and each answer, with values that look like keys or tokens masked, and also a bare JSON Web Token, an `sk-` key, a labeled password, secret or pin and the password in a URL (`GET /tasks/<task_id>/share`). The menu no longer has New chat, Conversations, Copy
+  thread ID or Status, and the conversation header no longer has its own menu. Settings no longer has Interaction logs with its Export logs button; the
+  integration's Download diagnostics carries the same anonymized data.
+- The foot of the chat list shows **Codex**, **GitHub** and **Remote**, each with a word or two (for example
+  "Codex · Ready", "GitHub · Not connected", "Remote · Off") and a dot. Selecting one opens Settings at that part
+  of Accounts and connections. They replace the Home Assistant row and the Remote connection row; the integration's
+  state still shows as a line at the top of the chat when it needs you. The Status window is removed: its Context
+  and Usage and reset fields always showed Unavailable, because the app reads no context figure from Codex, and the
+  quota and reset times already show under the rows. The Codex access line moves to the ChatGPT account part of
+  Settings. `tests/browser_fb2_band.cjs` and `tests/browser_account_access.cjs` check the rows, their states and
+  where each one opens.
+- In **Settings**, one top-level section is open at a time: opening one closes the others. **Browser permissions**
+  moves into a new **Advanced** section at the bottom of Settings, folded by default; nothing about it is removed.
+  The **Add-on configuration** row now opens the app's Configuration tab. It linked to `/hassio/addon/<slug>/config`,
+  a page Home Assistant 2026.2 moved to `/config/app/<slug>/config` and 2026.5, this app's minimum, removed, so the
+  row opened a page that does not exist. `tests/browser_fb2_split.cjs` checks the sections and the link.
+- **Pause the assistant** is removed: the Assistant part of Settings, the banner above the chat with **Resume the
+  assistant**, the `GET` and `POST /pause` routes and the `pause` field of `GET /status`. New chats, replies, queued
+  messages, scheduled runs and lead-agent tasks no longer wait on it. To hold the work that starts on its own, pause
+  each schedule in **Settings > Scheduled runs**, and rotate the lead token to stop the lead agent. **Stop task**
+  still stops a running task. A `/data/paused.json` left by an earlier build is no longer read; an install that was
+  paused runs again after the update, and you can delete the file.
+- The chat page shows Codex's own permission request for the Home Assistant tool (`call` of the `home_assistant_call` server) as a card:
+  the tool, the action in plain words (naming each entity, area, device, floor and label of its target), and every argument as JSON, including the full text of a message, with
+  **Allow once** and **Deny**. **Allow once** allows that one call; Codex asks again before the next one. A request
+  that cannot be shown in full has **Allow once** turned off. Questions from every other tool are still declined, and the
+  chat says so.
+
+- The ChatGPT app gets the same `call` tool while remote control is on. Codex asks in the app before each call; the
+  tool is not approved ahead. Its key is new at each start of remote control and stops working when remote control
+  stops. The app's instructions now point changes to the tool too. The managed Codex config in the image
+  (`/etc/codex/managed_config.toml`, one setting, no hooks) keeps the tool keys out of the commands Codex runs for
+  every client.
 
 ## 0.3.5 (unreleased)
 

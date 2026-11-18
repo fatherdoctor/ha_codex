@@ -1,4 +1,4 @@
-"""Sign-in without a terminal, the pause switch, and the model pin."""
+"""Sign-in without a terminal, no pause switch, and the model pin."""
 from __future__ import annotations
 
 import importlib.util
@@ -45,7 +45,6 @@ class _Worker(unittest.TestCase):
         self.stack.enter_context(patch.object(server, "task_root", return_value=self.root / "tasks"))
         self.stack.enter_context(patch.object(server, "TASK_STATE_FILE", self.root / "index.json"))
         self.stack.enter_context(patch.object(server, "MESSAGE_QUEUE_FILE", self.root / "queue.json"))
-        self.stack.enter_context(patch.object(server, "PAUSE_FILE", self.root / "paused.json"))
         self.stack.enter_context(patch.object(server, "CODEX_HOME", self.root / "codex"))
         self.stack.enter_context(patch.object(server, "api_token", return_value="test-token"))
         self.stack.enter_context(patch.object(server, "fire_ha_event", return_value=(True, "")))
@@ -229,42 +228,30 @@ class SignInTests(_Worker):
         self.assertNotIn("user_code", server.auth_state)
         server.create_persistent_notification.assert_not_called()
 
-    def test_status_reports_the_sign_in_flow_and_pause_for_the_integration(self):
+    def test_status_reports_the_sign_in_flow_and_pin_for_the_integration(self):
         data = self.client.get("/status", headers=self.headers).get_json()
         self.assertIn("pending", data["auth_flow"])
-        self.assertEqual(data["pause"], {"paused": False})
+        self.assertNotIn("pause", data)
         self.assertEqual(data["model_pin"], PIN)
 
 
-class PauseTests(_Worker):
-    """Pause refuses new messages and holds the queue; resume starts what waited."""
+class NoPauseTests(_Worker):
+    """The assistant has no pause switch: no route, no refusal and no hold on the queue."""
 
-    def test_pause_refuses_new_chats_and_messages_and_resume_allows_them(self):
-        self.assertTrue(self.client.post("/pause", json={"paused": True}, headers=self.headers).get_json()["paused"])
-        response = self.client.post("/tasks", json={"prompt": "hello"}, headers=self.headers)
-        self.assertEqual(response.status_code, 409)
-        self.assertTrue(response.get_json()["paused"])
-        response = self.client.post("/tasks/x/continue", json={"message": "hello"}, headers=self.headers)
-        self.assertEqual(response.status_code, 409)
-        self.runner.assert_not_called()
-        self.assertFalse(self.client.post("/pause", json={"paused": False}, headers=self.headers).get_json()["paused"])
+    def test_the_pause_route_is_gone(self):
+        self.assertEqual(self.client.get("/pause", headers=self.headers).status_code, 404)
+        self.assertEqual(self.client.post("/pause", json={"paused": True}, headers=self.headers).status_code, 404)
+        self.assertFalse(hasattr(server, "assistant_paused"))
+
+    def test_a_new_chat_starts_without_a_pause_check(self):
         response = self.client.post("/tasks", json={"prompt": "hello"}, headers=self.headers)
         self.assertEqual(response.status_code, 200)
         self.runner.assert_called_once()
 
-    def test_pause_survives_a_restart_and_rejects_a_bad_body(self):
-        self.client.post("/pause", json={"paused": True}, headers=self.headers)
-        self.assertTrue((self.root / "paused.json").exists())
-        self.assertTrue(self.client.get("/pause", headers=self.headers).get_json()["paused"])
-        self.assertEqual(self.client.post("/pause", json={"paused": "yes"}, headers=self.headers).status_code, 400)
-
-    def test_queued_messages_wait_while_paused_and_start_on_resume(self):
+    def test_a_queued_message_starts_once_nothing_runs(self):
         server.message_queue.append({"task_id": "t1"})
         with patch.object(server, "start_queued_message", return_value=None) as start:
-            server.set_assistant_paused(True)
             server.start_next_queued()
-            start.assert_not_called()
-            server.set_assistant_paused(False)
             start.assert_called_once()
 
 

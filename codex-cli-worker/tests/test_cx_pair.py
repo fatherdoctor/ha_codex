@@ -35,7 +35,7 @@ class PairingTests(unittest.TestCase):
     def supervisor(self):
         def popen(command,**kw):
             self.commands.append(command);proc=base.FakeProc();self.procs.append(proc);return proc
-        sup=rc.Supervisor('codex',Path(self.temp.name)/'state.json',dict,lambda:'Home Assistant',gate=lambda:'',
+        sup=rc.Supervisor('codex',Path(self.temp.name)/'state.json',dict,lambda:'Home Assistant',
                           popen=popen,control_factory=lambda path:FakeControl(self,path))
         self.addCleanup(sup.stop);sup.start()
         self.assertTrue(base.wait_for(lambda:sup.snapshot()['state']=='ready'))
@@ -67,7 +67,7 @@ class PairingTests(unittest.TestCase):
             self.assertFalse(sup.snapshot()['pairing_code']);self.assertNotEqual(old_path,self.calls[-1][1])
 
     def test_legacy_pair_output_is_shown_on_page_but_never_in_log(self):
-        sup=rc.Supervisor('codex',Path(self.temp.name)/'state.json',dict,lambda:'',gate=lambda:'')
+        sup=rc.Supervisor('codex',Path(self.temp.name)/'state.json',dict,lambda:'')
         sup._parse('Pairing code: '+FIXTURE_CODE)
         self.assertTrue(sup.snapshot()['pairing_code']==FIXTURE_CODE)
         self.assertFalse(any(FIXTURE_CODE in line for line in sup.snapshot()['log']))
@@ -134,7 +134,7 @@ class LifecycleTests(unittest.TestCase):
                     return {"manualPairingCode": FIXTURE_CODE}
             def popen(*args, **kwargs):
                 proc=base.FakeProc();procs.append(proc);return proc
-            sup=rc.Supervisor('codex',Path(tmp)/'state',dict,lambda:'',gate=lambda:'',popen=popen,control_factory=DelayedControl)
+            sup=rc.Supervisor('codex',Path(tmp)/'state',dict,lambda:'',popen=popen,control_factory=DelayedControl)
             self.addCleanup(sup.stop);sup.start()
             self.assertTrue(base.wait_for(lambda:sup.snapshot()['state']=='ready'))
             private=sup.control_socket.parent;self.assertEqual(private.stat().st_mode & 0o777,0o700)

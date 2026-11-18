@@ -102,6 +102,29 @@ async function testApprovals(browser, output, errors) {
   assert.match(await approvalPage.locator(".permission-card").textContent(), /Move to: \/other\/renamed.yaml/);
   await approvalPage.getByRole("button", {name: "Allow once", exact: true}).click();
   await approvalPage.locator(".permission-card strong").filter({hasText: /^Allowed once$/}).waitFor();
+  // CX-SIMPLE.B: Codex's own request before a tool call shows the tool and every argument, as text.
+  await approvalPage.locator("#new-chat").click();
+  await approvalPage.locator("#message").fill("Request permission to call a tool");
+  await approvalPage.getByRole("button", {name: "Send message", exact: true}).click();
+  await approvalPage.getByRole("button", {name: "Allow once", exact: true}).waitFor();
+  const toolCard = approvalPage.locator(".permission-card");
+  assert.match(await toolCard.textContent(), /Tool: home_assistant_call\.call/);
+  assert.match(await toolCard.textContent(), /What changes: Run the Home Assistant action notify\.notify\./);
+  const toolArguments = await approvalPage.locator(".permission-command").textContent();
+  assert.equal(JSON.parse(toolArguments).data.message, "Dinner is ready.\n<img src=x onerror=alert(1)>");
+  assert.equal(await approvalPage.locator(".permission-card img").count(), 0);
+  assert.equal(await approvalPage.getByRole("button", {name: "Allow once", exact: true}).isDisabled(), false);
+  await approvalPage.getByRole("button", {name: "Allow once", exact: true}).click();
+  await approvalPage.locator(".permission-card strong").filter({hasText: /^Allowed once$/}).waitFor();
+  // A request too long to show in full can only be denied.
+  await approvalPage.locator("#new-chat").click();
+  await approvalPage.locator("#message").fill("Request permission to call a tool, clipped");
+  await approvalPage.getByRole("button", {name: "Send message", exact: true}).click();
+  await approvalPage.getByRole("button", {name: "Deny", exact: true}).waitFor();
+  assert.equal(await approvalPage.getByRole("button", {name: "Allow once", exact: true}).isDisabled(), true);
+  assert.match(await approvalPage.locator(".permission-card").textContent(), /cannot be allowed here/);
+  await approvalPage.getByRole("button", {name: "Deny", exact: true}).click();
+  await approvalPage.locator(".permission-card strong").filter({hasText: /^Denied$/}).waitFor();
   await approvalPage.close();
 }
 module.exports = testApprovals;

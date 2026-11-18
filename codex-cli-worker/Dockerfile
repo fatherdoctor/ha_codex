@@ -88,26 +88,25 @@ RUN pip3 install --no-cache-dir --break-system-packages \
 WORKDIR /data
 
 COPY run.sh /
-COPY server.py account_access.py /
+COPY server.py account_access.py safety_block.py starter_agents.md /
 COPY interaction_diagnostics.py diagnostics_scrub.py /
-# The remote-control command check (CX-B6b): managed Codex requirements and hook, read-only, outside
-# /config and outside every sandbox's writable roots. The marker goes last: remote control can be
-# turned on only when it and every file it lists are present and the hook passes its self-test.
+# Codex's managed requirements (the sandbox modes and approval policies a client may ask for) and managed
+# config (the tool keys kept out of commands), read-only, outside /config and every sandbox's writable roots.
 COPY gate/requirements.toml gate/managed_config.toml /etc/codex/
-COPY gate/gate_hook.py gate_rules.py shell_words.py policy/refused-domains.json /usr/share/ha_codex/
-COPY gate/remote-control-gate.json /usr/share/ha_codex/remote-control-gate.json
-RUN chmod 0644 /etc/codex/requirements.toml /etc/codex/managed_config.toml /usr/share/ha_codex/* \
+# The shipped requirements, from which full_access.py writes /etc/codex/requirements.toml at start.
+COPY gate/requirements.toml /usr/share/ha_codex/requirements.toml
+RUN chmod 0644 /etc/codex/requirements.toml /etc/codex/managed_config.toml /usr/share/ha_codex/requirements.toml \
     && chown -R root:root /etc/codex /usr/share/ha_codex
 
 # The GitHub sign-in (CX-GITHUB): the worker side, the stdio tool Codex calls, git's askpass helper, and the
-# kit's push guard, read-only beside the gate. Every push the worker makes for Codex runs that guard first.
+# kit's push guard, read-only in /usr/share/ha_codex. Every push the worker makes for Codex runs that guard first.
 COPY github_access.py github_mcp.py /
 COPY github_askpass.py /usr/local/bin/codex-github-askpass
 COPY push_guard.py /usr/share/ha_codex/push_guard.py
 RUN chmod 0555 /usr/local/bin/codex-github-askpass && chmod 0444 /usr/share/ha_codex/push_guard.py \
     && chown root:root /usr/local/bin/codex-github-askpass /usr/share/ha_codex/push_guard.py
 
-COPY core_address.py relay_reads.py relay_reads_mcp.py scheduling.py schedule_api.py scheduling_mcp.py approvals.py policy.py gate_rules.py shell_words.py remote_control.py relay_diagnostics.py verification.py verification_mcp.py browser_permissions.py browser_permission_policy.json ha_data.py ha_data_mcp.py ha_call.py ha_call_mcp.py name_match.py browser.cjs browser_resources.cjs browser_permissions.cjs /
+COPY full_access.py core_address.py relay_reads.py relay_reads_mcp.py scheduling.py schedule_api.py scheduling_mcp.py approvals.py policy.py remote_control.py relay_diagnostics.py verification.py verification_mcp.py browser_permissions.py browser_permission_policy.json ha_data.py ha_data_mcp.py ha_call.py ha_call_mcp.py name_match.py browser.cjs browser_resources.cjs browser_permissions.cjs /
 COPY web /web
 # The Codex integration of the same release, which integration_sync.py installs in /config at start.
 # The build copies custom_components/codex_cli into integration/ first (see integration/README.md).
