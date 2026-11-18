@@ -332,6 +332,36 @@ The request and decision remain in the exchange's `approvals` history, with sens
 
 Authenticated API clients can answer a live request using `POST /tasks/<task_id>/approvals/<approval_id>` with `{"turn_id":"<current_turn_id>","decision":"allow"}` or `"deny"`. Read the redacted `approvals` records from `GET /tasks/<task_id>` first. A stale or already answered request returns HTTP 409. Task summaries include `permission_required` while an exchange is waiting. Permission decisions are made directly on the live exchange and are never queued as chat messages.
 
+### Changes to the house: the `call` tool
+
+From **0.3.6**, a chat on the page changes the house through one tool, `home_assistant_call` `call`. It sends one
+Home Assistant action (a service call), for example `light.turn_off` with a target, `automation.reload` or
+`homeassistant.restart`. The app sets the tool's approval mode to `prompt`, so Codex asks you each time, with no
+remembered answer: the question has no "Allow for this session" and no "don't ask again". It shows the service,
+the target and the data. The command check gives the tool's request no decision, so the answer is always yours.
+A scheduled run does not get the tool, since nobody is there to answer.
+
+The tool gives Codex no token. Its bridge passes the request to the worker over a private socket, with a key that
+is valid for the running message only. The worker sends the call to Home Assistant once, with its own access, and
+checks these things first, in every mode:
+
+- A request without the current key of a running chat sends nothing.
+- The service must be `domain.service`. `entity_id`, `device_id`, `area_id`, `floor_id` and `label_id` go in
+  `target`, the other fields in `data`. A request in any other form sends nothing.
+
+The tool refuses no service by name. Your answer to Codex's question is the only gate, so read the service before
+you allow it. A call can reach the Supervisor: a `hassio` service, `update.install` on an update entity (an app,
+Home Assistant OS or Core, this app too) or `backup.create`. A call can also run code that you wrote, for example a
+`shell_command`, `python_script`, `pyscript` or `rest_command` service. The app keeps no log of its own of the
+calls; Home Assistant's logbook and history show what changed.
+
+The keys of the app's tools (`HA_*_CAPABILITY`) are kept out of the commands that Codex runs, with Codex's
+`shell_environment_policy` setting. So a command cannot write to the socket and skip Codex's question. In a mode
+without a sandbox, a command can read the environment of the Codex process; that mode has no question to skip,
+and the checks above still hold.
+
+These checks do not cover a command that uses the `HA_TOKEN` option (see "AGENTS.md and HA_TOKEN").
+
 ### Confirmed actions and planted commands
 
 Codex follows its defaults and the owner's `/config/AGENTS.md`. The integration does not bundle a house-practice file prescribing device categories, API-deletion practices or a writing style. Owners can choose such practices through their own workspace instructions or the starter kit. Permission cards and the enforced gate continue to operate independently of prose instructions.
@@ -358,21 +388,21 @@ Codex can be reached three ways: the chat page, the ChatGPT app paired through r
 |---|---|---|---|
 | Read an entity's state or find an entity | `home_assistant.verify` | `home_assistant_relay.read` | `home_assistant.verify` |
 | Read history or long-term statistics | `home_assistant_data.history`, `home_assistant_data.statistics` | not available | `home_assistant_data.history`, `home_assistant_data.statistics` |
-| Control a device or call a service | not available | not available | not available |
-| Send a notification | not available | not available | not available |
+| Control a device or call a service | `home_assistant_call.call` | not available | `home_assistant_call.call` |
+| Send a notification | `home_assistant_call.call` | not available | `home_assistant_call.call` |
 | Ask the owner a question or report the turn's state | `home_assistant_data.ask_owner`, `home_assistant_data.report_failure`, `home_assistant_data.exchange_info` | not available | `home_assistant_data.ask_owner`, `home_assistant_data.report_failure`, `home_assistant_data.exchange_info` |
 | Propose a schedule or use the mailbox | `codex_scheduling.propose_schedule`, `codex_scheduling.list_schedules`, `codex_scheduling.read_mailbox`, `codex_scheduling.post_mailbox` | not available | `codex_scheduling.propose_schedule`, `codex_scheduling.list_schedules`, `codex_scheduling.read_mailbox`, `codex_scheduling.post_mailbox` |
 | Work with a GitHub repository | `codex_github.github_git` | not available | `codex_github.github_git` |
 
 - `codex_cli.start_task` starts the same kind of task as the chat page, so it gets the same tools.
-- No way in has a Home Assistant tool that changes the house. Codex asks for each device command or notification
-  as a [permission request](#permission-requests), and the change runs only after **Allow once**.
+- Codex asks you before each `call`, on the chat page
+  ([Changes to the house: the `call` tool](#changes-to-the-house-the-call-tool)).
 - File edits and shell commands use Codex's own tools on every way in, and the [sandbox](#sandbox) applies on every
   way in. On the chat page and for `codex_cli.start_task`, a request for more access shows on the chat page as a
   [permission request](#permission-requests). The ChatGPT app shows Codex's own requests in the app instead, as
   [Remote control from the ChatGPT app](#remote-control-from-the-chatgpt-app) describes.
 - A scheduled run and a message on the lead agent channel also start a task. They use the same launcher as the chat
-  page and get the page's tools. A Read only schedule narrows the sandbox, not the tools
+  page and get the page's tools, except the `call` tool: nobody is there to answer. A Read only schedule narrows the sandbox, not the tools
   ([Scheduled runs and the lead agent channel](#scheduled-runs-and-the-lead-agent-channel)).
 - "Not available" means the way in has no tool for that request.
 
@@ -618,7 +648,7 @@ When the state changes, and only then:
 
 - The app fires the Home Assistant event `codex_cli_github_access` with the state, the previous state, the reason, the account login, the missing and added repositories, the permission problem and the expiry. It never sends a token or a code. The integration fires the same event, with `source: integration`, when it sees the change, so an automation still works if the app's own call failed. An automation can route it to your notify service.
 - The app sends one notification through its `notify_service` option, or a persistent notification (`codex_cli_github`) without one.
-- The integration raises the repair **The Codex add-on's GitHub sign-in needs attention** (`github_access_lost`). It is an error for expired, revoked and cannot be checked, and a warning for expires soon and access changed. It clears when the check is OK or you disconnect. If you never connected, there is no repair.
+- The integration raises one repair (`github_access_lost`). It is an error for expired, revoked and cannot be checked, and a warning for expires soon and access changed. Its text fits the state and the kind of sign-in: for expires soon it says that GitHub still works and gives the date, and for a token it names **Use a token instead**, because **Connect again** starts an App sign-in. It clears when the check is OK or you disconnect. If you never connected, there is no repair.
 - A banner above the chat offers **Open GitHub settings**.
 
 ### When GitHub stops working
@@ -628,9 +658,10 @@ Open **Settings > Accounts and connections > GitHub** in the app page. The card 
 - **Not connected to GitHub:** No sign-in is saved, or the app was restored from a backup. Press **Connect GitHub** to connect the App. If you use a fine-grained token, open **Use a token instead**.
 - **Connecting:** The App is waiting for you to finish on GitHub. Follow the link on the card. If the code expires, press **Get a new code**. To start over while it is waiting, press **Cancel**, then **Connect GitHub**.
 - **Connected to GitHub:** The access check is OK. If a repository operation still fails, press **Read test** to check the connected repositories.
-- **Connected, but the sign-in expires within 7 days:** The saved token is close to its expiry. Open **Use a token instead** and save a new fine-grained token, or press **Connect again** to use the App.
-- **The GitHub sign-in expired:** The saved sign-in is past its expiry. Press **Connect again** for the App, or open **Use a token instead** to save a new token.
-- **GitHub refused the stored sign-in (revoked):** GitHub no longer accepts the saved sign-in. Press **Connect again** for the App, or open **Use a token instead** to save a new token.
+- **GitHub still works, but this sign-in (or token) expires within 7 days:** The assistant can still use GitHub. Before the date, press **Connect again** for the App, or create a new fine-grained token and open **Use a token instead** for a token.
+- **The GitHub sign-in expired** or **This GitHub token expired:** The saved sign-in is past its expiry. For the App, press **Connect again**. For a token, create a new one on GitHub, then open **Use a token instead**.
+- **GitHub no longer accepts this sign-in (or token):** GitHub refused the saved sign-in (revoked). For the App, press **Connect again**; if GitHub still refuses it, restore the App's repository access on GitHub. For a token, create a new one, then open **Use a token instead**.
+- **The new GitHub sign-in failed:** A **Connect again** did not finish. The card gives GitHub's reason, and the previous sign-in stays as it was.
 - **The GitHub sign-in reaches different repositories or access than you connected:** GitHub reports a changed repository list or permissions. Check the list and access shown on the card. If the repository change is intended and **Accept this access** is available, press it. If you did not intend the repository change, restore the repository selection for the App on GitHub. Then press **Check now**. If permissions changed, restore Contents read and write on GitHub, then press **Check now**.
 - **The GitHub sign-in cannot be checked:** GitHub could not be reached repeatedly, or the check found another error. Check the last-check reason and your connection, then press **Check now**.
 
@@ -652,6 +683,11 @@ it again only after a change. A change you make to the file still reaches a chat
 next message.
 
 The optional `HA_TOKEN` app option is passed to Codex subprocesses as the `HA_TOKEN` environment variable. Configure it only if you want Codex tasks to call Home Assistant APIs directly. A Home Assistant long-lived access token inherits its user's permissions; use a dedicated user with permissions appropriate for the intended work.
+
+From **0.3.6**, the instructions tell Codex to change the house with the `call` tool, reloads and restarts
+included, and to use `HA_TOKEN` only for an API call that is not a service. A command that uses the token is still
+a command: in the sandboxed modes it needs network access, so Codex asks first. The `call` tool's checks do not
+cover such a command; the command check (hook) reads it.
 
 From **0.1.68**, a task that has `HA_TOKEN` also gets `HA_URL`, the address those calls go to, and the worker's instructions tell Codex to use the two together. The app's own calls to Home Assistant keep using the Supervisor proxy with the app's own token and do not use this option.
 

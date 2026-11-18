@@ -414,7 +414,9 @@ class ConversationTests(unittest.TestCase):
         self.assertNotIn("HA_URL", server.PAGE_INSTRUCTIONS)
         with patch.object(server, "read_options", return_value={"HA_TOKEN": "token-value"}):
             prompt = server.exchange_info("task", None)["home_assistant_api"]
-        self.assertIn('$HA_URL/api/services/automation/reload, with the header "Authorization: Bearer $HA_TOKEN"', prompt)
+        # From 0.3.6 a reload goes through the call tool; the token is only for an API call that is not a service.
+        self.assertIn("a reload and a restart included, use the home_assistant_call call tool", prompt)
+        self.assertIn('$HA_URL/api/template, with the header "Authorization: Bearer $HA_TOKEN"', prompt)
         self.assertIn("Do not use http://supervisor/core, which does not accept this token", prompt)
         # The token itself is never written into the prompt.
         self.assertNotIn("token-value", prompt)

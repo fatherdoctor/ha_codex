@@ -149,6 +149,33 @@ function status(state, extra = {}) {
       await page.locator('#github-check').click();
       await page.waitForFunction(() => document.querySelector('#github-result').textContent.includes('Check finished'));
 
+      // A failed Connect again shows its reason while the old sign-in stays (Astro F2).
+      for (const state of ['expired', 'revoked', 'near_expiry']) {
+        github = status(state, {flow: {...idle, status: 'failed', error: 'The sign-in was refused on GitHub.'}});
+        await page.locator('#github-check').click();
+        await page.waitForFunction(() => document.querySelector('#github-flow').textContent.includes('refused on GitHub'));
+        assert.equal(await page.locator('#github-flow').textContent(),
+          'The new GitHub sign-in failed. The sign-in was refused on GitHub. Your previous sign-in has not changed.');
+      }
+      // The recovery step fits the kind of sign-in: Connect again starts an App sign-in (Astro F4).
+      github = status('expired', {kind: 'token'});
+      await page.locator('#github-check').click();
+      await page.waitForFunction(() => document.querySelector('#github-status').textContent.includes('token expired'));
+      assert.match(await page.locator('#github-status').textContent(), /Create a new token on GitHub, then choose Use a token instead/);
+      assert.match(await page.locator('#github-banner-text').textContent(), /Use a token instead/);
+      assert.equal(await page.locator('#github-flow').textContent(), '');
+      github = status('revoked');
+      await page.locator('#github-check').click();
+      await page.waitForFunction(() => document.querySelector('#github-status').textContent.includes('no longer accepts this sign-in'));
+      assert.match(await page.locator('#github-status').textContent(), /Choose Connect again/);
+      github = status('near_expiry');
+      await page.locator('#github-check').click();
+      await page.waitForFunction(() => document.querySelector('#github-status').textContent.startsWith('GitHub still works'));
+      assert.equal(await page.locator('#github-banner').isHidden(), true);
+      github = status('ok');
+      await page.locator('#github-check').click();
+      await page.waitForFunction(() => document.querySelector('#github-status').textContent.startsWith('Connected to GitHub'));
+
       // Clone into /share/<repository> (the default folder name) and link existing folders, by buttons.
       await page.locator('#github-local summary').click();
       assert.equal(await page.locator('#github-clone-folder').inputValue(), 'house');
