@@ -328,9 +328,9 @@ def command_names_protected_path(command: str) -> bool:
 FILE_APPROVAL = "item/fileChange/requestApproval"
 TOOL_APPROVAL = "mcpServer/elicitation/request"
 
-# The tool servers whose action requests get a page card: the plain Home Assistant tool, home_assistant.call.
-# A question from any other server is still declined (see _elicitation_refusal).
-TOOL_CARD_SERVERS = frozenset({"home_assistant"})
+# The (server, tool) pairs whose action requests get a page card: the plain Home Assistant tool that server.py
+# registers as home_assistant_call. A question from any other server or tool is still declined (_elicitation_refusal).
+TOOL_CARDS = frozenset({("home_assistant_call", "call")})
 
 # Codex 0.166.0 asks before a tool call with a form whose _meta has codex_approval_kind "mcp_tool_call" and the full
 # arguments in tool_params. The tool name is only in its message, which for a tool outside the ChatGPT apps is always
@@ -357,13 +357,13 @@ def decision_result(kind: str, allow: bool) -> dict[str, Any]:
 
 
 def tool_request(params: dict[str, Any]) -> tuple[str, str] | None:
-    """Return (server, tool) when this is Codex's own request to run a tool of a card server, else None."""
+    """Return (server, tool) when this is Codex's own request to run a tool that has a page card, else None."""
     meta = params.get("_meta")
     if params.get("mode") != "form" or not isinstance(meta, dict) or meta.get("codex_approval_kind") != "mcp_tool_call":
         return None
     question = _TOOL_QUESTION.fullmatch(str(params.get("message") or ""))
     server = params.get("serverName")
-    if not question or server not in TOOL_CARD_SERVERS or question.group(1) != server:
+    if not question or question.group(1) != server or (server, question.group(2)) not in TOOL_CARDS:
         return None
     return server, question.group(2)
 

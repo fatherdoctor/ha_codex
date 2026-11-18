@@ -11,7 +11,7 @@
   `/data/codex-home/house-rules/permission-overrides.json`, `/data/house-rules/confirmed.json`,
   `/data/permission-overrides-backups` and `/data/permission-overrides.sock` behind; the app no longer reads them, and you can delete them.
 
-- The chat page shows Codex's own permission request for the Home Assistant tool (`home_assistant.call`) as a card:
+- The chat page shows Codex's own permission request for the Home Assistant tool (`call` of the `home_assistant_call` server) as a card:
   the tool, the action in plain words, and every argument as JSON, including the full text of a message, with
   **Allow once** and **Deny**. **Allow once** allows that one call; Codex asks again before the next one. A request
   that cannot be shown in full has no **Allow once**. Questions from every other tool are still declined, and the

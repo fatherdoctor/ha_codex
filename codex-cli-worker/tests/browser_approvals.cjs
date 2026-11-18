@@ -108,7 +108,7 @@ async function testApprovals(browser, output, errors) {
   await approvalPage.getByRole("button", {name: "Send message", exact: true}).click();
   await approvalPage.getByRole("button", {name: "Allow once", exact: true}).waitFor();
   const toolCard = approvalPage.locator(".permission-card");
-  assert.match(await toolCard.textContent(), /Tool: home_assistant\.call/);
+  assert.match(await toolCard.textContent(), /Tool: home_assistant_call\.call/);
   assert.match(await toolCard.textContent(), /What changes: Run the Home Assistant action notify\.notify\./);
   const toolArguments = await approvalPage.locator(".permission-command").textContent();
   assert.equal(JSON.parse(toolArguments).data.message, "Dinner is ready.\n<img src=x onerror=alert(1)>");

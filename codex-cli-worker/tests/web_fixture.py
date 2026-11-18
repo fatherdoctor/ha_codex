@@ -235,8 +235,8 @@ def main():
                         # request carries an argument longer than the page shows, so it has no Allow button.
                         text = "x" * 40000 if "clipped" in (reply or prompt) else "Dinner is ready.\n<img src=x onerror=alert(1)>"
                         session.receive({"id": 0, "method": "mcpServer/elicitation/request", "params": {
-                            "threadId": session_id, "turnId": "preview-native", "serverName": "home_assistant",
-                            "mode": "form", "message": 'Allow the home_assistant MCP server to run tool "call"?',
+                            "threadId": session_id, "turnId": "preview-native", "serverName": "home_assistant_call",
+                            "mode": "form", "message": 'Allow the home_assistant_call MCP server to run tool "call"?',
                             "requestedSchema": {"type": "object", "properties": {}},
                             "_meta": {"codex_approval_kind": "mcp_tool_call", "tool_params": {
                                 "service": "notify.notify", "data": {"title": "Kitchen", "message": text}}}}})

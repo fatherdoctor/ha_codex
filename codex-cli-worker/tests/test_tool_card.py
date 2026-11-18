@@ -10,7 +10,7 @@ from test_approvals import Transport  # first: it puts the worker folder on the 
 import approvals
 from approvals import AppServerSession
 
-QUESTION = 'Allow the home_assistant MCP server to run tool "call"?'
+QUESTION = 'Allow the home_assistant_call MCP server to run tool "call"?'
 
 
 def tool_params(**overrides):
@@ -47,7 +47,7 @@ class ToolCardTests(unittest.TestCase):
     def ask(self, request_id=7, arguments=None, **overrides):
         """Send the request Codex 0.166.0 sends before a tool call; return the records saved for the page."""
         params = {
-            "threadId": "thread", "turnId": "turn", "serverName": "home_assistant", "mode": "form",
+            "threadId": "thread", "turnId": "turn", "serverName": "home_assistant_call", "mode": "form",
             "message": QUESTION, "requestedSchema": {"type": "object", "properties": {}},
             "_meta": {"codex_approval_kind": "mcp_tool_call", "persist": ["session", "always"],
                       "tool_params": tool_params() if arguments is None else arguments},
@@ -63,7 +63,7 @@ class ToolCardTests(unittest.TestCase):
     def test_request_waits_for_the_owner_and_sends_nothing_yet(self):
         self.assertEqual(self.ask(), [])
         record = self.record()
-        self.assertEqual((record["kind"], record["status"], record["tool"]), ("tool", "pending", "home_assistant.call"))
+        self.assertEqual((record["kind"], record["status"], record["tool"]), ("tool", "pending", "home_assistant_call.call"))
         self.assertTrue(record["can_allow"])
         self.assertTrue(self.session.waiting_for_user())
 
@@ -121,6 +121,7 @@ class ToolCardTests(unittest.TestCase):
             "another server": {"serverName": "codex_scheduling",
                                "message": 'Allow the codex_scheduling MCP server to run tool "post_mailbox"?'},
             "message names another server": {"message": 'Allow the github MCP server to run tool "call"?'},
+            "another tool of the server": {"message": 'Allow the home_assistant_call MCP server to run tool "read"?'},
             "the server's own question": {"_meta": None, "message": "Pick a light"},
             "not a form": {"mode": "url"},
             "a different sentence": {"message": QUESTION + " Also allow everything"},
