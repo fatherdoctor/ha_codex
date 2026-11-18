@@ -606,7 +606,9 @@ class PermissionNotificationTests(unittest.TestCase):
             server.notify_permission("task-1", {"kind": "file_change", "reason": "",
                                                 "changes": [{"path": "/other/a.yaml", "diff": "+name: After"}]}, waiting)
             server.notify_permission("task-1", {"kind": "command", "reason": "Why? " + "x" * 500}, waiting)
-        first, second, third = [call.args for call in notify.call_args_list]
+            server.notify_permission("task-1", {"kind": "tool", "reason": "",
+                                                "arguments": '{"service": "light.turn_off"}'}, waiting)
+        first, second, third, fourth = [call.args for call in notify.call_args_list]
         self.assertEqual(first, ("Codex needs permission",
                                  "Codex is waiting for your decision on a command. Reason: Read sensor history. "
                                  "Open the Codex chat to review it. Task: task-1"))
@@ -614,6 +616,8 @@ class PermissionNotificationTests(unittest.TestCase):
                                     "Open the Codex chat to review it. Task: task-1")
         self.assertIn("x… Open the Codex chat", third[1])
         self.assertLess(len(third[1]), server.PERMISSION_REASON_MAX + 120)
+        self.assertEqual(fourth[1], "Codex is waiting for your decision on a tool request. "
+                                    "Open the Codex chat to review it. Task: task-1")
 
     def test_notification_does_not_hold_up_the_caller(self):
         """Requests are saved under the worker lock, so sending must not wait for Home Assistant there."""
