@@ -14,6 +14,7 @@ from aiohttp import web
 from homeassistant.auth.const import GROUP_ID_READ_ONLY
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.components.http.const import KEY_HASS_USER
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.network import get_url, get_supervisor_network_url
 from homeassistant.helpers.storage import Store
@@ -161,8 +162,15 @@ class BrowserSessionView(HomeAssistantView):
 
         Raises HTTPServiceUnavailable when no broker is open, and HTTPForbidden for any other caller.
         """
-        broker = self.hass.data.get(DOMAIN, {}).get("browser_sessions")
-        if broker is None or broker.closed:
+        broker = None
+        for entry in self.hass.config_entries.async_entries(DOMAIN):
+            if entry.state is ConfigEntryState.LOADED:
+                runtime = getattr(entry, "runtime_data", None)
+                candidate = getattr(runtime, "browser_sessions", None)
+                if isinstance(candidate, BrowserSessions) and not candidate.closed:
+                    broker = candidate
+                    break
+        if broker is None:
             raise web.HTTPServiceUnavailable()
         supplied = data.get("worker_token", "")
         if not isinstance(supplied, str) or not request[KEY_HASS_USER].is_admin or not hmac.compare_digest(

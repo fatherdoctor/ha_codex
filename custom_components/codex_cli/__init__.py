@@ -3,20 +3,21 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from contextlib import ExitStack
 from dataclasses import dataclass
 from functools import wraps
 from typing import Any
 
 import voluptuous as vol
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError, ServiceValidationError, Unauthorized
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady, HomeAssistantError, ServiceValidationError, Unauthorized
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
 
-from .api import CodexCliApiClient, CodexCliApiError
+from .api import CodexCliApiClient, CodexCliApiError, CodexCliAuthError
 from .const import (
     ATTR_PROMPT,
     ATTR_REPLY,
@@ -70,6 +71,7 @@ class CodexCliRuntimeData:
 
     client: CodexCliApiClient
     coordinator: CodexCliCoordinator
+    browser_sessions: BrowserSessions
 
 
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
@@ -86,26 +88,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     session = async_get_clientsession(hass)
     try:
         worker = await async_discover_worker(hass, session)
+    except CodexCliAuthError as exc:
+        raise ConfigEntryAuthFailed("Worker authentication failed") from exc
     except CodexCliApiError as exc:
         raise ConfigEntryNotReady(str(exc)) from exc
 
     _async_update_discovered_entry(hass, entry, worker.base_url)
     client = CodexCliApiClient(session, worker.base_url, worker.api_token)
     coordinator = CodexCliCoordinator(hass, client, entry.entry_id)
-    entry.runtime_data = CodexCliRuntimeData(client=client, coordinator=coordinator)
-    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     await coordinator.async_config_entry_first_refresh()
 
     broker = BrowserSessions(hass, worker.api_token)
-    await broker.setup()
-    hass.data.setdefault(DOMAIN, {})["browser_sessions"] = broker
-    entry.async_on_unload(broker.close)
-    entry.async_on_unload(async_listen_for_choices(hass, client, coordinator))
-    # Keep contact with the worker even when every entity is disabled. The
-    # coordinator still respects the entry's setting to disable polling.
-    entry.async_on_unload(coordinator.async_add_listener(lambda: None))
-
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    # Setup can fail before Core owns the unload callbacks. Close all acquired
+    # resources on failure, and transfer their cleanup to the entry on success.
+    with ExitStack() as cleanup:
+        cleanup.callback(broker.close)
+        await broker.setup()
+        entry.runtime_data = CodexCliRuntimeData(
+            client=client, coordinator=coordinator, browser_sessions=broker
+        )
+        cleanup.callback(setattr, entry, "runtime_data", None)
+        cleanup.callback(entry.add_update_listener(_async_update_listener))
+        cleanup.callback(async_listen_for_choices(hass, client, coordinator))
+        # Keep contact even when every entity is disabled, while respecting
+        # the config entry's setting to disable polling.
+        cleanup.callback(coordinator.async_add_listener(lambda: None))
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        entry.async_on_unload(cleanup.pop_all().close)
     return True
 
 
@@ -113,6 +122,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a Codex CLI config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
+        runtime_data = getattr(entry, "runtime_data", None)
+        if isinstance(runtime_data, CodexCliRuntimeData):
+            runtime_data.browser_sessions.close()
         entry.runtime_data = None
     return unload_ok
 
@@ -143,7 +155,7 @@ def _first_runtime(hass: HomeAssistant) -> CodexCliRuntimeData:
     """Return the first loaded Codex runtime."""
     for entry in hass.config_entries.async_entries(DOMAIN):
         runtime_data = getattr(entry, "runtime_data", None)
-        if isinstance(runtime_data, CodexCliRuntimeData):
+        if entry.state is ConfigEntryState.LOADED and isinstance(runtime_data, CodexCliRuntimeData):
             return runtime_data
     raise ServiceValidationError("Codex integration is not configured or is not loaded")
 

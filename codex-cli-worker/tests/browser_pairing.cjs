@@ -18,7 +18,7 @@ const assert = require('node:assert/strict');
       const conversations=page.getByRole('button',{name:'Open conversations',exact:true});
       if(await conversations.isVisible()) await conversations.click();
       await page.getByRole('button',{name:'Open settings',exact:true}).click();
-    if(await page.locator('#accounts-section > h3 .settings-toggle').getAttribute('aria-expanded')!=='true')await page.locator('#accounts-section > h3 .settings-toggle').click();await page.getByRole('button',{name:'Manage remote connection',exact:true}).click();
+    if(await page.locator('#accounts-section > h3 .settings-toggle').getAttribute('aria-expanded')!=='true')await page.locator('#accounts-section > h3 .settings-toggle').click();if(await page.locator('#app-pairing-section .settings-toggle').getAttribute('aria-expanded')!=='true')await page.locator('#app-pairing-section .settings-toggle').click();await page.getByRole('button',{name:'Manage remote connection',exact:true}).click();
       await page.locator('#remote-control-pair').click();
       await page.locator('#remote-control-card .pairing-code').waitFor({state:'visible'});
       assert.equal(await page.locator('#remote-control-card .pairing-code').textContent(),'TEST-0000');

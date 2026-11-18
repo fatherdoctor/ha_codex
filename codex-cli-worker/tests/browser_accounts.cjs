@@ -27,7 +27,7 @@ async function openSettings(page) {
 const accountsStatus = page => page.locator('#accounts-section > h3 .settings-status').textContent();
 
 /** A same-origin page that stands in for the Home Assistant frontend: a hass object whose callWS is recorded. */
-function hostPage(sessionReply) {
+function hostPage(sessionReply, page = base) {
   return `<!doctype html><home-assistant></home-assistant><script>
     window.wsCalls = [];
     document.querySelector('home-assistant').hass = {
@@ -36,7 +36,7 @@ function hostPage(sessionReply) {
         ${sessionReply}
       },
     };
-  <\/script><iframe src="${base}" style="width:400px;height:800px"></iframe>`;
+  <\/script><iframe src="${page}" style="width:400px;height:800px"></iframe>`;
 }
 
 (async () => {
@@ -66,6 +66,10 @@ function hostPage(sessionReply) {
       await page.locator('#accounts-section > h3 .settings-toggle').click();
       assert.equal(await page.locator('#chatgpt-section .settings-status').textContent(), 'Signed in');
       assert.equal(await page.locator('#github-section .settings-status').textContent(), 'Connected as synthetic-owner, 1 repository');
+      // The app pairing part has its own collapsed header, like ChatGPT and GitHub.
+      assert.equal(await page.locator('#app-pairing-section .settings-status').textContent(), 'On');
+      assert.equal(await page.locator('#app-pairing-new').isVisible(), false);
+      await page.locator('#app-pairing-section .settings-toggle').click();
       assert.equal(await page.locator('#app-pairing-status').textContent(), 'Connected');
       assert.equal(await page.locator('#app-pairing-new').isVisible(), true);
       // Turn off is the remote-control stop: the part and the header follow the new state.
@@ -81,6 +85,8 @@ function hostPage(sessionReply) {
       await openSettings(page);
       await page.waitForFunction(() => document.querySelector('#accounts-section > h3 .settings-status').textContent === 'app connection error');
       assert.equal(await page.locator('#accounts-section').evaluate(s => s.classList.contains('needs-attention')), true);
+      assert.equal(await page.locator('#app-pairing-section .settings-status').textContent(), 'Connection error');
+      assert.equal(await page.locator('#app-pairing-section').evaluate(s => s.classList.contains('needs-attention')), true);
       assert.equal(await page.locator('#chatgpt-section').evaluate(s => s.classList.contains('needs-attention')), false);
       // Get a pairing code opens the remote connection window and asks for a code.
       rc = remote;
@@ -174,7 +180,27 @@ function hostPage(sessionReply) {
       assert.equal(await page.locator('#session-banner').isHidden(), true);
       await page.close();
     }
-    console.log('PASS 401: a failed renewal shows a plain message and a Reload button, never the HTTP code');
+    // 5. A parent on another origin cannot be asked: the page never reaches its callWS and shows the plain banner.
+    // Chromium refuses to frame a local address from a page a test route serves on another origin; this browser
+    // turns that check off, and only this case uses it.
+    const crossOrigin = await chromium.launch({headless: true, args: ['--disable-features=LocalNetworkAccessChecks']});
+    try {
+      const page = await crossOrigin.newPage();
+      await page.route('**/preview/pause', route => route.fulfill({status: 401, contentType: 'text/plain', body: '401: Unauthorized'}));
+      // The same server under its other local name: the parent and the page are on different origins.
+      await page.route('http://127.0.0.1:9137/ingress-host', route => route.fulfill({contentType: 'text/html', body: hostPage(
+        "return {session: 'synthetic-session'};", 'http://localhost:9137/preview/')}));
+      await page.goto('http://127.0.0.1:9137/ingress-host');
+      const frame = await (await page.waitForSelector('iframe')).contentFrame();
+      await frame.waitForFunction(() => typeof api === 'function');
+      const message = await frame.evaluate(() => api('pause').then(() => 'no error', e => e.message));
+      assert.equal(message, 'Your Home Assistant session expired. Reload the page to continue.');
+      assert.equal(await frame.locator('#session-banner').isVisible(), true);
+      assert.deepEqual(await page.evaluate(() => window.wsCalls), []);
+    } finally {
+      await crossOrigin.close();
+    }
+    console.log('PASS 401: a failed renewal shows a plain message and a Reload button, never the HTTP code; a parent on another origin is not asked');
   } finally {
     await browser.close();
   }

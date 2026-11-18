@@ -30,12 +30,19 @@ const state = {
   generation: 0,
   drafts: new Map(),
   signature: "",
+  approvalsShown: new Set(),
   listSignature: "",
   catalog: null,
   chatSettings: new Map(),
   settingsBusy: false,
   activity: null,
   permissionModes: new Map(),
+  // Checks whose retry the owner started on this page. Their result shows open; a reload forgets them.
+  retriedChecks: new Set(),
+  // Earlier answers whose "Worked for" line the owner opened. The latest answer keeps this in state.activity.
+  workedOpen: new Set(),
+  // The checks block of the latest answer. renderActivity puts it inside that answer's "Worked for" line.
+  latestChecks: null,
 };
 const effortLabels = {
   low: "Low",
@@ -320,10 +327,12 @@ let usageTimer;
 let usageLoading = false;
 /**
  * Show the quota left for the five-hour and weekly limits as a figure and a
- * bar, with the reset time as a tooltip. A limit without a valid percentage
- * reads Unavailable, and a note says when the quota is stale or missing.
+ * bar, with the reset time as a tooltip. A limit the account does not report
+ * reads Unknown, one with a bad value reads Unavailable, and a note says when
+ * the quota is stale or missing. The line under the bars names the plan and
+ * the reset times in plain text.
  */
-function renderUsage(usage) {
+function renderUsage(usage, planType) {
   // An account can lack either limit, and the worker may have no quota data at all.
   usage = usage || {};
   // The worker's percentages already represent quota left, not quota used.
@@ -337,7 +346,9 @@ function renderUsage(usage) {
         ? Number(raw)
         : NaN;
     const valid = Number.isFinite(percent) && percent >= 0 && percent <= 100;
-    $(id).textContent = valid ? `${percent}% left` : "Unavailable";
+    // An empty field in a good read means the account has no such window.
+    const unreported = usage.status === "ok" && (raw === undefined || raw === null || raw === "");
+    $(id).textContent = valid ? `${percent}% left` : unreported ? "Unknown" : "Unavailable";
     // The bar is as long as the quota left, turns red below 5%, and is an outline without a value.
     const bar = $(`${id}-bar`);
     bar.style.width = valid ? `${percent}%` : "0";
@@ -355,6 +366,46 @@ function renderUsage(usage) {
         ? ""
         : "Quota is currently unavailable.";
   $("usage-note").hidden = !$("usage-note").textContent;
+  $("usage-plan").textContent = planLine(usage, planType);
+}
+/** A reset time short enough for the side bar: the weekday and the time. */
+function shortResetLabel(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+}
+/**
+ * The plan line under the quota bars, for example "Pro plan · Weekly resets
+ * Mon 9:00 AM · 5h resets 2:30 PM". The plan is information only; a reset time
+ * shows only for a window the read reported.
+ */
+function planLine(usage, planType) {
+  const plan = typeof planType === "string" && planType.trim()
+    ? `${planType.trim()[0].toUpperCase()}${planType.trim().slice(1)} plan`
+    : "Plan unknown";
+  const parts = [plan];
+  for (const [key, name] of [["weekly", "Weekly"], ["five_hour", "5h"]]) {
+    const reset = shortResetLabel(usage[`${key}_reset_at`]) || usage[`${key}_reset`];
+    if (usage[`${key}_percent`] !== undefined && usage[`${key}_percent`] !== "" && reset)
+      parts.push(`${name} resets ${reset}`);
+  }
+  return parts.join(" · ");
+}
+// The Home Assistant row at the foot of the side bar: the state of the Codex integration.
+const HOME_ASSISTANT_STATES = {
+  ok: ["ready", "Ready"],
+  starting: ["starting", "Starting"],
+  not_installed: ["needs-owner", "Integration not installed"],
+  outdated: ["needs-owner", "Integration out of date"],
+  not_connected: ["needs-owner", "Integration not connected"],
+};
+/** Show the integration state in the side bar row; a failed status read shows Unavailable. */
+function renderHomeAssistantStatus(integration) {
+  const [dot, text] = integration === undefined
+    ? ["error", "Unavailable"]
+    : HOME_ASSISTANT_STATES[integration?.state] || ["error", "Unavailable"];
+  $("ha-status-row").dataset.state = dot;
+  $("ha-status-summary").textContent = text;
 }
 // Where the line at the top of the chat sends someone to install the integration.
 const INTEGRATION_INSTALL_URL =
@@ -411,14 +462,16 @@ async function loadUsage() {
   try {
     if (!document.hidden) {
       const data = await api("status");
-      renderUsage(data.codex_usage);
+      renderUsage(data.codex_usage, data.account_access?.plan_type);
       renderIntegration(data.integration);
+      renderHomeAssistantStatus(data.integration || null);
       // The quota check also tells the worker which model Codex picks when the add-on names none.
       // Not awaited: the quota shown must not depend on it.
       if (state.catalog) loadChatOptions(true);
     }
   } catch (_) {
     renderUsage();
+    renderHomeAssistantStatus(undefined);
   } finally {
     usageLoading = false;
     usageTimer = setTimeout(loadUsage, 60000);
@@ -486,12 +539,12 @@ $("session-reload").onclick = () => {
   }
   location.reload();
 };
+let sessionGeneration = 0;
 /**
  * fetch() for the worker: on HTTP 401 renew the ingress session and send the
  * request once more. Requests that fail together share one renewal, and a
  * request sent before a renewal finished is sent again without a new one.
  */
-let sessionGeneration = 0;
 async function pageFetch(url, options) {
   const generation = sessionGeneration;
   const response = await fetch(url, options);
@@ -559,18 +612,6 @@ document.getElementById("export-interaction-logs").addEventListener("click", asy
   }
 });
 
-document.getElementById("save-diagnostic-retention").addEventListener("click", async () => {
-  const status = document.getElementById("export-logs-status");
-  try {
-    const capacity = Number(document.getElementById("diagnostic-retention").value);
-    if (!Number.isInteger(capacity) || capacity < 10 || capacity > 100)
-      throw new Error("Keep between 10 and 100 interactions.");
-    await api("diagnostics/settings", { capacity });
-    status.textContent = `Keeping up to ${capacity} interactions. Running interactions are retained.`;
-  } catch (error) {
-    status.textContent = error.message;
-  }
-});
 /** Build an error that keeps the HTTP status so callers can tell 404 apart. */
 function workerError(message, status) {
   const error = new Error(message);
@@ -663,8 +704,13 @@ function controls() {
     ? "Add to the queue. It starts when the running chat finishes."
     : "";
   $("send").classList.toggle("queueing", queueing);
-  $("cancel").hidden = !task || !["queued", "running"].includes(task.status);
+  // While this chat's task runs or waits to run, the send button is the stop
+  // button, whatever the message box holds. Send cannot be used then anyway
+  // (see blocked), and a draft must never take away the only way to stop.
+  const running = Boolean(task && ["queued", "running"].includes(task.status));
+  $("cancel").hidden = !running;
   $("cancel").disabled = state.busy;
+  $("send").hidden = running;
   $("new-chat").disabled = state.busy || state.settingsBusy;
   $("message").readOnly = state.busy;
   $("attach").disabled =
@@ -701,29 +747,37 @@ function controls() {
   document.dispatchEvent(new Event("chat-view"));
 }
 /** Build the small pin icon shown beside pinned chat titles. */
-function pinIcon() {
+/** One 24 px Material Design icon, the set Home Assistant uses, filled with the text color. */
+function mdiIcon(path, className) {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("viewBox", "0 0 24 24");
   svg.setAttribute("aria-hidden", "true");
-  svg.classList.add("pin-icon");
-  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  path.setAttribute(
-    "d",
-    "M8 2h8v2l-1.5 1v5.5l3.5 3V16h-5v6l-1 1-1-1v-6H6v-2.5l3.5-3V5L8 4z",
-  );
-  svg.append(path);
+  svg.classList.add("row-icon", className);
+  const shape = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  shape.setAttribute("d", path);
+  svg.append(shape);
   return svg;
 }
-/** Build the small clock icon that marks a message waiting in the queue. */
+/** mdiPin: a pinned chat. */
+function pinIcon() {
+  return mdiIcon("M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z", "pin-icon");
+}
+/** mdiClockOutline: a message that waits in the queue. */
 function queueIcon() {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("aria-hidden", "true");
-  svg.classList.add("queue-icon");
-  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  path.setAttribute("d", "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm0 4.5V12l3 2");
-  svg.append(path);
-  return svg;
+  return mdiIcon(
+    "M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z",
+    "queue-icon",
+  );
+}
+/** mdiMessageOutline: an ordinary chat. */
+function chatIcon() {
+  return mdiIcon("M20,2H4A2,2 0 0,0 2,4V22L6,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2M20,16H5.17L4,17.17V4H20V16Z", "chat-icon");
+}
+/** A small spinner for a chat that is working now. */
+function spinnerIcon() {
+  const spinner = textNode("span", "", "row-icon row-spinner");
+  spinner.setAttribute("aria-hidden", "true");
+  return spinner;
 }
 /** Find a loaded sidebar chat by task id. */
 function chatById(id) {
@@ -756,7 +810,9 @@ function renderRow(chat, queued = null) {
   main.setAttribute("aria-current", String(chat.task_id === state.id));
   const heading = textNode("span", "", "row-title");
   if (queued) heading.append(queueIcon());
+  else if (chat.status === "running") heading.append(spinnerIcon());
   else if (chat.pinned) heading.append(pinIcon());
+  else heading.append(chatIcon());
   heading.append(textNode("span", title));
   main.append(heading);
   main.append(
@@ -789,6 +845,8 @@ function renderRow(chat, queued = null) {
     ),
   );
   main.append(meta);
+  // One line for each chat: the last answer is the tooltip instead of a second line.
+  main.title = `${title} - ${main.querySelector(".row-preview").textContent}`;
   main.onclick = () => selectChat(chat.task_id);
   row.append(main);
   // A chat that is still waiting for its first message has nothing to pin or rename yet.
@@ -1088,24 +1146,40 @@ function tickElapsed() {
       ? ` · ${elapsedLabel(Date.now() - activity.startedAt)}`
       : "";
 }
+/** Check results that mean something did not work, or could not be confirmed. */
+const BAD_CHECK_STATUSES = new Set(["failed", "issues", "unavailable"]);
 /**
- * Build the Verification section of an answer: one expandable row per check
+ * Build the collapsed checks block of an answer: one expandable row per check
  * with its result, details, and findings, then the screenshots that have not
- * expired. Returns null when the turn has no checks.
+ * expired. It stays closed under the answer, except while a batch of blocked
+ * browser requests waits for the owner, a retry runs, or a retry the owner
+ * started on this page has its result. The closed line counts
+ * the bad results, so a failed check shows without opening the block. Returns
+ * null when the turn has no checks.
  */
 function renderVerification(turn, taskId) {
   const checks = turn.verification || [];
   if (!checks.length) return null;
-  const section = textNode("section", "", "verification");
-  section.append(textNode("h3", "Verification"));
+  const section = textNode("details", "", "verification disclosure");
+  const bad = checks.filter(check => BAD_CHECK_STATUSES.has(check.status)).length;
+  const title = checks.length === 1 ? "Check and readback" : `Checks and readback (${checks.length})`;
+  const summary = textNode("summary", bad ? `${title} · ${bad} failed` : title);
+  if (bad) summary.classList.add("has-failed");
+  section.append(summary);
   if (state.task?.browser_retry?.turn_id === turn.turn_id) {
+    section.open = true;
     const progress = textNode("p", "Retrying dashboard inspection…", "browser-permission-progress");
     progress.setAttribute("role", "status");
     section.append(progress);
   }
   for (const check of checks) {
-    const row = textNode("details", "", `verification-result is-${check.status}`);
-    if (check.retry_of && check === checks[checks.length - 1]) row.open = true;
+    const row = textNode("details", "", `verification-result disclosure is-${check.status}`);
+    // A retry result opens its own row. The block opens too when the owner started that retry on this page,
+    // so the result shows where they clicked; a saved chat opened later starts closed.
+    if (check.retry_of && check === checks[checks.length - 1]) {
+      row.open = true;
+      if (state.retriedChecks.has(check.retry_of)) section.open = true;
+    }
     const label = {
       passed: "Passed", failed: "Failed", observed: "Readback", captured: "Screenshots captured",
       issues: "Needs review", disabled: "Disabled", unavailable: "Unverified",
@@ -1149,12 +1223,73 @@ function renderVerification(turn, taskId) {
       row.append(textNode("p", "Some blocked requests can't be offered for approval: they were incomplete, looked like credentials, or exceeded the review limit."));
     const review = renderBrowserPermissions(check, turn, taskId);
     if (review) row.append(review);
+    if (review?.classList.contains("browser-permission-review")) section.open = true;
     section.append(row);
   }
   const images = imageAttachments(turn.verification_attachments).filter(image => image.expires_at * 1000 > Date.now());
   if (images.length) section.append(renderAttachments(taskId, images, "Dashboard verification screenshot"));
   section.append(textNode("p", "Screenshots are evidence for visual review. State and configuration checks do not prove automation behavior.", "verification-note"));
   return section;
+}
+/**
+ * Return "Worked for 1m 21s" from the exchange's start and end times, or ""
+ * when the record lacks one of them (a chat saved by an older version).
+ */
+function workedLabel(turn) {
+  const started = Date.parse(turn?.started_at || "");
+  const completed = Date.parse(turn?.completed_at || "");
+  if (!Number.isFinite(started) || !Number.isFinite(completed) || completed < started) return "";
+  return `Worked for ${elapsedLabel(completed - started)}`;
+}
+/** Count the checks of an exchange that failed or could not be confirmed. */
+function badCheckCount(turn) {
+  return (turn.verification || []).filter(check => BAD_CHECK_STATUSES.has(check.status)).length;
+}
+/**
+ * Build the "Worked for" line of an earlier answer. Only the latest exchange
+ * has its steps on the page, so here the line opens the checks block alone.
+ * With no checks it is plain text, and with no times either it is left out.
+ * The line opens by itself when the checks block wants attention (a browser
+ * permission review or a retry result).
+ */
+function renderWorked(turn, checks) {
+  const label = workedLabel(turn);
+  if (!checks) return label ? textNode("p", label, "worked-line") : null;
+  const block = textNode("div", "", "activity worked");
+  const toggle = textNode("button", "", "activity-toggle");
+  toggle.type = "button";
+  toggle.append(textNode("span", "", "activity-chevron"), textNode("span", label || "Checks and readback"));
+  const list = textNode("div", "", "activity-steps");
+  list.append(checks);
+  const show = open => {
+    if (open) state.workedOpen.add(turn.turn_id);
+    else state.workedOpen.delete(turn.turn_id);
+    toggle.setAttribute("aria-expanded", String(open));
+    list.hidden = !open;
+  };
+  show(checks.open || state.workedOpen.has(turn.turn_id));
+  toggle.onclick = () => show(list.hidden);
+  block.append(toggle, list);
+  block.openChecks = () => {
+    show(true);
+    checks.open = true;
+    checks.scrollIntoView({block: "nearest"});
+  };
+  return block;
+}
+/**
+ * Build the line that stays under an answer when a check failed, so the owner
+ * sees an accident without a tap. A click opens the checks.
+ */
+function failedChecksLine(count, openChecks) {
+  const line = textNode("button", "", "check-failed-line");
+  line.type = "button";
+  line.append(
+    textNode("span", count === 1 ? "1 check failed" : `${count} checks failed`),
+    textNode("span", "", "activity-chevron"),
+  );
+  line.onclick = openChecks;
+  return line;
 }
 /** Let the owner review a batch of complete requests without interrupting capture. */
 function renderBrowserPermissions(check, turn, taskId) {
@@ -1189,7 +1324,7 @@ function renderBrowserPermissions(check, turn, taskId) {
     box.value = candidate.id;
     boxes.push(box);
     label.append(box, textNode("span", candidate.label));
-    const details = textNode("details", "", "browser-permission-details");
+    const details = textNode("details", "", "browser-permission-details disclosure");
     details.append(textNode("summary", "Request details"), textNode("pre", candidate.description));
     item.append(label, details);
     fields.append(item);
@@ -1229,6 +1364,7 @@ function renderBrowserPermissions(check, turn, taskId) {
     const generation = state.generation;
     fields.disabled = allow.disabled = keep.disabled = true;
     feedback.textContent = "Starting a fresh inspection…";
+    state.retriedChecks.add(check.check_id);
     try {
       await api(`tasks/${encodeURIComponent(taskId)}/browser-permissions`, {
         turn_id: turn.turn_id, check_id: check.check_id,
@@ -1268,7 +1404,7 @@ async function loadBrowserPermissions() {
       const row = textNode("div", "", "saved-browser-permission");
       const info = textNode("div", "", "saved-browser-permission-info");
       info.append(textNode("strong", permission.label), textNode("p", permission.path));
-      const details = textNode("details", "", "browser-permission-details");
+      const details = textNode("details", "", "browser-permission-details disclosure");
       details.append(textNode("summary", "Request details"), textNode("pre", permission.description));
       info.append(details);
       const revoke = textNode("button", "Revoke", "subtle");
@@ -1317,18 +1453,8 @@ async function loadBrowserPermissions() {
 function showsQuestionApart(turn) {
   return Boolean(turn.question) && !(turn.summary || "").includes(turn.question);
 }
-/** Keep the original Markdown of the answer's visible text, including code indentation. */
-function responseMarkdown(turn) {
-  return [
-    turn.summary,
-    turn.details && turn.details !== turn.summary ? turn.details : "",
-    showsQuestionApart(turn) ? turn.question : "",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-}
 /** Try the browser clipboard, then the selection-based copy used on local HTTP. */
-async function copyResponseText(text) {
+async function copyText(text) {
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(text);
@@ -1363,50 +1489,6 @@ async function copyResponseText(text) {
       for (const range of ranges) selection.addRange(range);
     }
   }
-}
-/** Offer selected, read-only Markdown when the browser cannot copy automatically. */
-function showCopyResponse(text) {
-  $("copy-text").value = text;
-  $("copy-dialog").showModal();
-  $("copy-text").focus({ preventScroll: true });
-  $("copy-text").select();
-}
-$("copy-select").onclick = () => {
-  $("copy-text").focus({ preventScroll: true });
-  $("copy-text").select();
-};
-$("copy-close").onclick = () => $("copy-dialog").close();
-$("copy-dialog").addEventListener("close", () => {
-  $("copy-text").value = "";
-});
-/** A copy action belongs to this exchange, even when later answers arrive. */
-function renderResponseCopy(text) {
-  const actions = textNode("div", "", "response-actions");
-  const button = textNode("button", "Copy response", "subtle copy-response");
-  button.type = "button";
-  button.title = "Copy the whole response as Markdown";
-  const status = textNode("span", "", "copy-status");
-  status.setAttribute("role", "status");
-  let timer;
-  button.onclick = async () => {
-    const focused = document.activeElement === button;
-    clearTimeout(timer);
-    status.textContent = "";
-    button.disabled = true;
-    const copied = await copyResponseText(text);
-    button.disabled = false;
-    if (!button.isConnected) return;
-    if (focused && document.activeElement === document.body)
-      button.focus({ preventScroll: true });
-    if (copied) {
-      status.textContent = "Copied!";
-      timer = setTimeout(() => {
-        status.textContent = "";
-      }, 2500);
-    } else showCopyResponse(text);
-  };
-  actions.append(button, status);
-  return actions;
 }
 /** Draw the open chat: every exchange with its answer, checks, saved copies, and steps. */
 function renderTask(force = false) {
@@ -1454,6 +1536,8 @@ function renderTask(force = false) {
       ),
     );
   const turns = task.turns || [];
+  let newApproval = false;
+  state.latestChecks = null;
   for (const turn of turns) {
     const latest = turn === turns[turns.length - 1];
     const exchange = textNode("section", "", "exchange");
@@ -1472,12 +1556,34 @@ function renderTask(force = false) {
       );
     if (turn.message)
       exchange.append(renderMarkdown(turn.message, "message user"));
+    // A request still waiting for the owner goes last, below the working lines, so it is not missed.
+    const active = latest && task.status === "running";
+    const waiting = (turn.approvals || []).filter(approval => active && approval.status === "pending");
     for (const approval of turn.approvals || [])
-      exchange.append(renderApproval(approval, task.task_id, turn.turn_id, latest && task.status === "running"));
+      if (!waiting.includes(approval))
+        exchange.append(renderApproval(approval, task.task_id, turn.turn_id, active));
     const attachments = imageAttachments(turn.attachments);
     const hasAnswer =
       turn.summary || turn.details || turn.question || attachments.length || turn.verification?.length;
     if (hasAnswer) {
+      // The steps and checks sit closed behind one "Worked for" line above the answer, as in the desktop app.
+      const evidence = renderVerification(turn, task.task_id);
+      let openChecks = null;
+      if (latest) {
+        state.latestChecks = evidence;
+        exchange.append(activityBlock());
+        openChecks = () => {
+          if (!state.activity || !evidence) return;
+          state.activity.expanded = true;
+          evidence.open = true;
+          renderActivity();
+          evidence.scrollIntoView({block: "nearest"});
+        };
+      } else {
+        const worked = renderWorked(turn, evidence);
+        if (worked) exchange.append(worked);
+        openChecks = () => worked?.openChecks?.();
+      }
       const answer = textNode("div", "", "answer");
       const heading = textNode("div", "", "answer-heading");
       heading.append(textNode("span", "⌘", "mark"), textNode("span", "Codex"));
@@ -1486,8 +1592,6 @@ function renderTask(force = false) {
       if (turn.details && turn.details !== turn.summary)
         answer.append(renderMarkdown(turn.details, "message details"));
       if (showsQuestionApart(turn)) answer.append(renderMarkdown(turn.question, "message question"));
-      const markdown = responseMarkdown(turn);
-      if (markdown.trim()) answer.append(renderResponseCopy(markdown));
       // Only the question still waiting can be answered with a choice.
       if (
         latest &&
@@ -1499,8 +1603,8 @@ function renderTask(force = false) {
       const check = renderConfigCheck(turn.config_check);
       if (check) answer.append(check);
       answer.append(...renderBackups(turn));
-      const evidence = renderVerification(turn, task.task_id);
-      if (evidence) answer.append(evidence);
+      const bad = badCheckCount(turn);
+      if (bad) answer.append(failedChecksLine(bad, openChecks));
       if (attachments.length)
         answer.append(renderAttachments(task.task_id, attachments));
       answer.append(
@@ -1518,7 +1622,6 @@ function renderTask(force = false) {
           "turn-meta",
         ),
       );
-      if (latest) answer.append(activityBlock());
       exchange.append(answer);
     } else if (["queued", "running"].includes(turn.status)) {
       const pending = textNode(
@@ -1535,21 +1638,51 @@ function renderTask(force = false) {
       exchange.append(pending);
       if (latest) exchange.append(activityBlock());
     }
+    for (const approval of waiting) {
+      exchange.append(renderApproval(approval, task.task_id, turn.turn_id, active));
+      // Bring each new request into view once, even if the owner scrolled up.
+      if (!state.approvalsShown.has(approval.approval_id)) {
+        state.approvalsShown.add(approval.approval_id);
+        newApproval = true;
+      }
+    }
     area.append(exchange);
   }
   if (queued) area.append(renderQueued(task.task_id, queued));
   renderActivity();
-  area.scrollTop = force || nearBottom ? area.scrollHeight : oldScroll;
+  area.scrollTop = force || nearBottom || newApproval ? area.scrollHeight : oldScroll;
   controls();
   ensureActivity();
 }
-/** Show a native permission request as text, with its precise action and scope. */
+/** Return the first line of what a permission request asked for, for its closed line. */
+function approvalHeadline(approval) {
+  const plain = approval.confirmation || {};
+  const first = [
+    approval.command, approval.action, plain.what, approval.network,
+    approval.changes?.[0]?.path, approval.scope,
+  ].find(value => typeof value === "string" && value.trim());
+  return first ? first.trim().split("\n")[0] : "";
+}
+/**
+ * Show a native permission request as text, with its precise action and
+ * scope. While it waits for the owner it is a full card with the two answers.
+ * Once answered (or expired) it shrinks to one closed line, such as
+ * "Allowed once: ls /config", that opens to the same details.
+ */
 function renderApproval(approval, taskId, turnId, active) {
   const pending = active && approval.status === "pending";
-  const card = textNode("section", "", "permission-card");
-  card.setAttribute("aria-label", "Permission request");
   const statuses = { allowed: "Allowed once", denied: "Denied", expired: "Expired" };
-  card.append(textNode("strong", pending ? "Permission needed" : statuses[approval.status] || "Expired"));
+  const status = pending ? "Permission needed" : statuses[approval.status] || "Expired";
+  const card = textNode(pending ? "section" : "details", "", pending ? "permission-card" : "permission-card disclosure is-answered");
+  card.setAttribute("aria-label", "Permission request");
+  if (pending) card.append(textNode("strong", status));
+  else {
+    const summary = textNode("summary", "");
+    const headline = approvalHeadline(approval);
+    summary.append(textNode("strong", status));
+    if (headline) summary.append(textNode("span", `: ${headline}`, "permission-headline"));
+    card.append(summary);
+  }
   const plain = approval.confirmation || {};
   for (const [key, label] of [["what", "What changes"], ["where", "Where"], ["effect", "The effect"]]) {
     if (plain[key]) card.append(textNode("p", `${label}: ${plain[key]}`, "permission-plain"));
@@ -1923,15 +2056,23 @@ async function pollActivity() {
     }
   }
 }
-/** Draw the step list of the latest exchange, with its heading, count, and timer. */
+/**
+ * Draw the latest exchange's step list. While Codex works, the heading counts
+ * the steps and shows the running time, and the list stays open. When the
+ * exchange is over, the heading becomes the closed "Worked for" line above the
+ * answer, and the list holds the steps and then the answer's checks.
+ */
 function renderActivity() {
   const block = $("activity");
   const activity = state.activity;
   if (!block || !activity || activity.id !== state.id) return;
   const steps = [...activity.steps.values()].sort((a, b) => a.index - b.index);
   const running = activity.running || taskActive();
-  block.hidden = !steps.length;
+  const checks = state.latestChecks;
+  const worked = running ? "" : workedLabel(state.task?.turns?.at(-1));
+  block.hidden = !steps.length && !checks && !worked;
   block.classList.toggle("running", running);
+  block.classList.toggle("worked", !running);
   // The step list takes the place of the waiting line once Codex reports steps.
   const pending = $("pending");
   if (pending) pending.hidden = !block.hidden;
@@ -1939,7 +2080,13 @@ function renderActivity() {
     block.replaceChildren();
     return;
   }
-  const expanded = activity.expanded ?? running;
+  if (!steps.length && !checks) {
+    // Nothing to open: the total time alone.
+    block.replaceChildren(textNode("p", worked, "worked-line"));
+    return;
+  }
+  // A checks block that asks for the owner (a browser permission review, a retry result) opens the line.
+  const expanded = activity.expanded ?? (running || Boolean(checks?.open));
   const area = $("messages");
   const nearBottom =
     area.scrollHeight - area.scrollTop - area.clientHeight < 100;
@@ -1952,7 +2099,7 @@ function renderActivity() {
     "span",
     running
       ? `${state.task?.permission_required ? "Waiting for your permission…" : "Working on your request…"} · ${count}`
-      : `${expanded ? "Hide" : "Show"} activity (${count})`,
+      : worked || (steps.length ? `Activity (${count})` : "Checks and readback"),
   );
   if (running) label.append(textNode("span", "", "elapsed"));
   toggle.append(textNode("span", "", "activity-chevron"), label);
@@ -1964,6 +2111,7 @@ function renderActivity() {
   list.id = "activity-steps";
   list.hidden = !expanded;
   for (const step of steps) list.append(renderStep(step, activity));
+  if (checks) list.append(checks);
   block.replaceChildren(toggle, list);
   tickElapsed();
   if (nearBottom) area.scrollTop = area.scrollHeight;
@@ -2784,14 +2932,17 @@ $("cancel").onclick = async () => {
     controls();
   }
 };
+const SIDEBAR_MIN = 200;
+const SIDEBAR_MAX = 480;
+const SIDEBAR_DEFAULT = 260;
 /**
- * Set the sidebar width in pixels, kept between 220 and 440 and leaving 360
+ * Set the sidebar width in pixels, kept between 200 and 480 and leaving 360
  * for the chat when the window allows, and remember it for the next visit.
  */
 function setWidth(value) {
   const width = Math.max(
-    220,
-    Math.min(440, Number(value) || 280, innerWidth - 360),
+    SIDEBAR_MIN,
+    Math.min(SIDEBAR_MAX, Number(value) || SIDEBAR_DEFAULT, innerWidth - 360),
   );
   document.documentElement.style.setProperty("--sidebar-width", `${width}px`);
   $("divider").setAttribute("aria-valuenow", String(width));
@@ -2802,9 +2953,9 @@ function setWidth(value) {
   }
 }
 try {
-  setWidth(localStorage.getItem("codex-sidebar-width") || 280);
+  setWidth(localStorage.getItem("codex-sidebar-width") || SIDEBAR_DEFAULT);
 } catch (_) {
-  setWidth(280);
+  setWidth(SIDEBAR_DEFAULT);
 }
 $("divider").addEventListener("pointerdown", (event) => {
   if (event.button !== 0) return;
@@ -2820,6 +2971,8 @@ $("divider").addEventListener("pointerup", (event) => {
 $("divider").addEventListener("lostpointercapture", () =>
   document.body.classList.remove("resizing"),
 );
+// A double-click gives back the default width.
+$("divider").addEventListener("dblclick", () => setWidth(SIDEBAR_DEFAULT));
 $("divider").addEventListener("keydown", (event) => {
   if (["ArrowLeft", "ArrowRight"].includes(event.key)) {
     event.preventDefault();
@@ -2840,10 +2993,9 @@ window.addEventListener("resize", () => {
  */
 function collapseSettingsSections() {
   // Sections marked data-own-dialog move to a dialog of their own (studio.js) and stay open there.
-  // The long parts of Accounts and connections collapse too, inside it; a short part marked
-  // data-always-open (the app pairing) stays open, so its buttons are one tap away.
+  // The three parts of Accounts and connections collapse too, inside it, each under its own header.
   const sections = document.querySelectorAll(
-    "#settings > section:not([data-own-dialog]), #accounts-section > section:not([data-always-open])",
+    "#settings > section:not([data-own-dialog]), #accounts-section > section",
   );
   sections.forEach((section, index) => {
     const heading = section.querySelector(":scope > h3, :scope > h4");
@@ -2907,7 +3059,33 @@ function setAccountPart(sectionId, word, attention = false) {
   );
 }
 collapseSettingsSections();
-setSectionStatus("appearance-section", "Follows Home Assistant");
+setSectionStatus("workspace-section", "AGENTS.md");
+const TEXT_SIZES = ["normal", "larger", "largest"];
+const TEXT_SIZE_KEY = "codex-text-size";
+/**
+ * Show the page at one of the three text sizes and tick that choice in
+ * Settings. The stylesheet multiplies every font size by --text-scale,
+ * which the data-text-size attribute on the root sets.
+ * With save, remember the choice on this device for the next visit.
+ */
+function setTextSize(value, save = false) {
+  const size = TEXT_SIZES.includes(value) ? value : "normal";
+  if (size === "normal") delete document.documentElement.dataset.textSize;
+  else document.documentElement.dataset.textSize = size;
+  for (const input of document.querySelectorAll("input[data-text-size-choice]"))
+    input.checked = input.value === size;
+  setSectionStatus("text-size-section", size[0].toUpperCase() + size.slice(1));
+  if (!save) return;
+  try {
+    if (size === "normal") localStorage.removeItem(TEXT_SIZE_KEY);
+    else localStorage.setItem(TEXT_SIZE_KEY, size);
+  } catch (_) {
+    /* Storage may be disabled: the size lasts until the page is reloaded. */
+  }
+}
+setTextSize(document.documentElement.dataset.textSize);
+for (const input of document.querySelectorAll("input[data-text-size-choice]"))
+  input.addEventListener("change", () => setTextSize(input.value, true));
 /*
  * The time left on a sign-in code. The worker sends the seconds left, by its
  * own clock; the page counts down from when that reply arrived, so a phone
@@ -3089,8 +3267,9 @@ function renderLogin(auth) {
     : lapsed
       ? "The assistant's ChatGPT sign-in expired or was revoked. Sign in again."
       : "The assistant is not signed in to ChatGPT.";
-  setSectionStatus("chatgpt-section", chatgptSectionStatus({ signedIn, pending, failed, lapsed }), !signedIn);
-  setAccountPart("chatgpt-section", chatgptSectionStatus({ signedIn, pending, failed, lapsed }).toLowerCase(), !signedIn);
+  const sectionStatus = chatgptSectionStatus({ signedIn, pending, failed, lapsed });
+  setSectionStatus("chatgpt-section", sectionStatus, !signedIn);
+  setAccountPart("chatgpt-section", sectionStatus.toLowerCase(), !signedIn);
   for (const id of ["login", "banner-login"]) $(id).textContent = failed ? "Get a new code" : "Sign in";
   const key = JSON.stringify([
     signedIn,
@@ -3129,12 +3308,22 @@ const GITHUB_STATE_TEXT = {
   disconnected: "Not connected to GitHub.",
   connecting: "Connecting. Enter the code below on GitHub.",
   ok: "Connected to GitHub.",
-  near_expiry: "Connected, but the sign-in expires within 7 days. Connect again or make a new token.",
-  expired: "The GitHub sign-in expired. Connect again.",
-  revoked: "GitHub refused the stored sign-in (revoked). Connect again.",
+  near_expiry: "GitHub still works, but this sign-in expires within 7 days. Choose Connect again before then.",
+  expired: "The GitHub sign-in expired. Choose Connect again.",
+  revoked: "GitHub no longer accepts this sign-in. Choose Connect again. If needed, restore the App's repository access on GitHub.",
   access_changed: "The GitHub sign-in reaches different repositories or access than you connected.",
   failed: "The GitHub sign-in cannot be checked.",
 };
+// Connect again starts a GitHub App sign-in, so a token connection is sent to the token form instead.
+const GITHUB_TOKEN_STATE_TEXT = {
+  near_expiry: "GitHub still works, but this token expires within 7 days. Create a new token on GitHub, then choose Use a token instead.",
+  expired: "This GitHub token expired. Create a new token on GitHub, then choose Use a token instead.",
+  revoked: "GitHub no longer accepts this token. Create a new token on GitHub, then choose Use a token instead.",
+};
+/** The sentence for a GitHub state, with the recovery step that fits the kind of sign-in. */
+function githubStateText(state, kind) {
+  return (kind === "token" && GITHUB_TOKEN_STATE_TEXT[state]) || GITHUB_STATE_TEXT[state] || state;
+}
 /** Send a GitHub request; every reply carries the status, also a refusal's, so the card stays true. */
 async function githubApi(path, body) {
   const response = await pageFetch(path, {
@@ -3208,10 +3397,10 @@ async function newGithubCode() {
   }
 }
 /** The GitHub header in a few words, for example "Connected as owner, 1 repository". */
-function githubSectionStatus({ waiting, connected, bad, state, login, repositoryCount, retry }) {
+function githubSectionStatus({ waiting, connected, bad, state, kind, login, repositoryCount, retry }) {
   if (waiting) return "Connecting: enter the code";
   if (connected) {
-    const condition = bad ? (GITHUB_STATE_TEXT[state] || state).replace(/\.$/, "") : "Connected";
+    const condition = bad ? githubStateText(state, kind).replace(/\.$/, "") : "Connected";
     const account = login ? ` as ${login}` : "";
     const repositories = repositoryCount === 1 ? "1 repository" : `${repositoryCount} repositories`;
     return `${condition}${account}, ${repositories}`;
@@ -3234,13 +3423,14 @@ function renderGithub(github) {
   const waiting = flow.status === "waiting_for_user";
   const connected = !["disconnected", "connecting"].includes(state);
   const login = github.account?.login || "";
+  const kind = github.kind === "token" ? "token" : "app";
   if (connected && github.revoke_url) githubRevokeUrl = github.revoke_url;
   $("github-status").textContent =
-    connected && login ? `${GITHUB_STATE_TEXT[state] || state} Signed in as ${login}.` : GITHUB_STATE_TEXT[state] || state;
+    connected && login ? `${githubStateText(state, kind)} Signed in as ${login}.` : githubStateText(state, kind);
   const details = $("github-details");
   const rows = [];
   if (connected) {
-    rows.push(["Sign-in", github.kind === "token" ? "Fine-grained token" : "GitHub App"]);
+    rows.push(["Sign-in", kind === "token" ? "Fine-grained token" : "GitHub App"]);
     if (github.connected_at) rows.push(["Connected", githubDate(github.connected_at)]);
     rows.push(["Expiry", githubExpiry(github)]);
     rows.push(["Access", github.permission_problem
@@ -3277,10 +3467,15 @@ function renderGithub(github) {
     }
   } else {
     flowArea.dataset.key = "";
-    const ended = { expired: "The GitHub code expired before it was entered. Get a new code to sign in.",
-      canceled: "The GitHub sign-in was canceled.", failed: "The GitHub sign-in failed." }[flow.status];
+    // A failed Connect again also shows its reason, and says that the stored sign-in did not change.
+    const ended = connected
+      ? { expired: "The new GitHub code expired before it was entered.",
+        canceled: "The new GitHub sign-in was canceled.", failed: "The new GitHub sign-in failed." }[flow.status]
+      : { expired: "The GitHub code expired before it was entered. Get a new code to sign in.",
+        canceled: "The GitHub sign-in was canceled.", failed: "The GitHub sign-in failed." }[flow.status];
     const why = flow.status === "failed" && flow.error ? ` ${flow.error}` : "";
-    flowArea.replaceChildren(...(ended && !connected ? [textNode("p", `${ended}${why}`, "muted")] : []));
+    const kept = connected ? " Your previous sign-in has not changed." : "";
+    flowArea.replaceChildren(...(ended ? [textNode("p", `${ended}${why}${kept}`, "muted")] : []));
   }
   const retry = !connected && ["expired", "failed"].includes(flow.status);
   $("github-connect").textContent = connected ? "Connect again" : retry ? "Get a new code" : "Connect GitHub";
@@ -3307,11 +3502,11 @@ function renderGithub(github) {
   const repositoryCount = (github.repositories || []).length;
   setSectionStatus(
     "github-section",
-    githubSectionStatus({ waiting, connected, bad, state, login, repositoryCount, retry }),
+    githubSectionStatus({ waiting, connected, bad, state, kind, login, repositoryCount, retry }),
     bad || waiting || retry,
   );
   setAccountPart("github-section", githubAccountWord({ waiting, connected, bad, retry }), bad || waiting || retry);
-  $("github-banner-text").textContent = `The add-on's GitHub sign-in needs attention: ${(GITHUB_STATE_TEXT[state] || state).replace(/\.$/, "")}.`;
+  $("github-banner-text").textContent = `The add-on's GitHub sign-in needs attention: ${githubStateText(state, kind).replace(/\.$/, "")}.`;
   $("github-banner").hidden = !bad;
 }
 /** Show that this worker has no GitHub sign-in (an add-on before 0.3). */
@@ -3365,7 +3560,7 @@ $("github-connect").onclick = () => githubAction($("github-connect"), "github/co
 $("github-cancel").onclick = () => githubAction($("github-cancel"), "github/cancel", {});
 $("github-test").onclick = () => githubAction($("github-test"), "github/test", {});
 $("github-check").onclick = () => githubAction($("github-check"), "github/check", {}, (data) =>
-  githubResult(`Check finished: ${GITHUB_STATE_TEXT[data.github?.state] || data.github?.state || "done"}`));
+  githubResult(`Check finished: ${data.github?.state ? githubStateText(data.github.state, data.github.kind) : "done"}`));
 $("github-accept").onclick = () => githubAction($("github-accept"), "github/accept", {}, () =>
   githubResult("The current repositories are now the ones the check expects."));
 $("github-disconnect").onclick = () => {
@@ -3506,38 +3701,29 @@ function renderRemoteControl(rc) {
   $("remote-control-log-box").hidden = !(rc.log || []).length;
   document.dispatchEvent(new CustomEvent("remote-view", {detail: rc}));
 }
-/**
- * Show the configured machine name in its field. Codex reads the name when
- * remote control starts, so the field is locked while it is on. Polling never
- * replaces a name the person is still typing.
- */
+/** Show the machine name the ChatGPT app lists; it is set on the Configuration tab (0.3.5). */
 function renderRemoteControlName(rc) {
-  const input = $("remote-control-name");
-  if (!input.dataset.edited) input.value = rc.configured_name || "";
-  input.disabled = Boolean(rc.enabled);
-  $("remote-control-name-save").disabled = Boolean(rc.enabled);
-  $("remote-control-name-note").textContent = rc.enabled
-    ? "Turn remote control off to change the name."
-    : "Pairing is kept, so the app should show the new name the next time remote control connects. If it still shows the old name, choose New pairing code.";
+  $("remote-control-name").textContent = rc.configured_name || "";
 }
-$("remote-control-name").oninput = () => {
-  $("remote-control-name").dataset.edited = "1";
-};
-$("remote-control-name-form").onsubmit = async (event) => {
-  event.preventDefault();
-  const input = $("remote-control-name");
-  $("remote-control-name-save").disabled = true;
-  try {
-    const data = await api("remote-control/name", { name: input.value });
-    delete input.dataset.edited;
-    renderRemoteControl(data.remote_control);
-    $("remote-control-name-note").textContent = data.notice
-      || `Saved. The ChatGPT app will show “${data.remote_control.configured_name}”.`;
-  } catch (error) {
-    settingsError(error);
-    $("remote-control-name-save").disabled = false;
+const ADDON_CONFIGURATION_UNKNOWN =
+  "Home Assistant did not give this app's address. Open the app's Configuration tab from the Home Assistant settings.";
+/**
+ * Point the Add-on configuration row at this app's Configuration tab. The slug differs per install, so the
+ * worker asks Supervisor. The row has no link until Supervisor answers, and it says where to go when it cannot.
+ */
+async function loadAddonConfiguration() {
+  const row = $("addon-configuration");
+  const description = $("addon-configuration-description");
+  description.dataset.usual ??= description.textContent;
+  const data = await api("addon-configuration").catch(() => ({}));
+  if (typeof data.url === "string" && data.url.startsWith("/hassio/addon/")) {
+    row.href = data.url;
+    description.textContent = description.dataset.usual;
+  } else {
+    row.removeAttribute("href");
+    description.textContent = ADDON_CONFIGURATION_UNKNOWN;
   }
-};
+}
 for (const [id, action] of [
   ["remote-control-start", "start"],
   ["remote-control-stop", "stop"],
@@ -3574,7 +3760,8 @@ function renderAppPairing(rc, status) {
   $("app-pairing-status").textContent = status;
   $("app-pairing-new").hidden = !ready;
   $("app-pairing-off").hidden = !rc.enabled;
-  $("app-pairing-section").classList.toggle("needs-attention", failed);
+  // The part's own header shows the word too, capitalized as the other headers are.
+  setSectionStatus("app-pairing-section", word[0].toUpperCase() + word.slice(1), failed);
   setAccountPart("app-pairing-section", word, failed);
 }
 $("app-pairing-off").onclick = () => $("remote-control-stop").click();
@@ -3583,101 +3770,55 @@ function settingsError(error) {
   const result = $("connection-dialog").open ? $("connection-result") : $("settings-result");
   result.textContent = String(error.message || error);
 }
-let permissionGroups = null;
-let permissionRuleDigest = null;
-const permissionSwitches = () => [...document.querySelectorAll("[data-permission-group]")];
-function permissionTheme() {
-  try {
-    if (window.parent === window) return;
-    const theme = getComputedStyle(window.parent.document.documentElement);
-    const target = $("permission-overrides");
-    for (const key of ["--primary-color", "--primary-text-color", "--secondary-text-color", "--divider-color", "--card-background-color",
-      "--ha-switch-background-color", "--ha-switch-thumb-background-color", "--ha-switch-checked-background-color", "--ha-switch-checked-thumb-background-color",
-      "--ha-color-fill-disabled-quiet-resting", "--ha-color-on-neutral-normal", "--ha-color-fill-primary-normal-resting", "--ha-color-on-primary-normal"])
-      if (theme.getPropertyValue(key).trim()) target.style.setProperty(key, theme.getPropertyValue(key));
-  } catch (_error) { /* Standalone/cross-origin previews use the page theme. */ }
-}
-async function loadPermissionOverrides() {
-  permissionTheme();
-  const controls = permissionSwitches();
-  controls.forEach((input) => { input.disabled = true; });
-  try {
-    const data = await api("permissions-overrides");
-    permissionGroups = data.groups;
-    permissionRuleDigest = data.rule_digest;
-    $("permissions-overrides-guard-note").textContent = data.guard_note || "";
-    $("permissions-overrides-guard-note").hidden = !data.guard_note;
-    controls.forEach((input) => {
-      input.checked = permissionGroups[input.dataset.permissionGroup] === true;
-      input.disabled = false;
-    });
-    $("permissions-overrides-result").textContent = "Changes save immediately.";
-    showPermissionSectionStatus(data.guard_note);
-  } catch (_error) {
-    permissionGroups = null;
-    $("permissions-overrides-guard-note").hidden = true;
-    $("permissions-overrides-result").textContent = "Permissions overrides are unavailable. Administrator access is required.";
-    setSectionStatus("permission-overrides", "Administrators only");
-  }
-}
 /**
- * The Permissions overrides header: how many groups are on, or that the house
- * rules changed and wait for the owner's review. While they wait, every group
- * is suspended, so the header says so instead of a count.
+ * The Home Assistant theme variables the page reads, by name without the leading "--". Home Assistant sets them on
+ * its own document; the page runs in an iframe and does not inherit them, so haTheme() copies them to this page's
+ * root. Each use in chat.css and studio.css has a fallback, so a name a frontend version lacks changes nothing.
  */
-function showPermissionSectionStatus(guardNote) {
-  // The worker's text for rules that changed since the owner confirmed them
-  // (permission_overrides_api.py, guards).
-  if (/^House rules changed/.test(guardNote || "")) {
-    setSectionStatus("permission-overrides", "Suspended: review the house rules", true);
-    return;
-  }
-  const switches = permissionSwitches();
-  const on = switches.filter((input) => permissionGroups[input.dataset.permissionGroup] === true).length;
-  setSectionStatus("permission-overrides", `${on} of ${switches.length} on`);
+const haThemeTokens = [
+  // Colors: studio.css maps these onto the page's own --bg, --sidebar, --surface, --text, --muted, --line and --accent.
+  "primary-color", "primary-background-color", "secondary-background-color", "card-background-color",
+  "primary-text-color", "secondary-text-color", "divider-color", "disabled-text-color", "error-color", "warning-color",
+  "text-light-primary-color",
+  // Filled buttons and filled fields, as on the add-on's Configuration tab.
+  "ha-color-fill-primary-loud-resting", "ha-color-on-primary-loud",
+  "input-fill-color", "input-ink-color", "input-label-ink-color", "input-idle-line-color",
+  // Font and type scale.
+  "ha-font-family-body", "ha-font-size-s", "ha-font-size-m",
+];
+/**
+ * Follow Home Assistant's theme: copy its variables to this page's root and set data-theme to light or dark. A
+ * variable the theme does not set is removed, so a theme change never leaves an old color behind. With no parent
+ * window (the standalone preview) or one the page may not read, the page keeps its own palette and the system's
+ * light or dark setting.
+ */
+function haTheme() {
+  let dark = matchMedia("(prefers-color-scheme: dark)").matches;
+  try {
+    if (window.parent !== window) {
+      const host = window.parent.document.querySelector("home-assistant") || window.parent.document.documentElement;
+      const style = window.parent.getComputedStyle(host);
+      if (typeof host.hass?.themes?.darkMode === "boolean") dark = host.hass.themes.darkMode;
+      else if (style.colorScheme === "dark") dark = true;
+      else if (style.colorScheme === "light") dark = false;
+      for (const token of haThemeTokens) {
+        const value = style.getPropertyValue("--" + token).trim();
+        if (value) document.documentElement.style.setProperty("--" + token, value);
+        else document.documentElement.style.removeProperty("--" + token);
+      }
+    }
+  } catch (_error) { /* A cross-origin parent: keep the page's own palette. */ }
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
 }
-$("confirm-permission-rules").onclick = async () => {
-  try {
-    const rules = await api("agents");
-    if (!window.confirm("Review these house rules before confirming:\n\n" + (rules.content || "No instructions file."))) return;
-    await api("permissions-overrides", { confirm_rules: true, expected_digest: permissionRuleDigest });
-    await loadPermissionOverrides();
-    $("permissions-overrides-result").textContent = "House rules confirmed. Start a new exchange to use them.";
-  } catch (_error) {
-    $("permissions-overrides-result").textContent = "Could not confirm house rules. Review them again.";
-  }
-};
-permissionSwitches().forEach((input) => input.addEventListener("change", async () => {
-  if (!permissionGroups) return;
-  const proposed = { ...permissionGroups, [input.dataset.permissionGroup]: input.checked };
-  permissionSwitches().forEach((control) => { control.disabled = true; });
-  try {
-    const data = await api("permissions-overrides", proposed);
-    permissionGroups = data.groups;
-    permissionRuleDigest = data.rule_digest;
-    $("permissions-overrides-guard-note").textContent = data.guard_note || "";
-    $("permissions-overrides-guard-note").hidden = !data.guard_note;
-    $("permissions-overrides-result").textContent = "Permissions overrides saved.";
-    showPermissionSectionStatus(data.guard_note);
-  } catch (_error) {
-    $("permissions-overrides-result").textContent = "Could not save permissions overrides. Check the settings before continuing.";
-  } finally {
-    permissionSwitches().forEach((control) => {
-      control.checked = permissionGroups[control.dataset.permissionGroup] === true;
-      control.disabled = false;
-    });
-  }
-}));
 $("settings-button").onclick = async () => {
   try {
     const data = await api("diagnostics/settings");
-    $("diagnostic-retention").value = data.capacity;
     setSectionStatus("interaction-logs-section", `Keeps ${data.capacity}`);
   } catch (_error) {
-    $("export-logs-status").textContent = "Log retention is available to administrators.";
     setSectionStatus("interaction-logs-section", "Administrators only");
   }
   sidebar(false);
+  haTheme();
   $("settings").showModal();
   $("settings-result").textContent = "";
   $("agents").disabled = true;
@@ -3688,7 +3829,7 @@ $("settings-button").onclick = async () => {
     loadRemoteControl(),
     loadPause(),
     loadBrowserPermissions(),
-    loadPermissionOverrides(),
+    loadAddonConfiguration(),
   ]);
   for (const result of results)
     if (result.status === "rejected") settingsError(result.reason);
