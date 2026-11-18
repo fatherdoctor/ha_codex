@@ -352,7 +352,9 @@ class ByNameTests(CallTestCase):
 
     def test_the_tool_description_states_the_read_back_limit(self):
         self.assertIn("first 5", ha_call_mcp.TOOL["description"])
-        self.assertIn("home_assistant.verify", ha_call_mcp.TOOL["description"])
+        # The ChatGPT app gets this tool too, without the page's verify tool, so it names none (step C).
+        self.assertIn("read the state with a read tool", ha_call_mcp.TOOL["description"])
+        self.assertNotIn("home_assistant.verify", ha_call_mcp.TOOL["description"])
 
 
 def configured(args):
