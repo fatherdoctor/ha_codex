@@ -142,22 +142,22 @@ names it stops the app at startup, with a log line that says why.
 
 ## Safety
 
-Each of these protections stands on its own.
+Codex's own permission modes and the sandbox are the protection, as in the Claude add-on. The app adds no command
+check of its own.
 
-- **The sandbox.** Commands run with their own user, mount, process and network space.
-- **The gate.** A check runs before each command and answers within 1.5 seconds; a late answer is a refusal. It
-  refuses commands that reach the Supervisor, the app's own settings or the private sign-in files.
-- **Fail-closed cards.** A command that is incomplete, too large, redacted, or quoted in a way the check cannot read
-  can be denied but never allowed: its card has no **Allow once** button.
-- **The configuration watch.** At the end of an exchange, the app removes a new unsafe file and restores a changed one
-  only from a copy it verified. Otherwise it tells you which files to review.
+- **The sandbox.** Commands run with their own user, mount, process and network space. The sandbox hides
+  `secrets.yaml`, Home Assistant's sign-in store and the app's own private files.
+- **Complete cards.** A command or file change that is incomplete, too large or redacted can be denied but never
+  allowed: its card has no **Allow once** button.
 - **A protected policy.** The allowed modes come from a file inside the app image. Options and chats cannot loosen it.
 
 What the safeguards do not do:
 
 - They do not promise that every action is safe or can be undone. **Read each permission card before you allow it.**
-- The command check reads only text. It cannot see a path that a command builds while it runs, or a symbolic link.
-- An allowed command runs outside the sandbox, with the app's file and network access.
+- An allowed command runs outside the sandbox, with the app's file and network access. Nothing stops it from
+  reading a private file or changing the app's settings.
+- The app does not check what Codex writes in `/config`. An edit can add a shell command that Home Assistant runs
+  later; review what a chat changed before you reload or restart.
 - Backups depend on Codex following its instructions, and credential files are never copied. Keep your own Home
   Assistant backups.
 

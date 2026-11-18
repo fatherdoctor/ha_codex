@@ -186,36 +186,6 @@ class ApprovalTests(unittest.TestCase):
         self.session.decide(approval_id, "allow")
         self.assertEqual(self.writer.messages()[-1]["result"], {"decision": "accept"})
 
-    def test_change_to_the_protected_policy_can_only_be_denied(self):
-        """A file change to the app's policy, its rules or its settings has no Allow, even when fully shown."""
-        for index, path in enumerate(["/usr/share/ha_codex/policy.json", "/data/codex-home/AGENTS.md", "/data/options.json"]):
-            self.session.receive({"method": "item/started", "params": {
-                "threadId": "thread", "turnId": "turn", "item": {"id": "item", "type": "fileChange",
-                    "changes": [{"path": path, "kind": {"type": "update"}, "diff": "-old\n+new"}]}}})
-            approval_id = self.request(method=FILE_APPROVAL, request_id=index)
-            self.assertFalse(self.records[-1]["can_allow"])
-            self.assertIn("permission policy", self.records[-1]["note"])
-            self.assertEqual(self.records[-1]["prompt_kind"], "file_change")
-            with self.assertRaises(ValueError):
-                self.session.decide(approval_id, "allow")
-            self.session.decide(approval_id, "deny")
-
-    def test_command_naming_the_protected_policy_can_only_be_denied(self):
-        """A command allowed once runs outside the sandbox, so one that names the policy or rules has no Allow."""
-        for index, command in enumerate([
-            "sed -i 's/never/x/' /usr/share/ha_codex/AGENTS.md",
-            "chmod u+w '/usr/share/ha_codex'/policy.json",
-            "cat /usr//share/ha_c*/policy.json",
-            "cd /data/codex-home && sed -i 1d AGENTS.md",
-            "rm /data/codex-home/*",
-            "sed -i 1d /etc/codex/requirements.toml",
-        ]):
-            approval_id = self.request(request_id=index, command=command)
-            self.assertFalse(self.records[-1]["can_allow"], command)
-            self.assertIn("permission policy", self.records[-1]["note"])
-            with self.assertRaises(ValueError):
-                self.session.decide(approval_id, "allow")
-            self.session.decide(approval_id, "deny")
 
     def test_masked_file_diff_or_path_cannot_be_allowed(self):
         """A masked diff or path cannot hide an edit behind an Allow button."""

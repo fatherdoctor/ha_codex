@@ -42,10 +42,6 @@ class ParityReviewDocsTests(unittest.TestCase):
         parser.feed((ROOT / 'web/index.html').read_text())
         self.assert_normal_approval_contract(parser.text())
 
-    def test_f1_command_checks_bullet_describes_normal_remote_approval_and_retained_refusals(self):
-        docs = (ROOT / 'DOCS.md').read_text()
-        bullet = next(line for line in docs.splitlines() if line.startswith('- **Command checks.**'))
-        self.assert_normal_approval_contract(' '.join(bullet.lower().split()))
 
     def test_no_house_practice_is_bundled(self):
         self.assertFalse((ROOT / 'policy/house-rules.md').exists())

@@ -2,12 +2,21 @@
 
 ## 0.3.6 (unreleased)
 
+- The app's own guards are removed. Codex's own permission modes and the sandbox are now the whole protection, as in
+  the Claude add-on. Gone: the command check that ran before each tool call (the hook and its rules), the managed
+  command-prefix rules, the refusal of named paths on the approval card (a command or file change that names the
+  app's settings or a private file can now be allowed once), the check after each exchange that undid a planted
+  shell, REST or Python command, the config watch and its **Mark reviewed** button, the self-tests in front of remote
+  control (**Turn on** is always available), and the GitHub read-only limit (a Read only chat can pull and push; Read
+  only is Codex's read-only sandbox only). Kept: sign-in, the sandbox and its hidden files, Codex's managed
+  requirements (no full access, only `on-request` approvals, and no hooks, so a hook planted in `/config` never
+  runs), the read tools, the GitHub push guard and the schedule tools. Review what a chat changed before a reload or
+  restart: an edit that adds a command now stays as Codex wrote it.
 - The app's own grant layer is removed: the five pre-approved action groups (Settings > Permissions overrides), the
   guard-rails block they read from `/config/AGENTS.md`, and the `home_assistant_actions` `act` tool with its
   **Allow once** card. Codex's own permission requests are now the only way a change to the house is approved. A
   device command still finds the entity and reads its state back with the `home_assistant` tools; the change itself
-  now needs your normal **Allow once**, as every other action does. The sandbox, the command check, the protected
-  places and the check after each exchange are unchanged. A test build that used the groups leaves
+  now needs your normal **Allow once**, as every other action does. A test build that used the groups leaves
   `/data/codex-home/house-rules/permission-overrides.json`, `/data/house-rules/confirmed.json`,
   `/data/permission-overrides-backups` and `/data/permission-overrides.sock` behind; the app no longer reads them, and you can delete them.
 

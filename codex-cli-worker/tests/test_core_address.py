@@ -124,7 +124,7 @@ class AddressTests(unittest.TestCase):
             proc = types.SimpleNamespace(stdout=io.StringIO(''), wait=lambda: 0, poll=lambda: None)
             popen = Mock(return_value=proc)
             supervisor = remote_control.Supervisor('/synthetic/codex', Path(temp)/'state.json', server.relay_env,
-                lambda: 'Sample relay', gate=lambda: '', popen=popen,
+                lambda: 'Sample relay', popen=popen,
                 run=Mock(return_value=subprocess.CompletedProcess([], 0)),
                 tool_args_factory=server.relay_read_mcp_args)
             supervisor.enabled = lambda: True

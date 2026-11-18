@@ -39,7 +39,7 @@ class RelayExecutionTests(unittest.TestCase):
             def launch(cmd, **kw):
                 calls.append(kw)
                 return FakeProc()
-            sup = rc.Supervisor('codex', Path(tmp) / 'state', dict, lambda: '', gate=lambda: '',
+            sup = rc.Supervisor('codex', Path(tmp) / 'state', dict, lambda: '',
                                 popen=launch, run=lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1))
             try:
                 sup.start()
@@ -99,9 +99,9 @@ class RelayExecutionTests(unittest.TestCase):
                 self.assertEqual(db.read_bytes(), before)
             self.assertEqual(keys[0], keys[1])
             self.assertEqual(keys[0][-1], 'ha_codex')
-            first = rc.Supervisor('codex', data / 'remote_control.json', dict, lambda: 'First room', gate=lambda: '')
+            first = rc.Supervisor('codex', data / 'remote_control.json', dict, lambda: 'First room')
             first.save_enabled(True)
-            second = rc.Supervisor('codex', data / 'remote_control.json', dict, lambda: 'Other room', gate=lambda: '')
+            second = rc.Supervisor('codex', data / 'remote_control.json', dict, lambda: 'Other room')
             self.assertTrue(second.enabled())
 
 

@@ -47,7 +47,6 @@ CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 CA_DIR = "/etc/ssl/certs"
 ALLOW_MARK = "guard: allow"
 OPERATIONS = ("repos", "fetch", "pull", "push", "clone", "link")
-READ_ONLY_OPERATIONS = ("repos", "fetch")
 BAD_STATES = ("near_expiry", "expired", "revoked", "access_changed", "failed")
 STATE_WORDS = {
     "ok": "working", "near_expiry": "expires within 7 days", "expired": "expired",
@@ -793,7 +792,6 @@ class GitHubService:
                  fire_event: Callable[[str, dict], Any] = lambda *_: None,
                  notify: Callable[[str, str], Any] = lambda *_: None,
                  find_task: Callable[[Any], str | None] = lambda _cap: None,
-                 read_only: Callable[[str], bool] = lambda _task: True,
                  runner: GitRunner | None = None, log: Callable[[str], Any] | None = None):
         self.store = Store(root)
         self.client_id = client_id
@@ -801,7 +799,6 @@ class GitHubService:
         self.fire_event = fire_event
         self.notify = notify
         self.find_task = find_task
-        self.read_only = read_only
         self.log = log or (lambda text: print(text, flush=True))
         self.lock = threading.RLock()
         self.git_lock = threading.Lock()
@@ -1096,8 +1093,6 @@ class GitHubService:
         required = {"repos": set(), "clone": {"repository"}, "link": {"repository", "path"}}.get(operation, {"path"})
         if not isinstance(args, dict) or set(args) - allowed or required - set(args):
             raise GitHubError(f"{operation} takes " + (", ".join(sorted(allowed)) or "no arguments") + ".")
-        if operation not in READ_ONLY_OPERATIONS and self.read_only(task_id):
-            raise GitHubError("This chat is read only; only repos and fetch are available.")
         if self.current_state() not in ("ok", "near_expiry"):
             return reply(False, "GitHub is not connected on this box; the owner connects it on the add-on page.")
         if operation == "repos":
