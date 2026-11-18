@@ -41,6 +41,7 @@ Paths are under `codex-cli-worker/` unless they start with `custom_components/`.
 | A sandboxed command cannot see the add-on's GitHub sign-in (`/data/github`); the token is never in an environment the worker builds, never in a git argument, remote URL or log, and the folder is left out of the add-on backup | `codex-bwrap: HIDDEN_DIRS`; `github_access.py: GitRunner.env`, `Store`; `github_askpass.py`; `config.yaml: backup_exclude` | `tests/test_bwrap.py` (`test_the_github_folder_is_hidden_in_every_sandbox`), `tests/test_github_access.py` |
 | The relay runs under its own AppArmor label with all capabilities dropped, entered only through one fixed launcher | `apparmor.txt`, `relay-launcher`, `relay-tool-launcher` | `tests/apparmor_317_check.py`, `.github/workflows/apparmor-317.yaml` |
 | The worker's memory cannot be read by a process it starts | `server.py: make_worker_undumpable` | `tests/test_gate.py` (`test_the_flag_is_set`) |
+| Each way in (the chat page, the ChatGPT app, `codex_cli.start_task`) gets the Home Assistant tools that DOCS.md "Ways in" lists, and no others | `server.py: build_app_server_args`, `build_codex_args`, `relay_read_mcp_args`; `remote_control.py: Supervisor._command` | `tests/test_surface_matrix.py` |
 | Full access is not available, whatever a client or an option asks for | `gate/requirements.toml` (Codex's managed requirements) and `policy.py: load_policy`, `policy_problem`; checked before each exchange at the top of `server.py: run_task` | `tests/test_policy.py` |
 
 ### Layer 2: what the hook refuses

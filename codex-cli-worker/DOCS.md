@@ -349,6 +349,36 @@ Confirmed findings stay in `refused_edits`; `unchecked_edits` lists paths with n
 summary and details. Marking the watch reviewed acknowledges findings; it does not relax the always-on checks.
 
 
+## Ways in
+
+Codex can be reached three ways: the chat page, the ChatGPT app paired through remote control, and the
+`codex_cli.start_task` action. Each way in gets its own set of Home Assistant tools. The table lists them.
+
+| Request | Chat page | ChatGPT app | codex_cli.start_task |
+|---|---|---|---|
+| Read an entity's state or find an entity | `home_assistant.verify` | `home_assistant_relay.read` | `home_assistant.verify` |
+| Read history or long-term statistics | `home_assistant_data.history`, `home_assistant_data.statistics` | not available | `home_assistant_data.history`, `home_assistant_data.statistics` |
+| Control a device or call a service | `home_assistant_actions.act` | not available | `home_assistant_actions.act` |
+| Send a notification | `home_assistant_actions.act` | not available | `home_assistant_actions.act` |
+| Ask the owner a question or report the turn's state | `home_assistant_data.ask_owner`, `home_assistant_data.report_failure`, `home_assistant_data.exchange_info` | not available | `home_assistant_data.ask_owner`, `home_assistant_data.report_failure`, `home_assistant_data.exchange_info` |
+| Propose a schedule or use the mailbox | `codex_scheduling.propose_schedule`, `codex_scheduling.list_schedules`, `codex_scheduling.read_mailbox`, `codex_scheduling.post_mailbox` | not available | `codex_scheduling.propose_schedule`, `codex_scheduling.list_schedules`, `codex_scheduling.read_mailbox`, `codex_scheduling.post_mailbox` |
+| Work with a GitHub repository | `codex_github.github_git` | not available | `codex_github.github_git` |
+
+- `codex_cli.start_task` starts the same kind of task as the chat page, so it gets the same tools.
+- A notification goes through the `act` tool only when the Security and people group is on
+  ([Permissions overrides](#permissions-overrides)).
+- File edits and shell commands use Codex's own tools on every way in, and the [sandbox](#sandbox) applies on every
+  way in. On the chat page and for `codex_cli.start_task`, a request for more access shows on the chat page as a
+  [permission request](#permission-requests). The ChatGPT app shows Codex's own requests in the app instead, as
+  [Remote control from the ChatGPT app](#remote-control-from-the-chatgpt-app) describes.
+- A scheduled run and a message on the lead agent channel also start a task. They use the same launcher as the chat
+  page and get the page's tools. A Read only schedule narrows the sandbox, not the tools
+  ([Scheduled runs and the lead agent channel](#scheduled-runs-and-the-lead-agent-channel)).
+- "Not available" means the way in has no tool for that request.
+
+`tests/test_surface_matrix.py` starts each way in's tool servers and compares their tools with this table. A change
+that adds, removes or moves a tool updates this table and the test in the same pull request.
+
 ## Remote control from the ChatGPT app
 
 OpenAI's remote control (`codex remote-control`) lets the ChatGPT app on a phone or tablet work on this Home Assistant through OpenAI's relay. The app runs it for you; there is no terminal step.
