@@ -172,6 +172,13 @@ class DeviceFlowTests(ServiceCase):
         posted = [call for call in self.http.calls if call[0] == "POST"]
         self.assertTrue(all("client_secret" not in call[2] for call in posted))
 
+    def test_status_gives_the_seconds_left_on_a_waiting_code_only(self):
+        """The page counts down from the worker's clock; an ended flow has no countdown."""
+        self.service.flow = self.flow()
+        self.assertTrue(895 <= self.service.status()["flow"]["expires_in"] <= 900)
+        self.service.flow.finish("expired", "The code expired before it was entered on GitHub.")
+        self.assertNotIn("expires_in", self.service.status()["flow"])
+
     def test_expired_and_denied_store_nothing(self):
         for error, status in (("expired_token", "expired"), ("access_denied", "failed")):
             with self.subTest(error=error):
@@ -227,6 +234,8 @@ class CheckTests(ServiceCase):
                 self.assertEqual(self.events[0][1]["previous_state"], "ok")
                 self.assertEqual(self.events[0][1]["source"], "worker")
                 self.assertEqual(len(self.notices), 1)
+                # The notice names where the GitHub part is now: inside Accounts and connections.
+                self.assertIn("Settings > Accounts and connections > GitHub", self.notices[0][1])
                 self.assertNotIn(APP_TOKEN, json.dumps(self.events) + json.dumps(self.notices))
                 # The same state again: no second event, no second notice (one cause, one warning).
                 self.check_with(answers)

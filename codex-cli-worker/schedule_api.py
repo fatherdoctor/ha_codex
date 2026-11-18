@@ -190,11 +190,16 @@ class Service:
             payload = json.loads(raw)
         except ValueError:
             return {'ok': False, 'error': 'The request is not valid JSON.'}
+        # The order of these branches matters. KeyError and IndexError are LookupErrors, and
+        # UnicodeError is a ValueError; their first argument is a key, an index or a codec
+        # name, not a sentence, so they are caught before the branch that passes it on.
         try:
             return self.dispatch(payload)
         except (KeyError, IndexError):
-            # Their message is a key or index, not a sentence for the caller.
             return {'ok': False, 'error': 'Invalid, refused or expired scheduling request.'}
+        except UnicodeError:
+            # A lone surrogate, such as JSON "\ud800", cannot be encoded for storage.
+            return {'ok': False, 'error': 'The text holds a character that cannot be stored.'}
         except (ValueError, LookupError) as exc:
             reason = exc.args[0] if exc.args and isinstance(exc.args[0], str) else ''
             return {'ok': False, 'error': reason or 'Invalid, refused or expired scheduling request.'}
@@ -317,10 +322,18 @@ def register(worker):
         # refresh must not mark that tiny in-flight gap interrupted.
         with engine.tick_lock:
             engine.reconcile()
+            reader = mailbox_reader()
+            mailbox = engine.store.messages(reader=reader, limit=scheduling.MAX_MESSAGES + 1)
+            if reader == 'owner' and len(mailbox) > scheduling.MAX_MESSAGES:
+                # Settings acknowledges its visible owner page. Prefer unread
+                # legacy copies so that refresh reaches the next page without
+                # deleting read history to advance it.
+                unread = engine.store.messages(reader=reader, unread_only=True, limit=scheduling.MAX_MESSAGES)
+                mailbox = unread or mailbox
             return jsonify(ok=True, schedules=[schedule_payload(row) for row in engine.store.schedules()], runs=clean(engine.store.runs()),
                            mailbox=[mail_payload(row, engine.store.timezone) for row in
-                                    engine.store.messages(reader=mailbox_reader(), limit=scheduling.MAX_MESSAGES)],
-                           mailbox_reader=mailbox_reader(), mailbox_status=engine.store.mail_status(), timezone=engine.store.timezone,
+                                    mailbox[:scheduling.MAX_MESSAGES]],
+                           mailbox_reader=reader, mailbox_status=engine.store.mail_status(), timezone=engine.store.timezone,
                            timezone_error='' if engine.store.timezone else 'Home Assistant time zone unavailable; schedule entry and dispatch are paused.',
                            lead_token_configured=engine.store.has_token(),
                            limits={'proposals': scheduling.MAX_PROPOSALS, 'mail_per_turn': scheduling.MAX_MAIL_PER_TURN,

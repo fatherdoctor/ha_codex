@@ -119,7 +119,7 @@ class ProtectedPolicyTests(unittest.TestCase):
             patch.object(server, "write_task_log"),
             patch.object(server, "record_baseline", return_value={}) as baseline,
             patch.object(server, "prepare_ha_docs"),
-            patch.object(server, "build_prompt", return_value="prompt"),
+            patch.object(server, "page_message", return_value="prompt"),
             patch.object(server, "publish_task_outcome", create=True),
             patch.object(server, "notify", create=True),
             patch.object(server.subprocess, "Popen") as popen,

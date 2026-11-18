@@ -477,7 +477,7 @@ class DeviceFlow:
             self.finish("canceled")
             return False
         if time.monotonic() >= self.deadline:
-            self.finish("expired", "The code expired. Press Connect for a new one.")
+            self.finish("expired", "The code expired before it was entered on GitHub.")
             return False
         try:
             response = self.http.post(ACCESS_TOKEN_URL, {"client_id": self.client_id, "device_code": self.device_code,
@@ -502,7 +502,7 @@ class DeviceFlow:
             self.interval += 5
             return True
         if error == "expired_token":
-            self.finish("expired", "The code expired. Press Connect for a new one.")
+            self.finish("expired", "The code expired before it was entered on GitHub.")
         elif error == "access_denied":
             self.finish("failed", "The sign-in was refused on GitHub.")
         elif error == "device_flow_disabled":
@@ -837,6 +837,10 @@ class GitHubService:
         last = state.get("last_check") if isinstance(state.get("last_check"), dict) else None
         flow = dict(self.flow.public) if self.flow else {"status": "idle", "user_code": "", "verification_uri": "",
                                                          "expires_at": None, "error": ""}
+        if self.flow and flow.get("status") == "waiting_for_user":
+            # Seconds the code still works, by the worker's clock, so the page's countdown does not depend
+            # on the phone's clock.
+            flow["expires_in"] = max(0, int(self.flow.deadline - time.monotonic()))
         return {
             "state": self.current_state(),
             "kind": credential.get("kind"),
@@ -1022,7 +1026,7 @@ class GitHubService:
         if current in BAD_STATES:
             when = state.get("last_check", {}).get("at") or ""
             self.notify("GitHub sign-in", f"GitHub sign-in on the Codex add-on: {STATE_WORDS.get(current, current)} "
-                        f"since {when}. Open the Codex page > Settings > GitHub.")
+                        f"since {when}. Open the Codex page > Settings > Accounts and connections > GitHub.")
 
     def _fire(self, previous: str, state: dict[str, Any]) -> None:
         last = state.get("last_check") or {}

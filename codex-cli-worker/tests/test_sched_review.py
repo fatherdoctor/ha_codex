@@ -177,7 +177,7 @@ class ReviewApiTests(unittest.TestCase):
         result=self.service.dispatch({'operation':'list_schedules','arguments':{'offset':110,'limit':10},'capability':cap})
         self.assertEqual(len(result['items']),10); self.assertIsNone(result['next_offset'])
 
-    def test_f3_background_outcomes_are_log_only_and_chat_still_pushes(self):
+    def test_f3_background_outcomes_are_log_only_and_chat_pushes_only_what_needs_the_owner(self):
         with patch.object(server,'notify') as notify, patch.object(server,'notify_question') as question:
             for source in ('lead','schedule'):
                 server.tasks['background']={'task_source':source}
@@ -185,7 +185,8 @@ class ReviewApiTests(unittest.TestCase):
                     server.notify_task_outcome('background',status,'sample','turn','question',['choice'])
             notify.assert_not_called(); question.assert_not_called()
             server.tasks['chat']={}
-            server.notify_task_outcome('chat','completed','sample'); notify.assert_called_once()
+            server.notify_task_outcome('chat','completed','sample'); notify.assert_not_called()
+            server.notify_task_outcome('chat','failed','sample'); notify.assert_called_once()
             server.notify_task_outcome('chat','needs_input','sample','turn','question',['choice']); question.assert_called_once()
 
     def test_f7_masked_prompt_flag_and_edit_rejection(self):

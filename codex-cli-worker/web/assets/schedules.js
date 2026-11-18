@@ -81,6 +81,18 @@
     el("schedule-value").type = kind === "once" ? "datetime-local" : "text";
     el("schedule-format-note").textContent = kind === "cron" ? `Numeric minute hour day month weekday in ${zone || "Home Assistant time"}. Missing clock-change minutes are skipped; repeated minutes run once, at the first occurrence.` : kind === "once" ? `Use ${zone || "Home Assistant time"}. A repeated time uses its first occurrence; a nonexistent time is refused.` : "Use a whole number, at least 1.";
   }
+  /**
+   * The Scheduled runs header: how many schedules there are. It needs the owner
+   * when the time zone is unknown (no schedule runs) or a proposal waits for
+   * approval.
+   */
+  function showScheduleSectionStatus(schedules) {
+    const waiting = schedules.filter((schedule) => !schedule.approved).length;
+    let text = schedules.length === 1 ? "1 schedule" : `${schedules.length} schedules`;
+    if (waiting) text = `${waiting} waiting for your approval`;
+    if (!zone) text = "Paused: time zone unavailable";
+    setSectionStatus("scheduled-work", text, Boolean(waiting) || !zone);
+  }
   async function refresh() {
     if (refreshing || !dialog.open) return;
     refreshing = true;
@@ -92,7 +104,7 @@
       for (const schedule of data.schedules) {
         const item = node("div", "");
         item.append(node("strong", schedule.name), node("p", `${schedule.approved ? schedule.enabled ? "On" : "Paused" : "Needs your approval"} · ${describe(schedule.spec)} · ${schedule.mode === "read-only" ? "Read only" : "Default"} · ${when(schedule.next_due)}`, "muted"));
-        const prompt = node("details", ""); prompt.append(node("summary", "Review prompt"), node("pre", schedule.prompt)); item.append(prompt);
+        const prompt = node("details", "", "disclosure"); prompt.append(node("summary", "Review prompt"), node("pre", schedule.prompt)); item.append(prompt);
         const actions = node("div", "", "settings-actions");
         const editButton = button("Edit", () => edit(schedule));
         editButton.disabled = Boolean(schedule.prompt_redacted || !zone);
@@ -104,6 +116,7 @@
         item.append(actions); list.append(item);
       }
       if (!data.schedules.length) list.append(node("p", "No schedules saved.", "muted"));
+      showScheduleSectionStatus(data.schedules);
       const runs = el("schedule-runs"); runs.replaceChildren();
       for (const run of data.runs) {
         const item = node("p", `${when(run.created)} · ${run.status.replaceAll("_", " ")}${run.error ? ` · ${run.error}` : ""} · `);
@@ -146,7 +159,7 @@
           item.append(node("strong", label), node(key === "message" ? "pre" : "p", value));
         }
         if (envelope.due && Date.parse(envelope.due) <= Date.now()) item.append(node("p", "Due / overdue", "muted"));
-        const plain = node("details", ""); plain.append(node("summary", "Plain text"), node("pre", mail.text)); item.append(plain);
+        const plain = node("details", "", "disclosure"); plain.append(node("summary", "Plain text"), node("pre", mail.text)); item.append(plain);
         item.append(button("Reply", () => { el("schedule-mail-parent").value = mail.parent || mail.id; el("schedule-mail-target").textContent = "Reply to selected thread"; el("schedule-mail-body").focus(); }));
         if (!mail.parent) item.append(button("Delete thread", () => api(mailboxPath(`schedule-mailbox/${mail.id}`), undefined, "DELETE")));
         mailbox.append(item);

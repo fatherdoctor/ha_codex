@@ -68,6 +68,15 @@ class VerificationTests(unittest.TestCase):
         self.engine.begin("chat")
         self.assertEqual(server.tasks["chat"]["verification"], [])
 
+    def test_find_runs_as_a_check_and_is_recorded_in_this_turn(self):
+        """Look an entity up by name through the same capability, limits and record as every other check."""
+        states = [{"entity_id": "light.kitchen_ceiling", "state": "on", "attributes": {"friendly_name": "Kitchen Ceiling"}}]
+        with patch("verification.fetch_states", return_value=states), patch.object(server, "ha_token", return_value="synthetic"):
+            result = self.engine.dispatch({"capability": self.capability, "operation": "find", "name": "kitchen ceiling"})
+        self.assertEqual(result["matches"], [{"entity_id": "light.kitchen_ceiling", "name": "Kitchen Ceiling", "state": "on"}])
+        recorded = server.tasks["chat"]["turns"][0]["verification"]
+        self.assertEqual([(check["operation"], check["status"]) for check in recorded], [("find", "observed")])
+
     def test_expired_check_cannot_record_results_in_a_finished_or_replaced_turn(self):
         """Discard the result of a check whose turn ended, completed, or was replaced while it ran."""
         for outcome in ("ended", "completed", "replaced"):
