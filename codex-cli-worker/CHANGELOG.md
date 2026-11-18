@@ -141,6 +141,7 @@
 
 ## 0.3.2 (unreleased)
 
+- The integration adds a GitHub connected binary sensor with the access state, account login and repository count for automations.
 - Codex now refuses risky commands in two layers. Managed Codex command rules refuse six literal command
   prefixes: the Supervisor (`ha supervisor`, `ha super`, `ha su`), credentials, the app's policy folder and
   full access. They apply with Remote Control off too. The command hook stays the main check. The app tests
