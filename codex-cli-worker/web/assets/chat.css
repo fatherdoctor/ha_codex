@@ -2013,63 +2013,6 @@ dialog :is(h3, h4):has(> .settings-toggle) {
 }
 
 /*
- * The switch: a 48 x 24 track with a round thumb. The real checkbox lies on top of it, invisible, so a click,
- * the keyboard and a screen reader all reach the checkbox. Newer frontends name the colors --ha-switch-*, older
- * ones --switch-*.
- */
-.ha-row input[type="checkbox"] {
-  position: absolute;
-  right: 16px;
-  width: 48px;
-  height: 40px;
-  margin: 0;
-  opacity: 0;
-  cursor: pointer;
-  z-index: 1;
-}
-.ha-switch {
-  position: relative;
-  display: block;
-  flex: 0 0 48px;
-  height: 24px;
-  border-radius: 12px;
-  border: 1px solid var(--ha-switch-border-color, var(--ha-color-border-neutral-normal, var(--divider-color, #bdbdbd)));
-  background: var(--ha-switch-background-color,
-    var(--ha-color-fill-disabled-quiet-resting, var(--switch-unchecked-track-color, var(--disabled-text-color, #9e9e9e))));
-  transition: background 0.15s;
-}
-.ha-switch::after {
-  content: "";
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--ha-switch-thumb-background-color,
-    var(--ha-color-on-neutral-normal, var(--switch-unchecked-button-color, var(--card-background-color, #fff))));
-  box-shadow: 0 1px 3px #0004;
-  transition: transform 0.15s;
-}
-.ha-row input:checked + .ha-switch {
-  border-color: var(--ha-switch-checked-border-color, var(--ha-color-border-primary-loud, var(--accent)));
-  background: var(--ha-switch-checked-background-color,
-    var(--ha-color-fill-primary-normal-resting, var(--switch-checked-track-color, var(--accent))));
-}
-.ha-row input:checked + .ha-switch::after {
-  transform: translateX(24px);
-  background: var(--ha-switch-checked-thumb-background-color,
-    var(--ha-color-on-primary-normal, var(--switch-checked-button-color, var(--card-background-color, #fff))));
-}
-.ha-row input:focus-visible + .ha-switch {
-  outline: 2px solid var(--accent);
-  outline-offset: 4px;
-}
-.ha-row input:disabled + .ha-switch {
-  opacity: var(--ha-switch-disabled-opacity, 0.3);
-}
-
-/*
  * Text, number and list fields: the filled field of the Configuration tab. A tinted background, a line under it
  * that takes the primary color on focus, and the label as small text above. The workspace instructions editor
  * (#agents) keeps its own look: it is a text editor, not a field.

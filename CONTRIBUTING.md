@@ -128,6 +128,12 @@ For worker app changes, verify that the app can:
 
 For documentation-only changes, please check that links, paths, and examples are accurate.
 
+Codex is reached three ways: the chat page, the ChatGPT app through remote control, and the `codex_cli.start_task`
+action. A fix that works on one of them may be missing on another. [Ways in](codex-cli-worker/DOCS.md#ways-in) lists
+the Home Assistant tools each one gets, and `codex-cli-worker/tests/test_surface_matrix.py` checks that list against
+the real launch of each. If your change adds, removes or moves a tool, update both. In the pull request, name the ways
+in that you tested.
+
 Automated tests do not cover every installed dashboard, device, or HAOS kernel. Include clear manual test notes for behavior the suite does not exercise.
 
 ## Security Notes
