@@ -781,7 +781,7 @@ API: `POST /tasks/<task_id>/reply` and `POST /tasks/<task_id>/continue` accept `
 
 The web UI lists recent chats in a resizable sidebar and opens their messages on the right. On mobile, the sidebar becomes a drawer. Select a saved chat and send a message to continue, or choose **New chat** for a fresh session. Settings contains account controls and workspace instructions.
 
-To make the text easier to read, open **Settings** > **Text size** and choose **Normal**, **Larger** or **Largest**. On a computer, the **Aa** button in the title row above the chat offers the same choice. The choice applies to the whole page and is saved in that browser only, so a phone and a tablet can each keep their own size.
+To make the text easier to read, open **Settings** > **Text size** and choose **Normal**, **Larger** or **Largest**. The choice applies to the whole page and is saved in that browser only, so a phone and a tablet can each keep their own size.
 
 Below **Home Assistant workspace**, the sidebar shows how much of the account's 5-hour and 7-day quota is left. From **0.1.67**, each has a bar next to the percentage. The filled part is the quota left: green, and red when less than 5% is left. Hover over a bar to see when the quota resets. The worker checks the quota every few minutes, and not while a task is running. Until it has a value, the bar is an empty outline.
 
