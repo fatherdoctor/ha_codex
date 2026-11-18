@@ -358,15 +358,15 @@ Codex can be reached three ways: the chat page, the ChatGPT app paired through r
 |---|---|---|---|
 | Read an entity's state or find an entity | `home_assistant.verify` | `home_assistant_relay.read` | `home_assistant.verify` |
 | Read history or long-term statistics | `home_assistant_data.history`, `home_assistant_data.statistics` | not available | `home_assistant_data.history`, `home_assistant_data.statistics` |
-| Control a device or call a service | `home_assistant_actions.act` | not available | `home_assistant_actions.act` |
-| Send a notification | `home_assistant_actions.act` | not available | `home_assistant_actions.act` |
+| Control a device or call a service | not available | not available | not available |
+| Send a notification | not available | not available | not available |
 | Ask the owner a question or report the turn's state | `home_assistant_data.ask_owner`, `home_assistant_data.report_failure`, `home_assistant_data.exchange_info` | not available | `home_assistant_data.ask_owner`, `home_assistant_data.report_failure`, `home_assistant_data.exchange_info` |
 | Propose a schedule or use the mailbox | `codex_scheduling.propose_schedule`, `codex_scheduling.list_schedules`, `codex_scheduling.read_mailbox`, `codex_scheduling.post_mailbox` | not available | `codex_scheduling.propose_schedule`, `codex_scheduling.list_schedules`, `codex_scheduling.read_mailbox`, `codex_scheduling.post_mailbox` |
 | Work with a GitHub repository | `codex_github.github_git` | not available | `codex_github.github_git` |
 
 - `codex_cli.start_task` starts the same kind of task as the chat page, so it gets the same tools.
-- A notification goes through the `act` tool only when the Security and people group is on
-  ([Permissions overrides](#permissions-overrides)).
+- No way in has a Home Assistant tool that changes the house. Codex asks for each device command or notification
+  as a [permission request](#permission-requests), and the change runs only after **Allow once**.
 - File edits and shell commands use Codex's own tools on every way in, and the [sandbox](#sandbox) applies on every
   way in. On the chat page and for `codex_cli.start_task`, a request for more access shows on the chat page as a
   [permission request](#permission-requests). The ChatGPT app shows Codex's own requests in the app instead, as
