@@ -418,7 +418,7 @@ class ApprovalApiTests(unittest.TestCase):
         with patch.object(server, "lookup_ha_users", side_effect=RuntimeError("offline")):
             refused = self.answer()
         self.assertEqual(refused.status_code, 403)
-        self.assertIn("Could not confirm", refused.get_json()["error"])
+        self.assertEqual(refused.get_json()["error"], server.UNVERIFIED_ACCOUNT)
         # Nothing reached Codex and the request still waits.
         self.assertEqual(self.writer.messages(), [])
         self.assertEqual(server.tasks["task"]["approvals"][0]["status"], "pending")

@@ -3063,6 +3063,32 @@ function setAccountPart(sectionId, word, attention = false) {
 }
 collapseSettingsSections();
 setSectionStatus("workspace-section", "AGENTS.md");
+const TEXT_SIZES = ["normal", "larger", "largest"];
+const TEXT_SIZE_KEY = "codex-text-size";
+/**
+ * Show the page at one of the three text sizes and tick that choice in
+ * Settings. The stylesheet multiplies every font size by --text-scale,
+ * which the data-text-size attribute on the root sets.
+ * With save, remember the choice on this device for the next visit.
+ */
+function setTextSize(value, save = false) {
+  const size = TEXT_SIZES.includes(value) ? value : "normal";
+  if (size === "normal") delete document.documentElement.dataset.textSize;
+  else document.documentElement.dataset.textSize = size;
+  for (const input of document.querySelectorAll("input[data-text-size-choice]"))
+    input.checked = input.value === size;
+  setSectionStatus("text-size-section", size[0].toUpperCase() + size.slice(1));
+  if (!save) return;
+  try {
+    if (size === "normal") localStorage.removeItem(TEXT_SIZE_KEY);
+    else localStorage.setItem(TEXT_SIZE_KEY, size);
+  } catch (_) {
+    /* Storage may be disabled: the size lasts until the page is reloaded. */
+  }
+}
+setTextSize(document.documentElement.dataset.textSize);
+for (const input of document.querySelectorAll("input[data-text-size-choice]"))
+  input.addEventListener("change", () => setTextSize(input.value, true));
 /*
  * The time left on a sign-in code. The worker sends the seconds left, by its
  * own clock; the page counts down from when that reply arrived, so a phone
@@ -3285,12 +3311,22 @@ const GITHUB_STATE_TEXT = {
   disconnected: "Not connected to GitHub.",
   connecting: "Connecting. Enter the code below on GitHub.",
   ok: "Connected to GitHub.",
-  near_expiry: "Connected, but the sign-in expires within 7 days. Connect again or make a new token.",
-  expired: "The GitHub sign-in expired. Connect again.",
-  revoked: "GitHub refused the stored sign-in (revoked). Connect again.",
+  near_expiry: "GitHub still works, but this sign-in expires within 7 days. Choose Connect again before then.",
+  expired: "The GitHub sign-in expired. Choose Connect again.",
+  revoked: "GitHub no longer accepts this sign-in. Choose Connect again. If needed, restore the App's repository access on GitHub.",
   access_changed: "The GitHub sign-in reaches different repositories or access than you connected.",
   failed: "The GitHub sign-in cannot be checked.",
 };
+// Connect again starts a GitHub App sign-in, so a token connection is sent to the token form instead.
+const GITHUB_TOKEN_STATE_TEXT = {
+  near_expiry: "GitHub still works, but this token expires within 7 days. Create a new token on GitHub, then choose Use a token instead.",
+  expired: "This GitHub token expired. Create a new token on GitHub, then choose Use a token instead.",
+  revoked: "GitHub no longer accepts this token. Create a new token on GitHub, then choose Use a token instead.",
+};
+/** The sentence for a GitHub state, with the recovery step that fits the kind of sign-in. */
+function githubStateText(state, kind) {
+  return (kind === "token" && GITHUB_TOKEN_STATE_TEXT[state]) || GITHUB_STATE_TEXT[state] || state;
+}
 /** Send a GitHub request; every reply carries the status, also a refusal's, so the card stays true. */
 async function githubApi(path, body) {
   const response = await pageFetch(path, {
@@ -3364,10 +3400,10 @@ async function newGithubCode() {
   }
 }
 /** The GitHub header in a few words, for example "Connected as owner, 1 repository". */
-function githubSectionStatus({ waiting, connected, bad, state, login, repositoryCount, retry }) {
+function githubSectionStatus({ waiting, connected, bad, state, kind, login, repositoryCount, retry }) {
   if (waiting) return "Connecting: enter the code";
   if (connected) {
-    const condition = bad ? (GITHUB_STATE_TEXT[state] || state).replace(/\.$/, "") : "Connected";
+    const condition = bad ? githubStateText(state, kind).replace(/\.$/, "") : "Connected";
     const account = login ? ` as ${login}` : "";
     const repositories = repositoryCount === 1 ? "1 repository" : `${repositoryCount} repositories`;
     return `${condition}${account}, ${repositories}`;
@@ -3390,13 +3426,14 @@ function renderGithub(github) {
   const waiting = flow.status === "waiting_for_user";
   const connected = !["disconnected", "connecting"].includes(state);
   const login = github.account?.login || "";
+  const kind = github.kind === "token" ? "token" : "app";
   if (connected && github.revoke_url) githubRevokeUrl = github.revoke_url;
   $("github-status").textContent =
-    connected && login ? `${GITHUB_STATE_TEXT[state] || state} Signed in as ${login}.` : GITHUB_STATE_TEXT[state] || state;
+    connected && login ? `${githubStateText(state, kind)} Signed in as ${login}.` : githubStateText(state, kind);
   const details = $("github-details");
   const rows = [];
   if (connected) {
-    rows.push(["Sign-in", github.kind === "token" ? "Fine-grained token" : "GitHub App"]);
+    rows.push(["Sign-in", kind === "token" ? "Fine-grained token" : "GitHub App"]);
     if (github.connected_at) rows.push(["Connected", githubDate(github.connected_at)]);
     rows.push(["Expiry", githubExpiry(github)]);
     rows.push(["Access", github.permission_problem
@@ -3433,10 +3470,15 @@ function renderGithub(github) {
     }
   } else {
     flowArea.dataset.key = "";
-    const ended = { expired: "The GitHub code expired before it was entered. Get a new code to sign in.",
-      canceled: "The GitHub sign-in was canceled.", failed: "The GitHub sign-in failed." }[flow.status];
+    // A failed Connect again also shows its reason, and says that the stored sign-in did not change.
+    const ended = connected
+      ? { expired: "The new GitHub code expired before it was entered.",
+        canceled: "The new GitHub sign-in was canceled.", failed: "The new GitHub sign-in failed." }[flow.status]
+      : { expired: "The GitHub code expired before it was entered. Get a new code to sign in.",
+        canceled: "The GitHub sign-in was canceled.", failed: "The GitHub sign-in failed." }[flow.status];
     const why = flow.status === "failed" && flow.error ? ` ${flow.error}` : "";
-    flowArea.replaceChildren(...(ended && !connected ? [textNode("p", `${ended}${why}`, "muted")] : []));
+    const kept = connected ? " Your previous sign-in has not changed." : "";
+    flowArea.replaceChildren(...(ended ? [textNode("p", `${ended}${why}${kept}`, "muted")] : []));
   }
   const retry = !connected && ["expired", "failed"].includes(flow.status);
   $("github-connect").textContent = connected ? "Connect again" : retry ? "Get a new code" : "Connect GitHub";
@@ -3463,11 +3505,11 @@ function renderGithub(github) {
   const repositoryCount = (github.repositories || []).length;
   setSectionStatus(
     "github-section",
-    githubSectionStatus({ waiting, connected, bad, state, login, repositoryCount, retry }),
+    githubSectionStatus({ waiting, connected, bad, state, kind, login, repositoryCount, retry }),
     bad || waiting || retry,
   );
   setAccountPart("github-section", githubAccountWord({ waiting, connected, bad, retry }), bad || waiting || retry);
-  $("github-banner-text").textContent = `The add-on's GitHub sign-in needs attention: ${(GITHUB_STATE_TEXT[state] || state).replace(/\.$/, "")}.`;
+  $("github-banner-text").textContent = `The add-on's GitHub sign-in needs attention: ${githubStateText(state, kind).replace(/\.$/, "")}.`;
   $("github-banner").hidden = !bad;
 }
 /** Show that this worker has no GitHub sign-in (an add-on before 0.3). */
@@ -3521,7 +3563,7 @@ $("github-connect").onclick = () => githubAction($("github-connect"), "github/co
 $("github-cancel").onclick = () => githubAction($("github-cancel"), "github/cancel", {});
 $("github-test").onclick = () => githubAction($("github-test"), "github/test", {});
 $("github-check").onclick = () => githubAction($("github-check"), "github/check", {}, (data) =>
-  githubResult(`Check finished: ${GITHUB_STATE_TEXT[data.github?.state] || data.github?.state || "done"}`));
+  githubResult(`Check finished: ${data.github?.state ? githubStateText(data.github.state, data.github.kind) : "done"}`));
 $("github-accept").onclick = () => githubAction($("github-accept"), "github/accept", {}, () =>
   githubResult("The current repositories are now the ones the check expects."));
 $("github-disconnect").onclick = () => {
