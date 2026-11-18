@@ -332,6 +332,32 @@ The request and decision remain in the exchange's `approvals` history, with sens
 
 Authenticated API clients can answer a live request using `POST /tasks/<task_id>/approvals/<approval_id>` with `{"turn_id":"<current_turn_id>","decision":"allow"}` or `"deny"`. Read the redacted `approvals` records from `GET /tasks/<task_id>` first. A stale or already answered request returns HTTP 409. Task summaries include `permission_required` while an exchange is waiting. Permission decisions are made directly on the live exchange and are never queued as chat messages.
 
+### Changes to the house: the `call` tool
+
+From **0.3.6**, a chat on the page changes the house through one tool, `home_assistant_call` `call`. It sends one
+Home Assistant action (a service call), for example `light.turn_off` with a target, `automation.reload` or
+`homeassistant.restart`. The app does not approve the tool ahead, so Codex asks you before each call, with the
+service, the target and the data. A scheduled run does not get the tool, since nobody is there to answer.
+
+The tool gives Codex no token. Its bridge passes the request to the worker over a private socket, with a key that
+is valid for the running message only. The worker sends the call to Home Assistant once, with its own access, and
+checks these things first, in every mode:
+
+- A request without the current key of a running chat sends nothing.
+- A `hassio` service (the Supervisor through Home Assistant) or a `codex_cli` service (this app's own actions) is
+  refused.
+- `entity_id`, `device_id`, `area_id`, `floor_id` and `label_id` go in `target`, the other fields in `data`.
+
+Every call with a valid key writes one line to `/data/ha-call-audit.jsonl`: the time, the chat, the service, the
+target and the result. The line never holds the data, so a message text or a code stays out of the log.
+
+The keys of the app's tools (`HA_*_CAPABILITY`) are kept out of the commands that Codex runs, with Codex's
+`shell_environment_policy` setting. So a command cannot write to the socket and skip Codex's question. In a mode
+without a sandbox, a command can read the environment of the Codex process; that mode has no question to skip,
+and the checks above still hold.
+
+These checks do not cover a command that uses the `HA_TOKEN` option (see "AGENTS.md and HA_TOKEN").
+
 ### Confirmed actions and planted commands
 
 Codex follows its defaults and the owner's `/config/AGENTS.md`. The integration does not bundle a house-practice file prescribing device categories, API-deletion practices or a writing style. Owners can choose such practices through their own workspace instructions or the starter kit. Permission cards and the enforced gate continue to operate independently of prose instructions.
@@ -622,6 +648,11 @@ it again only after a change. A change you make to the file still reaches a chat
 next message.
 
 The optional `HA_TOKEN` app option is passed to Codex subprocesses as the `HA_TOKEN` environment variable. Configure it only if you want Codex tasks to call Home Assistant APIs directly. A Home Assistant long-lived access token inherits its user's permissions; use a dedicated user with permissions appropriate for the intended work.
+
+From **0.3.6**, the instructions tell Codex to change the house with the `call` tool, reloads and restarts
+included, and to use `HA_TOKEN` only for an API call that is not a service. A command that uses the token is still
+a command: in the sandboxed modes it needs network access, so Codex asks first. The `call` tool's refusals and its
+audit line do not cover such a command; the command check (hook) reads it.
 
 From **0.1.68**, a task that has `HA_TOKEN` also gets `HA_URL`, the address those calls go to, and the worker's instructions tell Codex to use the two together. The app's own calls to Home Assistant keep using the Supervisor proxy with the app's own token and do not use this option.
 
