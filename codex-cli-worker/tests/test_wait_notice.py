@@ -12,10 +12,12 @@ from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
 
-from test_server import server
+from test_server import dismiss_wait_notice_async, server
 
 TASK_ID = "20261117T180000Z-1a2b3c4d"
 TURN_ID = "0123456789abcdef0123456789abcdef"
+NEXT_TURN_ID = "fedcba9876543210fedcba9876543210"
+PHONE = "notify.mobile_app_phone"
 NOTICE_ID = f"codex_cli_wait_{TASK_ID}"
 
 
@@ -47,6 +49,10 @@ class WaitNoticeTests(unittest.TestCase):
     def dismissed(self):
         """The notification ids dismissed so far."""
         return [data["notification_id"] for service, data in self.calls if service == "persistent_notification.dismiss"]
+
+    def pushes(self):
+        """The data of every call to the phone's notify service so far."""
+        return [data for service, data in self.calls if service == PHONE]
 
     def waiting_question(self):
         """Record a chat whose current turn waits for the owner's answer, and send its question."""
@@ -148,7 +154,76 @@ class WaitNoticeTests(unittest.TestCase):
             dismissal.join(0.2)
             self.assertTrue(dismissal.is_alive())
             self.assertEqual(self.dismissed(), [])
+            server.tasks[TASK_ID]["status"] = "running"  # The owner answers while the notice is on its way.
         dismissal.join(5)
+        self.assertEqual(self.dismissed(), [NOTICE_ID])
+
+    def test_the_dismissal_runs_on_its_own_thread(self):
+        """The worker's dismissal starts a thread that dismisses the notice; the caller does not wait for it."""
+        done = threading.Event()
+        self.stack.enter_context(patch.object(
+            server, "call_ha_service", side_effect=lambda service, data: done.set() or (True, "ok"),
+        ))
+        dismiss_wait_notice_async(TASK_ID)
+        self.assertTrue(done.wait(5))
+
+    def test_a_late_dismissal_keeps_the_notice_of_a_chat_that_waits_again(self):
+        """A dismissal that runs after the chat asks its next question leaves the new notice in place."""
+        late = []
+        self.stack.enter_context(patch.object(server, "dismiss_wait_notice_async", side_effect=late.append))
+        self.waiting_question()
+        server.update_task(TASK_ID, status="running", question="")
+        server.update_task(TASK_ID, status="waiting_for_input", current_turn_id=NEXT_TURN_ID, question="And the other?")
+        server.notify_question(TASK_ID, NEXT_TURN_ID, "And the other?", [])
+        self.assertEqual(late, [TASK_ID])
+        server.dismiss_wait_notice(TASK_ID)
+        self.assertEqual(self.created(), [NOTICE_ID, NOTICE_ID])
+        self.assertEqual(self.dismissed(), [])
+
+    def test_a_question_answered_while_its_push_fails_makes_no_notice(self):
+        """The question checks again after a push that failed, before it falls back to a persistent notification."""
+        def push_fails_after_the_answer(service, data):
+            """The owner answers in the chat while the push to the phone is on its way, and the push fails."""
+            self.calls.append((service, data))
+            server.tasks[TASK_ID]["status"] = "running"
+            return False, "timeout"
+
+        server.update_task(TASK_ID, status="waiting_for_input", current_turn_id=TURN_ID, question="Keep both?")
+        self.stack.enter_context(patch.object(server, "call_ha_service", side_effect=push_fails_after_the_answer))
+        for choices in (["Yes", "No"], []):
+            server.tasks[TASK_ID]["status"] = "waiting_for_input"
+            with patch.object(server, "read_options", return_value={"notify_service": PHONE}):
+                server.notify_question(TASK_ID, TURN_ID, "Keep both?", choices)
+        self.assertEqual(len(self.pushes()), 2)
+        self.assertEqual(self.created(), [])
+
+    def test_a_question_of_an_older_turn_makes_no_notice(self):
+        """A question that a newer turn of the same chat replaced is not sent, though the chat waits again."""
+        server.update_task(TASK_ID, status="waiting_for_input", current_turn_id=NEXT_TURN_ID, question="And the other?")
+        server.notify_question(TASK_ID, TURN_ID, "Keep both?", ["Yes", "No"])
+        self.assertEqual(self.calls, [])
+
+    def test_a_phone_push_is_tagged_and_cleared_when_the_wait_ends(self):
+        """Every push about a waiting chat carries the chat's tag, and the dismissal clears it on the phone."""
+        self.stack.enter_context(patch.object(server, "read_options", return_value={"notify_service": PHONE}))
+        self.waiting_question()
+        server.update_task(TASK_ID, status="running", question="")
+        self.waiting_permission()
+        server.update_task(TASK_ID, status="completed", approvals=[])
+        pushes = self.pushes()
+        self.assertEqual([push["data"]["tag"] for push in pushes], [NOTICE_ID] * 4)
+        self.assertEqual([push["message"] for push in pushes][1::2], ["clear_notification", "clear_notification"])
+        self.assertIn("actions", pushes[0]["data"])
+        self.assertEqual(self.dismissed(), [NOTICE_ID, NOTICE_ID])
+
+    def test_another_notify_service_gets_no_tag_and_no_clear(self):
+        """Only the companion app knows tags; any other notify service gets the plain message, and nothing to clear."""
+        self.stack.enter_context(patch.object(server, "read_options", return_value={"notify_service": "notify.family"}))
+        self.waiting_permission()
+        server.update_task(TASK_ID, status="completed", approvals=[])
+        sent = [data for service, data in self.calls if service == "notify.family"]
+        self.assertEqual(len(sent), 1)
+        self.assertNotIn("data", sent[0])
         self.assertEqual(self.dismissed(), [NOTICE_ID])
 
     def test_waits_on_owner(self):

@@ -5,8 +5,10 @@
 - Home Assistant shows a Codex notification only while a chat waits for you: a question, or a permission request.
   A failed action or a failed chat no longer makes one; the failure shows in the chat. Each waiting chat has one
   notification, `codex_cli_wait_<task_id>`, and the app dismisses it when you answer, stop or delete the chat, or
-  when the request expires. A tap on a phone notification that the worker refuses no longer makes a notification
-  either; the integration logs why.
+  when the request expires, unless the chat waits again by then. With a companion app notify service, the push
+  carries the same id as its tag, and the app clears it from the phone at the same time. A tap on a phone
+  notification that the worker refuses no longer makes a notification either; the integration logs why. The
+  sign-in and GitHub notifications are not about a chat and are unchanged.
 - The app's own grant layer is removed: the five pre-approved action groups (Settings > Permissions overrides), the
   guard-rails block they read from `/config/AGENTS.md`, and the `home_assistant_actions` `act` tool with its
   **Allow once** card. Codex's own permission requests are now the only way a change to the house is approved. A

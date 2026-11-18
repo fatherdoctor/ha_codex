@@ -3225,24 +3225,30 @@ def fire_ha_event(event_type: str, data: dict[str, Any]) -> tuple[bool, str]:
 # Every notification replaces the same persistent notification, so the last one delivered is the
 # one the user sees. They are delivered one at a time, in the order they were asked for.
 notification_lock = threading.RLock()
+# Only the companion app's notify services take buttons, a tag, and the clear_notification message.
+MOBILE_APP_NOTIFY_PREFIX = "notify.mobile_app_"
 
 
 def notify(title: str, message: str, *, still_wanted: Callable[[], bool] | None = None,
-           notification_id: str = "codex_cli_worker") -> None:
+           notification_id: str = "codex_cli_worker", push_tag: str = "") -> None:
     """Send a notification through the configured notify service; without one, or when it fails, show a persistent one.
 
     Notifications go out one at a time, so one that is slow to deliver cannot
     arrive after a later one. `still_wanted` is asked before each attempt, and a
     notification that is out of date by then is dropped. It is asked while the
     notification lock is held and must not take the worker lock, which some
-    callers hold while they send their notification.
+    callers hold while they send their notification. A `push_tag` tags a push to
+    the companion app, so that the push can be cleared later.
     """
     with notification_lock:
         service = str(read_options().get("notify_service") or "")
         if service:
             if still_wanted is not None and not still_wanted():
                 return
-            ok, detail = call_ha_service(service, {"title": title, "message": message})
+            data: dict[str, Any] = {"title": title, "message": message}
+            if push_tag and service.startswith(MOBILE_APP_NOTIFY_PREFIX):
+                data["data"] = {"tag": push_tag}
+            ok, detail = call_ha_service(service, data)
             if ok:
                 return
             print(f"Notification through {service} failed: {detail}", flush=True)
@@ -3289,20 +3295,29 @@ def task_waits_on_owner(task: dict[str, Any] | None) -> bool:
     status = task.get("status")
     if status == "waiting_for_input":
         return True
-    if status in {"completed", "failed", "cancelled", "canceled"}:
+    if status in {"completed", "failed", "cancelled"}:
         return False
     return any(isinstance(item, dict) and item.get("status") == "pending" for item in task.get("approvals") or [])
 
 
 def dismiss_wait_notice(task_id: str) -> None:
-    """Dismiss the notice of a chat that no longer waits.
+    """Dismiss the notice of a chat that no longer waits, and clear its push on the companion app.
 
     It takes the notification lock, so a notice that was being sent when the
     wait ended is sent first and then dismissed; one that was not sent yet sees
-    that the wait ended and is dropped.
+    that the wait ended and is dropped. The dismissal runs late, on its own
+    thread: if the chat waits again by then, its new notice stays. A dismissal
+    that fails is not tried again.
     """
+    notice_id = wait_notification_id(task_id)
     with notification_lock:
-        dismiss_persistent_notification(wait_notification_id(task_id))
+        # Read without the worker lock, as still_waiting in notify_question does.
+        if task_waits_on_owner(tasks.get(task_id)):
+            return
+        dismiss_persistent_notification(notice_id)
+        service = str(read_options().get("notify_service") or "")
+        if service.startswith(MOBILE_APP_NOTIFY_PREFIX):
+            call_ha_service(service, {"message": "clear_notification", "data": {"tag": notice_id}})
 
 
 def dismiss_wait_notice_async(task_id: str) -> None:
@@ -3318,6 +3333,7 @@ def notify_question(task_id: str, turn_id: str, question: str, choices: list[str
     the persistent notification, lists the choices in the text.
     """
     title = "Codex needs input"
+    notice_id = wait_notification_id(task_id)
 
     def still_waiting() -> bool:
         """Whether the question still waits; read without the worker lock, which the caller may hold."""
@@ -3328,20 +3344,21 @@ def notify_question(task_id: str, turn_id: str, question: str, choices: list[str
         if not still_waiting():
             return
         service = str(read_options().get("notify_service") or "")
-        if choices and turn_id and service.startswith("notify.mobile_app_"):
+        if choices and turn_id and service.startswith(MOBILE_APP_NOTIFY_PREFIX):
             actions = [
                 {"action": f"{CHOICE_ACTION_PREFIX}{index}_{turn_id}_{task_id}", "title": choice}
                 for index, choice in enumerate(choices)
             ]
+            push = {"actions": actions, "tag": notice_id}
             ok, detail = call_ha_service(
-                service, {"title": title, "message": f"{question} Task: {task_id}", "data": {"actions": actions}}
+                service, {"title": title, "message": f"{question} Task: {task_id}", "data": push}
             )
             if ok:
                 return
             print(f"Notification with choices through {service} failed: {detail}", flush=True)
         options = f" Options: {'; '.join(choices)}." if choices else ""
         notify(title, f"{question}{options} Task: {task_id}", still_wanted=still_waiting,
-               notification_id=wait_notification_id(task_id))
+               notification_id=notice_id, push_tag=notice_id)
 
 
 PERMISSION_REASON_MAX = 200
@@ -3363,11 +3380,13 @@ def notify_permission(task_id: str, approval: dict[str, Any], withdrawn: threadi
     if reason and reason[-1] not in ".!?…":
         reason += "."
     detail = f" Reason: {reason}" if reason else ""
+    notice_id = wait_notification_id(task_id)
     notify(
         "Codex needs permission",
         f"Codex is waiting for your decision on {subject}.{detail} Open the Codex chat to review it. Task: {task_id}",
         still_wanted=lambda: not withdrawn.is_set(),
-        notification_id=wait_notification_id(task_id),
+        notification_id=notice_id,
+        push_tag=notice_id,
     )
 
 

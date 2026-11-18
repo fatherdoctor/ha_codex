@@ -302,7 +302,10 @@ class ChoiceTests(unittest.TestCase):
         server.tasks[task_id] = {"task_id": task_id, "status": "waiting_for_input", "current_turn_id": turn_id}
 
     def test_mobile_app_notification_has_a_button_per_choice(self):
-        """A mobile app notify service gets each choice as a button whose action names the position, turn, and task."""
+        """A mobile app notify service gets each choice as a button whose action names the position, turn, and task.
+
+        The push carries the chat's notification id as its tag, so the worker can clear it when the wait ends.
+        """
         turn_id = "0123456789abcdef0123456789abcdef"
         self.waiting("20261004T101500Z-1a2b3c4d", turn_id)
         with (
@@ -316,7 +319,7 @@ class ChoiceTests(unittest.TestCase):
             "data": {"actions": [
                 {"action": f"CODEX_CLI_CHOICE_0_{turn_id}_20261004T101500Z-1a2b3c4d", "title": "Go ahead"},
                 {"action": f"CODEX_CLI_CHOICE_1_{turn_id}_20261004T101500Z-1a2b3c4d", "title": "Don't change anything"},
-            ]},
+            ], "tag": "codex_cli_wait_20261004T101500Z-1a2b3c4d"},
         })
 
     def test_other_notifications_list_the_choices_in_the_text(self):
@@ -347,7 +350,8 @@ class ChoiceTests(unittest.TestCase):
             server.notify_question("task-1", "0" * 32, "Remove the duplicate?", ["Go ahead", "Skip"])
         self.assertEqual(call.call_count, 2)
         self.assertEqual(call.call_args.args, ("notify.mobile_app_pixel", {
-            "title": "Codex needs input", "message": "Remove the duplicate? Options: Go ahead; Skip. Task: task-1"}))
+            "title": "Codex needs input", "message": "Remove the duplicate? Options: Go ahead; Skip. Task: task-1",
+            "data": {"tag": "codex_cli_wait_task-1"}}))
 
 
 if __name__ == "__main__":

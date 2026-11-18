@@ -468,13 +468,13 @@ class ApprovalApiTests(unittest.TestCase):
         self.assertTrue(self.notified.call_args.args[2].is_set())
         self.assertEqual(self.notified.call_count, 2)
 
-    def test_late_alert_cannot_replace_the_result_notification(self):
-        """An alert that is delivered only after the answer and the result is dropped, however the request ended."""
+    def test_late_alert_cannot_replace_a_later_notification(self):
+        """An alert that is delivered only after the answer and a later notification is dropped, however the request ended."""
         delivered = []
 
         def deliver(service, data):
-            """Stand in for Home Assistant and keep what it was asked to show."""
-            delivered.append((service, data["title"]))
+            """Stand in for Home Assistant and keep what it was asked to show; a dismissal has no title."""
+            delivered.append((service, data.get("title")))
             return True, "ok"
 
         def late_alert():
