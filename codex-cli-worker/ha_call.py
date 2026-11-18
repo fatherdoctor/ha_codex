@@ -5,7 +5,12 @@ ha_call_mcp.py, passes the request here over a private socket with the key of th
 turn. This module, not the bridge, holds the checks:
 
 - a request without the current key of a running chat sends nothing;
-- a malformed request (a service that is not domain.service, an unknown field) sends nothing.
+- a malformed request (a service that is not domain.service, an unknown field) sends nothing;
+- a request that names the entity ("name") is sent only when the name fits exactly one entity
+  of the service's domain (name_match.py); otherwise it sends nothing and lists the candidates.
+
+After a call whose target is only entity ids, the worker reads up to MAX_READBACK of them back,
+so Codex needs no second tool call.
 
 It refuses no service by name: the person's answer to Codex's request is the gate.
 """
@@ -22,11 +27,15 @@ from pathlib import Path
 
 import requests
 
+import name_match
+from relay_reads import ATTRIBUTES, PRIVATE, fetch_states, password_state
+
 SERVICE_RE = re.compile(r"[a-z0-9_]+\.[a-z0-9_]+")
 TARGET_KEYS = frozenset({"entity_id", "device_id", "area_id", "floor_id", "label_id"})
 MAX_REQUEST_BYTES = 65536
 MAX_TARGET_IDS = 50
 MAX_CHANGED_REPORTED = 50
+MAX_READBACK = 5
 CALL_TIMEOUT_SECONDS = 60
 CORE_SERVICES_URL = "http://supervisor/core/api/services/"
 # The task name of the ChatGPT app's remote control. A page chat's id never has this form (it starts with a
@@ -36,6 +45,15 @@ RELAY_TASK = "remote-control"
 
 class CallRefused(ValueError):
     """A request the worker will not send to Home Assistant; the message says why, for Codex."""
+
+
+class NotSent(Exception):
+    """A request by name that fits no entity, or more than one: nothing is sent, and the answer lists the candidates."""
+
+    def __init__(self, answer):
+        """Keep the answer for Codex; its message is the exception's text."""
+        super().__init__(answer["message"])
+        self.answer = answer
 
 
 def parse_target(target):
@@ -145,11 +163,76 @@ class HomeAssistantCall:
         task_id = self.task_for(payload.get("capability"))
         if task_id is None:
             return {"status": "unavailable", "message": "No active call key: the chat turn has ended"}
+        arguments = payload.get("arguments")
         try:
-            service, body = parse_request(payload.get("arguments"))
+            if isinstance(arguments, dict) and "name" in arguments:
+                arguments = self.target_by_name(arguments)
+            service, body = parse_request(arguments)
+        except NotSent as not_sent:
+            return not_sent.answer
         except CallRefused as refusal:
             return {"status": "refused", "message": str(refusal)}
-        return self.send(service, body)
+        result = self.send(service, body)
+        target = arguments.get("target") or {}
+        if result["status"] == "ok" and set(target) == {"entity_id"}:
+            result["readback"] = self.read_back(target["entity_id"])
+        return result
+
+    def target_by_name(self, arguments):
+        """Return the arguments with the named entity as the target, or raise NotSent when no one entity fits.
+
+        The service and data are checked first, so a malformed request is refused before Home Assistant is read.
+        """
+        rest = {key: value for key, value in arguments.items() if key != "name"}
+        if "target" in rest:
+            raise CallRefused("give a name or a target, not both")
+        service, _ = parse_request(rest)
+        token = self.worker.ha_token()
+        if not token:
+            raise CallRefused("Home Assistant authentication is unavailable")
+        try:
+            states = fetch_states("/states", token)
+        except (ValueError, requests.RequestException) as exc:  # relay_reads.ReadError is a ValueError
+            raise CallRefused(f"Could not read the entity list ({type(exc).__name__}). Nothing was sent.") from None
+        if not isinstance(states, list):
+            raise CallRefused("Home Assistant returned an invalid entity list. Nothing was sent.")
+        try:
+            found = name_match.resolve(states, arguments["name"], service)
+        except ValueError as exc:
+            raise CallRefused(str(exc)) from None
+        if "entity_id" in found:
+            return {**rest, "target": {"entity_id": found["entity_id"]}}
+        count = found["total"]
+        if count:
+            message = (f"{count} entities fit this name. Nothing was sent: ask the person which one, "
+                       "then call again with target.entity_id.")
+        else:
+            message = f"No {service.split('.', 1)[0]} entity fits this name. Nothing was sent."
+        raise NotSent({"status": "not_sent", "message": message, "candidates": found["candidates"],
+                       "total_matches": count})
+
+    def read_back(self, entity_ids):
+        """Return the new state and the common attributes of up to MAX_READBACK target entities.
+
+        Credential-like and password-mode entities are left out, as they are for every read.
+        """
+        token = self.worker.ha_token()
+        ids = [entity_ids] if isinstance(entity_ids, str) else entity_ids
+        rows = []
+        for entity_id in ids[:MAX_READBACK]:
+            if PRIVATE.search(entity_id.split(".", 1)[-1]):
+                continue
+            try:
+                row = fetch_states(f"/states/{entity_id}", token)
+            except (ValueError, requests.RequestException) as exc:
+                rows.append({"entity_id": entity_id, "error": f"read back failed ({type(exc).__name__})"})
+                continue
+            if not isinstance(row, dict) or password_state(row):
+                continue
+            attributes = row.get("attributes") if isinstance(row.get("attributes"), dict) else {}
+            rows.append({"entity_id": entity_id, "state": str(row.get("state"))[:120],
+                         "attributes": {key: attributes[key] for key in sorted(ATTRIBUTES & set(attributes))}})
+        return rows
 
     def send(self, service, body):
         """Send one service call to Home Assistant, once, and return the result for Codex."""

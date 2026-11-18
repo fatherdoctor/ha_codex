@@ -41,6 +41,11 @@
   your approval, and its **Edit** button opens the same editor. Schedules saved by an earlier version keep running
   unchanged: they belong to no chat, so open them from Settings or from the menu of a chat one of their runs started.
   The lead agent and Codex can still only propose a name, a prompt, a mode and a timing.
+- A device command takes one step instead of three. Codex can give the device's name, as you said it, to the
+  `home_assistant_call` `call` tool in place of the entity id. The worker sends the call only when exactly one
+  entity of the service's domain has that name (whole words; an exact name wins over longer ones), and its
+  answer reads back the state right after the call. When none or several fit, nothing is sent and Codex asks you which one. You
+  still answer Codex's question before each call.
 - The app's own grant layer is removed: the five pre-approved action groups (Settings > Permissions overrides), the
   guard-rails block they read from `/config/AGENTS.md`, and the `home_assistant_actions` `act` tool with its
   **Allow once** card. Codex's own permission requests are now the only way a change to the house is approved. A
