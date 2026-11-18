@@ -1692,7 +1692,6 @@ function renderApproval(approval, taskId, turnId, active) {
   if (approval.cwd) card.append(textNode("p", `Working folder: ${approval.cwd}`, "permission-folder"));
   if (approval.network) card.append(textNode("p", `Network host: ${approval.network}`));
   if (approval.command) card.append(textNode("pre", approval.command, "permission-command"));
-  if (approval.action) card.append(textNode("pre", approval.action, "permission-command"));
   for (const change of approval.changes || []) {
     card.append(textNode("p", `${change.kind}: ${change.path}`, "permission-folder"));
     if (change.move_path) card.append(textNode("p", `Move to: ${change.move_path}`, "permission-folder"));
@@ -3729,9 +3728,6 @@ function settingsError(error) {
   const result = $("connection-dialog").open ? $("connection-result") : $("settings-result");
   result.textContent = String(error.message || error);
 }
-let permissionGroups = null;
-let permissionRuleDigest = null;
-const permissionSwitches = () => [...document.querySelectorAll("[data-permission-group]")];
 /**
  * The Home Assistant theme variables the page reads, by name without the leading "--". Home Assistant sets them on
  * its own document; the page runs in an iframe and does not inherit them, so haTheme() copies them to this page's
@@ -3745,12 +3741,6 @@ const haThemeTokens = [
   // Filled buttons and filled fields, as on the add-on's Configuration tab.
   "ha-color-fill-primary-loud-resting", "ha-color-on-primary-loud",
   "input-fill-color", "input-ink-color", "input-label-ink-color", "input-idle-line-color",
-  // Switches. Newer frontends name them --ha-switch-* and --ha-color-*, older ones --switch-*; chat.css tries each.
-  "ha-switch-background-color", "ha-switch-thumb-background-color",
-  "ha-switch-checked-background-color", "ha-switch-checked-thumb-background-color",
-  "ha-color-border-neutral-normal", "ha-color-border-primary-loud",
-  "ha-color-fill-disabled-quiet-resting", "ha-color-on-neutral-normal", "ha-color-fill-primary-normal-resting", "ha-color-on-primary-normal",
-  "switch-unchecked-track-color", "switch-unchecked-button-color", "switch-checked-track-color", "switch-checked-button-color",
   // Font and type scale.
   "ha-font-family-body", "ha-font-size-s", "ha-font-size-m",
 ];
@@ -3778,76 +3768,6 @@ function haTheme() {
   } catch (_error) { /* A cross-origin parent: keep the page's own palette. */ }
   document.documentElement.dataset.theme = dark ? "dark" : "light";
 }
-async function loadPermissionOverrides() {
-  const controls = permissionSwitches();
-  controls.forEach((input) => { input.disabled = true; });
-  try {
-    const data = await api("permissions-overrides");
-    permissionGroups = data.groups;
-    permissionRuleDigest = data.rule_digest;
-    $("permissions-overrides-guard-note").textContent = data.guard_note || "";
-    $("permissions-overrides-guard-note").hidden = !data.guard_note;
-    controls.forEach((input) => {
-      input.checked = permissionGroups[input.dataset.permissionGroup] === true;
-      input.disabled = false;
-    });
-    $("permissions-overrides-result").textContent = "Changes save immediately.";
-    showPermissionSectionStatus(data.guard_note);
-  } catch (_error) {
-    permissionGroups = null;
-    $("permissions-overrides-guard-note").hidden = true;
-    $("permissions-overrides-result").textContent = "Permissions overrides are unavailable. Administrator access is required.";
-    setSectionStatus("permission-overrides", "Administrators only");
-  }
-}
-/**
- * The Permissions overrides header: how many groups are on, or that the house
- * rules changed and wait for the owner's review. While they wait, every group
- * is suspended, so the header says so instead of a count.
- */
-function showPermissionSectionStatus(guardNote) {
-  // The worker's text for rules that changed since the owner confirmed them
-  // (permission_overrides_api.py, guards).
-  if (/^House rules changed/.test(guardNote || "")) {
-    setSectionStatus("permission-overrides", "Suspended: review the house rules", true);
-    return;
-  }
-  const switches = permissionSwitches();
-  const on = switches.filter((input) => permissionGroups[input.dataset.permissionGroup] === true).length;
-  setSectionStatus("permission-overrides", `${on} of ${switches.length} on`);
-}
-$("confirm-permission-rules").onclick = async () => {
-  try {
-    const rules = await api("agents");
-    if (!window.confirm("Review these house rules before confirming:\n\n" + (rules.content || "No instructions file."))) return;
-    await api("permissions-overrides", { confirm_rules: true, expected_digest: permissionRuleDigest });
-    await loadPermissionOverrides();
-    $("permissions-overrides-result").textContent = "House rules confirmed. Start a new exchange to use them.";
-  } catch (_error) {
-    $("permissions-overrides-result").textContent = "Could not confirm house rules. Review them again.";
-  }
-};
-permissionSwitches().forEach((input) => input.addEventListener("change", async () => {
-  if (!permissionGroups) return;
-  const proposed = { ...permissionGroups, [input.dataset.permissionGroup]: input.checked };
-  permissionSwitches().forEach((control) => { control.disabled = true; });
-  try {
-    const data = await api("permissions-overrides", proposed);
-    permissionGroups = data.groups;
-    permissionRuleDigest = data.rule_digest;
-    $("permissions-overrides-guard-note").textContent = data.guard_note || "";
-    $("permissions-overrides-guard-note").hidden = !data.guard_note;
-    $("permissions-overrides-result").textContent = "Permissions overrides saved.";
-    showPermissionSectionStatus(data.guard_note);
-  } catch (_error) {
-    $("permissions-overrides-result").textContent = "Could not save permissions overrides. Check the settings before continuing.";
-  } finally {
-    permissionSwitches().forEach((control) => {
-      control.checked = permissionGroups[control.dataset.permissionGroup] === true;
-      control.disabled = false;
-    });
-  }
-}));
 $("settings-button").onclick = async () => {
   try {
     const data = await api("diagnostics/settings");
@@ -3867,7 +3787,6 @@ $("settings-button").onclick = async () => {
     loadRemoteControl(),
     loadPause(),
     loadBrowserPermissions(),
-    loadPermissionOverrides(),
     loadAddonConfiguration(),
   ]);
   for (const result of results)

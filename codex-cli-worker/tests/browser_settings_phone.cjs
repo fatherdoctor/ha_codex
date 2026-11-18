@@ -1,6 +1,6 @@
 // Settings on a phone (400 px) in light and dark: collapsed sections with a status line, button rows that fit,
 // and the ChatGPT code countdown. On a phone and a desktop: one window size, one arrow size, even spacing. The Home
-// Assistant look (CX-FB2-THEME): inside a host window that sets theme variables, the fields, switches, buttons and font
+// Assistant look (CX-FB2-THEME): inside a host window that sets theme variables, the fields, buttons and font
 // take them; with no host window, each part falls back to the page's own palette. Run with tests/web_fixture.py
 // serving the page. Every code, name and color is synthetic.
 // Screenshots go to SETTINGS_SHOTS (default /tmp/codex-settings-qa).
@@ -112,7 +112,7 @@ async function checkLayout(page) {
   for (const [id, gap] of layout.below) assert.ok(Math.abs(gap - 16) <= 1, `${id}: ${gap} px above the next divider`);
 }
 
-/** The computed look of one field, one switch, the two kinds of button, a close icon and the page font. */
+/** The computed look of one field, one settings row, the two kinds of button, a close icon and the page font. */
 const themeLook = target => target.evaluate(() => {
   const css = (selector, property, pseudo) => {
     const element = document.querySelector(selector);
@@ -126,8 +126,7 @@ const themeLook = target => target.evaluate(() => {
     fieldFill: css('#schedule-value', 'background-color'),
     fieldLine: css('#schedule-value', 'border-bottom-color'),
     fieldHeight: document.querySelector('#schedule-value').getBoundingClientRect().height,
-    switchOn: css('.ha-row input:checked + .ha-switch', 'background-color'),
-    switchOff: css('.ha-row input:not(:checked) + .ha-switch', 'background-color'),
+    // The Add-on configuration row at the foot of Settings: a name and a description line.
     rowHeight: document.querySelector('.ha-row').getBoundingClientRect().height,
     filled: css('#pause', 'background-color'),
     filledText: css('#pause', 'color'),
@@ -139,20 +138,10 @@ const themeLook = target => target.evaluate(() => {
   };
 });
 
-/**
- * Wait until a switch that is on shows the expected color. Its fill fades in over 0.15 s, so a single
- * read can catch it halfway. On a timeout the caller's assertion reports the color it found.
- */
-const switchSettles = (target, color) => target.waitForFunction(expected => {
-  const track = document.querySelector('.ha-row input:checked + .ha-switch');
-  return track !== null && getComputedStyle(track).backgroundColor === expected;
-}, color, {timeout: 5000}).catch(() => {});
-
-/** Open the sections that hold a switch, a field and both kinds of button. */
+/** Open the sections that hold a field and both kinds of button. */
 async function openThemedSections(target) {
-  for (const id of ['permission-overrides', 'interaction-logs-section', 'assistant-section', 'scheduled-work'])
+  for (const id of ['interaction-logs-section', 'assistant-section', 'scheduled-work'])
     await target.locator(`#${id} > h3 .settings-toggle`).click();
-  await target.waitForFunction(() => document.querySelector('.ha-row input:checked'));
 }
 
 (async () => {
@@ -192,7 +181,6 @@ async function openThemedSections(target) {
         {title: 'ChatGPT account', status: 'Signing in: enter the code', attention: true},
         {title: 'GitHub', status: 'Connected as synthetic-owner, 1 repository', attention: false},
         {title: 'ChatGPT app pairing', status: 'Unavailable', attention: false},
-        {title: 'Permissions overrides', status: '3 of 5 on', attention: false},
         {title: 'Interaction logs', status: 'Keeps 25', attention: false},
         {title: 'Assistant', status: 'Running', attention: false},
         {title: 'Browser permissions', status: 'None remembered', attention: false},
@@ -275,22 +263,19 @@ async function openThemedSections(target) {
       await page.goto('http://127.0.0.1:9137/preview/');
       await page.getByRole('button', {name: 'Open settings', exact: true}).click();
       await openThemedSections(page);
-      await switchSettles(page, 'rgb(0, 154, 199)');
       const look = await themeLook(page);
       assert.match(look.font, /^Inter,/, 'the page font with no Home Assistant font');
       assert.equal(look.selectFont, look.font, 'a list field takes the page font');
       assert.equal(look.fieldHeight, 56, 'a filled field is 56 px high');
-      assert.ok(look.rowHeight >= 72, `a two-line switch row is 72 px or more: ${look.rowHeight}`);
+      assert.ok(look.rowHeight >= 72, `a two-line settings row is 72 px or more: ${look.rowHeight}`);
       assert.equal(look.filled, 'rgb(0, 154, 199)', 'the filled button takes the page accent');
       assert.equal(look.filledText, 'rgb(255, 255, 255)');
       assert.equal(look.textButton, 'rgb(0, 154, 199)', 'a text button is in the accent color');
       assert.equal(look.textButtonFill, 'rgba(0, 0, 0, 0)', 'a text button has no fill');
-      assert.equal(look.switchOn, 'rgb(0, 154, 199)', 'a switch that is on takes the accent');
-      assert.notEqual(look.switchOff, look.switchOn);
-      for (const part of ['fieldFill', 'fieldLine', 'switchOff'])
+      for (const part of ['fieldFill', 'fieldLine'])
         assert.ok(!['', 'rgba(0, 0, 0, 0)'].includes(look[part]), `${part} has a color: ${look[part]}`);
       assert.ok(look.closeIcons.length >= 5 && look.closeIcons.every(icon => icon === 'true true'), `close icons: ${look.closeIcons}`);
-      await page.locator('#permission-overrides').screenshot({path: path.join(SHOTS, `theme-standalone-${colorScheme}-1280.png`)});
+      await page.locator('#scheduled-work').screenshot({path: path.join(SHOTS, `theme-standalone-${colorScheme}-1280.png`)});
       assert.deepEqual(errors, []);
       await page.close();
     }
@@ -303,8 +288,7 @@ async function openThemedSections(target) {
       const variables = '--primary-color:#6344ff;--primary-background-color:#18212a;--card-background-color:#223344;'
         + '--primary-text-color:#ddeeff;--secondary-text-color:#99aabb;--divider-color:#334455;'
         + '--ha-font-family-body:Synthetic Sans,sans-serif;--input-fill-color:#2a3b4c;--input-idle-line-color:#8899aa;'
-        + '--ha-color-fill-primary-loud-resting:#5522ee;--ha-color-on-primary-loud:#fefefe;'
-        + '--switch-checked-track-color:#11aa55;--switch-unchecked-track-color:#776655';
+        + '--ha-color-fill-primary-loud-resting:#5522ee;--ha-color-on-primary-loud:#fefefe';
       await host.route('http://127.0.0.1:9137/preview/theme-host', route => route.fulfill({contentType: 'text/html', body:
         `<!doctype html><home-assistant style="${variables}"></home-assistant>`
         + `<script>document.querySelector('home-assistant').hass={themes:{darkMode:true}};<\/script>`
@@ -317,7 +301,6 @@ async function openThemedSections(target) {
       if (await conversations.isVisible()) await conversations.click();
       await frame.getByRole('button', {name: 'Open settings', exact: true}).click();
       await openThemedSections(page);
-      await switchSettles(page, 'rgb(17, 170, 85)');
       const look = await themeLook(page);
       assert.match(look.font, /^"?Synthetic Sans"?, sans-serif$/, `Home Assistant's font: ${look.font}`);
       assert.equal(look.selectFont, look.font, `a list field takes Home Assistant's font: ${look.selectFont}`);
@@ -326,8 +309,6 @@ async function openThemedSections(target) {
       assert.equal(look.filled, 'rgb(85, 34, 238)', 'the filled button is --ha-color-fill-primary-loud-resting');
       assert.equal(look.filledText, 'rgb(254, 254, 254)');
       assert.equal(look.textButton, 'rgb(99, 68, 255)', 'a text button is --primary-color');
-      assert.equal(look.switchOn, 'rgb(17, 170, 85)', 'a switch that is on is --switch-checked-track-color');
-      assert.equal(look.switchOff, 'rgb(119, 102, 85)', 'a switch that is off is --switch-unchecked-track-color');
       assert.ok(look.closeIcons.every(icon => icon === 'true true'), `close icons: ${look.closeIcons}`);
       await page.locator('#settings').screenshot({path: path.join(SHOTS, `theme-host-${width}.png`)});
       // The next theme has no field fill and no font: those parts go back to the page's own values.

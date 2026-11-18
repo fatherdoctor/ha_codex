@@ -36,7 +36,7 @@ const assert = require('node:assert/strict');
           assert.equal(await row.getAttribute('target'), '_top');
           assert.equal(await page.locator('#export-interaction-logs').count(), 1);
           assert.equal(await page.locator('#pause').count(), 1);
-          assert.equal(await page.locator('[data-permission-group]').count(), 5);
+          assert.equal(await page.locator('[data-permission-group]').count(), 0, 'the pre-approved action groups are removed');
           assert.equal(await page.locator('#remote-control-start, #remote-control-stop, #remote-control-pair').count(), 3);
           assert.deepEqual(errors, []);
 
