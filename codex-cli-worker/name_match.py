@@ -4,9 +4,10 @@ A wrong match changes the wrong device, so this rule is stricter than the find t
 
 1. The domain comes from the service. light.turn_on searches lights only. A service whose domain holds no
    entities of its own (homeassistant.turn_on) is not accepted by name; the request must give the entity id.
-2. Whole words. A name is cut into words at every character that is not a letter or a digit, after Unicode
-   NFKC and case folding, with invisible format characters removed. Each word of the request must equal a word
-   of the entity's friendly name or object id: "lamp" does not fit "lamppost".
+2. Whole words. A name is cut into words at every character that is not a letter, a digit or a combining mark,
+   after Unicode NFKC and case folding, with invisible format characters removed. A mark stays in its word:
+   Thai and Devanagari write vowels as marks, so "กัน" and "กิน" are two words, not one. Each word of the
+   request must equal a word of the entity's friendly name or object id: "lamp" does not fit "lamppost".
 3. Exact name. A friendly name with the same words in the same order is exact. One exact name in the domain is
    the match, also when longer names fit too. Two exact names are two candidates, not a match.
 4. With no exact name, every entity that fits is counted, not only the rows shown. One in all is the match;
@@ -23,18 +24,34 @@ import unicodedata
 from relay_reads import PRIVATE, password_state
 
 ENTITY_RE = re.compile(r"[a-z0-9_]+\.[a-z0-9_]+")
-WORD_RE = re.compile(r"[^\W_]+")
 MAX_NAME_LENGTH = 120
 MAX_CANDIDATES = 10
 # Services of these domains act on entities of other domains, so a name cannot pick the domain for them.
 NO_OWN_ENTITIES = frozenset({"homeassistant"})
 
 
+def in_word(char):
+    """Return True for a letter, a digit or a combining mark (Unicode category M)."""
+    return char.isalnum() or unicodedata.category(char).startswith("M")
+
+
 def name_words(text):
-    """Return the words of a name: NFKC, case folded, format characters dropped, cut at non-letters and non-digits."""
+    """Return the words of a name: NFKC, case folded, format characters dropped, cut at what in_word refuses.
+
+    A word of marks only (a stray mark after a space) is no word: it holds no letter or digit to match on.
+    """
     folded = unicodedata.normalize("NFKC", text).casefold()
-    visible = "".join(char for char in folded if unicodedata.category(char) != "Cf")
-    return WORD_RE.findall(visible)
+    words, current = [], ""
+    for char in folded + " ":
+        if unicodedata.category(char) == "Cf":
+            continue
+        if in_word(char):
+            current += char
+            continue
+        if any(part.isalnum() for part in current):
+            words.append(current)
+        current = ""
+    return words
 
 
 def entity_row(row, domain):

@@ -325,6 +325,21 @@ class ByNameTests(CallTestCase):
         self.call({"service": "lock.lock", "target": {"entity_id": ["lock.front_door", "lock.door_code"]}})
         self.assertEqual([path for path, _ in self.reads], ["/states/lock.front_door"])
 
+    def test_read_back_leaves_out_password_mode_text(self):
+        def fetch(path, token):
+            self.reads.append((path, token))
+            return {"entity_id": path[8:], "state": "words", "attributes": {"mode": self.mode}}
+
+        target = {"service": "text.set_value", "target": {"entity_id": "text.shopping_note"}, "data": {"value": "x"}}
+        with patch.object(ha_call, "fetch_states", fetch):
+            self.mode = "password"
+            hidden = self.call(target)
+            self.mode = "text"
+            shown = self.call(target)
+        self.assertEqual(hidden["readback"], [])
+        self.assertEqual([row["entity_id"] for row in shown["readback"]], ["text.shopping_note"])
+        self.assertEqual(len(self.fake.requests), 2)
+
     def test_read_back_stops_at_five_entities(self):
         ids = [f"light.sample_{number}" for number in range(6)]
         result = self.call({"service": "light.turn_on", "target": {"entity_id": ids}})

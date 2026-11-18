@@ -41,6 +41,8 @@ HOUSE = [
     {"entity_id": "light.door_code_light", "state": "off", "attributes": {"friendly_name": "Hall"}},
     {"entity_id": "text.hall", "state": "x", "attributes": {"friendly_name": "Hall", "mode": "password"}},
     light("hall_pin_light", "Hall Pin"),
+    light("thai_table", "กัน"),
+    light("hindi_room", "कमरा"),
 ]
 
 # (id, name, service, expected: an entity id, "none", "several", or "error"; family)
@@ -80,6 +82,13 @@ CORPUS = [
     ("only-punctuation", "--_!!", "light.turn_on", "error", "size and empty"),
     ("too-long", "a" * 121, "light.turn_on", "error", "size and empty"),
     ("not-text", ["office"], "light.turn_on", "error", "size and empty"),
+    # A vowel or tone mark is part of its word (review CX-SPEED.br F1, case R15). Cut at the mark, the
+    # Thai names "กัน" and "กิน" are both the words "ก" "น", and the Hindi "कमर" is the name "कमरा".
+    ("thai-mark-differs", "กิน", "light.turn_on", "none", "combining marks"),
+    ("thai-same-marks", "กัน", "light.turn_on", "light.thai_table", "combining marks"),
+    ("devanagari-vowel-sign-missing", "कमर", "light.turn_on", "none", "combining marks"),
+    ("devanagari-same-word", "कमरा", "light.turn_on", "light.hindi_room", "combining marks"),
+    ("only-a-mark", "\u0e31", "light.turn_on", "error", "combining marks"),
 ]
 
 
