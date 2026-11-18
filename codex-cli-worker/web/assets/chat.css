@@ -2033,6 +2033,18 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   outline: 0;
   border-bottom: 2px solid var(--accent);
 }
+/* The schedule editor: the trigger, its day and its time share one row, and wrap on a phone. */
+.schedule-trigger {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 12px;
+}
+.schedule-trigger > div {
+  flex: 1 1 8.5rem;
+}
+.schedule-trigger > [hidden] {
+  display: none;
+}
 #settings label,
 .studio-sheet label {
   color: var(--input-label-ink-color, var(--muted));

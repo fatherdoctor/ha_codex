@@ -8,6 +8,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import secrets
 import sqlite3
 import threading
@@ -25,6 +26,10 @@ MAX_SCHEDULE_DAILY_RUNS = 24
 MAX_MESSAGES = 128
 READERS = ("owner", "lead", "codex")
 MAX_RUNS = 500
+# Fields only the owner's editor may set: the chat a schedule was made in, and its model.
+OWNER_FIELDS = frozenset({'chat_id', 'model'})
+CHAT_ID = re.compile(r'(?:[A-Za-z0-9][A-Za-z0-9._-]{0,127})?')
+MODEL_ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,79}')
 class Busy(ValueError):
     pass
 
@@ -168,9 +173,32 @@ def next_due(spec, after, zone='UTC'):
     raise ValueError('Cron has no occurrence in the next 366 days.')
 
 
-def validate(payload, now, zone="UTC"):
-    if not isinstance(payload, dict) or set(payload) - {'name', 'prompt', 'mode', 'spec'}:
-        raise ValueError('A schedule accepts only name, prompt, mode and spec.')
+def owner_fields(payload):
+    """Return the chat and model an owner's request names; a field left out is left out.
+
+    Only the owner's editor sets these. The chat is where the schedule was made,
+    so the page can show it there. The model is None for the add-on's own model;
+    schedule_api checks a named one against the models the worker offers.
+    """
+    fields = {}
+    if 'chat_id' in payload:
+        chat_id = payload['chat_id']
+        if not isinstance(chat_id, str) or CHAT_ID.fullmatch(chat_id) is None:
+            raise ValueError('chat_id must be the id of a chat, or empty.')
+        fields['chat_id'] = chat_id
+    if 'model' in payload:
+        model = payload['model']
+        if model is not None and (not isinstance(model, str) or MODEL_ID.fullmatch(model) is None):
+            raise ValueError('model must be the id of a model, or null for the add-on default.')
+        fields['model'] = model
+    return fields
+
+
+def validate(payload, now, zone="UTC", *, owner=False):
+    allowed = {'name', 'prompt', 'mode', 'spec'}
+    if not isinstance(payload, dict) or set(payload) - (allowed | OWNER_FIELDS if owner else allowed):
+        raise ValueError('A schedule accepts only name, prompt, mode, spec, model and chat_id.' if owner
+                         else 'A schedule accepts only name, prompt, mode and spec.')
     if zone is None:
         raise ValueError('Home Assistant time zone is unavailable; schedule entry is paused.')
     ZoneInfo(zone)
@@ -206,7 +234,9 @@ def validate(payload, now, zone="UTC"):
         spec = {'kind': kind, 'at': at}
     else:
         raise ValueError('Invalid schedule specification.')
-    return {'name': name, 'prompt': prompt, 'mode': mode, 'spec': spec, 'next_due': next_due(spec, now, zone)}
+    value = {'name': name, 'prompt': prompt, 'mode': mode, 'spec': spec, 'next_due': next_due(spec, now, zone)}
+    value.update(owner_fields(payload))  # Empty for an agent: the check above refused these fields.
+    return value
 
 
 class Store:
@@ -251,6 +281,11 @@ class Store:
             columns = {row['name'] for row in db.execute('PRAGMA table_info(schedules)')}
             if 'author' not in columns:
                 db.execute("ALTER TABLE schedules ADD COLUMN author TEXT NOT NULL DEFAULT 'owner'")
+            # Older schedules belong to no chat and follow the add-on's model.
+            if 'chat_id' not in columns:
+                db.execute("ALTER TABLE schedules ADD COLUMN chat_id TEXT NOT NULL DEFAULT ''")
+            if 'model' not in columns:
+                db.execute('ALTER TABLE schedules ADD COLUMN model TEXT')
             mail_columns = {row['name'] for row in db.execute('PRAGMA table_info(mailbox)')}
             for name, definition in (('recipient', "TEXT NOT NULL DEFAULT 'all'"), ('sent', "TEXT NOT NULL DEFAULT ''"),
                                      ('last_modified', "TEXT NOT NULL DEFAULT ''"), ('due', 'TEXT'),
@@ -315,7 +350,7 @@ class Store:
             return [self.schedule(row) for row in db.execute('SELECT * FROM schedules ORDER BY updated DESC, id')]
 
     def save(self, payload, *, owner, now, schedule_id=None, author=None):
-        value = validate(payload, now, self.timezone)
+        value = validate(payload, now, self.timezone, owner=owner)
         author = 'owner' if owner else (author or 'lead')
         if author not in ('owner', 'lead', 'codex'):
             raise ValueError('Invalid schedule author.')
@@ -329,9 +364,12 @@ class Store:
             if count >= cap:
                 raise ValueError('Approved schedule limit reached.' if owner else 'Proposal limit reached.')
             schedule_id = schedule_id or uuid.uuid4().hex
-            db.execute('INSERT OR REPLACE INTO schedules(id,name,prompt,mode,spec,approved,enabled,next_due,updated,revision,author) VALUES(?,?,?,?,?,?,?,?,?,?,?)', (
+            # An edit that does not name the chat or the model keeps the saved one.
+            chat_id = value.get('chat_id', old['chat_id'] if old else '')
+            model = value.get('model', old['model'] if old else None)
+            db.execute('INSERT OR REPLACE INTO schedules(id,name,prompt,mode,spec,approved,enabled,next_due,updated,revision,author,chat_id,model) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)', (
                 schedule_id, value['name'], value['prompt'], value['mode'], json.dumps(value['spec']),
-                approved, approved, value['next_due'], now, uuid.uuid4().hex, author))
+                approved, approved, value['next_due'], now, uuid.uuid4().hex, author, chat_id, model))
             return self.schedule(db.execute('SELECT * FROM schedules WHERE id=?', (schedule_id,)).fetchone())
 
     def delete_proposal(self, schedule_id, author):
@@ -647,8 +685,11 @@ class Engine:
                     self.store.finish(run['id'], 'waiting_for_approval' if pending else task.get('status', 'interrupted'))
 
     def submit(self, run, prompt, mode, name):
+        schedule = run['schedule'] or {}
+        # A schedule with no model of its own starts exactly as before.
+        own_model = {'model': schedule['model']} if schedule.get('model') else {}
         try:
-            self.worker.submit(run['task_id'], prompt, mode, name, (run['schedule'] or {}).get('id'))
+            self.worker.submit(run['task_id'], prompt, mode, name, schedule.get('id'), **own_model)
         except Busy:
             self.store.defer(run)
             raise

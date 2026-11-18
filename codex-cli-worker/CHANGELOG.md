@@ -2,6 +2,15 @@
 
 ## 0.3.6 (unreleased)
 
+- Scheduling moves to a chat's menu. **Schedule** opens one editor with a name, a prompt, a model and a trigger:
+  Hourly, Daily, Weekly or Custom. Custom keeps every earlier timing: every N minutes or hours, a cron line, or one
+  date and time. Permissions, the schedule's state, its recent runs, Pause and Delete are folded under **Advanced
+  settings**. A new schedule starts from the chat's title and first message, and each run still starts a new chat.
+  A schedule can now name its own model; one that names none follows the add-on's model as before. The form in
+  **Settings > Scheduled runs** is gone. The list stays there, with every schedule and the proposals that wait for
+  your approval, and its **Edit** button opens the same editor. Schedules saved by an earlier version keep running
+  unchanged: they belong to no chat, so open them from Settings or from the menu of a chat one of their runs started.
+  The lead agent and Codex can still only propose a name, a prompt, a mode and a timing.
 - The app's own grant layer is removed: the five pre-approved action groups (Settings > Permissions overrides), the
   guard-rails block they read from `/config/AGENTS.md`, and the `home_assistant_actions` `act` tool with its
   **Allow once** card. Codex's own permission requests are now the only way a change to the house is approved. A
