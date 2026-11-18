@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.6 (unreleased)
+## 0.3.6 - 2026-11-18
 
 - The app's own guards are removed. Codex's own permission modes and the sandbox are now the whole protection, as in
   the Claude add-on. Gone: the command check that ran before each tool call (the hook and its rules), the managed
@@ -114,8 +114,6 @@
   (`/etc/codex/managed_config.toml`, one setting, no hooks) keeps the tool keys out of the commands Codex runs for
   every client.
 
-## 0.3.5 (unreleased)
-
 - The GitHub messages say what still works and what to do next. The Home Assistant repair for a sign-in that
   expires soon now says that GitHub still works and gives the date; before, it said the assistant could not fetch,
   pull or push. A token connection that expired or was refused is sent to Use a token instead, because Connect
@@ -163,8 +161,6 @@
   at the foot of Settings opens the Configuration tab; when Supervisor cannot name the app, the row says where to
   find the tab and is not a link. The number of interactions to keep now applies before the worker closes the
   records an interrupted run left open, so a restart keeps as many records as the option says.
-
-## 0.3.4 (unreleased)
 
 - A plain device command such as "set the office overhead to 50%" is faster. On 0.3.3 Codex had no tool on the
   chat page that finds an entity by name, so it searched `.storage/core.entity_registry` with shell commands, and
@@ -221,8 +217,6 @@
   said it could see none. The page's rules now name the two commands, say that the list holds only Codex cloud
   tasks of the signed-in account, and tell Codex to say so plainly when the list is empty. In a sandboxed mode
   each command still raises the usual Allow once card. No approval, sandbox or permission rule changed.
-
-## 0.3.3 (unreleased)
 
 - The approval card and the remote-control hook now read command text with one shared copy of the comment
   and word code (`shell_words.py`), so a later fix cannot leave the two checks reading a command differently.
