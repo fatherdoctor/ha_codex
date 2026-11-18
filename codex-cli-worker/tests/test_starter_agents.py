@@ -144,7 +144,8 @@ class StarterAgentsAtStartup(unittest.TestCase):
 
     def test_the_image_ships_the_starter_beside_the_worker(self):
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
-        self.assertIn("COPY server.py account_access.py starter_agents.md /\n", dockerfile)
+        # The worker's first COPY line; other files may share it.
+        self.assertRegex(dockerfile, r"(?m)^COPY server\.py account_access\.py (\S+ )*starter_agents\.md( \S+)* /$")
         self.assertEqual(server.STARTER_AGENTS_PATH, Path(server.__file__).resolve().parent / "starter_agents.md")
 
 

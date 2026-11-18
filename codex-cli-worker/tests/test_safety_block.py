@@ -188,7 +188,8 @@ class WorkerTests(unittest.TestCase):
 
     def test_module_is_in_the_worker_image(self):
         dockerfile = (Path(__file__).resolve().parents[1] / "Dockerfile").read_text()
-        self.assertIn("COPY server.py account_access.py safety_block.py /", dockerfile)
+        # The worker's first COPY line; other files may share it.
+        self.assertRegex(dockerfile, r"(?m)^COPY server\.py account_access\.py (\S+ )*safety_block\.py( \S+)* /$")
 
 
 if __name__ == "__main__":
