@@ -60,12 +60,22 @@ def allow_unix_sockets():
 
 
 def fake_home_assistant(test):
-    """Put a fake Home Assistant in place of requests.post in ha_call for the test, and return it."""
+    """Put a fake Home Assistant in place of ha_call's requests.post and state reads for the test, and return it.
+
+    The call reads back the new state after it acts, so the reads are replaced too: no test reaches the network.
+    """
     fake = FakeHomeAssistant(answer=[{"entity_id": "light.kitchen_ceiling", "state": "off"}])
-    patcher = patch.object(ha_call.requests, "post", fake.post)
-    patcher.start()
-    test.addCleanup(patcher.stop)
+    for patcher in (patch.object(ha_call.requests, "post", fake.post), patch.object(ha_call, "fetch_states", fake_states)):
+        patcher.start()
+        test.addCleanup(patcher.stop)
     return fake
+
+
+def fake_states(path, token):
+    """Answer a state read: one entity for /states/<id>, and an empty list for /states."""
+    if path.startswith("/states/"):
+        return {"entity_id": path.removeprefix("/states/"), "state": "off", "attributes": {}}
+    return []
 
 
 def sent(fake):
