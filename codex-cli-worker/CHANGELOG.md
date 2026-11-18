@@ -23,6 +23,11 @@
   instructions point changes to the tool; `HA_TOKEN` is now only for an API call that is not a service. The page
   shows Codex's request for the tool in a later step; until then the page can only decline it.
 
+- The ChatGPT app gets the same `call` tool while remote control is on. Codex asks in the app before each call; the
+  tool is not approved ahead. Its key is new at each start of remote control and stops working when remote control
+  stops. The app's instructions now point changes to the tool too. The managed Codex settings in the image keep the tool keys out of
+  the commands Codex runs for every client, and remote control does not start without that setting.
+
 ## 0.3.5 (unreleased)
 
 - The GitHub messages say what still works and what to do next. The Home Assistant repair for a sign-in that

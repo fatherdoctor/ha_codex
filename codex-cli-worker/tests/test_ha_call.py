@@ -429,10 +429,10 @@ class InstructionTests(unittest.TestCase):
         self.assertNotIn("automation/reload", text)
         self.assertEqual(server.home_assistant_api_instructions({}), "")
 
-    def test_the_app_keeps_its_token_text_until_it_has_the_tool(self):
+    def test_the_app_token_text_points_changes_to_the_tool_too(self):
         text = server.remote_control_instructions({"HA_TOKEN": "invented-token"})
-        self.assertNotIn("home_assistant_call", text)
-        self.assertIn("automation/reload", text)
+        self.assertIn("a reload and a restart included, use the home_assistant_call call tool", text)
+        self.assertNotIn("automation/reload", text)
 
 
 if __name__ == "__main__":

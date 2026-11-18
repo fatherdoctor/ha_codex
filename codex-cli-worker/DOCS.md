@@ -343,6 +343,10 @@ remembered answer: the question has no "Allow for this session" and no "don't as
 the target and the data. The command check gives the tool's request no decision, so the answer is always yours.
 A scheduled run does not get the tool, since nobody is there to answer.
 
+The ChatGPT app has the same tool while remote control is on. There, Codex asks in the app before each call; the
+worker does not see that answer. The tool's key in the app holds while the remote-control process runs, and each
+start of that process makes a new one. The checks below hold in the app too.
+
 The tool gives Codex no token. Its bridge passes the request to the worker over a private socket, with a key that
 is valid for the running message only. The worker sends the call to Home Assistant once, with its own access, and
 checks these things first, in every mode:
@@ -358,9 +362,12 @@ Home Assistant OS or Core, this app too) or `backup.create`. A call can also run
 calls; Home Assistant's logbook and history show what changed.
 
 The keys of the app's tools (`HA_*_CAPABILITY`) are kept out of the commands that Codex runs, with Codex's
-`shell_environment_policy` setting. So a command cannot write to the socket and skip Codex's question. In a mode
-without a sandbox, a command can read the environment of the Codex process; that mode has no question to skip,
-and the checks above still hold.
+`shell_environment_policy` setting. So a command cannot write to the socket and skip Codex's question. The page
+launch and the remote-control launch set it, and `/etc/codex/managed_config.toml` in the image sets it for every
+client. A thread that the ChatGPT app starts cannot change it, because the managed file outranks a thread's own
+settings. Remote control does not start if that file does not hold the setting. In a mode without a sandbox, a
+command can read the environment of the Codex process; that mode has no question to skip, and the checks above
+still hold.
 
 These checks do not cover a command that uses the `HA_TOKEN` option (see "AGENTS.md and HA_TOKEN").
 
@@ -390,14 +397,14 @@ Codex can be reached three ways: the chat page, the ChatGPT app paired through r
 |---|---|---|---|
 | Read an entity's state or find an entity | `home_assistant.verify` | `home_assistant_relay.read` | `home_assistant.verify` |
 | Read history or long-term statistics | `home_assistant_data.history`, `home_assistant_data.statistics` | not available | `home_assistant_data.history`, `home_assistant_data.statistics` |
-| Control a device or call a service | `home_assistant_call.call` | not available | `home_assistant_call.call` |
-| Send a notification | `home_assistant_call.call` | not available | `home_assistant_call.call` |
+| Control a device or call a service | `home_assistant_call.call` | `home_assistant_call.call` | `home_assistant_call.call` |
+| Send a notification | `home_assistant_call.call` | `home_assistant_call.call` | `home_assistant_call.call` |
 | Ask the owner a question or report the turn's state | `home_assistant_data.ask_owner`, `home_assistant_data.report_failure`, `home_assistant_data.exchange_info` | not available | `home_assistant_data.ask_owner`, `home_assistant_data.report_failure`, `home_assistant_data.exchange_info` |
 | Propose a schedule or use the mailbox | `codex_scheduling.propose_schedule`, `codex_scheduling.list_schedules`, `codex_scheduling.read_mailbox`, `codex_scheduling.post_mailbox` | not available | `codex_scheduling.propose_schedule`, `codex_scheduling.list_schedules`, `codex_scheduling.read_mailbox`, `codex_scheduling.post_mailbox` |
 | Work with a GitHub repository | `codex_github.github_git` | not available | `codex_github.github_git` |
 
 - `codex_cli.start_task` starts the same kind of task as the chat page, so it gets the same tools.
-- Codex asks you before each `call`, on the chat page
+- Codex asks you before each `call`, on the chat page or in the ChatGPT app
   ([Changes to the house: the `call` tool](#changes-to-the-house-the-call-tool)).
 - File edits and shell commands use Codex's own tools on every way in, and the [sandbox](#sandbox) applies on every
   way in. On the chat page and for `codex_cli.start_task`, a request for more access shows on the chat page as a
@@ -450,7 +457,7 @@ were redundant with `file,` and have been removed. Tool sandbox labels retain th
 `network netlink raw,` rule; the relay alone keeps its parent transport access. Native approvals,
 managed requirements and the command check remain in effect. The relay starts in `/config`.
 
-**First run: no hand-made token for reads.** Pair remote control, then ask for entity ids or current state. The `home_assistant_relay.read` tool uses the worker's existing Supervisor access for bounded, observational entity listings and state readback. The relay receives only a temporary read capability; the Supervisor credential stays in the worker. The page shows the discovered Core address and explains the read tool. Capability rotation, relay exit or stopping revokes a pending read; late results are discarded. This tool is separate from a page task's verification/history tools and cannot call services, reload, approve an action or read credential stores.
+**First run: no hand-made token for reads.** Pair remote control, then ask for entity ids or current state. The `home_assistant_relay.read` tool uses the worker's existing Supervisor access for bounded, observational entity listings and state readback. The relay receives only a temporary read capability; the Supervisor credential stays in the worker. The page shows the discovered Core address and explains the read tool. Capability rotation, relay exit or stopping revokes a pending read; late results are discarded. This tool is separate from a page task's verification/history tools and cannot call services, reload, approve an action or read credential stores. From **0.3.6**, a change goes through the separate `home_assistant_call` `call` tool, which Codex asks you for in the app before each call (see "Changes to the house: the `call` tool").
 
 Use `{"operation":"states","domain":"light","limit":10}` to list a page, then `{"operation":"state","entity_id":"light.sample","attributes":["friendly_name","brightness"]}` for selected observational attributes. Lists are sorted and return `next_offset`; limits are 1–50 and the default is 10. State strings longer than 512 characters are explicitly marked truncated. Credential-like entity ids and undocumented attributes are refused, and recognized credential values are redacted. A state read does not prove automation behavior. Responses are capped at 64 KiB and Core responses at 16 MiB; request a smaller page or fewer attributes when a read is too large. One relay read runs at a time. Downloads above 16 MiB return an explicit error asking for a single entity. Password-mode input_text entities and credential-like id substrings are excluded from both listings and state readback.
 
@@ -546,7 +553,7 @@ prevent a reload before the scan, or guarantee capture of an obfuscated referenc
 - **One supervised process.** The app runs `codex app-server --listen unix://<private socket> --remote-control` in the foreground and starts it again, with a growing delay, if it exits. **Turn off** stops it.
 - **Machine name.** The ChatGPT app lists this machine as **Home Assistant** unless you change the **Remote control machine name** option on the app's Configuration tab (from 0.3.5 the page shows the name and no longer changes it). The new name takes effect when the app restarts. Pairing is kept with the Codex sign-in, so the app should show the new name the next time remote control connects; if it still shows the old name, choose **New pairing code**. Codex has no name setting, so the app starts it with that name as its host name inside a private namespace. If the private name namespace is unavailable, the page explains that Codex is using its existing host name.
 - **Pairing.** The manual code is shown as large text. A QR for the app link appears only when an app-link code is available; otherwise type the manual code or request a new code. Pairing is kept in the app's private storage with the Codex sign-in, so a restart does not ask for it again. **New pairing code** asks Codex for a fresh one when the ChatGPT app has lost this machine.
-- **Automatic Core address and first-run reads.** Relay commands receive the discovered or explicitly overridden `HA_URL`; an owner-configured `HA_TOKEN` remains optional. The separate observational read tool needs no hand-made token. Relay processes never receive the Supervisor token or a chat turn's private MCP capabilities. Never print credentials; approval does not create them.
+- **Automatic Core address and first-run reads.** Relay commands receive the discovered or explicitly overridden `HA_URL`; an owner-configured `HA_TOKEN` remains optional. The separate observational read tool needs no hand-made token. Relay processes never receive the Supervisor token or a chat turn's private MCP capabilities; from **0.3.6** they get the `call` tool with a key of their own, kept out of the commands Codex runs. Never print credentials; approval does not create them.
 - **The command check.** Commands from the ChatGPT app do not pass through this app's Allow and Deny buttons, so the app ships a check that holds outside the model, for every client:
   - Codex's managed requirements (`/etc/codex/requirements.toml`, read-only) rule out the full-access sandbox and any hook other than the app's own.
   - **Managed command prefixes.** The same read-only requirements file forbids literal `ha supervisor`, `ha super` and `ha su` commands. It forbids `printenv` of the two Supervisor-token variable names. It forbids `cat` of the catalogued credential and app-policy paths, and the two explicit Codex full-access spellings. These six rules have 20 literal alternatives. Recognized shell pipelines check each segment.

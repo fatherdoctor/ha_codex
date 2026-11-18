@@ -10,5 +10,6 @@
     "/usr/share/ha_codex/refused-domains.json"
   ],
   "hook": "/usr/share/ha_codex/gate_hook.py",
-  "requirements": "/etc/codex/requirements.toml"
+  "requirements": "/etc/codex/requirements.toml",
+  "managed_config": "/etc/codex/managed_config.toml"
 }
