@@ -21,7 +21,7 @@ class StudioTests(unittest.TestCase):
         task_id = self.create()
         server.tasks[task_id]['status'] = 'completed'
         server.active_task_runners.clear()
-        for invalid in ['auto-review', 'full-access', True, {}, None]:
+        for invalid in ['full-access', 'never', True, {}, None]:
             response = self.client.post(f'/tasks/{task_id}/settings',
                 json={'permission_mode': invalid}, headers=self.headers)
             self.assertEqual(response.status_code, 400)

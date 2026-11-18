@@ -1073,14 +1073,19 @@ PDF acceptance does not promise a particular extraction tool. Draft attachments 
 Send. Archiving a chat hides it from recent conversations without deleting its session or attachments;
 Archived chats can restore it. Delete remains a separate action.
 
-The Permissions picker starts at Default permissions: use the add-on's configured sandbox and native
-approval flow. Read only narrows the next turn to the read-only sandbox, including a resumed or queued turn.
-Neither choice expands a configured read-only sandbox, suppresses native approval, or changes managed
-security refusals. A queued message keeps the choice submitted with it. Full access can be chosen only by an
+The Permissions picker offers the four modes of the ChatGPT app: Default permissions, Auto-review, Read only
+and Full access. It starts at Default permissions: use the add-on's configured sandbox and native approval
+flow. Read only narrows the next turn to the read-only sandbox, including a resumed or queued turn.
+Auto-review keeps the configured sandbox, and Codex's own reviewer answers each permission request instead of
+you. The reviewer allows or denies; it does not ask you, and a review that takes too long or fails counts as a
+denial. Each review shows in the chat with its result, the risk the reviewer saw and its reason. Only an
+administrator can choose Auto-review, because the reviewer answers in an administrator's place. The command
+check and the managed refusals still run first. None of Default, Auto-review or Read only expands a configured
+read-only sandbox or changes managed security refusals. A queued message keeps the choice submitted with it. Full access can be chosen only by an
 administrator, and only while Full access is on in Settings. Turning it off returns every chat set to Full access,
 and every queued Full access message, to Default permissions. Turning Full access on again starts every chat at
 Default; an administrator chooses Full access again in the chat's Permissions, and a choice made before the cycle in a page that
-missed it runs with Default. Auto-review is shown as Coming and cannot be selected. Camera and Plan mode are not offered in this build.
+missed it runs with Default. Camera and Plan mode are not offered in this build.
 
 The thread menu includes Pin, Rename, Copy thread ID, Archive and Status. A thread without a native ID
 reports that it is unavailable instead of substituting the page's task ID. Status shows the workspace,

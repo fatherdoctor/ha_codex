@@ -2,5 +2,6 @@
   "allowed_sandbox_modes": ["workspace-write", "read-only"],
   "approval_policy": "on-request",
   "approvals_reviewer": "user",
+  "allowed_approvals_reviewers": ["user", "auto_review"],
   "approvals_require_admin": true
 }

@@ -578,8 +578,16 @@ def parse_chat_settings(payload: dict[str, Any], task: dict[str, Any] | None = N
     return settings
 
 
+AUTO_REVIEW_MODE = 'auto-review'
+
+
 def parse_permission_mode(payload, task=None, choosing=False, sending=False):
-    """Return the chat's permission mode: Default, Read only, or Full access while the owner's setting is on.
+    """Return the chat's permission mode: Default, Auto-review, Read only, or Full access while the owner's setting is on.
+
+    Auto-review hands each permission request to Codex's own reviewer instead
+    of the person, so it needs what answering a request needs: a Home
+    Assistant administrator (the policy's approvals_require_admin), and a
+    protected policy that lists the reviewer.
 
     A request that runs or sets Full access must come from a Home Assistant
     administrator. While the setting is off, choosing Full access in a chat's
@@ -606,9 +614,24 @@ def parse_permission_mode(payload, task=None, choosing=False, sending=False):
         if sending and not full_access_choice_is_current(payload, task, setting):
             return 'default'
         return mode
+    if mode == AUTO_REVIEW_MODE:
+        if not auto_review_allowed():
+            raise ValueError('Auto-review is not allowed by the protected policy of this app.')
+        if has_request_context() and ingress_admin()[0] is None:
+            raise ValueError('Only a Home Assistant administrator can use Auto-review.')
+        return mode
     if not isinstance(mode, str) or mode not in {'default', 'read-only'}:
-        raise ValueError('Choose Default permissions or Read only. Other modes are not available.')
+        raise ValueError('Choose Default permissions, Auto-review or Read only. Other modes are not available.')
     return mode
+
+
+def auto_review_allowed() -> bool:
+    """Return True when the protected policy lists Codex's own reviewer; an unreadable policy allows only the person."""
+    try:
+        policy = protected_policy.load_policy()
+    except protected_policy.PolicyError:
+        return False
+    return protected_policy.AUTO_REVIEWER in policy["allowed_approvals_reviewers"]
 
 
 def full_access_choice_is_current(payload, task, setting) -> bool:
@@ -1764,6 +1787,41 @@ def note_edited_files(task_id: str, step: dict[str, Any]) -> None:
             record["edited"].update(paths)
 
 
+AUTO_REVIEW_ACTIONS = {
+    "command": "a command", "execve": "a command", "writeStdin": "input to a command",
+    "applyPatch": "a file change", "networkAccess": "network access", "mcpToolCall": "a tool call",
+}
+
+
+def auto_review_step(event: dict[str, Any]) -> dict[str, Any] | None:
+    """Turn one review by Codex's reviewer (approvals.auto_review_event) into a chat step, or None without an id.
+
+    The started and completed events share the review id, so the step shows
+    "checking" and then the answer in one place. Only "approved" reads as
+    allowed; a denial, a timeout, an abort or an unknown status reads as not
+    allowed, as Codex treats it.
+    """
+    review_id = str(event.get("review_id") or "")
+    if not review_id:
+        return None
+    what = AUTO_REVIEW_ACTIONS.get(str(event.get("action") or ""), "a request")
+    status = event.get("status")
+    risk = f" ({event['risk_level']} risk)" if event.get("risk_level") else ""
+    if status == "inProgress":
+        text, state = f"Auto-review is checking {what}.", "running"
+    elif status == "approved":
+        text, state = f"Auto-review allowed {what}{risk}.", "done"
+    else:
+        reason = {"timedOut": "it took too long", "aborted": "the review stopped"}.get(str(status), "")
+        text = f"Auto-review did not allow {what}{risk}" + (f": {reason}." if reason else ".")
+        state = "failed"
+    rationale = str(event.get("rationale") or "").strip()
+    if rationale and state != "running":
+        text = f"{text} {rationale}"
+    step_text, _ = clip_activity_text(text, ACTIVITY_TEXT_MAX)
+    return {"id": f"auto-review:{review_id}", "kind": "notice", "status": state, "text": step_text}
+
+
 def record_activity_event(task_id: str, event: Any) -> None:
     """Map one line of `codex exec --json` output onto the running exchange's steps."""
     if not isinstance(event, dict):
@@ -1783,6 +1841,10 @@ def record_activity_event(task_id: str, event: Any) -> None:
             if step is not None:
                 append_activity_step(task_id, step)
                 note_edited_files(task_id, step)
+    elif kind == "auto_review":
+        step = auto_review_step(event)
+        if step is not None:
+            append_activity_step(task_id, step)
     elif kind == "error":
         append_activity_error(task_id, event.get("message"))
     elif kind == "turn.failed":
@@ -4471,6 +4533,7 @@ def task_options(task_id: str) -> dict[str, Any]:
     """
     options = dict(read_options())
     options.pop(full_access.CHAT_OPTION, None)
+    options.pop(protected_policy.AUTO_REVIEW_OPTION, None)
     with lock:
         task = tasks.get(task_id, {})
         if (task.get('permission_mode') == 'read-only'
@@ -4479,6 +4542,9 @@ def task_options(task_id: str) -> dict[str, Any]:
         elif task.get('permission_mode') == full_access.PERMISSION_MODE and full_access.is_on():
             options['codex_sandbox'] = full_access.SANDBOX_MODE
             options[full_access.CHAT_OPTION] = True
+        elif task.get('permission_mode') == AUTO_REVIEW_MODE:
+            # The app's sandbox stays; only who answers a permission request changes.
+            options[protected_policy.AUTO_REVIEW_OPTION] = True
     return options
 
 
@@ -4712,8 +4778,10 @@ def create_approval_session(
     # A Full access turn runs as the ChatGPT app's Full access: no sandbox and the never approval policy.
     allow_full_access = protected_policy.is_full_access_turn(options)
     approval_policy = full_access.APPROVAL_POLICY if allow_full_access else "on-request"
+    # An Auto-review turn hands each permission request to Codex's own reviewer; every other turn to the person.
+    reviewer = protected_policy.AUTO_REVIEWER if protected_policy.is_auto_review_turn(options) else "user"
     thread_params: dict[str, Any] = {
-        "cwd": "/config", "sandbox": mode, "approvalPolicy": approval_policy, "approvalsReviewer": "user",
+        "cwd": "/config", "sandbox": mode, "approvalPolicy": approval_policy, "approvalsReviewer": reviewer,
     }
     if session_id:
         thread_params["threadId"] = session_id
@@ -4735,10 +4803,11 @@ def create_approval_session(
                      # the ask_owner and report_failure calls (apply_status_calls).
                      "effort": execution["reasoning_effort"], "summary": reasoning_summary(options),
                      "sandboxPolicy": policy,
-                     "approvalPolicy": approval_policy, "approvalsReviewer": "user"},
+                     "approvalPolicy": approval_policy, "approvalsReviewer": reviewer},
         on_event=event, on_approvals=save_approvals,
         on_final=lambda text: final_file.write_text(text, encoding="utf-8"),
         is_active=active, redact=approval_redact, allow_full_access=allow_full_access,
+        approvals_reviewer=reviewer,
     )
 
 

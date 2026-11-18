@@ -336,6 +336,11 @@ def remote_env(base: dict[str, str]) -> dict[str, str]:
     return env
 
 
+# The reviewers the managed requirements may list, as policy.KNOWN_REVIEWERS (kept here so this module
+# imports alone in the AppArmor check's fixture; a test holds the two equal).
+KNOWN_REVIEWERS = ("user", "auto_review")
+
+
 def requirements_problem(path: Path) -> str:
     """Return what is wrong with the managed requirements file, or an empty string when it holds."""
     try:
@@ -355,6 +360,11 @@ def requirements_problem(path: Path) -> str:
         return "the managed requirements do not rule out the never approval policy"
     if "never" in approvals and not (full_access_on and "danger-full-access" in modes):
         return "the managed requirements do not rule out the never approval policy"
+    # The person first, so a thread that names no reviewer asks the person; Codex's own reviewer may follow.
+    reviewers = data.get("allowed_approvals_reviewers")
+    if (not isinstance(reviewers, list) or not reviewers or reviewers[0] != "user"
+            or not all(reviewer in KNOWN_REVIEWERS for reviewer in reviewers)):
+        return "the managed requirements do not keep the person as the default approvals reviewer"
     if data.get("allow_managed_hooks_only") is not True:
         return "the managed requirements do not keep hooks to the managed ones"
     return managed_exec_rules_problem(data)

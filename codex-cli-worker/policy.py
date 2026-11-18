@@ -61,8 +61,16 @@ STRICT_POLICY: dict[str, Any] = {
     "allowed_sandbox_modes": ["workspace-write", "read-only"],
     "approval_policy": "on-request",
     "approvals_reviewer": "user",
+    "allowed_approvals_reviewers": ["user"],
     "approvals_require_admin": True,
 }
+
+# The reviewers Codex knows (protocol/src/config_types.rs at rust-v0.166.0). "auto_review" is Codex's own
+# reviewer: it allows or denies a request in place of the person and never asks the person.
+KNOWN_REVIEWERS = ("user", "auto_review")
+AUTO_REVIEWER = "auto_review"
+# Set only by the worker on the options of one chat turn that asked for Auto-review; never an app option.
+AUTO_REVIEW_OPTION = "_auto_review_chat"
 
 NEEDS_SUPPORT = "needs_support"
 
@@ -94,6 +102,11 @@ def load_policy(path: Path | None = None) -> dict[str, Any]:
         raise PolicyError('The protected policy may not set approval_policy to "never".')
     if policy["approvals_reviewer"] != "user":
         raise PolicyError('The protected policy must keep approvals_reviewer set to "user".')
+    reviewers = policy["allowed_approvals_reviewers"]
+    if (not isinstance(reviewers, list) or "user" not in reviewers
+            or not all(reviewer in KNOWN_REVIEWERS for reviewer in reviewers)
+            or len(set(reviewers)) != len(reviewers)):
+        raise PolicyError('allowed_approvals_reviewers must list "user" and may add only "auto_review".')
     if policy["approvals_require_admin"] is not True:
         raise PolicyError("The protected policy must keep approvals_require_admin on.")
     return policy
@@ -111,17 +124,28 @@ def is_full_access_turn(options: dict[str, Any]) -> bool:
             and full_access.is_on())
 
 
+def is_auto_review_turn(options: dict[str, Any]) -> bool:
+    """Return True only for a chat turn the worker set to Auto-review (server.task_options).
+
+    The app options can never set it: task_options removes it from them first.
+    A Full access turn is never an Auto-review turn: with the "never" approval
+    policy Codex asks nobody, so there is nothing for a reviewer to answer.
+    """
+    return options.get(AUTO_REVIEW_OPTION) is True and not is_full_access_turn(options)
+
+
 def effective_policy(options: dict[str, Any], policy: dict[str, Any]) -> dict[str, str]:
-    """Return the sandbox mode and approval policy an exchange would run with under these options.
+    """Return the sandbox mode, approval policy and reviewer an exchange would run with under these options.
 
     A Full access turn runs with the "never" approval policy, as the ChatGPT
     app's Full access does; every other turn runs with the protected policy's.
+    An Auto-review turn names Codex's own reviewer; every other turn the person.
     """
     full = is_full_access_turn(options)
     return {
         "sandbox": str(options.get("codex_sandbox") or "workspace-write"),
         "approval_policy": full_access.APPROVAL_POLICY if full else str(policy["approval_policy"]),
-        "approvals_reviewer": str(policy["approvals_reviewer"]),
+        "approvals_reviewer": AUTO_REVIEWER if is_auto_review_turn(options) else str(policy["approvals_reviewer"]),
     }
 
 
@@ -147,6 +171,8 @@ def policy_problem(options: dict[str, Any], path: Path | None = None) -> str:
                 f"Choose {allowed} in the app's settings and restart it.")
     if effective["approval_policy"] == "never" and not full:
         return 'The effective approval policy is "never", which this app refuses.'
+    if effective["approvals_reviewer"] not in policy["allowed_approvals_reviewers"]:
+        return f'The approvals reviewer "{effective["approvals_reviewer"]}" is not allowed in this app.'
     return ""
 
 

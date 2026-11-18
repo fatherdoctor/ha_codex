@@ -447,6 +447,40 @@ def require_supported_policy(params: dict[str, Any], allow_full_access: bool = F
         raise ValueError("The never approval policy is refused by this integration; use on-request.")
 
 
+# Codex's reviewer reports each review it makes in an Auto-review chat (app-server-protocol common.rs at
+# rust-v0.166.0). It sends no request: it allows or denies in place of the person.
+AUTO_REVIEW_EVENTS = {"item/autoApprovalReview/started", "item/autoApprovalReview/completed"}
+AUTO_REVIEW_STATUSES = {"inProgress", "approved", "denied", "timedOut", "aborted"}
+AUTO_REVIEW_RISKS = {"low", "medium", "high", "critical"}
+AUTO_REVIEW_RATIONALE_LIMIT = 500
+
+
+def auto_review_event(method: str, params: dict[str, Any], redact: Callable[[str], str]) -> dict[str, Any]:
+    """Return the chat event for one review by Codex's reviewer: its id, status, risk, what it checked and why.
+
+    Only known words pass: an unknown status reads as "unknown" and is shown as
+    not allowed. The reviewer's reason is model text, so it is redacted and
+    clipped like any other text the chat shows.
+    """
+    review = params.get("review") if isinstance(params.get("review"), dict) else {}
+    action = params.get("action") if isinstance(params.get("action"), dict) else {}
+    status = review.get("status")
+    if method.endswith("/started"):
+        status = "inProgress"
+    elif status not in AUTO_REVIEW_STATUSES - {"inProgress"}:
+        status = "unknown"
+    risk = review.get("riskLevel")
+    rationale = review.get("rationale") if isinstance(review.get("rationale"), str) else ""
+    return {
+        "type": "auto_review",
+        "review_id": str(params.get("reviewId") or "")[:128],
+        "status": status,
+        "risk_level": risk if risk in AUTO_REVIEW_RISKS else "",
+        "action": str(action.get("type") or "")[:40],
+        "rationale": redact(rationale)[:AUTO_REVIEW_RATIONALE_LIMIT],
+    }
+
+
 class AppServerSession:
     """Run one app-server turn and correlate each user decision with its request.
 
@@ -461,8 +495,14 @@ class AppServerSession:
         on_approvals: Callable[[list[dict[str, Any]]], None],
         on_final: Callable[[str], None], is_active: Callable[[], bool],
         redact: Callable[[str], str], allow_full_access: bool = False,
+        approvals_reviewer: str = "user",
     ) -> None:
-        """Bind a live transport to one worker exchange and its persistence callbacks."""
+        """Bind a live transport to one worker exchange and its persistence callbacks.
+
+        approvals_reviewer is the reviewer the worker asked for: "user" (the
+        person) or "auto_review" (Codex's own reviewer, for an Auto-review
+        chat). Codex must start the thread with exactly that one.
+        """
         self.writer = writer
         self.lock = lock
         self.thread_params = copy.deepcopy(thread_params)
@@ -473,6 +513,7 @@ class AppServerSession:
         self.is_active = is_active
         self.redact = redact
         self.allow_full_access = allow_full_access
+        self.approvals_reviewer = approvals_reviewer
         self.finished = threading.Event()
         # When Codex last sent anything, or the user last answered; the worker's stall watchdog reads it.
         self.last_activity = time.monotonic()
@@ -791,6 +832,8 @@ class AppServerSession:
                     self.on_event({"type": "turn.started"})
             elif params.get("threadId") == self.thread_id and params.get("turnId") == self.turn_id and method in {"item/started", "item/completed"}:
                 self._item(method, params["item"])
+            elif method in AUTO_REVIEW_EVENTS and params.get("threadId") == self.thread_id and params.get("turnId") == self.turn_id:
+                self.on_event(auto_review_event(method, params, self.redact))
             elif method == "item/fileChange/patchUpdated" and params.get("threadId") == self.thread_id and params.get("turnId") == self.turn_id:
                 self._cache_file_changes(str(params["itemId"]), params.get("changes") or [])
             elif method == "turn/completed" and params.get("threadId") == self.thread_id:
@@ -822,8 +865,11 @@ class AppServerSession:
             if self.allow_full_access:
                 if result.get("approvalPolicy") != "never" or result.get("approvalsReviewer") != "user":
                     raise ValueError("Codex did not start the Full access turn with the never approval policy")
-            elif result.get("approvalPolicy") != "on-request" or result.get("approvalsReviewer") != "user":
+            elif result.get("approvalPolicy") != "on-request":
                 raise ValueError("Codex did not enable user approval requests")
+            elif result.get("approvalsReviewer") != self.approvals_reviewer:
+                # A thread that kept another reviewer would answer requests the chat did not choose to hand over.
+                raise ValueError("Codex did not start the turn with the chosen approvals reviewer")
             require_supported_policy(result, self.allow_full_access)
             self.thread_id = result["thread"]["id"]
             expected = self.thread_params.get("threadId")

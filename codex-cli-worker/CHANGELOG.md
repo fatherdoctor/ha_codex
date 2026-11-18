@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.6 (unreleased)
+
+- **Auto-review, the fourth permission mode.** The Permissions button now offers the four modes of the ChatGPT
+  app: Default permissions, Auto-review, Read only and Full access. In Auto-review, Codex's own reviewer answers
+  each permission request instead of you: it allows or denies, and does not ask you. A review that takes too long
+  or fails counts as a denial. The chat shows each review, with its result, the risk the reviewer saw and its
+  reason. The sandbox stays the one the app is set to. Only a Home Assistant administrator can choose it. The
+  command check and the managed refusals still run first. The protected policy and Codex's managed requirements
+  now list `auto_review` beside `user`, with the person first, so a client that names no reviewer still asks
+  you. A ChatGPT app thread can choose Auto-review too.
+
 ## 0.3.5 (unreleased)
 
 - A permission request that waits for you now shows at the bottom of the chat, below the "Working" lines, and the

@@ -1,6 +1,6 @@
 "use strict";
 /** Production controls for the Quiet Studio layout. No sample account data. */
-const permissionNames = {default: "Default permissions", "read-only": "Read only", "full-access": "Full access"};
+const permissionNames = {default: "Default permissions", "auto-review": "Auto-review", "read-only": "Read only", "full-access": "Full access"};
 function updateStudio() {
   document.body.dataset.newChat = String(!state.id);
   const hour = new Date().getHours();
