@@ -104,7 +104,7 @@
       for (const schedule of data.schedules) {
         const item = node("div", "");
         item.append(node("strong", schedule.name), node("p", `${schedule.approved ? schedule.enabled ? "On" : "Paused" : "Needs your approval"} · ${describe(schedule.spec)} · ${schedule.mode === "read-only" ? "Read only" : "Default"} · ${when(schedule.next_due)}`, "muted"));
-        const prompt = node("details", ""); prompt.append(node("summary", "Review prompt"), node("pre", schedule.prompt)); item.append(prompt);
+        const prompt = node("details", "", "disclosure"); prompt.append(node("summary", "Review prompt"), node("pre", schedule.prompt)); item.append(prompt);
         const actions = node("div", "", "settings-actions");
         const editButton = button("Edit", () => edit(schedule));
         editButton.disabled = Boolean(schedule.prompt_redacted || !zone);
@@ -159,7 +159,7 @@
           item.append(node("strong", label), node(key === "message" ? "pre" : "p", value));
         }
         if (envelope.due && Date.parse(envelope.due) <= Date.now()) item.append(node("p", "Due / overdue", "muted"));
-        const plain = node("details", ""); plain.append(node("summary", "Plain text"), node("pre", mail.text)); item.append(plain);
+        const plain = node("details", "", "disclosure"); plain.append(node("summary", "Plain text"), node("pre", mail.text)); item.append(plain);
         item.append(button("Reply", () => { el("schedule-mail-parent").value = mail.parent || mail.id; el("schedule-mail-target").textContent = "Reply to selected thread"; el("schedule-mail-body").focus(); }));
         if (!mail.parent) item.append(button("Delete thread", () => api(mailboxPath(`schedule-mailbox/${mail.id}`), undefined, "DELETE")));
         mailbox.append(item);

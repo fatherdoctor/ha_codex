@@ -64,6 +64,10 @@ function pngBuffer(width = 8, height = 6) {
     await page.goto("http://127.0.0.1:9137/preview/");
     await page.locator(".chat-row").first().waitFor();
     assert.equal(await page.locator(".chat-row").count(), 20);
+    // The empty message box is one line of text above the control row.
+    assert.equal(await page.locator("#message").getAttribute("rows"), "1");
+    const composerHeight = await page.locator("#composer").evaluate((node) => node.getBoundingClientRect().height);
+    assert.ok(composerHeight < 120, `empty composer is ${composerHeight} px high`);
     await page.getByRole("button", { name: "Load older chats" }).click();
     await page.waitForFunction(
       () => document.querySelectorAll(".chat-row").length === 25,
@@ -96,8 +100,9 @@ function pngBuffer(width = 8, height = 6) {
         ],
       ],
     );
-    // An account can lack either limit, or both. A missing one reads Unavailable
-    // with an empty outline instead of an empty quota, and the other keeps its bar.
+    // An account can lack either limit, or both. In a good read, a limit the
+    // account does not report reads Unknown; a bad value or a failed read reads
+    // Unavailable. Both show an empty outline, and the other limit keeps its bar.
     /**
      * Render a quota payload in the page and return, for each limit, the text
      * shown, the bar width, and the bar's classes.
@@ -115,14 +120,15 @@ function pngBuffer(width = 8, height = 6) {
         });
       }, usage);
     const missing = ["Unavailable", "0px", "usage-bar unknown"];
+    const unreported = ["Unknown", "0px", "usage-bar unknown"];
     assert.deepEqual(await quotaRows({ status: "ok", weekly_percent: "87" }), [
-      missing,
+      unreported,
       ["87% left", "87%", "usage-bar"],
     ]);
     assert.equal(await page.locator("#usage-note").isHidden(), true);
     assert.deepEqual(
       await quotaRows({ status: "ok", five_hour_percent: "2", weekly_percent: "" }),
-      [["2% left", "2%", "usage-bar low"], missing],
+      [["2% left", "2%", "usage-bar low"], unreported],
     );
     // Neither limit, values that are not percentages, and no quota data at all.
     for (const usage of [
@@ -131,7 +137,10 @@ function pngBuffer(width = 8, height = 6) {
       { status: "ok", five_hour_percent: null, weekly_percent: -1 },
       null,
     ]) {
-      assert.deepEqual(await quotaRows(usage), [missing, missing]);
+      assert.deepEqual(await quotaRows(usage), [
+        usage?.status === "ok" ? unreported : missing,
+        missing,
+      ]);
       assert.equal(
         await page.locator("#usage-note").textContent(),
         usage?.status === "ok" ? "" : "Quota is currently unavailable.",
@@ -220,15 +229,14 @@ function pngBuffer(width = 8, height = 6) {
       target.evaluate(() => {
         const messages = document.getElementById("messages");
         messages.scrollTop = messages.scrollHeight;
-        const header = document
-          .querySelector(".chat-header")
-          .getBoundingClientRect();
+        // The chat column; a phone hides the title row and shows its slim row instead.
+        const header = document.querySelector("main").getBoundingClientRect();
         const line = document
           .getElementById("integration-notice")
           .getBoundingClientRect();
         const list = messages.getBoundingClientRect();
         return (
-          Math.abs(line.top - (document.querySelector(".phone-thread-tools").offsetHeight ? document.querySelector(".phone-thread-tools") : document.querySelector(".connection-strip")).getBoundingClientRect().bottom) < 1 &&
+          Math.abs(line.top - (document.querySelector(".phone-thread-tools").offsetHeight ? document.querySelector(".phone-thread-tools") : document.querySelector(".chat-header")).getBoundingClientRect().bottom) < 1 &&
           Math.abs(line.bottom - list.top) < 1 &&
           Math.abs(line.left - header.left) < 1 &&
           Math.abs(line.width - header.width) < 1 &&
@@ -458,10 +466,11 @@ function pngBuffer(width = 8, height = 6) {
       .waitFor();
     // The numbered suggestions of this answer are a list.
     assert.equal(await page.locator("#messages .details ol > li").count(), 2);
-    // A finished exchange keeps its steps behind a collapsed toggle.
+    // A finished exchange keeps its steps behind a collapsed toggle. This saved chat has no start time,
+    // so the line counts the steps instead of reading "Worked for" (CX-FB2-FLOW).
     const storedToggle = page.locator("#activity .activity-toggle");
     await storedToggle.waitFor();
-    assert.equal(await storedToggle.textContent(), "Show activity (4 steps)");
+    assert.equal(await storedToggle.textContent(), "Activity (4 steps)");
     assert.equal(await page.locator("#activity-steps").isVisible(), false);
     await storedToggle.click();
     assert.equal(await page.locator("#activity .step").count(), 4);
@@ -622,12 +631,15 @@ function pngBuffer(width = 8, height = 6) {
         exact: true,
       })
       .waitFor();
-    // Four steps from Codex and four from the worker; the timer stops with the run.
-    await page.waitForFunction(
-      () =>
-        document.querySelector("#activity .activity-toggle")?.textContent ===
-        "Show activity (8 steps)",
+    // Four steps from Codex and four from the worker; the timer stops with the run,
+    // and the closed line reads the exchange's total time (CX-FB2-FLOW).
+    await page.waitForFunction(() =>
+      /^Worked for \d+s$/.test(
+        document.querySelector("#activity .activity-toggle")?.textContent || "",
+      ),
     );
+    await page.locator("#activity .activity-toggle").click();
+    assert.equal(await page.locator("#activity .step").count(), 8);
     assert.equal(await page.locator(".elapsed").count(), 0);
     assert.equal(await page.locator("#activity").count(), 1);
     assert.equal(await page.locator("#activity .step.is-running").count(), 0);
@@ -1327,7 +1339,7 @@ function pngBuffer(width = 8, height = 6) {
     await page
       .getByText("Signed in (local preview)", { exact: true })
       .waitFor();
-    await page.locator(".advanced summary").click();
+    await page.locator("#workspace-section .settings-toggle").click();
     await page.locator("#workspace-open").click();
     await page.locator("#agents").fill("Keep edits focused.");
     await page.getByRole("button", { name: "Save instructions" }).click();
@@ -1535,7 +1547,32 @@ function pngBuffer(width = 8, height = 6) {
       .getByText("The dashboard configuration is valid.", { exact: true })
       .waitFor();
     // The screenshot the user attached shows with their message.
-    await phone.locator(".verification h3").waitFor();
+    // No bold Verification box under the answer: the checks sit in one closed block, readback and note inside.
+    // CX-FB2-FLOW: that block is inside the answer's closed "Worked for" line, and a failed check keeps one
+    // short line under the answer, in the error color.
+    const errorColor = await phone.evaluate(() => { const probe = document.createElement("span"); probe.style.color = "var(--error)";
+      document.body.append(probe); const color = getComputedStyle(probe).color; probe.remove(); return color; });
+    const failedLine = phone.locator(".answer .check-failed-line");
+    await failedLine.waitFor();
+    assert.equal(await failedLine.textContent(), "1 check failed");
+    assert.equal(await failedLine.evaluate(node => getComputedStyle(node).color), errorColor);
+    assert.ok(await failedLine.evaluate(node => node.getBoundingClientRect().height) <= 24);
+    assert.equal(await phone.locator(".verification > summary").isVisible(), false);
+    await phone.locator("#activity > .activity-toggle").click();
+    await phone.locator(".verification > summary").waitFor();
+    assert.equal(await phone.locator(".verification h3").count(), 0);
+    assert.equal(await phone.locator(".verification").evaluate(node => node.open), false);
+    // The closed line names the check that needs review, in the error color, and keeps one line of height.
+    const closedLine = phone.locator(".verification > summary");
+    assert.equal(await closedLine.textContent(), "Checks and readback (2) · 1 failed");
+    assert.equal(await closedLine.evaluate(node => node.classList.contains("has-failed")), true);
+    assert.equal(await closedLine.evaluate(node => getComputedStyle(node).color),
+      await phone.evaluate(() => { const probe = document.createElement("span"); probe.style.color = "var(--error)";
+        document.body.append(probe); const color = getComputedStyle(probe).color; probe.remove(); return color; }));
+    assert.ok(await closedLine.evaluate(node => node.getBoundingClientRect().height) <= 24);
+    assert.equal(await phone.locator(".verification-note").isVisible(), false);
+    await phone.locator(".verification > summary").click();
+    assert.equal(await phone.locator(".verification-note").isVisible(), true);
     assert.equal(await phone.locator(".verification-result").count(), 2);
     await phone.locator(".verification-result").nth(1).locator("summary").click();
     assert.equal(await phone.locator(".verification").getByText("Custom element does not exist: sample-card", {exact:true}).isVisible(), true);
@@ -1545,6 +1582,12 @@ function pngBuffer(width = 8, height = 6) {
     assert.equal(await phone.locator(".verification img").count(), 1);
     assert.equal(await phone.locator(".verification img").evaluate(img => img.complete && img.naturalWidth > 0), true);
     await phone.screenshot({path: path.join(output, "verification-mobile.png"), fullPage: true});
+    // From a closed "Worked for" line, the failed-check line opens the line and the checks in one tap.
+    await phone.locator("#activity > .activity-toggle").click();
+    await phone.locator(".verification").evaluate(node => { node.open = false; });
+    assert.equal(await phone.locator(".verification > summary").isVisible(), false);
+    await failedLine.click();
+    assert.equal(await phone.locator(".verification-note").isVisible(), true);
     assert.equal(
       await phone.locator("#messages .user-attachments img").count(),
       1,

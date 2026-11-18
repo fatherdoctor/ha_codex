@@ -16,6 +16,27 @@ async function testApprovals(browser, output, errors) {
   await approvalPage.locator("#message").fill("Request permission to read sensor history");
   await approvalPage.getByRole("button", {name: "Send message", exact: true}).click();
   await approvalPage.getByRole("button", {name: "Allow once", exact: true}).waitFor();
+  // CX-FB4-APPROVE: the waiting request is the last child of the latest exchange, below the working lines.
+  assert.equal(await approvalPage.locator(".exchange:last-child > :last-child").evaluate(el => el.classList.contains("permission-card")), true);
+  const pendingBox = await approvalPage.locator(".permission-card").boundingBox();
+  const messagesBox = await approvalPage.locator("#messages").boundingBox();
+  assert.ok(pendingBox.y + pendingBox.height <= messagesBox.y + messagesBox.height + 1, "pending request is in view");
+  assert.equal(await approvalPage.evaluate(() => document.querySelectorAll(".permission-card").length), 1);
+  // CX-FB4-APPROVE: the chat scrolls to a request once. A later redraw of the same request leaves the owner's place alone.
+  await approvalPage.setViewportSize({width: 1440, height: 420});
+  const overflow = await approvalPage.evaluate(() => {
+    const area = document.getElementById("messages");
+    area.scrollTop = 0;
+    return area.scrollHeight - area.clientHeight;
+  });
+  assert.ok(overflow > 150, `the chat must overflow for the scroll check (${overflow})`);
+  await approvalPage.evaluate(() => {
+    const retention = state.catalog?.backup_retention_days;
+    state.catalog = {...state.catalog, backup_retention_days: (retention || 0) + 1};
+    renderTask();
+  });
+  assert.equal(await approvalPage.evaluate(() => document.getElementById("messages").scrollTop), 0, "a redraw must not scroll to a request already shown");
+  await approvalPage.setViewportSize({width: 1440, height: 950});
   const plain = approvalPage.locator(".permission-plain");
   assert.equal(await plain.count(), 3);
   assert.match(await plain.nth(0).textContent(), /^What changes:/);

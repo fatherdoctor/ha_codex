@@ -34,7 +34,7 @@ Details and other ways to install: [Installation](#installation).
 - [Updating](#updating)
 - [Uninstalling](#uninstalling)
 - [An example, step by step](#an-example-step-by-step)
-- [Permission modes and action groups](#permission-modes-and-action-groups)
+- [Permission modes](#permission-modes)
 - [Safety](#safety)
 - [Sign-in](#sign-in)
 - [Mailbox and schedules](#mailbox-and-schedules)
@@ -81,7 +81,7 @@ says so once in a notification.
 
 Every app option is in [codex-cli-worker/DOCS.md](codex-cli-worker/DOCS.md).
 
-Put rules for your house in `/config/AGENTS.md`. The chat has an editor for it under **Settings** > **Advanced** >
+Put rules for your house in `/config/AGENTS.md`. The chat has an editor for it under **Settings** > **Workspace instructions** >
 **Workspace rules**. Codex uses its defaults and your workspace instructions; the app bundles no house rules.
 
 ## Updating
@@ -121,13 +121,13 @@ flowchart LR
    question and offer two or three short answers as buttons.
 2. Codex edits the automation file. In the default `workspace-write` mode, an edit inside your configuration folder
    needs no permission. It saves the earlier copy first.
-3. Codex runs a configuration check on the changed YAML and reloads automations. The reload is in the **Apply my
-   changes** group, which starts on. If you turned that group off, a permission card asks you first.
+3. Codex runs a configuration check on the changed YAML and asks to reload automations. A permission card shows the
+   command, and you choose **Allow once** or **Deny**.
 4. You read the summary. If you do not like it, ask Codex to undo it, or restore the saved earlier copy.
 
 Screenshots of these screens are listed in [SCREENSHOTS.md](SCREENSHOTS.md).
 
-## Permission modes and action groups
+## Permission modes
 
 Each chat turn runs in one of two modes.
 
@@ -139,29 +139,6 @@ Each chat turn runs in one of two modes.
 Anything else shows a **Permission needed** card with the full command or file change, and the buttons **Allow once**
 and **Deny**. Only a Home Assistant administrator can answer it. This fork has no full-access mode; an old setting that
 names it stops the app at startup, with a log line that says why.
-
-### Pre-approved action groups
-
-In **Settings** > **Permissions overrides**, an administrator turns five groups of Home Assistant actions on or off.
-
-| Group | Starts | What it covers |
-|---|---|---|
-| Apply my changes | On | Reload automations, scripts, scenes, templates and groups. Run the configuration check. Start or continue an integration setup. |
-| Everyday control | On | Turn lights and switches on, off or toggle. Activate scenes. Enable, disable or trigger automations. Set helper values. |
-| Organize | On | Change a device or entity name, area and labels. Save a dashboard after its backup succeeds. |
-| Bigger changes | Off | Run a script. Change an entity ID, with a report of what refers to it. Back up or restart Core. Delete a device, entity, automation, script or dashboard. |
-| Security and people | Off | Locks, alarms, covers and garage doors, cameras, notifications and messages. |
-
-- The groups apply only to a turn that a person starts on the chat page in `workspace-write`. Scheduled runs, runs
-  started by another agent and `read-only` turns never use them. Turns started from the ChatGPT app also use the
-  normal permission card.
-- A group judges the service and the things it directly targets. What a scene or a script does next is your own setup.
-- Unknown limits, templated values, mixed targets and missing data fall back to the normal permission card.
-- A successful action is named in the answer, and the event is recorded before the action runs.
-
-You can add limits in a marked block in `/config/AGENTS.md`. If the block changes, all groups pause until an
-administrator uses **Review and confirm** in Settings. Details:
-[Permissions overrides](codex-cli-worker/DOCS.md#permissions-overrides).
 
 ## Safety
 
@@ -239,9 +216,9 @@ The integration adds actions that scripts, automations and Assist can call.
 | `codex_cli.start_login`, `codex_cli.logout`, `codex_cli.get_login_status` | Manage the sign-in. |
 
 The actions refuse a caller who is not an administrator. A task started this way still uses the normal permission
-cards; the integration cannot answer them. Home Assistant
-sends a notification when a task finishes or waits for you. Set `notify_service` in the app options for phone pushes,
-or leave it empty for persistent notifications.
+cards; the integration cannot answer them. Home Assistant sends a notification when a task waits for you or fails; a
+completed answer sends none. Set `notify_service` in the app options for phone pushes, or leave it empty for persistent
+notifications.
 
 The event `codex_cli_task_result` carries the result for automations. The full list of entities and actions, the task
 output format and an Assist example are in the [integration README](custom_components/codex_cli/README.md). A

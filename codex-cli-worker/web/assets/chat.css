@@ -1,4 +1,9 @@
 :root {
+  /* Material Design Icons (Apache-2.0, @mdi/js 7.4.47): mdiChevronRight and mdiChevronDown, the arrows Home Assistant uses; mdiClose and mdiCheck. */
+  --mdi-chevron-right: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z'/%3E%3C/svg%3E");
+  --mdi-chevron-down: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z'/%3E%3C/svg%3E");
+  --mdi-close: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z'/%3E%3C/svg%3E");
+  --mdi-check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z'/%3E%3C/svg%3E");
   color-scheme: light;
   --bg: #fff;
   --sidebar: #f7f7f5;
@@ -15,14 +20,17 @@
   --notice: #fdf3d6;
   --notice-text: #5f4500;
   --sidebar-width: 280px;
-  font-family:
+  /* Home Assistant's font when the page runs inside it (haTheme copies the variable), else the page's own list. */
+  font-family: var(
+    --ha-font-family-body,
     Inter,
     ui-sans-serif,
     -apple-system,
     BlinkMacSystemFont,
     "Segoe UI",
-    sans-serif;
-  font-size: 14px;
+    sans-serif
+  );
+  font-size: var(--ha-font-size-m, 14px);
 }
 * {
   box-sizing: border-box;
@@ -34,6 +42,7 @@ body {
 }
 button,
 input,
+select,
 textarea {
   font: inherit;
   color: inherit;
@@ -363,11 +372,6 @@ aside {
   font-size: 11px;
   color: var(--muted);
 }
-.workspace-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
 .usage {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -409,16 +413,6 @@ aside {
   margin: 6px 0 0 14px;
   line-height: 1.4;
 }
-.sidebar-footer .icon {
-  margin-left: auto;
-}
-.workspace-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-  flex-shrink: 0;
-}
 #divider {
   background: var(--sidebar);
   cursor: col-resize;
@@ -448,10 +442,6 @@ main {
   gap: 14px;
   border-bottom: 1px solid var(--line);
 }
-.chat-heading {
-  min-width: 0;
-  flex: 1;
-}
 h1 {
   font-size: 15px;
   font-weight: 600;
@@ -459,11 +449,6 @@ h1 {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-}
-.chat-heading p {
-  font-size: 11px;
-  color: var(--muted);
-  margin: 7px 0 0;
 }
 /* Between the header and the scrolling messages, so it stays in view. */
 #integration-notice {
@@ -558,7 +543,7 @@ h1 {
   margin-bottom: 32px;
 }
 .message {
-  line-height: 1.8;
+  line-height: 1.6;
   font-size: 14px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -661,22 +646,6 @@ h1 {
 .answer .question {
   margin-top: 14px;
   font-weight: 500;
-}
-.response-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 14px;
-}
-.copy-response {
-  min-height: 44px;
-  padding: 8px 12px;
-  font-size: 12px;
-}
-.copy-status {
-  color: var(--accent);
-  font-size: 12px;
 }
 .copy-buffer {
   position: fixed;
@@ -1110,29 +1079,14 @@ h1 {
 .activity-toggle:hover {
   color: var(--text);
 }
-.activity-chevron::before {
-  content: "";
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-right: 1.5px solid currentColor;
-  border-bottom: 1.5px solid currentColor;
-  transform: rotate(-45deg);
-  transition: transform 0.15s;
-  margin-bottom: 2px;
-}
-.activity-toggle[aria-expanded="true"] .activity-chevron::before {
-  transform: rotate(45deg);
-  margin-bottom: 4px;
-}
 .activity.running .activity-chevron::before {
-  border: 0;
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: var(--accent);
-  transform: none;
-  margin: 0;
+  margin: 0 4px;
+  -webkit-mask: none;
+  mask: none;
   animation: activity-pulse 1.4s ease-in-out infinite;
 }
 @keyframes activity-pulse {
@@ -1266,7 +1220,6 @@ textarea {
   outline: none;
   resize: none;
   max-height: 180px;
-  min-height: 52px;
   padding: 0 3px;
   display: block;
 }
@@ -1660,16 +1613,6 @@ dialog::backdrop {
   line-height: 1.6;
   overflow-wrap: anywhere;
 }
-.copy-dialog {
-  width: min(650px, calc(100% - 28px));
-}
-#copy-text {
-  margin-top: 16px;
-  max-height: 45dvh;
-  white-space: pre;
-  font-family: ui-monospace, monospace;
-  font-size: 12px;
-}
 #rename-input {
   width: 100%;
   padding: 10px 12px;
@@ -1746,14 +1689,47 @@ dialog label {
 dialog :is(h3, h4):has(> .settings-toggle) {
   margin: 0;
 }
-/* The three parts of Accounts and connections sit inside it, indented, with a lighter rule. */
-#accounts-section section {
-  margin: 0 0 0 12px;
+/*
+ * Every settings section, and each part of Accounts and connections, is a
+ * divider line and a header of the same height. An open section adds its
+ * body with the same space below it, so the gap from each divider to the
+ * next header or button is the same throughout.
+ */
+#settings section {
+  margin: 0;
   padding: 0;
   border-top: 1px solid var(--line);
 }
+#settings > section:last-of-type {
+  border-bottom: 1px solid var(--line);
+}
+/* The three parts of Accounts and connections sit inside it, indented. */
+#accounts-section section {
+  margin-left: 12px;
+}
 #accounts-section h4 .settings-toggle {
   font-size: 13px;
+}
+.settings-body {
+  padding: 2px 0 16px;
+}
+.settings-body > :first-child {
+  margin-top: 0;
+}
+.settings-body > :last-child,
+.settings-body > :last-child > :last-child {
+  margin-bottom: 0;
+}
+/* A status line with nothing to say yet takes no space, so it does not widen the gap above the next divider. */
+.settings-body p:empty {
+  margin: 0;
+}
+/* Accounts and connections holds only the headers of its parts; each open part adds its own space below. */
+#accounts-section > .settings-body {
+  padding: 0;
+}
+#settings > .dialog-header {
+  margin-bottom: 16px;
 }
 .settings-toggle {
   display: flex;
@@ -1770,12 +1746,6 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   font-weight: 600;
   text-align: left;
 }
-.settings-title::before {
-  content: "▸ ";
-}
-.settings-toggle[aria-expanded="true"] .settings-title::before {
-  content: "▾ ";
-}
 .settings-status {
   color: var(--muted);
   font-size: 12px;
@@ -1784,12 +1754,12 @@ dialog :is(h3, h4):has(> .settings-toggle) {
 }
 /* Only the section's own header: a marked Accounts and connections must not mark the parts inside it. */
 .needs-attention > :is(h3, h4) .settings-status,
-.needs-attention > #app-pairing-status {
+.needs-attention > .settings-body > #app-pairing-status {
   color: var(--error);
   font-weight: 600;
 }
 .needs-attention > :is(h3, h4) .settings-status:not(:empty)::before,
-.needs-attention > #app-pairing-status:not(:empty)::before {
+.needs-attention > .settings-body > #app-pairing-status:not(:empty)::before {
   content: "⚠ ";
 }
 .signin-expired {
@@ -1902,10 +1872,6 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   .footnote {
     font-size: 9px;
   }
-  .chat-header #cancel {
-    font-size: 11px;
-    padding: 8px;
-  }
   .welcome-icon {
     margin-bottom: 20px;
   }
@@ -1925,8 +1891,10 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   }
 }
 /* Keep verification evidence readable in narrow Ingress panels. */
-.verification { margin: 18px 0; min-width: 0; }
-.verification h3 { font-size: 14px; margin-bottom: 8px; }
+.verification { margin: 10px 0; min-width: 0; }
+.verification > summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+/* A failed check shows on the closed line, in the error color. */
+.verification > summary.has-failed { color: var(--error); }
 .verification-result { border: 1px solid var(--border, #8885); border-radius: 8px; margin: 6px 0; padding: 10px; overflow-wrap: anywhere; }
 .verification-result summary { cursor: pointer; font-size: 13px; }
 .verification-result pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; max-height: 260px; overflow: auto; }
@@ -2004,18 +1972,109 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   border-radius: 4px;
 }
 
-/* HA settings rows: 16px horizontal padding, 72px two-line rows, 48x24 switch. */
-.permission-row { position:relative; display:flex; align-items:center; gap:16px; min-height:72px; padding:8px 16px; border-bottom:1px solid var(--divider-color,#e0e0e0); cursor:pointer; box-sizing:border-box; }
-.permission-row > span:first-child { flex:1; min-width:0; }
-.permission-row strong { display:block; font-size:14px; font-weight:500; color:var(--primary-text-color,var(--text)); }
-.permission-description { display:block; margin-top:4px; font-size:12px; line-height:1.5; color:var(--secondary-text-color,var(--muted)); }
-.permission-row input { position:absolute; right:16px; width:48px; height:40px; opacity:0; margin:0; cursor:pointer; z-index:1; }
-.ha-permission-switch { display:block; flex:0 0 48px; height:24px; border-radius:12px; position:relative; box-sizing:border-box; border:1px solid var(--ha-switch-border-color,var(--ha-color-border-neutral-normal,var(--divider-color,#bdbdbd))); background:var(--ha-switch-background-color,var(--ha-color-fill-disabled-quiet-resting,var(--switch-unchecked-track-color,var(--disabled-text-color,#9e9e9e)))); transition:background .15s; }
-.ha-permission-switch::after { content:""; position:absolute; width:18px; height:18px; top:2px; left:2px; border-radius:50%; background:var(--ha-switch-thumb-background-color,var(--ha-color-on-neutral-normal,var(--switch-unchecked-button-color,var(--card-background-color,#fff)))); box-shadow:0 1px 3px #0004; transition:transform .15s; }
-.permission-row input:checked + .ha-permission-switch { border-color:var(--ha-switch-checked-border-color,var(--ha-color-border-primary-loud,var(--primary-color,#03a9f4))); background:var(--ha-switch-checked-background-color,var(--ha-color-fill-primary-normal-resting,var(--switch-checked-track-color,var(--primary-color,#03a9f4)))); }
-.permission-row input:checked + .ha-permission-switch::after { transform:translateX(24px); background:var(--ha-switch-checked-thumb-background-color,var(--ha-color-on-primary-normal,var(--switch-checked-button-color,var(--card-background-color,#fff)))); }
-.permission-row input:focus-visible + .ha-permission-switch { outline:2px solid var(--primary-color,#03a9f4); outline-offset:4px; }
-.permission-row input:disabled + .ha-permission-switch { opacity:var(--ha-switch-disabled-opacity,.3); }
+/*
+ * Settings and its dialogs (Status, Remote connection, Permissions, Workspace rules) look like Home Assistant's
+ * own settings pages. The page copies the look with plain HTML and CSS: Home Assistant's own components are not
+ * published for add-on pages and change between releases. haTheme() in chat.js copies the theme variables used
+ * here; every use has a fallback, so the standalone preview and an older frontend still draw each part.
+ */
+
+/* A settings row: the name, a smaller gray line under it, the control at the right and a divider below. */
+.ha-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 56px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--divider-color, var(--line));
+  cursor: pointer;
+}
+/* Two lines of text make the 72 px row of Home Assistant's two-line lists. */
+.ha-row:has(.ha-row-description) {
+  min-height: 72px;
+}
+.ha-row > span:first-child {
+  flex: 1;
+  min-width: 0;
+}
+.ha-row strong {
+  display: block;
+  font-size: var(--ha-font-size-m, 14px);
+  font-weight: 500;
+  color: var(--text);
+}
+.ha-row-description {
+  display: block;
+  margin-top: 4px;
+  font-size: var(--ha-font-size-s, 12px);
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+/*
+ * Text, number and list fields: the filled field of the Configuration tab. A tinted background, a line under it
+ * that takes the primary color on focus, and the label as small text above. The workspace instructions editor
+ * (#agents) keeps its own look: it is a text editor, not a field.
+ */
+:is(#settings, .studio-sheet) :is(input:not([type="checkbox"], [type="radio"], [type="hidden"], [type="file"]), select, textarea):not(#agents) {
+  display: block;
+  width: 100%;
+  min-height: 56px;
+  padding: 16px 12px 8px;
+  border: 0;
+  border-bottom: 1px solid var(--input-idle-line-color, var(--muted));
+  border-radius: 4px 4px 0 0;
+  background: var(--input-fill-color, color-mix(in srgb, var(--text) 5%, transparent));
+  color: var(--input-ink-color, var(--text));
+  font-size: var(--ha-font-size-m, 14px);
+}
+:is(#settings, .studio-sheet) :is(input, select, textarea):not(#agents):focus-visible {
+  outline: 0;
+  border-bottom: 2px solid var(--accent);
+}
+#settings label,
+.studio-sheet label {
+  color: var(--input-label-ink-color, var(--muted));
+  font-size: var(--ha-font-size-s, 12px);
+}
+
+/*
+ * Buttons: the main action of a part is a filled button in the primary color; the others (class "subtle") are
+ * text buttons in the primary color, as Home Assistant draws them. Icon buttons, section headers, text links and
+ * the permission choices keep their own look.
+ */
+:is(#settings, .studio-sheet) button:not(.icon, .subtle, .settings-toggle, .text-button, .permission-option) {
+  background: var(--ha-color-fill-primary-loud-resting, var(--accent));
+  color: var(--ha-color-on-primary-loud, #fff);
+  font-weight: 500;
+}
+:is(#settings, .studio-sheet) button.subtle {
+  border-color: transparent;
+  background: transparent;
+  color: var(--accent);
+  font-weight: 500;
+}
+:is(#settings, .studio-sheet) button.subtle:hover:not(:disabled) {
+  filter: none;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+/* Material Design Icons (Apache-2.0, @mdi/js 7.4.47): mdiClose for the close button of each window. */
+.icon-close::before {
+  content: "";
+  display: block;
+  width: 24px;
+  height: 24px;
+  background: currentColor;
+  -webkit-mask: var(--mdi-close) center / 24px no-repeat;
+  mask: var(--mdi-close) center / 24px no-repeat;
+}
+.icon.icon-close {
+  padding: 8px;
+  border-radius: 50%;
+  line-height: 0;
+}
 
 /* GitHub sign-in card: beside the ChatGPT account, same code style. */
 .github-details {
@@ -2067,4 +2126,494 @@ dialog :is(h3, h4):has(> .settings-toggle) {
 }
 #github-result {
   overflow-wrap: anywhere;
+}
+
+/*
+ * One Material Design Icons arrow, at one size, for every collapsible part of the page:
+ * the Settings section headers, the thread step list, and each <details class="disclosure">
+ * (the checks block, Scheduled runs, the GitHub and remote-control parts). It replaces the
+ * browser's own triangle on <details>.
+ */
+.settings-title::before,
+.activity-chevron::before,
+details.disclosure > summary::before {
+  content: "";
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  margin-right: 2px;
+  vertical-align: -3px;
+  background: currentColor;
+  -webkit-mask: var(--mdi-chevron-right) center / 16px no-repeat;
+  mask: var(--mdi-chevron-right) center / 16px no-repeat;
+}
+.settings-toggle[aria-expanded="true"] .settings-title::before,
+.activity-toggle[aria-expanded="true"] .activity-chevron::before,
+details.disclosure[open] > summary::before {
+  -webkit-mask-image: var(--mdi-chevron-down);
+  mask-image: var(--mdi-chevron-down);
+}
+details.disclosure > summary {
+  list-style: none;
+}
+details.disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* FB2-BAND: the top bands move to the foot of the side bar (CX-FB2-BAND).
+ * The chat keeps one thin title row; Home Assistant status, the remote connection, the quota and Settings
+ * are rows at the side bar's foot; the stop button takes the send button's place while a task runs. */
+:root {
+  /* Material Design Icons (Apache-2.0, @mdi/js 7.4.47): mdiCog for Settings, mdiStop for the stop button. */
+  --mdi-cog: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.21,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.21,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.67 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z'/%3E%3C/svg%3E");
+  --mdi-stop: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M18,18H6V6H18V18Z'/%3E%3C/svg%3E");
+  /* A row that needs the owner shows an amber dot: Home Assistant's warning color, else the page's own. */
+  --needs-owner: var(--warning-color, #b26a00);
+}
+.mdi-icon {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  background: currentColor;
+}
+.mdi-cog {
+  -webkit-mask: var(--mdi-cog) center / 18px no-repeat;
+  mask: var(--mdi-cog) center / 18px no-repeat;
+}
+.mdi-stop {
+  -webkit-mask: var(--mdi-stop) center / 20px no-repeat;
+  mask: var(--mdi-stop) center / 20px no-repeat;
+}
+
+/* The thin title row above the messages: the title and the chat menu, nothing else. */
+main > .chat-header {
+  height: 44px;
+  min-height: 44px;
+  padding: 0 24px;
+  gap: 8px;
+  border-bottom: 0;
+  background: transparent;
+}
+main > .chat-header h1 {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* The side bar's foot, top to bottom: Home Assistant, remote connection, quota, Settings. */
+.sidebar-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 8px;
+  font-family: var(--ha-font-family-body, inherit);
+}
+.sidebar-footer .foot-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 400;
+  text-align: left;
+}
+.sidebar-footer .foot-row:hover:not(:disabled),
+.sidebar-footer .foot-row:focus-visible {
+  background: var(--hover);
+  filter: none;
+}
+.foot-row .foot-label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.foot-row .foot-label > span {
+  color: var(--muted);
+}
+.foot-row .status-dot {
+  width: 8px;
+  height: 8px;
+  margin: 0 5px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--muted);
+}
+#ha-status-row[data-state="ready"] .status-dot,
+#ha-status-row[data-state="starting"] .status-dot,
+body[data-connection="ready"] #connection-manage .status-dot,
+body[data-connection="starting"] #connection-manage .status-dot {
+  background: var(--accent);
+}
+#ha-status-row[data-state="needs-owner"] .status-dot,
+body[data-connection="reconnecting"] #connection-manage .status-dot {
+  background: var(--needs-owner);
+}
+#ha-status-row[data-state="error"] .status-dot,
+body[data-connection="error"] #connection-manage .status-dot {
+  background: var(--error);
+}
+.sidebar-footer .usage {
+  padding: 6px 10px 0 28px;
+  font-size: 11px;
+}
+.usage-plan,
+.sidebar-footer .usage-note {
+  margin: 4px 10px 4px 28px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+/* The stop button sits where the send button is, with the same size and shape. */
+#composer #cancel.stop-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 0;
+  background: var(--accent);
+  color: var(--text-light-primary-color, #212121);
+}
+#composer #cancel.stop-button[hidden],
+#composer #send[hidden] {
+  display: none;
+}
+
+@media (max-width: 700px) {
+  /* A phone keeps its slim row (chats, title, new chat, chat menu); the status rows are in the chats drawer. */
+  main > .chat-header {
+    display: none;
+  }
+}
+/* FB2-LIST: "Your chats" as one Home Assistant list card, and a visible side bar divider. */
+:root {
+  --sidebar-width: 260px;
+  --fb2-row-height: 36px;
+  --fb2-row-selected: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.chats-card {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  margin-top: 14px;
+  overflow: hidden;
+  background: var(--card-background-color, var(--bg));
+  border: 1px solid var(--divider-color, var(--line));
+  border-radius: var(--ha-card-border-radius, 12px);
+}
+.chats-card .list-heading {
+  padding: 8px 4px 4px 14px;
+  color: var(--primary-text-color, var(--text));
+  font-size: 14px;
+  font-weight: 500;
+}
+.chats-card .sidebar-error {
+  margin: 0;
+  padding: 4px 14px;
+}
+.chats-card #chat-list {
+  padding-bottom: 4px;
+}
+.chats-card .list-group {
+  margin: 6px 0 2px;
+  padding: 0 14px;
+  font-size: 11px;
+  letter-spacing: 0.4px;
+}
+.chats-card .list-group + .list-group,
+.chats-card .chat-row + .list-group {
+  margin-top: 8px;
+}
+.chats-card #list-empty {
+  padding: 4px 14px 10px;
+}
+/* A flat row: icon, title on one line, age at the right, the menu on hover or focus. */
+.chats-card .chat-row {
+  margin: 0;
+  border-radius: 0;
+  min-height: var(--fb2-row-height);
+}
+.chats-card .chat-row:hover,
+.chats-card .chat-row.menu-open {
+  background: var(--hover);
+}
+.chats-card .chat-row.current {
+  background: var(--fb2-row-selected);
+  box-shadow: none;
+  color: var(--accent);
+}
+.chats-card .chat-row.current .row-main,
+.chats-card .chat-row.current .row-title {
+  color: var(--accent);
+}
+.chats-card .chat-row.queued {
+  outline-offset: -3px;
+}
+.chats-card .row-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 8px;
+  min-height: var(--fb2-row-height);
+  padding: 0 14px;
+  border-radius: 0;
+  font-size: 13px;
+}
+.chats-card .row-title {
+  padding-right: 0;
+  gap: 8px;
+  font-weight: 400;
+}
+.chats-card .row-preview {
+  display: none;
+}
+.chats-card .row-meta {
+  margin: 0;
+  font-size: 12px;
+  white-space: nowrap;
+}
+/* The status word is for a screen reader. A chat that waits for the owner shows a dot in its place. */
+.chats-card .row-meta > span:first-child {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.chats-card .row-meta > .waiting {
+  position: static;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  display: inline-block;
+  vertical-align: middle;
+  border-radius: 50%;
+  background: var(--warning-color, #f59e0b);
+  font-size: 0;
+  clip-path: none;
+}
+.chats-card .row-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+.chats-card .row-menu {
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  font-size: 16px;
+  background: transparent;
+}
+.chats-card .chat-row:hover .row-meta > span:last-child,
+.chats-card .chat-row:focus-within .row-meta > span:last-child,
+.chats-card .chat-row.menu-open .row-meta > span:last-child {
+  visibility: hidden;
+}
+.row-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  fill: var(--muted);
+}
+.chats-card .chat-row.current .row-icon {
+  fill: var(--accent);
+}
+.chats-card .pin-icon,
+.chats-card .queue-icon {
+  fill: var(--accent);
+  stroke: none;
+}
+.row-spinner {
+  box-sizing: border-box;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  fill: none;
+  animation: row-spin 0.9s linear infinite;
+}
+@keyframes row-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .row-spinner {
+    animation: none;
+  }
+}
+/* "Archived chats" and "Load older chats" are text rows at the foot of the card. */
+.chats-card .subtle {
+  width: 100%;
+  min-height: var(--fb2-row-height);
+  padding: 0 14px;
+  text-align: left;
+  border: 0;
+  border-top: 1px solid var(--divider-color, var(--line));
+  border-radius: 0;
+  color: var(--accent);
+  font-size: 13px;
+}
+.chats-card .subtle:hover:not(:disabled) {
+  background: var(--hover);
+}
+@media (pointer: coarse), (max-width: 700px) {
+  :root {
+    --fb2-row-height: 48px;
+  }
+}
+/* The divider: a 1 px line at the side bar's edge in a 9 px grab area. */
+.app {
+  grid-template-columns: var(--sidebar-width) 9px minmax(0, 1fr);
+}
+#divider {
+  position: relative;
+  background: transparent;
+  border-right: 0;
+  cursor: ew-resize;
+}
+#divider::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 4px;
+  width: 1px;
+  background: var(--divider-color, var(--line));
+}
+#divider:hover::before,
+#divider:focus-visible::before,
+body.resizing #divider::before {
+  background: var(--accent);
+}
+#divider:hover,
+#divider:focus-visible {
+  background: transparent;
+}
+body.resizing {
+  cursor: ew-resize;
+}
+/* FB2-FLOW */
+/*
+ * The chat flow, with the desktop app as the model (CX-FB2 design, sections 4 and 6). The chat column and
+ * the prompt box share one 720 px column; the owner's message is a bubble up to 70 % of it on a wide screen.
+ * Each answer has one gray "Worked for" line above it that opens its steps and checks. A failed check keeps
+ * one short line under the answer, and an answered permission request is one closed line.
+ * studio.css loads after this file and sets the column (860 px) and the prompt box (920 px), so the two
+ * width rules name the main area to win; a phone keeps studio.css's own padding.
+ */
+@media (min-width: 701px) {
+  main .messages {
+    padding-left: max(24px, calc((100% - 720px) / 2));
+    padding-right: max(24px, calc((100% - 720px) / 2));
+  }
+  main .compose-area {
+    max-width: calc(720px + 60px);
+  }
+  .message.user {
+    max-width: 70%;
+  }
+}
+.activity.worked,
+.answer .activity.worked {
+  margin: 10px 0 8px;
+}
+.activity.worked .activity-toggle,
+.worked-line {
+  font-size: 13px;
+  color: var(--muted);
+}
+.worked-line {
+  margin: 10px 0 8px;
+  padding: 4px 0;
+}
+.activity.worked .activity-steps > .verification {
+  margin: 8px 0 4px 8px;
+}
+.check-failed-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 10px;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: var(--error);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.check-failed-line:hover {
+  text-decoration: underline;
+}
+details.permission-card.is-answered {
+  margin: 8px 0;
+  padding: 6px 12px;
+  border-color: var(--line);
+  border-radius: 8px;
+}
+details.permission-card.is-answered > summary {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--muted);
+}
+details.permission-card.is-answered > summary strong {
+  flex: none;
+  font-weight: 500;
+  color: var(--text);
+}
+details.permission-card.is-answered > summary .permission-headline {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+details.permission-card.is-answered[open] {
+  padding-bottom: 12px;
+}
+
+/* FB2-SPLIT */
+/*
+ * The Add-on configuration row at the foot of Settings: a link that looks like Home Assistant's navigation rows,
+ * the name and a gray line at the left and a chevron at the right. It lines up with the section headers above it.
+ */
+a.ha-nav-row {
+  padding-left: 0;
+  padding-right: 0;
+  color: inherit;
+  text-decoration: none;
+}
+a.ha-nav-row:not([href]) .ha-nav-chevron {
+  /* No address from Supervisor yet: the row is text, not a link. */
+  visibility: hidden;
+}
+a.ha-nav-row[href]:hover strong {
+  color: var(--primary-color, var(--accent));
+}
+a.ha-nav-row:focus-visible {
+  outline: 2px solid var(--primary-color, var(--accent));
+  outline-offset: 2px;
+}
+.ha-nav-chevron {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  background: var(--secondary-text-color, var(--muted));
+  -webkit-mask: var(--mdi-chevron-right) center / 24px no-repeat;
+  mask: var(--mdi-chevron-right) center / 24px no-repeat;
 }

@@ -1026,7 +1026,7 @@ class GitHubService:
         if current in BAD_STATES:
             when = state.get("last_check", {}).get("at") or ""
             self.notify("GitHub sign-in", f"GitHub sign-in on the Codex add-on: {STATE_WORDS.get(current, current)} "
-                        f"since {when}. Open the Codex page > Settings > GitHub.")
+                        f"since {when}. Open the Codex page > Settings > Accounts and connections > GitHub.")
 
     def _fire(self, previous: str, state: dict[str, Any]) -> None:
         last = state.get("last_check") or {}

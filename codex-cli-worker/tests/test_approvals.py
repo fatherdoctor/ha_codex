@@ -906,3 +906,4 @@ class ApprovalRunTests(unittest.TestCase):
         self.assertTrue(any(message.get("method") == "turn/interrupt" for message in proc.stdin.messages()))
         self.assertFalse(any("result" in message for message in proc.stdin.messages()))
         self.assertNotIn("task", server.running_processes)
+

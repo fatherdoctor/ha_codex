@@ -153,6 +153,16 @@
           "description": "Return short entries instead of full task records."
         }
       }
+    },
+    "start_login": {
+      "name": "Start sign-in",
+      "description": "Start the worker’s device-code sign-in flow and return its current sign-in state. Completing sign-in requires following the returned instructions. A worker connection or request failure returns an action error.",
+      "fields": {
+        "force": {
+          "name": "Force sign-in",
+          "description": "Defaults to false: if already signed in, return the existing sign-in state without starting a new flow. Set true to start a new flow even when already signed in. An already running sign-in flow is reused in either case; this does not restart or cancel it."
+        }
+      }
     }
   }
 }

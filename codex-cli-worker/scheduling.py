@@ -440,13 +440,6 @@ class Store:
         db.execute('''DELETE FROM mailbox_deliveries WHERE reader IN ('lead','codex')
             AND EXISTS (SELECT 1 FROM mailbox_reads r WHERE r.message_id=mailbox_deliveries.message_id
                         AND r.reader=mailbox_deliveries.reader AND r.read_at<?)''', (now - 48 * 3600,))
-        for reader in READERS:
-            excess = db.execute('SELECT max(0,count(*)-?) FROM mailbox_deliveries WHERE reader=?', (MAX_MESSAGES, reader)).fetchone()[0]
-            if excess:
-                db.execute('''DELETE FROM mailbox_deliveries WHERE reader=? AND message_id IN (
-                    SELECT d.message_id FROM mailbox_deliveries d JOIN mailbox m ON m.id=d.message_id
-                    JOIN mailbox_reads r ON r.message_id=d.message_id AND r.reader=d.reader
-                    WHERE d.reader=? ORDER BY m.created,m.rowid LIMIT ?)''', (reader, reader, excess))
         db.execute('''DELETE FROM mailbox_reads WHERE NOT EXISTS (SELECT 1 FROM mailbox_deliveries d
             WHERE d.message_id=mailbox_reads.message_id AND d.reader=mailbox_reads.reader)''')
         db.execute('DELETE FROM mailbox WHERE NOT EXISTS (SELECT 1 FROM mailbox_deliveries d WHERE d.message_id=mailbox.id)')
@@ -458,6 +451,8 @@ class Store:
 
     def _make_mail_room(self, db, recipients):
         """Evict read copies only, or refuse the entire delivery when a recipient is full."""
+        # Enforce capacity on arrival only. Trimming an upgraded mailbox during
+        # a read would shift the remaining pages beneath the reader's offset.
         for reader in sorted(recipients):
             while db.execute('SELECT count(*) FROM mailbox_deliveries WHERE reader=?', (reader,)).fetchone()[0] >= MAX_MESSAGES:
                 oldest = db.execute('''SELECT d.message_id FROM mailbox_deliveries d JOIN mailbox m ON m.id=d.message_id
