@@ -42,7 +42,8 @@ Paths are under `codex-cli-worker/` unless they start with `custom_components/`.
 | The relay runs under its own AppArmor label with all capabilities dropped, entered only through one fixed launcher | `apparmor.txt`, `relay-launcher`, `relay-tool-launcher` | `tests/apparmor_317_check.py`, `.github/workflows/apparmor-317.yaml` |
 | The worker's memory cannot be read by a process it starts | `server.py: make_worker_undumpable` | `tests/test_gate.py` (`test_the_flag_is_set`) |
 | Each way in (the chat page, the ChatGPT app, `codex_cli.start_task`) gets the Home Assistant tools that DOCS.md "Ways in" lists, and no others | `server.py: build_app_server_args`, `build_codex_args`, `relay_read_mcp_args`; `remote_control.py: Supervisor._command` | `tests/test_surface_matrix.py` |
-| Full access is not available, whatever a client or an option asks for | `gate/requirements.toml` (Codex's managed requirements) and `policy.py: load_policy`, `policy_problem`; checked before each exchange at the top of `server.py: run_task` | `tests/test_policy.py` |
+| Each permission mode is only Codex's own settings: the table `policy.py: MODES`, passed by `server.py: task_mode_settings` and `create_approval_session`; the app keeps no check of its own on them | `policy.py: MODES`, `mode_settings`; `server.py: parse_permission_mode`, `task_mode_settings` | `tests/test_four_modes.py` |
+| Full access is Codex's own `never` with the `danger-full-access` sandbox, behind the owner's warning switch: Codex's managed requirements list those two values only while the switch is on | `full_access.py: read_setting`, `requirements_text`, `write_requirements`; `server.py: change_full_access` (administrator and confirmed warning) | `tests/test_four_modes.py` (`RequirementsTests`, `test_the_switch_needs_an_administrator_and_the_warning`) |
 
 ### Layer 2: what the hook refuses
 

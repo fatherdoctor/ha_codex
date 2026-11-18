@@ -129,16 +129,18 @@ Screenshots of these screens are listed in [SCREENSHOTS.md](SCREENSHOTS.md).
 
 ## Permission modes
 
-Each chat turn runs in one of two modes.
+Each chat picks one of the four modes of the ChatGPT app: Default, Auto-review, Read only or Full access. Each mode is
+only Codex's own settings.
 
 | Mode | What Codex can do without asking |
 |---|---|
-| `read-only` | Read files. A write, or shell networking, needs your permission for that one action. |
-| `workspace-write` (default) | Edit files in your configuration folder. Shell networking and writes outside it need your permission. |
+| Default | Edit files in your configuration folder. Shell networking and writes outside it need your permission. |
+| Auto-review | As Default, but Codex's own reviewer answers each request instead of you. |
+| Read only | Read files. A write, a device change or shell networking needs your permission for that one action. |
+| Full access | Everything, without a sandbox and without asking. Off until an administrator turns it on in Settings. |
 
-Anything else shows a **Permission needed** card with the full command or file change, and the buttons **Allow once**
-and **Deny**. Only a Home Assistant administrator can answer it. This fork has no full-access mode; an old setting that
-names it stops the app at startup, with a log line that says why.
+A request shows a **Permission needed** card with the full command or file change, and the buttons **Allow once**
+and **Deny**. Only a Home Assistant administrator can answer it.
 
 ## Safety
 

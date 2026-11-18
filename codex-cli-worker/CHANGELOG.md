@@ -2,6 +2,13 @@
 
 ## 0.3.6 (unreleased)
 
+- The Permissions button offers the four modes of the ChatGPT app: Default, Auto-review, Read only and Full access.
+  Each mode is only Codex's own settings, passed when the app starts Codex for a chat
+  (`codex-cli-worker/DOCS.md`, "Permission modes"). Auto-review hands each request to Codex's own reviewer, and
+  the chat shows what it allowed or denied. Full access runs Codex without its sandbox and without questions; it is
+  off until an administrator turns it on in **Settings > Full access** and confirms a warning. The app's own checks
+  of these settings are removed: the protected policy no longer pins the approval policy and reviewer, the chat
+  page no longer refuses a thread's settings, and remote control no longer checks the managed requirements file.
 - The app's own grant layer is removed: the five pre-approved action groups (Settings > Permissions overrides), the
   guard-rails block they read from `/config/AGENTS.md`, and the `home_assistant_actions` `act` tool with its
   **Allow once** card. Codex's own permission requests are now the only way a change to the house is approved. A

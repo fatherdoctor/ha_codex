@@ -31,10 +31,9 @@ class ProtectedPolicyTests(unittest.TestCase):
         return path
 
     def test_shipped_policy_is_the_strict_one(self) -> None:
-        """The policy in the repository loads and allows only the two sandboxed modes, asking on request."""
+        """The policy in the repository loads and allows only the two sandboxed app options."""
         loaded = policy.load_policy()
         self.assertEqual(loaded["allowed_sandbox_modes"], ["workspace-write", "read-only"])
-        self.assertEqual(loaded["approval_policy"], "on-request")
         self.assertEqual(policy.policy_problem({}), "")
         self.assertEqual(policy.policy_problem({"codex_sandbox": "read-only"}), "")
 
@@ -44,14 +43,12 @@ class ProtectedPolicyTests(unittest.TestCase):
             with self.subTest(mode=mode):
                 self.assertIn("not allowed", policy.policy_problem({"codex_sandbox": mode}))
 
-    def test_policy_file_cannot_loosen_the_fixed_rules(self) -> None:
-        """A policy file that allows full access, never asks, skips the user or the admin check is itself refused."""
+    def test_a_malformed_sandbox_list_is_refused(self) -> None:
+        """A policy file without a usable list of sandbox modes is itself refused."""
         for changes in (
-            {"allowed_sandbox_modes": ["workspace-write", "danger-full-access"]},
-            {"approval_policy": "never"},
-            {"approvals_reviewer": "auto_review"},
-            {"approvals_require_admin": False},
             {"allowed_sandbox_modes": []},
+            {"allowed_sandbox_modes": "workspace-write"},
+            {"allowed_sandbox_modes": [1]},
         ):
             with self.subTest(changes=changes):
                 path = self.write_policy(**changes)
