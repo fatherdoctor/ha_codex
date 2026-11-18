@@ -1,4 +1,5 @@
 """The GitHub sign-in Repairs issue and event, against a mocked worker /status. All values are synthetic."""
+import json
 import os
 import subprocess
 import sys
@@ -54,14 +55,14 @@ async def poll(coordinator, client, github):
     await coordinator._async_update_data()
 
 
-@pytest.mark.parametrize(("state", "severity"), [
-    ("expired", ir.IssueSeverity.ERROR),
-    ("revoked", ir.IssueSeverity.ERROR),
-    ("failed", ir.IssueSeverity.ERROR),
-    ("near_expiry", ir.IssueSeverity.WARNING),
-    ("access_changed", ir.IssueSeverity.WARNING),
+@pytest.mark.parametrize(("state", "severity", "key"), [
+    ("expired", ir.IssueSeverity.ERROR, "github_access_lost"),
+    ("revoked", ir.IssueSeverity.ERROR, "github_access_lost"),
+    ("failed", ir.IssueSeverity.ERROR, "github_access_check_failed"),
+    ("near_expiry", ir.IssueSeverity.WARNING, "github_access_near_expiry"),
+    ("access_changed", ir.IssueSeverity.WARNING, "github_access_changed"),
 ])
-async def test_each_bad_state_raises_the_repair_and_ok_clears_it(hass, state, severity):
+async def test_each_bad_state_raises_the_repair_and_ok_clears_it(hass, state, severity, key):
     client = AsyncMock()
     coordinator = integration.CodexCliCoordinator(hass, client)
     registry = ir.async_get(hass)
@@ -71,12 +72,53 @@ async def test_each_bad_state_raises_the_repair_and_ok_clears_it(hass, state, se
     issue = registry.async_get_issue("codex_cli", ISSUE)
     assert issue is not None
     assert issue.severity == severity
-    assert issue.translation_key == ISSUE
+    assert issue.translation_key == key
     assert issue.is_fixable is False
     assert issue.translation_placeholders["account"] == "synthetic-owner"
     assert issue.translation_placeholders["reason"] == "synthetic reason"
     await poll(coordinator, client, github_status("ok"))
     assert registry.async_get_issue("codex_cli", ISSUE) is None
+
+
+@pytest.mark.parametrize(("state", "key"), [
+    ("expired", "github_access_lost_token"),
+    ("revoked", "github_access_lost_token"),
+    ("near_expiry", "github_access_near_expiry_token"),
+    ("access_changed", "github_access_changed"),
+    ("failed", "github_access_check_failed"),
+])
+async def test_a_token_connection_is_sent_to_the_token_form(hass, state, key):
+    """Astro F4: Connect again starts an App sign-in, so a token's Repair names Use a token instead."""
+    client = AsyncMock()
+    coordinator = integration.CodexCliCoordinator(hass, client)
+    await poll(coordinator, client, github_status(state, kind="token"))
+    issue = ir.async_get(hass).async_get_issue("codex_cli", ISSUE)
+    assert issue.translation_key == key
+
+
+async def test_the_repair_text_fits_the_state(hass):
+    """Astro F1: near expiry says GitHub still works and gives the date; a blocked state says work stops."""
+    strings = json.loads((Path(integration.__file__).parent / "translations" / "en.json").read_text())["issues"]
+    for key in ("github_access_near_expiry", "github_access_near_expiry_token"):
+        text = strings[key]["description"]
+        assert text.startswith("GitHub still works.")
+        assert "cannot fetch" not in text
+        assert "{expires}" in text
+    for key in ("github_access_lost", "github_access_lost_token", "github_access_changed",
+                "github_access_check_failed"):
+        assert "cannot fetch, pull or push" in strings[key]["description"]
+    assert "Use a token instead" in strings["github_access_lost_token"]["description"]
+    assert "Use a token instead" in strings["github_access_near_expiry_token"]["description"]
+    assert "Connect again" not in strings["github_access_lost_token"]["description"]
+    assert "Connect again" in strings["github_access_lost"]["description"]
+    client = AsyncMock()
+    coordinator = integration.CodexCliCoordinator(hass, client)
+    await poll(coordinator, client, github_status("near_expiry", expires_at="2026-11-20T12:00:00+00:00"))
+    issue = ir.async_get(hass).async_get_issue("codex_cli", ISSUE)
+    assert issue.translation_placeholders["expires"] == "on 2026-11-20"
+    await poll(coordinator, client, github_status("near_expiry", expires_at=None))
+    issue = ir.async_get(hass).async_get_issue("codex_cli", ISSUE)
+    assert issue.translation_placeholders["expires"] == "within 7 days"
 
 
 async def test_disconnect_clears_the_repair(hass):

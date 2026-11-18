@@ -13,6 +13,14 @@
 
 ## 0.3.5 (unreleased)
 
+- The GitHub messages say what still works and what to do next. The Home Assistant repair for a sign-in that
+  expires soon now says that GitHub still works and gives the date; before, it said the assistant could not fetch,
+  pull or push. A token connection that expired or was refused is sent to Use a token instead, because Connect
+  again starts an App sign-in. The repair has its own text for access changed and for cannot be checked. A failed
+  Connect again now shows its reason on the page while the old sign-in stays; before, the page hid it. A refused
+  GitHub change names GitHub ("Only a Home Assistant administrator can manage GitHub.") instead of permission
+  requests or browser permissions, and the Read test and two repository refusals give a next step. Who may make a
+  change, and every check, stay the same.
 - Settings and its windows (Status, Remote connection, Permissions, Workspace rules) look more like Home Assistant's
   own settings pages. Text, number and list fields are filled fields with a line under them, as on the add-on's
   Configuration tab. Each part's main button is filled in the primary color, and the other buttons are text buttons.
