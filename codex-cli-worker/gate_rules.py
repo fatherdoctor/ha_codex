@@ -92,6 +92,11 @@ PATCH_BLOCK_RE = re.compile(r"\*\*\* Begin Patch.*?(?:\*\*\* End Patch|\Z)", re.
 ESCALATION_KEYS = ("sandbox_permissions", "with_escalated_permissions", "escalated", "require_escalated")
 ESCALATION_VALUES = {"require_escalated", "escalated", "true", "danger-full-access"}
 
+# The name Codex gives the Home Assistant call tool in hook events (mcp__<server>__<tool>). Codex asks the
+# person before each call of it (approval mode "prompt"). The hook answers first, so an allow here would skip
+# the person and a refusal would block every call: the hook gives it no decision.
+CALL_TOOL_HOOK_NAME = "mcp__home_assistant_call__call"
+
 
 @dataclass(frozen=True)
 class Finding:
@@ -863,6 +868,8 @@ def check_tool_call(event: str, payload: Any, remote_on: bool, rules: dict[str, 
     refusal or no opinion, and with no opinion the usual approval flow runs.
     """
     data = payload if isinstance(payload, dict) else {}
+    if data.get("tool_name") == CALL_TOOL_HOOK_NAME:
+        return ""
     event = str(data.get("hook_event_name") or event or "")
     tool_input = data.get("tool_input", data.get("input", data))
     if remote_on and (event == "PermissionRequest" or asks_for_escalation(tool_input)):

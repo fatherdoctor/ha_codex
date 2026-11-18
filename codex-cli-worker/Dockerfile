@@ -107,7 +107,7 @@ COPY push_guard.py /usr/share/ha_codex/push_guard.py
 RUN chmod 0555 /usr/local/bin/codex-github-askpass && chmod 0444 /usr/share/ha_codex/push_guard.py \
     && chown root:root /usr/local/bin/codex-github-askpass /usr/share/ha_codex/push_guard.py
 
-COPY core_address.py relay_reads.py relay_reads_mcp.py scheduling.py schedule_api.py scheduling_mcp.py approvals.py policy.py gate_rules.py shell_words.py remote_control.py relay_diagnostics.py verification.py verification_mcp.py browser_permissions.py browser_permission_policy.json ha_data.py ha_data_mcp.py browser.cjs browser_resources.cjs browser_permissions.cjs /
+COPY core_address.py relay_reads.py relay_reads_mcp.py scheduling.py schedule_api.py scheduling_mcp.py approvals.py policy.py gate_rules.py shell_words.py remote_control.py relay_diagnostics.py verification.py verification_mcp.py browser_permissions.py browser_permission_policy.json ha_data.py ha_data_mcp.py ha_call.py ha_call_mcp.py name_match.py browser.cjs browser_resources.cjs browser_permissions.cjs /
 COPY web /web
 # The Codex integration of the same release, which integration_sync.py installs in /config at start.
 # The build copies custom_components/codex_cli into integration/ first (see integration/README.md).
