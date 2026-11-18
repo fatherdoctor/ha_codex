@@ -334,7 +334,7 @@ Authenticated API clients can answer a live request using `POST /tasks/<task_id>
 
 ### Confirmed actions and planted commands
 
-Codex follows its defaults and the owner's `/config/AGENTS.md`. The integration does not bundle a house-practice file prescribing device categories, API-deletion practices or a writing style. Owners can choose such practices through their own workspace instructions or the starter kit. Permission cards and the enforced gate continue to operate independently of prose instructions.
+Codex follows its defaults and the owner's `/config/AGENTS.md`. The integration does not bundle a house-practice file prescribing device categories, API-deletion practices or a writing style. Owners can choose such practices through their own workspace instructions or the starter kit. The starter `/config/AGENTS.md` of a new install ([AGENTS.md and HA_TOKEN](#agentsmd-and-ha_token)) is an ordinary owner file, in plain view, that the owner can change or delete. Permission cards and the enforced gate continue to operate independently of prose instructions.
 
 Credential and permission-policy protections remain always on, including the Supervisor token, process environments,
 private sign-in files, secrets and the app's own settings. Normal remote actions follow Codex's native approval flow; explicit full-access requests remain refused.
@@ -645,6 +645,15 @@ Open **Settings > Accounts and connections > GitHub** in the app page. The card 
 ## AGENTS.md and HA_TOKEN
 
 The app web UI includes an editor for `/config/AGENTS.md` under **Settings** > **Workspace instructions** > **Workspace rules**. This file remains the source of truth for shared Codex project instructions. When the file does not exist, the task prompt does not mention it, and the page shows a setup hint above the message box until you write the file or choose **Dismiss** (the choice is kept in that browser).
+
+**Starter instructions.** On its first start, the app writes a short starter `/config/AGENTS.md` when the home has
+none. The text is `starter_agents.md` in the app's source. It tells Codex what `/config` is and gives seven general
+rules. Four of them matter most: change the home only on the owner's word, keep secrets secret, keep the old version
+of a changed file, and check the configuration before a restart. The app never replaces a file that is already there,
+a link included. It writes the starter once: when you delete the file, it stays deleted, and an update of an app
+that has started before writes nothing. The rules are instructions to Codex and not a safeguard; the sandbox, the
+command check and the approval cards work the same with or without them. To get the starter on an older install,
+copy the text from `starter_agents.md` into the editor.
 
 From **0.3.4**, Codex no longer looks for `/config/AGENTS.md` in every message. Codex loads the file when a chat
 starts. In each message the worker tells Codex whether the file exists and when it last changed, and Codex reads

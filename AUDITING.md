@@ -107,6 +107,7 @@ and the worker.
 |---|---|---|
 | After every exchange, including a cancelled or failed one, changed files are compared with the manifest taken before it, and an edit that plants a refused command is undone and reported | `server.py: run_task` (after the process is reaped), `refuse_planted_edits`, `build_manifest`, `diff_manifests` | `tests/test_backups.py`, `tests/test_server.py` |
 | Changed YAML is validated and Home Assistant's own config check is run | `server.py: validate_changed_files`, `check_home_assistant_config` | `tests/test_config_check.py` |
+| The starter `/config/AGENTS.md` is written only on the app's first start and only when nothing has that name; an existing file, link or folder is never replaced | `server.py: write_starter_agents_file`, called from `main` before `ensure_runtime_files` | `tests/test_starter_agents.py` |
 | A copy of each changed file is kept, without credentials | `server.py: create_snapshot`, `saved_copy`, `drop_credential_backups` | `tests/test_backups.py` |
 | With remote control on, `/config` is watched for refused content that arrived by a route the hook cannot see, and a Home Assistant repair is raised | `remote_control.py: ConfigWatch` | `tests/test_remote_control.py` |
 

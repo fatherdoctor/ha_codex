@@ -2,6 +2,12 @@
 
 ## 0.3.6 (unreleased)
 
+- A new install starts with workspace instructions. On its first start, the app writes a short starter
+  `/config/AGENTS.md` when the home has none: what `/config` is, and seven general rules for Codex (change the home
+  only on the owner's word, keep secrets secret, keep the old version of a changed file, check the configuration
+  before a restart, and three more). The file is yours to change or delete under **Settings** > **Workspace
+  instructions**. The app never replaces an existing file and writes the starter once only, so an install that has
+  started before is not changed by this update. The text is `codex-cli-worker/starter_agents.md`.
 - The app's own grant layer is removed: the five pre-approved action groups (Settings > Permissions overrides), the
   guard-rails block they read from `/config/AGENTS.md`, and the `home_assistant_actions` `act` tool with its
   **Allow once** card. Codex's own permission requests are now the only way a change to the house is approved. A

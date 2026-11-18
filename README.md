@@ -82,7 +82,8 @@ says so once in a notification.
 Every app option is in [codex-cli-worker/DOCS.md](codex-cli-worker/DOCS.md).
 
 Put rules for your house in `/config/AGENTS.md`. The chat has an editor for it under **Settings** > **Workspace instructions** >
-**Workspace rules**. Codex uses its defaults and your workspace instructions; the app bundles no house rules.
+**Workspace rules**. Codex uses its defaults and your workspace instructions; the app bundles no house rules. A new
+install that has no `/config/AGENTS.md` gets a short starter file there once, which is yours to change or delete.
 
 ## Updating
 
