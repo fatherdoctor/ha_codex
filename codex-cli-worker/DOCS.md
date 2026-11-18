@@ -680,7 +680,7 @@ Tasks run without an interactive terminal. If Codex needs a decision, it calls t
 
 The worker reads these calls from the exchange's events and decides the status in this order:
 
-1. A failure that the worker finds itself: no answer, an exit with an error, a timeout, a stall, a configuration that fails its check, or a refused configuration edit. A question is not asked over a broken configuration.
+1. A failure that the worker finds itself: no answer, an exit with an error, a timeout, a stall, or a configuration that fails its check. A question is not asked over a broken configuration.
 2. A `report_failure` call.
 3. An `ask_owner` call.
 4. Completed.

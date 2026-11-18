@@ -45,7 +45,7 @@ Paths are under `codex-cli-worker/` unless they start with `custom_components/`.
 | The worker's memory cannot be read by a process it starts | `server.py: make_worker_undumpable` | `tests/test_undumpable.py` (`test_the_flag_is_set`) |
 | Each way in (the chat page, the ChatGPT app, `codex_cli.start_task`) gets the Home Assistant tools that DOCS.md "Ways in" lists, and no others | `server.py: build_app_server_args`, `build_codex_args`, `relay_read_mcp_args`; `remote_control.py: Supervisor._command` | `tests/test_surface_matrix.py` |
 | Full access is not available, whatever a client or an option asks for | `gate/requirements.toml` (Codex's managed requirements) and `policy.py: load_policy`, `policy_problem`; checked before each exchange at the top of `server.py: run_task` | `tests/test_policy.py` |
-| No hook runs: the managed requirements allow only managed hooks and the image ships none, so a hook planted in `/config` or Codex's home (which would run outside the sandbox) is ignored | `gate/requirements.toml` (`allow_managed_hooks_only`); no `managed_config.toml` in the image (`Dockerfile`) | `tests/test_guards_removed.py` |
+| No hook runs: the managed requirements allow only managed hooks and the image ships none, so a hook planted in `/config` or Codex's home (which would run outside the sandbox) is ignored | `gate/requirements.toml` (`allow_managed_hooks_only`); no `managed_config.toml` in the image (`Dockerfile`) | `tests/test_guards_removed.py` shows the setting and that the image ships no managed hooks. That Codex then ignores a planted hook is Codex's own behavior: no test here runs Codex, so the lab pass before a release checks it |
 
 ### Layer 2: who can approve
 

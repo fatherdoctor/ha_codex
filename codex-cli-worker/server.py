@@ -4433,8 +4433,6 @@ def reader_thread(task_id: str, stream_name: str, handle, session_holder: dict[s
         if not line:
             break
         write_task_log(task_id, stream_name, line)
-        if stream_name == "stderr":
-            record_diagnostic("gate_message", task_id, line)
         if stream_name == "stdout":
             try:
                 event = json.loads(line)

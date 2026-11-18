@@ -245,6 +245,7 @@ class RecorderTests(unittest.TestCase):
         self.assertEqual(rows[1]['events'][0]['result'], 'unknown')
 
     def test_gate_classification_does_not_infer_hidden_rules(self):
+        # Since 0.3.6 no approval card carries a rule of the app's own; the old policy note is now plain prose.
         self.recorder.begin('task', 'addon_page')
         self.recorder.approvals(
             'task',
@@ -259,7 +260,7 @@ class RecorderTests(unittest.TestCase):
         }])
         self.recorder.finish('task', 'done')
         gates = [x['rule'] for x in self.store.export()['interactions'][0]['events'] if x['kind'] == 'gate']
-        self.assertEqual(gates, ['other', 'protected_policy'])
+        self.assertEqual(gates, ['other', 'other'])
 
     def test_storage_failure_never_changes_execution(self):
         # A storage exception carries private text that must not affect task execution.
