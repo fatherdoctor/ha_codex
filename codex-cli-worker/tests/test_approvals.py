@@ -13,7 +13,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from test_server import server
-from approvals import AppServerSession, COMMAND_APPROVAL, FILE_APPROVAL, DISPLAY_LIMIT
+from approvals import AppServerSession, COMMAND_APPROVAL, FILE_APPROVAL, DISPLAY_LIMIT, REQUEST_LIMIT
 
 
 ADMIN_ID = "a" * 32
@@ -313,6 +313,65 @@ class ApprovalTests(unittest.TestCase):
         self.session.read(io.StringIO("not json\n"))
         self.assertTrue(self.session.error)
         self.assertEqual(self.records[-1]["status"], "expired")
+
+    def test_request_before_the_turn_starts_is_refused(self):
+        """Before the turn starts, a request with an empty turn id does not match the empty active turn."""
+        early = AppServerSession(
+            Transport(), lock=threading.RLock(),
+            thread_params={"sandbox": "workspace-write", "approvalPolicy": "on-request", "approvalsReviewer": "user"},
+            turn_params={"input": []}, on_event=self.events.append,
+            on_approvals=lambda records: setattr(self, "records", records),
+            on_final=self.finals.append, is_active=lambda: True, redact=lambda text: text,
+        )
+        early.start()
+        early.receive({"id": "worker-1", "result": {}})
+        early.receive({"id": "worker-2", "result": {
+            "thread": {"id": "thread"}, "approvalPolicy": "on-request", "approvalsReviewer": "user"}})
+        self.assertEqual(early.turn_id, "")
+        for request_id, method in enumerate((COMMAND_APPROVAL, FILE_APPROVAL), 7):
+            with self.subTest(method=method), self.assertRaises(ValueError):
+                early.receive({"id": request_id, "method": method, "params": {
+                    "threadId": "thread", "turnId": "", "itemId": "item", "command": "ls", "cwd": "/config"}})
+        self.assertFalse(self.records)
+        self.assertFalse({7, 8} & {message.get("id") for message in early.writer.messages()})
+
+    def test_repeated_request_id_is_an_error_also_at_the_request_limit(self):
+        """At the limit a new request is declined, but a repeated live request id still stops the exchange."""
+        for request_id in range(REQUEST_LIMIT):
+            self.request(request_id=request_id)
+        self.assertEqual(len(self.records), REQUEST_LIMIT)
+        sent = len(self.writer.messages())
+        with self.assertRaises(ValueError):
+            self.request(request_id=0)
+        self.assertEqual(len(self.writer.messages()), sent)
+        self.request(request_id=REQUEST_LIMIT)
+        self.assertEqual(self.writer.messages()[-1], {"id": REQUEST_LIMIT, "result": {"decision": "decline"}})
+        self.assertEqual(len(self.records), REQUEST_LIMIT)
+
+    def test_plan_update_becomes_one_to_do_step_and_a_malformed_one_is_ignored(self):
+        """Codex's plan is shown as a to-do step; an update of the wrong shape or turn changes nothing."""
+        def plan(entries, *, turn="turn", thread="thread"):
+            self.session.receive({"method": "turn/plan/updated", "params": {
+                "threadId": thread, "turnId": turn, "plan": entries}})
+
+        plan([{"step": "Read the automation", "status": "completed"}, {"step": "Fix the trigger", "status": "inProgress"}])
+        self.assertEqual(self.events[-1], {"type": "item.updated", "item": {
+            "id": "app-server:plan", "type": "todo_list",
+            "items": [{"text": "Read the automation", "completed": True}, {"text": "Fix the trigger", "completed": False}]}})
+        seen = len(self.events)
+        malformed = (
+            None, "Read the automation", {"step": "Read", "status": "pending"}, [None], [["Read", "pending"]],
+            [{"status": "pending"}], [{"step": "Read"}], [{"step": 1, "status": "pending"}],
+            [{"step": "Read", "status": None}], [{"step": "Read", "status": "pending"}, "Fix"],
+            [{"step": "Read", "status": "pending"}] * 51,
+        )
+        for entries in malformed:
+            with self.subTest(entries=entries):
+                plan(entries)
+        plan([{"step": "Other turn", "status": "pending"}], turn="old")
+        plan([{"step": "Other thread", "status": "pending"}], thread="other")
+        self.assertEqual(len(self.events), seen)
+        self.assertIsNone(self.session.error or None)
 
     def test_final_answer_uses_completed_item_and_expires_pending_requests(self):
         """Only a completed assistant message becomes the structured final output."""
