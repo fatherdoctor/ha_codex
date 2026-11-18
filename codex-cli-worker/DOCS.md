@@ -330,7 +330,39 @@ When a request starts waiting, the worker sends a **Codex needs permission** not
 
 The request and decision remain in the exchange's `approvals` history, with sensitive values redacted. An incomplete, oversized, or redacted action can be denied but cannot be allowed, since hidden text could contain executable instructions. Ask for an action whose command, working folder, paths, and diff can be shown in full. API calls should refer to credentials through environment variables instead of embedding their values in a command. This first version supports individual command and file-change requests; broad turn or session permission grants and permanent policy changes are refused. Input that Codex wants to type into a command already running outside the sandbox is shown and can only be denied; Codex can run the whole action as one command instead. API credentials are separate: an approval does not create a Home Assistant token or expose the Supervisor token to Codex. The built-in verification tool continues to work through the worker without shell network approval.
 
+A request is shown only when it belongs to the exchange that is running now: a request that arrives before Codex started the exchange, or one for another exchange, stops the exchange without a card. A request that repeats the id of a request that is still waiting also stops the exchange, also when the exchange has reached its limit of 50 requests. After that limit, each new request is denied with a line in the chat.
+
 Authenticated API clients can answer a live request using `POST /tasks/<task_id>/approvals/<approval_id>` with `{"turn_id":"<current_turn_id>","decision":"allow"}` or `"deny"`. Read the redacted `approvals` records from `GET /tasks/<task_id>` first. A stale or already answered request returns HTTP 409. Task summaries include `permission_required` while an exchange is waiting. Permission decisions are made directly on the live exchange and are never queued as chat messages.
+
+### Changes to the house: the `call` tool
+
+From **0.3.6**, a chat on the page changes the house through one tool, `home_assistant_call` `call`. It sends one
+Home Assistant action (a service call), for example `light.turn_off` with a target, `automation.reload` or
+`homeassistant.restart`. The app sets the tool's approval mode to `prompt`, so Codex asks you each time, with no
+remembered answer: the question has no "Allow for this session" and no "don't ask again". It shows the service,
+the target and the data. The command check gives the tool's request no decision, so the answer is always yours.
+A scheduled run does not get the tool, since nobody is there to answer.
+
+The tool gives Codex no token. Its bridge passes the request to the worker over a private socket, with a key that
+is valid for the running message only. The worker sends the call to Home Assistant once, with its own access, and
+checks these things first, in every mode:
+
+- A request without the current key of a running chat sends nothing.
+- The service must be `domain.service`. `entity_id`, `device_id`, `area_id`, `floor_id` and `label_id` go in
+  `target`, the other fields in `data`. A request in any other form sends nothing.
+
+The tool refuses no service by name. Your answer to Codex's question is the only gate, so read the service before
+you allow it. A call can reach the Supervisor: a `hassio` service, `update.install` on an update entity (an app,
+Home Assistant OS or Core, this app too) or `backup.create`. A call can also run code that you wrote, for example a
+`shell_command`, `python_script`, `pyscript` or `rest_command` service. The app keeps no log of its own of the
+calls; Home Assistant's logbook and history show what changed.
+
+The keys of the app's tools (`HA_*_CAPABILITY`) are kept out of the commands that Codex runs, with Codex's
+`shell_environment_policy` setting. So a command cannot write to the socket and skip Codex's question. In a mode
+without a sandbox, a command can read the environment of the Codex process; that mode has no question to skip,
+and the checks above still hold.
+
+These checks do not cover a command that uses the `HA_TOKEN` option (see "AGENTS.md and HA_TOKEN").
 
 ### Confirmed actions and planted commands
 
@@ -358,21 +390,21 @@ Codex can be reached three ways: the chat page, the ChatGPT app paired through r
 |---|---|---|---|
 | Read an entity's state or find an entity | `home_assistant.verify` | `home_assistant_relay.read` | `home_assistant.verify` |
 | Read history or long-term statistics | `home_assistant_data.history`, `home_assistant_data.statistics` | not available | `home_assistant_data.history`, `home_assistant_data.statistics` |
-| Control a device or call a service | `home_assistant_actions.act` | not available | `home_assistant_actions.act` |
-| Send a notification | `home_assistant_actions.act` | not available | `home_assistant_actions.act` |
+| Control a device or call a service | `home_assistant_call.call` | not available | `home_assistant_call.call` |
+| Send a notification | `home_assistant_call.call` | not available | `home_assistant_call.call` |
 | Ask the owner a question or report the turn's state | `home_assistant_data.ask_owner`, `home_assistant_data.report_failure`, `home_assistant_data.exchange_info` | not available | `home_assistant_data.ask_owner`, `home_assistant_data.report_failure`, `home_assistant_data.exchange_info` |
 | Propose a schedule or use the mailbox | `codex_scheduling.propose_schedule`, `codex_scheduling.list_schedules`, `codex_scheduling.read_mailbox`, `codex_scheduling.post_mailbox` | not available | `codex_scheduling.propose_schedule`, `codex_scheduling.list_schedules`, `codex_scheduling.read_mailbox`, `codex_scheduling.post_mailbox` |
 | Work with a GitHub repository | `codex_github.github_git` | not available | `codex_github.github_git` |
 
 - `codex_cli.start_task` starts the same kind of task as the chat page, so it gets the same tools.
-- A notification goes through the `act` tool only when the Security and people group is on
-  ([Permissions overrides](#permissions-overrides)).
+- Codex asks you before each `call`, on the chat page
+  ([Changes to the house: the `call` tool](#changes-to-the-house-the-call-tool)).
 - File edits and shell commands use Codex's own tools on every way in, and the [sandbox](#sandbox) applies on every
   way in. On the chat page and for `codex_cli.start_task`, a request for more access shows on the chat page as a
   [permission request](#permission-requests). The ChatGPT app shows Codex's own requests in the app instead, as
   [Remote control from the ChatGPT app](#remote-control-from-the-chatgpt-app) describes.
 - A scheduled run and a message on the lead agent channel also start a task. They use the same launcher as the chat
-  page and get the page's tools. A Read only schedule narrows the sandbox, not the tools
+  page and get the page's tools, except the `call` tool: nobody is there to answer. A Read only schedule narrows the sandbox, not the tools
   ([Scheduled runs and the lead agent channel](#scheduled-runs-and-the-lead-agent-channel)).
 - "Not available" means the way in has no tool for that request.
 
@@ -618,7 +650,7 @@ When the state changes, and only then:
 
 - The app fires the Home Assistant event `codex_cli_github_access` with the state, the previous state, the reason, the account login, the missing and added repositories, the permission problem and the expiry. It never sends a token or a code. The integration fires the same event, with `source: integration`, when it sees the change, so an automation still works if the app's own call failed. An automation can route it to your notify service.
 - The app sends one notification through its `notify_service` option, or a persistent notification (`codex_cli_github`) without one.
-- The integration raises the repair **The Codex add-on's GitHub sign-in needs attention** (`github_access_lost`). It is an error for expired, revoked and cannot be checked, and a warning for expires soon and access changed. It clears when the check is OK or you disconnect. If you never connected, there is no repair.
+- The integration raises one repair (`github_access_lost`). It is an error for expired, revoked and cannot be checked, and a warning for expires soon and access changed. Its text fits the state and the kind of sign-in: for expires soon it says that GitHub still works and gives the date, and for a token it names **Use a token instead**, because **Connect again** starts an App sign-in. It clears when the check is OK or you disconnect. If you never connected, there is no repair.
 - A banner above the chat offers **Open GitHub settings**.
 
 ### When GitHub stops working
@@ -628,9 +660,10 @@ Open **Settings > Accounts and connections > GitHub** in the app page. The card 
 - **Not connected to GitHub:** No sign-in is saved, or the app was restored from a backup. Press **Connect GitHub** to connect the App. If you use a fine-grained token, open **Use a token instead**.
 - **Connecting:** The App is waiting for you to finish on GitHub. Follow the link on the card. If the code expires, press **Get a new code**. To start over while it is waiting, press **Cancel**, then **Connect GitHub**.
 - **Connected to GitHub:** The access check is OK. If a repository operation still fails, press **Read test** to check the connected repositories.
-- **Connected, but the sign-in expires within 7 days:** The saved token is close to its expiry. Open **Use a token instead** and save a new fine-grained token, or press **Connect again** to use the App.
-- **The GitHub sign-in expired:** The saved sign-in is past its expiry. Press **Connect again** for the App, or open **Use a token instead** to save a new token.
-- **GitHub refused the stored sign-in (revoked):** GitHub no longer accepts the saved sign-in. Press **Connect again** for the App, or open **Use a token instead** to save a new token.
+- **GitHub still works, but this sign-in (or token) expires within 7 days:** The assistant can still use GitHub. Before the date, press **Connect again** for the App, or create a new fine-grained token and open **Use a token instead** for a token.
+- **The GitHub sign-in expired** or **This GitHub token expired:** The saved sign-in is past its expiry. For the App, press **Connect again**. For a token, create a new one on GitHub, then open **Use a token instead**.
+- **GitHub no longer accepts this sign-in (or token):** GitHub refused the saved sign-in (revoked). For the App, press **Connect again**; if GitHub still refuses it, restore the App's repository access on GitHub. For a token, create a new one, then open **Use a token instead**.
+- **The new GitHub sign-in failed:** A **Connect again** did not finish. The card gives GitHub's reason, and the previous sign-in stays as it was.
 - **The GitHub sign-in reaches different repositories or access than you connected:** GitHub reports a changed repository list or permissions. Check the list and access shown on the card. If the repository change is intended and **Accept this access** is available, press it. If you did not intend the repository change, restore the repository selection for the App on GitHub. Then press **Check now**. If permissions changed, restore Contents read and write on GitHub, then press **Check now**.
 - **The GitHub sign-in cannot be checked:** GitHub could not be reached repeatedly, or the check found another error. Check the last-check reason and your connection, then press **Check now**.
 
@@ -652,6 +685,11 @@ it again only after a change. A change you make to the file still reaches a chat
 next message.
 
 The optional `HA_TOKEN` app option is passed to Codex subprocesses as the `HA_TOKEN` environment variable. Configure it only if you want Codex tasks to call Home Assistant APIs directly. A Home Assistant long-lived access token inherits its user's permissions; use a dedicated user with permissions appropriate for the intended work.
+
+From **0.3.6**, the instructions tell Codex to change the house with the `call` tool, reloads and restarts
+included, and to use `HA_TOKEN` only for an API call that is not a service. A command that uses the token is still
+a command: in the sandboxed modes it needs network access, so Codex asks first. The `call` tool's checks do not
+cover such a command; the command check (hook) reads it.
 
 From **0.1.68**, a task that has `HA_TOKEN` also gets `HA_URL`, the address those calls go to, and the worker's instructions tell Codex to use the two together. The app's own calls to Home Assistant keep using the Supervisor proxy with the app's own token and do not use this option.
 
@@ -744,7 +782,7 @@ A report with logs is much easier to fix. On Home Assistant 2026.11:
 
 ## Notifications
 
-A notification about a chat goes out only while the chat waits for you: a question to answer, or a permission request to decide. A completed answer and a failure send nothing; read both in the chat. A chat has one notification at a time, with the id `codex_cli_wait_<task_id>`. The app dismisses the persistent notification as soon as the chat no longer waits: you answer, you stop the chat, you delete it, or the request expires. With a companion app service (`notify.mobile_app_...`), the push carries the same id as its `tag`, and the app clears it from your phone at the same time. Any other notify service cannot clear a push, so that push stays until you clear it; a tap on it after the wait ended does nothing. An answer that waits in the queue behind another chat keeps the notification until the answer starts. A dismissal that Home Assistant does not take is not tried again.
+A notification about a chat goes out only while the chat waits for you: a question to answer, or a permission request to decide. A completed answer and a failure send nothing; read both in the chat. A chat has one notification at a time, with the id `codex_cli_wait_<task_id>`. The app dismisses the persistent notification as soon as the chat no longer waits: you answer, you stop the chat, you delete it, the request expires, or the app restarts. With a companion app service (`notify.mobile_app_...`), the push carries the same id as its `tag`, and the app clears it from your phone at the same time. Any other notify service cannot clear a push, so that push stays until you clear it; a tap on it after the wait ended does nothing. An answer that waits in the queue behind another chat keeps the notification until the answer starts. A dismissal that Home Assistant does not take is not tried again.
 
 Some notifications are not about a chat. **Codex CLI is not signed in** and the sign-in code (id `codex_cli_login`) go away when you sign in or stop the sign-in. **Codex sign-in complete**, **Codex sign-in failed** and **Codex signed out** (id `codex_cli_worker`) and the GitHub notice (id `codex_cli_github`) stay until you dismiss them. Leave `notify_service` unset or empty to use Home Assistant persistent notifications. If you want push notifications, set it to a Home Assistant notify service such as `notify.mobile_app_your_phone`.
 
@@ -782,6 +820,8 @@ API: `POST /tasks/<task_id>/reply` and `POST /tasks/<task_id>/continue` accept `
 ## Saved conversations
 
 The web UI lists recent chats in a resizable sidebar and opens their messages on the right. On mobile, the sidebar becomes a drawer. Select a saved chat and send a message to continue, or choose **New chat** for a fresh session. Settings contains account controls and workspace instructions.
+
+To make the text easier to read, open **Settings** > **Text size** and choose **Normal**, **Larger** or **Largest**. The choice applies to the whole page and is saved in that browser only, so a phone and a tablet can each keep their own size.
 
 Below **Home Assistant workspace**, the sidebar shows how much of the account's 5-hour and 7-day quota is left. From **0.1.67**, each has a bar next to the percentage. The filled part is the quota left: green, and red when less than 5% is left. Hover over a bar to see when the quota resets. The worker checks the quota every few minutes, and not while a task is running. Until it has a value, the bar is an empty outline.
 
@@ -840,7 +880,7 @@ The authenticated worker API exposes `GET /chat-options` for choices and default
 
 ### Live activity
 
-From **0.1.53**, the chat shows what Codex is doing while it works on your latest message. Steps appear under the message as Codex reports them: reasoning headlines, progress notes, the commands it runs, the files it edits, web searches, and tool calls. A failed command or an error is highlighted. When a run is stopped or fails, the list ends with a **Stopped** or **Failed** row. The list is expanded while the run lasts. When it finishes, it closes to one gray line above the answer, **Worked for** and the exchange's total time, which opens the steps and the answer's checks. Only the latest exchange of a chat shows steps; on an earlier exchange the line opens its checks alone. When a check failed, a short **1 check failed** line stays under the answer and opens the checks. A permission request you have answered shrinks to one line, such as **Allowed once: ls /config**, that opens to its details.
+From **0.1.53**, the chat shows what Codex is doing while it works on your latest message. Steps appear under the message as Codex reports them: reasoning headlines, progress notes, the commands it runs, the files it edits, web searches, and tool calls. A failed command or an error is highlighted. When a run is stopped or fails, the list ends with a **Stopped** or **Failed** row. The list is expanded while the run lasts. When it finishes, it closes to one gray line above the answer, **Worked for** and the exchange's total time, which opens the steps and the answer's checks. Only the latest exchange of a chat shows steps; on an earlier exchange the line opens its checks alone. When a check failed, a short **1 check failed** line stays under the answer and opens the checks. A permission request you have answered shrinks to one line, such as **Allowed once: ls /config**, that opens to its details. Codex's plan shows as one to-do step that is updated in place as Codex works through it; a plan update that does not have the expected form, or that has more than 50 entries, is ignored.
 
 From **0.1.63**, the list starts as soon as a message is accepted. The worker reports its own steps alongside those of Codex: recording the state of the configuration files, saving a full snapshot when that option is on, starting Codex, waiting for its first response, and checking the changes afterwards. The heading shows how long the exchange has been running, and its dot pulses for as long as the run lasts.
 
@@ -892,7 +932,7 @@ API: `POST /tasks/<task_id>/pin` with `{"pinned": true}` or `{"pinned": false}` 
 
 `GET /tasks` and `codex_cli.list_tasks` accept optional `limit` (1–500), `offset`, `status`, `order` (`created_asc` or `updated_desc`; the worker API also accepts `pinned_first`), and `summary` parameters. `summary: true` returns compact entries for the sidebar. Without filters, all tasks are returned in their original creation order. `GET /tasks/<task_id>` includes `turns`, `history_incomplete`, and `can_continue`. The latter indicates an eligible task with a recorded session ID; availability of its session file is checked when continuing. `POST /tasks/<task_id>/continue` accepts a JSON `message`.
 
-Each new exchange stores its user message, timestamps, status, and response in the task's `turns` list. Prompts, final output, backups, and the list of changed files are stored separately under `<task_root>/<task_id>/turns/<turn_id>/`. The task-level result and existing result events continue to describe the latest exchange. Old tasks are adapted from their available prompt, replies, and last result, with a notice that earlier responses may be missing. History is retained until its files are removed; there is no automatic expiry, except for [backups](#backups).
+Each new exchange stores its user message, timestamps, status, and response in the task's `turns` list. Prompts, final output, backups, and the list of changed files are stored separately under `<task_root>/<task_id>/turns/<turn_id>/`. The task-level result and existing result events continue to describe the latest exchange. Old tasks are adapted from their available prompt, replies, and last result, with a notice that earlier responses may be missing. When a chat's `task.json` is lost and the chat is rebuilt from the task index, its latest exchange keeps its turn id, so the steps saved for that exchange stay linked to it after you continue the chat. History is retained until its files are removed; there is no automatic expiry, except for [backups](#backups).
 
 For local browser checks, run `python codex-cli-worker/tests/web_fixture.py` from the repository root, then `node codex-cli-worker/tests/browser_smoke.cjs` with Playwright available. The fixture uses temporary storage and simulated responses, and never launches Codex or contacts Home Assistant. Set `CODEX_CHAT_BROWSER=msedge` to use installed Edge, and optionally `CODEX_CHAT_QA_DIR` to choose a screenshot directory outside the repository.
 

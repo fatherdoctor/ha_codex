@@ -2,13 +2,16 @@
 
 ## 0.3.6 (unreleased)
 
-- Home Assistant shows a Codex notification only while a chat waits for you: a question, or a permission request.
-  A failed action or a failed chat no longer makes one; the failure shows in the chat. Each waiting chat has one
-  notification, `codex_cli_wait_<task_id>`, and the app dismisses it when you answer, stop or delete the chat, or
-  when the request expires, unless the chat waits again by then. With a companion app notify service, the push
-  carries the same id as its tag, and the app clears it from the phone at the same time. A tap on a phone
-  notification that the worker refuses no longer makes a notification either; the integration logs why. The
+- Home Assistant shows a Codex notification only while a chat waits for you: a question, or a permission request. A
+  failed action or a failed chat no longer makes one; the failure shows in the chat. Each waiting chat has one
+  notification, `codex_cli_wait_<task_id>`, and the app dismisses it when you answer, stop or delete the chat, when
+  the request expires, or when the app restarts, unless the chat waits again by then. With a companion app notify
+  service, the push carries the same id as its tag, and the app clears it from the phone at the same time. A tap on a
+  phone notification that the worker refuses no longer makes a notification either; the integration logs why. The
   sign-in and GitHub notifications are not about a chat and are unchanged.
+- **Text size** for the chat page: Normal, Larger (115 %) or Largest (130 %), from **Settings > Text size**. It
+  scales the messages, code, buttons, the chat list, Settings, the sign-in text, the schedule dialog and the list of
+  steps together, is remembered on each device, and still fits a phone screen at Largest.
 - The app's own grant layer is removed: the five pre-approved action groups (Settings > Permissions overrides), the
   guard-rails block they read from `/config/AGENTS.md`, and the `home_assistant_actions` `act` tool with its
   **Allow once** card. Codex's own permission requests are now the only way a change to the house is approved. A
@@ -18,8 +21,25 @@
   `/data/codex-home/house-rules/permission-overrides.json`, `/data/house-rules/confirmed.json`,
   `/data/permission-overrides-backups` and `/data/permission-overrides.sock` behind; the app no longer reads them, and you can delete them.
 
+- A chat on the page changes the house through one new tool, `home_assistant_call` `call`: one Home Assistant action
+  (a service call), reloads and restarts included. Codex asks you each time, with no remembered answer, and shows
+  the service, the target and the data; the command check gives the request no decision. The tool gives Codex no
+  token: the worker sends the call once, with its own access. It refuses no service by name: your answer is the
+  gate, and a call can reach the Supervisor (for example `update.install`) or run your own `shell_command`. A
+  scheduled run does not get the tool. The keys of the app's tools are now kept out of the commands Codex runs. The
+  instructions point changes to the tool; `HA_TOKEN` is now only for an API call that is not a service. The page
+  shows Codex's request for the tool in a later step; until then the page can only decline it.
+
 ## 0.3.5 (unreleased)
 
+- The GitHub messages say what still works and what to do next. The Home Assistant repair for a sign-in that
+  expires soon now says that GitHub still works and gives the date; before, it said the assistant could not fetch,
+  pull or push. A token connection that expired or was refused is sent to Use a token instead, because Connect
+  again starts an App sign-in. The repair has its own text for access changed and for cannot be checked. A failed
+  Connect again now shows its reason on the page while the old sign-in stays; before, the page hid it. A refused
+  GitHub change names GitHub ("Only a Home Assistant administrator can manage GitHub.") instead of permission
+  requests or browser permissions, and the Read test and two repository refusals give a next step. Who may make a
+  change, and every check, stay the same.
 - Settings and its windows (Status, Remote connection, Permissions, Workspace rules) look more like Home Assistant's
   own settings pages. Text, number and list fields are filled fields with a line under them, as on the add-on's
   Configuration tab. Each part's main button is filled in the primary color, and the other buttons are text buttons.
@@ -43,6 +63,14 @@
 - A permission request that waits for you now shows at the bottom of the chat, below the "Working" lines, and the
   chat scrolls to it once when it first appears. Before, it sat above those lines and was easy to miss. A request
   you already answered stays where it was. No approval or permission rule changed.
+- Four small fixes from upstream 0.1.82, ported by hand. A command or file request that arrives before Codex has
+  started the exchange is now refused and stops the exchange; before, a request with an empty turn id matched the
+  empty turn id of an exchange that had not started. A request that repeats the id of a request still waiting
+  stops the exchange also after the limit of 50 requests; before, it was denied like a new request. Codex's plan
+  shows as one to-do step in the activity list, updated in place; a plan update of the wrong form is ignored, and
+  the text is redacted like every other step. A chat rebuilt from the task index after its `task.json` was lost
+  keeps the turn id of its latest exchange, so the steps saved for it stay linked. Nothing from upstream's Full
+  access changes is included.
 - Settings keeps what needs a button, a sign-in or a confirm step. Plain values move to the app's Configuration
   tab, so each value has one place to change it. A new option, Interactions to keep (10 to 100), replaces the field
   on the page; an install that saved a number keeps it, and a new install keeps 25. The remote control machine name

@@ -26,6 +26,8 @@ from shell_words import split_words, strip_comments
 APPROVAL_GONE = "This permission request is no longer waiting for an answer."
 DISPLAY_LIMIT = 32000
 REQUEST_LIMIT = 50
+# A plan update with more entries than this is ignored: nobody reads a plan that long.
+PLAN_STEP_LIMIT = 50
 COMMAND_APPROVAL = "item/commandExecution/requestApproval"
 # The app's permission policy, its house rules and Codex's own configuration: a change there is never allowed here.
 PROTECTED_PREFIXES = ("/usr/share/ha_codex", "/data/codex-home/AGENTS.md", "/data/codex-home/config.toml",
@@ -554,14 +556,16 @@ class AppServerSession:
 
     def _publish_approval(self, request_id: Any, method: str, params: dict[str, Any]) -> None:
         """Expose only a request for the active thread and turn, with an opaque UI ID."""
-        if params.get("threadId") != self.thread_id or params.get("turnId") != self.turn_id:
+        # Before the turn starts, turn_id is empty and a request without a turnId would match it.
+        if not self.turn_id or params.get("threadId") != self.thread_id or params.get("turnId") != self.turn_id:
             raise ValueError("permission request does not belong to the active exchange")
+        # A repeated request id is an error even when the request limit is reached.
+        if request_id in self._pending.values():
+            raise ValueError("duplicate live permission request")
         if len(self._records) >= REQUEST_LIMIT:
             self._write({"id": request_id, "result": {"decision": "decline"}})
             self.on_event({"type": "error", "message": "Too many permission requests in this exchange; request denied."})
             return
-        if request_id in self._pending.values():
-            raise ValueError("duplicate live permission request")
         reason, _ = self._display(params.get("reason"))
         clipped = False
         # Anything but a new command, such as input typed into a running one, is shown but never allowed.
@@ -711,6 +715,9 @@ class AppServerSession:
                     self.on_event({"type": "turn.started"})
             elif params.get("threadId") == self.thread_id and params.get("turnId") == self.turn_id and method in {"item/started", "item/completed"}:
                 self._item(method, params["item"])
+            elif (method == "turn/plan/updated" and self.turn_id
+                  and params.get("threadId") == self.thread_id and params.get("turnId") == self.turn_id):
+                self._plan(params.get("plan"))
             elif method == "item/fileChange/patchUpdated" and params.get("threadId") == self.thread_id and params.get("turnId") == self.turn_id:
                 self._cache_file_changes(str(params["itemId"]), params.get("changes") or [])
             elif method == "turn/completed" and params.get("threadId") == self.thread_id:
@@ -770,6 +777,21 @@ class AppServerSession:
             raise ValueError("File changes were updated while permission was pending. The exchange was stopped.")
         self._file_changes[item_id] = changes
         return changes
+
+    def _plan(self, plan: Any) -> None:
+        """Show Codex's plan as one to-do step; ignore an update that does not have the expected shape.
+
+        Each entry must be a dictionary with a text "step" and a text "status". The text is not
+        trusted here: the event goes to on_event like every other step, where server.py redacts it
+        (redact_event) and cuts it to the activity length limit (clip_activity_text).
+        """
+        if not isinstance(plan, list) or len(plan) > PLAN_STEP_LIMIT:
+            return
+        for entry in plan:
+            if not isinstance(entry, dict) or not isinstance(entry.get("step"), str) or not isinstance(entry.get("status"), str):
+                return
+        items = [{"text": entry["step"], "completed": entry["status"] == "completed"} for entry in plan]
+        self.on_event({"type": "item.updated", "item": {"id": "app-server:plan", "type": "todo_list", "items": items}})
 
     def _item(self, method: str, item: dict[str, Any]) -> None:
         """Translate app-server items into the worker's existing activity format."""
