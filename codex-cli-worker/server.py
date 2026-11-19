@@ -47,6 +47,7 @@ from ha_data import HomeAssistantData
 from ha_call import RELAY_TASK as RELAY_CALL_TASK, HomeAssistantCall
 import ha_data_mcp
 import remote_control
+import tool_threads
 from core_address import CoreAddress, probe_core
 from relay_reads import RelayReads, ReadError as RelayReadError
 import schedule_api
@@ -4253,6 +4254,7 @@ def codex_env() -> dict[str, str]:
     from the add-on option, together with HA_URL, the address it works at.
     """
     env = dict(os.environ)
+    # The *_CAPABILITY names are no longer set for a chat; they are still removed in case a parent process has them.
     for key in ("SUPERVISOR_TOKEN", "HASSIO_TOKEN", "HA_TOKEN", "HA_URL", "HA_VERIFICATION_CAPABILITY", "HA_DATA_CAPABILITY", "HA_DATA_SOCKET", "HA_RELAY_CAPABILITY", "HA_RELAY_SOCKET", "CODEX_SCHEDULE_SOCKET",
                 "HA_CALL_CAPABILITY", "HA_CALL_SOCKET"):
         env.pop(key, None)
@@ -4483,7 +4485,6 @@ def verification_mcp_args() -> list[str]:
     settings = {
         "command": sys.executable,
         "args": [str(Path(__file__).with_name("verification_mcp.py"))],
-        "env_vars": ["HA_VERIFICATION_CAPABILITY"],
         "enabled": True,
         "required": True,
         "startup_timeout_sec": 10,
@@ -4501,7 +4502,6 @@ def data_mcp_args() -> list[str]:
     settings = {
         "command": sys.executable,
         "args": [str(Path(__file__).with_name("ha_data_mcp.py"))],
-        "env_vars": ["HA_DATA_CAPABILITY"],
         "enabled": True,
         "required": True,
         "startup_timeout_sec": 10,
@@ -4516,7 +4516,7 @@ def data_mcp_args() -> list[str]:
             for argument in ("--config", f"mcp_servers.home_assistant_data.{name}={json.dumps(value)}")]
 
 
-def call_mcp_args() -> list[str]:
+def call_mcp_args(relay: bool = False) -> list[str]:
     """Register the one tool that changes the house, with the approval mode "prompt".
 
     With no mode a tool is "auto", and Codex's question then offers "Allow for this session", which ends the
@@ -4524,13 +4524,15 @@ def call_mcp_args() -> list[str]:
     answer (codex-rs/core/src/mcp_tool_call.rs, session_mcp_tool_approval_key and
     normalize_approval_decision_for_mode, at rust-v0.166.0).
 
-    Its key, HA_CALL_CAPABILITY, is its own: no read tool holds it, and shell_exclude_args keeps it out of
-    shell commands. The worker behind the socket checks the key and the form of the request (ha_call.py).
+    In a chat the bridge sends the thread id that Codex puts in each call, and the worker checks that a
+    person attends that chat's running exchange. Under remote control (relay=True) the bridge gets the
+    relay's key, HA_CALL_CAPABILITY, in its place; shell_exclude_args keeps that key out of shell commands.
+    The worker behind the socket checks the chat or the key, and the form of the request (ha_call.py).
     """
     settings = {
         "command": sys.executable,
         "args": [str(Path(__file__).with_name("ha_call_mcp.py"))],
-        "env_vars": ["HA_CALL_CAPABILITY"],
+        **({"env_vars": ["HA_CALL_CAPABILITY"]} if relay else {}),
         "enabled": True,
         "required": True,
         "startup_timeout_sec": 10,
@@ -4541,13 +4543,13 @@ def call_mcp_args() -> list[str]:
             for argument in ("--config", f"mcp_servers.home_assistant_call.{name}={json.dumps(value)}")]
 
 
-# The tool keys reach each bridge through its env_vars; a sandboxed shell command must not see them,
-# or it could write to a socket itself and skip Codex's question (plan CX-SIMPLE, review F1).
+# Remote control's keys reach its bridges through their env_vars; a shell command of the relay must not see
+# them (plan CX-SIMPLE, review F1). A chat holds no key: its tool requests name the chat by thread id.
 SHELL_EXCLUDED_ENV = (remote_control.TOOL_KEY_EXCLUDE,)
 
 
 def shell_exclude_args() -> list[str]:
-    """Keep every HA_*_CAPABILITY key out of the environment of the commands Codex runs."""
+    """Keep every HA_*_CAPABILITY key out of the environment of the commands the relay's Codex runs."""
     return ["--config", "shell_environment_policy.exclude=" + json.dumps(list(SHELL_EXCLUDED_ENV))]
 
 
@@ -4567,7 +4569,6 @@ def scheduling_mcp_args() -> list[str]:
     settings = {
         'command': sys.executable,
         'args': [str(Path(__file__).with_name('scheduling_mcp.py'))],
-        'env_vars': ['HA_DATA_CAPABILITY'],
         'enabled': True, 'required': True, 'startup_timeout_sec': 10, 'tool_timeout_sec': 15,
     }
     for tool in SCHEDULING_TOOLS:
@@ -4584,7 +4585,6 @@ def github_mcp_args() -> list[str]:
     settings = {
         'command': sys.executable,
         'args': [str(Path(__file__).with_name('github_mcp.py'))],
-        'env_vars': ['HA_DATA_CAPABILITY'],
         'enabled': True, 'required': False, 'startup_timeout_sec': 10, 'tool_timeout_sec': 700,
         'tools.github_git.approval_mode': 'approve',
     }
@@ -4688,8 +4688,18 @@ def build_app_server_args(attended: bool = True) -> list[str]:
     has nobody to answer Codex's question.
     """
     return [CODEX_BINARY, "app-server", "--config", 'approval_policy="on-request"',
-            "--config", 'approvals_reviewer="user"', *shell_exclude_args(), *verification_mcp_args(),
+            "--config", 'approvals_reviewer="user"', *verification_mcp_args(),
             *data_mcp_args(), *scheduling_mcp_args(), *github_mcp_args(), *(call_mcp_args() if attended else [])]
+
+
+def bind_chat_thread(task_id: str, thread_id: Any) -> None:
+    """Bind a Codex thread to the task's chat, and log one line when the map refuses it.
+
+    A refused thread leaves the chat's tools answering "No running exchange", so the log says why.
+    """
+    if not tool_threads.CHATS.bind(task_id, thread_id):
+        print(f"Tool requests of thread {str(thread_id)[:64]!r} are not bound to task {task_id}: the id is not a "
+              "lower-case Codex thread id, or another chat holds the thread.", flush=True)
 
 
 def create_approval_session(
@@ -4780,6 +4790,12 @@ def create_approval_session(
         if found and not session_holder.get("session_id"):
             session_holder["session_id"] = found
             update_task(task_id, session_id=found)
+        if found:
+            bind_chat_thread(task_id, found)
+        if event.get("type") == "agent.threads" and event.get("parent") == session_holder.get("session_id"):
+            # A sub-agent of this chat: its tool calls name its own thread (design CX-SPEED cut 3, review F2).
+            for child in event.get("threads") or []:
+                bind_chat_thread(task_id, child)
 
     # The chat's permission mode is only these three Codex settings (protected_policy.MODES).
     settings = task_mode_settings(task_id, options)
@@ -5313,8 +5329,11 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
 
     update_task(task_id, status="running", started_at=utc_now(), error="")
     note_task_sign_in(task_id)
-    verification_capability = verification.begin(task_id)
-    data_capability = ha_data.begin(task_id)
+    verification.begin(task_id)
+    ha_data.begin(task_id)
+    # A follow-up names its thread now; a new chat's thread is bound when Codex reports it (event below).
+    if session_id:
+        bind_chat_thread(task_id, session_id)
     with lock:
         current_turn_id = str(tasks.get(task_id, {}).get("current_turn_id") or "")
     start_activity(task_id, current_turn_id)
@@ -5396,9 +5415,8 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     # top of run_task has already refused the modes that this transport must never be given.
     attended = not background_task(task_id)
     args = build_app_server_args(attended)
-    tool_keys = {"HA_VERIFICATION_CAPABILITY": verification_capability, "HA_DATA_CAPABILITY": data_capability}
     if attended:
-        tool_keys["HA_CALL_CAPABILITY"] = ha_call.begin(task_id)
+        ha_call.begin(task_id)
     write_task_log(task_id, "worker", "Starting Codex: " + " ".join(args))
 
     start_phase(task_id, "launch", "Starting Codex")
@@ -5426,7 +5444,7 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
         proc = subprocess.Popen(
             args,
             cwd="/config",
-            env={**codex_env(), **tool_keys},
+            env=codex_env(),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -5843,17 +5861,21 @@ def _run_background_task(
         verification.end(task_id)
         ha_data.end(task_id)
         ha_call.end(task_id)
-        with lock:
-            approval_session = approval_sessions.pop(task_id, None)
-            if approval_session:
-                approval_session.close()
-            proc = running_processes.get(task_id)
-        if proc is not None:
-            process_exit_confirmed = terminate_and_reap_process(proc)
-            if process_exit_confirmed:
-                with lock:
-                    if running_processes.get(task_id) is proc:
-                        running_processes.pop(task_id, None)
+        try:
+            with lock:
+                approval_session = approval_sessions.pop(task_id, None)
+                if approval_session:
+                    approval_session.close()
+                proc = running_processes.get(task_id)
+            if proc is not None:
+                process_exit_confirmed = terminate_and_reap_process(proc)
+                if process_exit_confirmed:
+                    with lock:
+                        if running_processes.get(task_id) is proc:
+                            running_processes.pop(task_id, None)
+        finally:
+            # After the session is closed and its process reaped, so no late event binds a thread again.
+            tool_threads.CHATS.release(task_id)
         with lock:
             result = tasks.get(task_id, {}).get("status")
         record_diagnostic("finish", task_id, {"completed": "done", "waiting_for_input": "done", "cancelled": "stopped",
@@ -7014,7 +7036,7 @@ def relay_tool_args() -> list[str]:
     The relay holds both keys for its whole run, so the shell exclude matters as much as on the page;
     /etc/codex/managed_config.toml holds the same exclude for every client.
     """
-    return [*shell_exclude_args(), *relay_read_mcp_args(), *call_mcp_args()]
+    return [*shell_exclude_args(), *relay_read_mcp_args(), *call_mcp_args(relay=True)]
 
 
 remote_control_supervisor = remote_control.Supervisor(
@@ -7470,7 +7492,7 @@ github_service = github_access.register(_ToolWorker(), github_access.GitHubServi
     client_id=lambda: str(read_options().get("github_client_id") or ""),
     fire_event=lambda event, data: fire_ha_event(event, data),
     notify=lambda title, message: notify(title, message, notification_id="codex_cli_github"),
-    find_task=lambda capability: github_access.find_task_by_capability(ha_data, capability),
+    find_task=lambda thread_id: github_access.find_task_by_thread(ha_data, thread_id),
 ))
 
 

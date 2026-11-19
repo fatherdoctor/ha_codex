@@ -21,6 +21,7 @@ move of the Codex pin must run it again.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import shlex
@@ -79,13 +80,47 @@ class Listener(socketserver.ThreadingUnixStreamServer):
         outer = self
 
         class Handler(socketserver.BaseRequestHandler):
-            """Count the connection and close it."""
+            """Count the connection, read the probe's line, then close it.
+
+            The probe writes one line after it connects. A close before that write makes the write fail with
+            EPIPE, and the probe would report a connection that was accepted as not connected.
+            """
 
             def handle(self) -> None:
                 outer.accepted += 1
+                self.request.settimeout(10)
+                with contextlib.suppress(OSError), self.request.makefile("rb") as stream:
+                    stream.readline()
 
         super().__init__(str(path), Handler)
         threading.Thread(target=self.serve_forever, daemon=True).start()
+
+
+class ListenerReadsTheProbe(unittest.TestCase):
+    """A connection the stand-in accepted always reads as connected, even when the probe writes late.
+
+    On slow runners the listener used to close a connection before the probe wrote its line, and the probe then
+    failed with EPIPE. Here the probe waits between connect and write, which made it fail every time before the
+    listener read the line. No Codex CLI is needed.
+    """
+
+    def test_a_slow_probe_still_reads_as_connected(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ha-socket-listener-") as folder:
+            paths = [Path(folder) / f"stand-in-{number}.sock" for number in range(3)]
+            listeners = [Listener(path) for path in paths]
+            slow_probe = PROBE.replace("client.connect(path)\n",
+                                       "client.connect(path)\n        __import__('time').sleep(0.05)\n")
+            self.assertNotEqual(slow_probe, PROBE)
+            try:
+                output = subprocess.run([sys.executable, "-c", slow_probe, *map(str, paths)], capture_output=True,
+                                        text=True, timeout=30, check=True).stdout
+            finally:
+                for listener in listeners:
+                    listener.shutdown()
+                    listener.server_close()
+        result = json.loads(output.split("PROBE ", 1)[1])
+        self.assertEqual(result, {str(path): "connected" for path in paths})
+        self.assertEqual(sum(listener.accepted for listener in listeners), len(paths))
 
 
 def full_access_allowed() -> bool:

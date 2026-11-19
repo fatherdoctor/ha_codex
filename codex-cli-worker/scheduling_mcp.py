@@ -5,6 +5,8 @@ import os
 import socket
 import sys
 
+import tool_threads
+
 PROPOSAL = {'type': 'object', 'additionalProperties': False,
             'properties': {'name': {'type': 'string', 'maxLength': 80},
                            'prompt': {'type': 'string', 'maxLength': 16000},
@@ -21,14 +23,14 @@ TOOLS = [
 ]
 
 
-def fetch(name, arguments):
+def fetch(name, arguments, thread_id):
     tool = next((t for t in TOOLS if t['name'] == name), None)
     if tool is None:
         raise ValueError('Unknown scheduling tool; the tools are ' + ', '.join(t['name'] for t in TOOLS) + '.')
     allowed = tool['inputSchema']['properties']
     if not isinstance(arguments, dict) or set(arguments) - set(allowed):
         raise ValueError(f'{name} accepts only these arguments: ' + ', '.join(allowed) + '.')
-    data = json.dumps({'operation': name, 'arguments': arguments, 'capability': os.environ.get('HA_DATA_CAPABILITY', '')}).encode() + b'\n'
+    data = json.dumps({'operation': name, 'arguments': arguments, 'thread_id': thread_id}).encode() + b'\n'
     if len(data) > 65536:
         raise ValueError('The request is larger than 64 KiB.')
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
@@ -53,7 +55,7 @@ def respond(request):
     if method == 'tools/call':
         try:
             params = request.get('params', {})
-            result = fetch(params.get('name'), params.get('arguments', {}))
+            result = fetch(params.get('name'), params.get('arguments', {}), tool_threads.thread_id_from_call(params))
         except OSError:
             result = {'ok': False, 'error': 'The scheduling service is not reachable; the add-on may be restarting.'}
         except json.JSONDecodeError:

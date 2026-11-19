@@ -15,8 +15,8 @@ class FollowupTests(unittest.TestCase):
     def exchange(self, operation='list_schedules', arguments=None):
         task='timezone-fixture'
         server.tasks[task]={'status':'running','current_turn_id':'synthetic-turn'}
-        cap=server.ha_data.begin(task); self.addCleanup(lambda:server.ha_data.end(task))
-        return task, {'operation':operation,'arguments':arguments or {},'capability':cap}
+        thread=fixtures.open_exchange(self, task)
+        return task, {'operation':operation,'arguments':arguments or {},'thread_id':thread}
 
     def test_n1_slow_failed_ha_refresh_leaves_worker_lock_available_and_is_cached(self):
         task,payload=self.exchange(); entered=threading.Event(); release=threading.Event(); outcomes=[]

@@ -26,6 +26,7 @@ sys.path.insert(0, str(WORKER))
 import github_access as gh  # noqa: E402
 import github_mcp  # noqa: E402
 
+THREAD = "11111111-2222-4333-8444-555555555555"  # synthetic
 APP_TOKEN = "ghu_" + "A1b2C3d4E5" * 4  # synthetic
 PAT = "github_pat_" + "Z9y8X7w6V5" * 8  # synthetic
 REPO = "example-owner/house"
@@ -108,7 +109,7 @@ class ServiceCase(unittest.TestCase):
             self.root / "data" / "github", client_id=lambda: "Iv23liExampleClient", http=self.http,
             fire_event=lambda event, data: self.events.append((event, data)),
             notify=lambda title, message: self.notices.append((title, message)),
-            find_task=lambda cap: "task-1" if cap == "cap-live" else None,
+            find_task=lambda thread: "task-1" if thread == THREAD else None,
             log=self.logs.append)
 
     def connect_app(self):
@@ -975,16 +976,27 @@ class CloneLinkTests(GitRunnerCase):
 
 
 class DispatchTests(ServiceCase):
-    def payload(self, operation, cap="cap-live", **arguments):
-        return {"operation": operation, "arguments": arguments, "capability": cap}
+    def payload(self, operation, thread=THREAD, **arguments):
+        return {"operation": operation, "arguments": arguments, "thread_id": thread}
 
-    def test_a_wrong_or_stale_capability_is_refused(self):
+    def test_a_wrong_or_unbound_thread_id_is_refused(self):
         self.connect_app()
-        for cap in ("", "cap-old", None, 7):
-            with self.subTest(cap=cap):
-                answer = self.service.answer(json.dumps(self.payload("repos", cap=cap)).encode())
+        for thread in ("", "99999999-2222-4333-8444-555555555555", "abcdefab-2222-4333-8444-555555555555".upper(),
+                       "\u05e9\u05dc\u05d5\u05dd", ["x"], None, 7):
+            with self.subTest(thread=thread):
+                answer = self.service.answer(json.dumps(self.payload("repos", thread=thread)).encode())
                 self.assertFalse(answer["ok"])
                 self.assertIn("ended", answer["text"])
+
+    def test_a_request_with_a_capability_key_or_without_a_thread_id_is_refused(self):
+        self.connect_app()
+        base = self.payload("repos")
+        for payload in ({**base, "capability": "x"}, {key: value for key, value in base.items() if key != "thread_id"},
+                        {"operation": "repos", "arguments": {}, "capability": THREAD}):
+            with self.subTest(payload=payload):
+                answer = self.service.answer(json.dumps(payload).encode())
+                self.assertFalse(answer["ok"])
+                self.assertIn("thread_id", answer["text"])
 
     def test_every_operation_reaches_the_runner_in_a_read_only_chat(self):
         """0.3.6: the GitHub read-only limit is gone; Read only is Codex's read-only sandbox only."""
