@@ -13,6 +13,8 @@
 - Chat page: the plus on the attach button is now an icon centered in a round button, on a desktop and a phone.
   The banner across the top of the page while Full access is on is gone; in a chat's Permissions menu, **Full
   access** is now shown in bold while the setting is on, and the other choices are not bold.
+- Chat page: the extra plus button beside the chat title on a phone is gone. It did the same as **New chat**, which
+  stays in the conversation list.
 - Chat page: the plus on the **New chat** button is now a 20 px icon, in the same style as the attach plus, on a
   desktop and a phone.
 - Documentation only: the README, the integration README, `SECURITY.md`, `DOCS.md` and three option descriptions
