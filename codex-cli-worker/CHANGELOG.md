@@ -1,6 +1,8 @@
 # Changelog
 
 ## 0.4.0 (unreleased)
+- The mark in the chat page header now follows the page's theme (the Home Assistant theme when the page runs inside
+  Home Assistant) instead of the system's light or dark setting. The tab icon still follows the system.
 - The app's tools no longer use a secret key for each message. Each tool request names its chat by the thread id
   that Codex adds to every tool call, and the worker answers it only while that chat's exchange runs; a sub-agent
   that the chat starts counts as the chat, and a thread that one chat holds is never given to another. The sandbox already stops a command in Read only, Default and Auto-review from
