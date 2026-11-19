@@ -33,7 +33,7 @@ the version.
 | Path | What is there |
 |---|---|
 | `codex-cli-worker/` | the app: `server.py` (API and chat page), `policy.py`, `approvals.py`, `run.sh`, `Dockerfile`, `config.yaml` (options and the app's version) |
-| `codex-cli-worker/policy/` | the permission policy and house rules built into the image |
+| `codex-cli-worker/policy/` | the permission policy built into the image (`policy.json`) |
 | `codex-cli-worker/web/` | the chat page (plain JavaScript and CSS, no build step) |
 | `codex-cli-worker/tests/` | every test: `test_*.py`, the Home Assistant tests in `ha/`, browser checks `browser_*.cjs` |
 | `custom_components/codex_cli/` | the integration; `manifest.json` holds its version |
@@ -90,9 +90,8 @@ When one is:
 - `main`, tags and GitHub releases - the maintainer's, after review and a lab pass.
 - `.github/workflows/` - an agent's token usually cannot push there; put the changed file in `ci/` and say so in
   the pull request. Never enable the release, image build or Pullfrog workflows.
-- `codex-cli-worker/policy/` - what the packaged Codex is allowed to do on an install (`house-rules.md` becomes
-  that Codex's own `AGENTS.md`). It is product code, not guidance for working here; change it only when the task
-  is a policy change, with the review above.
+- `codex-cli-worker/policy/` - what the packaged Codex is allowed to do on an install. It is product code, not
+  guidance for working here; change it only when the task is a policy change, with the review above.
 - `LICENSE`, `codex-cli-worker/web/assets/vendor/` - upstream's and third parties' text.
 - Any real Home Assistant install: nothing in this repository is to be tested against a home that people live in.
 

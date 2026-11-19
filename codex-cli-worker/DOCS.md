@@ -954,8 +954,6 @@ Each new exchange stores its user message, timestamps, status, and response in t
 For local browser checks, run `python codex-cli-worker/tests/web_fixture.py` from the repository root, then `node codex-cli-worker/tests/browser_smoke.cjs` with Playwright available. The fixture uses temporary storage and simulated responses, and never launches Codex or contacts Home Assistant. Set `CODEX_CHAT_BROWSER=msedge` to use installed Edge, and optionally `CODEX_CHAT_QA_DIR` to choose a screenshot directory outside the repository.
 
 
-From **0.3.4**, the page's rules tell Codex to answer a question about Codex cloud tasks with `codex cloud list --json` and `codex cloud status <task id>` in the shell. In a sandboxed mode each command needs network access, so it shows the usual **Allow once** card. The list holds only Codex cloud tasks of the signed-in account; when it is empty, Codex says so.
-
 ### ABI and relay fallback acceptance (N8/N9)
 
 The AppArmor ABI declaration enables domain/stack and network_v8 mediation on HAOS; ptrace was already mediated. Both tool labels keep their existing Unix/raw-netlink socket permissions, so sandboxed AF_INET/AF_INET6/packet socket creation is denied. Approved escalations keep the existing parent/relay policy. The maintainer must run an ordinary chat-page shell read and the history MCP tool after loading the updated HAOS profile; CI's Ubuntu kernel is not that acceptance.

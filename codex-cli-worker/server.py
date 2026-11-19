@@ -136,10 +136,6 @@ HA_DOCS_RETRY_INTERVAL_SECONDS = 60 * 60
 HA_DOCS_GIT_TIMEOUT_SECONDS = 300
 HA_DOCS_GIT_STALL_SECONDS = 60
 
-# Home Assistant's own address inside the app network. A Home Assistant token, such
-# as the HA_TOKEN option, works there and not at the Supervisor's Core proxy.
-CORE_URL = "http://homeassistant:8123"
-
 DEFAULT_OPTIONS = {
     "codex_model": "default",
     "model_reasoning_effort": "medium",
@@ -4400,9 +4396,7 @@ For other decisions or verification, call the home_assistant_data ask_owner tool
 If the task cannot be done, call the home_assistant_data report_failure tool with the reason, then end your turn and explain the reason in your answer.
 If these tools are not available, ask your question or explain the failure in your answer only.
 
-@@SCHEDULING_PARAGRAPH@@For a question about Codex cloud tasks or cloud sessions, run codex cloud list --json in the shell, and codex cloud status with a task id for the state of one task. In a sandboxed mode these commands need network access, so request approval for the command. Do not answer from document sessions or another tool instead. codex cloud list shows only Codex cloud tasks of the signed-in account; ChatGPT chats and Codex threads in other apps are not in it. If it returns no tasks, say so plainly and do not guess what else exists. codex cloud status exits with 1 for every state except ready, so read its output and not its exit code.
-
-If the user asks for an image, use the built-in image generation tool. Every image it generates is attached to this conversation and shown to the user automatically, so leave it at its default save location and describe it in your answer. Copy it into /config only when the user asks for a file at a specific path. The default save location is not a failure.
+@@SCHEDULING_PARAGRAPH@@If the user asks for an image, use the built-in image generation tool. Every image it generates is attached to this conversation and shown to the user automatically, so leave it at its default save location and describe it in your answer. Copy it into /config only when the user asks for a file at a specific path. The default save location is not a failure.
 
 Use the home_assistant MCP verify tool for authenticated Home Assistant checks, with these argument examples:
   {"operation":"find","name":"kitchen ceiling","domain":"light"}
@@ -4700,7 +4694,7 @@ def create_approval_session(
     session_id: str | None, session_holder: dict[str, str], options: dict[str, Any],
     status_calls: list[dict[str, Any]] | None = None,
 ) -> AppServerSession:
-    """Bind one app-server exchange to its task, activity, and redacted audit trail.
+    """Bind one app-server exchange to its task and live activity, with secret values redacted.
 
     Each usable ask_owner or report_failure call of the turn is added to status_calls.
     """

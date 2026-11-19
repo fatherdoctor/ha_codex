@@ -99,7 +99,7 @@ class Verification:
         self.permissions = BrowserPermissionStore(worker)
         self.ui_captures = {}
         # Authority stays in worker memory, never in agent-writable task.json.
-        # Restarting the worker expires one-off grants; audit records remain.
+        # Restarting the worker expires one-off grants.
         self.retry_grants = {}
 
     def begin(self, task_id):

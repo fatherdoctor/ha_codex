@@ -45,7 +45,6 @@ GUARD_PATH = "/usr/share/ha_codex/push_guard.py"
 ASKPASS_PATH = "/usr/local/bin/codex-github-askpass"
 CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 CA_DIR = "/etc/ssl/certs"
-ALLOW_MARK = "guard: allow"
 OPERATIONS = ("repos", "fetch", "pull", "push", "clone", "link")
 BAD_STATES = ("near_expiry", "expired", "revoked", "access_changed", "failed")
 STATE_WORDS = {
