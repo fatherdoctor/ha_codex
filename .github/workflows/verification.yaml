@@ -46,8 +46,6 @@ jobs:
         env:
           HA_BROWSER_NODE: node
         run: pytest
-      - name: Test single-action user approvals through the pinned CLI
-        run: python codex-cli-worker/tests/codex_approval_smoke.py
       - name: Exercise browser protocol and restrictions
         run: |
           node codex-cli-worker/tests/browser_resources.cjs
@@ -65,6 +63,10 @@ jobs:
           node codex-cli-worker/tests/browser_smoke.cjs
           node codex-cli-worker/tests/browser_copy.cjs
           node codex-cli-worker/tests/browser_permissions_ui.cjs
+          node codex-cli-worker/tests/browser_settings_phone.cjs
+          node codex-cli-worker/tests/browser_remote_name.cjs
+          node codex-cli-worker/tests/browser_full_access.cjs
+          node codex-cli-worker/tests/browser_four_modes.cjs
 
   container:
     name: Container (${{ matrix.arch }})
@@ -99,6 +101,11 @@ jobs:
       - name: Smoke test packaged historical data tools
         run: |
           docker run --rm --workdir / --entrypoint python3 verification-test -c 'import server, ha_data, ha_data_mcp; assert {tool["name"] for tool in ha_data_mcp.TOOLS} == {"history", "statistics", "exchange_info"}; assert {tool["name"] for tool in ha_data_mcp.STATUS_TOOLS} == {"ask_owner", "report_failure"}; assert server.ha_data is not server.verification'
+      - name: Test single-action user approvals through the packaged CLI
+        # Runs in the built image, so it tests the Codex CLI and the requirements file that ship.
+        # Bubblewrap needs namespace privileges that the runner's default container profile withholds.
+        run: |
+          docker run --rm --privileged --workdir / --entrypoint python3 -v "$PWD/codex-cli-worker/tests:/tests:ro" verification-test /tests/codex_approval_smoke.py
       - name: Test packaged SSH with single-command approvals in both sandbox modes
         # Paramiko is a test-only SSH target in the disposable container.
         # The runtime image installs only the OpenSSH client, not an SSH server.
