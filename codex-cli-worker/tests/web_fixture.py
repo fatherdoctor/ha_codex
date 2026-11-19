@@ -44,8 +44,8 @@ def main():
     spec.loader.exec_module(server)
     with tempfile.TemporaryDirectory(prefix="codex-chat-preview-") as temp:
         root = Path(temp)
-        # Scheduled runs are off in this series; a test of the schedule pages starts the fixture with this set.
-        server.scheduling.SCHEDULED_RUNS = os.environ.get("CODEX_FIXTURE_SCHEDULED_RUNS") == "1"
+        # Scheduled runs are on; a test of the pages without them starts the fixture with CODEX_FIXTURE_SCHEDULED_RUNS=0.
+        server.scheduling.SCHEDULED_RUNS = os.environ.get("CODEX_FIXTURE_SCHEDULED_RUNS") != "0"
         server.DATA_ROOT = root
         server.CONFIG_ROOT = root
         # Full access keeps its setting and writes the requirements in the temporary folder, never in /data or /etc.
