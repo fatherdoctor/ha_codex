@@ -33,6 +33,13 @@
   reached it. No behavior changes: the modes the protected policy refuses are still stopped before Codex starts. A
   new test fails if any shipped module names the `exec` subcommand. The approval smoke test now runs in the built
   image, against the Codex CLI that ships (the workflow change is staged in `ci/verification.yaml`).
+- The chat page's rules no longer tell Codex how to answer a question about Codex cloud tasks (the
+  `codex cloud list --json` line from 0.3.4). That line was the first step of a feature that is not built; it
+  returns with the feature. Codex can still run those commands when you ask it to.
+- Clean-up, no other behavior change: three code comments no longer name an audit record that the app does not
+  keep; the unused `CORE_URL` and `ALLOW_MARK` constants are gone; the three test files that prove a removed part
+  stays removed are now one, `tests/test_removed_surfaces.py`, with the same tests; `AGENTS.md` no longer
+  describes the bundled house rules file, which was removed in an earlier version.
 
 ## 0.3.6 - 2026-11-18
 

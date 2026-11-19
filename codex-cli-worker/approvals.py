@@ -311,7 +311,7 @@ class AppServerSession:
             try:
                 self.close()
             except OSError:
-                # A failed audit write must not keep the transport alive.
+                # A failed close must not keep the transport alive.
                 pass
 
     def close(self) -> None:

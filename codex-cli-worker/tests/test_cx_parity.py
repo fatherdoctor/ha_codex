@@ -60,14 +60,6 @@ class DeviceCommandSpeedTests(unittest.TestCase):
         self.assertIn('Do not search files under /config or .storage or run shell commands to find an entity', line)
         self.assertIn('{"operation":"find","name":"kitchen ceiling","domain":"light"}', rules)
 
-    def test_rules_answer_a_cloud_task_question_with_codex_cloud(self):
-        rules = server.PAGE_INSTRUCTIONS
-        line = next(line for line in rules.splitlines() if line.startswith('For a question about Codex cloud tasks'))
-        for text in ('codex cloud list --json', 'codex cloud status', 'request approval for the command',
-                     'Do not answer from document sessions', 'shows only Codex cloud tasks',
-                     'If it returns no tasks, say so plainly and do not guess'):
-            self.assertIn(text, line)
-
     def test_rules_no_longer_ask_for_the_owner_file_in_each_message(self):
         rules = server.PAGE_INSTRUCTIONS
         self.assertNotIn('check for it in each message', rules)
