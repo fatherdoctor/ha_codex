@@ -6,6 +6,11 @@
   that the chat starts counts as the chat, and a thread that one chat holds is never given to another. The sandbox already stops a command in Read only, Default and Auto-review from
   reaching the tool sockets. Remote control keeps its keys for now.
 
+- Chat page: while something needs you, the Settings cog becomes a warning symbol, and on a phone the
+  conversations button shows it too. Yellow means an approval or a schedule proposal waits; red means ChatGPT is
+  signed out or unreadable, the GitHub sign-in expired or was revoked, or Remote is on and lost its connection.
+  **Dismiss the warning** hides it until something new happens; the ChatGPT warning cannot be dismissed. The page
+  reads this from the status checks it already makes, plus one read of the schedules a minute.
 - Not used yet: a new module, `codex_host.py`, can keep one Codex process running and hold each chat as a thread
   in it, with at most three chats loaded at a time. Nothing in the app starts it in this version, so every message
   still starts its own Codex process. A later change connects it, with an option to turn it off.

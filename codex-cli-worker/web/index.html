@@ -86,10 +86,15 @@
           </div>
           <p id="usage-plan" class="usage-plan">Plan unknown</p>
           <p id="usage-note" class="usage-note" role="status">Loading quota…</p>
-          <button id="settings-button" class="foot-row" type="button" aria-label="Open settings">
+          <button id="settings-button" class="foot-row" type="button" aria-label="Open settings" aria-describedby="attention-label">
             <span class="mdi-icon mdi-cog" aria-hidden="true"></span
             ><span class="foot-label">Settings</span>
           </button>
+          <button id="attention-dismiss" class="foot-row" type="button" hidden>
+            <span class="mdi-icon" aria-hidden="true"></span
+            ><span class="foot-label">Dismiss the warning</span>
+          </button>
+          <span id="attention-label" class="sr-only"></span>
         </div>
       </aside>
       <div
@@ -108,6 +113,7 @@
             id="menu"
             class="icon mobile"
             aria-label="Open conversations"
+            aria-describedby="attention-label"
             aria-expanded="false"
           >
             ☰
@@ -115,7 +121,7 @@
           <h1 id="chat-title">New chat</h1>
           <p id="chat-status" class="sr-only" role="status">Your Home Assistant, with a little help.</p>
         </header>
-        <div class="phone-thread-tools"><button id="phone-history" class="icon" aria-label="Open conversations">☰</button>
+        <div class="phone-thread-tools"><button id="phone-history" class="icon" aria-label="Open conversations" aria-describedby="attention-label">☰</button>
           <span id="phone-title">New chat</span></div>
         <p id="integration-notice" role="status" hidden></p>
         <section id="session-banner" class="page-banner" role="alert" hidden>
