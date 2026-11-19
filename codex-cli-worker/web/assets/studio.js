@@ -114,6 +114,8 @@ function renderStudioRemote(rc) {
   retryConnection.hidden = label.state !== "error" || !rc.enabled || !rc.available;
   // The Remote row at the foot of the side bar keeps to a word or two; its tooltip and the window's title say more.
   setFootRow("remote-status-row", ...remoteFootRow(rc, label));
+  // Only an error while the owner's switch is on counts as a sign-out; Off is the owner's choice.
+  noteAttention("remote", Boolean(rc.available && rc.enabled && label.state === "error"));
   $("remote-status-row").title = `Remote · ${label.text}`;
   document.body.dataset.connection = label.state;
   $("connection-title").textContent = `Remote connection · ${label.text}`;
