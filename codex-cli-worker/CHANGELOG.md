@@ -11,7 +11,10 @@
   `/lead/` routes and the `/schedule-mailbox` routes are gone, and Codex no longer has the `read_mailbox` and
   `post_mailbox` tools. Saved messages stay in the schedule file, unread, so an older version still finds them after
   a rollback. `/status` reports the mailbox as not available, so the integration's unread-mail sensor shows unknown
-  until the integration removes it. Saved schedules are kept.
+  until the integration removes it. Saved schedules are kept. The schedule store no longer has the code paths that
+  only the channel used: Codex can propose a new schedule but not edit a saved proposal (no tool offered that), and
+  a run is always reserved for one schedule. A bare old lead token in Codex output is still redacted, because a
+  rollback to 0.3 makes it valid again.
 - New Courtyard mark: the app icon and logo, the integration's brand images, the chat page's tab icon and header mark, and
   the README logo.
 - The app no longer pins a model by default. The **Model pin** option is empty, and empty means the account's

@@ -263,8 +263,11 @@ class Store:
         if author not in ('owner', 'codex'):
             raise ValueError('Invalid schedule author.')
         with self.connect() as db:
+            # Codex only proposes new schedules (propose_schedule); an edit of a saved one is the owner's.
+            if schedule_id and not owner:
+                raise LookupError('Schedule not found.')
             old = db.execute('SELECT * FROM schedules WHERE id=?', (schedule_id,)).fetchone() if schedule_id else None
-            if schedule_id and (old is None or (not owner and (old['approved'] or old['author'] != author))):
+            if schedule_id and old is None:
                 raise LookupError('Schedule not found.')
             approved = int(owner)
             cap = MAX_SCHEDULES if owner else MAX_PROPOSALS
@@ -304,42 +307,37 @@ class Store:
             db.execute('UPDATE schedules SET approved=?,enabled=?,next_due=?,updated=?,revision=? WHERE id=?',
                        (int(approved), int(action != 'pause'), due, now, uuid.uuid4().hex, schedule_id))
 
-    def reserve(self, now, schedule_id=None):
+    def reserve(self, now, schedule_id):
         """Claim before dispatch. Missing tasks after a crash become interrupted, never retried."""
         with self.connect() as db:
-            row = None
-            if schedule_id:
-                row = db.execute('SELECT * FROM schedules WHERE id=? AND approved=1 AND enabled=1 AND next_due<=?',
-                                 (schedule_id, now)).fetchone()
-                if row is None:
-                    return None
-                if db.execute('SELECT 1 FROM runs WHERE schedule_id=? AND status IN (?,?,?,?,?)', (schedule_id, *ACTIVE)).fetchone():
-                    return None
+            row = db.execute('SELECT * FROM schedules WHERE id=? AND approved=1 AND enabled=1 AND next_due<=?',
+                             (schedule_id, now)).fetchone()
+            if row is None:
+                return None
+            if db.execute('SELECT 1 FROM runs WHERE schedule_id=? AND status IN (?,?,?,?,?)', (schedule_id, *ACTIVE)).fetchone():
+                return None
             day = datetime.fromtimestamp(now, timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
             if db.execute("SELECT count(*) FROM runs WHERE status!='deferred' AND created>=? AND created<?", (day, day + 86400)).fetchone()[0] >= MAX_DAILY_RUNS:
                 return None
-            if schedule_id and db.execute("SELECT count(*) FROM runs WHERE schedule_id=? AND status!='deferred' AND created>=? AND created<?", (schedule_id, day, day + 86400)).fetchone()[0] >= MAX_SCHEDULE_DAILY_RUNS:
+            if db.execute("SELECT count(*) FROM runs WHERE schedule_id=? AND status!='deferred' AND created>=? AND created<?", (schedule_id, day, day + 86400)).fetchone()[0] >= MAX_SCHEDULE_DAILY_RUNS:
                 return None
             run_id = uuid.uuid4().hex
             task_id = datetime.fromtimestamp(now, timezone.utc).strftime('%Y%m%dT%H%M%SZ-') + uuid.uuid4().hex[:8]
-            due = row['next_due'] if row else now
             db.execute('INSERT INTO runs(id,schedule_id,task_id,due,created,status) VALUES(?,?,?,?,?,?)',
-                       (run_id, schedule_id, task_id, due, now, 'reserved'))
-            if row:
-                try:
-                    following = next_due(json.loads(row['spec']), now, self.timezone)
-                except ValueError:
-                    following = None  # No next occurrence within the bounded cron horizon.
-                db.execute('UPDATE schedules SET next_due=?,enabled=? WHERE id=?', (following, int(following is not None), schedule_id))
-            return {'id': run_id, 'task_id': task_id, 'schedule': self.schedule(row) if row else None}
+                       (run_id, schedule_id, task_id, row['next_due'], now, 'reserved'))
+            try:
+                following = next_due(json.loads(row['spec']), now, self.timezone)
+            except ValueError:
+                following = None  # No next occurrence within the bounded cron horizon.
+            db.execute('UPDATE schedules SET next_due=?,enabled=? WHERE id=?', (following, int(following is not None), schedule_id))
+            return {'id': run_id, 'task_id': task_id, 'schedule': self.schedule(row)}
 
     def defer(self, run):
         """Undo a busy reservation without overwriting a concurrent owner edit."""
         with self.connect() as db:
             schedule = run['schedule']
-            if schedule:
-                db.execute('UPDATE schedules SET enabled=1,next_due=? WHERE id=? AND revision=?',
-                           (schedule['next_due'], schedule['id'], schedule['revision']))
+            db.execute('UPDATE schedules SET enabled=1,next_due=? WHERE id=? AND revision=?',
+                       (schedule['next_due'], schedule['id'], schedule['revision']))
             db.execute("UPDATE runs SET status='deferred',error='Worker became busy; occurrence remains due.' WHERE id=?", (run['id'],))
 
     def finish(self, run_id, status, error=''):
@@ -370,11 +368,11 @@ class Engine:
                     self.store.finish(run['id'], 'waiting_for_approval' if pending else task.get('status', 'interrupted'))
 
     def submit(self, run, prompt, mode, name):
-        schedule = run['schedule'] or {}
+        schedule = run['schedule']
         # A schedule with no model of its own starts exactly as before.
         own_model = {'model': schedule['model']} if schedule.get('model') else {}
         try:
-            self.worker.submit(run['task_id'], prompt, mode, name, schedule.get('id'), **own_model)
+            self.worker.submit(run['task_id'], prompt, mode, name, schedule['id'], **own_model)
         except Busy:
             self.store.defer(run)
             raise
