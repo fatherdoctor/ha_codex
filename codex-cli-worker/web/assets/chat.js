@@ -2042,7 +2042,12 @@ function renderActivity() {
     return;
   }
   // A checks block that asks for the owner (a browser permission review, a retry result) opens the line.
-  const expanded = activity.expanded ?? (running || Boolean(checks?.open));
+  // While Codex works the steps start closed under the waiting line; a tap holds only until the turn ends.
+  if (!running && activity.tappedWhileRunning) {
+    activity.expanded = null;
+    activity.tappedWhileRunning = false;
+  }
+  const expanded = activity.expanded ?? Boolean(checks?.open);
   const area = $("messages");
   const nearBottom =
     area.scrollHeight - area.scrollTop - area.clientHeight < 100;
@@ -2061,6 +2066,7 @@ function renderActivity() {
   toggle.append(textNode("span", "", "activity-chevron"), label);
   toggle.onclick = () => {
     activity.expanded = !expanded;
+    activity.tappedWhileRunning = running;
     renderActivity();
   };
   const list = textNode("div", "", "activity-steps");
