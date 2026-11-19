@@ -131,8 +131,8 @@ class ReviewApiTests(unittest.TestCase):
         for i in range(scheduling.MAX_SCHEDULES): store.save(proposal(),owner=True,now=NOW)
         for i in range(scheduling.MAX_PROPOSALS): store.save(proposal(),owner=False,author='codex',now=NOW)
         task_id='sample'; server.tasks[task_id]={'status':'running','current_turn_id':'verified-turn'}
-        cap=server.ha_data.begin(task_id); self.addCleanup(lambda: server.ha_data.end(task_id))
-        result=self.service.dispatch({'operation':'list_schedules','arguments':{'offset':110,'limit':10},'capability':cap})
+        thread=fixtures.open_exchange(self, task_id)
+        result=self.service.dispatch({'operation':'list_schedules','arguments':{'offset':110,'limit':10},'thread_id':thread})
         self.assertEqual(len(result['items']),10); self.assertIsNone(result['next_offset'])
 
     def test_f3_background_outcomes_are_log_only_and_chat_pushes_only_what_needs_the_owner(self):

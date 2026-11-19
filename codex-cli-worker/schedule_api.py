@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import copy
-import hmac
 import json
 import os
 import socketserver
@@ -120,18 +119,16 @@ class Service:
         print(f'Scheduled runs are off in this version; {held} saved schedule(s) kept and not run.', flush=True)
 
     def dispatch(self, payload):
-        """Use the existing running-turn capability only to propose a schedule or read the list."""
-        if not isinstance(payload, dict) or set(payload) != {'operation', 'arguments', 'capability'}:
-            raise ValueError('A scheduling request needs exactly operation, arguments and capability.')
-        cap = payload['capability']
+        """Propose a schedule or read the list, for the chat whose running exchange the thread id names."""
+        if not isinstance(payload, dict) or set(payload) != {'operation', 'arguments', 'thread_id'}:
+            raise ValueError('A scheduling request needs exactly operation, arguments and thread_id.')
         w = self.worker
         # Refresh cached HA metadata before taking the worker lock. Validate the
         # turn afterward, since it may expire while a slow HA request completes.
         store = self.engine().store
         with w.lock:
-            with w.ha_data.lock:
-                task_id = next((key for key, value in w.ha_data.capabilities.items() if isinstance(cap, str) and cap and hmac.compare_digest(value, cap)), None)
-            if not task_id or not w.ha_data.active(task_id, cap):
+            task_id, _exchange = w.ha_data.exchange_for(payload['thread_id'])
+            if task_id is None:
                 raise ValueError('This exchange has ended.')
             operation, args = payload['operation'], payload['arguments']
             if not isinstance(args, dict):

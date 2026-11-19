@@ -17,6 +17,7 @@ import unittest
 from unittest.mock import patch
 
 from test_server import server
+import tool_threads
 import test_approvals as approvals
 import test_attachments as attachments
 import test_ha_data as data
@@ -162,12 +163,14 @@ class ExchangeInfoToolTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.engine = HomeAssistantData(self.worker, Path(temporary.name) / "exports")
         self.addCleanup(self.engine.end, "chat")
+        tool_threads.CHATS.bind("chat", data.THREAD)
+        self.addCleanup(tool_threads.CHATS.release, "chat")
         self.capability = self.engine.begin("chat")
         self.engine.set_exchange_info("chat", {"task_id": "chat", "backups": "Copy files to /config/backup-a."})
 
     def call(self, **fields):
         """Send one exchange_info request as the MCP bridge does."""
-        return self.engine.dispatch({"operation": "exchange_info", "capability": self.capability, **fields})
+        return self.engine.dispatch({"operation": "exchange_info", "thread_id": data.THREAD, **fields})
 
     def test_the_running_exchange_reads_its_own_details(self):
         """The reply holds the recorded details, reads no Home Assistant data and uses no query budget."""
@@ -177,18 +180,22 @@ class ExchangeInfoToolTests(unittest.TestCase):
         self.worker.ha_token.assert_not_called()
         self.assertEqual(self.engine.queries["chat"], 0)
 
-    def test_arguments_and_a_wrong_or_ended_capability_are_refused(self):
-        """Arguments are refused; a wrong capability and an ended or replaced exchange get nothing."""
+    def test_arguments_and_a_wrong_thread_or_ended_exchange_are_refused(self):
+        """Arguments are refused; a wrong thread and an ended or released exchange get nothing."""
         with self.assertRaises(DataError):
             self.call(path="/config")
+        for thread in ("not-a-thread", "", None, "99999999-2222-4333-8444-555555555555"):
+            with self.assertRaises(DataError):
+                self.engine.dispatch({"operation": "exchange_info", "thread_id": thread})
         with self.assertRaises(DataError):
-            self.engine.dispatch({"operation": "exchange_info", "capability": "not-the-capability"})
-        old = self.capability
+            self.engine.dispatch({"operation": "exchange_info", "capability": self.capability})
         self.capability = self.engine.begin("chat")
         self.assertEqual(self.call(), {"status": "unavailable", "message": "No details are recorded for this exchange"})
-        with self.assertRaises(DataError):
-            self.engine.dispatch({"operation": "exchange_info", "capability": old})
         self.engine.end("chat")
+        with self.assertRaises(DataError):
+            self.call()
+        self.capability = self.engine.begin("chat")
+        tool_threads.CHATS.release("chat")
         with self.assertRaises(DataError):
             self.call()
 
@@ -220,10 +227,10 @@ class ExchangeInfoToolTests(unittest.TestCase):
 
             answering = threading.Thread(target=answer_twice, daemon=True)
             answering.start()
-            with patch.dict("os.environ", {"HA_DATA_SOCKET": path, "HA_DATA_CAPABILITY": "capability"}):
-                self.assertEqual(len(ha_data_mcp.fetch("exchange_info", {})["rules"]), ha_data_mcp.MAX_RESPONSE_BYTES + 100)
+            with patch.dict("os.environ", {"HA_DATA_SOCKET": path}):
+                self.assertEqual(len(ha_data_mcp.fetch("exchange_info", {}, data.THREAD)["rules"]), ha_data_mcp.MAX_RESPONSE_BYTES + 100)
                 with self.assertRaises(ValueError):
-                    ha_data_mcp.fetch("history", {})
+                    ha_data_mcp.fetch("history", {}, data.THREAD)
             answering.join(timeout=5)
             self.assertFalse(answering.is_alive())
 

@@ -10,39 +10,39 @@ from unittest.mock import patch
 import pytest
 import pytest_socket
 
-from test_ha_data import START, END, data_worker
+from test_ha_data import START, END, THREAD, data_worker
+import tool_threads
 from ha_data import HomeAssistantData
 from ha_data_mcp import fetch
 
 
 @pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="Unix data socket")
 def test_mcp_bridge_authenticates_to_owner_only_worker_socket(tmp_path, monkeypatch):
-    """Use the actual stdio bridge's forwarding code, rejecting arbitrary or expired credentials."""
+    """Use the actual stdio bridge's forwarding code, refusing an unknown thread and an ended exchange."""
     pytest_socket.socket_allow_hosts(["127.0.0.1"], allow_unix_socket=True)
     worker = data_worker()
     engine = HomeAssistantData(worker, tmp_path / "exports")
-    capability = engine.begin("chat")
+    engine.begin("chat")
+    tool_threads.CHATS.bind("chat", THREAD)
     path = tmp_path / "data.sock"
-    monkeypatch.setenv("HA_DATA_CAPABILITY", capability)
     monkeypatch.setenv("HA_DATA_SOCKET", str(path))
     args = {"entity_ids": ["sensor.kitchen"], "start_time": START, "end_time": END}
     with patch.object(engine, "history", return_value={"status": "observed", "state": "42"}) as history:
         service = engine.serve(path)
         try:
             assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
-            receipt = fetch("history", args)
+            receipt = fetch("history", args, THREAD)
             assert receipt["status"] == "observed" and receipt["delivery"] == "file"
             export = Path(receipt["file"]["path"])
             assert export.is_relative_to(engine.export_root)
             assert json.loads(export.read_bytes()) == {"status": "observed", "state": "42"}
-            monkeypatch.setenv("HA_DATA_CAPABILITY", "unrelated-verification-capability")
-            assert fetch("history", args)["status"] == "unavailable"
-            monkeypatch.setenv("HA_DATA_CAPABILITY", capability)
+            assert fetch("history", args, "00000000-0000-0000-0000-000000000000")["status"] == "unavailable"
             engine.end("chat")
             assert not export.exists()
-            assert fetch("history", args)["status"] == "unavailable"
+            assert fetch("history", args, THREAD)["status"] == "unavailable"
             history.assert_called_once()
         finally:
+            tool_threads.CHATS.release("chat")
             service.shutdown()
             service.server_close()
 
@@ -53,9 +53,9 @@ def test_parallel_query_is_refused_and_cancelled_read_is_discarded(tmp_path, mon
     pytest_socket.socket_allow_hosts(["127.0.0.1"], allow_unix_socket=True)
     worker = data_worker()
     engine = HomeAssistantData(worker, tmp_path / "exports")
-    capability = engine.begin("chat")
+    engine.begin("chat")
+    tool_threads.CHATS.bind("chat", THREAD)
     path = tmp_path / "data.sock"
-    monkeypatch.setenv("HA_DATA_CAPABILITY", capability)
     monkeypatch.setenv("HA_DATA_SOCKET", str(path))
     entered, release = threading.Event(), threading.Event()
     first_result = []
@@ -70,11 +70,11 @@ def test_parallel_query_is_refused_and_cancelled_read_is_discarded(tmp_path, mon
 
     with patch.object(engine, "history", side_effect=read) as history:
         service = engine.serve(path)
-        first = threading.Thread(target=lambda: first_result.append(fetch("history", args)))
+        first = threading.Thread(target=lambda: first_result.append(fetch("history", args, THREAD)))
         try:
             first.start()
             assert entered.wait(3)
-            assert fetch("history", args) == {"status": "unavailable", "message": "Another historical data query is running"}
+            assert fetch("history", args, THREAD) == {"status": "unavailable", "message": "Another historical data query is running"}
             with worker.lock:
                 worker.tasks["chat"]["cancellation_requested"] = True
             release.set()
@@ -85,6 +85,7 @@ def test_parallel_query_is_refused_and_cancelled_read_is_discarded(tmp_path, mon
             assert not engine.export_root.exists()
             history.assert_called_once()
         finally:
+            tool_threads.CHATS.release("chat")
             release.set()
             first.join(5)
             service.shutdown()

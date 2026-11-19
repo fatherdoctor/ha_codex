@@ -172,7 +172,8 @@ class GitHubRegistrationTests(unittest.TestCase):
             self.assertIn("github_mcp.py", text)
             self.assertIn('mcp_servers.codex_github.required=false', text)
             self.assertIn('mcp_servers.codex_github.tools.github_git.approval_mode="approve"', text)
-            self.assertIn('mcp_servers.codex_github.env_vars=["HA_DATA_CAPABILITY"]', text)
+            self.assertNotIn("codex_github.env_vars", text)
+            self.assertNotIn("CAPABILITY", text)
 
     def test_the_prompt_names_the_tool_only_when_connected(self):
         with patch.object(server.github_service, "current_state", return_value="disconnected"):

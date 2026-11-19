@@ -8,9 +8,13 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 from contextlib import ExitStack
 from test_server import server
+import tool_threads
 from approvals import COMMAND_APPROVAL
 from interaction_diagnostics import InteractionRecorder, RollingDiagnostics
 from relay_reads import RelayReads, ReadError
+
+THREAD = '11111111-2222-4333-8444-555555555555'
+
 
 class RuntimeDiagnosticsTests(unittest.TestCase):
 
@@ -204,12 +208,14 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
         worker = data_worker()
         worker.diagnostics = self.recorder
         engine = HomeAssistantData(worker, self.store.path.parent / 'exports')
-        capability = engine.begin('chat')
+        engine.begin('chat')
         self.addCleanup(engine.end, 'chat')
+        tool_threads.CHATS.bind('chat', THREAD)
+        self.addCleanup(tool_threads.CHATS.release, 'chat')
         self.recorder.begin('chat', 'addon_page')
         payload = {
             'operation': 'history',
-            'capability': capability,
+            'thread_id': THREAD,
             'entity_ids': ['sensor.synthetic'],
             'start_time': START,
             'end_time': END,

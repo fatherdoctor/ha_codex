@@ -1,6 +1,10 @@
 # Changelog
 
 ## 0.4.0 (unreleased)
+- The app's tools no longer use a secret key for each message. Each tool request names its chat by the thread id
+  that Codex adds to every tool call, and the worker answers it only while that chat's exchange runs; a sub-agent
+  that the chat starts counts as the chat, and a thread that one chat holds is never given to another. The sandbox already stops a command in Read only, Default and Auto-review from
+  reaching the tool sockets. Remote control keeps its keys for now.
 
 - The starter `AGENTS.md` has a short section of safeguard defaults (secrets, protected places, backups). The
   section says they are defaults the owner can change or delete, not locks in the app. No app code changes.

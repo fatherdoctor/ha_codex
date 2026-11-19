@@ -584,9 +584,25 @@ class AppServerSession:
         items = [{"text": entry["step"], "completed": entry["status"] == "completed"} for entry in plan]
         self.on_event({"type": "item.updated", "item": {"id": "app-server:plan", "type": "todo_list", "items": items}})
 
+    def _spawned(self, method: str, item: dict[str, Any]) -> bool:
+        """Return True for the completed spawn item of this thread, the only collab item whose ids Codex made.
+
+        In the other collab tools (send_input, wait, resume_agent, close_agent and the rest) the model writes the
+        receiver, so those ids may name the thread of another chat.
+        """
+        return (method == "item/completed" and item.get("tool") == "spawnAgent"
+                and item.get("senderThreadId") == self.thread_id)
+
     def _item(self, method: str, item: dict[str, Any]) -> None:
         """Translate app-server items into the worker's existing activity format."""
         kind = item.get("type")
+        if kind == "collabAgentToolCall":
+            if self._spawned(method, item):
+                # The ids of the sub-agents that this thread started. Their tool calls name their own thread.
+                threads = [value for value in item.get("receiverThreadIds") or [] if isinstance(value, str)]
+                if threads:
+                    self.on_event({"type": "agent.threads", "parent": self.thread_id, "threads": threads})
+            return
         mapped = {"agentMessage": "agent_message", "commandExecution": "command_execution",
                   "fileChange": "file_change", "mcpToolCall": "mcp_tool_call", "webSearch": "web_search"}
         if kind not in mapped and kind != "reasoning":

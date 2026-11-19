@@ -12,6 +12,7 @@ from unittest.mock import patch
 from test_server import server
 import scheduling
 import scheduling_mcp
+import test_scheduling
 
 
 # Every route of the removed channel and mailbox, with a method each one answered to in version 0.3.
@@ -99,12 +100,11 @@ class CodexToolTests(unittest.TestCase):
         with patch.object(server, 'DATA_ROOT', Path(temp.name)), \
                 patch.object(server, 'schedule_timezone', return_value='UTC'), \
                 patch.dict(server.tasks, {task_id: {'status': 'running', 'current_turn_id': 'synthetic-turn'}}):
-            capability = server.ha_data.begin(task_id)
-            self.addCleanup(lambda: server.ha_data.end(task_id))
+            thread = test_scheduling.open_exchange(self, task_id)
             for operation, arguments in (('read_mailbox', {}), ('post_mailbox', {'body': 'A sample message.'})):
                 with self.subTest(operation=operation):
                     answer = server.schedule_service.answer(
-                        json.dumps({'operation': operation, 'arguments': arguments, 'capability': capability}))
+                        json.dumps({'operation': operation, 'arguments': arguments, 'thread_id': thread}))
                     self.assertEqual(answer, {'ok': False,
                                               'error': 'Unsupported scheduling operation; approvals are owner-only.'})
 

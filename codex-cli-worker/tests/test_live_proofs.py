@@ -682,7 +682,16 @@ class LiveProofs(unittest.TestCase):
         for app in self.apps:
             app.close()
         self.model.close()
-        self.temporary.cleanup()
+        # Codex clones its plugin list in the background, and that clone can still write into the Codex home
+        # for a moment after the process is closed. Try the removal again for up to five seconds.
+        for attempt in range(10):
+            try:
+                self.temporary.cleanup()
+                return
+            except OSError:
+                if attempt == 9:
+                    raise
+                time.sleep(0.5)
 
     def start(self, extra_args: list[str] | None = None, home: Path | None = None,
               tools: bool = True) -> AppServer:
