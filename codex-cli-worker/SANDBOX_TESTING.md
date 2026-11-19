@@ -91,11 +91,10 @@ and NNP, then execs the fixed native `bwrap.exec`. A refused or missing stack fa
 it never starts native Bubblewrap under only the relay label. The chat tool path retains
 its existing profile. The public mask/proc wrapper is unchanged.
 
-**Install a version update before testing an AppArmor change.** On the lab's Supervisor,
-`ha apps rebuild` does not reload the profile. A same-version rebuild does not reload it. The release/lead must use a bumped candidate
-version and an add-on version update, then confirm the os-agent profile-load record. Do not
-count a rebuild against a stale loaded profile as a test of this policy. This card changes
-no version itself. The HAOS worker container is `app_local_codex_cli_worker`, not an `addon_`
+**Install a version update before testing an AppArmor change.** On the test machine's Supervisor,
+`ha apps rebuild` does not reload the profile. A same-version rebuild does not reload it. Use a candidate
+with a higher version and an add-on version update, then confirm the os-agent profile-load record. Do not
+count a rebuild against a stale loaded profile as a test of this policy. The HAOS worker container is `app_local_codex_cli_worker`, not an `addon_`
 prefix. If the existing SSH add-on has no Docker CLI/socket, stop that step and report
 not run; do not disable its protection or add an unreviewed endpoint to get around it.
 No `aa-exec` or source tests are needed in the image. From the lead's SSH add-on shell, select the

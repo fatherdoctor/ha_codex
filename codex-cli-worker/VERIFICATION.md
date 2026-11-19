@@ -73,8 +73,7 @@ explains the account restriction; an extra browser approval cannot resolve it.
 
 ## Fully Kiosk screenshots
 
-With the worker app and Codex integration at **0.1.79** or newer, dashboard
-inspections also request fresh images from Home Assistant's
+Dashboard inspections also request fresh images from Home Assistant's
 [Fully Kiosk Browser integration](https://www.home-assistant.io/integrations/fully_kiosk/).
 Enable the device's **Current page** sensor and **Screenshot** image entity.
 The reported URL must belong to this Home Assistant installation and match the
@@ -230,10 +229,7 @@ for that operation; it does not allow other installed apps' logs.
 ## Dashboard resources
 
 Update the worker and integration together, then restart Home Assistant, to use
-the current resource and permission support. Static-route discovery, including
-individual files on Core 2026.9.4, requires integration **0.1.62** or newer.
-Older integration versions support the original built-in paths but cannot
-supply the registered route list.
+the current resource and permission support.
 
 Core supplies registered static file and directory URLs, never filesystem paths.
 This allows assets such as Browser Mod, custom icons, navigation modules, and
@@ -346,9 +342,7 @@ as complete credential isolation or a hardened browser sandbox.
 
 ## Validation
 
-Live browser verification has been confirmed working by the maintainer on their
-Home Assistant installation. Custom-card compatibility remains subject to the
-resource and permission limits above.
+Custom-card compatibility is subject to the resource and permission limits above.
 
 Run commands from the repository root. The full `pytest` suite needs Linux
 (or WSL on Windows), Python 3.14, and the Home Assistant test dependencies; see

@@ -9,8 +9,7 @@ access. It is for the household member who looks after Home Assistant and can re
 want to write every automation by hand.
 
 **Status: pre-release.** The app image is published for each version, but no version is called stable yet. Install it
-on a test Home Assistant first. It is built on
-[moryoav/home-assistant-codex](https://github.com/moryoav/home-assistant-codex) release **0.1.81**.
+on a test Home Assistant first.
 
 ## What it does
 
@@ -148,7 +147,7 @@ flowchart LR
 5. You read the summary. If you do not like it, ask Codex to undo it, or restore the saved earlier copy if the chat
    lists one.
 
-Screenshots of these screens are listed in [SCREENSHOTS.md](SCREENSHOTS.md).
+Screenshots of these screens are listed in [screenshots/SCREENSHOTS.md](screenshots/SCREENSHOTS.md).
 
 ## Permission modes
 
@@ -256,15 +255,15 @@ starter Assist script is in [examples/scripts.yaml](examples/scripts.yaml).
 
 ## Versions
 
-A fork version is the upstream version plus one number. `0.1.81.1` is the first build of this fork on upstream 0.1.81.
-A daily workflow opens one issue when upstream releases something newer.
+A version has three numbers, such as `0.3.6`. The first two versions, `0.1.81.1` and `0.1.81.2`, had four: the number
+of the release that the project started from ([Credit](#credit)), plus one more.
 
 | Version | Changes |
 |---|---|
 | 0.3.6 | The app's own command checks are removed: Codex's permission modes and the sandbox are the protection. Four permission modes, with Full access off until an administrator turns it on. A notification shows only while a chat waits for you. |
 | 0.3.0 (unreleased) | GitHub sign-in on the page (device sign-in, clone and link under /share or /config, every push through the push guard, a Repairs issue when access changes). The app installs and updates its own integration (one install and one restart); setup from discovery asks for confirmation. |
 | 0.1.81.2 (unreleased) | No full-access mode (changed in 0.3.6); a protected permission policy in the image, no bundled house rules and owner workspace instructions; permission answers and the integration's actions only from Home Assistant administrators; a permission-prompt sensor. |
-| 0.1.81.1 (unreleased) | Codex CLI 0.166.0 pinned by checksum, no self-update, base image pinned by digest, links and maintainer for the fork. |
+| 0.1.81.1 (unreleased) | Codex CLI 0.166.0 pinned by checksum, no self-update, base image pinned by digest, links and maintainer for this repository. |
 
 The full list is in the [changelog](codex-cli-worker/CHANGELOG.md).
 
@@ -287,17 +286,17 @@ security problem, use the **Report a vulnerability** button on the Security tab.
 ## Credit
 
 This project is a fork of [moryoav/home-assistant-codex](https://github.com/moryoav/home-assistant-codex) by Yoav Mor
-(MIT).
+(MIT). It started from release 0.1.81 of that project and has its own versions and its own code since then.
+
+This project is not affiliated with OpenAI or with Home Assistant.
 
 ## Contributing
 
-Issues and pull requests are welcome on this fork. Changes that are not specific to the fork belong upstream first;
-see [CONTRIBUTING.md](CONTRIBUTING.md).
+Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-MIT, as upstream: [LICENSE](LICENSE) (copyright Yoav Mor). Fork changes are copyright The Backshop, under the same
-license.
+MIT: [LICENSE](LICENSE). Copyright Yoav Mor and The Backshop.
 
 [license-badge]: https://img.shields.io/github/license/fatherdoctor/ha_codex
 [license-url]: LICENSE
