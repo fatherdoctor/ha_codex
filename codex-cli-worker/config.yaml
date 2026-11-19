@@ -33,7 +33,6 @@ discovery:
   - codex_cli
 options:
   codex_model: default
-  model_pin: gpt-6.1-sol
   model_reasoning_effort: medium
   reasoning_summary: concise
   codex_sandbox: workspace-write

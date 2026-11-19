@@ -187,10 +187,13 @@ CLI_DEFAULT_MODEL = "gpt-6.1-sol"
 # does not start an app whose saved option is missing from the list.
 RETIRED_MODELS = {"gpt-5.5": "gpt-5.6-sol"}
 DEFAULT_CHAT_SETTINGS = {"model": None, "reasoning_effort": None}
-# The one model this build runs when the `model_pin` option is left as shipped.
-# A chat, a saved turn or the `codex_model` option naming any other model is
-# refused instead of running on it; the option set to "none" turns the pin off.
-DEFAULT_MODEL_PIN = "gpt-6.1-sol"
+# The `model_pin` option is empty as shipped, and empty means no pin: runs use the
+# account's default model. When the owner sets it, a chat, a saved turn or the
+# `codex_model` option naming any other model is refused instead of running on it.
+# Versions before 0.4 shipped this value as the default; run.sh clears it once, on the
+# first start of 0.4, and sets MODEL_PIN_CLEARED so that start does not read the stale
+# copy in options.json. A value set after that is kept.
+OLD_DEFAULT_MODEL_PIN = "gpt-6.1-sol"
 
 AGENTS_MAX_BYTES = 256 * 1024
 SNAPSHOT_MAX_BYTES = 8 * 1024 * 1024
@@ -441,6 +444,9 @@ def read_options() -> dict[str, Any]:
             options.update(json.loads(OPTIONS_PATH.read_text(encoding="utf-8")))
         except Exception as exc:
             print(f"Could not read add-on options: {exc}", flush=True)
+    if os.environ.get("MODEL_PIN_CLEARED") == "1" and options.get("model_pin") == OLD_DEFAULT_MODEL_PIN:
+        # run.sh asked Supervisor to clear it; options.json may still hold it until the next start.
+        options["model_pin"] = ""
     return options
 
 
@@ -493,9 +499,8 @@ def default_model(options: dict[str, Any]) -> str:
 
 def model_pin(options: dict[str, Any]) -> str:
     """Return the model every run must use, or an empty string when the pin is off."""
-    # The Supervisor writes the shipped default (DEFAULT_MODEL_PIN, in config.yaml) into
-    # options.json and fills a cleared option back in, so "none" is how a user turns
-    # the pin off; a missing key only happens outside the add-on, as in tests.
+    # The option ships empty, so a missing or empty value means no pin. "none" and "off"
+    # are still accepted from installs that used them to turn the old default pin off.
     value = options.get("model_pin", "")
     value = value.strip() if isinstance(value, str) else ""
     return "" if value.lower() in {"", "none", "off"} else value

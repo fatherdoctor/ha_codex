@@ -25,6 +25,23 @@ if [ -n "${legacy_token}" ]; then
     bashio::log.info "Removed legacy worker API token from app options."
 fi
 
+# Versions before 0.4 shipped model_pin as gpt-6.1-sol. Clear exactly that value once, on the first start
+# after the update; the marker keeps a value the owner sets later. Write the marker first so a failed
+# call is not retried on every start.
+pin_marker=/data/model_pin_default_cleared
+if [ ! -e "${pin_marker}" ]; then
+    : > "${pin_marker}"
+    old_pin="$(python3 -c 'import json, pathlib; p=pathlib.Path("/data/options.json"); data=json.loads(p.read_text()) if p.exists() else {}; print(data.get("model_pin") or "")')"
+    if [ "${old_pin}" = "gpt-6.1-sol" ]; then
+        if bashio::addon.option 'model_pin'; then
+            export MODEL_PIN_CLEARED=1
+            bashio::log.info "Cleared the old default model pin gpt-6.1-sol; runs use the account's default model unless you set the model_pin option."
+        else
+            bashio::log.warning "Could not clear the old default model pin gpt-6.1-sol."
+        fi
+    fi
+fi
+
 # Install or update the bundled Codex integration in /config (integration_sync.py); never blocks the start.
 python3 /integration_sync.py || bashio::log.warning "The integration install step failed; the worker starts anyway."
 # Announce the app through Supervisor discovery once Home Assistant has loaded the integration. It runs in the
