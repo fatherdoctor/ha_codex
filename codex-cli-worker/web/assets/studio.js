@@ -13,7 +13,6 @@ function updateStudio() {
   $("permission-button").setAttribute('aria-label', permissionLabel);
   $("permission-button").title = permissionLabel;
   $("permission-button").classList.toggle("full-access", selectedPermissionMode() === "full-access");
-  $("phone-new").disabled = state.busy || state.settingsBusy;
   $("permission-button").disabled = state.busy || state.loading || state.settingsBusy ||
     Boolean(state.task && ["queued", "running"].includes(state.task.status)) || Boolean(state.task?.queued_message);
   for (const choice of document.querySelectorAll("[data-mode]"))
@@ -24,7 +23,6 @@ document.addEventListener("chat-view", updateStudio);
 for (const button of document.querySelectorAll("[data-close]"))
   button.onclick = () => $(button.dataset.close).close();
 $("phone-history").onclick = () => sidebar(true);
-$("phone-new").onclick = () => selectChat(null);
 $("permission-button").onclick = () => {
   $("permission-result").textContent = "";
   updateStudio();

@@ -144,7 +144,9 @@ async function showSidebar(page, phone) {
       if (phone) await page.locator('#close-sidebar').click();
 
       // 6. While a task runs, the send button is the stop button, and a draft or a file in the box keeps it there.
-      await page.locator(phone ? '#phone-new' : '#new-chat').click();
+      if (phone) await showSidebar(page, phone);
+      assert.equal(await page.locator('#phone-new').count(), 0, 'no separate plus button beside the phone title');
+      await page.locator('#new-chat').click();
       await page.locator('#message').fill('Take your time and list the synthetic porch lights.');
       await page.locator('#send').click();
       await page.locator('#cancel:not([hidden])').waitFor();
