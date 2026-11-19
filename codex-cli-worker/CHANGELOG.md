@@ -28,6 +28,11 @@
   for the project, not for one person, and give versions of this project in their examples. The changelog now starts
   at this project's first version. The root `SCREENSHOTS.md`, which said that no screenshot was published, is
   removed; `screenshots/SCREENSHOTS.md` lists the screenshots.
+- The worker no longer contains the `codex exec` start path that it kept from upstream. Every exchange already ran
+  through `codex app-server`, which carries the live permission requests; the exec path had none and only tests
+  reached it. No behavior changes: the modes the protected policy refuses are still stopped before Codex starts. A
+  new test fails if any shipped module names the `exec` subcommand. The approval smoke test now runs in the built
+  image, against the Codex CLI that ships (the workflow change is staged in `ci/verification.yaml`).
 
 ## 0.3.6 - 2026-11-18
 
