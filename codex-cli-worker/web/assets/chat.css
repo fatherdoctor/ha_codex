@@ -136,6 +136,13 @@ aside {
   width: 100%;
   height: 100%;
 }
+.brand-icon .brand-mark-dark,
+:root[data-theme="dark"] .brand-icon .brand-mark-light {
+  display: none;
+}
+:root[data-theme="dark"] .brand-icon .brand-mark-dark {
+  display: block;
+}
 .tag {
   width: 100%;
   padding-left: 33px;
