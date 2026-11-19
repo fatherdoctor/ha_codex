@@ -2,13 +2,18 @@
 
 ## 0.4.0 (unreleased)
 
+- Chat page: the plus on the attach button is now an icon centered in a round button, on a desktop and a phone.
+  The banner across the top of the page while Full access is on is gone; in a chat's Permissions menu, **Full
+  access** is now shown in bold while the setting is on, and the other choices are not bold.
+- Chat page: the plus on the **New chat** button is now a 20 px icon, in the same style as the attach plus, on a
+  desktop and a phone.
 - Files and photos you attach to a message are now stored in the app's own data folder (`/data/attachments`), not
-  under `task_root` in the Home Assistant configuration folder, and the folder is left out of backups. The app
-  removes attachments older than 7 days once a day; a chat that shows one then says "Attachment removed after
-  7 days". On the first start of this version, uploads kept under `task_root` by earlier versions are moved into
-  the new folder, with one log line. Images that Codex generates stay with the chat. The move is recorded only when every file moved, so a failed
-  file is tried again at the next start. The cleanup keeps a folder changed in the last hour, so it cannot remove
-  the folder of an upload in progress.
+  under `task_root` in the Home Assistant configuration folder, and the folder is left out of backups. The app removes
+  attachments older than 7 days once a day; a chat that shows one then says "Attachment removed after 7 days". On the
+  first start of this version, uploads kept under `task_root` by earlier versions are moved into the new folder, with
+  one log line. Images that Codex generates stay with the chat. The move is recorded only when every file moved, so a
+  failed file is tried again at the next start. The cleanup keeps a folder changed in the last hour, so it cannot
+  remove the folder of an upload in progress.
 - Documentation only: the README, the integration README, `SECURITY.md`, `DOCS.md` and three option descriptions
   now say what the code does. The README no longer promises a question before every change, or a saved copy and a
   configuration check after every change; it says when each one happens. It says that an automation with no user

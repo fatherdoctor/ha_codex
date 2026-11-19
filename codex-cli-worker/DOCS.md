@@ -1131,7 +1131,7 @@ own to any of them.
 - In Auto-review the chat shows each review: "Auto-review is checking a command", then whether it allowed it, the
   risk level and the reviewer's reason. The reviewer also answers for locks and messages; that is Codex's model.
 - **Full access** is off until an administrator turns it on in **Settings > Full access** and confirms a warning.
-  While it is on, a banner says so. Turning it off returns every chat set to Full access to Default. While Full
+  While it is on, **Full access** shows in bold in a chat's Permissions menu. Turning it off returns every chat set to Full access to Default. While Full
   access is on, a ChatGPT app thread can also ask for it; the app never sees those threads, so such a thread can
   mix the settings (for example "never ask" with `workspace-write`). No mix reaches further than Full access itself.
   A turn that is running when the switch goes off finishes in Full access; the chat's next turn runs in Default.

@@ -45,7 +45,8 @@ main { min-width: 0; background: var(--bg); }
 #message { min-height: 0; background: transparent; padding: 2px 3px 6px; font-size: calc(15px * var(--text-scale)); }
 .compose-bottom { align-items: center; gap: 8px; }
 .compose-tools { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; }
-#attach { background: transparent; color: var(--text); width: 32px; height: 32px; padding: 0; font-size: calc(26px * var(--text-scale)); flex-shrink: 0; }
+#attach { background: transparent; color: var(--text); width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+#attach svg { width: 22px; height: 22px; display: block; }
 /* The chevron is the same icon as the effort picker's, centered on the label rather than set on its baseline. */
 .permission-pill { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: 20px; padding: 7px 8px 7px 10px; font-size: calc(12px * var(--text-scale)); white-space: nowrap; }
 #chat-picker { margin-left: auto; min-width: 0; }
@@ -64,6 +65,9 @@ dialog::backdrop { background: #0006; }
 .studio-sheet .dialog-header h2 { font-size: calc(20px * var(--text-scale)); overflow-wrap: anywhere; }
 .permission-option { display: block; width: 100%; padding: 16px; text-align: left; background: transparent; color: var(--text); border: 1px solid var(--line); margin: 10px 0; }
 .permission-option strong, .permission-option span { display: block; }
+.permission-option strong { font-weight: 400; }
+/* Full access is bold in the menu only while the owner's switch has it on. */
+body[data-full-access="on"] .permission-option[data-mode="full-access"] strong { font-weight: 700; }
 .permission-option span { color: var(--muted); font-size: calc(12px * var(--text-scale)); line-height: 1.6; margin-top: 5px; }
 .permission-option[aria-pressed="true"] { border-color: var(--accent); background: var(--hover); }
 /* The chosen permission mode: mdiCheck (chat.css) in the primary color after its name. */
@@ -106,6 +110,6 @@ dialog::backdrop { background: #0006; }
   #model-button, #effort-button { padding: 4px 5px; font-size: calc(11px * var(--text-scale)); }
   #model-button { max-width: 82px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .picker-pill { min-width: 0; }
-  .compose-tools #attach { width: 26px; }
+  .compose-tools #attach { width: 28px; height: 28px; }
   .studio-sheet, #settings { padding: 20px; width: calc(100vw - 20px); max-height: 90dvh; border-radius: 18px; }
 }
