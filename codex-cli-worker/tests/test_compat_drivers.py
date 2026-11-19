@@ -13,8 +13,10 @@ import unittest
 from unittest import mock
 
 COMPAT = Path(__file__).resolve().parents[2] / "tests" / "compat"
+SERVER = Path(__file__).resolve().parents[1] / "server.py"
 sys.path.insert(0, str(COMPAT))
 
+import cx01_install  # noqa: E402
 import cx02_sign_in  # noqa: E402
 import cx03_chat_task  # noqa: E402
 import cx04_file_edit  # noqa: E402
@@ -243,6 +245,18 @@ class SignInTests(unittest.TestCase):
         login = {"has_auth_file": True, "status_ok": True, "server_check": "unchecked"}
         self.assertEqual(cx02_sign_in.judge(login)[0], compat.FAIL)
 
+    def test_the_wait_outlasts_the_apps_usage_refresh_interval(self):
+        # A status read starts the server check only when the app's last usage read is older than this interval,
+        # so a shorter wait can report a good sign-in as a FAIL.
+        source = SERVER.read_text(encoding="utf-8")
+        self.assertIn(
+            f"USAGE_REFRESH_INTERVAL_SECONDS = {cx02_sign_in.APP_USAGE_REFRESH_SECONDS}\n",
+            source,
+        )
+        self.assertGreater(
+            cx02_sign_in.CHECK_TIMEOUT, cx02_sign_in.APP_USAGE_REFRESH_SECONDS
+        )
+
 
 class ChatTaskTests(unittest.TestCase):
     def test_the_prompt_does_not_hold_the_word(self):
@@ -346,6 +360,204 @@ class FileEditTests(unittest.TestCase):
             )
         )
         self.assertIn(cx04_file_edit.SCRATCH_TEXT, script)
+
+
+class InstallLab(StandInLab):
+    """A lab that answers the calls of cx-01 from recorded values; each test changes one of them."""
+
+    SLUG = "a1b2c3d4_codex_cli_worker"
+
+    def __init__(self, **answers):
+        super().__init__()
+        self.installed = answers.get("installed", False)
+        self.flows = answers.get(
+            "flows", [{"handler": compat.INTEGRATION_DOMAIN, "flow_id": "f1"}]
+        )
+        self.flow_answer = answers.get("flow_answer", {"type": "create_entry"})
+        self.entries = answers.get("entries", [{"state": "loaded"}])
+        self.logs = list(answers.get("logs", ["", "INFO started\n"]))
+        self.system_log = answers.get("system_log", [])
+        self.calls = []
+
+    def addon_slug(self):
+        return self.SLUG
+
+    def supervisor(self, method, endpoint, data=None, timeout=compat.REQUEST_TIMEOUT):
+        self.calls.append((method, endpoint))
+        if endpoint == f"/store/addons/{self.SLUG}":
+            return {"installed": self.installed}
+        return {}
+
+    def addon_info(self, slug):
+        return {"state": "started", "version": "0.0.0-test"}
+
+    def addon_log(self, slug):
+        return self.logs.pop(0)
+
+    def worker(self, slug):
+        worker = mock.Mock()
+        worker.call.return_value = {"integration": {"state": "installed"}}
+        return worker
+
+    def ws(self, message_type, timeout=compat.REQUEST_TIMEOUT, **fields):
+        if message_type == "config_entries/flow/progress":
+            return self.flows
+        if message_type == "system_log/list":
+            return self.system_log
+        raise AssertionError(message_type)
+
+    def rest(self, method, path, body=None, *, text=False):
+        return self.flow_answer
+
+    def config_entries(self, domain):
+        return self.entries
+
+
+class InstallTests(unittest.TestCase):
+    """The pass rule of cx-01, on a lab that answers at once (no waits, no sleeps)."""
+
+    def setUp(self):
+        for name in (
+            "START_TIMEOUT",
+            "RESTART_TIMEOUT",
+            "DISCOVERY_TIMEOUT",
+            "LOAD_TIMEOUT",
+        ):
+            patcher = mock.patch.object(cx01_install, name, 0)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(cx01_install.time, "sleep")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def step(self, lab):
+        args = mock.Mock(core="2026.12.0")
+        with redirect_stdout(io.StringIO()):
+            return cx01_install.step(lab, args)
+
+    def assert_fails(self, lab, text):
+        with self.assertRaises(compat.StepResult) as caught:
+            self.step(lab)
+        self.assertEqual(caught.exception.code, compat.FAIL)
+        self.assertIn(text, caught.exception.why)
+
+    def test_pass(self):
+        lab = InstallLab()
+        self.assertIn("the integration's entry is loaded", self.step(lab))
+        self.assertIn(("post", f"/store/addons/{InstallLab.SLUG}/install"), lab.calls)
+
+    def test_error_lines_from_the_app_fail(self):
+        lab = InstallLab(logs=["INFO started\n[ERROR] worker: could not start\n"])
+        self.assert_fails(lab, "1 ERROR line(s) from the app, 0 from the integration")
+
+    def test_error_entries_from_the_integration_fail(self):
+        lab = InstallLab(
+            system_log=[
+                {
+                    "level": "ERROR",
+                    "name": "custom_components.codex_cli",
+                    "message": ["setup failed"],
+                },
+                {
+                    "level": "ERROR",
+                    "name": "homeassistant.components.other",
+                    "message": ["x"],
+                },
+                {
+                    "level": "WARNING",
+                    "name": "custom_components.codex_cli",
+                    "message": ["y"],
+                },
+            ]
+        )
+        self.assert_fails(lab, "0 ERROR line(s) from the app, 1 from the integration")
+
+    def test_an_entry_that_is_not_loaded_fails(self):
+        lab = InstallLab(entries=[{"state": "setup_retry"}])
+        self.assert_fails(lab, "not loaded: ['setup_retry']")
+
+    def test_no_entry_fails(self):
+        self.assert_fails(InstallLab(entries=[]), "not loaded: no entry")
+
+    def test_no_discovered_flow_fails(self):
+        flows = [{"handler": "other", "flow_id": "f2"}]
+        self.assert_fails(InstallLab(flows=flows), "did not discover the app")
+
+    def test_a_flow_that_does_not_create_an_entry_fails(self):
+        answer = {"type": "abort", "reason": "already_configured"}
+        self.assert_fails(
+            InstallLab(flow_answer=answer),
+            "did not create an entry: abort already_configured",
+        )
+
+    def test_an_installed_app_counts_only_new_error_lines(self):
+        old = "[ERROR] worker: an old problem\n"
+        lab = InstallLab(installed=True, logs=[old, old + "INFO started\n"])
+        self.step(lab)
+        self.assertNotIn(
+            ("post", f"/store/addons/{InstallLab.SLUG}/install"), lab.calls
+        )
+        lab = InstallLab(installed=True, logs=[old, old + old])
+        self.assert_fails(lab, "1 ERROR line(s) from the app")
+
+    def test_new_error_lines_count_each_repeat(self):
+        before = "[ERROR] a\n[ERROR] b\n"
+        after = "[ERROR] a\n[ERROR] b\n[ERROR] a\nINFO c\n[ERROR] d\n"
+        self.assertEqual(
+            cx01_install.new_error_lines(before, after), ["[ERROR] a", "[ERROR] d"]
+        )
+
+
+class WaitForTaskTests(unittest.TestCase):
+    """Worker.wait_for_task: when a chat counts as ended, and what a timeout leaves behind."""
+
+    def worker(self, *tasks, cancel_fails=False):
+        worker = compat.Worker("http://lab.invalid:8123/ingress", "stand-in")
+        answers = iter(tasks)
+        self.cancels = []
+
+        def call(method, path, body=None):
+            if path.endswith("/cancel"):
+                self.cancels.append(path)
+                if cancel_fails:
+                    raise compat.requests.HTTPError("502 Bad Gateway")
+                return {"ok": True}
+            return {"task": next(answers)}
+
+        worker.call = call
+        return worker
+
+    def test_a_permission_request_ends_the_wait_and_cancels_the_chat(self):
+        worker = self.worker(
+            {"status": "running", "permission_required": True},
+        )
+        task = worker.wait_for_task("t1", timeout=0)
+        self.assertTrue(task["permission_required"])
+        self.assertEqual(self.cancels, ["/tasks/t1/cancel"])
+
+    def test_a_completed_chat_is_returned_without_a_cancel(self):
+        worker = self.worker({"status": "running"}, {"status": "completed"})
+        with mock.patch.object(compat.time, "sleep"):
+            task = worker.wait_for_task("t1", timeout=60)
+        self.assertEqual(task["status"], "completed")
+        self.assertEqual(self.cancels, [])
+
+    def test_a_timeout_fails_and_cancels_the_chat(self):
+        worker = self.worker({"status": "running"})
+        with self.assertRaises(compat.StepResult) as caught:
+            worker.wait_for_task("t1", timeout=0)
+        self.assertEqual(caught.exception.code, compat.FAIL)
+        self.assertEqual(caught.exception.why, "chat t1 did not end within 0 seconds")
+        self.assertEqual(self.cancels, ["/tasks/t1/cancel"])
+
+    def test_a_failed_cancel_keeps_the_timeout_reason(self):
+        worker = self.worker({"status": "running"}, cancel_fails=True)
+        with self.assertRaises(compat.StepResult) as caught:
+            worker.wait_for_task("t1", timeout=0)
+        self.assertEqual(
+            caught.exception.why,
+            "chat t1 did not end within 0 seconds; the cancel request failed too",
+        )
 
 
 class DriverFolderTests(unittest.TestCase):

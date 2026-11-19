@@ -2,8 +2,11 @@
 """cx-02 sign-in: the app's own check of the ChatGPT sign-in answers ok.
 
 The runner restores the lab's sign-in file before this step. The app reports OpenAI's last answer for that sign-in
-as `codex_login.server_check` in its status: "ok", "rejected" or "unchecked". Reading the status starts a usage
-read, which asks OpenAI, so the step reads the status until the answer is no longer "unchecked".
+as `codex_login.server_check` in its status: "ok", "rejected" or "unchecked". The answer comes from a usage read,
+which asks OpenAI. A status read starts a usage read only when the app's last one is older than its refresh interval
+(`USAGE_REFRESH_INTERVAL_SECONDS` in server.py, 300 seconds), and the app has no route that forces one. cx-01 reads
+the status before the runner restores the file, so the step reads the status until the answer is no longer
+"unchecked", for longer than that interval.
 
 An expired or missing sign-in is NOT RUN, not a FAIL: it says nothing about compatibility, and the person who owns
 the lab signs in again. The runner then marks the later steps that need the sign-in NOT RUN too.
@@ -16,7 +19,9 @@ from typing import Any
 
 import lab as compat
 
-CHECK_TIMEOUT = 45
+# The app's usage refresh interval (server.py), and how long the step waits: one full interval and a margin.
+APP_USAGE_REFRESH_SECONDS = 300
+CHECK_TIMEOUT = APP_USAGE_REFRESH_SECONDS + 30
 
 
 def judge(login: dict[str, Any]) -> tuple[int, str]:

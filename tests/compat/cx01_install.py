@@ -8,12 +8,24 @@ What it does, as a person would on a new install (DOCS.md, "The Codex integratio
 2. Wait until the app has written the integration under /config/custom_components.
 3. Restart Home Assistant, which then discovers the app.
 4. Confirm the discovered flow (Add, then Submit) and wait for the entry to load.
-5. Read the app's log and Home Assistant's error log for ERROR lines from either.
+5. Read the app's log and Home Assistant's error log for new ERROR lines from either.
+
+Which ERROR lines count (the design's rule is "no new ERROR line from either"):
+- Home Assistant keeps its error log in memory, so the restart in step 3 clears it: every entry the step reads is
+  from this run.
+- On a new lab the app's log starts with this run. On a lab where the app is already installed, the step keeps the
+  log from before the install and counts only the ERROR lines it did not have. If the Supervisor has dropped old
+  lines from the log in the meantime, a repeat of an old error is not counted.
+
+What the app-log check can see: only lines that carry the level word ERROR (`lab.error_lines`), such as the lines of
+the Codex CLI, Flask and the Python logging module. The app prints many of its own problems with no level word, and
+this check does not see those. The later steps catch them as failed chats, edits or checks.
 """
 
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import time
 
 import lab as compat
@@ -23,6 +35,28 @@ START_TIMEOUT = 120
 RESTART_TIMEOUT = 300
 DISCOVERY_TIMEOUT = 120
 LOAD_TIMEOUT = 60
+
+
+def installed_slug(lab: compat.Lab) -> str | None:
+    """The app's slug when the app is already installed, else None."""
+    slug = lab.addon_slug()
+    if slug is None or not lab.supervisor("get", f"/store/addons/{slug}").get(
+        "installed"
+    ):
+        return None
+    return slug
+
+
+def new_error_lines(before: str, after: str) -> list[str]:
+    """The ERROR lines of `after` that `before` did not have, counted line by line, in their order."""
+    earlier = Counter(compat.error_lines(before))
+    new = []
+    for line in compat.error_lines(after):
+        if earlier[line]:
+            earlier[line] -= 1
+        else:
+            new.append(line)
+    return new
 
 
 def install_app(lab: compat.Lab) -> str:
@@ -126,12 +160,14 @@ def integration_errors(lab: compat.Lab) -> list[str]:
 
 def step(lab: compat.Lab, args: argparse.Namespace) -> str:
     """Install, start, restart, confirm and check the logs; return the PASS line."""
+    earlier_slug = installed_slug(lab)
+    log_before = lab.addon_log(earlier_slug) if earlier_slug else ""
     slug = install_app(lab)
     wait_for_integration_files(lab.worker(slug))
     restart_core(lab)
     confirm_discovery(lab)
     wait_for_entry(lab)
-    app_errors = compat.error_lines(lab.addon_log(slug))
+    app_errors = new_error_lines(log_before, lab.addon_log(slug))
     core_errors = integration_errors(lab)
     if app_errors or core_errors:
         for line in (app_errors + core_errors)[:20]:

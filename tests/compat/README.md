@@ -37,10 +37,14 @@ input_boolean:
     initial: true
 ```
 
+The machine that runs the drivers needs Python 3.12 or later with `requests` and `websocket-client`
+(`pip install requests websocket-client`). Without them a driver stops with a traceback, which counts as a FAIL.
+
 The lab also needs:
 
 - an administrator's long-lived access token in the file that `COMPAT_HA_TOKEN_FILE` names;
-- for cx-02 on, a ChatGPT sign-in in the app (the runner restores a saved sign-in file before cx-02);
+- for cx-02 on, a ChatGPT sign-in in the app (the runner restores a saved sign-in file before cx-02); cx-02 can
+  take five and a half minutes, because the app asks OpenAI about the sign-in at most once in 300 seconds;
 - for cx-03, Playwright for Python with Chromium (`pip install playwright`, then `playwright install chromium`);
 - for cx-04, `COMPAT_LAB_SHELL`: a command that runs `sh` on the lab with the configuration folder at `/config`,
   for example `ssh compat-lab` to the SSH app.
@@ -62,8 +66,8 @@ Steps cx-01 to cx-04 are built. The others are planned; a runner reports a step 
 
 | Step | Script | What it proves | Passes when |
 |---|---|---|---|
-| cx-01 install | `cx01_install.py` | a new install works: store, install, start, integration written, restart, discovery, setup | the app is started, the integration's entry is loaded, no ERROR line from either |
-| cx-02 sign-in | `cx02_sign_in.py` | the ChatGPT sign-in still works with this version | the app's server check answers ok; an expired sign-in is NOT RUN |
+| cx-01 install | `cx01_install.py` | a new install works: store, install, start, integration written, restart, discovery, setup | the app is started, the integration's entry is loaded, no new ERROR line from either |
+| cx-02 sign-in | `cx02_sign_in.py` | the ChatGPT sign-in still works with this version | the app's server check answers ok within 330 seconds; an expired sign-in is NOT RUN |
 | cx-03 chat task | `cx03_chat_task.py` | the chat page sends a prompt and shows the answer | the fixed word arrives on the page, the turn completes, no console error |
 | cx-04 file edit | `cx04_file_edit.py` | a chat can change a file, and the safety checks after an edit still run | the line is in the scratch file, the rest is unchanged, the previous version was saved and the configuration check is valid |
 | cx-05 relay read | `cx05_relay_read.py` (planned) | a chat reads an entity state through the relay read tool | the answer holds the stand-in entity's state |

@@ -325,17 +325,25 @@ class Worker:
 
         task = wait_for(ended, timeout, interval=3)
         if not task:
-            self.cancel(task_id)
-            raise failed(f"chat {task_id} did not end within {int(timeout)} seconds")
+            reason = f"chat {task_id} did not end within {int(timeout)} seconds"
+            if not self.cancel(task_id):
+                reason += "; the cancel request failed too"
+            raise failed(reason)
         if task.get("permission_required"):
-            self.cancel(
-                task_id
-            )  # Leave the app idle for the next step; the driver judges the request.
+            # Leave the app idle for the next step; the driver judges the request.
+            self.cancel(task_id)
         return task
 
-    def cancel(self, task_id: str) -> None:
-        """Stop a chat, so the app is idle for the next step."""
-        self.call("POST", f"/tasks/{task_id}/cancel")
+    def cancel(self, task_id: str) -> bool:
+        """Stop a chat, so the app is idle for the next step; return False when the app did not take the request.
+
+        A failed cancel must not hide why the step ends, so it is reported to the caller and not raised.
+        """
+        try:
+            self.call("POST", f"/tasks/{task_id}/cancel")
+        except (requests.RequestException, ValueError):
+            return False
+        return True
 
 
 def require_lab(lab: Lab) -> None:
