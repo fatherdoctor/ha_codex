@@ -358,8 +358,34 @@ class AttachmentTests(unittest.TestCase):
         os.utime(new, (now - 6 * 86400,) * 2)
         self.assertEqual(server.cleanup_attachments(now), 1)
         self.assertFalse(old.exists())
+        # The emptied folder was just changed, so the next run removes it.
+        os.utime(old.parent, (now - 7200,) * 2)
+        self.assertEqual(server.cleanup_attachments(now), 0)
         self.assertFalse(old.parent.exists())
         self.assertTrue(new.is_file())
+
+    def test_cleanup_keeps_the_empty_folder_of_a_new_upload(self):
+        """A folder just made for an upload, with its file not yet written, is not removed."""
+        folder = server.ATTACHMENTS_ROOT / "t1" / "turn1"
+        folder.mkdir(parents=True)
+        self.assertEqual(server.cleanup_attachments(), 0)
+        self.assertTrue(folder.is_dir())
+
+    def test_a_failed_move_leaves_no_mark(self):
+        """When a file does not move, the mark is not written, so the next start tries again."""
+        task_id = "a" * 32
+        task_dir = server.get_task_dir(task_id)
+        legacy = task_dir / "turns" / "turn1" / "attachments" / ("b" * 32 + ".png")
+        legacy.parent.mkdir(parents=True)
+        legacy.write_bytes(png_bytes())
+        record = {"attachment_id": "b" * 32, "kind": "image", "origin": "user",
+                  "path": legacy.relative_to(task_dir).as_posix()}
+        server.tasks[task_id] = {"task_id": task_id, "turns": [{"turn_id": "turn1", "prompt_attachments": [record]}]}
+        with patch.object(server.shutil, "move", side_effect=OSError("disk full")):
+            self.assertEqual(server.migrate_attachments(), 0)
+        self.assertFalse(server.ATTACHMENT_MIGRATION_MARK.exists())
+        self.assertEqual(server.migrate_attachments(), 1)
+        self.assertTrue(server.ATTACHMENT_MIGRATION_MARK.exists())
 
     def test_removed_upload_answers_with_the_removal_message(self):
         """A chat whose upload was cleaned up gets 410 and the plain message, not a broken image."""

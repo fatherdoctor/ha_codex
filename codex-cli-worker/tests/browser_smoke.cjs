@@ -959,6 +959,31 @@ function pngBuffer(width = 8, height = 6) {
       }),
       [200, "image/png"],
     );
+    // Once the daily cleanup has removed the upload, the chat says so. A new
+    // browser context has no cached copy of the image.
+    const sentChat = await page.evaluate(
+      () => document.querySelector("#messages .user-attachments img").src,
+    );
+    const sentChatId = sentChat.match(/tasks\/([^/]+)\/attachments/)[1];
+    assert.equal(
+      await page.evaluate(
+        async () => (await fetch("fixture/remove-uploads", { method: "POST" })).status,
+      ),
+      200,
+    );
+    const fresh = await browser.newContext();
+    try {
+      const freshPage = await fresh.newPage();
+      await freshPage.goto("http://127.0.0.1:9137/preview/");
+      await freshPage.locator(`[data-task-id="${sentChatId}"]`).click();
+      await freshPage
+        .locator("#messages p.attachment-missing", {
+          hasText: "Attachment removed after 7 days.",
+        })
+        .waitFor();
+    } finally {
+      await fresh.close();
+    }
     // Timing regressions, made deterministic by gating image decoding: a
     // batch stays with the chat it was picked in, and Send waits for images
     // that are still being prepared.

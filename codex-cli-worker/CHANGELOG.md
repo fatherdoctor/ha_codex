@@ -6,7 +6,9 @@
   under `task_root` in the Home Assistant configuration folder, and the folder is left out of backups. The app
   removes attachments older than 7 days once a day; a chat that shows one then says "Attachment removed after
   7 days". On the first start of this version, uploads kept under `task_root` by earlier versions are moved into
-  the new folder, with one log line. Images that Codex generates stay with the chat.
+  the new folder, with one log line. Images that Codex generates stay with the chat. The move is recorded only when every file moved, so a failed
+  file is tried again at the next start. The cleanup keeps a folder changed in the last hour, so it cannot remove
+  the folder of an upload in progress.
 - Documentation only: the README, the integration README, `SECURITY.md`, `DOCS.md` and three option descriptions
   now say what the code does. The README no longer promises a question before every change, or a saved copy and a
   configuration check after every change; it says when each one happens. It says that an automation with no user

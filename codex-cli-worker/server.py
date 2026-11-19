@@ -81,6 +81,7 @@ DATA_ROOT = Path("/data")
 ATTACHMENTS_ROOT = DATA_ROOT / "attachments"
 ATTACHMENT_KEEP_DAYS = 7
 ATTACHMENT_CLEANUP_INTERVAL_SECONDS = 86400
+ATTACHMENT_FOLDER_GRACE_SECONDS = 3600
 ATTACHMENT_MIGRATION_MARK = DATA_ROOT / "attachments_migrated"
 ATTACHMENT_REMOVED_MESSAGE = "attachment removed after 7 days"
 # Rows an interrupted run left open are closed in main(), after the interactions_to_keep option is applied, so the
@@ -5931,9 +5932,11 @@ def cleanup_backups() -> None:
 def cleanup_attachments(now: float | None = None) -> int:
     """Delete attachments a person uploaded more than ATTACHMENT_KEEP_DAYS days ago; return how many.
 
-    The age is the file's own modified time. Folders left empty are removed too.
+    The age is the file's own modified time. Folders left empty are removed too, on the
+    run after they were last changed by an hour or more.
     """
-    cutoff = (time.time() if now is None else now) - ATTACHMENT_KEEP_DAYS * 86400
+    now_time = time.time() if now is None else now
+    cutoff = now_time - ATTACHMENT_KEEP_DAYS * 86400
     removed = 0
     if not ATTACHMENTS_ROOT.is_dir():
         return 0
@@ -5944,8 +5947,11 @@ def cleanup_attachments(now: float | None = None) -> int:
             if path.is_file() and path.stat().st_mtime < cutoff:
                 path.unlink()
                 removed += 1
-            elif path.is_dir():
-                path.rmdir()  # Fails, and is skipped, while the folder holds anything.
+            elif path.is_dir() and path.stat().st_mtime < now_time - ATTACHMENT_FOLDER_GRACE_SECONDS:
+                # A folder changed in the last hour stays: a new upload's folder is empty for
+                # a moment before its file is written, and a folder just emptied here is
+                # removed by the next run. Fails, and is skipped, while the folder holds anything.
+                path.rmdir()
         except OSError:
             continue
     if removed:
@@ -5972,6 +5978,7 @@ def migrate_attachments() -> int:
     if ATTACHMENT_MIGRATION_MARK.exists():
         return 0
     moved = 0
+    failed = 0
     with lock:
         for task_id, task in tasks.items():
             if TASK_ID_RE.fullmatch(task_id) is None:
@@ -5992,6 +5999,7 @@ def migrate_attachments() -> int:
                         shutil.move(str(source), str(target))
                     except OSError as exc:
                         print(f"Could not move attachment {source.name}: {exc}", flush=True)
+                        failed += 1
                         continue
                     attachment["store"] = "data"
                     attachment["path"] = target.relative_to(ATTACHMENTS_ROOT / task_id).as_posix()
@@ -6002,11 +6010,15 @@ def migrate_attachments() -> int:
                     atomic_json_write(get_task_dir(task_id) / "task.json", task)
                 except OSError as exc:
                     print(f"Could not save task {task_id} after moving attachments: {exc}", flush=True)
-    try:
-        ATTACHMENT_MIGRATION_MARK.parent.mkdir(parents=True, exist_ok=True)
-        ATTACHMENT_MIGRATION_MARK.write_text(utc_now(), encoding="utf-8")
-    except OSError as exc:
-        print(f"Could not record the attachment move: {exc}", flush=True)
+    if failed:
+        # No mark, so the next start tries the files that did not move.
+        print(f"{failed} attachment(s) did not move; the move runs again at the next start.", flush=True)
+    else:
+        try:
+            ATTACHMENT_MIGRATION_MARK.parent.mkdir(parents=True, exist_ok=True)
+            ATTACHMENT_MIGRATION_MARK.write_text(utc_now(), encoding="utf-8")
+        except OSError as exc:
+            print(f"Could not record the attachment move: {exc}", flush=True)
     print(f"Moved {moved} attachment(s) out of the task folder into {ATTACHMENTS_ROOT}.", flush=True)
     return moved
 
