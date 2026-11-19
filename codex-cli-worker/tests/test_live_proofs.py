@@ -38,6 +38,7 @@ import contextlib
 import json
 import os
 import queue
+import signal
 import subprocess
 import sys
 import tempfile
@@ -366,6 +367,66 @@ def pid_alive(pid: int) -> bool:
     return state != "Z"
 
 
+def process_table() -> dict[int, tuple[int, int, str]]:
+    """Return {pid: (parent pid, process group, start time)} of every live process that is not a zombie."""
+    table = {}
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            fields = (entry / "stat").read_text().rsplit(")", 1)[1].split()
+        except OSError:
+            continue
+        # After the name: state, parent pid, process group, ...; the start time is field 22 of stat(5).
+        state, parent, group, started = fields[0], int(fields[1]), int(fields[2]), fields[19]
+        if state != "Z":
+            table[int(entry.name)] = (parent, group, started)
+    return table
+
+
+def process_group(group_id: int) -> set[tuple[int, str]]:
+    """Return (pid, start time) of every live member of one process group.
+
+    The start time tells a process from a later one that gets the same pid.
+    """
+    return {(pid, started) for pid, (_parent, group, started) in process_table().items() if group == group_id}
+
+
+def process_tree(root_pid: int) -> set[tuple[int, str]]:
+    """Return (pid, start time) of every live descendant of a running process."""
+    table = process_table()
+    found = set()
+    pending = [root_pid]
+    while pending:
+        parent_pid = pending.pop()
+        for pid, (parent, _group, _started) in table.items():
+            if parent == parent_pid and pid not in found:
+                found.add(pid)
+                pending.append(pid)
+    return {(pid, table[pid][2]) for pid in found}
+
+
+def still_running(processes: set[tuple[int, str]]) -> set[tuple[int, str]]:
+    """Return the processes of the set that still run as the same process."""
+    table = process_table()
+    return {(pid, started) for pid, started in processes if pid in table and table[pid][2] == started}
+
+
+def end_processes(processes: set[tuple[int, str]], timeout: float = 5) -> None:
+    """Wait for each process to end; stop it with SIGTERM, then SIGKILL, when it outlives the timeout."""
+    for signal_number in (None, signal.SIGTERM, signal.SIGKILL):
+        if signal_number is not None:
+            for pid, _started in still_running(processes):
+                with contextlib.suppress(OSError):
+                    os.kill(pid, signal_number)
+        deadline = time.monotonic() + timeout
+        while still_running(processes) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if not still_running(processes):
+            return
+    raise AssertionError(f"processes left after SIGKILL: {sorted(still_running(processes))}")
+
+
 def tool_calls(root: Path, names: list[str]) -> list[tuple[str, dict[str, Any]]]:
     """Return (server name, params) of every tools/call request Codex sent to a tool program."""
     calls = []
@@ -412,7 +473,7 @@ class AppServer:
             [CODEX, "app-server", *config, *(tool_args or []), *(extra_args or [])],
             cwd=root / "workspace", env={**os.environ, "CODEX_HOME": str(self.home)},
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.stderr,
-            text=True, bufsize=1)
+            text=True, bufsize=1, start_new_session=True)
         self.messages: list[dict[str, Any]] = []
         self.changed = threading.Condition()
         self.responses: dict[int, queue.Queue] = {}
@@ -501,14 +562,29 @@ class AppServer:
                              and (m.get("params") or {}).get("turn", {}).get("id") == turn["id"], start)
 
     def close(self) -> None:
-        """Close the input and stop the process."""
+        """Close the input, stop the process, and wait until each process it started has ended too.
+
+        Codex starts child processes (the tool programs, and a git clone of its plugins under CODEX_HOME). A child
+        can outlive the app-server and still write in the test's folder when tearDown removes it, which fails with
+        "Directory not empty". The app-server runs in its own process group, so the children that leave its tree
+        when it exits are still found. Calling close a second time does nothing more.
+        """
+        children = set()
+        if self.proc.poll() is None:
+            children = process_tree(self.proc.pid) | process_group(self.proc.pid)
         with contextlib.suppress(OSError, ValueError):
             self.proc.stdin.close()
-        try:
-            self.proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
+        deadline = time.monotonic() + 5
+        while self.proc.poll() is None and time.monotonic() < deadline:
+            children |= process_tree(self.proc.pid)
+            time.sleep(0.05)
+        if self.proc.poll() is None:
+            children |= process_tree(self.proc.pid)
             self.proc.kill()
-            self.proc.wait(timeout=5)
+        self.proc.wait(timeout=5)
+        # The process group id is the app-server's pid (start_new_session). The kernel keeps that id in use while
+        # the group has a member, so the group still names only Codex's children after the app-server is gone.
+        end_processes(children | process_group(self.proc.pid))
         self.stderr.close()
         with contextlib.suppress(OSError, ValueError):
             self.proc.stdout.close()
@@ -528,6 +604,59 @@ def wait_ready(app: AppServer, names: list[str], after: int) -> float:
     begin = time.monotonic()
     app.wait_for(lambda _m: all(ready_servers(app, after).get(name) == "ready" for name in names), after)
     return time.monotonic() - begin
+
+
+STAND_IN = """\
+import os, subprocess, sys, time
+from pathlib import Path
+
+# Two writers that keep adding files under the stand-in's CODEX_HOME, as Codex's plugin clone does:
+# one in a session of its own, still a child here, and one whose parent exits at once, so it leaves this tree.
+home = Path(os.environ["CODEX_HOME"])
+writer = ("import itertools, sys, time\\n"
+          "for n in itertools.count():\\n"
+          "    open(f'{sys.argv[1]}/{n}', 'w').close(); time.sleep(0.02)\\n")
+(home / "own").mkdir()
+(home / "orphan").mkdir()
+own = subprocess.Popen([sys.executable, "-c", writer, str(home / "own")], start_new_session=True,
+                       stdout=subprocess.DEVNULL)
+launcher = subprocess.Popen([sys.executable, "-c",
+                             "import subprocess, sys; "
+                             "print(subprocess.Popen(sys.argv[1:], stdout=subprocess.DEVNULL).pid)",
+                             sys.executable, "-c", writer, str(home / "orphan")], stdout=subprocess.PIPE, text=True)
+orphan = int(launcher.communicate()[0])
+(home / "pids").write_text(f"{own.pid} {orphan}")
+sys.stdin.read()
+"""
+
+
+class CloseWaitsForChildren(unittest.TestCase):
+    """AppServer.close ends what the app-server started, so tearDown can remove the folder (CX-PROOFS-RMTREE).
+
+    A stand-in for the codex binary starts two writers and exits when its input closes; no Codex is needed.
+    """
+
+    def test_close_ends_the_children_before_the_folder_goes(self) -> None:
+        temporary = tempfile.TemporaryDirectory(prefix="ha-live-proofs-close-")
+        root = Path(temporary.name)
+        (root / "workspace").mkdir()
+        program = root / "codex"
+        program.write_text(f"#!{sys.executable}\n{STAND_IN}", encoding="utf-8")
+        program.chmod(0o755)
+        model = type("Model", (), {"base_url": "http://127.0.0.1:9/v1"})()
+        with patch.dict(globals(), {"CODEX": str(program)}):
+            app = AppServer(root, model)
+        pids = root / "codex-home" / "pids"
+        deadline = time.monotonic() + WAIT
+        while not pids.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        writers = [int(pid) for pid in pids.read_text().split()]
+        self.assertTrue(all(pid_alive(pid) for pid in writers), writers)
+        app.close()
+        self.assertFalse([pid for pid in writers if pid_alive(pid)], "a child of the app-server outlived close")
+        app.close()
+        temporary.cleanup()
+        self.assertFalse(root.exists())
 
 
 THREAD = {"cwd": None, "sandbox": "workspace-write", "approvalPolicy": "on-request", "approvalsReviewer": "user",
