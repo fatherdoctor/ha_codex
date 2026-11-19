@@ -53,6 +53,9 @@
   keep; the unused `CORE_URL` and `ALLOW_MARK` constants are gone; the three test files that prove a removed part
   stays removed are now one, `tests/test_removed_surfaces.py`, with the same tests; `AGENTS.md` no longer
   describes the bundled house rules file, which was removed in an earlier version.
+- Chat page code only: five styles that no part of the page used are removed: `eyebrow`, `footnote`, `suggestions`
+  and `welcome-icon` from `chat.css`, and `text-button` from `studio.css`. The page looks and works the same. Two new
+  tests fail if a stylesheet or a page file names one of them again.
 
 ## 0.3.6 - 2026-11-18
 
