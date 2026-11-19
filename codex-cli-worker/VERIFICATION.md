@@ -353,6 +353,17 @@ endpoint to check MCP discovery and real entity-tool calls in both sandbox modes
 while confirming that shell socket connections remain denied. Set `HA_TEST_CODEX`
 to the pinned CLI binary when it is not at `/usr/local/bin/codex`. No model account
 or paid request is involved.
+`codex-cli-worker/tests/test_live_proofs.py` runs the pinned CLI's `app-server` with the worker's own launch
+arguments and tool programs, and a local stand-in model, to check what one long-lived process with several
+chats would rely on: tool programs start with each thread and report ready, `thread/unsubscribe` unloads a
+thread and stops its tools, a resumed thread keeps its history, a turn may change the permission mode without
+starting the tools again, `turn/interrupt` ends one turn and leaves the thread usable, two threads run turns at
+the same time, and every tool call carries the thread id in `_meta.threadId` (a sub-agent's call carries its own
+thread's id). It also prints three start-up times and what Codex does when a second process resumes a thread
+that is live. Each tool program runs behind a small relay that logs what Codex sends it; the tool sockets do not
+exist in the test, so tool calls fail after Codex has sent them. Set `HA_TEST_CODEX` as above; without the pinned
+CLI the tests are skipped. The socket check of the same kind is in
+[SANDBOX_TESTING.md](SANDBOX_TESTING.md#the-workers-sockets-and-the-sandbox-live-proof).
 `node codex-cli-worker/tests/browser_verification.cjs` uses real Chromium and a protocol fixture to
 check viewports, external auth, registered local resources, blocked writes, broken resources/cards, rejected
 authentication, and cleanup. Provide `playwright-core` and `ws` on `NODE_PATH` and

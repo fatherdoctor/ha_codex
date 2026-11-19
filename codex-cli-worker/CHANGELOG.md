@@ -2,6 +2,11 @@
 
 ## 0.4.0 (unreleased)
 
+- Tests only: two new checks run the packaged Codex CLI against a local stand-in model. One shows that a command in
+  Read only, Default or Auto-review cannot connect to any of the app's tool sockets, and records that an
+  escalated command, once approved, can. The other checks how `codex app-server` handles several chats in one
+  process: tool start-up, pausing and resuming a chat, turns at the same time, interrupts, and the chat id on
+  each tool call. Nothing in the app changes.
 - The lead agent channel and the local mailbox are removed from the app. The lead token, its Settings section, the
   `/lead/` routes and the `/schedule-mailbox` routes are gone, and Codex no longer has the `read_mailbox` and
   `post_mailbox` tools. Saved messages stay in the schedule file, unread, so an older version still finds them after
