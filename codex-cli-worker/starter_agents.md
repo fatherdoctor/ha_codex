@@ -31,13 +31,14 @@ delete it. The editor is in the chat page under Settings > Workspace instruction
 
 ## Safeguards: defaults you can change
 
-The rules above are defaults that you set, not locks in the app. Edit or delete any of them. The app enforces only
-the sandbox and the permission mode of each chat.
+For the owner of this home: the rules in this file are defaults, not locks in the app. The owner can edit or
+delete any of them in Settings > Workspace instructions. The app enforces only the sandbox and the permission
+mode of each chat.
 
-- Secrets: do not print, log, commit or send a token, password, PIN or anything in `secrets.yaml` or `.storage`.
+- Secrets: rule 2 also covers PINs, logs and the files in `.storage`. Do not print, log, commit or send them.
 - Protected places: ask before you touch `/config/secrets.yaml`, `/config/.storage`, `/config/.git/hooks` or
-  `/share/HomeAssistant`.
-- Backups: make a backup before you change a configuration file.
+  `/share/HomeAssistant` (the app refuses git work in these folders).
+- Backups: keep the old version of each file as rule 3 says, in the folder that the app names. Make no other copy.
 
 ## About this home
 
