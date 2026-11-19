@@ -157,12 +157,12 @@ class OwnerFieldApiTests(unittest.TestCase):
         self.request_owner('POST', '/schedules', proposal(chat_id=CHAT, model=MODEL))
         task = 'listing-turn'
         server.tasks[task] = {'status': 'running', 'current_turn_id': 'synthetic-turn'}
-        capability = server.ha_data.begin(task); self.addCleanup(lambda: server.ha_data.end(task))
+        thread = fixtures.open_exchange(self, task)
         for field in ({'chat_id': CHAT}, {'model': MODEL}):
             with self.assertRaisesRegex(ValueError, 'accepts only name, prompt, mode and spec'):
-                self.service.dispatch({'operation': 'propose_schedule', 'arguments': proposal(**field), 'capability': capability})
-        self.service.dispatch({'operation': 'propose_schedule', 'arguments': proposal(), 'capability': capability})
-        answer = self.service.dispatch({'operation': 'list_schedules', 'arguments': {}, 'capability': capability})
+                self.service.dispatch({'operation': 'propose_schedule', 'arguments': proposal(**field), 'thread_id': thread})
+        self.service.dispatch({'operation': 'propose_schedule', 'arguments': proposal(), 'thread_id': thread})
+        answer = self.service.dispatch({'operation': 'list_schedules', 'arguments': {}, 'thread_id': thread})
         self.assertEqual(len(answer['items']), 2)
         for row in answer['items']:
             self.assertFalse(scheduling.OWNER_FIELDS & set(row), row)

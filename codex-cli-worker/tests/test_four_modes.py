@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT))
 import approvals
 import full_access
 import ha_call
+import tool_threads
 import policy
 import remote_control as rc
 import test_approvals as approval_tests
@@ -503,7 +504,7 @@ class StandInCodex:
         self.asked = None
 
     def run(self, arguments):
-        return self.calls.dispatch({"capability": self.key, "arguments": arguments})
+        return self.calls.dispatch({"thread_id": ha_calls.THREAD, "arguments": arguments})
 
     def call(self, arguments, review_status=None):
         """Ask to run the tool. Return the tool's result when it ran now, else None."""
@@ -555,6 +556,8 @@ class DeviceCallContractTests(unittest.TestCase):
         self.stack.enter_context(patch.object(ha_call, "fetch_states", lambda path, token: {
             "entity_id": path[8:], "state": "off", "attributes": {}}))
         self.calls = ha_call.HomeAssistantCall(ha_calls.call_worker())
+        tool_threads.CHATS.bind("t1", ha_calls.THREAD)
+        self.addCleanup(tool_threads.CHATS.release, "t1")
         self.key = self.calls.begin("t1")
         prefix = "mcp_servers.home_assistant_call.tools.call.approval_mode="
         modes = [value.removeprefix(prefix) for value in server.call_mcp_args() if value.startswith(prefix)]
