@@ -24,7 +24,7 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
         self.addCleanup(p.stop)
 
     def test_background_sources_finish_and_exceptions_are_recorded_without_prompt(self):
-        for source, expected in (('page', 'addon_page'), ('schedule', 'scheduled_run'), ('lead', 'lead_channel')):
+        for source, expected in (('page', 'addon_page'), ('schedule', 'scheduled_run'), ('lead', 'addon_page')):
             task = {'task_source': source, 'status': 'running', 'chat_settings': {'model': 'gpt-6.1-sol'}}
 
             def run(*args):

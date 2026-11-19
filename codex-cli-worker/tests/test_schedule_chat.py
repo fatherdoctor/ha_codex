@@ -58,7 +58,7 @@ class OwnerFieldStoreTests(unittest.TestCase):
         self.assertEqual((cleared['chat_id'], cleared['model']), ('', None))
 
     def test_an_agent_proposal_cannot_name_a_chat_or_a_model(self):
-        for author in ('lead', 'codex'):
+        for author in ('codex',):
             for field in ({'chat_id': CHAT}, {'model': MODEL}):
                 with self.subTest(author=author, field=field), self.assertRaisesRegex(
                         ValueError, 'accepts only name, prompt, mode and spec'):
@@ -152,26 +152,20 @@ class OwnerFieldApiTests(unittest.TestCase):
         self.assertEqual(run['error'], server.model_pin_message(MODEL, OTHER_MODEL) + ' Not retried.')
         self.assertNotIn(run['task_id'], server.tasks)
 
-    def test_the_lead_cannot_set_or_read_the_chat_and_the_model(self):
-        self.add_chat()
-        self.request_owner('POST', '/schedules', proposal(chat_id=CHAT, model=MODEL))
-        for field in ({'chat_id': CHAT}, {'model': MODEL}):
-            self.assertEqual(self.client.post('/lead/schedules', json=proposal(**field), headers=self.lead).status_code, 400)
-        proposed = self.client.post('/lead/schedules', json=proposal(), headers=self.lead).json['schedule']
-        listed = self.client.get('/lead/schedules', headers=self.lead).json['schedules']
-        self.assertEqual(len(listed), 2)
-        for row in (proposed, *listed):
-            self.assertFalse(scheduling.OWNER_FIELDS & set(row), row)
-
     def test_codex_cannot_read_the_chat_and_the_model(self):
         self.add_chat()
         self.request_owner('POST', '/schedules', proposal(chat_id=CHAT, model=MODEL))
         task = 'listing-turn'
         server.tasks[task] = {'status': 'running', 'current_turn_id': 'synthetic-turn'}
         capability = server.ha_data.begin(task); self.addCleanup(lambda: server.ha_data.end(task))
+        for field in ({'chat_id': CHAT}, {'model': MODEL}):
+            with self.assertRaisesRegex(ValueError, 'accepts only name, prompt, mode and spec'):
+                self.service.dispatch({'operation': 'propose_schedule', 'arguments': proposal(**field), 'capability': capability})
+        self.service.dispatch({'operation': 'propose_schedule', 'arguments': proposal(), 'capability': capability})
         answer = self.service.dispatch({'operation': 'list_schedules', 'arguments': {}, 'capability': capability})
-        self.assertEqual(len(answer['items']), 1)
-        self.assertFalse(scheduling.OWNER_FIELDS & set(answer['items'][0]), answer['items'][0])
+        self.assertEqual(len(answer['items']), 2)
+        for row in answer['items']:
+            self.assertFalse(scheduling.OWNER_FIELDS & set(row), row)
 
 
 if __name__ == '__main__':

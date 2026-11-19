@@ -1,4 +1,4 @@
-// Synthetic schedule editor (opened from a chat's menu and from Settings) and mailbox UI against the disposable web fixture.
+// Synthetic schedule editor (opened from a chat's menu and from Settings) against the disposable web fixture.
 // Scheduled runs are off in this series; this test needs the fixture started with CODEX_FIXTURE_SCHEDULED_RUNS=1.
 if (process.env.CODEX_FIXTURE_SCHEDULED_RUNS !== "1") {
   console.log("SKIP: scheduled runs are switched off (start the fixture with CODEX_FIXTURE_SCHEDULED_RUNS=1)");
@@ -12,12 +12,12 @@ const assert = require('node:assert/strict');
     for (const width of [390, 1100]) {
       const page = await browser.newPage({viewport:{width,height:844}});
       const errors=[]; page.on('pageerror', e=>errors.push(e.message));
-      let schedules=[], runs=[], mailbox=[], created, edits=0, newTokens=0, mailDeletes=0, acknowledgements=[], refusal='', approvedRevision;
+      let schedules=[], runs=[], created, edits=0, refusal='', approvedRevision;
       await page.route('**/schedules**', async route => {
         const req=route.request(), path=new URL(req.url()).pathname.replace('/preview/','');
         if (path.startsWith('assets/')) return route.continue();
         const data=req.postDataJSON();
-        if (req.method()==='GET') return route.fulfill({json:{ok:true,timezone:'America/Chicago',schedules,runs:[...runs,{created:1803859200,status:'waiting_for_approval',task_id:'sample-task',error:''}],mailbox,lead_token_configured:newTokens>0}});
+        if (req.method()==='GET') return route.fulfill({json:{ok:true,timezone:'America/Chicago',schedules,runs:[...runs,{created:1803859200,status:'waiting_for_approval',task_id:'sample-task',error:''}]}});
         if (refusal) return route.fulfill({status:400,json:{ok:false,error:refusal}});
         if (path==='schedules') { created=data; schedules=[{...data,id:'sample',approved:true,enabled:true,revision:'revision-one',next_due:1803862800}]; if(data.spec.kind==='once') schedules[0].spec={kind:'once',at:Date.parse(data.spec.at+'-06:00')/1000}; }
         else if(req.method()==='PATCH') { edits++; schedules=[{...schedules[0],...data}]; }
@@ -25,18 +25,6 @@ const assert = require('node:assert/strict');
         else if(path.endsWith('/resume')) schedules[0].enabled=true;
         else if(path.endsWith('/approve')) { approvedRevision=data.revision; schedules[0].approved=true; schedules[0].enabled=true; }
         else if(path.endsWith('/delete')) schedules=[];
-        return route.fulfill({json:{ok:true}});
-      });
-      await page.route('**/lead-token', route=>{newTokens++;return route.fulfill({json:{ok:true,token:'synthetic-once-only-value'}});});
-      await page.route('**/schedule-mailbox**', async route=>{
-        if (route.request().method()==='DELETE') { assert.deepEqual(route.request().postDataJSON(), {confirm:true}); assert.equal(new URL(route.request().url()).searchParams.get('mailbox'), 'owner'); mailDeletes++; mailbox=[]; return route.fulfill({json:{ok:true}}); }
-        const data=route.request().postDataJSON();
-        if (new URL(route.request().url()).pathname.endsWith('/read')) {
-          assert.equal(await page.locator('#schedule-mailbox details').count(), mailbox.length);
-          acknowledgements.push(data.ids);
-          return route.fulfill({json:{ok:true}});
-        }
-        mailbox.push({id:'mail-'+mailbox.length,parent:route.request().url().endsWith('/reply')?'mail-0':null,envelope:{to:data.to,from:'owner',sent:'2027-03-01T00:00:00.000Z',last_modified:'2027-03-01T00:00:00.000Z',due:data.due,message:data.message},origin:'lead',text:'To: '+data.to+'\nFrom: owner\nSent: 2027-02-28 18:00:00 (America/Chicago)\nLast modified: 2027-02-28 18:00:00 (America/Chicago)\n\n'+data.message});
         return route.fulfill({json:{ok:true}});
       });
       /** On a phone the chat list slides over the chat; open it unless it is open already. */
@@ -211,58 +199,12 @@ const assert = require('node:assert/strict');
       await page.locator('#schedule-list').getByRole('button',{name:'Approve this proposal',exact:true}).click();
       await page.locator('#schedule-list').getByRole('button',{name:'Pause',exact:true}).waitFor();
       assert.equal(approvedRevision,'current-proposal');
-      await page.locator('#schedule-mail-to').selectOption('codex');
-      await page.locator('#schedule-mail-due').fill('2027-03-02T00:00:00Z');
-      await page.locator('#schedule-mail-body').fill('<b>Plain sample message</b>');
-      await page.locator('#schedule-mail-form button[type=submit]').click();
-      await page.locator('#schedule-mailbox').getByText('<b>Plain sample message</b>',{exact:true}).waitFor();
-      assert.equal(await page.locator('#schedule-mailbox b').count(),0);
-      assert.deepEqual(await page.locator('#schedule-mailbox > div > strong').allTextContents(), ['Started by lead', 'To', 'From', 'Sent', 'Last modified', 'Due', 'Message']);
-      assert.ok((await page.locator('#schedule-mailbox').innerText()).includes('(America/Chicago)'));
-      await page.locator('#schedule-mailbox details summary').click();
-      assert.ok((await page.locator('#schedule-mailbox details pre').innerText()).startsWith('To: codex\nFrom: owner\nSent:'));
-      await page.locator('#schedule-mail-reader').selectOption('lead');
-      await page.waitForResponse(response => new URL(response.url()).searchParams.get('mailbox') === 'lead');
-      await page.locator('#schedule-mail-reader').selectOption('owner');
-      await page.waitForResponse(response => new URL(response.url()).searchParams.get('mailbox') === 'owner');
-      await page.locator('#schedule-mailbox').getByRole('button',{name:'Reply',exact:true}).click();
-      await page.locator('#schedule-mail-body').fill('A sample reply');
-      const replyRead = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/schedule-mailbox/read')
-        && response.request().postDataJSON().ids.length === 2);
-      await page.locator('#schedule-mail-form button[type=submit]').click();
-      await page.locator('#schedule-mailbox').getByText('A sample reply',{exact:true}).waitFor();
-      await replyRead;
-      assert.deepEqual(acknowledgements.at(-1), ['mail-0', 'mail-1']);
-      assert.equal(mailbox[1].parent,'mail-0');
-      await page.locator('#schedule-mailbox').getByRole('button',{name:'Clear mailbox',exact:true}).click();
-      await page.waitForFunction(()=>document.querySelector('#schedule-mail-clear-confirmation') || document.querySelector('#schedule-mailbox').textContent.includes('No local messages.'));
-      assert.equal(mailDeletes,0,'The first tap must not delete messages');
-      const confirmation=page.locator('#schedule-mail-clear-confirmation');
-      await confirmation.getByRole('button',{name:'Cancel',exact:true}).click();
-      await page.locator('#schedule-mailbox').getByRole('button',{name:'Clear mailbox',exact:true}).waitFor();
-      assert.equal(mailDeletes,0); assert.equal(mailbox.length,2);
-      await page.locator('#schedule-mailbox').getByRole('button',{name:'Clear mailbox',exact:true}).click();
-      await confirmation.waitFor();
-      await page.locator('#close-settings').click(); await openSettings();
-      await page.locator('#schedule-mailbox').getByRole('button',{name:'Clear mailbox',exact:true}).waitFor();
-      assert.equal(await confirmation.count(),0,'Closing settings cancels pending confirmation');
-      assert.equal(mailDeletes,0);
-      await page.locator('#schedule-mailbox').getByRole('button',{name:'Clear mailbox',exact:true}).click();
-      await confirmation.getByRole('button',{name:'Clear all messages',exact:true}).click();
-      await page.locator('#schedule-mailbox').getByText('No local messages.').waitFor();
-      assert.equal(mailDeletes,1);
-      await page.locator('#lead-token-create').click();
-      await page.locator('#lead-token-result').waitFor({state:'visible'});
-      assert.equal(await page.locator('#lead-token-value').getAttribute('type'),'password');
-      assert.equal(await page.locator('#lead-token-value').inputValue(),'synthetic-once-only-value');
-      assert.equal(await page.evaluate(()=>JSON.stringify(localStorage).includes('synthetic-once-only-value')),false);
       assert.ok((await page.locator('#schedule-runs').textContent()).includes('waiting for approval'));
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
       await page.locator('#close-settings').click();
-      await page.waitForFunction(()=>document.querySelector('#lead-token-value').value==='');
       assert.deepEqual(errors,[]);
       await page.close();
-      console.log(`PASS ${width}px: schedule editor from a chat's menu (hourly, daily, weekly, custom), HA-zone one-off entry, masked prompt read-only, proposal approval, literal rendering, in-page mailbox confirmation/cancel/close, pending status and token cleanup.`);
+      console.log(`PASS ${width}px: schedule editor from a chat's menu (hourly, daily, weekly, custom), HA-zone one-off entry, masked prompt read-only, proposal approval, literal rendering and pending status.`);
     }
   } finally {await browser.close();}
 })().catch(error=>{console.error(error.stack);process.exitCode=1;});
