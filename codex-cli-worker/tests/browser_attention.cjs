@@ -1,5 +1,6 @@
 // The warning on the Settings icon (and the phone's menu buttons) against mocked worker replies.
-// Run with tests/web_fixture.py serving the page; with CODEX_FIXTURE_SCHEDULED_RUNS=1 set it also checks schedule proposals.
+// Run with tests/web_fixture.py serving the page. Scheduled runs are on by default, so it also checks schedule
+// proposals; with CODEX_FIXTURE_SCHEDULED_RUNS=0 the fixture turns them off and the proposal case is skipped.
 // Every account, chat and schedule here is synthetic.
 const {chromium} = require('playwright');
 const assert = require('node:assert/strict');
@@ -34,13 +35,16 @@ function schedule(id, approved, revision = 'r1') {
     for (const width of [390, 1100]) {
       const page = await browser.newPage({viewport: {width, height: 844}});
       const errors = []; page.on('pageerror', e => errors.push(e.message));
-      const world = {auth: signedIn, github: github('disconnected'), remote: remote(false, 'off'), chats: [], schedules: []};
+      const world = {auth: signedIn, github: github('disconnected'), remote: remote(false, 'off'), chats: [], archived: [], schedules: []};
       await page.route('**/auth/status', r => r.fulfill({json: {ok: true, auth: world.auth}}));
       await page.route('**/github', r => r.fulfill({json: {ok: true, github: world.github}}));
       await page.route('**/remote-control', r => r.fulfill({json: {ok: true, remote_control: world.remote}}));
       await page.route('**/schedules', r => r.fulfill({json: {ok: true, schedules: world.schedules, runs: [], timezone: 'UTC'}}));
-      await page.route(/\/tasks\?/, r => r.fulfill({json: {ok: true, tasks: world.chats, total: world.chats.length,
-        next_offset: null, active_task_id: world.chats.find(c => c.permission_required)?.task_id || null, queue: []}}));
+      await page.route(/\/tasks\?/, r => {
+        const tasks = new URL(r.request().url()).searchParams.get('archived') === 'true' ? world.archived : world.chats;
+        return r.fulfill({json: {ok: true, tasks, total: tasks.length, next_offset: null,
+          active_task_id: tasks.find(c => c.permission_required)?.task_id || null, queue: []}});
+      });
 
       // Read everything again, as the page's own polls do.
       const reread = () => page.evaluate(async () => {
@@ -102,11 +106,19 @@ function schedule(id, approved, revision = 'r1') {
       world.github = github('ok'); await reread();
       world.github = github('revoked'); await reread();
       assert.equal((await look()).level, 'red', `${width} github new sign-out`);
+      // An expired sign-in is red too, like a revoked one.
+      world.github = github('ok'); await reread();
+      world.github = github('expired'); await reread();
+      seen = await look();
+      assert.deepEqual([seen.level, seen.label], ['red', 'GitHub signed out'], `${width} github expired`);
       world.github = github('ok'); await reread();
 
       // Remote: Off is the owner's choice; an error while it is on is red and can be dismissed.
       world.remote = remote(false, 'off'); await reread();
       assert.equal((await look()).level, '', `${width} remote off`);
+      // Remote not available on this install (switch on, state error) shows nothing: the owner cannot fix it here.
+      world.remote = {...remote(true, 'error'), available: false}; await reread();
+      assert.equal((await look()).level, '', `${width} remote not available`);
       world.remote = remote(true, 'error'); await reread();
       seen = await look();
       assert.deepEqual([seen.level, seen.label, seen.dismiss], ['red', 'Remote disconnected', true], `${width} remote red`);
@@ -132,15 +144,25 @@ function schedule(id, approved, revision = 'r1') {
       assert.equal((await look()).level, '', `${width} approval answered`);
       world.chats = [chat('a', true), chat('b', false)]; await reread();
       assert.equal((await look()).level, 'yellow', `${width} same chat asks again`);
+      // A read of the archived chats leaves the approvals of the recent list in place.
+      await page.evaluate(() => document.getElementById('archive-list').onclick());
+      await page.waitForFunction(() => state.archived === true);
+      assert.equal((await look()).level, 'yellow', `${width} archived view keeps approvals`);
+      await page.evaluate(() => document.getElementById('archive-list').onclick());
+      await page.waitForFunction(() => state.archived === false);
       world.chats = [chat('a', false), chat('b', false)]; await reread();
 
-      // A schedule proposal waits: yellow; approving it clears the warning.
-      // The page has schedules only while scheduled runs are on (CODEX_FIXTURE_SCHEDULED_RUNS=1).
+      // A schedule proposal waits: yellow; an edit after Dismiss brings it back; approving it clears the warning.
+      // The page has schedules only while scheduled runs are on (the default; CODEX_FIXTURE_SCHEDULED_RUNS=0 turns them off).
       if (await page.locator('#schedule-dialog').count()) {
         world.schedules = [schedule('s1', false)]; await rereadSchedules();
         seen = await look();
         assert.deepEqual([seen.level, seen.label], ['yellow', 'Schedule proposal waiting'], `${width} proposal`);
-        world.schedules = [schedule('s1', true, 'r2')]; await rereadSchedules();
+        await dismiss();
+        assert.equal((await look()).level, '', `${width} proposal dismissed`);
+        world.schedules = [schedule('s1', false, 'r2')]; await rereadSchedules();
+        assert.equal((await look()).level, 'yellow', `${width} edited proposal is new`);
+        world.schedules = [schedule('s1', true, 'r3')]; await rereadSchedules();
         assert.equal((await look()).level, '', `${width} proposal approved`);
       } else console.log(`browser_attention: ${width}: scheduled runs off, proposal case skipped`);
 

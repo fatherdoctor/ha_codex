@@ -1061,7 +1061,8 @@ shows the same symbol. It is yellow while an approval or a schedule proposal wai
 signed in or its status cannot be read, when the GitHub sign-in expired or was revoked, or when Remote is on and
 lost its connection. Red wins over yellow. A GitHub account that was never connected, or that you disconnected, and
 Remote turned off show nothing. **Dismiss the warning**, under Settings, hides the warnings shown at that moment
-until something new happens, such as another approval or a new sign-out; the waiting item itself stays. The
+until something new happens, such as another approval or a new sign-out; the waiting item itself stays. A
+reload of the page brings a dismissed warning back. The
 ChatGPT warning cannot be dismissed, because no chat runs without that sign-in. A screen reader reads the warning
 as the description of the Settings and conversations buttons. The page notices a ChatGPT or GitHub sign-out at its
 next status check, within five minutes, and a schedule proposal within a minute.
