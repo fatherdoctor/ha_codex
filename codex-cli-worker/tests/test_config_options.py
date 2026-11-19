@@ -34,8 +34,13 @@ OPTIONS = {
 }
 
 
-def quoted(key: str) -> re.Pattern:
-    return re.compile(r"""["']%s["']""" % re.escape(key))
+def read_form(key: str) -> re.Pattern:
+    """The option is read, as .get("key") or ["key"], not only listed in a table of defaults."""
+    return re.compile(r"""(\.get\(\s*|\[\s*)["']%s["']""" % re.escape(key))
+
+
+MAX_DESCRIPTION_WORDS = 25
+CODE_WORDS = ("HA_TOKEN", "HA_URL", "_seconds", "_mib", "_days")
 
 
 class ConfigurationOptionsTests(unittest.TestCase):
@@ -55,7 +60,7 @@ class ConfigurationOptionsTests(unittest.TestCase):
         for key, (_feature, source, _test) in OPTIONS.items():
             with self.subTest(option=key):
                 text = (WORKER / source).read_text(encoding="utf-8")
-                self.assertRegex(text, quoted(key), f"{source} does not read {key}")
+                self.assertRegex(text, read_form(key), f"{source} never reads {key} with .get or [ ]")
 
     def test_each_option_is_covered_by_a_test(self):
         for key, (_feature, _source, test) in OPTIONS.items():
@@ -69,6 +74,15 @@ class ConfigurationOptionsTests(unittest.TestCase):
             with self.subTest(option=key):
                 self.assertTrue(entry.get("name", "").strip())
                 self.assertTrue(entry.get("description", "").strip())
+
+    def test_labels_are_plain_and_descriptions_stay_short(self):
+        for key, entry in self.translations.items():
+            with self.subTest(option=key):
+                name = entry["name"]
+                for word in CODE_WORDS:
+                    self.assertNotIn(word, name, f"the name of {key} uses the code word {word}")
+                words = len(entry["description"].split())
+                self.assertLessEqual(words, MAX_DESCRIPTION_WORDS, f"the description of {key} has {words} words")
 
     def test_no_option_belongs_to_a_hidden_feature(self):
         names = " ".join(self.config["schema"]).lower()

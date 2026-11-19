@@ -58,8 +58,7 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256((paragraph + '\n\n' + next(
             x for x in docs.split('\n\n') if x.startswith('From **0.1.81.2**')
         )).encode()).hexdigest(), 'a6806005f34bc7047dd7e3de83c8cab174483221c814554a074120183f55dcc5')
-        description=yaml.safe_load((ROOT/'translations/en.yaml').read_text())['configuration']['ha_url']['description']
-        self.assertEqual(hashlib.sha256(description[:462].encode()).hexdigest(),'00117f07856b0c78a57559b19be64cff20924a20f3db6e98bedb85481bc501d9')
+        # The long option description moved to DOCS.md above (CX-04-FB-CONFIG.f); the label stays as upstream had it.
         self.assertEqual(yaml.safe_load((ROOT/'translations/en.yaml').read_text())['configuration']['ha_url']['name'],'Home Assistant API URL')
 
     def test_f4_credential_substrings_and_password_mode_are_never_returned(self):
