@@ -4,7 +4,6 @@ from __future__ import annotations
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 import hashlib
-import hmac
 import json
 import math
 import os
@@ -22,6 +21,7 @@ from urllib.parse import quote
 import requests
 import websocket
 
+import tool_threads
 from ha_data_mcp import DEFAULT_POINTS, MAX_IDS, MAX_POINTS, MAX_RESPONSE_BYTES, PERIODS, STATISTIC_TYPES, TOOLS
 
 MAX_QUERIES = 64
@@ -71,7 +71,10 @@ class HomeAssistantData:
         self.diagnostic_failures = 0
 
     def begin(self, task_id):
-        """Replace the previous turn's credential and reset its independent data-query budget."""
+        """Start the exchange's tool state: a new exchange id, the turn, and a fresh data-query budget.
+
+        The exchange id stays in the worker. A request names its chat by thread id (tool_threads).
+        """
         with self.worker.lock:
             turn = self.worker.tasks.get(task_id, {}).get("current_turn_id")
             with self.lock:
@@ -128,6 +131,21 @@ class HomeAssistantData:
                 if directory not in self.export_dirs.values() and (directory.is_dir() or directory.is_symlink()):
                     self.remove_exports(directory)
 
+    def exchange_for(self, thread_id):
+        """Return (task, exchange id) for the chat that the thread belongs to, or (None, None).
+
+        The chat must have a running exchange that is not canceled. The exchange id never leaves the worker:
+        it only tells a running query that its exchange is still the same one.
+        """
+        task_id = tool_threads.CHATS.task_for(thread_id)
+        if task_id is None:
+            return None, None
+        with self.lock:
+            exchange = self.capabilities.get(task_id)
+        if exchange is None or not self.active(task_id, exchange):
+            return None, None
+        return task_id, exchange
+
     def active(self, task_id, capability):
         """Require the original running turn and refuse cancellation or a replaced credential."""
         with self.worker.lock:
@@ -141,7 +159,7 @@ class HomeAssistantData:
         """Validate every field before any network call and bound IDs, time range and output points."""
         operation = payload.get("operation")
         tool = next((tool for tool in TOOLS if tool["name"] == operation and operation in ("history", "statistics")), None)
-        if tool is None or set(payload) - {"operation", "capability", *tool["inputSchema"]["properties"]}:
+        if tool is None or set(payload) - {"operation", "thread_id", *tool["inputSchema"]["properties"]}:
             raise DataError("Only history and statistics arguments are supported")
         key = "entity_ids" if operation == "history" else "statistic_ids"
         ids = payload.get(key)
@@ -181,13 +199,9 @@ class HomeAssistantData:
         """Authenticate, run one bounded query, redact its result and discard data from expired turns."""
         if not isinstance(payload, dict):
             raise DataError("Expected a data request")
-        supplied = payload.get("capability")
-        if not isinstance(supplied, str) or not supplied or not supplied.isascii():
-            raise DataError("No active data capability")
-        with self.lock:
-            task_id = next((key for key, value in self.capabilities.items() if hmac.compare_digest(value, supplied)), None)
-        if not task_id or not self.active(task_id, supplied):
-            raise DataError("Data capability expired")
+        task_id, supplied = self.exchange_for(payload.get("thread_id"))
+        if task_id is None:
+            raise DataError("No running exchange for this chat")
         if payload.get("operation") == "exchange_info":
             return self.read_exchange_info(task_id, payload)
         if not self.execution_lock.acquire(blocking=False):
@@ -238,7 +252,7 @@ class HomeAssistantData:
 
     def read_exchange_info(self, task_id, payload):
         """Return the running exchange's notes. It reads no Home Assistant data and has no query budget."""
-        if set(payload) - {"operation", "capability"}:
+        if set(payload) - {"operation", "thread_id"}:
             raise DataError("exchange_info takes no arguments")
         with self.lock:
             info = self.exchange_notes.get(task_id)
@@ -463,7 +477,7 @@ class HomeAssistantData:
                            "Empty history can mean no recording, no access or purged data; it does not prove a constant state."}
 
     def serve(self, path):
-        """Start an owner-only Unix socket serving one bounded, capability-authenticated query per connection."""
+        """Start an owner-only Unix socket serving one bounded query per connection for a running exchange."""
         engine = self
 
         class Handler(socketserver.StreamRequestHandler):

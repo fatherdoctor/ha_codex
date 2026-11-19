@@ -389,13 +389,17 @@ the call of up to 5 of them, so Codex does not need a second step to read it bac
 that moves can still show its old state there. The answer names the entity that changed. If Home Assistant does
 not answer these reads, the answer can come up to 40 seconds late; the call itself is sent once.
 
-The keys of the app's tools (`HA_*_CAPABILITY`) are kept out of the commands that Codex runs, with Codex's
-`shell_environment_policy` setting. So a command cannot write to the socket and skip Codex's question. The page
-launch and the remote-control launch set it, and `/etc/codex/managed_config.toml` in the image sets it for every
-client. A thread that the ChatGPT app starts cannot change it, because the managed file outranks a thread's own
-settings. In a mode without a sandbox, a
-command can read the environment of the Codex process; that mode has no question to skip, and the checks above
-still hold.
+A chat holds no key for the app's tools (0.5). Each tool request carries the chat's thread id, which Codex adds
+to every tool call, and the worker answers it only while that chat's exchange runs. In Read only, Default and
+Auto-review a command cannot connect to the tool sockets at all: the sandbox has no network, and Codex denies the
+connection. A command that runs outside the sandbox - one you approve when Codex asks to run it with more access,
+one that Codex's reviewer approves in Auto-review, or any command in Full access - can reach the sockets, and can
+then do what the tools can do. That approval is the protection, as it is for the command itself.
+
+Remote control keeps its own keys (`HA_*_CAPABILITY`), kept out of the commands that its Codex runs with Codex's
+`shell_environment_policy` setting. The remote-control launch sets it, and `/etc/codex/managed_config.toml` in the
+image sets it for every client. A thread that the ChatGPT app starts cannot change it, because the managed file
+outranks a thread's own settings.
 
 These checks do not cover a command that uses the `HA_TOKEN` option (see "AGENTS.md and HA_TOKEN").
 

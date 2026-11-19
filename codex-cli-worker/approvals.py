@@ -587,6 +587,12 @@ class AppServerSession:
     def _item(self, method: str, item: dict[str, Any]) -> None:
         """Translate app-server items into the worker's existing activity format."""
         kind = item.get("type")
+        if kind == "collabAgentToolCall" and item.get("senderThreadId") == self.thread_id:
+            # The ids of the sub-agents that this thread started. Their tool calls name their own thread.
+            threads = [value for value in item.get("receiverThreadIds") or [] if isinstance(value, str)]
+            if threads:
+                self.on_event({"type": "agent.threads", "parent": self.thread_id, "threads": threads})
+            return
         mapped = {"agentMessage": "agent_message", "commandExecution": "command_execution",
                   "fileChange": "file_change", "mcpToolCall": "mcp_tool_call", "webSearch": "web_search"}
         if kind not in mapped and kind != "reasoning":
