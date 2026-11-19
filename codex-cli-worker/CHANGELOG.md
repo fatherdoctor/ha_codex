@@ -6,6 +6,9 @@
   that the chat starts counts as the chat, and a thread that one chat holds is never given to another. The sandbox already stops a command in Read only, Default and Auto-review from
   reaching the tool sockets. Remote control keeps its keys for now.
 
+- Not used yet: a new module, `codex_host.py`, can keep one Codex process running and hold each chat as a thread
+  in it, with at most three chats loaded at a time. Nothing in the app starts it in this version, so every message
+  still starts its own Codex process. A later change connects it, with an option to turn it off.
 - The starter `AGENTS.md` has a short section of safeguard defaults (secrets, protected places, backups). The
   section says they are defaults the owner can change or delete, not locks in the app. No app code changes.
 - Tests only: two new checks run the packaged Codex CLI against a local stand-in model. One shows that a command in

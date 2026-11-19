@@ -79,6 +79,21 @@ Paths are under `codex-cli-worker/` unless they start with `custom_components/`.
 | Codex is offered only `propose_schedule` and `list_schedules` (while scheduled runs are on), its rules name no mailbox, and the socket refuses the old mailbox operations | `server.py: SCHEDULING_TOOLS`, `SCHEDULING_PARAGRAPH`; `scheduling_mcp.py: TOOLS`; `schedule_api.py: Service.dispatch` | `tests/test_lead_removed.py: test_codex_is_offered_only_the_two_schedule_tools`, `test_the_socket_refuses_the_mailbox_operations` |
 | The old mailbox and lead tables in a saved schedule file stay on disk and are never read; a new file does not get them | `scheduling.py: Store.__init__` | `tests/test_lead_removed.py: test_an_old_file_keeps_its_mailbox_tables_unread`, `test_a_new_file_has_no_mailbox_or_lead_tables` |
 
+### The live Codex process (0.5, not used yet)
+
+`codex_host.py` keeps one `codex app-server` process alive and runs each chat as a thread in it. Nothing starts it
+in this version: every exchange still starts its own Codex process. The host decides no permission; the turn carries
+the mode, and `approvals.py` answers Codex's questions, as on the start path.
+
+| protection | enforced in | shown by |
+|---|---|---|
+| Each line of the process output goes to one place by the thread id in it: a reply to the host or to the session that sent the request, a line of a chat with a running exchange to that exchange's session, and nothing else to any session | `codex_host.py: CodexHost._route`, `_reply_owner` | `tests/test_codex_host.py: ReaderTests` (`test_a_line_of_one_chat_never_reaches_the_session_of_another`, `test_a_reply_goes_to_the_session_that_sent_the_request`) |
+| A question from Codex (an approval request) for a chat with no running exchange, or for no known thread, gets an error reply and reaches no session | `codex_host.py: CodexHost._route` | `tests/test_codex_host.py: test_a_question_for_a_chat_with_no_running_exchange_gets_an_error`, `test_a_question_after_the_exchange_ended_gets_an_error` |
+| A sub-agent's thread belongs to the chat whose `collabAgentToolCall` item names it, and cannot take over a thread that already belongs to a chat | `codex_host.py: CodexHost._note` | `tests/test_codex_host.py: test_a_sub_agent_line_reaches_its_chat_session`, `test_a_sub_agent_cannot_take_over_a_thread_of_another_chat` |
+| A process never outlives a change of its environment (address, token), arguments, sign-in, versions or rule files; the log names the row, never its value. A sign-out or the owner switch off stops it. A restart, a sign-out and the switch off wait until no exchange runs, and the check and the stop are one step under the lock | `codex_host.py: CodexHost.ready_for_message`, `_stop_when_idle`, `fingerprint` | `tests/test_codex_host.py: test_each_fingerprint_row_restarts_the_process_and_only_its_name_is_logged`, `test_a_sign_out_stops_the_process_and_starts_none`, `test_a_restart_never_fails_an_exchange_that_starts_during_the_check`, `test_the_owner_switch_off_waits_for_the_running_exchange` |
+| Every thread that holds tool programs is a live chat inside the cap: a wake whose tools fail or are late unloads its thread again (or makes a restart due), and a wake during a crash fails | `codex_host.py: CodexHost.wake`, `_unload_after_failed_wake` | `tests/test_codex_host.py: test_a_chat_whose_tools_fail_is_unloaded_so_the_cap_holds`, `test_a_crash_while_the_tools_start_fails_the_wake` |
+| When another process (remote control) wrote to a live chat's session file, the chat is unloaded and loaded again before its next turn | `codex_host.py: CodexHost.attach` | `tests/test_codex_host.py: test_a_changed_session_file_pauses_and_wakes_the_chat_before_the_turn` |
+
 ### Layer 3: what the worker checks afterwards
 
 | protection | enforced in | shown by |
