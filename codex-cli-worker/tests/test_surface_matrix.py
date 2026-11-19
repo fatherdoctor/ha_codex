@@ -48,15 +48,10 @@ WAYS_IN = {
         PAGE: ("codex_github.github_git",), APP: NONE, SERVICE: ("codex_github.github_git",)},
 }
 
-# Scheduled runs are off in this series (scheduling.SCHEDULED_RUNS): the row, the tools and the DOCS.md row are
-# there only when the switch is on.
-if scheduling.SCHEDULED_RUNS:
-    WAYS_IN["Propose a schedule or use the mailbox"] = {
-        PAGE: ("codex_scheduling.propose_schedule", "codex_scheduling.list_schedules",
-               "codex_scheduling.read_mailbox", "codex_scheduling.post_mailbox"),
-        APP: NONE,
-        SERVICE: ("codex_scheduling.propose_schedule", "codex_scheduling.list_schedules",
-                  "codex_scheduling.read_mailbox", "codex_scheduling.post_mailbox")}
+WAYS_IN["Propose a schedule"] = {
+    PAGE: ("codex_scheduling.propose_schedule", "codex_scheduling.list_schedules"),
+    APP: NONE,
+    SERVICE: ("codex_scheduling.propose_schedule", "codex_scheduling.list_schedules")}
 
 # The one tool that changes the house: Codex asks for it each time, so only a launch that can ask gets it.
 CALL_TOOL = "home_assistant_call.call"

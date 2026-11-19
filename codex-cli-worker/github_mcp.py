@@ -1,13 +1,14 @@
 """Stdio tool for GitHub through the worker: Codex gets a tool, never the sign-in.
 
 The worker does the git work with the add-on's GitHub sign-in and runs the push guard before every push.
-Each call carries this exchange's capability and is refused once the exchange ends.
+Each call carries the chat's thread id that Codex sent, and is refused once the chat's exchange ends.
 """
 from __future__ import annotations
 import json
-import os
 import socket
 import sys
+
+import tool_threads
 
 SOCKET = '/data/github.sock'
 PATH = {'type': 'string', 'maxLength': 4096, 'description': 'The git work tree under /share or /config, for example /share/house_repo or /config.'}
@@ -27,7 +28,7 @@ TOOLS = [
 ]
 
 
-def fetch(name, arguments):
+def fetch(name, arguments, thread_id):
     if name != 'github_git':
         raise ValueError('The only tool is github_git.')
     if not isinstance(arguments, dict) or set(arguments) - {'operation', 'path', 'branch', 'repository', 'folder'}:
@@ -35,7 +36,7 @@ def fetch(name, arguments):
     arguments = dict(arguments)
     operation = arguments.pop('operation', None)
     data = json.dumps({'operation': operation, 'arguments': arguments,
-                       'capability': os.environ.get('HA_DATA_CAPABILITY', '')}).encode() + b'\n'
+                       'thread_id': thread_id}).encode() + b'\n'
     if len(data) > 65536:
         raise ValueError('The request is larger than 64 KiB.')
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
@@ -60,7 +61,7 @@ def respond(request):
     if method == 'tools/call':
         try:
             params = request.get('params', {})
-            result = fetch(params.get('name'), params.get('arguments', {}))
+            result = fetch(params.get('name'), params.get('arguments', {}), tool_threads.thread_id_from_call(params))
         except OSError:
             result = {'ok': False, 'text': 'The GitHub service is not reachable; the add-on may be restarting.'}
         except ValueError as exc:

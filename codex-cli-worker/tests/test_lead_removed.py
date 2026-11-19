@@ -12,6 +12,7 @@ from unittest.mock import patch
 from test_server import server
 import scheduling
 import scheduling_mcp
+import test_scheduling
 
 
 # Every route of the removed channel and mailbox, with a method each one answered to in version 0.3.
@@ -99,12 +100,11 @@ class CodexToolTests(unittest.TestCase):
         with patch.object(server, 'DATA_ROOT', Path(temp.name)), \
                 patch.object(server, 'schedule_timezone', return_value='UTC'), \
                 patch.dict(server.tasks, {task_id: {'status': 'running', 'current_turn_id': 'synthetic-turn'}}):
-            capability = server.ha_data.begin(task_id)
-            self.addCleanup(lambda: server.ha_data.end(task_id))
+            thread = test_scheduling.open_exchange(self, task_id)
             for operation, arguments in (('read_mailbox', {}), ('post_mailbox', {'body': 'A sample message.'})):
                 with self.subTest(operation=operation):
                     answer = server.schedule_service.answer(
-                        json.dumps({'operation': operation, 'arguments': arguments, 'capability': capability}))
+                        json.dumps({'operation': operation, 'arguments': arguments, 'thread_id': thread}))
                     self.assertEqual(answer, {'ok': False,
                                               'error': 'Unsupported scheduling operation; approvals are owner-only.'})
 
@@ -130,8 +130,10 @@ class ScheduleFileTests(unittest.TestCase):
             db.execute('CREATE TABLE lead_threads (task_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, '
                        'started INTEGER NOT NULL DEFAULT 0, finished INTEGER NOT NULL DEFAULT 0)')
             db.execute("INSERT INTO lead_threads VALUES ('sample-task', 'sample-id', 0, 0)")
-        store = scheduling.Store(self.path)
-        run = store.reserve(1000.0)
+        store = scheduling.Store(self.path, zone='UTC')
+        sample = store.save({'name': 'Sample', 'prompt': 'Inspect the sample.', 'spec': {'kind': 'once', 'at': 1060}},
+                            owner=True, now=1000.0)
+        run = store.reserve(1060.0, sample['id'])
         store.finish(run['id'], 'completed')
         self.assertEqual(store.runs()[0]['status'], 'completed')
         with sqlite3.connect(self.path) as db:
@@ -146,6 +148,14 @@ class ScheduleFileTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             store.save(proposal, owner=False, now=1000.0)
         self.assertEqual(store.save(proposal, owner=False, author='codex', now=1000.0)['author'], 'codex')
+
+
+class RedactTests(unittest.TestCase):
+    """An old lead token stays hidden: its hash is kept for a rollback to 0.3, which makes the token valid again."""
+
+    def test_a_bare_lead_token_in_text_is_redacted(self):
+        token = 'cxlead_' + 'S' * 64  # invented
+        self.assertEqual(server.redact(f'The old value was {token} here.'), 'The old value was [redacted] here.')
 
 
 class PageTests(unittest.TestCase):

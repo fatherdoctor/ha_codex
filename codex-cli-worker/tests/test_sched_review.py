@@ -45,8 +45,10 @@ class ReviewStoreTests(unittest.TestCase):
         item = self.store.save(proposal(), owner=False, author='codex', now=NOW)
         with self.assertRaises(ValueError):
             self.store.save(proposal(), owner=False, author='lead', now=NOW, schedule_id=item['id'])
-        edited = self.store.save(proposal(prompt='Changed'), owner=False, author='codex', now=NOW, schedule_id=item['id'])
-        self.assertEqual(edited['author'], 'codex'); self.assertFalse(edited['approved'])
+        # Since 0.4.0 Codex only proposes new schedules; an edit of its own proposal is refused as well.
+        with self.assertRaises(LookupError):
+            self.store.save(proposal(prompt='Changed'), owner=False, author='codex', now=NOW, schedule_id=item['id'])
+        self.assertEqual(self.store.schedules()[0], item)
 
     def test_f4_database_and_persistent_journal_exist_before_task(self):
         self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
@@ -129,8 +131,8 @@ class ReviewApiTests(unittest.TestCase):
         for i in range(scheduling.MAX_SCHEDULES): store.save(proposal(),owner=True,now=NOW)
         for i in range(scheduling.MAX_PROPOSALS): store.save(proposal(),owner=False,author='codex',now=NOW)
         task_id='sample'; server.tasks[task_id]={'status':'running','current_turn_id':'verified-turn'}
-        cap=server.ha_data.begin(task_id); self.addCleanup(lambda: server.ha_data.end(task_id))
-        result=self.service.dispatch({'operation':'list_schedules','arguments':{'offset':110,'limit':10},'capability':cap})
+        thread=fixtures.open_exchange(self, task_id)
+        result=self.service.dispatch({'operation':'list_schedules','arguments':{'offset':110,'limit':10},'thread_id':thread})
         self.assertEqual(len(result['items']),10); self.assertIsNone(result['next_offset'])
 
     def test_f3_background_outcomes_are_log_only_and_chat_pushes_only_what_needs_the_owner(self):

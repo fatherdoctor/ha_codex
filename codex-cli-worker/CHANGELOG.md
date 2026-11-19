@@ -1,10 +1,16 @@
 # Changelog
 
 ## 0.4.0 (unreleased)
+- The app's tools no longer use a secret key for each message. Each tool request names its chat by the thread id
+  that Codex adds to every tool call, and the worker answers it only while that chat's exchange runs; a sub-agent
+  that the chat starts counts as the chat, and a thread that one chat holds is never given to another. The sandbox already stops a command in Read only, Default and Auto-review from
+  reaching the tool sockets. Remote control keeps its keys for now.
 
 - Not used yet: a new module, `codex_host.py`, can keep one Codex process running and hold each chat as a thread
   in it, with at most three chats loaded at a time. Nothing in the app starts it in this version, so every message
   still starts its own Codex process. A later change connects it, with an option to turn it off.
+- The starter `AGENTS.md` has a short section of safeguard defaults (secrets, protected places, backups). The
+  section says they are defaults the owner can change or delete, not locks in the app. No app code changes.
 - Tests only: two new checks run the packaged Codex CLI against a local stand-in model. One shows that a command in
   Read only, Default or Auto-review cannot connect to any of the app's tool sockets, and records that an
   escalated command, once approved, can. The other checks how `codex app-server` handles several chats in one
@@ -14,7 +20,10 @@
   `/lead/` routes and the `/schedule-mailbox` routes are gone, and Codex no longer has the `read_mailbox` and
   `post_mailbox` tools. Saved messages stay in the schedule file, unread, so an older version still finds them after
   a rollback. `/status` reports the mailbox as not available, so the integration's unread-mail sensor shows unknown
-  until the integration removes it. Saved schedules are kept.
+  until the integration removes it. Saved schedules are kept. The schedule store no longer has the code paths that
+  only the channel used: Codex can propose a new schedule but not edit a saved proposal (no tool offered that), and
+  a run is always reserved for one schedule. A bare old lead token in Codex output is still redacted, because a
+  rollback to 0.3 makes it valid again.
 - New Courtyard mark: the app icon and logo, the integration's brand images, the chat page's tab icon and header mark, and
   the README logo.
 - The app no longer pins a model by default. The **Model pin** option is empty, and empty means the account's
@@ -53,6 +62,9 @@
   keep; the unused `CORE_URL` and `ALLOW_MARK` constants are gone; the three test files that prove a removed part
   stays removed are now one, `tests/test_removed_surfaces.py`, with the same tests; `AGENTS.md` no longer
   describes the bundled house rules file, which was removed in an earlier version.
+- Chat page code only: five styles that no part of the page used are removed: `eyebrow`, `footnote`, `suggestions`
+  and `welcome-icon` from `chat.css`, and `text-button` from `studio.css`. The page looks and works the same. Two new
+  tests fail if a stylesheet or a page file names one of them again.
 
 ## 0.3.6 - 2026-11-18
 

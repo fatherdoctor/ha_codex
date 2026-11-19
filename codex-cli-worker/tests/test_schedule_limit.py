@@ -23,45 +23,43 @@ class ScheduleLimitTests(unittest.TestCase):
     def begin_turn(self):
         task_id = 'synthetic-task'
         server.tasks[task_id] = {'status': 'running', 'current_turn_id': 'synthetic-turn'}
-        cap = server.ha_data.begin(task_id)
-        self.addCleanup(lambda: server.ha_data.end(task_id))
-        return task_id, cap
+        return task_id, test_scheduling.open_exchange(self, task_id)
 
     def fill(self):
         store = self.service.engine().store
         for i in range(ROWS):
             store.save(test_scheduling.proposal(name=f'Sample {i}'), owner=True, now=test_scheduling.NOW)
 
-    def ask(self, cap, operation, arguments):
+    def ask(self, thread, operation, arguments):
         """One request through the socket handler's code path, as the MCP tool sends it."""
-        raw = json.dumps({'operation': operation, 'arguments': arguments, 'capability': cap}).encode() + b'\n'
+        raw = json.dumps({'operation': operation, 'arguments': arguments, 'thread_id': thread}).encode() + b'\n'
         return self.service.answer(raw)
 
     def test_limit_is_clamped_for_each_tool(self):
-        _, cap = self.begin_turn()
+        _, thread = self.begin_turn()
         self.fill()
         operation = 'list_schedules'
         for limit, size, next_offset in ((0, 1, 1), (1, 1, 1), (20, 20, 20), (21, 20, 20), (50, 20, 20)):
             with self.subTest(operation=operation, limit=limit):
-                result = self.ask(cap, operation, {'limit': limit})
+                result = self.ask(thread, operation, {'limit': limit})
                 self.assertTrue(result['ok'], result)
                 self.assertEqual(len(result['items']), size)
                 self.assertEqual(result['next_offset'], next_offset)
         # the next page after a clamped one holds the rest
-        rest = self.ask(cap, operation, {'offset': 20, 'limit': 50})
+        rest = self.ask(thread, operation, {'offset': 20, 'limit': 50})
         self.assertEqual(len(rest['items']), ROWS - 20)
         self.assertIsNone(rest['next_offset'])
 
     def test_limit_that_is_not_a_whole_number_is_refused_with_its_reason(self):
-        _, cap = self.begin_turn()
+        _, thread = self.begin_turn()
         for limit in ('20', 2.5, True, None, [5]):
             with self.subTest(limit=limit):
-                result = self.ask(cap, 'list_schedules', {'limit': limit})
+                result = self.ask(thread, 'list_schedules', {'limit': limit})
                 self.assertFalse(result['ok'])
                 self.assertIn('limit must be a whole number', result['error'])
 
     def test_each_refusal_names_its_reason(self):
-        task_id, cap = self.begin_turn()
+        task_id, thread = self.begin_turn()
         cases = [
             ('list_schedules', {'offset': -1}, 'offset must be a whole number from 0 to 120.'),
             ('list_schedules', {'offset': 121}, 'offset must be a whole number from 0 to 120.'),
@@ -73,28 +71,28 @@ class ScheduleLimitTests(unittest.TestCase):
         ]
         for operation, arguments, reason in cases:
             with self.subTest(operation=operation, arguments=arguments):
-                result = self.ask(cap, operation, arguments)
+                result = self.ask(thread, operation, arguments)
                 self.assertFalse(result['ok'])
                 self.assertIn(reason, result['error'])
-        self.assertIn('needs exactly operation, arguments and capability', self.service.answer(b'{}\n')['error'])
+        self.assertIn('needs exactly operation, arguments and thread_id', self.service.answer(b'{}\n')['error'])
         self.assertEqual(self.service.answer(b'not json\n')['error'], 'The request is not valid JSON.')
         self.assertEqual(self.service.answer(b'x' * 65537)['error'], 'The request is larger than 64 KiB.')
         server.ha_data.end(task_id)
-        self.assertEqual(self.ask(cap, 'list_schedules', {})['error'], 'This exchange has ended.')
+        self.assertEqual(self.ask(thread, 'list_schedules', {})['error'], 'This exchange has ended.')
 
     def test_a_character_that_cannot_be_stored_is_refused_with_a_sentence(self):
         # A lone surrogate is valid JSON but cannot be encoded as UTF-8. Its error's first
         # argument is the codec name, which must not reach the caller as the reason.
-        _, cap = self.begin_turn()
-        result = self.ask(cap, 'propose_schedule', test_scheduling.proposal(prompt='Sample \ud800 text.'))
+        _, thread = self.begin_turn()
+        result = self.ask(thread, 'propose_schedule', test_scheduling.proposal(prompt='Sample \ud800 text.'))
         self.assertFalse(result['ok'])
         self.assertEqual(result['error'], 'The text holds a character that cannot be stored.')
 
     def test_an_unexpected_error_stays_generic(self):
-        _, cap = self.begin_turn()
+        _, thread = self.begin_turn()
         for error in (KeyError('synthetic-task'), RuntimeError('internal detail')):
             with self.subTest(error=error), patch.object(self.service, 'dispatch', side_effect=error):
-                self.assertEqual(self.ask(cap, 'list_schedules', {})['error'], GENERIC)
+                self.assertEqual(self.ask(thread, 'list_schedules', {})['error'], GENERIC)
 
 
 class SchedulingToolTests(unittest.TestCase):

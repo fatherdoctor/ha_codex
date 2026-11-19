@@ -8,18 +8,22 @@ import pytest
 import pytest_socket
 
 from test_server import server
+import tool_threads
 from verification import Verification
+
+THREAD = "11111111-2222-4333-8444-555555555555"
 
 
 @pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="Unix verification socket")
 def test_parallel_request_is_rejected_while_active_check_is_blocked(tmp_path, monkeypatch):
     """Reject a second request before the first finishes, without recording it."""
     pytest_socket.socket_allow_hosts(["127.0.0.1"], allow_unix_socket=True)
-    monkeypatch.setattr(server, "tasks", {"chat": {"status": "running", "current_turn_id": "turn"}})
+    monkeypatch.setattr(server, "tasks", {"chat": {"task_id": "chat", "status": "running", "current_turn_id": "turn"}})
     monkeypatch.setattr(server, "save_task_index", lambda: None)
     monkeypatch.setattr(server, "get_task_dir", lambda _task_id: tmp_path / "chat")
     engine = Verification(server)
-    engine.capabilities["chat"] = "test-capability"
+    engine.begin("chat")
+    tool_threads.CHATS.bind("chat", THREAD)
     entered = threading.Event()
     release = threading.Event()
 
@@ -36,7 +40,7 @@ def test_parallel_request_is_rejected_while_active_check_is_blocked(tmp_path, mo
         try:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as first, \
                  socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as second:
-                request = json.dumps({"capability": "test-capability", "operation": "entity", "entity_id": "light.kitchen"}).encode() + b"\n"
+                request = json.dumps({"thread_id": THREAD, "operation": "entity", "entity_id": "light.kitchen"}).encode() + b"\n"
                 first.settimeout(3)
                 second.settimeout(3)
                 first.connect(path)
@@ -55,6 +59,7 @@ def test_parallel_request_is_rejected_while_active_check_is_blocked(tmp_path, mo
                 entity.assert_called_once()
                 assert len(server.tasks["chat"]["verification"]) == 1
         finally:
+            tool_threads.CHATS.release("chat")
             release.set()
             service.shutdown()
             service.server_close()
