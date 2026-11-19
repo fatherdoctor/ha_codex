@@ -187,6 +187,9 @@ class ReleaseHookLock:
     def __exit__(self, *_exc) -> None:
         self.release()
 
+    def locked(self) -> bool:
+        return self.inner.locked()
+
     # threading.Condition uses these to wait with a reentrant lock held.
     def _is_owned(self) -> bool:
         return self.inner._is_owned()
