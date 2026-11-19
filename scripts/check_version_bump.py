@@ -17,11 +17,19 @@ breaks it, 2 when the versions cannot be read.
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 import re
 import sys
-from pathlib import Path
 
-from fork_release import MANIFEST, ROOT, WORKER_CONFIG, ReleaseError, git, is_beta, versions_at
+from fork_release import (
+    MANIFEST,
+    ROOT,
+    WORKER_CONFIG,
+    ReleaseError,
+    git,
+    is_beta,
+    versions_at,
+)
 
 # "Release 0.3.6", "Release v0.3.6", "Release 0.3.6: roll back to 0.3.4". The word is case-sensitive on purpose:
 # a title such as "release notes for the beta" is not a release pull request.
@@ -45,7 +53,9 @@ def check(base: str, head: str, title: str, root: Path = ROOT) -> str:
     """
     merge_base = git("merge-base", base, head, root=root).strip()
     if not merge_base:
-        raise ReleaseError(f"no merge base between {base} and {head}; fetch more history")
+        raise ReleaseError(
+            f"no merge base between {base} and {head}; fetch more history"
+        )
     before = versions_at(merge_base, root)
     after = versions_at(head, root)
     if before == after:
@@ -59,16 +69,28 @@ def check(base: str, head: str, title: str, root: Path = ROOT) -> str:
             "request, whose title starts with 'Release <version>'. Set the version lines back to the ones on main."
         )
     if is_beta(named):
-        raise VersionRuleError(f"{named} is a beta version; a beta is made on the beta branch, never on main")
+        raise VersionRuleError(
+            f"{named} is a beta version; a beta is made on the beta branch, never on main"
+        )
     if after != (named, named):
-        raise VersionRuleError(f"the title names {named}, but the head has {files}; both must be {named}")
+        raise VersionRuleError(
+            f"the title names {named}, but the head has {files}; both must be {named}"
+        )
     return f"ok: release pull request for {named} ({files})"
 
 
 def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--base", required=True, help="the base revision (the pull request's base commit)")
-    parser.add_argument("--head", required=True, help="the head revision (the pull request's head commit)")
+    parser.add_argument(
+        "--base",
+        required=True,
+        help="the base revision (the pull request's base commit)",
+    )
+    parser.add_argument(
+        "--head",
+        required=True,
+        help="the head revision (the pull request's head commit)",
+    )
     parser.add_argument("--title", required=True, help="the pull request title")
     args = parser.parse_args(argv)
     try:

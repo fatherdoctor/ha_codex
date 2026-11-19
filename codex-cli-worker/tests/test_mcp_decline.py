@@ -6,11 +6,11 @@ import json
 import threading
 import unittest
 
-from test_server import server
 from approvals import AppServerSession
-from test_approvals import Transport
-import scheduling_mcp
 import scheduling
+import scheduling_mcp
+from test_approvals import Transport
+from test_server import server
 
 
 def setUpModule():

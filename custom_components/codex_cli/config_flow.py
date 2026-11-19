@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+import voluptuous as vol
 
 from .api import CodexCliApiError, CodexCliAuthError
 from .const import CONF_BASE_URL, DOMAIN
@@ -100,7 +100,9 @@ class CodexCliConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except CodexCliApiError as exc:
                 errors["base"] = _error_for_exception(exc)
             else:
-                self.hass.config_entries.async_update_entry(entry, data=data, options={})
+                self.hass.config_entries.async_update_entry(
+                    entry, data=data, options={}
+                )
                 await self.hass.config_entries.async_reload(entry.entry_id)
                 return self.async_abort(reason="reauth_successful")
 
@@ -124,7 +126,9 @@ class CodexCliConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except CodexCliApiError as exc:
                 errors["base"] = _error_for_exception(exc)
             else:
-                self.hass.config_entries.async_update_entry(entry, data=data, options={})
+                self.hass.config_entries.async_update_entry(
+                    entry, data=data, options={}
+                )
                 await self.hass.config_entries.async_reload(entry.entry_id)
                 return self.async_abort(reason="reconfigure_successful")
 

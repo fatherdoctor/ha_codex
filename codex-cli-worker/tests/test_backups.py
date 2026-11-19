@@ -1,16 +1,17 @@
 """Per-file backups, the optional full snapshot, change detection, and backup cleanup."""
+
 from __future__ import annotations
 
+from contextlib import ExitStack
+from datetime import datetime, timedelta, timezone
 import io
 import json
 import os
+from pathlib import Path, PurePosixPath
 import tarfile
 import tempfile
 import time
 import unittest
-from contextlib import ExitStack
-from datetime import datetime, timedelta, timezone
-from pathlib import Path, PurePosixPath
 from unittest.mock import patch
 
 from app_server_fixture import StubAppServer
@@ -27,24 +28,39 @@ class SSHBackupExclusionTests(unittest.TestCase):
 
     def test_ssh_directory_is_pruned_from_app_backup(self):
         """Prune nested SSH keys with archive-relative or host-prefixed filter paths."""
-        config = server.yaml.safe_load(Path(server.__file__).with_name("config.yaml").read_text(encoding="utf-8"))
+        config = server.yaml.safe_load(
+            Path(server.__file__).with_name("config.yaml").read_text(encoding="utf-8")
+        )
         exclusions = config["backup_exclude"]
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             data = root / "app-data"
-            for relative in (".ssh/config", ".ssh/key", ".ssh/nested/key", ".ssh-notes", "tasks/kept.txt"):
+            for relative in (
+                ".ssh/config",
+                ".ssh/key",
+                ".ssh/nested/key",
+                ".ssh-notes",
+                "tasks/kept.txt",
+            ):
                 file = data / relative
                 file.parent.mkdir(parents=True, exist_ok=True)
                 file.write_text("fixture", encoding="utf-8")
 
             for prefix in ("archive", "host"):
                 with self.subTest(prefix=prefix):
+
                     def exclude(info):
                         """Prune matching directories before visiting any of their contents."""
                         filter_path = PurePosixPath(info.name)
                         if prefix == "host":
-                            filter_path = PurePosixPath(data.as_posix()) / filter_path.relative_to("data")
-                        return None if any(filter_path.match(pattern) for pattern in exclusions) else info
+                            filter_path = PurePosixPath(
+                                data.as_posix()
+                            ) / filter_path.relative_to("data")
+                        return (
+                            None
+                            if any(filter_path.match(pattern) for pattern in exclusions)
+                            else info
+                        )
 
                     with tarfile.open(root / "app.tar", "w") as archive:
                         archive.add(data, arcname="data", filter=exclude)
@@ -52,7 +68,13 @@ class SSHBackupExclusionTests(unittest.TestCase):
                         names = archive.getnames()
                     self.assertIn("data/.ssh-notes", names)
                     self.assertIn("data/tasks/kept.txt", names)
-                    self.assertFalse(any(name == "data/.ssh" or name.startswith("data/.ssh/") for name in names), names)
+                    self.assertFalse(
+                        any(
+                            name == "data/.ssh" or name.startswith("data/.ssh/")
+                            for name in names
+                        ),
+                        names,
+                    )
 
 
 class SavedCopyTests(unittest.TestCase):
@@ -105,12 +127,26 @@ class SavedCopyTests(unittest.TestCase):
         self.original("scenes.yaml", "[]\n")
         saved = self.copy("automations.yaml", "- alias: old\n")
         late = self.copy("scripts.yaml", "a: 2\n")
-        self.assertEqual(self.version("automations.yaml"),
-                         {"path": "automations.yaml", "status": "saved", "copy": str(saved.resolve())})
-        self.assertEqual(self.version("scripts.yaml"),
-                         {"path": "scripts.yaml", "status": "unverified", "copy": str(late.resolve())})
-        self.assertEqual(self.version("scenes.yaml"),
-                         {"path": "scenes.yaml", "status": "missing", "copy": ""})
+        self.assertEqual(
+            self.version("automations.yaml"),
+            {
+                "path": "automations.yaml",
+                "status": "saved",
+                "copy": str(saved.resolve()),
+            },
+        )
+        self.assertEqual(
+            self.version("scripts.yaml"),
+            {
+                "path": "scripts.yaml",
+                "status": "unverified",
+                "copy": str(late.resolve()),
+            },
+        )
+        self.assertEqual(
+            self.version("scenes.yaml"),
+            {"path": "scenes.yaml", "status": "missing", "copy": ""},
+        )
         self.assertEqual(self.version("../outside.yaml")["status"], "missing")
 
     def test_credential_copies_are_removed_and_reported_as_excluded(self):
@@ -120,29 +156,57 @@ class SavedCopyTests(unittest.TestCase):
         self.copy("secrets.yaml", "token: old\n")
         self.copy(".storage/auth", "{}")
         kept = self.copy("automations.yaml", "x")
-        changes = {"added": [], "changed": ["secrets.yaml", ".storage/auth"], "deleted": []}
+        changes = {
+            "added": [],
+            "changed": ["secrets.yaml", ".storage/auth"],
+            "deleted": [],
+        }
         result = server.review_backups(self.run_dir, self.before, changes, set())
-        self.assertEqual(result, [{"path": "secrets.yaml", "status": "excluded", "copy": ""}])
+        self.assertEqual(
+            result, [{"path": "secrets.yaml", "status": "excluded", "copy": ""}]
+        )
         self.assertFalse((self.backups / "secrets.yaml").exists())
         self.assertFalse((self.backups / ".storage" / "auth").exists())
         self.assertTrue(kept.exists())
 
     def test_only_files_changed_by_codex_are_reviewed(self):
         """Home Assistant's own storage writes are not reported as files without a copy."""
-        for rel in ("automations.yaml", "custom_components/demo/sensor.py", "notes.txt",
-                    ".storage/lovelace.kitchen", ".storage/core.restore_state", ".storage/browser_mod.storage"):
+        for rel in (
+            "automations.yaml",
+            "custom_components/demo/sensor.py",
+            "notes.txt",
+            ".storage/lovelace.kitchen",
+            ".storage/core.restore_state",
+            ".storage/browser_mod.storage",
+        ):
             self.original(rel, f"old {rel}\n")
         self.copy("notes.txt", "old notes.txt\n")
-        changes = {"added": ["packages/new.yaml"], "deleted": [".storage/lovelace.kitchen"],
-                   "changed": ["automations.yaml", "custom_components/demo/sensor.py", "notes.txt",
-                               ".storage/core.restore_state", ".storage/browser_mod.storage"]}
-        result = server.review_backups(self.run_dir, self.before, changes, {"custom_components/demo/sensor.py", "unchanged.yaml"})
-        self.assertEqual([(entry["path"], entry["status"]) for entry in result], [
-            (".storage/lovelace.kitchen", "missing"),
-            ("automations.yaml", "missing"),
-            ("custom_components/demo/sensor.py", "missing"),
-            ("notes.txt", "saved"),
-        ])
+        changes = {
+            "added": ["packages/new.yaml"],
+            "deleted": [".storage/lovelace.kitchen"],
+            "changed": [
+                "automations.yaml",
+                "custom_components/demo/sensor.py",
+                "notes.txt",
+                ".storage/core.restore_state",
+                ".storage/browser_mod.storage",
+            ],
+        }
+        result = server.review_backups(
+            self.run_dir,
+            self.before,
+            changes,
+            {"custom_components/demo/sensor.py", "unchanged.yaml"},
+        )
+        self.assertEqual(
+            [(entry["path"], entry["status"]) for entry in result],
+            [
+                (".storage/lovelace.kitchen", "missing"),
+                ("automations.yaml", "missing"),
+                ("custom_components/demo/sensor.py", "missing"),
+                ("notes.txt", "saved"),
+            ],
+        )
 
     def test_full_snapshot_supplies_missing_and_wrong_copies(self):
         """With a full snapshot every reviewed file gets its previous version."""
@@ -150,11 +214,20 @@ class SavedCopyTests(unittest.TestCase):
         self.original("scripts.yaml", "a: 1\n")
         self.copy("scripts.yaml", "a: 2\n")
         self.archive({"automations.yaml": "- alias: old\n", "scripts.yaml": "a: 1\n"})
-        changes = {"added": [], "changed": ["automations.yaml", "scripts.yaml"], "deleted": []}
+        changes = {
+            "added": [],
+            "changed": ["automations.yaml", "scripts.yaml"],
+            "deleted": [],
+        }
         result = server.review_backups(self.run_dir, self.before, changes, set())
         self.assertEqual([entry["status"] for entry in result], ["saved", "saved"])
-        self.assertEqual((self.backups / "automations.yaml").read_text(encoding="utf-8"), "- alias: old\n")
-        self.assertEqual((self.backups / "scripts.yaml").read_text(encoding="utf-8"), "a: 1\n")
+        self.assertEqual(
+            (self.backups / "automations.yaml").read_text(encoding="utf-8"),
+            "- alias: old\n",
+        )
+        self.assertEqual(
+            (self.backups / "scripts.yaml").read_text(encoding="utf-8"), "a: 1\n"
+        )
 
     def test_links_left_in_the_backup_folder_are_not_followed(self):
         """Links in the backup folder are neither read, written through, nor searched."""
@@ -169,14 +242,28 @@ class SavedCopyTests(unittest.TestCase):
         self.original("notes.txt", "old\n")
         (self.backups / "linked").symlink_to(self.config, target_is_directory=True)
         self.assertEqual(server.copied_files(self.run_dir), {})
-        self.assertEqual(server.review_backups(self.run_dir, self.before,
-                                               {"added": [], "changed": ["notes.txt"], "deleted": []}, set()), [])
+        self.assertEqual(
+            server.review_backups(
+                self.run_dir,
+                self.before,
+                {"added": [], "changed": ["notes.txt"], "deleted": []},
+                set(),
+            ),
+            [],
+        )
         (self.backups / "linked").unlink()
         self.backups.rmdir()
         self.backups.symlink_to(outside, target_is_directory=True)
         self.assertEqual(self.version("automations.yaml")["status"], "missing")
-        self.assertEqual(server.review_backups(self.run_dir, self.before,
-                                               {"added": [], "changed": ["automations.yaml"], "deleted": []}, set())[0]["status"], "missing")
+        self.assertEqual(
+            server.review_backups(
+                self.run_dir,
+                self.before,
+                {"added": [], "changed": ["automations.yaml"], "deleted": []},
+                set(),
+            )[0]["status"],
+            "missing",
+        )
         self.assertEqual(list(outside.iterdir()), [])
 
     def test_recovery_copies_explain_files_without_a_saved_version(self):
@@ -185,22 +272,45 @@ class SavedCopyTests(unittest.TestCase):
         self.original("scripts.yaml", "a: 1\n")
         self.original("secrets.yaml", "token: old\n")
         saved = self.copy("automations.yaml", "- alias: old\n")
-        changes = {"added": ["packages/new.yaml"], "changed": ["automations.yaml", "scripts.yaml", "secrets.yaml"], "deleted": []}
-        result = server.recovery_copies(self.run_dir, changes,
-                                        ["automations.yaml", "packages/new.yaml", "scripts.yaml", "secrets.yaml", "/etc/passwd"], self.before)
-        self.assertEqual(result, [
-            {"path": "automations.yaml", "copy": str(saved.resolve())},
-            {"path": "packages/new.yaml", "copy": ""},
-            {"path": "scripts.yaml", "copy": "", "reason": "no_backup"},
-            {"path": "secrets.yaml", "copy": "", "reason": "excluded_credentials"},
-        ])
-        with patch.object(server, "read_options", return_value={"backup_retention_days": 3}):
+        changes = {
+            "added": ["packages/new.yaml"],
+            "changed": ["automations.yaml", "scripts.yaml", "secrets.yaml"],
+            "deleted": [],
+        }
+        result = server.recovery_copies(
+            self.run_dir,
+            changes,
+            [
+                "automations.yaml",
+                "packages/new.yaml",
+                "scripts.yaml",
+                "secrets.yaml",
+                "/etc/passwd",
+            ],
+            self.before,
+        )
+        self.assertEqual(
+            result,
+            [
+                {"path": "automations.yaml", "copy": str(saved.resolve())},
+                {"path": "packages/new.yaml", "copy": ""},
+                {"path": "scripts.yaml", "copy": "", "reason": "no_backup"},
+                {"path": "secrets.yaml", "copy": "", "reason": "excluded_credentials"},
+            ],
+        )
+        with patch.object(
+            server, "read_options", return_value={"backup_retention_days": 3}
+        ):
             details = server.validation_details(["scripts.yaml: bad"], {}, result)
         # Each path is inline code, so the chat's Markdown leaves its underscores alone.
         self.assertIn("Validation errors: `scripts.yaml`: bad", details)
         self.assertIn(f"are kept for 3 days at: `{saved.resolve()}`", details)
-        self.assertIn("New files that did not exist before: `packages/new.yaml`", details)
-        self.assertIn("No copy of the previous version was saved for: `scripts.yaml`.", details)
+        self.assertIn(
+            "New files that did not exist before: `packages/new.yaml`", details
+        )
+        self.assertIn(
+            "No copy of the previous version was saved for: `scripts.yaml`.", details
+        )
         self.assertIn("excluded from recovery copies", details)
 
 
@@ -214,11 +324,29 @@ class BackupFolderTests(unittest.TestCase):
             inside = config / "codex_tasks" / "t" / "turns" / "a"
             outside = Path(temp) / "data" / "t"
             with patch.object(server, "CONFIG_ROOT", config):
-                self.assertEqual(server.codex_backup_dir(inside, {"codex_sandbox": "workspace-write"}), inside / "backups")
-                self.assertEqual(server.codex_backup_dir(inside, {}), inside / "backups")
-                self.assertIsNone(server.codex_backup_dir(inside, {"codex_sandbox": "read-only"}))
-                self.assertIsNone(server.codex_backup_dir(outside, {"codex_sandbox": "workspace-write"}))
-                self.assertEqual(server.codex_backup_dir(outside, {"codex_sandbox": "danger-full-access"}), outside / "backups")
+                self.assertEqual(
+                    server.codex_backup_dir(
+                        inside, {"codex_sandbox": "workspace-write"}
+                    ),
+                    inside / "backups",
+                )
+                self.assertEqual(
+                    server.codex_backup_dir(inside, {}), inside / "backups"
+                )
+                self.assertIsNone(
+                    server.codex_backup_dir(inside, {"codex_sandbox": "read-only"})
+                )
+                self.assertIsNone(
+                    server.codex_backup_dir(
+                        outside, {"codex_sandbox": "workspace-write"}
+                    )
+                )
+                self.assertEqual(
+                    server.codex_backup_dir(
+                        outside, {"codex_sandbox": "danger-full-access"}
+                    ),
+                    outside / "backups",
+                )
 
     def test_exchange_info_carries_the_backup_folder_only_when_there_is_one(self):
         """exchange_info gives the backup instruction when a folder is given, and says to make no copies without one."""
@@ -228,8 +356,10 @@ class BackupFolderTests(unittest.TestCase):
             self.assertIn(f"copy it to {folder} under the same relative path", backups)
             self.assertIn(f"{folder}/.storage/lovelace.kitchen", backups)
             self.assertIn("Never copy secrets.yaml", backups)
-            self.assertEqual(server.exchange_info("t", None)["backups"],
-                             "This message has no backup folder. Make no backup copies.")
+            self.assertEqual(
+                server.exchange_info("t", None)["backups"],
+                "This message has no backup folder. Make no backup copies.",
+            )
             # The folder changes with each message, so the fixed instructions never name one.
             self.assertNotIn("copy it to", server.PAGE_INSTRUCTIONS)
 
@@ -238,12 +368,19 @@ class BackupFolderTests(unittest.TestCase):
         cases = ((None, 7), ("x", 7), (0, 1), (2, 2), ("30", 30), (9999, 365))
         for configured, expected in cases:
             with self.subTest(configured=configured):
-                self.assertEqual(server.backup_retention_days({"backup_retention_days": configured}), expected)
+                self.assertEqual(
+                    server.backup_retention_days({"backup_retention_days": configured}),
+                    expected,
+                )
         with (
-            patch.object(server, "read_options", return_value={"backup_retention_days": 2}),
+            patch.object(
+                server, "read_options", return_value={"backup_retention_days": 2}
+            ),
             patch.object(server, "api_token", return_value="test-token"),
         ):
-            response = server.app.test_client().get("/chat-options", headers={"Authorization": "Bearer test-token"})
+            response = server.app.test_client().get(
+                "/chat-options", headers={"Authorization": "Bearer test-token"}
+            )
         self.assertEqual(response.json["backup_retention_days"], 2)
 
 
@@ -254,15 +391,28 @@ class ManifestTests(unittest.TestCase):
         """Scan a temporary config tree with an empty cache."""
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
-        self.config = Path(self.stack.enter_context(tempfile.TemporaryDirectory())) / "config"
+        self.config = (
+            Path(self.stack.enter_context(tempfile.TemporaryDirectory())) / "config"
+        )
         self.config.mkdir()
         self.stack.enter_context(patch.object(server, "CONFIG_ROOT", self.config))
-        self.stack.enter_context(patch.object(server, "manifest_cache", {"root": "", "scanned_ns": 0, "files": {}}))
-        self.stack.enter_context(patch.object(server, "task_root", return_value=self.config / "my_tasks"))
+        self.stack.enter_context(
+            patch.object(
+                server, "manifest_cache", {"root": "", "scanned_ns": 0, "files": {}}
+            )
+        )
+        self.stack.enter_context(
+            patch.object(server, "task_root", return_value=self.config / "my_tasks")
+        )
         self.hashed = []
         real = server.file_hash
-        self.stack.enter_context(patch.object(
-            server, "file_hash", side_effect=lambda path: (self.hashed.append(path.name), real(path))[1]))
+        self.stack.enter_context(
+            patch.object(
+                server,
+                "file_hash",
+                side_effect=lambda path: (self.hashed.append(path.name), real(path))[1],
+            )
+        )
 
     def write(self, rel, content, age=None):
         """Write a config file, optionally dated some seconds in the past."""
@@ -301,8 +451,14 @@ class ManifestTests(unittest.TestCase):
         (self.config / "scripts.yaml").unlink()
         second = server.build_manifest()
         self.assertEqual(sorted(self.hashed), ["automations.yaml", "new.yaml"])
-        self.assertEqual(server.diff_manifests(first, second),
-                         {"added": ["packages/new.yaml"], "changed": ["automations.yaml"], "deleted": ["scripts.yaml"]})
+        self.assertEqual(
+            server.diff_manifests(first, second),
+            {
+                "added": ["packages/new.yaml"],
+                "changed": ["automations.yaml"],
+                "deleted": ["scripts.yaml"],
+            },
+        )
 
     def test_same_size_and_date_with_new_content_is_still_found(self):
         """New content behind an unchanged size and modification time is detected."""
@@ -314,14 +470,23 @@ class ManifestTests(unittest.TestCase):
         path.write_text("- alias: two\n", encoding="utf-8")
         os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
         second = server.build_manifest()
-        self.assertEqual(second["automations.yaml"]["mtime_ns"], first["automations.yaml"]["mtime_ns"])
-        self.assertEqual(server.diff_manifests(first, second)["changed"], ["automations.yaml"])
+        self.assertEqual(
+            second["automations.yaml"]["mtime_ns"],
+            first["automations.yaml"]["mtime_ns"],
+        )
+        self.assertEqual(
+            server.diff_manifests(first, second)["changed"], ["automations.yaml"]
+        )
 
     def test_cache_is_not_reused_for_another_config_folder(self):
         """Hashes remembered for one folder are not trusted for another."""
         self.write("automations.yaml", "- alias: old\n")
         server.build_manifest()
-        server.manifest_cache.update(root="/elsewhere", scanned_ns=server.manifest_cache["scanned_ns"] + 10 * server.MANIFEST_SETTLE_NS)
+        server.manifest_cache.update(
+            root="/elsewhere",
+            scanned_ns=server.manifest_cache["scanned_ns"]
+            + 10 * server.MANIFEST_SETTLE_NS,
+        )
         self.hashed.clear()
         server.build_manifest()
         self.assertEqual(self.hashed, ["automations.yaml"])
@@ -343,98 +508,204 @@ class RunTests(unittest.TestCase):
         self.addCleanup(self.stack.close)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
         self.config = self.root / "config"
-        for name, value in (("tasks", {}), ("task_activity", {}), ("active_task_runners", set()), ("running_processes", {})):
+        for name, value in (
+            ("tasks", {}),
+            ("task_activity", {}),
+            ("active_task_runners", set()),
+            ("running_processes", {}),
+        ):
             self.stack.enter_context(patch.object(server, name, value))
-        self.stack.enter_context(patch.object(server, "manifest_cache", {"root": "", "scanned_ns": 0, "files": {}}))
+        self.stack.enter_context(
+            patch.object(
+                server, "manifest_cache", {"root": "", "scanned_ns": 0, "files": {}}
+            )
+        )
         self.stack.enter_context(patch.object(server, "CONFIG_ROOT", self.config))
-        self.stack.enter_context(patch.object(server, "task_root", return_value=self.config / "codex_tasks"))
-        self.stack.enter_context(patch.object(server, "TASK_STATE_FILE", self.root / "index.json"))
-        self.stack.enter_context(patch.object(server, "CODEX_HOME", self.root / "codex"))
-        self.options = {"task_timeout_seconds": 30, "auto_save_lovelace": False, "config_check": False}
-        self.stack.enter_context(patch.object(server, "read_options", side_effect=lambda: dict(self.options)))
-        self.stack.enter_context(patch.object(server, "sandbox_readiness", return_value={"required": True, "ready": True}))
+        self.stack.enter_context(
+            patch.object(server, "task_root", return_value=self.config / "codex_tasks")
+        )
+        self.stack.enter_context(
+            patch.object(server, "TASK_STATE_FILE", self.root / "index.json")
+        )
+        self.stack.enter_context(
+            patch.object(server, "CODEX_HOME", self.root / "codex")
+        )
+        self.options = {
+            "task_timeout_seconds": 30,
+            "auto_save_lovelace": False,
+            "config_check": False,
+        }
+        self.stack.enter_context(
+            patch.object(server, "read_options", side_effect=lambda: dict(self.options))
+        )
+        self.stack.enter_context(
+            patch.object(
+                server,
+                "sandbox_readiness",
+                return_value={"required": True, "ready": True},
+            )
+        )
         self.stack.enter_context(patch.object(server, "codex_env", return_value={}))
         self.stack.enter_context(patch.object(server, "notify"))
         self.stack.enter_context(patch.object(server, "refresh_usage_status_async"))
         self.events = []
-        self.stack.enter_context(patch.object(
-            server, "fire_ha_event", side_effect=lambda _event, data: (self.events.append(data) or True, "")))
-        for rel, content in (("automations.yaml", "- alias: old\n"), ("scripts.yaml", "a: 1\n"),
-                             (".storage/core.restore_state", '{"data": 1}')):
+        self.stack.enter_context(
+            patch.object(
+                server,
+                "fire_ha_event",
+                side_effect=lambda _event, data: (self.events.append(data) or True, ""),
+            )
+        )
+        for rel, content in (
+            ("automations.yaml", "- alias: old\n"),
+            ("scripts.yaml", "a: 1\n"),
+            (".storage/core.restore_state", '{"data": 1}'),
+        ):
             path = self.config / rel
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")
         self.task_id = "20261002T000000Z-abcdef12"
         self.turn_id = "0123456789abcdef0123456789abcdef"
         server.tasks[self.task_id] = {
-            "task_id": self.task_id, "status": "queued", "current_turn_id": self.turn_id,
-            "turns": [{"turn_id": self.turn_id, "message": "Rename the automation", "status": "queued"}],
+            "task_id": self.task_id,
+            "status": "queued",
+            "current_turn_id": self.turn_id,
+            "turns": [
+                {
+                    "turn_id": self.turn_id,
+                    "message": "Rename the automation",
+                    "status": "queued",
+                }
+            ],
         }
-        self.run_dir = self.config / "codex_tasks" / self.task_id / "turns" / self.turn_id
+        self.run_dir = (
+            self.config / "codex_tasks" / self.task_id / "turns" / self.turn_id
+        )
 
     def codex(self, *, keep_copy):
         """A fake Codex that edits two files and a Home Assistant that rewrites its own state meanwhile."""
+
         def change_files():
             if keep_copy:
-                (self.run_dir / "backups" / "automations.yaml").write_text("- alias: old\n", encoding="utf-8")
-            (self.config / "automations.yaml").write_text("- alias: new\n", encoding="utf-8")
+                (self.run_dir / "backups" / "automations.yaml").write_text(
+                    "- alias: old\n", encoding="utf-8"
+                )
+            (self.config / "automations.yaml").write_text(
+                "- alias: new\n", encoding="utf-8"
+            )
             (self.config / "scripts.yaml").write_text("a: 2\n", encoding="utf-8")
             (self.config / "packages").mkdir(exist_ok=True)
-            (self.config / "packages" / "new.yaml").write_text("sensor: []\n", encoding="utf-8")
-            (self.config / ".storage" / "core.restore_state").write_text('{"data": 2}', encoding="utf-8")
+            (self.config / "packages" / "new.yaml").write_text(
+                "sensor: []\n", encoding="utf-8"
+            )
+            (self.config / ".storage" / "core.restore_state").write_text(
+                '{"data": 2}', encoding="utf-8"
+            )
 
-        file_change = {"id": "item_0", "type": "fileChange", "status": "completed", "changes": [
-            {"path": str(self.config / "scripts.yaml"), "kind": {"type": "update"}},
-            {"path": str(self.config / "packages" / "new.yaml"), "kind": {"type": "add"}},
-        ]}
+        file_change = {
+            "id": "item_0",
+            "type": "fileChange",
+            "status": "completed",
+            "changes": [
+                {"path": str(self.config / "scripts.yaml"), "kind": {"type": "update"}},
+                {
+                    "path": str(self.config / "packages" / "new.yaml"),
+                    "kind": {"type": "add"},
+                },
+            ],
+        }
         process = StubAppServer(
             "019fc242-910a-7c92-a17d-54c014e19fc4",
-            {"status": "completed", "summary": "Renamed", "question": "", "details": "Notes"},
-            items=[file_change], on_turn=change_files,
+            {
+                "status": "completed",
+                "summary": "Renamed",
+                "question": "",
+                "details": "Notes",
+            },
+            items=[file_change],
+            on_turn=change_files,
         )
         return patch.object(server.subprocess, "Popen", return_value=process)
 
     def steps(self):
         """The kind, text, and status of the steps recorded for the exchange."""
         with server.lock:
-            return [(step["kind"], step["text"], step["status"]) for step in server.task_activity[self.task_id]["steps"]]
+            return [
+                (step["kind"], step["text"], step["status"])
+                for step in server.task_activity[self.task_id]["steps"]
+            ]
 
     def test_per_file_copies_are_reviewed_without_a_snapshot(self):
         """By default no archive is made and Codex's copies are checked and reported."""
         recorded = []
         keep = server.ha_data.set_exchange_info
-        with self.codex(keep_copy=True), \
-             patch.object(server.ha_data, "set_exchange_info", side_effect=lambda *a: (recorded.append(a), keep(*a))):
+        with (
+            self.codex(keep_copy=True),
+            patch.object(
+                server.ha_data,
+                "set_exchange_info",
+                side_effect=lambda *a: (recorded.append(a), keep(*a)),
+            ),
+        ):
             server.run_task(self.task_id, "Rename the automation")
         task = server.tasks[self.task_id]
         self.assertEqual(task["status"], "completed")
-        self.assertEqual(task["changes"], {
-            "added": ["packages/new.yaml"], "changed": [".storage/core.restore_state", "automations.yaml", "scripts.yaml"], "deleted": []})
+        self.assertEqual(
+            task["changes"],
+            {
+                "added": ["packages/new.yaml"],
+                "changed": [
+                    ".storage/core.restore_state",
+                    "automations.yaml",
+                    "scripts.yaml",
+                ],
+                "deleted": [],
+            },
+        )
         saved = self.run_dir / "backups" / "automations.yaml"
         expected = [
-            {"path": "automations.yaml", "status": "saved", "copy": str(saved.resolve())},
+            {
+                "path": "automations.yaml",
+                "status": "saved",
+                "copy": str(saved.resolve()),
+            },
             {"path": "scripts.yaml", "status": "missing", "copy": ""},
         ]
         self.assertEqual(task["backups"], expected)
         self.assertEqual(task["turns"][0]["backups"], expected)
         self.assertEqual(self.events[-1]["backups"], expected)
         self.assertNotIn("unchecked_edits", task)
-        self.assertEqual(task["details"], "Notes\n\nNo copy of the previous version was saved for: `scripts.yaml`. "
-                         "Use a Home Assistant backup to restore such a file.")
+        self.assertEqual(
+            task["details"],
+            "Notes\n\nNo copy of the previous version was saved for: `scripts.yaml`. "
+            "Use a Home Assistant backup to restore such a file.",
+        )
         self.assertFalse((self.run_dir / server.SNAPSHOT_FILE).exists())
         self.assertNotIn("snapshot", task)
         self.assertFalse((self.run_dir / "manifest-after.json").exists())
         # The backup folder reaches Codex through exchange_info; the message holds only the user's words.
         self.assertEqual([task_id for task_id, _ in recorded], [self.task_id])
-        self.assertIn(f"copy it to {self.run_dir / 'backups'} under", recorded[0][1]["backups"])
-        self.assertEqual((self.run_dir / "prompt.txt").read_text(encoding="utf-8"), "Rename the automation")
-        self.assertEqual(self.steps(), [
-            ("phase", "Noting the current state of your configuration files", "done"),
-            ("phase", "Starting Codex", "done"),
-            ("phase", "Codex is thinking", "done"),
-            ("file_change", "Edited scripts.yaml, Added packages/new.yaml", "done"),
-            ("phase", "Checking the changes", "done"),
-        ])
+        self.assertIn(
+            f"copy it to {self.run_dir / 'backups'} under", recorded[0][1]["backups"]
+        )
+        self.assertEqual(
+            (self.run_dir / "prompt.txt").read_text(encoding="utf-8"),
+            "Rename the automation",
+        )
+        self.assertEqual(
+            self.steps(),
+            [
+                (
+                    "phase",
+                    "Noting the current state of your configuration files",
+                    "done",
+                ),
+                ("phase", "Starting Codex", "done"),
+                ("phase", "Codex is thinking", "done"),
+                ("file_change", "Edited scripts.yaml, Added packages/new.yaml", "done"),
+                ("phase", "Checking the changes", "done"),
+            ],
+        )
 
     def test_full_snapshot_fills_in_what_codex_did_not_copy(self):
         """With the option on, the archive is made and supplies the missing copies."""
@@ -442,14 +713,25 @@ class RunTests(unittest.TestCase):
         with self.codex(keep_copy=False):
             server.run_task(self.task_id, "Rename the automation")
         task = server.tasks[self.task_id]
-        self.assertEqual([(entry["path"], entry["status"]) for entry in task["backups"]],
-                         [("automations.yaml", "saved"), ("scripts.yaml", "saved")])
-        self.assertEqual((self.run_dir / "backups" / "scripts.yaml").read_text(encoding="utf-8"), "a: 1\n")
+        self.assertEqual(
+            [(entry["path"], entry["status"]) for entry in task["backups"]],
+            [("automations.yaml", "saved"), ("scripts.yaml", "saved")],
+        )
+        self.assertEqual(
+            (self.run_dir / "backups" / "scripts.yaml").read_text(encoding="utf-8"),
+            "a: 1\n",
+        )
         self.assertEqual(task["details"], "Notes")
         self.assertEqual(task["snapshot"]["file_count"], 3)
         with tarfile.open(self.run_dir / server.SNAPSHOT_FILE) as archive:
-            self.assertEqual(sorted(archive.getnames()), [".storage/core.restore_state", "automations.yaml", "scripts.yaml"])
-        self.assertIn(("phase", "Saving a full snapshot of your configuration", "done"), self.steps())
+            self.assertEqual(
+                sorted(archive.getnames()),
+                [".storage/core.restore_state", "automations.yaml", "scripts.yaml"],
+            )
+        self.assertIn(
+            ("phase", "Saving a full snapshot of your configuration", "done"),
+            self.steps(),
+        )
 
     def test_read_only_runs_get_no_backup_folder(self):
         """A read-only run is given no backup folder and no instruction."""
@@ -457,31 +739,48 @@ class RunTests(unittest.TestCase):
         with self.codex(keep_copy=False):
             server.run_task(self.task_id, "Rename the automation")
         self.assertFalse((self.run_dir / "backups").exists())
-        self.assertNotIn("copy it to", (self.run_dir / "prompt.txt").read_text(encoding="utf-8"))
+        self.assertNotIn(
+            "copy it to", (self.run_dir / "prompt.txt").read_text(encoding="utf-8")
+        )
 
     def test_a_snapshot_that_fails_is_not_shown_as_done(self):
         """A failed full snapshot stays marked as failed when the exchange itself ends well."""
         self.options["full_snapshot"] = True
-        with self.codex(keep_copy=True), patch.object(server, "create_snapshot", side_effect=OSError("disk full")):
+        with (
+            self.codex(keep_copy=True),
+            patch.object(server, "create_snapshot", side_effect=OSError("disk full")),
+        ):
             server.run_task(self.task_id, "Rename the automation")
         task = server.tasks[self.task_id]
         self.assertEqual(task["status"], "completed")
         self.assertEqual(task["snapshot_error"], "disk full")
         failed = ("phase", "Saving a full snapshot of your configuration", "failed")
         self.assertIn(failed, self.steps())
-        self.assertIn(("phase", "Noting the current state of your configuration files", "done"), self.steps())
+        self.assertIn(
+            ("phase", "Noting the current state of your configuration files", "done"),
+            self.steps(),
+        )
         server.finish_activity(self.task_id)
-        stored = json.loads((self.run_dir / server.ACTIVITY_FILE).read_text(encoding="utf-8"))
-        self.assertIn(failed, [(step["kind"], step["text"], step["status"]) for step in stored["steps"]])
+        stored = json.loads(
+            (self.run_dir / server.ACTIVITY_FILE).read_text(encoding="utf-8")
+        )
+        self.assertIn(
+            failed,
+            [(step["kind"], step["text"], step["status"]) for step in stored["steps"]],
+        )
 
     def test_working_files_are_removed_when_the_exchange_ends(self):
         """The file list is deleted after the run while the copies stay."""
         with self.codex(keep_copy=True), patch.object(server.verification, "end"):
-            server._run_background_task(self.task_id, "Rename the automation", None, None)
+            server._run_background_task(
+                self.task_id, "Rename the automation", None, None
+            )
         self.assertEqual(server.tasks[self.task_id]["status"], "completed")
         self.assertFalse((self.run_dir / server.BASELINE_FILE).exists())
         self.assertTrue((self.run_dir / "backups" / "automations.yaml").is_file())
-        stored = json.loads((self.run_dir / server.ACTIVITY_FILE).read_text(encoding="utf-8"))
+        stored = json.loads(
+            (self.run_dir / server.ACTIVITY_FILE).read_text(encoding="utf-8")
+        )
         self.assertTrue(all(step["status"] == "done" for step in stored["steps"]))
         self.assertNotIn("elapsed_ms", stored)
 
@@ -493,24 +792,54 @@ class CleanupTests(unittest.TestCase):
         """Keep three exchanges of one chat, and one chat from before conversation history."""
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
-        self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory())) / "tasks"
-        for name, value in (("tasks", {}), ("active_task_runners", set()), ("running_processes", {})):
+        self.root = (
+            Path(self.stack.enter_context(tempfile.TemporaryDirectory())) / "tasks"
+        )
+        for name, value in (
+            ("tasks", {}),
+            ("active_task_runners", set()),
+            ("running_processes", {}),
+        ):
             self.stack.enter_context(patch.object(server, name, value))
-        self.stack.enter_context(patch.object(server, "task_root", return_value=self.root))
+        self.stack.enter_context(
+            patch.object(server, "task_root", return_value=self.root)
+        )
         self.options = {}
-        self.stack.enter_context(patch.object(server, "read_options", side_effect=lambda: dict(self.options)))
+        self.stack.enter_context(
+            patch.object(server, "read_options", side_effect=lambda: dict(self.options))
+        )
         self.old, self.recent, self.current = "a" * 32, "b" * 32, "c" * 32
         self.task_id = "20261002T000000Z-abcdef12"
         server.tasks[self.task_id] = {
-            "task_id": self.task_id, "status": "completed", "current_turn_id": self.current,
+            "task_id": self.task_id,
+            "status": "completed",
+            "current_turn_id": self.current,
             "updated_at": "2026-10-02T00:00:00+00:00",
             "turns": [
-                {"turn_id": self.old, "status": "completed", "completed_at": self.ago(days=8)},
-                {"turn_id": self.recent, "status": "completed", "completed_at": self.ago(days=6)},
-                {"turn_id": self.current, "status": "waiting_for_input", "completed_at": "", "updated_at": self.ago(days=30)},
+                {
+                    "turn_id": self.old,
+                    "status": "completed",
+                    "completed_at": self.ago(days=8),
+                },
+                {
+                    "turn_id": self.recent,
+                    "status": "completed",
+                    "completed_at": self.ago(days=6),
+                },
+                {
+                    "turn_id": self.current,
+                    "status": "waiting_for_input",
+                    "completed_at": "",
+                    "updated_at": self.ago(days=30),
+                },
             ],
         }
-        server.tasks["legacy"] = {"task_id": "legacy", "status": "completed", "completed_at": self.ago(days=40), "prompt": "Old"}
+        server.tasks["legacy"] = {
+            "task_id": "legacy",
+            "status": "completed",
+            "completed_at": self.ago(days=40),
+            "prompt": "Old",
+        }
         for turn_id in (self.old, self.recent, self.current):
             self.fill(self.root / self.task_id / "turns" / turn_id)
         self.fill(self.root / "legacy")
@@ -518,7 +847,11 @@ class CleanupTests(unittest.TestCase):
     @staticmethod
     def ago(**delta):
         """An ISO timestamp the given time before now."""
-        return (datetime.now(timezone.utc) - timedelta(**delta)).replace(microsecond=0).isoformat()
+        return (
+            (datetime.now(timezone.utc) - timedelta(**delta))
+            .replace(microsecond=0)
+            .isoformat()
+        )
 
     @staticmethod
     def fill(run_dir):
@@ -527,30 +860,67 @@ class CleanupTests(unittest.TestCase):
         (run_dir / "backups" / ".storage" / "lovelace.kitchen").write_text("{}")
         (run_dir / "recovery").mkdir()
         (run_dir / "recovery" / "automations.yaml").write_text("old")
-        for name in ("snapshot-before.tar.gz", "manifest-before.json", "manifest-after.json", "prompt.txt", "changes.json"):
+        for name in (
+            "snapshot-before.tar.gz",
+            "manifest-before.json",
+            "manifest-after.json",
+            "prompt.txt",
+            "changes.json",
+        ):
             (run_dir / name).write_text("x")
 
     def names(self, run_dir):
         """The files and folders left in an exchange's folder."""
-        return sorted(path.name for path in run_dir.iterdir() if path.name not in {"turns", "task.json"})
+        return sorted(
+            path.name
+            for path in run_dir.iterdir()
+            if path.name not in {"turns", "task.json"}
+        )
 
     def test_expired_backups_go_and_the_rest_stays(self):
         """Old backups are deleted and marked without moving the chat or touching other files."""
         server.cleanup_backups()
         turns = self.root / self.task_id / "turns"
         self.assertEqual(self.names(turns / self.old), ["changes.json", "prompt.txt"])
-        self.assertEqual(self.names(turns / self.recent), ["backups", "changes.json", "prompt.txt", "recovery", "snapshot-before.tar.gz"])
-        self.assertEqual(self.names(turns / self.current), ["changes.json", "prompt.txt"])
-        self.assertEqual(self.names(self.root / "legacy"), ["changes.json", "prompt.txt"])
+        self.assertEqual(
+            self.names(turns / self.recent),
+            [
+                "backups",
+                "changes.json",
+                "prompt.txt",
+                "recovery",
+                "snapshot-before.tar.gz",
+            ],
+        )
+        self.assertEqual(
+            self.names(turns / self.current), ["changes.json", "prompt.txt"]
+        )
+        self.assertEqual(
+            self.names(self.root / "legacy"), ["changes.json", "prompt.txt"]
+        )
         task = server.tasks[self.task_id]
-        self.assertEqual([turn.get("backups_removed", False) for turn in task["turns"]], [True, False, True])
+        self.assertEqual(
+            [turn.get("backups_removed", False) for turn in task["turns"]],
+            [True, False, True],
+        )
         self.assertTrue(server.tasks["legacy"]["backups_removed"])
         self.assertEqual(task["updated_at"], "2026-10-02T00:00:00+00:00")
-        stored = json.loads((self.root / self.task_id / "task.json").read_text(encoding="utf-8"))
+        stored = json.loads(
+            (self.root / self.task_id / "task.json").read_text(encoding="utf-8")
+        )
         self.assertTrue(stored["turns"][0]["backups_removed"])
         self.assertEqual(stored["updated_at"], "2026-10-02T00:00:00+00:00")
         server.cleanup_backups()
-        self.assertEqual(self.names(turns / self.recent), ["backups", "changes.json", "prompt.txt", "recovery", "snapshot-before.tar.gz"])
+        self.assertEqual(
+            self.names(turns / self.recent),
+            [
+                "backups",
+                "changes.json",
+                "prompt.txt",
+                "recovery",
+                "snapshot-before.tar.gz",
+            ],
+        )
 
     def test_the_running_exchange_is_left_alone(self):
         """Nothing of the exchange that is running is removed."""
@@ -566,35 +936,68 @@ class CleanupTests(unittest.TestCase):
         self.options["backup_retention_days"] = 5
         server.cleanup_backups()
         turns = self.root / self.task_id / "turns"
-        self.assertEqual(self.names(turns / self.recent), ["changes.json", "prompt.txt"])
+        self.assertEqual(
+            self.names(turns / self.recent), ["changes.json", "prompt.txt"]
+        )
 
     def test_a_continued_chat_from_before_history_loses_its_old_archive(self):
         """The chat's own folder is cleaned for early exchanges, also after the chat was continued."""
         newer = "d" * 32
         server.tasks["continued"] = {
-            "task_id": "continued", "status": "running", "current_turn_id": newer,
+            "task_id": "continued",
+            "status": "running",
+            "current_turn_id": newer,
             "turns": [
                 {"turn_id": "legacy", "created_at": self.ago(days=50), "legacy": True},
-                {"turn_id": "legacy-1", "created_at": self.ago(days=45), "completed_at": self.ago(days=40), "legacy": True},
-                {"turn_id": newer, "status": "running", "created_at": self.ago(minutes=1)},
+                {
+                    "turn_id": "legacy-1",
+                    "created_at": self.ago(days=45),
+                    "completed_at": self.ago(days=40),
+                    "legacy": True,
+                },
+                {
+                    "turn_id": newer,
+                    "status": "running",
+                    "created_at": self.ago(minutes=1),
+                },
             ],
         }
         self.fill(self.root / "continued")
         self.fill(self.root / "continued" / "turns" / newer)
         server.cleanup_backups()
-        self.assertEqual(self.names(self.root / "continued"), ["changes.json", "prompt.txt"])
+        self.assertEqual(
+            self.names(self.root / "continued"), ["changes.json", "prompt.txt"]
+        )
         self.assertEqual(len(self.names(self.root / "continued" / "turns" / newer)), 7)
         task = server.tasks["continued"]
         self.assertTrue(task["backups_removed"])
         self.assertFalse(any("backups_removed" in turn for turn in task["turns"]))
         # Early exchanges that are still recent keep their backups and lose only the working files.
-        server.tasks["younger"] = {"task_id": "younger", "status": "completed", "current_turn_id": newer, "turns": [
-            {"turn_id": "legacy", "completed_at": self.ago(days=2), "legacy": True},
-            {"turn_id": newer, "status": "completed", "completed_at": self.ago(days=1)},
-        ]}
+        server.tasks["younger"] = {
+            "task_id": "younger",
+            "status": "completed",
+            "current_turn_id": newer,
+            "turns": [
+                {"turn_id": "legacy", "completed_at": self.ago(days=2), "legacy": True},
+                {
+                    "turn_id": newer,
+                    "status": "completed",
+                    "completed_at": self.ago(days=1),
+                },
+            ],
+        }
         self.fill(self.root / "younger")
         server.cleanup_backups()
-        self.assertEqual(self.names(self.root / "younger"), ["backups", "changes.json", "prompt.txt", "recovery", "snapshot-before.tar.gz"])
+        self.assertEqual(
+            self.names(self.root / "younger"),
+            [
+                "backups",
+                "changes.json",
+                "prompt.txt",
+                "recovery",
+                "snapshot-before.tar.gz",
+            ],
+        )
         self.assertNotIn("backups_removed", server.tasks["younger"])
 
     def test_a_linked_backup_folder_is_unlinked_not_emptied(self):
@@ -611,8 +1014,18 @@ class CleanupTests(unittest.TestCase):
 
     def test_unusual_task_and_turn_names_are_never_used_as_paths(self):
         """Names that could lead outside the task folder are skipped."""
-        server.tasks["../escape"] = {"task_id": "../escape", "status": "completed", "completed_at": self.ago(days=40)}
-        server.tasks[self.task_id]["turns"].append({"turn_id": "../../x", "status": "completed", "completed_at": self.ago(days=40)})
+        server.tasks["../escape"] = {
+            "task_id": "../escape",
+            "status": "completed",
+            "completed_at": self.ago(days=40),
+        }
+        server.tasks[self.task_id]["turns"].append(
+            {
+                "turn_id": "../../x",
+                "status": "completed",
+                "completed_at": self.ago(days=40),
+            }
+        )
         outside = self.root.parent / "escape"
         self.fill(outside)
         server.cleanup_backups()
@@ -626,9 +1039,17 @@ class ActivityPhaseTests(unittest.TestCase):
         """Start collecting steps for one running exchange."""
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
-        for name, value in (("tasks", {}), ("task_activity", {}), ("active_task_runners", set())):
+        for name, value in (
+            ("tasks", {}),
+            ("task_activity", {}),
+            ("active_task_runners", set()),
+        ):
             self.stack.enter_context(patch.object(server, name, value))
-        server.tasks["t"] = {"task_id": "t", "status": "running", "current_turn_id": "turn-1"}
+        server.tasks["t"] = {
+            "task_id": "t",
+            "status": "running",
+            "current_turn_id": "turn-1",
+        }
         server.start_activity("t", "turn-1")
 
     def payload(self):
@@ -639,32 +1060,65 @@ class ActivityPhaseTests(unittest.TestCase):
     def test_phases_follow_the_start_of_codex(self):
         """The worker's steps close as Codex starts, thinks, and reports its first step."""
         server.start_phase("t", "launch", "Starting Codex")
-        self.assertEqual([(s["kind"], s["text"], s["status"]) for s in self.payload()["steps"]],
-                         [("phase", "Starting Codex", "running")])
+        self.assertEqual(
+            [(s["kind"], s["text"], s["status"]) for s in self.payload()["steps"]],
+            [("phase", "Starting Codex", "running")],
+        )
         server.record_activity_event("t", {"type": "thread.started", "thread_id": "x"})
         server.record_activity_event("t", {"type": "turn.started"})
-        self.assertEqual([(s["text"], s["status"]) for s in self.payload()["steps"]],
-                         [("Starting Codex", "done"), ("Codex is thinking", "running")])
-        server.record_activity_event("t", {"type": "item.completed", "item": {"id": "r0", "type": "reasoning", "text": "Looking"}})
+        self.assertEqual(
+            [(s["text"], s["status"]) for s in self.payload()["steps"]],
+            [("Starting Codex", "done"), ("Codex is thinking", "running")],
+        )
+        server.record_activity_event(
+            "t",
+            {
+                "type": "item.completed",
+                "item": {"id": "r0", "type": "reasoning", "text": "Looking"},
+            },
+        )
         steps = self.payload()["steps"]
-        self.assertEqual([(s["text"], s["status"]) for s in steps],
-                         [("Starting Codex", "done"), ("Codex is thinking", "done"), ("Looking", "done")])
+        self.assertEqual(
+            [(s["text"], s["status"]) for s in steps],
+            [
+                ("Starting Codex", "done"),
+                ("Codex is thinking", "done"),
+                ("Looking", "done"),
+            ],
+        )
         self.assertIsInstance(steps[0]["duration_ms"], int)
         server.finish_phase("t", "launch", "never-started")
         self.assertEqual(self.payload()["total"], 3)
 
     def test_timer_is_reported_only_while_running(self):
         """The running time is sent while the exchange lasts and not afterwards."""
-        with patch.object(server.time, "monotonic", return_value=server.task_activity["t"]["started"] + 12.5):
+        with patch.object(
+            server.time,
+            "monotonic",
+            return_value=server.task_activity["t"]["started"] + 12.5,
+        ):
             self.assertEqual(self.payload()["elapsed_ms"], 12500)
         server.task_activity["t"]["running"] = False
         self.assertNotIn("elapsed_ms", self.payload())
 
     def test_edits_codex_reports_are_remembered(self):
         """Edited and deleted files under /config are noted for the backup review."""
-        server.record_activity_event("t", {"type": "item.completed", "item": {"id": "f0", "type": "file_change", "changes": [
-            {"path": "/config/automations.yaml", "kind": "update"}, {"path": "/config/old.yaml", "kind": "delete"},
-            {"path": "/config/new.yaml", "kind": "add"}, {"path": "/tmp/scratch.txt", "kind": "update"}]}})
+        server.record_activity_event(
+            "t",
+            {
+                "type": "item.completed",
+                "item": {
+                    "id": "f0",
+                    "type": "file_change",
+                    "changes": [
+                        {"path": "/config/automations.yaml", "kind": "update"},
+                        {"path": "/config/old.yaml", "kind": "delete"},
+                        {"path": "/config/new.yaml", "kind": "add"},
+                        {"path": "/tmp/scratch.txt", "kind": "update"},
+                    ],
+                },
+            },
+        )
         self.assertEqual(server.edited_paths("t"), {"automations.yaml", "old.yaml"})
         self.assertEqual(server.edited_paths("missing"), set())
 
@@ -672,9 +1126,14 @@ class ActivityPhaseTests(unittest.TestCase):
         """A worker step still open at a successful end is saved as done."""
         server.start_phase("t", "review", "Checking the changes")
         server.tasks["t"]["status"] = "completed"
-        with patch.object(server, "atomic_json_write") as write, patch.object(server, "task_root", return_value=Path(tempfile.gettempdir())):
+        with (
+            patch.object(server, "atomic_json_write") as write,
+            patch.object(server, "task_root", return_value=Path(tempfile.gettempdir())),
+        ):
             server.finish_activity("t")
-        self.assertEqual([step["status"] for step in write.call_args.args[1]["steps"]], ["done"])
+        self.assertEqual(
+            [step["status"] for step in write.call_args.args[1]["steps"]], ["done"]
+        )
 
 
 if __name__ == "__main__":

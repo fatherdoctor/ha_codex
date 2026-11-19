@@ -8,39 +8,50 @@ from dataclasses import dataclass
 from functools import wraps
 from typing import Any
 
-import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady, HomeAssistantError, ServiceValidationError, Unauthorized
+from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
+    ConfigEntryNotReady,
+    HomeAssistantError,
+    ServiceValidationError,
+    Unauthorized,
+)
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
+import voluptuous as vol
 
 from .api import CodexCliApiClient, CodexCliApiError, CodexCliAuthError
+from .browser_auth import (
+    STORAGE_KEY,
+    BrowserSessions,
+    BrowserSessionView,
+    DiagnosticView,
+)
 from .const import (
+    ATTR_FORCE,
     ATTR_PROMPT,
     ATTR_REPLY,
     ATTR_TASK_ID,
     ATTR_TURN_ID,
-    ATTR_FORCE,
     CONF_BASE_URL,
     DOMAIN,
     SERVICE_CANCEL_TASK,
     SERVICE_CONTINUE_TASK,
     SERVICE_GET_LOGIN_STATUS,
     SERVICE_GET_TASK,
-    SERVICE_LOGOUT,
     SERVICE_LIST_TASKS,
+    SERVICE_LOGOUT,
     SERVICE_REPLY_TASK,
     SERVICE_START_LOGIN,
     SERVICE_START_TASK,
 )
 from .coordinator import CodexCliCoordinator
 from .discovery import async_discover_worker
-from .notification_actions import async_listen_for_choices
-from .browser_auth import STORAGE_KEY, BrowserSessions, BrowserSessionView, DiagnosticView
 from .kiosk import KioskScreenshotsView
+from .notification_actions import async_listen_for_choices
 
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -52,16 +63,33 @@ START_TASK_SCHEMA = vol.Schema(
 )
 TASK_ID_SCHEMA = vol.Schema({vol.Required(ATTR_TASK_ID): str})
 REPLY_TASK_SCHEMA = vol.Schema(
-    {vol.Required(ATTR_TASK_ID): str, vol.Required(ATTR_REPLY): str, vol.Optional(ATTR_TURN_ID): str}
+    {
+        vol.Required(ATTR_TASK_ID): str,
+        vol.Required(ATTR_REPLY): str,
+        vol.Optional(ATTR_TURN_ID): str,
+    }
 )
-CONTINUE_TASK_SCHEMA = vol.Schema({vol.Required(ATTR_TASK_ID): str, vol.Required("message"): str})
-LIST_TASKS_SCHEMA = vol.Schema({
-    vol.Optional("limit"): vol.All(vol.Coerce(int), vol.Range(min=1, max=500)),
-    vol.Optional("offset"): vol.All(vol.Coerce(int), vol.Range(min=0)),
-    vol.Optional("status"): vol.In(["queued", "running", "waiting_for_input", "completed", "failed", "cancelled"]),
-    vol.Optional("order"): vol.In(["created_asc", "updated_desc"]),
-    vol.Optional("summary"): bool,
-})
+CONTINUE_TASK_SCHEMA = vol.Schema(
+    {vol.Required(ATTR_TASK_ID): str, vol.Required("message"): str}
+)
+LIST_TASKS_SCHEMA = vol.Schema(
+    {
+        vol.Optional("limit"): vol.All(vol.Coerce(int), vol.Range(min=1, max=500)),
+        vol.Optional("offset"): vol.All(vol.Coerce(int), vol.Range(min=0)),
+        vol.Optional("status"): vol.In(
+            [
+                "queued",
+                "running",
+                "waiting_for_input",
+                "completed",
+                "failed",
+                "cancelled",
+            ]
+        ),
+        vol.Optional("order"): vol.In(["created_asc", "updated_desc"]),
+        vol.Optional("summary"): bool,
+    }
+)
 START_LOGIN_SCHEMA = vol.Schema({vol.Optional(ATTR_FORCE, default=False): bool})
 
 
@@ -144,7 +172,9 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
     await hass.config_entries.async_reload(entry.entry_id)
 
 
-def _async_update_discovered_entry(hass: HomeAssistant, entry: ConfigEntry, base_url: str) -> None:
+def _async_update_discovered_entry(
+    hass: HomeAssistant, entry: ConfigEntry, base_url: str
+) -> None:
     """Persist only non-secret discovered connection metadata."""
     data = {CONF_BASE_URL: base_url}
     if dict(entry.data) != data or dict(entry.options):
@@ -155,12 +185,16 @@ def _first_runtime(hass: HomeAssistant) -> CodexCliRuntimeData:
     """Return the first loaded Codex runtime."""
     for entry in hass.config_entries.async_entries(DOMAIN):
         runtime_data = getattr(entry, "runtime_data", None)
-        if entry.state is ConfigEntryState.LOADED and isinstance(runtime_data, CodexCliRuntimeData):
+        if entry.state is ConfigEntryState.LOADED and isinstance(
+            runtime_data, CodexCliRuntimeData
+        ):
             return runtime_data
     raise ServiceValidationError("Codex integration is not configured or is not loaded")
 
 
-def _admin_only(hass: HomeAssistant, handler: Callable[[ServiceCall], Awaitable[Any]]) -> Callable[[ServiceCall], Awaitable[Any]]:
+def _admin_only(
+    hass: HomeAssistant, handler: Callable[[ServiceCall], Awaitable[Any]]
+) -> Callable[[ServiceCall], Awaitable[Any]]:
     """Run a Codex action only for a Home Assistant administrator.
 
     A call that names a user (the UI, the API, a script started by a person)
@@ -209,7 +243,9 @@ def _async_register_services(hass: HomeAssistant) -> None:
         """Start the Codex login flow on the worker, even when logged in if forced, and refresh the coordinator."""
         runtime_data = _first_runtime(hass)
         try:
-            result = await runtime_data.client.start_login(bool(call.data.get(ATTR_FORCE, False)))
+            result = await runtime_data.client.start_login(
+                bool(call.data.get(ATTR_FORCE, False))
+            )
         except CodexCliApiError as exc:
             raise HomeAssistantError(str(exc)) from exc
         await runtime_data.coordinator.async_request_refresh()
@@ -267,7 +303,9 @@ def _async_register_services(hass: HomeAssistant) -> None:
         runtime_data = _first_runtime(hass)
         try:
             result = await runtime_data.client.reply_task(
-                call.data[ATTR_TASK_ID], call.data[ATTR_REPLY], call.data.get(ATTR_TURN_ID)
+                call.data[ATTR_TASK_ID],
+                call.data[ATTR_REPLY],
+                call.data.get(ATTR_TURN_ID),
             )
         except CodexCliApiError as exc:
             raise HomeAssistantError(str(exc)) from exc
@@ -278,15 +316,20 @@ def _async_register_services(hass: HomeAssistant) -> None:
         """Continue a saved conversation with a new message and refresh the coordinator."""
         runtime_data = _first_runtime(hass)
         try:
-            result = await runtime_data.client.continue_task(call.data[ATTR_TASK_ID], call.data["message"])
+            result = await runtime_data.client.continue_task(
+                call.data[ATTR_TASK_ID], call.data["message"]
+            )
         except CodexCliApiError as exc:
             raise HomeAssistantError(str(exc)) from exc
         await runtime_data.coordinator.async_request_refresh()
         return result
 
     hass.services.async_register(
-        DOMAIN, SERVICE_CONTINUE_TASK, _admin_only(hass, handle_continue_task),
-        schema=CONTINUE_TASK_SCHEMA, **register_kwargs,
+        DOMAIN,
+        SERVICE_CONTINUE_TASK,
+        _admin_only(hass, handle_continue_task),
+        schema=CONTINUE_TASK_SCHEMA,
+        **register_kwargs,
     )
     hass.services.async_register(
         DOMAIN,

@@ -6,16 +6,21 @@ import json
 import threading
 import unittest
 
-from test_approvals import Transport  # first: it puts the worker folder on the import path
 import approvals
 from approvals import AppServerSession
+from test_approvals import (
+    Transport,  # first: it puts the worker folder on the import path
+)
 
 QUESTION = 'Allow the home_assistant_call MCP server to run tool "call"?'
 
 
 def tool_params(**overrides):
     """A Home Assistant action as the plain tool receives it, with invented entity ids."""
-    params = {"service": "light.turn_off", "target": {"entity_id": "light.kitchen_ceiling"}}
+    params = {
+        "service": "light.turn_off",
+        "target": {"entity_id": "light.kitchen_ceiling"},
+    }
     params.update(overrides)
     return params
 
@@ -30,8 +35,14 @@ class ToolCardTests(unittest.TestCase):
         self.session = AppServerSession(
             self.writer,
             lock=threading.RLock(),
-            thread_params={"sandbox": "workspace-write", "approvalPolicy": "on-request", "approvalsReviewer": "user"},
-            turn_params={"input": [{"type": "text", "text": "Turn off the kitchen light"}]},
+            thread_params={
+                "sandbox": "workspace-write",
+                "approvalPolicy": "on-request",
+                "approvalsReviewer": "user",
+            },
+            turn_params={
+                "input": [{"type": "text", "text": "Turn off the kitchen light"}]
+            },
             on_event=self.events.append,
             on_approvals=self.saved.append,
             on_final=lambda text: None,
@@ -40,21 +51,42 @@ class ToolCardTests(unittest.TestCase):
         )
         self.session.start()
         self.session.receive({"id": "worker-1", "result": {}})
-        self.session.receive({"id": "worker-2", "result": {
-            "thread": {"id": "thread"}, "approvalPolicy": "on-request", "approvalsReviewer": "user"}})
+        self.session.receive(
+            {
+                "id": "worker-2",
+                "result": {
+                    "thread": {"id": "thread"},
+                    "approvalPolicy": "on-request",
+                    "approvalsReviewer": "user",
+                },
+            }
+        )
         self.session.receive({"id": "worker-3", "result": {"turn": {"id": "turn"}}})
 
     def ask(self, request_id=7, arguments=None, **overrides):
         """Send the request Codex 0.166.0 sends before a tool call; return the records saved for the page."""
         params = {
-            "threadId": "thread", "turnId": "turn", "serverName": "home_assistant_call", "mode": "form",
-            "message": QUESTION, "requestedSchema": {"type": "object", "properties": {}},
-            "_meta": {"codex_approval_kind": "mcp_tool_call", "persist": ["session", "always"],
-                      "tool_params": tool_params() if arguments is None else arguments},
+            "threadId": "thread",
+            "turnId": "turn",
+            "serverName": "home_assistant_call",
+            "mode": "form",
+            "message": QUESTION,
+            "requestedSchema": {"type": "object", "properties": {}},
+            "_meta": {
+                "codex_approval_kind": "mcp_tool_call",
+                "persist": ["session", "always"],
+                "tool_params": tool_params() if arguments is None else arguments,
+            },
         }
         params.update(overrides)
         before = len(self.writer.messages())
-        self.session.receive({"id": request_id, "method": "mcpServer/elicitation/request", "params": params})
+        self.session.receive(
+            {
+                "id": request_id,
+                "method": "mcpServer/elicitation/request",
+                "params": params,
+            }
+        )
         return self.writer.messages()[before:]
 
     def record(self):
@@ -63,13 +95,22 @@ class ToolCardTests(unittest.TestCase):
     def test_request_waits_for_the_owner_and_sends_nothing_yet(self):
         self.assertEqual(self.ask(), [])
         record = self.record()
-        self.assertEqual((record["kind"], record["status"], record["tool"]), ("tool", "pending", "home_assistant_call.call"))
+        self.assertEqual(
+            (record["kind"], record["status"], record["tool"]),
+            ("tool", "pending", "home_assistant_call.call"),
+        )
         self.assertTrue(record["can_allow"])
         self.assertTrue(self.session.waiting_for_user())
 
     def test_card_shows_every_argument_exactly(self):
-        arguments = tool_params(service="notify.notify", target=None,
-                                data={"title": "Kitchen", "message": "Line one.\nLine two, with light.porch in it."})
+        arguments = tool_params(
+            service="notify.notify",
+            target=None,
+            data={
+                "title": "Kitchen",
+                "message": "Line one.\nLine two, with light.porch in it.",
+            },
+        )
         self.ask(arguments=arguments)
         self.assertEqual(json.loads(self.record()["arguments"]), arguments)
 
@@ -85,15 +126,25 @@ class ToolCardTests(unittest.TestCase):
         cases = {  # target: (where, what the effect line says it turns off)
             "an entity and an area": (
                 {"entity_id": "light.kitchen_ceiling", "area_id": "upstairs"},
-                "light.kitchen_ceiling, every light in area upstairs."),
+                "light.kitchen_ceiling, every light in area upstairs.",
+            ),
             "an entity, a floor and a label": (
-                {"entity_id": "light.kitchen_ceiling", "floor_id": "first", "label_id": "all_lights"},
-                "light.kitchen_ceiling, every light on floor first, every light with label all_lights."),
+                {
+                    "entity_id": "light.kitchen_ceiling",
+                    "floor_id": "first",
+                    "label_id": "all_lights",
+                },
+                "light.kitchen_ceiling, every light on floor first, every light with label all_lights.",
+            ),
             "entities of two domains": (
-                {"entity_id": ["light.desk", "switch.desk_fan"]}, "light.desk, switch.desk_fan."),
+                {"entity_id": ["light.desk", "switch.desk_fan"]},
+                "light.desk, switch.desk_fan.",
+            ),
             "only an area": ({"area_id": "upstairs"}, "Every light in area upstairs."),
-            "two devices": ({"device_id": ["device_one", "device_two"]},
-                            "Every light of device device_one, every light of device device_two."),
+            "two devices": (
+                {"device_id": ["device_one", "device_two"]},
+                "Every light of device device_one, every light of device device_two.",
+            ),
             "every entity of the domain": ({"entity_id": "all"}, "Every light."),
         }
         for number, (name, (target, where)) in enumerate(cases.items(), start=20):
@@ -101,32 +152,47 @@ class ToolCardTests(unittest.TestCase):
                 self.ask(request_id=number, arguments=tool_params(target=target))
                 plain = self.record()["confirmation"]
                 self.assertEqual(plain["where"], where)
-                self.assertEqual(plain["effect"], "This turns off " + where[0].lower() + where[1:])
+                self.assertEqual(
+                    plain["effect"], "This turns off " + where[0].lower() + where[1:]
+                )
 
     def test_plain_words_claim_no_limit_for_a_target_they_cannot_read(self):
         """No target, an unknown field or a value that is not an id: the words say every light the action reaches."""
-        targets = [None, {}, {"code": "invented"}, {"entity_id": [1]}, "light.desk",
-                   {"entity_id": "light.desk", "code": "invented"}, {"entity_id": "light.desk", "area_id": [1]}]
+        targets = [
+            None,
+            {},
+            {"code": "invented"},
+            {"entity_id": [1]},
+            "light.desk",
+            {"entity_id": "light.desk", "code": "invented"},
+            {"entity_id": "light.desk", "area_id": [1]},
+        ]
         for number, target in enumerate(targets, start=30):
             with self.subTest(target=target):
                 self.ask(request_id=number, arguments=tool_params(target=target))
                 plain = self.record()["confirmation"]
                 self.assertEqual(plain["where"], "Every light the action reaches.")
-                self.assertEqual(plain["effect"], "This turns off every light the action reaches.")
+                self.assertEqual(
+                    plain["effect"], "This turns off every light the action reaches."
+                )
 
     def test_allow_once_accepts_this_call_only(self):
         self.ask()
         self.session.decide(self.record()["approval_id"], "allow")
         # No persist value: Codex reads a plain accept as one approval and asks again before the next call.
-        self.assertEqual(self.writer.messages()[-1],
-                         {"id": 7, "result": {"action": "accept", "content": None, "_meta": None}})
+        self.assertEqual(
+            self.writer.messages()[-1],
+            {"id": 7, "result": {"action": "accept", "content": None, "_meta": None}},
+        )
         self.assertEqual(self.record()["status"], "allowed")
 
     def test_deny_declines(self):
         self.ask()
         self.session.decide(self.record()["approval_id"], "deny")
-        self.assertEqual(self.writer.messages()[-1],
-                         {"id": 7, "result": {"action": "decline", "content": None, "_meta": None}})
+        self.assertEqual(
+            self.writer.messages()[-1],
+            {"id": 7, "result": {"action": "decline", "content": None, "_meta": None}},
+        )
 
     def assert_deny_only(self):
         record = self.record()
@@ -138,7 +204,9 @@ class ToolCardTests(unittest.TestCase):
         self.assertEqual(len(self.writer.messages()), before)
 
     def test_clipped_request_has_no_allow(self):
-        self.ask(arguments=tool_params(data={"message": "x" * (approvals.DISPLAY_LIMIT + 1)}))
+        self.ask(
+            arguments=tool_params(data={"message": "x" * (approvals.DISPLAY_LIMIT + 1)})
+        )
         self.assert_deny_only()
 
     def test_request_with_a_hidden_value_has_no_allow(self):
@@ -152,10 +220,16 @@ class ToolCardTests(unittest.TestCase):
 
     def test_other_questions_are_still_declined_in_the_chat(self):
         cases = {
-            "another server": {"serverName": "codex_scheduling",
-                               "message": 'Allow the codex_scheduling MCP server to run tool "list_schedules"?'},
-            "message names another server": {"message": 'Allow the github MCP server to run tool "call"?'},
-            "another tool of the server": {"message": 'Allow the home_assistant_call MCP server to run tool "read"?'},
+            "another server": {
+                "serverName": "codex_scheduling",
+                "message": 'Allow the codex_scheduling MCP server to run tool "list_schedules"?',
+            },
+            "message names another server": {
+                "message": 'Allow the github MCP server to run tool "call"?'
+            },
+            "another tool of the server": {
+                "message": 'Allow the home_assistant_call MCP server to run tool "read"?'
+            },
             "the server's own question": {"_meta": None, "message": "Pick a light"},
             "not a form": {"mode": "url"},
             "a different sentence": {"message": QUESTION + " Also allow everything"},
@@ -163,7 +237,9 @@ class ToolCardTests(unittest.TestCase):
         for number, (name, overrides) in enumerate(cases.items(), start=10):
             with self.subTest(name):
                 reply = self.ask(request_id=number, **overrides)
-                self.assertEqual(reply, [{"id": number, "result": {"action": "decline"}}])
+                self.assertEqual(
+                    reply, [{"id": number, "result": {"action": "decline"}}]
+                )
                 self.assertEqual(self.events[-1]["type"], "error")
         self.assertEqual(self.saved, [])
 
@@ -181,7 +257,12 @@ class ToolCardTests(unittest.TestCase):
 
     def test_resolved_elsewhere_expires_the_card(self):
         self.ask()
-        self.session.receive({"method": "serverRequest/resolved", "params": {"threadId": "thread", "requestId": 7}})
+        self.session.receive(
+            {
+                "method": "serverRequest/resolved",
+                "params": {"threadId": "thread", "requestId": 7},
+            }
+        )
         self.assertEqual(self.record()["status"], "expired")
         with self.assertRaises(LookupError):
             self.session.decide(self.record()["approval_id"], "allow")
@@ -190,12 +271,28 @@ class ToolCardTests(unittest.TestCase):
         self.ask()
         self.session.close()
         self.assertEqual(self.record()["status"], "expired")
-        self.assertFalse(any(message.get("result", {}).get("action") == "accept" for message in self.writer.messages()))
+        self.assertFalse(
+            any(
+                message.get("result", {}).get("action") == "accept"
+                for message in self.writer.messages()
+            )
+        )
 
     def test_over_the_limit_is_declined_in_the_tool_form(self):
-        self.session._records.extend({"approval_id": str(n), "status": "denied"} for n in range(approvals.REQUEST_LIMIT))
+        self.session._records.extend(
+            {"approval_id": str(n), "status": "denied"}
+            for n in range(approvals.REQUEST_LIMIT)
+        )
         reply = self.ask()
-        self.assertEqual(reply, [{"id": 7, "result": {"action": "decline", "content": None, "_meta": None}}])
+        self.assertEqual(
+            reply,
+            [
+                {
+                    "id": 7,
+                    "result": {"action": "decline", "content": None, "_meta": None},
+                }
+            ],
+        )
 
 
 if __name__ == "__main__":

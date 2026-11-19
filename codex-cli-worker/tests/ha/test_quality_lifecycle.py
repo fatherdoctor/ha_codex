@@ -1,15 +1,20 @@
 """Action, browser-session and discovery boundaries during entry transitions."""
+
 import importlib.util
-import sys
 from pathlib import Path
+import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
-import pytest
 from aiohttp import web
 from homeassistant.components.http.const import KEY_HASS_USER
 from homeassistant.config_entries import ConfigEntryState, current_entry
-from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady, ServiceValidationError
+from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
+    ConfigEntryNotReady,
+    ServiceValidationError,
+)
+import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 ROOT = Path(__file__).resolve().parents[3] / "custom_components" / "codex_cli"
@@ -23,25 +28,36 @@ discovery = sys.modules["quality_ha_test.discovery"]
 auth = sys.modules["quality_ha_test.browser_auth"]
 
 CALLS = [
-    ("start_task", {"prompt": "fixture"}), ("start_login", {}),
-    ("get_login_status", {}), ("logout", {}), ("get_task", {"task_id": "fixture"}),
-    ("list_tasks", {}), ("cancel_task", {"task_id": "fixture"}),
+    ("start_task", {"prompt": "fixture"}),
+    ("start_login", {}),
+    ("get_login_status", {}),
+    ("logout", {}),
+    ("get_task", {"task_id": "fixture"}),
+    ("list_tasks", {}),
+    ("cancel_task", {"task_id": "fixture"}),
     ("reply_task", {"task_id": "fixture", "reply": "fixture"}),
     ("continue_task", {"task_id": "fixture", "message": "fixture"}),
 ]
-NOT_LOADED = [state for state in ConfigEntryState if state is not ConfigEntryState.LOADED]
+NOT_LOADED = [
+    state for state in ConfigEntryState if state is not ConfigEntryState.LOADED
+]
 
 
 def add_entry(hass, state=ConfigEntryState.SETUP_IN_PROGRESS):
     """Use a synthetic entry without starting real discovery or platforms."""
-    entry = MockConfigEntry(domain="codex_cli", data={"base_url": "http://worker"}, state=state)
+    entry = MockConfigEntry(
+        domain="codex_cli", data={"base_url": "http://worker"}, state=state
+    )
     entry.add_to_hass(hass)
     return entry
 
 
 def runtime(client=None, broker=None):
     """Allow the same guard regression to run before the broker field is added."""
-    kwargs = {"client": client if client is not None else AsyncMock(), "coordinator": AsyncMock()}
+    kwargs = {
+        "client": client if client is not None else AsyncMock(),
+        "coordinator": AsyncMock(),
+    }
     if "browser_sessions" in integration.CodexCliRuntimeData.__dataclass_fields__:
         kwargs["browser_sessions"] = broker
     return integration.CodexCliRuntimeData(**kwargs)
@@ -68,7 +84,13 @@ async def test_loaded_action_passes_default_force(hass, force):
     client.start_login.return_value = {"status": "already_logged_in"}
     entry.runtime_data = runtime(client)
     integration._async_register_services(hass)
-    result = await hass.services.async_call("codex_cli", "start_login", {} if force is None else {"force": force}, blocking=True, return_response=True)
+    result = await hass.services.async_call(
+        "codex_cli",
+        "start_login",
+        {} if force is None else {"force": force},
+        blocking=True,
+        return_response=True,
+    )
     assert result == {"status": "already_logged_in"}
     client.start_login.assert_awaited_once_with(False if force is None else force)
 
@@ -82,7 +104,9 @@ async def test_browser_view_refuses_nonloaded_entry_and_legacy_global(hass, stat
     hass.data.setdefault("codex_cli", {})["browser_sessions"] = broker
     request = {KEY_HASS_USER: SimpleNamespace(is_admin=True)}
     with pytest.raises(web.HTTPServiceUnavailable):
-        auth.BrowserSessionView(hass).broker(request, {"worker_token": "fixture-pairing"})
+        auth.BrowserSessionView(hass).broker(
+            request, {"worker_token": "fixture-pairing"}
+        )
 
 
 @pytest.mark.parametrize("failure", [None, "refresh", "broker", "platforms"])
@@ -121,8 +145,12 @@ async def test_setup_publishes_after_refresh_and_cleans_failed_setup(hass, failu
         patch.object(integration, "CodexCliApiClient", return_value=AsyncMock()),
         patch.object(integration, "CodexCliCoordinator", return_value=coordinator),
         patch.object(integration, "BrowserSessions", return_value=broker),
-        patch.object(integration, "async_listen_for_choices", return_value=remove_choices),
-        patch.object(hass.config_entries, "async_forward_entry_setups", side_effect=forward),
+        patch.object(
+            integration, "async_listen_for_choices", return_value=remove_choices
+        ),
+        patch.object(
+            hass.config_entries, "async_forward_entry_setups", side_effect=forward
+        ),
     ):
         context = current_entry.set(entry)
         try:
@@ -159,7 +187,9 @@ async def test_real_broker_unload_and_reload_revoke_old_session(hass):
     with (
         patch.object(integration, "async_discover_worker", return_value=worker) as find,
         patch.object(integration, "CodexCliApiClient", return_value=client),
-        patch.object(hass.config_entries, "async_forward_entry_setups", return_value=None),
+        patch.object(
+            hass.config_entries, "async_forward_entry_setups", return_value=None
+        ),
         patch.object(hass.config_entries, "async_unload_platforms", return_value=True),
         patch.object(auth, "get_supervisor_network_url", return_value="http://worker"),
     ):
@@ -172,12 +202,16 @@ async def test_real_broker_unload_and_reload_revoke_old_session(hass):
             session = await first.issue()
             assert await integration.async_unload_entry(hass, entry)
             assert first.closed and not first.sessions
-            assert hass.auth.async_validate_access_token(session["access_token"]) is None
+            assert (
+                hass.auth.async_validate_access_token(session["access_token"]) is None
+            )
             with pytest.raises(web.HTTPServiceUnavailable):
                 view.broker(request, {"worker_token": "fixture-first"})
             await entry._async_process_on_unload(hass)
             entry._async_set_state(hass, ConfigEntryState.SETUP_IN_PROGRESS, None)
-            find.return_value = discovery.WorkerConnection("http://worker", "fixture-second")
+            find.return_value = discovery.WorkerConnection(
+                "http://worker", "fixture-second"
+            )
             assert await integration.async_setup_entry(hass, entry)
             entry._async_set_state(hass, ConfigEntryState.LOADED, None)
             second = entry.runtime_data.browser_sessions
@@ -191,23 +225,38 @@ async def test_real_broker_unload_and_reload_revoke_old_session(hass):
             current_entry.reset(context)
 
 
-@pytest.mark.parametrize("errors,expected", [
-    (["auth", "network"], ConfigEntryAuthFailed),
-    (["network", "auth"], ConfigEntryAuthFailed),
-    (["auth", "auth"], ConfigEntryAuthFailed),
-    (["network", "network"], ConfigEntryNotReady),
-])
+@pytest.mark.parametrize(
+    "errors,expected",
+    [
+        (["auth", "network"], ConfigEntryAuthFailed),
+        (["network", "auth"], ConfigEntryAuthFailed),
+        (["auth", "auth"], ConfigEntryAuthFailed),
+        (["network", "network"], ConfigEntryNotReady),
+    ],
+)
 async def test_actual_discovery_to_setup_preserves_auth_failure(hass, errors, expected):
     """A reachable worker's rejection is not erased by another unreachable URL."""
     entry = add_entry(hass)
-    failures = [discovery.CodexCliAuthError("fixture auth") if error == "auth"
-                else discovery.CodexCliApiError("fixture network") for error in errors]
+    failures = [
+        discovery.CodexCliAuthError("fixture auth")
+        if error == "auth"
+        else discovery.CodexCliApiError("fixture network")
+        for error in errors
+    ]
     client = AsyncMock()
     client.status.side_effect = failures
     with (
-        patch.object(discovery, "_async_worker_addons", return_value=[{"slug": "fixture_worker"}]),
-        patch.object(discovery, "_async_provision_worker_token", new_callable=AsyncMock),
-        patch.object(discovery, "_candidate_urls_from_addon", return_value=["http://one", "http://two"]),
+        patch.object(
+            discovery, "_async_worker_addons", return_value=[{"slug": "fixture_worker"}]
+        ),
+        patch.object(
+            discovery, "_async_provision_worker_token", new_callable=AsyncMock
+        ),
+        patch.object(
+            discovery,
+            "_candidate_urls_from_addon",
+            return_value=["http://one", "http://two"],
+        ),
         patch.object(discovery, "CodexCliApiClient", return_value=client),
         patch.object(integration, "BrowserSessions") as broker,
     ):
@@ -222,9 +271,17 @@ async def test_discovery_accepts_later_success_after_auth_rejection(hass):
     client = AsyncMock()
     client.status.side_effect = [discovery.CodexCliAuthError("fixture auth"), {}]
     with (
-        patch.object(discovery, "_async_worker_addons", return_value=[{"slug": "fixture_worker"}]),
-        patch.object(discovery, "_async_provision_worker_token", new_callable=AsyncMock),
-        patch.object(discovery, "_candidate_urls_from_addon", return_value=["http://one", "http://two"]),
+        patch.object(
+            discovery, "_async_worker_addons", return_value=[{"slug": "fixture_worker"}]
+        ),
+        patch.object(
+            discovery, "_async_provision_worker_token", new_callable=AsyncMock
+        ),
+        patch.object(
+            discovery,
+            "_candidate_urls_from_addon",
+            return_value=["http://one", "http://two"],
+        ),
         patch.object(discovery, "CodexCliApiClient", return_value=client),
     ):
         result = await discovery.async_discover_worker(hass, Mock())
@@ -234,7 +291,9 @@ async def test_discovery_accepts_later_success_after_auth_rejection(hass):
 def test_sign_in_force_metadata_matches_action_default():
     """The visible field explains both cases that otherwise look like a no-op."""
     import json
+
     import yaml
+
     source = json.loads((ROOT / "strings.json").read_text())
     english = json.loads((ROOT / "translations/en.json").read_text())
     action = source["services"]["start_login"]

@@ -1,8 +1,9 @@
 """A tapped choice on a Codex notification, handled on Home Assistant's real event bus."""
+
 import importlib.util
+from pathlib import Path
 import sys
 import types
-from pathlib import Path
 from unittest.mock import AsyncMock
 
 from homeassistant.components import persistent_notification
@@ -38,11 +39,27 @@ TASK_ID = "20261004T101500Z-1a2b3c4d"
 
 def test_only_codex_choice_actions_are_parsed():
     """The worker's button action gives the task, turn and position; any other action is left alone."""
-    assert actions.parse_choice_action(f"CODEX_CLI_CHOICE_2_{TURN_ID}_{TASK_ID}") == (TASK_ID, TURN_ID, 2)
+    assert actions.parse_choice_action(f"CODEX_CLI_CHOICE_2_{TURN_ID}_{TASK_ID}") == (
+        TASK_ID,
+        TURN_ID,
+        2,
+    )
     # A task id may contain underscores, dots and dashes.
-    assert actions.parse_choice_action(f"CODEX_CLI_CHOICE_0_{TURN_ID}_my_task.1-a") == ("my_task.1-a", TURN_ID, 0)
-    for other in ("OPEN_DOOR", f"CODEX_CLI_CHOICE_x_{TURN_ID}_{TASK_ID}", f"CODEX_CLI_CHOICE_0_short_{TASK_ID}",
-                  f"CODEX_CLI_CHOICE_0_{TURN_ID}_", f"CODEX_CLI_CHOICE_0_{TURN_ID}_bad/task", "", None, 7):
+    assert actions.parse_choice_action(f"CODEX_CLI_CHOICE_0_{TURN_ID}_my_task.1-a") == (
+        "my_task.1-a",
+        TURN_ID,
+        0,
+    )
+    for other in (
+        "OPEN_DOOR",
+        f"CODEX_CLI_CHOICE_x_{TURN_ID}_{TASK_ID}",
+        f"CODEX_CLI_CHOICE_0_short_{TASK_ID}",
+        f"CODEX_CLI_CHOICE_0_{TURN_ID}_",
+        f"CODEX_CLI_CHOICE_0_{TURN_ID}_bad/task",
+        "",
+        None,
+        7,
+    ):
         assert actions.parse_choice_action(other) is None
 
 
@@ -56,16 +73,22 @@ async def test_tapped_choice_is_sent_to_the_worker(hass, hass_admin_user):
     await hass.async_block_till_done()
     client.reply_choice.assert_not_called()
 
-    hass.bus.async_fire("mobile_app_notification_action", {"action": f"CODEX_CLI_CHOICE_1_{TURN_ID}_{TASK_ID}"},
-                        context=admin)
+    hass.bus.async_fire(
+        "mobile_app_notification_action",
+        {"action": f"CODEX_CLI_CHOICE_1_{TURN_ID}_{TASK_ID}"},
+        context=admin,
+    )
     await hass.async_block_till_done()
     client.reply_choice.assert_awaited_once_with(TASK_ID, TURN_ID, 1)
     coordinator.async_request_refresh.assert_awaited_once()
 
     # After unloading, a tap is no longer handled.
     stop()
-    hass.bus.async_fire("mobile_app_notification_action", {"action": f"CODEX_CLI_CHOICE_0_{TURN_ID}_{TASK_ID}"},
-                        context=admin)
+    hass.bus.async_fire(
+        "mobile_app_notification_action",
+        {"action": f"CODEX_CLI_CHOICE_0_{TURN_ID}_{TASK_ID}"},
+        context=admin,
+    )
     await hass.async_block_till_done()
     assert client.reply_choice.await_count == 1
 
@@ -77,12 +100,17 @@ async def test_only_an_administrator_tap_is_taken(hass, hass_read_only_user, cap
     """
     assert await async_setup_component(hass, "persistent_notification", {})
     shown = {}
-    persistent_notification.async_register_callback(hass, lambda _update, notifications: shown.update(notifications))
+    persistent_notification.async_register_callback(
+        hass, lambda _update, notifications: shown.update(notifications)
+    )
     client = AsyncMock()
     actions.async_listen_for_choices(hass, client, AsyncMock())
     for context in (Context(user_id=hass_read_only_user.id), None):
-        hass.bus.async_fire("mobile_app_notification_action", {"action": f"CODEX_CLI_CHOICE_0_{TURN_ID}_{TASK_ID}"},
-                            context=context)
+        hass.bus.async_fire(
+            "mobile_app_notification_action",
+            {"action": f"CODEX_CLI_CHOICE_0_{TURN_ID}_{TASK_ID}"},
+            context=context,
+        )
         await hass.async_block_till_done()
     client.reply_choice.assert_not_called()
     assert shown == {}
@@ -93,13 +121,20 @@ async def test_refused_choice_makes_no_notification(hass, hass_admin_user, caplo
     """When the worker does not take the answer, for example because the question was answered, it is logged only."""
     assert await async_setup_component(hass, "persistent_notification", {})
     shown = {}
-    persistent_notification.async_register_callback(hass, lambda _update, notifications: shown.update(notifications))
+    persistent_notification.async_register_callback(
+        hass, lambda _update, notifications: shown.update(notifications)
+    )
     client = AsyncMock()
-    client.reply_choice.side_effect = api.CodexCliApiError("This question is no longer waiting for an answer.", status=409)
+    client.reply_choice.side_effect = api.CodexCliApiError(
+        "This question is no longer waiting for an answer.", status=409
+    )
     coordinator = AsyncMock()
     actions.async_listen_for_choices(hass, client, coordinator)
-    hass.bus.async_fire("mobile_app_notification_action", {"action": f"CODEX_CLI_CHOICE_0_{TURN_ID}_{TASK_ID}"},
-                        context=Context(user_id=hass_admin_user.id))
+    hass.bus.async_fire(
+        "mobile_app_notification_action",
+        {"action": f"CODEX_CLI_CHOICE_0_{TURN_ID}_{TASK_ID}"},
+        context=Context(user_id=hass_admin_user.id),
+    )
     await hass.async_block_till_done()
 
     assert shown == {}

@@ -4,6 +4,9 @@
 # Core's alias table and its per-file ignores for core paths are left out.
 # CI enforces only format, E702 and I001 for now (ci/ruff.yaml); the other rules are for new code and later steps.
 
+# push_guard.py is a byte-for-byte copy of the kit's guard; a test checks its hash.
+extend-exclude = ["codex-cli-worker/push_guard.py"]
+
 [lint]
 select = [
   "A001",   # Variable {name} is shadowing a Python builtin

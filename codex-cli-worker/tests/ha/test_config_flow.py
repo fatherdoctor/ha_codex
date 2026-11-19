@@ -1,17 +1,17 @@
 """Exercise the real config flow with Home Assistant and synthetic worker discovery."""
 
+from collections.abc import Generator
 import importlib.util
 import json
-import sys
-from collections.abc import Generator
 from pathlib import Path
+import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-import pytest
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import AbortFlow, FlowResultType
+import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     MockModule,

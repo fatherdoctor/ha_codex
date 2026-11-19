@@ -34,9 +34,12 @@ pinned package> (SANDBOX_TESTING.md).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import contextlib
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+from pathlib import Path
 import queue
 import subprocess
 import sys
@@ -44,11 +47,8 @@ import tempfile
 import textwrap
 import threading
 import time
-import unittest
-from collections.abc import Callable
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 from typing import Any
+import unittest
 from unittest.mock import patch
 
 WORKER = Path(__file__).resolve().parents[1]
@@ -63,7 +63,13 @@ WAIT = 45
 def pinned_cli_present() -> bool:
     """Return True when the binary in HA_TEST_CODEX (or the image's) is the pinned version."""
     try:
-        version = subprocess.run([CODEX, "--version"], capture_output=True, text=True, timeout=20, check=False).stdout
+        version = subprocess.run(
+            [CODEX, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        ).stdout
     except (OSError, subprocess.SubprocessError):
         return False
     return PINNED_VERSION in version
@@ -81,7 +87,6 @@ def needs_cli(test_class: type) -> type:
     if os.environ.get("HA_TEST_REQUIRE_CODEX") == "1":
         raise RuntimeError(f"HA_TEST_REQUIRE_CODEX=1, but {reason}")
     return unittest.skip(reason)(test_class)
-
 
 
 def allow_local_sockets() -> None:
@@ -102,12 +107,15 @@ def allow_local_sockets() -> None:
 # The stand-in model
 # ---------------------------------------------------------------------------------------------------------------
 
+
 def message_text(item: dict[str, Any]) -> str:
     """Return the text of one input message item of a Responses request."""
     parts = item.get("content")
     if isinstance(parts, str):
         return parts
-    return "".join(part.get("text", "") for part in parts or [] if isinstance(part, dict))
+    return "".join(
+        part.get("text", "") for part in parts or [] if isinstance(part, dict)
+    )
 
 
 class QuietHTTPServer(ThreadingHTTPServer):
@@ -157,12 +165,28 @@ class ScriptedModel:
                 self.end_headers()
                 for event in (
                     {"type": "response.created", "response": {"id": "resp"}},
-                    {"type": "response.output_item.added", "output_index": 0, "item": item},
-                    {"type": "response.output_item.done", "output_index": 0, "item": item},
-                    {"type": "response.completed", "response": {"id": "resp", "status": "completed",
-                                                                "output": [item]}},
+                    {
+                        "type": "response.output_item.added",
+                        "output_index": 0,
+                        "item": item,
+                    },
+                    {
+                        "type": "response.output_item.done",
+                        "output_index": 0,
+                        "item": item,
+                    },
+                    {
+                        "type": "response.completed",
+                        "response": {
+                            "id": "resp",
+                            "status": "completed",
+                            "output": [item],
+                        },
+                    },
                 ):
-                    self.wfile.write(f"event: {event['type']}\ndata: {json.dumps(event)}\n\n".encode())
+                    self.wfile.write(
+                        f"event: {event['type']}\ndata: {json.dumps(event)}\n\n".encode()
+                    )
                 self.wfile.flush()
 
         self.http = QuietHTTPServer(("127.0.0.1", 0), Handler)
@@ -187,8 +211,12 @@ class ScriptedModel:
         if is_review(request):
             with self._lock:
                 self.reviews.append(request)
-            verdict = {"risk_level": "low", "user_authorization": "unknown", "outcome": self.review_outcome,
-                       "rationale": "scripted test reviewer"}
+            verdict = {
+                "risk_level": "low",
+                "user_authorization": "unknown",
+                "outcome": self.review_outcome,
+                "rationale": "scripted test reviewer",
+            }
             return self.item(request, {"final": json.dumps(verdict)}, "review")
         with self._lock:
             self.requests.append(request)
@@ -208,15 +236,27 @@ class ScriptedModel:
                 self.in_flight -= 1
 
     @staticmethod
-    def item(request: dict[str, Any], step: dict[str, Any], call_id: str) -> dict[str, Any]:
+    def item(
+        request: dict[str, Any], step: dict[str, Any], call_id: str
+    ) -> dict[str, Any]:
         """Build the one output item of a step."""
         if "final" in step:
-            return {"type": "message", "role": "assistant", "status": "completed", "phase": "final_answer",
-                    "content": [{"type": "output_text", "text": step["final"], "annotations": []}]}
+            return {
+                "type": "message",
+                "role": "assistant",
+                "status": "completed",
+                "phase": "final_answer",
+                "content": [
+                    {"type": "output_text", "text": step["final"], "annotations": []}
+                ],
+            }
         if "shell" in step:
             namespace, tool = find_tool(request, "exec_command")
-            arguments = {"cmd": step["shell"], "max_output_tokens": 4000,
-                         **{key: value for key, value in step.items() if key != "shell"}}
+            arguments = {
+                "cmd": step["shell"],
+                "max_output_tokens": 4000,
+                **{key: value for key, value in step.items() if key != "shell"},
+            }
         elif "spawn" in step:
             namespace, tool = find_tool(request, "spawn_agent")
             arguments = {"message": step["spawn"]}
@@ -224,7 +264,12 @@ class ScriptedModel:
             server, wanted = step["tool"]
             namespace, tool = find_tool(request, wanted, server)
             arguments = step.get("arguments", {})
-        item = {"type": "function_call", "call_id": call_id, "name": tool, "arguments": json.dumps(arguments)}
+        item = {
+            "type": "function_call",
+            "call_id": call_id,
+            "name": tool,
+            "arguments": json.dumps(arguments),
+        }
         if namespace:
             item["namespace"] = namespace
         return item
@@ -250,7 +295,11 @@ def outputs_since_user(request: dict[str, Any]) -> int:
     """Count the tool outputs after the latest user message that names a script."""
     count = 0
     for item in reversed(request.get("input") or []):
-        if item.get("type") == "message" and item.get("role") == "user" and "[script:" in message_text(item):
+        if (
+            item.get("type") == "message"
+            and item.get("role") == "user"
+            and "[script:" in message_text(item)
+        ):
             return count
         if str(item.get("type", "")).endswith("_output"):
             count += 1
@@ -262,13 +311,18 @@ def offered_tools(request: dict[str, Any]) -> list[tuple[str | None, str]]:
     found = []
     for tool in request.get("tools") or []:
         if tool.get("type") == "namespace":
-            found.extend((tool.get("name"), child.get("name")) for child in tool.get("tools") or [])
+            found.extend(
+                (tool.get("name"), child.get("name"))
+                for child in tool.get("tools") or []
+            )
         else:
             found.append((None, tool.get("name")))
     return found
 
 
-def find_tool(request: dict[str, Any], name: str, server: str | None = None) -> tuple[str | None, str]:
+def find_tool(
+    request: dict[str, Any], name: str, server: str | None = None
+) -> tuple[str | None, str]:
     """Return (namespace, function name) of one offered function.
 
     Without `server`, the function is named `name` (a built-in such as exec_command). With it, the function is
@@ -277,9 +331,16 @@ def find_tool(request: dict[str, Any], name: str, server: str | None = None) -> 
     for namespace, offered in offered_tools(request):
         if server is None and offered == name:
             return namespace, offered
-        if server is not None and offered and offered.endswith(name) and server in f"{namespace}{offered}":
+        if (
+            server is not None
+            and offered
+            and offered.endswith(name)
+            and server in f"{namespace}{offered}"
+        ):
             return namespace, offered
-    raise AssertionError(f"no such tool offered: {server or ''} {name}: {offered_tools(request)}")
+    raise AssertionError(
+        f"no such tool offered: {server or ''} {name}: {offered_tools(request)}"
+    )
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -308,7 +369,9 @@ RELAY = textwrap.dedent('''
 ''')
 
 
-def worker_app_server_args(root: Path, attended: bool = True) -> tuple[list[str], list[str]]:
+def worker_app_server_args(
+    root: Path, attended: bool = True
+) -> tuple[list[str], list[str]]:
     """Return the worker's own app-server arguments with each tool program behind the relay, and the server names.
 
     server.build_app_server_args is the launch the chat page uses. Only the binary and each tool program's
@@ -326,7 +389,11 @@ def worker_app_server_args(root: Path, attended: bool = True) -> tuple[list[str]
     index = 0
     while index < len(args):
         flag, value = args[index], args[index + 1] if index + 1 < len(args) else ""
-        if flag == "--config" and value.startswith("mcp_servers.") and ".command=" in value:
+        if (
+            flag == "--config"
+            and value.startswith("mcp_servers.")
+            and ".command=" in value
+        ):
             name = value.split(".")[1]
             names.append(name)
             program = json.loads(value.split("=", 1)[1])
@@ -334,9 +401,15 @@ def worker_app_server_args(root: Path, attended: bool = True) -> tuple[list[str]
             arg_value = args[index + 3]
             assert arg_value.startswith(f"mcp_servers.{name}.args="), arg_value
             program_args = json.loads(arg_value.split("=", 1)[1])
-            rewritten += ["--config", f"mcp_servers.{name}.command={json.dumps(sys.executable)}",
-                          "--config", f"mcp_servers.{name}.args="
-                          + json.dumps([str(relay), str(root / f"tool-{name}.log"), program, *program_args])]
+            rewritten += [
+                "--config",
+                f"mcp_servers.{name}.command={json.dumps(sys.executable)}",
+                "--config",
+                f"mcp_servers.{name}.args="
+                + json.dumps(
+                    [str(relay), str(root / f"tool-{name}.log"), program, *program_args]
+                ),
+            ]
             index += 4
             continue
         rewritten.append(flag)
@@ -349,12 +422,19 @@ def tool_log(root: Path, name: str) -> list[dict[str, Any]]:
     path = root / f"tool-{name}.log"
     if not path.exists():
         return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
 def tool_processes(root: Path, names: list[str]) -> dict[str, list[int]]:
     """Return the relay process ids that started, by tool program."""
-    return {name: [line["pid"] for line in tool_log(root, name) if line["kind"] == "start"] for name in names}
+    return {
+        name: [line["pid"] for line in tool_log(root, name) if line["kind"] == "start"]
+        for name in names
+    }
 
 
 def pid_alive(pid: int) -> bool:
@@ -372,7 +452,11 @@ def tool_calls(root: Path, names: list[str]) -> list[tuple[str, dict[str, Any]]]
     for name in names:
         for line in tool_log(root, name):
             value = line.get("value")
-            if line["kind"] == "in" and isinstance(value, dict) and value.get("method") == "tools/call":
+            if (
+                line["kind"] == "in"
+                and isinstance(value, dict)
+                and value.get("method") == "tools/call"
+            ):
                 calls.append((name, value.get("params") or {}))
     return calls
 
@@ -380,6 +464,7 @@ def tool_calls(root: Path, names: list[str]) -> list[tuple[str, dict[str, Any]]]
 # ---------------------------------------------------------------------------------------------------------------
 # A JSON-RPC client for `codex app-server`
 # ---------------------------------------------------------------------------------------------------------------
+
 
 def accept_everything(method: str, _params: dict[str, Any]) -> dict[str, Any]:
     """Accept every request from Codex, in the form the worker's own session answers it (approvals.py)."""
@@ -394,32 +479,50 @@ class AppServer:
     approve(method, params) answers a request from Codex; by default every approval is accepted.
     """
 
-    def __init__(self, root: Path, model: ScriptedModel, extra_args: list[str] | None = None,
-                 tool_args: list[str] | None = None, home: Path | None = None) -> None:
+    def __init__(
+        self,
+        root: Path,
+        model: ScriptedModel,
+        extra_args: list[str] | None = None,
+        tool_args: list[str] | None = None,
+        home: Path | None = None,
+    ) -> None:
         self.home = home or root / "codex-home"
         self.home.mkdir(exist_ok=True)
         settings = {
-            "model_provider": "fixture", "model_providers.fixture.name": "Fixture",
+            "model_provider": "fixture",
+            "model_providers.fixture.name": "Fixture",
             "model_providers.fixture.base_url": model.base_url,
             "model_providers.fixture.wire_api": "responses",
             "model_providers.fixture.requires_openai_auth": False,
             "check_for_update_on_startup": False,
         }
-        config = [part for key, value in settings.items() for part in ("-c", f"{key}={json.dumps(value)}")]
+        config = [
+            part
+            for key, value in settings.items()
+            for part in ("-c", f"{key}={json.dumps(value)}")
+        ]
         self.stderr = (root / "stderr.log").open("a", encoding="utf-8")
         self.started_at = time.monotonic()
         self.proc = subprocess.Popen(
             [CODEX, "app-server", *config, *(tool_args or []), *(extra_args or [])],
-            cwd=root / "workspace", env={**os.environ, "CODEX_HOME": str(self.home)},
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.stderr,
-            text=True, bufsize=1)
+            cwd=root / "workspace",
+            env={**os.environ, "CODEX_HOME": str(self.home)},
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=self.stderr,
+            text=True,
+            bufsize=1,
+        )
         self.messages: list[dict[str, Any]] = []
         self.changed = threading.Condition()
         self.responses: dict[int, queue.Queue] = {}
         self.next_id = 0
         self.write_lock = threading.Lock()
         self.requests_seen: list[tuple[str, dict[str, Any]]] = []
-        self.approve: Callable[[str, dict[str, Any]], dict[str, Any]] = accept_everything
+        self.approve: Callable[[str, dict[str, Any]], dict[str, Any]] = (
+            accept_everything
+        )
         threading.Thread(target=self.read, daemon=True).start()
 
     def read(self) -> None:
@@ -430,8 +533,17 @@ class AppServer:
             except ValueError:
                 continue
             if "id" in message and "method" in message:
-                self.requests_seen.append((message["method"], message.get("params") or {}))
-                self.send({"id": message["id"], "result": self.approve(message["method"], message.get("params") or {})})
+                self.requests_seen.append(
+                    (message["method"], message.get("params") or {})
+                )
+                self.send(
+                    {
+                        "id": message["id"],
+                        "result": self.approve(
+                            message["method"], message.get("params") or {}
+                        ),
+                    }
+                )
             elif "id" in message:
                 box = self.responses.get(message["id"])
                 if box:
@@ -454,7 +566,9 @@ class AppServer:
         self.send({"id": self.next_id, "method": method, "params": params or {}})
         return box.get(timeout=WAIT)
 
-    def request(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    def request(
+        self, method: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """Send one request and return its result; fail on an error answer."""
         answer = self.call(method, params)
         assert "error" not in answer, (method, answer)
@@ -462,13 +576,23 @@ class AppServer:
 
     def initialize(self) -> float:
         """Run the handshake; return the seconds from process start to its answer."""
-        self.request("initialize", {"clientInfo": {"name": "live-proofs", "version": "1"},
-                                    "capabilities": {"experimentalApi": True}})
+        self.request(
+            "initialize",
+            {
+                "clientInfo": {"name": "live-proofs", "version": "1"},
+                "capabilities": {"experimentalApi": True},
+            },
+        )
         elapsed = time.monotonic() - self.started_at
         self.send({"method": "initialized"})
         return elapsed
 
-    def wait_for(self, test: Callable[[dict[str, Any]], bool], after: int = 0, timeout: float = WAIT) -> dict[str, Any]:
+    def wait_for(
+        self,
+        test: Callable[[dict[str, Any]], bool],
+        after: int = 0,
+        timeout: float = WAIT,
+    ) -> dict[str, Any]:
         """Wait for the first message at or after index `after` that passes `test`."""
         deadline = time.monotonic() + timeout
         with self.changed:
@@ -488,17 +612,34 @@ class AppServer:
     def notices(self, method: str, after: int = 0) -> list[dict[str, Any]]:
         """Return the notifications of one method at or after index `after`."""
         with self.changed:
-            return [m for m in self.messages[after:] if m.get("method") == method and "id" not in m]
+            return [
+                m
+                for m in self.messages[after:]
+                if m.get("method") == method and "id" not in m
+            ]
 
-    def turn(self, thread_id: str, text: str, wait: bool = True, **settings: Any) -> dict[str, Any]:
+    def turn(
+        self, thread_id: str, text: str, wait: bool = True, **settings: Any
+    ) -> dict[str, Any]:
         """Start one turn; with wait, return its turn/completed notice."""
         start = self.mark()
-        turn = self.request("turn/start", {"threadId": thread_id, "input": [{"type": "text", "text": text}],
-                                           **settings})["turn"]
+        turn = self.request(
+            "turn/start",
+            {
+                "threadId": thread_id,
+                "input": [{"type": "text", "text": text}],
+                **settings,
+            },
+        )["turn"]
         if not wait:
             return turn
-        return self.wait_for(lambda m: m.get("method") == "turn/completed"
-                             and (m.get("params") or {}).get("turn", {}).get("id") == turn["id"], start)
+        return self.wait_for(
+            lambda m: (
+                m.get("method") == "turn/completed"
+                and (m.get("params") or {}).get("turn", {}).get("id") == turn["id"]
+            ),
+            start,
+        )
 
     def close(self) -> None:
         """Close the input and stop the process."""
@@ -526,12 +667,22 @@ def ready_servers(app: AppServer, after: int) -> dict[str, str]:
 def wait_ready(app: AppServer, names: list[str], after: int) -> float:
     """Wait until every named tool program reports ready since `after`; return the seconds it took."""
     begin = time.monotonic()
-    app.wait_for(lambda _m: all(ready_servers(app, after).get(name) == "ready" for name in names), after)
+    app.wait_for(
+        lambda _m: all(
+            ready_servers(app, after).get(name) == "ready" for name in names
+        ),
+        after,
+    )
     return time.monotonic() - begin
 
 
-THREAD = {"cwd": None, "sandbox": "workspace-write", "approvalPolicy": "on-request", "approvalsReviewer": "user",
-          "model": MODEL}
+THREAD = {
+    "cwd": None,
+    "sandbox": "workspace-write",
+    "approvalPolicy": "on-request",
+    "approvalsReviewer": "user",
+    "model": MODEL,
+}
 
 
 @needs_cli
@@ -542,7 +693,9 @@ class LiveProofs(unittest.TestCase):
         allow_local_sockets()
         cache = Path.home() / ".cache"
         cache.mkdir(exist_ok=True)
-        self.temporary = tempfile.TemporaryDirectory(prefix="ha-live-proofs-", dir=cache)
+        self.temporary = tempfile.TemporaryDirectory(
+            prefix="ha-live-proofs-", dir=cache
+        )
         self.root = Path(self.temporary.name)
         (self.root / "workspace").mkdir()
         self.model = ScriptedModel()
@@ -555,10 +708,16 @@ class LiveProofs(unittest.TestCase):
         self.model.close()
         self.temporary.cleanup()
 
-    def start(self, extra_args: list[str] | None = None, home: Path | None = None,
-              tools: bool = True) -> AppServer:
+    def start(
+        self,
+        extra_args: list[str] | None = None,
+        home: Path | None = None,
+        tools: bool = True,
+    ) -> AppServer:
         """Start and initialize one app-server; keep it for tearDown."""
-        app = AppServer(self.root, self.model, extra_args, self.tool_args if tools else [], home)
+        app = AppServer(
+            self.root, self.model, extra_args, self.tool_args if tools else [], home
+        )
         self.apps.append(app)
         app.initialize()
         return app
@@ -579,7 +738,10 @@ class LiveProofs(unittest.TestCase):
         thread_id = self.thread(app)
         wait_ready(app, self.names, mark)
         running = tool_processes(self.root, self.names)
-        self.assertTrue(all(len(pids) == 1 and pid_alive(pids[0]) for pids in running.values()), running)
+        self.assertTrue(
+            all(len(pids) == 1 and pid_alive(pids[0]) for pids in running.values()),
+            running,
+        )
         # Codex writes the session file at the first turn; a thread with no turn cannot be resumed.
         self.model.scripts["p1"] = [{"final": "one"}]
         app.turn(thread_id, "[script:p1] one turn")
@@ -587,12 +749,22 @@ class LiveProofs(unittest.TestCase):
         app.close()
         again = self.start()
         mark = again.mark()
-        resumed = again.request("thread/resume", {"threadId": thread_id, "cwd": str(self.root / "workspace")})
+        resumed = again.request(
+            "thread/resume",
+            {"threadId": thread_id, "cwd": str(self.root / "workspace")},
+        )
         self.assertEqual(resumed["thread"]["id"], thread_id)
         wait_ready(again, self.names, mark)
-        self.assertTrue(all(len(pids) == 2 for pids in tool_processes(self.root, self.names).values()))
-        print(f"\nP1 holds: {len(self.names)} tool programs ({', '.join(self.names)}) start and report ready "
-              "after thread/start and after thread/resume.")
+        self.assertTrue(
+            all(
+                len(pids) == 2
+                for pids in tool_processes(self.root, self.names).values()
+            )
+        )
+        print(
+            f"\nP1 holds: {len(self.names)} tool programs ({', '.join(self.names)}) start and report ready "
+            "after thread/start and after thread/resume."
+        )
 
     # P2 -------------------------------------------------------------------------------------------------------
     def test_p2_unsubscribe_unloads_and_stops_tool_programs(self) -> None:
@@ -605,14 +777,24 @@ class LiveProofs(unittest.TestCase):
         pids = [pids[0] for pids in tool_processes(self.root, self.names).values()]
         mark = app.mark()
         app.request("thread/unsubscribe", {"threadId": thread_id})
-        app.wait_for(lambda m: m.get("method") == "thread/closed"
-                     and (m.get("params") or {}).get("threadId") == thread_id, mark)
+        app.wait_for(
+            lambda m: (
+                m.get("method") == "thread/closed"
+                and (m.get("params") or {}).get("threadId") == thread_id
+            ),
+            mark,
+        )
         deadline = time.monotonic() + 10
         while any(pid_alive(pid) for pid in pids) and time.monotonic() < deadline:
             time.sleep(0.2)
-        self.assertFalse([pid for pid in pids if pid_alive(pid)], "tool programs still run after thread/closed")
-        print("\nP2 holds: thread/unsubscribe with thread_unload_delay_secs=0 sends thread/closed and stops "
-              f"all {len(pids)} tool programs.")
+        self.assertFalse(
+            [pid for pid in pids if pid_alive(pid)],
+            "tool programs still run after thread/closed",
+        )
+        print(
+            "\nP2 holds: thread/unsubscribe with thread_unload_delay_secs=0 sends thread/closed and stops "
+            f"all {len(pids)} tool programs."
+        )
 
     # P3 -------------------------------------------------------------------------------------------------------
     def test_p3_paused_chat_wakes_with_its_history(self) -> None:
@@ -622,10 +804,18 @@ class LiveProofs(unittest.TestCase):
         app.turn(thread_id, "[script:p3a] first turn")
         mark = app.mark()
         app.request("thread/unsubscribe", {"threadId": thread_id})
-        app.wait_for(lambda m: m.get("method") == "thread/closed"
-                     and (m.get("params") or {}).get("threadId") == thread_id, mark)
+        app.wait_for(
+            lambda m: (
+                m.get("method") == "thread/closed"
+                and (m.get("params") or {}).get("threadId") == thread_id
+            ),
+            mark,
+        )
         mark = app.mark()
-        resumed = app.request("thread/resume", {"threadId": thread_id, "cwd": str(self.root / "workspace")})
+        resumed = app.request(
+            "thread/resume",
+            {"threadId": thread_id, "cwd": str(self.root / "workspace")},
+        )
         self.assertEqual(resumed["thread"]["id"], thread_id)
         wait_ready(app, self.names, mark)
         turns = resumed["thread"].get("turns") or []
@@ -635,43 +825,82 @@ class LiveProofs(unittest.TestCase):
         seen = json.dumps(self.model.requests_for("p3b")[-1]["input"])
         self.assertIn("first turn", seen)
         self.assertIn("remember the word heron", seen)
-        print(f"\nP3 holds: the resumed thread keeps its id, thread/resume returns {len(turns)} earlier turn(s), "
-              "and the next request to the model holds the earlier turn.")
+        print(
+            f"\nP3 holds: the resumed thread keeps its id, thread/resume returns {len(turns)} earlier turn(s), "
+            "and the next request to the model holds the earlier turn."
+        )
 
     # P4 -------------------------------------------------------------------------------------------------------
     def test_p4_turn_with_another_mode_starts_no_tool_program(self) -> None:
         app = self.start()
         mark = app.mark()
-        thread_id = self.thread(app)  # Default: workspace-write, on-request, the person reviews
+        thread_id = self.thread(
+            app
+        )  # Default: workspace-write, on-request, the person reviews
         wait_ready(app, self.names, mark)
         before = tool_processes(self.root, self.names)
         workspace = str(self.root / "workspace")
         modes = [
-            ("Read only", {"sandboxPolicy": {"type": "readOnly", "networkAccess": False},
-                           "approvalPolicy": "on-request", "approvalsReviewer": "user"}),
-            ("Auto-review", {"sandboxPolicy": {"type": "workspaceWrite", "networkAccess": False,
-                                               "writableRoots": [workspace]},
-                             "approvalPolicy": "on-request", "approvalsReviewer": "auto_review"}),
-            ("Default", {"sandboxPolicy": {"type": "workspaceWrite", "networkAccess": False,
-                                           "writableRoots": [workspace]},
-                         "approvalPolicy": "on-request", "approvalsReviewer": "user"}),
+            (
+                "Read only",
+                {
+                    "sandboxPolicy": {"type": "readOnly", "networkAccess": False},
+                    "approvalPolicy": "on-request",
+                    "approvalsReviewer": "user",
+                },
+            ),
+            (
+                "Auto-review",
+                {
+                    "sandboxPolicy": {
+                        "type": "workspaceWrite",
+                        "networkAccess": False,
+                        "writableRoots": [workspace],
+                    },
+                    "approvalPolicy": "on-request",
+                    "approvalsReviewer": "auto_review",
+                },
+            ),
+            (
+                "Default",
+                {
+                    "sandboxPolicy": {
+                        "type": "workspaceWrite",
+                        "networkAccess": False,
+                        "writableRoots": [workspace],
+                    },
+                    "approvalPolicy": "on-request",
+                    "approvalsReviewer": "user",
+                },
+            ),
         ]
         target = self.root / "workspace" / "p4.txt"
         for label, settings in modes:
             name = "p4" + label.replace(" ", "").replace("-", "")
-            self.model.scripts[name] = [{"shell": f"echo {name} > {target}"}, {"final": label}]
+            self.model.scripts[name] = [
+                {"shell": f"echo {name} > {target}"},
+                {"final": label},
+            ]
             mark = app.mark()
             app.turn(thread_id, f"[script:{name}] mode {label}", **settings)
-            self.assertFalse([n for n in app.notices("mcpServer/startupStatus/updated", mark)
-                              if (n.get("params") or {}).get("status") == "starting"], label)
+            self.assertFalse(
+                [
+                    n
+                    for n in app.notices("mcpServer/startupStatus/updated", mark)
+                    if (n.get("params") or {}).get("status") == "starting"
+                ],
+                label,
+            )
             self.assertEqual(tool_processes(self.root, self.names), before, label)
             if label == "Read only":
                 self.assertFalse(target.exists(), "a Read only turn wrote a file")
             else:
                 self.assertEqual(target.read_text().strip(), name, label)
             target.unlink(missing_ok=True)
-        print("\nP4 holds: turns in Read only, Auto-review and Default on one thread apply each mode (Read only "
-              "cannot write) and start no tool program again: no new starting notice, the same process ids.")
+        print(
+            "\nP4 holds: turns in Read only, Auto-review and Default on one thread apply each mode (Read only "
+            "cannot write) and start no tool program again: no new starting notice, the same process ids."
+        )
 
     # P5 -------------------------------------------------------------------------------------------------------
     def test_p5_times(self) -> None:
@@ -690,11 +919,16 @@ class LiveProofs(unittest.TestCase):
         warm = self.start()
         mark = warm.mark()
         begin = time.monotonic()
-        warm.request("thread/resume", {"threadId": thread_id, "cwd": str(self.root / "workspace")})
+        warm.request(
+            "thread/resume",
+            {"threadId": thread_id, "cwd": str(self.root / "workspace")},
+        )
         resume_to_ready = time.monotonic() - begin
         resume_to_ready += wait_ready(warm, self.names, mark)
-        print(f"\nP5 times: process start to initialize {to_initialize:.2f} s; thread/start to all tools ready "
-              f"{start_to_ready:.2f} s; thread/resume of a 20-turn chat to all tools ready {resume_to_ready:.2f} s.")
+        print(
+            f"\nP5 times: process start to initialize {to_initialize:.2f} s; thread/start to all tools ready "
+            f"{start_to_ready:.2f} s; thread/resume of a 20-turn chat to all tools ready {resume_to_ready:.2f} s."
+        )
 
     # P6 -------------------------------------------------------------------------------------------------------
     def test_p6_interrupt_completes_the_turn_and_the_thread_goes_on(self) -> None:
@@ -708,16 +942,24 @@ class LiveProofs(unittest.TestCase):
         while not self.model.requests_for("p6a") and time.monotonic() < deadline:
             time.sleep(0.1)
         app.request("turn/interrupt", {"threadId": thread_id, "turnId": turn["id"]})
-        done = app.wait_for(lambda m: m.get("method") == "turn/completed"
-                            and m["params"]["turn"]["id"] == turn["id"], mark, timeout=10)
+        done = app.wait_for(
+            lambda m: (
+                m.get("method") == "turn/completed"
+                and m["params"]["turn"]["id"] == turn["id"]
+            ),
+            mark,
+            timeout=10,
+        )
         release.set()
         status = done["params"]["turn"].get("status")
         self.assertEqual(status, "interrupted", done)
         self.model.scripts["p6b"] = [{"final": "after"}]
         after = app.turn(thread_id, "[script:p6b] the next turn")
         self.assertEqual(after["params"]["turn"].get("status"), "completed", after)
-        print("\nP6 holds: after turn/interrupt, turn/completed arrives within 10 s with status interrupted, and "
-              "the thread completes a new turn.")
+        print(
+            "\nP6 holds: after turn/interrupt, turn/completed arrives within 10 s with status interrupted, and "
+            "the thread completes a new turn."
+        )
 
     # P7 -------------------------------------------------------------------------------------------------------
     def test_p7_a_second_process_adds_a_turn_to_a_live_thread(self) -> None:
@@ -727,7 +969,10 @@ class LiveProofs(unittest.TestCase):
         here.turn(thread_id, "[script:p7a] here first")
         # Remote control is a second Codex process on the same Codex home folder.
         other = self.start(home=here.home, tools=False)
-        answer = other.call("thread/resume", {"threadId": thread_id, "cwd": str(self.root / "workspace")})
+        answer = other.call(
+            "thread/resume",
+            {"threadId": thread_id, "cwd": str(self.root / "workspace")},
+        )
         refused = "error" in answer
         if refused:
             outcome = f"refuses the resume: {answer['error'].get('message')}"
@@ -738,17 +983,28 @@ class LiveProofs(unittest.TestCase):
         self.model.scripts["p7c"] = [{"final": "three"}]
         third = here.turn(thread_id, "[script:p7c] here again")
         self.assertEqual(third["params"]["turn"].get("status"), "completed", third)
-        sees_other = "from the other process" in json.dumps(self.model.requests_for("p7c")[-1]["input"])
+        sees_other = "from the other process" in json.dumps(
+            self.model.requests_for("p7c")[-1]["input"]
+        )
         # After the live process lets the thread go, the second process can take it, and the file is whole.
         here.request("thread/unsubscribe", {"threadId": thread_id})
         here.close()
-        turns = other.request("thread/resume", {"threadId": thread_id,
-                                                "cwd": str(self.root / "workspace")})["thread"].get("turns") or []
-        self.assertGreaterEqual(len(turns), 2 if refused else 3, "the session file lost turns")
-        print(f"\nP7 recorded: while the thread is live in one process, a second process on the same Codex home "
-              f"{outcome}. The live process {'sees' if sees_other else 'does not see'} a foreign turn. After the "
-              f"live process closes, the second process resumes the thread with {len(turns)} turns: the file is "
-              "whole.")
+        turns = (
+            other.request(
+                "thread/resume",
+                {"threadId": thread_id, "cwd": str(self.root / "workspace")},
+            )["thread"].get("turns")
+            or []
+        )
+        self.assertGreaterEqual(
+            len(turns), 2 if refused else 3, "the session file lost turns"
+        )
+        print(
+            f"\nP7 recorded: while the thread is live in one process, a second process on the same Codex home "
+            f"{outcome}. The live process {'sees' if sees_other else 'does not see'} a foreign turn. After the "
+            f"live process closes, the second process resumes the thread with {len(turns)} turns: the file is "
+            "whole."
+        )
 
     # P9 -------------------------------------------------------------------------------------------------------
     def every_tool_call_names_its_thread(self) -> list[str]:
@@ -762,26 +1018,37 @@ class LiveProofs(unittest.TestCase):
         steps: list[dict[str, Any]] = [
             {"tool": ("home_assistant", "verify"), "arguments": {"checks": []}},
             {"tool": ("home_assistant_data", "exchange_info"), "arguments": {}},
-            {"tool": ("home_assistant_call", "call"), "arguments": {"domain": "light", "service": "turn_on"}},
+            {
+                "tool": ("home_assistant_call", "call"),
+                "arguments": {"domain": "light", "service": "turn_on"},
+            },
             {"tool": ("codex_github", "github_git"), "arguments": {}},
         ]
         if "codex_scheduling" in self.names:
-            steps.append({"tool": ("codex_scheduling", "list_schedules"), "arguments": {}})
+            steps.append(
+                {"tool": ("codex_scheduling", "list_schedules"), "arguments": {}}
+            )
         self.model.scripts["p9"] = [*steps, {"final": "called"}]
         app.turn(thread_id, "[script:p9] call each tool")
         calls = tool_calls(self.root, self.names)
         by_server = {name: params for name, params in calls}
         self.assertEqual(set(by_server), set(self.names), calls)
         for name, params in calls:
-            self.assertEqual((params.get("_meta") or {}).get("threadId"), thread_id, (name, params))
+            self.assertEqual(
+                (params.get("_meta") or {}).get("threadId"), thread_id, (name, params)
+            )
         return sorted(by_server)
 
     def test_p9_every_tool_call_names_its_thread(self) -> None:
         servers = self.every_tool_call_names_its_thread()
-        print(f"\nP9 holds: each of the {len(servers)} tool programs received _meta.threadId equal to the thread id "
-              f"of thread/start ({servers}); scheduled runs are off by default, so the scheduling tool is not offered.")
+        print(
+            f"\nP9 holds: each of the {len(servers)} tool programs received _meta.threadId equal to the thread id "
+            f"of thread/start ({servers}); scheduled runs are off by default, so the scheduling tool is not offered."
+        )
 
-    def test_p9_with_scheduled_runs_on_the_scheduling_tool_names_its_thread_too(self) -> None:
+    def test_p9_with_scheduled_runs_on_the_scheduling_tool_names_its_thread_too(
+        self,
+    ) -> None:
         """Review N2: with SCHEDULED_RUNS on, the worker starts a fifth tool program; it gets the thread id too."""
         import server
 
@@ -790,38 +1057,67 @@ class LiveProofs(unittest.TestCase):
         self.assertIn("codex_scheduling", self.names)
         self.assertEqual(len(self.names), 5, self.names)
         servers = self.every_tool_call_names_its_thread()
-        print(f"\nP9 holds with scheduled runs on: each of the {len(servers)} tool programs received "
-              f"_meta.threadId ({servers}).")
+        print(
+            f"\nP9 holds with scheduled runs on: each of the {len(servers)} tool programs received "
+            f"_meta.threadId ({servers})."
+        )
 
     def test_p9_a_sub_agent_names_its_own_thread(self) -> None:
         """Review F2 of the design: a sub-agent is its own thread, so its tool calls carry its own id."""
         app = self.start()
         thread_id = self.thread(app)
-        self.model.scripts["p9sub"] = [{"spawn": "[script:p9child] read the exchange info"}, {"final": "parent"}]
-        self.model.scripts["p9child"] = [{"tool": ("home_assistant_data", "exchange_info"), "arguments": {}},
-                                         {"final": "child"}]
+        self.model.scripts["p9sub"] = [
+            {"spawn": "[script:p9child] read the exchange info"},
+            {"final": "parent"},
+        ]
+        self.model.scripts["p9child"] = [
+            {"tool": ("home_assistant_data", "exchange_info"), "arguments": {}},
+            {"final": "child"},
+        ]
         mark = app.mark()
         parent_turn = app.turn(thread_id, "[script:p9sub] start a helper")
         parent_done = app.messages.index(parent_turn)
-        call = app.wait_for(lambda m: m.get("method") == "item/completed"
-                            and m["params"]["item"].get("type") == "mcpToolCall", mark)
+        call = app.wait_for(
+            lambda m: (
+                m.get("method") == "item/completed"
+                and m["params"]["item"].get("type") == "mcpToolCall"
+            ),
+            mark,
+        )
         child_id = call["params"]["threadId"]
-        spawned = [m["params"]["item"] for m in app.notices("item/completed", mark)
-                   if m["params"]["item"].get("type") == "collabAgentToolCall"]
+        spawned = [
+            m["params"]["item"]
+            for m in app.notices("item/completed", mark)
+            if m["params"]["item"].get("type") == "collabAgentToolCall"
+        ]
         calls = tool_calls(self.root, self.names)
-        self.assertEqual([(params.get("_meta") or {}).get("threadId") for _name, params in calls], [child_id])
-        self.assertNotEqual(child_id, thread_id, "the sub-agent's call named the parent thread")
+        self.assertEqual(
+            [(params.get("_meta") or {}).get("threadId") for _name, params in calls],
+            [child_id],
+        )
+        self.assertNotEqual(
+            child_id, thread_id, "the sub-agent's call named the parent thread"
+        )
         # The parent's spawn item is the only link from the child's id to the chat.
-        self.assertEqual([(item["senderThreadId"], item["receiverThreadIds"]) for item in spawned],
-                         [(thread_id, [child_id])])
-        child_turn = app.wait_for(lambda m: m.get("method") == "turn/started"
-                                  and m["params"]["threadId"] == child_id, mark)
+        self.assertEqual(
+            [(item["senderThreadId"], item["receiverThreadIds"]) for item in spawned],
+            [(thread_id, [child_id])],
+        )
+        child_turn = app.wait_for(
+            lambda m: (
+                m.get("method") == "turn/started"
+                and m["params"]["threadId"] == child_id
+            ),
+            mark,
+        )
         after_parent = app.messages.index(call) > parent_done
-        print(f"\nP9 (sub-agent) recorded: the sub-agent's tool call names its own thread, not the chat's; the "
-              "parent's collabAgentToolCall item (senderThreadId, receiverThreadIds) links the two, and the "
-              f"child's turn has rootTurnId {'equal to' if child_turn['params']['turn'].get('rootTurnId') == parent_turn['params']['turn']['id'] else 'unlike'} "
-              f"the parent's turn. The child's tool call came {'after' if after_parent else 'before'} the "
-              "parent's turn/completed. Its tool programs start lazily, only the one it used.")
+        print(
+            f"\nP9 (sub-agent) recorded: the sub-agent's tool call names its own thread, not the chat's; the "
+            "parent's collabAgentToolCall item (senderThreadId, receiverThreadIds) links the two, and the "
+            f"child's turn has rootTurnId {'equal to' if child_turn['params']['turn'].get('rootTurnId') == parent_turn['params']['turn']['id'] else 'unlike'} "
+            f"the parent's turn. The child's tool call came {'after' if after_parent else 'before'} the "
+            "parent's turn/completed. Its tool programs start lazily, only the one it used."
+        )
 
     # P10 ------------------------------------------------------------------------------------------------------
     def test_p10_two_threads_run_at_once_and_interrupt_one(self) -> None:
@@ -839,24 +1135,45 @@ class LiveProofs(unittest.TestCase):
         deadline = time.monotonic() + WAIT
         while self.model.most_in_flight < 2 and time.monotonic() < deadline:
             time.sleep(0.1)
-        self.assertEqual(self.model.most_in_flight, 2, "the two turns did not reach the model at the same time")
+        self.assertEqual(
+            self.model.most_in_flight,
+            2,
+            "the two turns did not reach the model at the same time",
+        )
         app.request("turn/interrupt", {"threadId": first, "turnId": turn_a["id"]})
-        done_a = app.wait_for(lambda m: m.get("method") == "turn/completed"
-                              and m["params"]["turn"]["id"] == turn_a["id"], mark, timeout=10)
+        done_a = app.wait_for(
+            lambda m: (
+                m.get("method") == "turn/completed"
+                and m["params"]["turn"]["id"] == turn_a["id"]
+            ),
+            mark,
+            timeout=10,
+        )
         release.set()
-        done_b = app.wait_for(lambda m: m.get("method") == "turn/completed"
-                              and m["params"]["turn"]["id"] == turn_b["id"], mark)
+        done_b = app.wait_for(
+            lambda m: (
+                m.get("method") == "turn/completed"
+                and m["params"]["turn"]["id"] == turn_b["id"]
+            ),
+            mark,
+        )
         self.assertEqual(done_a["params"]["turn"]["status"], "interrupted")
         self.assertEqual(done_b["params"]["turn"]["status"], "completed")
-        unnamed = [m["method"] for m in app.messages[mark:]
-                   if m.get("method", "").startswith(("turn/", "item/")) and "id" not in m
-                   and (m.get("params") or {}).get("threadId") not in {first, second}]
+        unnamed = [
+            m["method"]
+            for m in app.messages[mark:]
+            if m.get("method", "").startswith(("turn/", "item/"))
+            and "id" not in m
+            and (m.get("params") or {}).get("threadId") not in {first, second}
+        ]
         self.assertFalse(unnamed, unnamed)
         programs = tool_processes(self.root, self.names)
         self.assertTrue(all(len(pids) == 2 for pids in programs.values()), programs)
-        print("\nP10 holds: two threads of one process were at the model at the same time; every turn and item "
-              "notice names its thread; each thread has its own tool programs (2 of each); turn/interrupt of one "
-              "left the other to complete.")
+        print(
+            "\nP10 holds: two threads of one process were at the model at the same time; every turn and item "
+            "notice names its thread; each thread has its own tool programs (2 of each); turn/interrupt of one "
+            "left the other to complete."
+        )
 
 
 if __name__ == "__main__":

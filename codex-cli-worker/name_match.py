@@ -16,6 +16,7 @@ A wrong match changes the wrong device, so this rule is stricter than the find t
 
 The hostile cases for this rule are in tests/test_name_match.py (CORPUS); add a case there.
 """
+
 from __future__ import annotations
 
 import re
@@ -58,7 +59,11 @@ def entity_row(row, domain):
     """Return (entity_id, friendly name, state) for a state row of the domain that may match, or None."""
     entity_id = row.get("entity_id")
     state = row.get("state")
-    if not isinstance(entity_id, str) or not ENTITY_RE.fullmatch(entity_id) or not isinstance(state, str):
+    if (
+        not isinstance(entity_id, str)
+        or not ENTITY_RE.fullmatch(entity_id)
+        or not isinstance(state, str)
+    ):
         return None
     entity_domain, object_id = entity_id.split(".", 1)
     if entity_domain != domain or PRIVATE.search(object_id) or password_state(row):
@@ -81,7 +86,9 @@ def resolve(states, name, service):
         raise ValueError("name must hold a letter or a digit")
     domain = service.split(".", 1)[0]
     if domain in NO_OWN_ENTITIES:
-        raise ValueError(f"{service} acts on other domains: give target.entity_id, not a name")
+        raise ValueError(
+            f"{service} acts on other domains: give target.entity_id, not a name"
+        )
     exact, fitting = [], []
     for row in states:
         found = entity_row(row, domain) if isinstance(row, dict) else None
@@ -92,8 +99,12 @@ def resolve(states, name, service):
         searched = set(friendly_words) | set(name_words(entity_id.split(".", 1)[1]))
         if not all(word in searched for word in words):
             continue
-        candidate = {"entity_id": entity_id, "name": friendly[:120], "state": state[:120],
-                     "other_words": len(searched - set(words))}
+        candidate = {
+            "entity_id": entity_id,
+            "name": friendly[:120],
+            "state": state[:120],
+            "other_words": len(searched - set(words)),
+        }
         fitting.append(candidate)
         if friendly_words == words:
             exact.append(candidate)
@@ -102,5 +113,8 @@ def resolve(states, name, service):
         return {"entity_id": chosen[0]["entity_id"]}
     # The closest name first, as the find tool orders them: the device before its extra sensors and buttons.
     chosen.sort(key=lambda item: (item["other_words"], item["entity_id"]))
-    shown = [{key: item[key] for key in ("entity_id", "name", "state")} for item in chosen[:MAX_CANDIDATES]]
+    shown = [
+        {key: item[key] for key in ("entity_id", "name", "state")}
+        for item in chosen[:MAX_CANDIDATES]
+    ]
     return {"candidates": shown, "total": len(chosen)}

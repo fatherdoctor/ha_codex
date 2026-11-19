@@ -1,12 +1,13 @@
 """Live activity steps for the running exchange."""
+
 from __future__ import annotations
 
+from contextlib import ExitStack
 import io
 import json
+from pathlib import Path
 import tempfile
 import unittest
-from contextlib import ExitStack
-from pathlib import Path
 from unittest.mock import patch
 
 from app_server_fixture import StubAppServer
@@ -20,12 +21,22 @@ def item(kind, item_id, **fields):
 
 def command(item_id, cmd, output="", exit_code=0, status="completed"):
     """Build a command item event: started when in progress, completed otherwise."""
-    return {"type": "item.completed" if status != "in_progress" else "item.started",
-            "item": {"id": item_id, "type": "command_execution", "command": cmd,
-                     "aggregated_output": output, "exit_code": exit_code, "status": status}}
+    return {
+        "type": "item.completed" if status != "in_progress" else "item.started",
+        "item": {
+            "id": item_id,
+            "type": "command_execution",
+            "command": cmd,
+            "aggregated_output": output,
+            "exit_code": exit_code,
+            "status": status,
+        },
+    }
 
 
-FINAL_ANSWER = json.dumps({"status": "completed", "summary": "Done", "question": "", "details": ""})
+FINAL_ANSWER = json.dumps(
+    {"status": "completed", "summary": "Done", "question": "", "details": ""}
+)
 
 
 class ActivityStepTests(unittest.TestCase):
@@ -35,9 +46,17 @@ class ActivityStepTests(unittest.TestCase):
         """Start collecting steps for one running exchange."""
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
-        for name, value in (("tasks", {}), ("task_activity", {}), ("active_task_runners", set())):
+        for name, value in (
+            ("tasks", {}),
+            ("task_activity", {}),
+            ("active_task_runners", set()),
+        ):
             self.stack.enter_context(patch.object(server, name, value))
-        server.tasks["t"] = {"task_id": "t", "status": "running", "current_turn_id": "turn-1"}
+        server.tasks["t"] = {
+            "task_id": "t",
+            "status": "running",
+            "current_turn_id": "turn-1",
+        }
         server.start_activity("t", "turn-1")
 
     def steps(self, after=0):
@@ -50,13 +69,40 @@ class ActivityStepTests(unittest.TestCase):
         events = [
             item("reasoning", "item_0", text="**Checking the automation**"),
             item("agent_message", "item_1", text="I'll read the automation first."),
-            command("item_2", "/bin/sh -lc 'cat /config/automations.yaml'", output="x" * 5000),
-            command("item_3", "/bin/sh -lc \"rg -n foo /config\"", output="", exit_code=1),
-            item("file_change", "item_4", status="completed",
-                 changes=[{"path": "/config/automations.yaml", "kind": "update"}, {"path": "/config/new.yaml", "kind": "add"}]),
+            command(
+                "item_2",
+                "/bin/sh -lc 'cat /config/automations.yaml'",
+                output="x" * 5000,
+            ),
+            command(
+                "item_3", '/bin/sh -lc "rg -n foo /config"', output="", exit_code=1
+            ),
+            item(
+                "file_change",
+                "item_4",
+                status="completed",
+                changes=[
+                    {"path": "/config/automations.yaml", "kind": "update"},
+                    {"path": "/config/new.yaml", "kind": "add"},
+                ],
+            ),
             item("web_search", "item_5", query="", action={"type": "other"}),
-            item("mcp_tool_call", "item_6", server="codex_apps", tool="github.get_repo", status="completed", error=None),
-            item("todo_list", "item_7", items=[{"text": "Read config", "completed": True}, {"text": "Edit", "completed": False}]),
+            item(
+                "mcp_tool_call",
+                "item_6",
+                server="codex_apps",
+                tool="github.get_repo",
+                status="completed",
+                error=None,
+            ),
+            item(
+                "todo_list",
+                "item_7",
+                items=[
+                    {"text": "Read config", "completed": True},
+                    {"text": "Edit", "completed": False},
+                ],
+            ),
             item("agent_message", "item_8", text=FINAL_ANSWER),
             item("agent_message", "item_9", text=""),
             {"type": "turn.completed", "usage": {"input_tokens": 1}},
@@ -66,8 +112,19 @@ class ActivityStepTests(unittest.TestCase):
         payload = self.steps()
         self.assertTrue(payload["running"])
         self.assertEqual(payload["turn_id"], "turn-1")
-        self.assertEqual([step["kind"] for step in payload["steps"]],
-                         ["reasoning", "message", "command", "command", "file_change", "web_search", "tool_call", "plan"])
+        self.assertEqual(
+            [step["kind"] for step in payload["steps"]],
+            [
+                "reasoning",
+                "message",
+                "command",
+                "command",
+                "file_change",
+                "web_search",
+                "tool_call",
+                "plan",
+            ],
+        )
         self.assertEqual([step["index"] for step in payload["steps"]], list(range(8)))
         reasoning, message, cat, rg, edit, search, tool, plan = payload["steps"]
         self.assertEqual(reasoning["text"], "Checking the automation")
@@ -79,7 +136,13 @@ class ActivityStepTests(unittest.TestCase):
         self.assertEqual(rg["text"], "rg -n foo /config")
         self.assertEqual((rg["status"], rg["exit_code"]), ("failed", 1))
         self.assertEqual(edit["text"], "Edited automations.yaml, Added new.yaml")
-        self.assertEqual(edit["files"], [{"path": "automations.yaml", "kind": "update"}, {"path": "new.yaml", "kind": "add"}])
+        self.assertEqual(
+            edit["files"],
+            [
+                {"path": "automations.yaml", "kind": "update"},
+                {"path": "new.yaml", "kind": "add"},
+            ],
+        )
         self.assertEqual(search["text"], "Searched the web")
         self.assertEqual(tool["text"], "codex_apps · github.get_repo")
         self.assertEqual(plan["text"], "☑ Read config\n☐ Edit")
@@ -87,31 +150,70 @@ class ActivityStepTests(unittest.TestCase):
 
     def test_file_change_reads_as_made_only_once_it_was_made(self):
         """A change that waits, as for permission, or that was refused is not reported as done."""
-        changes = [{"path": "/config/automations.yaml", "kind": "update"}, {"path": "/config/old.yaml", "kind": "delete"},
-                   {"path": "/config/new.yaml", "kind": "add"}, {"path": "/config/moved.yaml", "kind": "other"}]
-        server.record_activity_event("t", {"type": "item.started", "item": {
-            "id": "item_1", "type": "file_change", "status": "in_progress", "changes": changes}})
+        changes = [
+            {"path": "/config/automations.yaml", "kind": "update"},
+            {"path": "/config/old.yaml", "kind": "delete"},
+            {"path": "/config/new.yaml", "kind": "add"},
+            {"path": "/config/moved.yaml", "kind": "other"},
+        ]
+        server.record_activity_event(
+            "t",
+            {
+                "type": "item.started",
+                "item": {
+                    "id": "item_1",
+                    "type": "file_change",
+                    "status": "in_progress",
+                    "changes": changes,
+                },
+            },
+        )
         waiting = self.steps()["steps"][0]
-        self.assertEqual((waiting["status"], waiting["text"]),
-                         ("running", "Editing automations.yaml, Deleting old.yaml, Adding new.yaml, Changing moved.yaml"))
-        server.record_activity_event("t", item("file_change", "item_1", status="declined", changes=changes))
+        self.assertEqual(
+            (waiting["status"], waiting["text"]),
+            (
+                "running",
+                "Editing automations.yaml, Deleting old.yaml, Adding new.yaml, Changing moved.yaml",
+            ),
+        )
+        server.record_activity_event(
+            "t", item("file_change", "item_1", status="declined", changes=changes)
+        )
         refused = self.steps()["steps"][0]
-        self.assertEqual((refused["status"], refused["text"]),
-                         ("failed", "Did not edit automations.yaml, Did not delete old.yaml, Did not add new.yaml, "
-                                    "Did not change moved.yaml"))
-        server.record_activity_event("t", item("file_change", "item_2", status="completed", changes=changes[:1]))
-        server.record_activity_event("t", item("file_change", "item_3", status="declined", changes=[]))
+        self.assertEqual(
+            (refused["status"], refused["text"]),
+            (
+                "failed",
+                "Did not edit automations.yaml, Did not delete old.yaml, Did not add new.yaml, "
+                "Did not change moved.yaml",
+            ),
+        )
+        server.record_activity_event(
+            "t", item("file_change", "item_2", status="completed", changes=changes[:1])
+        )
+        server.record_activity_event(
+            "t", item("file_change", "item_3", status="declined", changes=[])
+        )
         made, empty = self.steps()["steps"][1:]
-        self.assertEqual((made["status"], made["text"]), ("done", "Edited automations.yaml"))
+        self.assertEqual(
+            (made["status"], made["text"]), ("done", "Edited automations.yaml")
+        )
         self.assertEqual(empty["text"], "Did not change files")
 
     def test_started_items_update_in_place_with_duration(self):
         """An item that starts and then completes stays one step, updated with its result and duration."""
-        server.record_activity_event("t", command("item_1", "/bin/sh -lc 'sleep 1'", status="in_progress", exit_code=None))
+        server.record_activity_event(
+            "t",
+            command(
+                "item_1", "/bin/sh -lc 'sleep 1'", status="in_progress", exit_code=None
+            ),
+        )
         first = self.steps()
         self.assertEqual(first["steps"][0]["status"], "running")
         self.assertIsNone(first["steps"][0]["duration_ms"])
-        server.record_activity_event("t", command("item_1", "/bin/sh -lc 'sleep 1'", output="done"))
+        server.record_activity_event(
+            "t", command("item_1", "/bin/sh -lc 'sleep 1'", output="done")
+        )
         second = self.steps(after=first["seq"])
         self.assertEqual(second["total"], 1)
         self.assertEqual(len(second["steps"]), 1)
@@ -125,25 +227,40 @@ class ActivityStepTests(unittest.TestCase):
         message = "Your access token could not be refreshed."
         server.record_activity_event("t", item("error", "item_0", message=message))
         server.record_activity_event("t", {"type": "error", "message": message})
-        server.record_activity_event("t", {"type": "turn.failed", "error": {"message": message}})
+        server.record_activity_event(
+            "t", {"type": "turn.failed", "error": {"message": message}}
+        )
         payload = self.steps()
-        self.assertEqual([(s["kind"], s["status"], s["text"]) for s in payload["steps"]], [("error", "failed", message)])
+        self.assertEqual(
+            [(s["kind"], s["status"], s["text"]) for s in payload["steps"]],
+            [("error", "failed", message)],
+        )
 
     def test_secrets_are_redacted_and_steps_are_capped(self):
         """Tokens are redacted from a step's command and output, and one notice replaces the steps past the limit."""
-        server.record_activity_event("t", command("item_0", "/bin/sh -lc 'curl -H \"Authorization: Bearer abcdefghijklmnop123456\" x'",
-                                                  output="token=abcdefghijklmnop123456"))
+        server.record_activity_event(
+            "t",
+            command(
+                "item_0",
+                "/bin/sh -lc 'curl -H \"Authorization: Bearer abcdefghijklmnop123456\" x'",
+                output="token=abcdefghijklmnop123456",
+            ),
+        )
         step = self.steps()["steps"][0]
         self.assertNotIn("abcdefghijklmnop123456", step["text"] + step["output"])
         for index in range(server.ACTIVITY_MAX_STEPS + 20):
-            server.record_activity_event("t", item("reasoning", f"r{index}", text=f"Step {index}"))
+            server.record_activity_event(
+                "t", item("reasoning", f"r{index}", text=f"Step {index}")
+            )
         payload = self.steps()
         self.assertEqual(payload["total"], server.ACTIVITY_MAX_STEPS + 1)
         self.assertEqual(payload["steps"][-1]["kind"], "notice")
         server.tasks["t"]["status"] = "failed"
         server.tasks["t"]["summary"] = "Codex timed out after 5 seconds."
         with patch.object(server, "atomic_json_write"):
-            with patch.object(server, "task_root", return_value=Path(tempfile.gettempdir())):
+            with patch.object(
+                server, "task_root", return_value=Path(tempfile.gettempdir())
+            ):
                 server.finish_activity("t")
         self.assertNotIn("t", server.task_activity)
 
@@ -163,28 +280,47 @@ class ActivityApiTests(unittest.TestCase):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
-        for name, value in (("tasks", {}), ("task_activity", {}), ("active_task_runners", set()), ("running_processes", {})):
+        for name, value in (
+            ("tasks", {}),
+            ("task_activity", {}),
+            ("active_task_runners", set()),
+            ("running_processes", {}),
+        ):
             self.stack.enter_context(patch.object(server, name, value))
-        self.stack.enter_context(patch.object(server, "task_root", return_value=self.root / "tasks"))
-        self.stack.enter_context(patch.object(server, "TASK_STATE_FILE", self.root / "index.json"))
-        self.stack.enter_context(patch.object(server, "CODEX_HOME", self.root / "codex"))
-        self.stack.enter_context(patch.object(server, "api_token", return_value="test-token"))
+        self.stack.enter_context(
+            patch.object(server, "task_root", return_value=self.root / "tasks")
+        )
+        self.stack.enter_context(
+            patch.object(server, "TASK_STATE_FILE", self.root / "index.json")
+        )
+        self.stack.enter_context(
+            patch.object(server, "CODEX_HOME", self.root / "codex")
+        )
+        self.stack.enter_context(
+            patch.object(server, "api_token", return_value="test-token")
+        )
         self.stack.enter_context(patch.object(server, "start_background_task"))
         self.client = server.app.test_client()
         self.headers = {"Authorization": "Bearer test-token"}
         self.session_id = "019fc242-910a-7c92-a17d-54c014e19fc4"
         session_dir = server.CODEX_HOME / "sessions" / "2026" / "09" / "20"
         session_dir.mkdir(parents=True)
-        (session_dir / f"rollout-2026-09-20T01-00-00-{self.session_id}.jsonl").write_text("{}\n")
+        (
+            session_dir / f"rollout-2026-09-20T01-00-00-{self.session_id}.jsonl"
+        ).write_text("{}\n")
 
     def get(self, task_id, after=None):
         """Request a task's activity, optionally only the steps after a sequence number."""
         query = "" if after is None else f"?after={after}"
-        return self.client.get(f"/tasks/{task_id}/activity{query}", headers=self.headers)
+        return self.client.get(
+            f"/tasks/{task_id}/activity{query}", headers=self.headers
+        )
 
     def create(self):
         """Create a queued task through the API and return its id."""
-        response = self.client.post("/tasks", json={"prompt": "Review my automation"}, headers=self.headers)
+        response = self.client.post(
+            "/tasks", json={"prompt": "Review my automation"}, headers=self.headers
+        )
         self.assertEqual(response.status_code, 200)
         return response.json["task_id"]
 
@@ -192,11 +328,24 @@ class ActivityApiTests(unittest.TestCase):
         """Activity shows live steps during a run, the stored steps after it, and none once a new exchange starts."""
         task_id = self.create()
         turn_id = server.tasks[task_id]["current_turn_id"]
-        self.assertEqual(self.get(task_id).json, {"ok": True, "turn_id": turn_id, "seq": 0, "running": False, "total": 0, "steps": []})
+        self.assertEqual(
+            self.get(task_id).json,
+            {
+                "ok": True,
+                "turn_id": turn_id,
+                "seq": 0,
+                "running": False,
+                "total": 0,
+                "steps": [],
+            },
+        )
         server.update_task(task_id, status="running")
         server.start_activity(task_id, turn_id)
         server.record_activity_event(task_id, item("reasoning", "r0", text="Looking"))
-        server.record_activity_event(task_id, command("c1", "/bin/sh -lc 'ls'", status="in_progress", exit_code=None))
+        server.record_activity_event(
+            task_id,
+            command("c1", "/bin/sh -lc 'ls'", status="in_progress", exit_code=None),
+        )
         live = self.get(task_id).json
         self.assertTrue(live["running"])
         self.assertEqual([step["text"] for step in live["steps"]], ["Looking", "ls"])
@@ -204,22 +353,37 @@ class ActivityApiTests(unittest.TestCase):
         self.assertEqual(self.get(task_id, after="x").status_code, 400)
         self.assertEqual(self.get("missing").status_code, 404)
 
-        server.update_task(task_id, status="cancelled", summary=server.CANCELLED_TASK_SUMMARY, session_id=self.session_id,
-                           completed_at=server.utc_now())
+        server.update_task(
+            task_id,
+            status="cancelled",
+            summary=server.CANCELLED_TASK_SUMMARY,
+            session_id=self.session_id,
+            completed_at=server.utc_now(),
+        )
         server.finish_activity(task_id)
         server.active_task_runners.discard(task_id)
-        stored_file = self.root / "tasks" / task_id / "turns" / turn_id / server.ACTIVITY_FILE
+        stored_file = (
+            self.root / "tasks" / task_id / "turns" / turn_id / server.ACTIVITY_FILE
+        )
         self.assertTrue(stored_file.is_file())
         self.assertNotIn(task_id, server.task_activity)
         stored = self.get(task_id).json
         self.assertFalse(stored["running"])
-        self.assertEqual([(s["kind"], s["status"]) for s in stored["steps"]],
-                         [("reasoning", "done"), ("command", "failed"), ("outcome", "failed")])
+        self.assertEqual(
+            [(s["kind"], s["status"]) for s in stored["steps"]],
+            [("reasoning", "done"), ("command", "failed"), ("outcome", "failed")],
+        )
         self.assertEqual(stored["steps"][-1]["text"], "Stopped")
-        self.assertEqual(len(self.get(task_id, after=stored["seq"] - 1).json["steps"]), 1)
+        self.assertEqual(
+            len(self.get(task_id, after=stored["seq"] - 1).json["steps"]), 1
+        )
 
         server.tasks[task_id]["cancellation_requested"] = True
-        response = self.client.post(f"/tasks/{task_id}/continue", json={"message": "Go on"}, headers=self.headers)
+        response = self.client.post(
+            f"/tasks/{task_id}/continue",
+            json={"message": "Go on"},
+            headers=self.headers,
+        )
         self.assertEqual(response.status_code, 200)
         fresh = self.get(task_id).json
         self.assertNotEqual(fresh["turn_id"], turn_id)
@@ -230,10 +394,18 @@ class ActivityApiTests(unittest.TestCase):
         task_id = self.create()
         server.update_task(task_id, status="running")
         server.start_activity(task_id, server.tasks[task_id]["current_turn_id"])
-        server.update_task(task_id, status="failed", summary="Codex timed out after 5 seconds.", completed_at=server.utc_now())
+        server.update_task(
+            task_id,
+            status="failed",
+            summary="Codex timed out after 5 seconds.",
+            completed_at=server.utc_now(),
+        )
         server.finish_activity(task_id)
         steps = self.get(task_id).json["steps"]
-        self.assertEqual([step["text"] for step in steps], ["Failed: Codex timed out after 5 seconds."])
+        self.assertEqual(
+            [step["text"] for step in steps],
+            ["Failed: Codex timed out after 5 seconds."],
+        )
 
     def test_recovered_chat_keeps_its_turn_id_and_saved_steps(self):
         """A chat rebuilt from the task index after task.json was lost keeps the turn id of its saved steps."""
@@ -242,8 +414,13 @@ class ActivityApiTests(unittest.TestCase):
         server.update_task(task_id, status="running")
         server.start_activity(task_id, turn_id)
         server.record_activity_event(task_id, command("c1", "/bin/sh -lc 'ls'"))
-        server.update_task(task_id, status="completed", session_id=self.session_id, summary="Done",
-                           completed_at=server.utc_now())
+        server.update_task(
+            task_id,
+            status="completed",
+            session_id=self.session_id,
+            summary="Done",
+            completed_at=server.utc_now(),
+        )
         server.finish_activity(task_id)
         server.active_task_runners.discard(task_id)
         saved = self.get(task_id).json
@@ -254,21 +431,32 @@ class ActivityApiTests(unittest.TestCase):
         server.load_task_index()
         recovered = server.tasks[task_id]
         self.assertNotIn("turns", recovered)
-        self.assertEqual([turn["turn_id"] for turn in server.task_turns(recovered)], [turn_id])
+        self.assertEqual(
+            [turn["turn_id"] for turn in server.task_turns(recovered)], [turn_id]
+        )
 
-        response = self.client.post(f"/tasks/{task_id}/continue", json={"message": "Go on"}, headers=self.headers)
+        response = self.client.post(
+            f"/tasks/{task_id}/continue",
+            json={"message": "Go on"},
+            headers=self.headers,
+        )
         self.assertEqual(response.status_code, 200)
         turns = server.tasks[task_id]["turns"]
         self.assertEqual(turns[0]["turn_id"], turn_id)
         self.assertNotEqual(turns[1]["turn_id"], turn_id)
-        self.assertEqual(server.load_stored_activity(task_id, turns[0]["turn_id"])["steps"], saved["steps"])
+        self.assertEqual(
+            server.load_stored_activity(task_id, turns[0]["turn_id"])["steps"],
+            saved["steps"],
+        )
 
     def test_a_turn_id_from_the_index_is_used_only_when_it_has_the_turn_id_form(self):
         """An index entry with a missing or malformed turn id still gets the legacy turn."""
         for current in (None, "", "turn-1", "../other", "A" * 32, 32):
             with self.subTest(current=current):
                 task = {"task_id": "t", "prompt": "Hello", "current_turn_id": current}
-                self.assertEqual([turn["turn_id"] for turn in server.task_turns(task)], ["legacy"])
+                self.assertEqual(
+                    [turn["turn_id"] for turn in server.task_turns(task)], ["legacy"]
+                )
 
     def test_plan_updates_from_codex_are_one_redacted_step_at_its_first_place(self):
         """Codex's plan becomes one to-do step that keeps its place, with credentials redacted."""
@@ -279,34 +467,76 @@ class ActivityApiTests(unittest.TestCase):
         stdin = type("Transport", (io.StringIO,), {"close": lambda self: None})()
         proc = type("Process", (), {"stdin": stdin, "poll": lambda _: None})()
         session = server.create_approval_session(
-            task_id, proc, "Review", self.root / "final.json", None, {}, server.DEFAULT_OPTIONS)
+            task_id,
+            proc,
+            "Review",
+            self.root / "final.json",
+            None,
+            {},
+            server.DEFAULT_OPTIONS,
+        )
         session.thread_id, session.turn_id = "thread", "turn"
 
         def update(*steps, turn="turn"):
-            session.receive({"method": "turn/plan/updated", "params": {
-                "threadId": "thread", "turnId": turn,
-                "plan": [{"step": text, "status": status} for text, status in steps]}})
+            session.receive(
+                {
+                    "method": "turn/plan/updated",
+                    "params": {
+                        "threadId": "thread",
+                        "turnId": turn,
+                        "plan": [
+                            {"step": text, "status": status} for text, status in steps
+                        ],
+                    },
+                }
+            )
 
-        update(("Read the automation", "pending"), ("Call the API with test-token", "pending"))
+        update(
+            ("Read the automation", "pending"),
+            ("Call the API with test-token", "pending"),
+        )
         first = self.get(task_id).json["steps"]
-        self.assertEqual([step["text"] for step in first],
-                         ["☐ Read the automation\n☐ Call the API with [redacted]"])
+        self.assertEqual(
+            [step["text"] for step in first],
+            ["☐ Read the automation\n☐ Call the API with [redacted]"],
+        )
         server.record_activity_event(task_id, command("c1", "/bin/sh -lc 'ls'"))
         update(("Read the automation", "completed"), turn="old")
-        session.receive({"method": "turn/plan/updated", "params": {
-            "threadId": "thread", "turnId": "turn", "plan": [{"step": "Read the automation"}]}})
+        session.receive(
+            {
+                "method": "turn/plan/updated",
+                "params": {
+                    "threadId": "thread",
+                    "turnId": "turn",
+                    "plan": [{"step": "Read the automation"}],
+                },
+            }
+        )
         self.assertEqual(self.get(task_id).json["steps"][0]["text"], first[0]["text"])
-        update(("Read the automation", "completed"), ("Call the API with test-token", "inProgress"))
+        update(
+            ("Read the automation", "completed"),
+            ("Call the API with test-token", "inProgress"),
+        )
         steps = self.get(task_id).json["steps"]
-        self.assertEqual([(step["kind"], step["text"]) for step in steps],
-                         [("plan", "☑ Read the automation\n☐ Call the API with [redacted]"), ("command", "ls")])
+        self.assertEqual(
+            [(step["kind"], step["text"]) for step in steps],
+            [
+                ("plan", "☑ Read the automation\n☐ Call the API with [redacted]"),
+                ("command", "ls"),
+            ],
+        )
         self.assertEqual(steps[0]["index"], first[0]["index"])
 
     def test_deleting_a_chat_forgets_its_steps(self):
         """Deleting a chat also drops the steps held in memory for it."""
         task_id = self.create()
         server.start_activity(task_id, server.tasks[task_id]["current_turn_id"])
-        server.update_task(task_id, status="completed", session_id=self.session_id, completed_at=server.utc_now())
+        server.update_task(
+            task_id,
+            status="completed",
+            session_id=self.session_id,
+            completed_at=server.utc_now(),
+        )
         server.active_task_runners.discard(task_id)
         response = self.client.delete(f"/tasks/{task_id}", headers=self.headers)
         self.assertEqual(response.status_code, 200)
@@ -318,12 +548,37 @@ class ReasoningSummaryOptionTests(unittest.TestCase):
 
     def test_option_is_passed_to_codex_and_validated(self):
         """The reasoning summary option reaches Codex, and a missing or unsupported value falls back to concise."""
-        for configured, expected in (("detailed", "detailed"), ("none", "none"), (None, "concise"), ("auto", "concise"), ("  Concise ", "concise")):
+        for configured, expected in (
+            ("detailed", "detailed"),
+            ("none", "none"),
+            (None, "concise"),
+            ("auto", "concise"),
+            ("  Concise ", "concise"),
+        ):
             with self.subTest(configured=configured):
-                self.assertEqual(server.reasoning_summary({"reasoning_summary": configured}), expected)
-        with patch.object(server, "tasks", {"t": {"task_id": "t", "turns": [], "chat_settings": server.DEFAULT_CHAT_SETTINGS}}):
+                self.assertEqual(
+                    server.reasoning_summary({"reasoning_summary": configured}),
+                    expected,
+                )
+        with patch.object(
+            server,
+            "tasks",
+            {
+                "t": {
+                    "task_id": "t",
+                    "turns": [],
+                    "chat_settings": server.DEFAULT_CHAT_SETTINGS,
+                }
+            },
+        ):
             session = server.create_approval_session(
-                "t", StubAppServer("thread"), "Prompt", Path("final"), None, {}, {"reasoning_summary": "detailed"},
+                "t",
+                StubAppServer("thread"),
+                "Prompt",
+                Path("final"),
+                None,
+                {},
+                {"reasoning_summary": "detailed"},
             )
         self.assertEqual(session.turn_params["summary"], "detailed")
         self.assertEqual(session.turn_params["effort"], "medium")

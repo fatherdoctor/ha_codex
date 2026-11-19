@@ -61,7 +61,12 @@ class CodexCliApiClient:
 
     async def list_tasks(self, **filters: Any) -> dict[str, Any]:
         """List known tasks."""
-        query = urlencode({key: str(value).lower() if isinstance(value, bool) else value for key, value in filters.items()})
+        query = urlencode(
+            {
+                key: str(value).lower() if isinstance(value, bool) else value
+                for key, value in filters.items()
+            }
+        )
         return await self._request("GET", "/tasks" + ("?" + query if query else ""))
 
     async def start_task(self, prompt: str) -> dict[str, Any]:
@@ -76,25 +81,33 @@ class CodexCliApiClient:
         """Cancel a task."""
         return await self._request("POST", f"/tasks/{task_id}/cancel")
 
-    async def reply_task(self, task_id: str, reply: str, turn_id: str | None = None) -> dict[str, Any]:
+    async def reply_task(
+        self, task_id: str, reply: str, turn_id: str | None = None
+    ) -> dict[str, Any]:
         """Reply to a waiting Codex task; with a turn ID, only while that turn's question is the one waiting."""
         payload = {"reply": reply}
         if turn_id:
             payload["turn_id"] = turn_id
         return await self._request("POST", f"/tasks/{task_id}/reply", json=payload)
 
-    async def reply_choice(self, task_id: str, turn_id: str, choice: int) -> dict[str, Any]:
+    async def reply_choice(
+        self, task_id: str, turn_id: str, choice: int
+    ) -> dict[str, Any]:
         """Answer a waiting question with one of the choices it offered, by position.
 
         The answer waits in the worker's queue when another task is running.
         """
         return await self._request(
-            "POST", f"/tasks/{task_id}/reply", json={"choice": choice, "turn_id": turn_id, "queue": True}
+            "POST",
+            f"/tasks/{task_id}/reply",
+            json={"choice": choice, "turn_id": turn_id, "queue": True},
         )
 
     async def continue_task(self, task_id: str, message: str) -> dict[str, Any]:
         """Continue a saved conversation."""
-        return await self._request("POST", f"/tasks/{task_id}/continue", json={"message": message})
+        return await self._request(
+            "POST", f"/tasks/{task_id}/continue", json={"message": message}
+        )
 
     async def _request(
         self,
@@ -126,7 +139,10 @@ class CodexCliApiClient:
                     except (ValueError, ClientError):
                         error = {}
                     detail = error.get("error") if isinstance(error, dict) else None
-                    raise CodexCliApiError(str(detail or f"Worker returned HTTP {response.status}"), status=response.status)
+                    raise CodexCliApiError(
+                        str(detail or f"Worker returned HTTP {response.status}"),
+                        status=response.status,
+                    )
                 response.raise_for_status()
                 data = await response.json(content_type=None)
         except ClientResponseError as exc:

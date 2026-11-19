@@ -1,17 +1,20 @@
 """Every Codex action refuses a signed-in user who is not an administrator (CG-3)."""
+
 import importlib.util
-import sys
 from pathlib import Path
+import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-import pytest
 from homeassistant.core import Context
 from homeassistant.exceptions import Unauthorized
+import pytest
 
 ROOT = Path(__file__).resolve().parents[3] / "custom_components" / "codex_cli"
 spec = importlib.util.spec_from_file_location(
-    "admin_services_ha_test", ROOT / "__init__.py", submodule_search_locations=[str(ROOT)]
+    "admin_services_ha_test",
+    ROOT / "__init__.py",
+    submodule_search_locations=[str(ROOT)],
 )
 integration = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = integration
@@ -35,8 +38,17 @@ CALLS = [
 def runtime():
     """Register the actions against a fake worker client."""
     client = AsyncMock()
-    for method in ("start_task", "start_login", "login_status", "logout", "get_task", "list_tasks",
-                   "cancel_task", "reply_task", "continue_task"):
+    for method in (
+        "start_task",
+        "start_login",
+        "login_status",
+        "logout",
+        "get_task",
+        "list_tasks",
+        "cancel_task",
+        "reply_task",
+        "continue_task",
+    ):
         getattr(client, method).return_value = {"ok": True}
     data = SimpleNamespace(client=client, coordinator=AsyncMock())
     with patch.object(integration, "_first_runtime", return_value=data):
@@ -46,7 +58,8 @@ def runtime():
 async def _call(hass, service, data, context):
     """Call one Codex action and wait for its answer."""
     return await hass.services.async_call(
-        "codex_cli", service, data, blocking=True, context=context, return_response=True)
+        "codex_cli", service, data, blocking=True, context=context, return_response=True
+    )
 
 
 async def test_non_admin_is_refused_everywhere(hass, hass_read_only_user, runtime):

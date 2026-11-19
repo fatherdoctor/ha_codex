@@ -5,14 +5,16 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
-from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SPEC = importlib.util.spec_from_file_location("build_hacs_release", ROOT / "scripts" / "build_hacs_release.py")
+SPEC = importlib.util.spec_from_file_location(
+    "build_hacs_release", ROOT / "scripts" / "build_hacs_release.py"
+)
 bhr = importlib.util.module_from_spec(SPEC)
 sys.modules["build_hacs_release"] = bhr
 SPEC.loader.exec_module(bhr)
@@ -43,10 +45,18 @@ class BuildHacsReleaseTests(unittest.TestCase):
     def make(self, version: str, heading: str) -> None:
         files = {
             "custom_components/codex_cli/__init__.py": "",
-            "custom_components/codex_cli/manifest.json": json.dumps({"domain": "codex_cli", "version": version}),
+            "custom_components/codex_cli/manifest.json": json.dumps(
+                {"domain": "codex_cli", "version": version}
+            ),
             "codex-cli-worker/config.yaml": f'name: Codex CLI Worker\nversion: "{version}"\n',
             "codex-cli-worker/CHANGELOG.md": f"# Changelog\n\n{heading}\n\n- Changes.\n\n## 0.1.81\n\n- Older.\n",
-            "hacs.json": json.dumps({"zip_release": True, "filename": "codex_cli.zip", "hide_default_branch": True}),
+            "hacs.json": json.dumps(
+                {
+                    "zip_release": True,
+                    "filename": "codex_cli.zip",
+                    "hide_default_branch": True,
+                }
+            ),
         }
         for path, text in files.items():
             target = self.repo / path
@@ -58,16 +68,24 @@ class BuildHacsReleaseTests(unittest.TestCase):
     def test_released_heading_builds(self) -> None:
         self.make("0.1.81.2", "## 0.1.81.2")
         self.assertTrue(bhr.build("v0.1.81.2", self.out).is_file())
-        self.assertEqual((self.out / "release_notes.md").read_text(encoding="utf-8"), "- Changes.\n")
+        self.assertEqual(
+            (self.out / "release_notes.md").read_text(encoding="utf-8"), "- Changes.\n"
+        )
 
     def test_unreleased_heading_passes_validation(self) -> None:
         self.make("0.1.81.2", "## 0.1.81.2 (unreleased)")
-        self.assertTrue(bhr.build("v0.1.81.2", self.out, allow_unreleased=True).is_file())
-        self.assertEqual((self.out / "release_notes.md").read_text(encoding="utf-8"), "- Changes.\n")
+        self.assertTrue(
+            bhr.build("v0.1.81.2", self.out, allow_unreleased=True).is_file()
+        )
+        self.assertEqual(
+            (self.out / "release_notes.md").read_text(encoding="utf-8"), "- Changes.\n"
+        )
 
     def test_unreleased_heading_is_never_released(self) -> None:
         self.make("0.1.81.2", "## 0.1.81.2 (unreleased)")
-        with self.assertRaisesRegex(ValueError, r"still marks 0\.1\.81\.2 as \(unreleased\)"):
+        with self.assertRaisesRegex(
+            ValueError, r"still marks 0\.1\.81\.2 as \(unreleased\)"
+        ):
             bhr.build("v0.1.81.2", self.out)
 
     def test_missing_heading_fails_either_way(self) -> None:
@@ -79,11 +97,15 @@ class BuildHacsReleaseTests(unittest.TestCase):
     def test_beta_tag_builds(self) -> None:
         self.make("0.2.0-beta.1", "## 0.2.0-beta.1")
         self.assertTrue(bhr.build("v0.2.0-beta.1", self.out).is_file())
-        self.assertEqual((self.out / "release_notes.md").read_text(encoding="utf-8"), "- Changes.\n")
+        self.assertEqual(
+            (self.out / "release_notes.md").read_text(encoding="utf-8"), "- Changes.\n"
+        )
 
     def test_beta_needs_matching_versions(self) -> None:
         self.make("0.2.0", "## 0.2.0-beta.1")
-        with self.assertRaisesRegex(ValueError, "Manifest version '0.2.0' does not match v0.2.0-beta.1"):
+        with self.assertRaisesRegex(
+            ValueError, "Manifest version '0.2.0' does not match v0.2.0-beta.1"
+        ):
             bhr.build("v0.2.0-beta.1", self.out)
 
     def test_beta_on_four_numbers_is_refused(self) -> None:
@@ -97,19 +119,29 @@ class BuildHacsReleaseTests(unittest.TestCase):
         # The script finds the repository from its own path, so run a copy placed inside the test repository.
         copy = self.repo / "scripts" / "build_hacs_release.py"
         copy.parent.mkdir()
-        copy.write_text((ROOT / "scripts" / "build_hacs_release.py").read_text(encoding="utf-8"), encoding="utf-8")
+        copy.write_text(
+            (ROOT / "scripts" / "build_hacs_release.py").read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
         base = {k: v for k, v in os.environ.items() if k != "GITHUB_REF_TYPE"}
 
-        def call(*args: str, ref_type: str | None = None) -> subprocess.CompletedProcess:
+        def call(
+            *args: str, ref_type: str | None = None
+        ) -> subprocess.CompletedProcess:
             env = dict(base, GITHUB_REF_TYPE=ref_type) if ref_type else base
-            return subprocess.run([sys.executable, str(copy), *args, "v0.1.81.2", str(self.out)],
-                                  capture_output=True, text=True, env=env)
+            return subprocess.run(
+                [sys.executable, str(copy), *args, "v0.1.81.2", str(self.out)],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
 
         for result in (call(ref_type="branch"), call()):
             self.assertEqual(result.returncode, 0, result.stderr)
         for result in (call("--release"), call(ref_type="tag")):
             self.assertEqual(result.returncode, 1)
             self.assertIn("(unreleased)", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

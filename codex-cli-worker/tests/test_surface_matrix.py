@@ -5,21 +5,22 @@ server those arguments register, ask it for its tool list, and compare the resul
 removes or moves a tool fails here until the table and DOCS.md say so, so a fix on one way in cannot pass as a fix on
 all of them.
 """
+
 from __future__ import annotations
 
 import asyncio
+from contextlib import ExitStack
 import importlib.util
 import json
+from pathlib import Path
 import re
 import subprocess
 import tempfile
 import unittest
-from contextlib import ExitStack
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from test_server import server
 import scheduling
+from test_server import server
 
 ROOT = Path(__file__).resolve().parents[2]
 DOCS = ROOT / "codex-cli-worker" / "DOCS.md"
@@ -32,26 +33,50 @@ NONE = ()
 # Each request kind and the tools that serve it on each way in. An empty tuple means not available.
 WAYS_IN = {
     "Read an entity's state or find an entity": {
-        PAGE: ("home_assistant.verify",), APP: ("home_assistant_relay.read",), SERVICE: ("home_assistant.verify",)},
+        PAGE: ("home_assistant.verify",),
+        APP: ("home_assistant_relay.read",),
+        SERVICE: ("home_assistant.verify",),
+    },
     "Read history or long-term statistics": {
-        PAGE: ("home_assistant_data.history", "home_assistant_data.statistics"), APP: NONE,
-        SERVICE: ("home_assistant_data.history", "home_assistant_data.statistics")},
-    "Control a device or call a service": {
-        PAGE: ("home_assistant_call.call",), APP: ("home_assistant_call.call",), SERVICE: ("home_assistant_call.call",)},
-    "Send a notification": {
-        PAGE: ("home_assistant_call.call",), APP: ("home_assistant_call.call",), SERVICE: ("home_assistant_call.call",)},
-    "Ask the owner a question or report the turn's state": {
-        PAGE: ("home_assistant_data.ask_owner", "home_assistant_data.report_failure", "home_assistant_data.exchange_info"),
+        PAGE: ("home_assistant_data.history", "home_assistant_data.statistics"),
         APP: NONE,
-        SERVICE: ("home_assistant_data.ask_owner", "home_assistant_data.report_failure", "home_assistant_data.exchange_info")},
+        SERVICE: ("home_assistant_data.history", "home_assistant_data.statistics"),
+    },
+    "Control a device or call a service": {
+        PAGE: ("home_assistant_call.call",),
+        APP: ("home_assistant_call.call",),
+        SERVICE: ("home_assistant_call.call",),
+    },
+    "Send a notification": {
+        PAGE: ("home_assistant_call.call",),
+        APP: ("home_assistant_call.call",),
+        SERVICE: ("home_assistant_call.call",),
+    },
+    "Ask the owner a question or report the turn's state": {
+        PAGE: (
+            "home_assistant_data.ask_owner",
+            "home_assistant_data.report_failure",
+            "home_assistant_data.exchange_info",
+        ),
+        APP: NONE,
+        SERVICE: (
+            "home_assistant_data.ask_owner",
+            "home_assistant_data.report_failure",
+            "home_assistant_data.exchange_info",
+        ),
+    },
     "Work with a GitHub repository": {
-        PAGE: ("codex_github.github_git",), APP: NONE, SERVICE: ("codex_github.github_git",)},
+        PAGE: ("codex_github.github_git",),
+        APP: NONE,
+        SERVICE: ("codex_github.github_git",),
+    },
 }
 
 WAYS_IN["Propose a schedule"] = {
     PAGE: ("codex_scheduling.propose_schedule", "codex_scheduling.list_schedules"),
     APP: NONE,
-    SERVICE: ("codex_scheduling.propose_schedule", "codex_scheduling.list_schedules")}
+    SERVICE: ("codex_scheduling.propose_schedule", "codex_scheduling.list_schedules"),
+}
 
 # The one tool that changes the house: Codex asks for it each time, so only a launch that can ask gets it.
 CALL_TOOL = "home_assistant_call.call"
@@ -72,15 +97,21 @@ def registered_servers(args: list[str]) -> dict[str, dict]:
 
 def listed_tools(settings: dict) -> list[str]:
     """Start one tool server as Codex starts it and return the names its tools/list answer gives."""
-    requests = [{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
-                {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}]
+    requests = [
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+    ]
     command = [settings["command"], *settings["args"]]
     lines = "".join(json.dumps(r) + "\n" for r in requests)
-    result = subprocess.run(command, input=lines, capture_output=True, text=True, timeout=30, check=False)
+    result = subprocess.run(
+        command, input=lines, capture_output=True, text=True, timeout=30, check=False
+    )
     answers = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
     listing = next((a for a in answers if a.get("id") == 2), None)
     if listing is None:
-        raise AssertionError(f"{settings['args']} gave no tools/list answer: {result.stderr[-500:]}")
+        raise AssertionError(
+            f"{settings['args']} gave no tools/list answer: {result.stderr[-500:]}"
+        )
     return [tool["name"] for tool in listing["result"]["tools"]]
 
 
@@ -115,8 +146,12 @@ def app_args() -> list[str]:
     """
     supervisor = server.remote_control_supervisor
     probe = MagicMock(return_value=subprocess.CompletedProcess([], 0))
-    with patch.multiple(supervisor, run=probe, status={}, _name_supported=None, _checked_name=None):
-        return supervisor._command("app-server", "--listen", "unix:///tmp/socket", "--remote-control")
+    with patch.multiple(
+        supervisor, run=probe, status={}, _name_supported=None, _checked_name=None
+    ):
+        return supervisor._command(
+            "app-server", "--listen", "unix:///tmp/socket", "--remote-control"
+        )
 
 
 def task_started_by_service(prompt: str) -> dict:
@@ -127,13 +162,27 @@ def task_started_by_service(prompt: str) -> dict:
     started = MagicMock()
     with tempfile.TemporaryDirectory() as temp_dir, ExitStack() as stack:
         root = Path(temp_dir)
-        stack.enter_context(patch.object(server, "get_task_dir", side_effect=lambda task_id: root / task_id))
-        stack.enter_context(patch.object(server, "api_token", return_value="test-token"))
+        stack.enter_context(
+            patch.object(
+                server, "get_task_dir", side_effect=lambda task_id: root / task_id
+            )
+        )
+        stack.enter_context(
+            patch.object(server, "api_token", return_value="test-token")
+        )
         stack.enter_context(patch.object(server, "start_background_task", started))
-        for name in ("save_task_index", "fire_ha_event", "notify", "refresh_usage_status_async"):
+        for name in (
+            "save_task_index",
+            "fire_ha_event",
+            "notify",
+            "refresh_usage_status_async",
+        ):
             stack.enter_context(patch.object(server, name))
         response = server.app.test_client().post(
-            "/tasks", headers={"Authorization": "Bearer test-token"}, json={"prompt": prompt})
+            "/tasks",
+            headers={"Authorization": "Bearer test-token"},
+            json={"prompt": prompt},
+        )
     payload = response.get_json()
     if not payload.get("ok"):
         raise AssertionError(f"/tasks refused the service request: {payload}")
@@ -148,8 +197,11 @@ def task_started_by_service(prompt: str) -> dict:
 def docs_row(request: str) -> str:
     def cell(tools):
         return ", ".join(f"`{tool}`" for tool in tools) if tools else "not available"
+
     row = WAYS_IN[request]
-    return f"| {request} | {cell(row[PAGE])} | {cell(row[APP])} | {cell(row[SERVICE])} |"
+    return (
+        f"| {request} | {cell(row[PAGE])} | {cell(row[APP])} | {cell(row[SERVICE])} |"
+    )
 
 
 class WaysInTests(unittest.TestCase):
@@ -166,13 +218,17 @@ class WaysInTests(unittest.TestCase):
     def test_the_chatgpt_app_gets_exactly_the_tools_in_the_table(self):
         self.assertEqual(self.app, table_tools(APP))
 
-    def test_the_app_asks_for_the_call_tool_each_time_and_approves_only_its_read_tool(self):
+    def test_the_app_asks_for_the_call_tool_each_time_and_approves_only_its_read_tool(
+        self,
+    ):
         """In the app as on the page, the call tool asks each time ("prompt") and the read tool is approved ahead."""
         for name, settings in registered_servers(app_args()).items():
             for tool in listed_tools(settings):
                 with self.subTest(tool=f"{name}.{tool}"):
                     expected = "prompt" if f"{name}.{tool}" == CALL_TOOL else "approve"
-                    self.assertEqual(settings.get(f"tools.{tool}.approval_mode"), expected)
+                    self.assertEqual(
+                        settings.get(f"tools.{tool}.approval_mode"), expected
+                    )
 
     def test_both_page_launches_register_the_same_tools(self):
         """A turn is attended or not by its source, never by way in; both launches give the same read tools.
@@ -187,7 +243,9 @@ class WaysInTests(unittest.TestCase):
             for tool in listed_tools(settings):
                 with self.subTest(tool=f"{name}.{tool}"):
                     expected = "prompt" if f"{name}.{tool}" == CALL_TOOL else "approve"
-                    self.assertEqual(settings.get(f"tools.{tool}.approval_mode"), expected)
+                    self.assertEqual(
+                        settings.get(f"tools.{tool}.approval_mode"), expected
+                    )
 
     def test_a_task_from_the_service_action_launches_with_the_page_tools(self):
         """The task that the service's request opens on /tasks is an attended one, so it gets the page's tools.
@@ -207,11 +265,20 @@ class WaysInTests(unittest.TestCase):
         api = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(api)
         response = MagicMock(status=200, json=AsyncMock(return_value={"ok": True}))
-        context = MagicMock(__aenter__=AsyncMock(return_value=response), __aexit__=AsyncMock(return_value=False))
+        context = MagicMock(
+            __aenter__=AsyncMock(return_value=response),
+            __aexit__=AsyncMock(return_value=False),
+        )
         session = MagicMock()
         session.request.return_value = context
-        asyncio.run(api.CodexCliApiClient(session, "http://worker", "token").start_task("Turn on a light"))
-        self.assertEqual(session.request.call_args.args, ("POST", "http://worker/tasks"))
+        asyncio.run(
+            api.CodexCliApiClient(session, "http://worker", "token").start_task(
+                "Turn on a light"
+            )
+        )
+        self.assertEqual(
+            session.request.call_args.args, ("POST", "http://worker/tasks")
+        )
         self.assertRegex(CHAT_JS.read_text(encoding="utf-8"), r':\s*"tasks"')
         for request, row in WAYS_IN.items():
             with self.subTest(request=request):
@@ -220,8 +287,13 @@ class WaysInTests(unittest.TestCase):
     def test_docs_hold_the_same_table(self):
         text = DOCS.read_text(encoding="utf-8")
         section = text.split("\n## Ways in\n", 1)[1].split("\n#", 1)[0]
-        rows = [line for line in section.splitlines() if line.startswith("| ") and not line.startswith("| Request")
-                and not line.startswith("|---")]
+        rows = [
+            line
+            for line in section.splitlines()
+            if line.startswith("| ")
+            and not line.startswith("| Request")
+            and not line.startswith("|---")
+        ]
         self.assertEqual(rows, [docs_row(request) for request in WAYS_IN])
 
 

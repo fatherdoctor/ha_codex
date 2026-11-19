@@ -1,4 +1,5 @@
 """Exercise the private historical-data bridge through real Unix sockets."""
+
 import json
 import os
 from pathlib import Path
@@ -7,12 +8,11 @@ import stat
 import threading
 from unittest.mock import patch
 
-import pytest
-import pytest_socket
-
-from test_ha_data import START, END, data_worker
 from ha_data import HomeAssistantData
 from ha_data_mcp import fetch
+import pytest
+import pytest_socket
+from test_ha_data import END, START, data_worker
 
 
 @pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="Unix data socket")
@@ -26,7 +26,9 @@ def test_mcp_bridge_authenticates_to_owner_only_worker_socket(tmp_path, monkeypa
     monkeypatch.setenv("HA_DATA_CAPABILITY", capability)
     monkeypatch.setenv("HA_DATA_SOCKET", str(path))
     args = {"entity_ids": ["sensor.kitchen"], "start_time": START, "end_time": END}
-    with patch.object(engine, "history", return_value={"status": "observed", "state": "42"}) as history:
+    with patch.object(
+        engine, "history", return_value={"status": "observed", "state": "42"}
+    ) as history:
         service = engine.serve(path)
         try:
             assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
@@ -34,8 +36,13 @@ def test_mcp_bridge_authenticates_to_owner_only_worker_socket(tmp_path, monkeypa
             assert receipt["status"] == "observed" and receipt["delivery"] == "file"
             export = Path(receipt["file"]["path"])
             assert export.is_relative_to(engine.export_root)
-            assert json.loads(export.read_bytes()) == {"status": "observed", "state": "42"}
-            monkeypatch.setenv("HA_DATA_CAPABILITY", "unrelated-verification-capability")
+            assert json.loads(export.read_bytes()) == {
+                "status": "observed",
+                "state": "42",
+            }
+            monkeypatch.setenv(
+                "HA_DATA_CAPABILITY", "unrelated-verification-capability"
+            )
             assert fetch("history", args)["status"] == "unavailable"
             monkeypatch.setenv("HA_DATA_CAPABILITY", capability)
             engine.end("chat")
@@ -48,7 +55,9 @@ def test_mcp_bridge_authenticates_to_owner_only_worker_socket(tmp_path, monkeypa
 
 
 @pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="Unix data socket")
-def test_parallel_query_is_refused_and_cancelled_read_is_discarded(tmp_path, monkeypatch):
+def test_parallel_query_is_refused_and_cancelled_read_is_discarded(
+    tmp_path, monkeypatch
+):
     """Keep one active read and discard its late data when the user cancels the exchange."""
     pytest_socket.socket_allow_hosts(["127.0.0.1"], allow_unix_socket=True)
     worker = data_worker()
@@ -70,17 +79,24 @@ def test_parallel_query_is_refused_and_cancelled_read_is_discarded(tmp_path, mon
 
     with patch.object(engine, "history", side_effect=read) as history:
         service = engine.serve(path)
-        first = threading.Thread(target=lambda: first_result.append(fetch("history", args)))
+        first = threading.Thread(
+            target=lambda: first_result.append(fetch("history", args))
+        )
         try:
             first.start()
             assert entered.wait(3)
-            assert fetch("history", args) == {"status": "unavailable", "message": "Another historical data query is running"}
+            assert fetch("history", args) == {
+                "status": "unavailable",
+                "message": "Another historical data query is running",
+            }
             with worker.lock:
                 worker.tasks["chat"]["cancellation_requested"] = True
             release.set()
             first.join(3)
             assert not first.is_alive()
-            assert first_result == [{"status": "unavailable", "message": "Data capability expired"}]
+            assert first_result == [
+                {"status": "unavailable", "message": "Data capability expired"}
+            ]
             assert engine.queries == {} and engine.capabilities == {}
             assert not engine.export_root.exists()
             history.assert_called_once()
