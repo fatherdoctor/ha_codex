@@ -128,7 +128,13 @@ aside {
   letter-spacing: -0.6px;
 }
 .brand-icon {
-  font-size: calc(24px * var(--text-scale));
+  display: inline-flex;
+  width: calc(24px * var(--text-scale));
+  height: calc(24px * var(--text-scale));
+}
+.brand-icon img {
+  width: 100%;
+  height: 100%;
 }
 .tag {
   width: 100%;

@@ -8,6 +8,8 @@
     />
     <meta name="color-scheme" content="light dark" />
     <title>Codex for Home Assistant</title>
+    <link rel="icon" type="image/svg+xml" href="assets/brand/icon.svg" media="(prefers-color-scheme: light)" />
+    <link rel="icon" type="image/svg+xml" href="assets/brand/dark_icon.svg" media="(prefers-color-scheme: dark)" />
     <link rel="stylesheet" href="assets/chat.css" />
     <link rel="stylesheet" href="assets/studio.css" />
     <script src="assets/text-size.js"></script>
@@ -28,7 +30,8 @@
       ></button>
       <aside id="sidebar" aria-label="Conversations">
         <div class="brand">
-          <span class="brand-icon" aria-hidden="true">⌘</span
+          <picture class="brand-icon" aria-hidden="true"
+            ><source media="(prefers-color-scheme: dark)" srcset="assets/brand/dark_icon.svg" /><img src="assets/brand/icon.svg" alt="" width="24" height="24" /></picture
           ><strong>Codex</strong><span class="tag">for Home Assistant</span
           ><button
             id="close-sidebar"
