@@ -96,14 +96,15 @@ class ScheduleStoreTests(unittest.TestCase):
             with self.subTest(expression=expression), self.assertRaises(ValueError):
                 self.save(spec={'kind': 'cron', 'expression': expression})
 
-    def test_agent_proposal_and_agent_edits_cannot_self_approve(self):
+    def test_agent_proposal_cannot_self_approve_or_be_edited_by_the_agent(self):
         value = self.store.save(proposal(), owner=False, author='codex', now=NOW)
         self.assertFalse(value['approved']); self.assertFalse(value['enabled'])
         self.engine.tick(NOW + 3601); self.assertEqual(self.worker.sent, [])
-        edited = self.store.save(proposal(prompt='Inspect another sample.'), owner=False, author='codex', now=NOW, schedule_id=value['id'])
+        with self.assertRaises(LookupError):
+            self.store.save(proposal(prompt='Inspect another sample.'), owner=False, author='codex', now=NOW, schedule_id=value['id'])
         with self.assertRaises(ValueError):
-            self.store.action(value['id'], 'approve', NOW, value['revision'])
-        self.store.action(value['id'], 'approve', NOW, edited['revision'])
+            self.store.action(value['id'], 'approve', NOW, 'stale-revision')
+        self.store.action(value['id'], 'approve', NOW, value['revision'])
         with self.assertRaises(LookupError):
             self.store.save(proposal(), owner=False, author='codex', now=NOW, schedule_id=value['id'])
         self.assertTrue(self.store.schedules()[0]['enabled'])
@@ -177,14 +178,18 @@ class ScheduleStoreTests(unittest.TestCase):
         self.assertIsNone(self.store.reserve(NOW + 5000, value['id']))
         self.assertIsNotNone(self.store.reserve(NOW + 86460, value['id']))
         for i in range(scheduling.MAX_DAILY_RUNS - scheduling.MAX_SCHEDULE_DAILY_RUNS):
-            self.assertIsNotNone(self.store.reserve(NOW + 5000))
-        self.assertIsNone(self.store.reserve(NOW + 5000))
+            other = self.save(name=f'Other {i}', spec={'kind': 'once', 'at': NOW + 60})
+            self.assertIsNotNone(self.store.reserve(NOW + 5000, other['id']))
+        last = self.save(name='Last', spec={'kind': 'once', 'at': NOW + 60})
+        self.assertIsNone(self.store.reserve(NOW + 5000, last['id']))
 
     def test_only_completed_run_history_is_pruned(self):
         with patch.object(scheduling, 'MAX_RUNS', 2):
-            pending = self.store.reserve(NOW)
+            first = self.save(name='Pending', spec={'kind': 'once', 'at': NOW + 60})
+            pending = self.store.reserve(NOW + 60, first['id'])
             for i in range(4):
-                value = self.store.reserve(NOW + i); self.store.finish(value['id'], 'completed')
+                item = self.save(name=f'Done {i}', spec={'kind': 'once', 'at': NOW + 60})
+                value = self.store.reserve(NOW + 60, item['id']); self.store.finish(value['id'], 'completed')
             runs = self.store.runs(); self.assertEqual(len(runs), 3)
             self.assertIn(pending['id'], {r['id'] for r in runs})
 
@@ -227,7 +232,6 @@ class SchedulingApiTests(unittest.TestCase):
         self.assertTrue(result.json['schedule']['approved'])
         self.assertEqual(result.headers['Cache-Control'], 'no-store')
 
-
     def agent(self):
         """Open a running turn and return a function that sends one Codex socket request."""
         task_id = 'synthetic-task'; server.tasks[task_id] = {'status': 'running', 'current_turn_id': 'synthetic-turn'}
@@ -249,7 +253,6 @@ class SchedulingApiTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             call('propose_schedule', proposal(approved=True))
 
-
     def test_redacted_agent_prompt_cannot_be_blindly_approved(self):
         self.agent()('propose_schedule', proposal(prompt='A sample that must be hidden.'))
         value = self.service.engine().store.schedules()[0]
@@ -267,7 +270,6 @@ class SchedulingApiTests(unittest.TestCase):
         self.assertEqual(self.request_owner('POST', route + '/resume', {}).status_code, 200)
         self.assertEqual(self.request_owner('POST', route + '/delete', {}).status_code, 200)
         self.assertEqual(self.request_owner('GET', '/schedules').json['schedules'], [])
-
 
     def test_agent_cannot_answer_native_approval_or_create_bypass_fields(self):
         call = self.agent()
@@ -288,7 +290,6 @@ class SchedulingApiTests(unittest.TestCase):
              patch.object(server, 'record_baseline') as baseline:
             server.run_task(task_id, 'Inspect the sample configuration.')
         refused.assert_called_once(); baseline.assert_not_called()
-
 
     def test_policy_refusal_is_not_bypassed_by_a_due_schedule(self):
         store = self.service.engine().store

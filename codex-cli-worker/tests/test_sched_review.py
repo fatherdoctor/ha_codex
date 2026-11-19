@@ -45,8 +45,10 @@ class ReviewStoreTests(unittest.TestCase):
         item = self.store.save(proposal(), owner=False, author='codex', now=NOW)
         with self.assertRaises(ValueError):
             self.store.save(proposal(), owner=False, author='lead', now=NOW, schedule_id=item['id'])
-        edited = self.store.save(proposal(prompt='Changed'), owner=False, author='codex', now=NOW, schedule_id=item['id'])
-        self.assertEqual(edited['author'], 'codex'); self.assertFalse(edited['approved'])
+        # Since 0.4.0 Codex only proposes new schedules; an edit of its own proposal is refused as well.
+        with self.assertRaises(LookupError):
+            self.store.save(proposal(prompt='Changed'), owner=False, author='codex', now=NOW, schedule_id=item['id'])
+        self.assertEqual(self.store.schedules()[0], item)
 
     def test_f4_database_and_persistent_journal_exist_before_task(self):
         self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)

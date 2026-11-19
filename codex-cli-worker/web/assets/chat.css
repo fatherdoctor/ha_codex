@@ -501,61 +501,16 @@ h1 {
   text-align: center;
   padding: 24px 0 50px;
 }
-.welcome-icon {
-  font-size: calc(38px * var(--text-scale));
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  height: 68px;
-  width: 68px;
-  display: grid;
-  place-items: center;
-  margin-bottom: 24px;
-  color: var(--accent);
-  background: var(--sidebar);
-}
-.eyebrow {
-  font-size: calc(10px * var(--text-scale));
-  letter-spacing: 2px;
-  color: var(--muted);
-  margin: 0 0 14px;
-}
 .welcome h2 {
   font-size: calc(clamp(23px, 2.5vw, 32px) * var(--text-scale));
   font-weight: 500;
   letter-spacing: -1px;
   margin: 0 0 10px;
 }
-.welcome > p:not(.eyebrow) {
+.welcome > p {
   color: var(--muted);
   margin: 0;
   line-height: 1.6;
-}
-.suggestions {
-  display: flex;
-  gap: 12px;
-  margin-top: 35px;
-  width: 100%;
-  max-width: 540px;
-}
-.suggestions button {
-  background: var(--bg);
-  border-color: var(--line);
-  color: var(--text);
-  text-align: left;
-  flex: 1;
-  padding: 17px;
-}
-.suggestions span {
-  display: block;
-  font-size: calc(12px * var(--text-scale));
-  font-weight: 600;
-}
-.suggestions small {
-  display: block;
-  font-size: calc(11px * var(--text-scale));
-  color: var(--muted);
-  margin-top: 7px;
-  line-height: 1.5;
 }
 .exchange {
   margin-bottom: 32px;
@@ -1566,13 +1521,6 @@ textarea::placeholder {
   color: var(--text);
   border: 1.5px dashed var(--muted);
 }
-.footnote {
-  text-align: center;
-  color: var(--muted);
-  font-size: calc(10px * var(--text-scale));
-  margin: 10px 0 0;
-  line-height: 1.5;
-}
 #notice,
 #error {
   font-size: calc(12px * var(--text-scale));
@@ -1862,26 +1810,10 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   .welcome h2 {
     font-size: calc(25px * var(--text-scale));
   }
-  .suggestions {
-    gap: 9px;
-    margin-top: 25px;
-  }
-  .suggestions button {
-    padding: 13px;
-  }
-  .suggestions small {
-    font-size: calc(10px * var(--text-scale));
-  }
   .message.user,
   .queued-edit,
   .queued-actions {
     max-width: 94%;
-  }
-  .footnote {
-    font-size: calc(9px * var(--text-scale));
-  }
-  .welcome-icon {
-    margin-bottom: 20px;
   }
   .row-title {
     font-size: calc(14px * var(--text-scale));
@@ -2166,7 +2098,7 @@ dialog :is(h3, h4):has(> .settings-toggle) {
  * text buttons in the primary color, as Home Assistant draws them. Icon buttons, section headers, text links and
  * the permission choices keep their own look.
  */
-:is(#settings, .studio-sheet) button:not(.icon, .subtle, .settings-toggle, .text-button, .permission-option) {
+:is(#settings, .studio-sheet) button:not(.icon, .subtle, .settings-toggle, .permission-option) {
   background: var(--ha-color-fill-primary-loud-resting, var(--accent));
   color: var(--ha-color-on-primary-loud, #fff);
   font-weight: 500;

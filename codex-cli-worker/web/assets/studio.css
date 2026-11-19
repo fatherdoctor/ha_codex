@@ -34,7 +34,6 @@ button, input, textarea, select { border-radius: 10px; }
 .new-chat { background: transparent; box-shadow: none; }
 .new-chat:hover { background: var(--hover); }
 main { min-width: 0; background: var(--bg); }
-.text-button { padding: 3px 0; background: transparent; color: var(--accent); font-size: calc(12px * var(--text-scale)); white-space: nowrap; }
 .phone-thread-tools { display: none; }
 .messages { padding: 28px max(24px, calc((100% - 860px) / 2)); min-height: 0; }
 .welcome { min-height: 0; max-width: 850px; margin: 0 auto; padding: 16vh 20px 30px; text-align: center; }

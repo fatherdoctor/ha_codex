@@ -2,11 +2,19 @@
 
 ## 0.4.0 (unreleased)
 
+- Tests only: two new checks run the packaged Codex CLI against a local stand-in model. One shows that a command in
+  Read only, Default or Auto-review cannot connect to any of the app's tool sockets, and records that an
+  escalated command, once approved, can. The other checks how `codex app-server` handles several chats in one
+  process: tool start-up, pausing and resuming a chat, turns at the same time, interrupts, and the chat id on
+  each tool call. Nothing in the app changes.
 - The lead agent channel and the local mailbox are removed from the app. The lead token, its Settings section, the
   `/lead/` routes and the `/schedule-mailbox` routes are gone, and Codex no longer has the `read_mailbox` and
   `post_mailbox` tools. Saved messages stay in the schedule file, unread, so an older version still finds them after
   a rollback. `/status` reports the mailbox as not available, so the integration's unread-mail sensor shows unknown
-  until the integration removes it. Saved schedules are kept.
+  until the integration removes it. Saved schedules are kept. The schedule store no longer has the code paths that
+  only the channel used: Codex can propose a new schedule but not edit a saved proposal (no tool offered that), and
+  a run is always reserved for one schedule. A bare old lead token in Codex output is still redacted, because a
+  rollback to 0.3 makes it valid again.
 - New Courtyard mark: the app icon and logo, the integration's brand images, the chat page's tab icon and header mark, and
   the README logo.
 - The app no longer pins a model by default. The **Model pin** option is empty, and empty means the account's
@@ -51,6 +59,9 @@
   but leaves the process input open for the other chats. After a cancel the bridge still reads the end of its own
   turn, so it can tell when the turn stopped; it sends no event or answer then. Nothing uses this mode yet. A later change keeps one Codex
   process alive for many chats and uses it. Each exchange still starts its own process, as before.
+- Chat page code only: five styles that no part of the page used are removed: `eyebrow`, `footnote`, `suggestions`
+  and `welcome-icon` from `chat.css`, and `text-button` from `studio.css`. The page looks and works the same. Two new
+  tests fail if a stylesheet or a page file names one of them again.
 
 ## 0.3.6 - 2026-11-18
 
