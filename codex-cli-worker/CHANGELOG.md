@@ -2,6 +2,11 @@
 
 ## 0.4.0 (unreleased)
 
+- Chat page: while something needs you, the Settings cog becomes a warning symbol, and on a phone the
+  conversations button shows it too. Yellow means an approval or a schedule proposal waits; red means ChatGPT is
+  signed out or unreadable, the GitHub sign-in expired or was revoked, or Remote is on and lost its connection.
+  **Dismiss the warning** hides it until something new happens; the ChatGPT warning cannot be dismissed. The page
+  reads this from the status checks it already makes, plus one read of the schedules a minute.
 - Tests only: two new checks run the packaged Codex CLI against a local stand-in model. One shows that a command in
   Read only, Default or Auto-review cannot connect to any of the app's tool sockets, and records that an
   escalated command, once approved, can. The other checks how `codex app-server` handles several chats in one

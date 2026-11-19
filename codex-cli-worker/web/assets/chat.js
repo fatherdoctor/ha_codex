@@ -400,6 +400,78 @@ function setFootRow(id, dot, text) {
   $(id).dataset.state = dot;
   $(id.replace("-row", "-summary")).textContent = text;
 }
+/*
+ * The warning on the Settings icon. While something needs the owner, the cog
+ * becomes a warning symbol: yellow for an approval or a schedule proposal that
+ * waits, red for a sign-out. On a phone the menu buttons show the same symbol.
+ * Red wins over yellow.
+ *
+ * Each part of the page reports what it last read with noteAttention, from
+ * the polls it already runs; nothing here asks the worker for more. GitHub
+ * and Remote count only a sign-out the owner did not ask for: GitHub reports
+ * "disconnected" after Disconnect and "expired" or "revoked" when the stored
+ * sign-in stops working, and Remote reports "error" only while the owner's
+ * switch is on. ChatGPT not signed in, or its status unreadable, is the one
+ * red the owner cannot dismiss: no chat can run without it.
+ *
+ * Dismiss hides the warnings shown at that moment. A warning comes back when
+ * something new happens: a new approval or proposal, or a sign-out after the
+ * account was working again. Dismissed keys live in this page only.
+ */
+const attention = {
+  chatgpt: "",
+  github: "",
+  remote: false,
+  approvals: [],
+  proposals: [],
+  dismissed: new Set(),
+};
+/** Every warning in the reported state, each with a key that changes when something new happens. */
+function attentionWarnings(parts) {
+  const warnings = [];
+  if (parts.chatgpt === "signed-out")
+    warnings.push({ key: "chatgpt", level: "red", label: "ChatGPT signed out", dismissible: false });
+  if (parts.chatgpt === "unavailable")
+    warnings.push({ key: "chatgpt", level: "red", label: "ChatGPT unavailable", dismissible: false });
+  if (["expired", "revoked"].includes(parts.github))
+    warnings.push({ key: `github:${parts.github}`, level: "red", label: "GitHub signed out", dismissible: true });
+  if (parts.remote)
+    warnings.push({ key: "remote", level: "red", label: "Remote disconnected", dismissible: true });
+  for (const id of parts.approvals)
+    warnings.push({ key: `approval:${id}`, level: "yellow", label: "Approval waiting", dismissible: true });
+  for (const id of parts.proposals)
+    warnings.push({ key: `proposal:${id}`, level: "yellow", label: "Schedule proposal waiting", dismissible: true });
+  return warnings;
+}
+/** The warnings to show: those not dismissed, plus the red that cannot be dismissed. */
+function shownWarnings(warnings, dismissed) {
+  return warnings.filter((warning) => !warning.dismissible || !dismissed.has(warning.key));
+}
+/** Draw the warning from the state each part last reported. */
+function showAttention() {
+  const warnings = attentionWarnings(attention);
+  // A key that is gone is no longer dismissed, so the same thing coming back counts as new.
+  const current = new Set(warnings.map((warning) => warning.key));
+  for (const key of attention.dismissed) if (!current.has(key)) attention.dismissed.delete(key);
+  const shown = shownWarnings(warnings, attention.dismissed);
+  const level = shown.some((warning) => warning.level === "red") ? "red" : shown.length ? "yellow" : "";
+  const label = [...new Set(shown.map((warning) => warning.label))].join(", ");
+  if (level) document.body.dataset.attention = level;
+  else delete document.body.dataset.attention;
+  $("attention-label").textContent = label;
+  for (const id of ["settings-button", "menu", "phone-history"]) $(id).title = label;
+  $("attention-dismiss").hidden = !shown.some((warning) => warning.dismissible);
+}
+/** Record what one part of the page read (chatgpt, github, remote, approvals or proposals), then redraw. */
+function noteAttention(part, value) {
+  attention[part] = value;
+  showAttention();
+}
+$("attention-dismiss").onclick = () => {
+  for (const warning of shownWarnings(attentionWarnings(attention), attention.dismissed))
+    if (warning.dismissible) attention.dismissed.add(warning.key);
+  showAttention();
+};
 /** Open Settings at one part of Accounts and connections, as a foot row or a banner asks. */
 async function openAccountItem(sectionId) {
   await $("settings-button").onclick();
@@ -932,6 +1004,9 @@ async function loadList(older = false) {
   const activeChanged = state.active !== data.active_task_id;
   state.active = data.active_task_id;
   state.queue = Array.isArray(data.queue) ? data.queue : [];
+  // The archived view lists other chats, so it leaves the approvals of the main list as they were.
+  if (!state.archived)
+    noteAttention("approvals", state.chats.filter((chat) => chat.permission_required).map((chat) => chat.task_id));
   if (hadSelected && !merged.has(state.id)) await selectChat(null);
   renderList();
   // Approval panels in the open chat depend on whether any chat is working.
@@ -3464,6 +3539,7 @@ async function loadLogin() {
     ({ auth } = await api("auth/status"));
   } catch (error) {
     setFootRow("codex-status-row", "error", "Unavailable");
+    noteAttention("chatgpt", "unavailable");
     throw error;
   } finally {
     loginTimer = setTimeout(
@@ -3505,6 +3581,7 @@ function renderLogin(auth) {
     : lapsed
       ? "The assistant's ChatGPT sign-in expired or was revoked. Sign in again."
       : "The assistant is not signed in to ChatGPT.";
+  noteAttention("chatgpt", signedIn ? "signed-in" : "signed-out");
   const sectionStatus = chatgptSectionStatus({ signedIn, pending, failed, lapsed });
   setSectionStatus("chatgpt-section", sectionStatus, !signedIn);
   setAccountPart("chatgpt-section", sectionStatus.toLowerCase(), !signedIn);
@@ -3669,6 +3746,7 @@ function githubFootRow({ waiting, connected, bad, retry }) {
 function renderGithub(github) {
   githubStatus = github;
   const state = String(github.state || "disconnected");
+  noteAttention("github", state);
   const flow = github.flow && typeof github.flow === "object" ? github.flow : { status: "idle" };
   const waiting = flow.status === "waiting_for_user";
   const connected = !["disconnected", "connecting"].includes(state);
@@ -3763,6 +3841,7 @@ function renderGithub(github) {
 /** Show that this worker has no GitHub sign-in (an add-on before 0.3). */
 function githubUnavailable() {
   githubStatus = null;
+  noteAttention("github", "");
   $("github-status").textContent = "Not available in this version of the add-on.";
   for (const id of ["github-connect", "github-cancel", "github-test", "github-check", "github-accept", "github-disconnect"])
     $(id).hidden = true;
