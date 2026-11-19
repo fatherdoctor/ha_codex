@@ -465,7 +465,7 @@ the relay's `/proc/<pid>/root`, `cwd` or `environ` in the no-proc fallback. Load
 isolation still require the lead's HAOS acceptance check described in
 [SANDBOX_TESTING.md](SANDBOX_TESTING.md#remote-control-profile-regression).
 
-**Relay execution (CX-RC-EXEC.f2).** The reproduced unified-exec failure was a `nodev` root bind, not
+**Relay execution.** The reproduced unified-exec failure was a `nodev` root bind, not
 a missing executable rule. Under the previous outer `--bind / /`, opening `/dev/null` and
 `/dev/ptmx` failed with `EACCES`; pipe commands and PTY commands both failed before exec. The
 outer relay now applies `--dev /dev` after the root bind and preserves shared memory with
@@ -669,7 +669,7 @@ These calls come from Codex's shell. In `workspace-write` and `read-only`, Codex
 
 ## SSH connections
 
-I include the OpenSSH client so Codex can use an existing SSH server, such as a Home Assistant SSH app, a NAS, or another Linux machine. There are no SSH app options or connection-management screens. Set up each connection through the existing chat and standard SSH files. No `HA_TOKEN` is needed for SSH authentication, and SSH does not mount remote folders inside the worker.
+The image includes the OpenSSH client so Codex can use an existing SSH server, such as a Home Assistant SSH app, a NAS, or another Linux machine. There are no SSH app options or connection-management screens. Set up each connection through the existing chat and standard SSH files. No `HA_TOKEN` is needed for SSH authentication, and SSH does not mount remote folders inside the worker.
 
 ### Set up a connection through chat
 

@@ -14,7 +14,7 @@ Codex runs in a sandbox: `workspace-write` (the default) or `read-only`. A chat 
 
 Browser sign-in is automatic and uses a temporary, local, read-only identity. Update both the app and integration, and leave **Enable built-in browser** on. Ask for a specific dashboard view to inspect it. See [setup and verification limits](https://github.com/fatherdoctor/ha_codex/blob/main/codex-cli-worker/VERIFICATION.md).
 
-Matching Fully Kiosk devices can also supply fresh screenshots of the view they are displaying, without being navigated, refreshed, or woken. This requires the app and integration at 0.1.79 or newer, plus enabled current-page and screenshot entities in Home Assistant's Fully Kiosk Browser integration.
+Matching Fully Kiosk devices can also supply fresh screenshots of the view they are displaying, without being navigated, refreshed, or woken. This requires enabled current-page and screenshot entities in Home Assistant's Fully Kiosk Browser integration.
 
 For setup, security notes, and action examples, see the [repository README](https://github.com/fatherdoctor/ha_codex/blob/main/README.md) and [app documentation](https://github.com/fatherdoctor/ha_codex/blob/main/codex-cli-worker/DOCS.md).
 

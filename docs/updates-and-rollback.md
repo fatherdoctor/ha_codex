@@ -1,7 +1,7 @@
 # Updates and rollback
 
-How a release of this fork reaches a Home Assistant install, how it is tested before it is tagged, and how a bad
-release is undone without anyone at the house doing anything.
+How a release reaches a Home Assistant install, how it is tested before it is tagged, and how a bad release is
+undone with no action on the install.
 
 ## How an update reaches an install
 
@@ -23,10 +23,10 @@ The integration (`custom_components/codex_cli`) carries the same version and upd
 
 ## Versions
 
-A stable version has three or four numbers: `0.2.0` or `0.1.81.3`. A beta version has three numbers, then `-beta.`
-and a number: `0.2.0-beta.1`. A beta never has four numbers, because Home Assistant cannot compare
-`0.1.81.3-beta.1` with `0.1.81.3`. A beta comes before the stable version with the same numbers: `0.2.0-beta.2` is
-older than `0.2.0`.
+A stable version has three numbers: `0.4.0`. The first two versions had four (`0.1.81.2`), and the release script
+still accepts that form. A beta version has three numbers, then `-beta.` and a number: `0.4.0-beta.1`. A beta never
+has four numbers, because Home Assistant cannot compare `0.1.81.3-beta.1` with `0.1.81.3`. A beta comes before the
+stable version with the same numbers: `0.4.0-beta.2` is older than `0.4.0`.
 
 `fork_release.py` refuses a stable version that is not newer than every stable tag. It refuses a beta that is not
 newer than every tag, stable or beta. So a stable fix can be released while a newer beta is out. A rollback is
@@ -64,7 +64,7 @@ the same version.
   entry, the `(beta)` name and its lab-pass records. Then set the new beta version.
 - A stable fix while a beta is out is released from `main` as usual. A beta install gets it with the next beta,
   because its own version is newer.
-- The stable release that follows a beta (`0.2.0` after `0.2.0-beta.2`) is made on `main`, which already has every
+- The stable release that follows a beta (`0.4.0` after `0.4.0-beta.2`) is made on `main`, which already has every
   change. `fork_release.py` refuses a stable version whose commit is not on `origin/main`.
 
 A beta has the same rules as a stable release: a lab-pass record and the tag on the tested commit (below), made from a
@@ -89,7 +89,7 @@ merged commit, through the Supervisor, as an install would get it. When it passe
 
 ```json
 {
-  "version": "0.1.81.2",
+  "version": "0.3.6",
   "commit": "<the full 40-character commit that was tested>",
   "result": "pass",
   "lab": "Home Assistant OS test machine",
@@ -101,8 +101,8 @@ merged commit, through the Supervisor, as an install would get it. When it passe
 Then tag:
 
 ```bash
-python3 scripts/fork_release.py check-tag 0.1.81.2   # what would be tagged, and why; changes nothing
-python3 scripts/fork_release.py tag 0.1.81.2 --push
+python3 scripts/fork_release.py check-tag 0.3.6   # what would be tagged, and why; changes nothing
+python3 scripts/fork_release.py tag 0.3.6 --push
 ```
 
 The script refuses when there is no record or it does not say `pass`; when the commit is not on the checked-out
@@ -116,17 +116,16 @@ tested commit, not on the later commit that added the record.
 The Supervisor never offers an older version, so a rollback is a new release whose code is the last good one:
 
 ```bash
-git checkout -b rollback-0.1.81.3 origin/main
-python3 scripts/fork_release.py rollback 0.1.81.1          # the version to go back to
-git commit -m "Roll back to 0.1.81.1 as 0.1.81.3"
-# open a pull request titled "Release 0.1.81.3: roll back to 0.1.81.1", merge it, then on main:
-python3 scripts/fork_release.py tag 0.1.81.3 --push
+git checkout -b rollback-0.3.8 origin/main
+python3 scripts/fork_release.py rollback 0.3.6          # the version to go back to
+git commit -m "Roll back to 0.3.6 as 0.3.8"
+# open a pull request titled "Release 0.3.8: roll back to 0.3.6", merge it, then on main:
+python3 scripts/fork_release.py tag 0.3.8 --push
 ```
 
-`rollback` puts `codex-cli-worker/` and `custom_components/` back exactly as they were at `v0.1.81.1` (files added
-since are removed), sets the next version (`0.1.81.3` here; `--to` picks another), adds a changelog entry above the
-existing history, and writes a rollback record. The install takes it as an ordinary update; nobody there has to do
-anything.
+`rollback` puts `codex-cli-worker/` and `custom_components/` back exactly as they were at `v0.3.6` (files added
+since are removed), sets the next version (`0.3.8` here, when `0.3.7` is the bad release; `--to` picks another), adds a changelog entry above the
+existing history, and writes a rollback record. The install takes it as an ordinary update, with no action there.
 
 A rollback needs no new lab pass, because its code already passed one: `tag` checks that the version it restores has
 its own lab-pass record and tag, and that the rollback differs from that tag only in the version fields and the
