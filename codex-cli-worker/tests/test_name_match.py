@@ -43,6 +43,7 @@ HOUSE = [
     light("hall_pin_light", "Hall Pin"),
     light("thai_table", "กัน"),
     light("hindi_room", "कमरा"),
+    light("light_strip", "Light Strip"),
 ]
 
 # (id, name, service, expected: an entity id, "none", "several", or "error"; family)
@@ -89,6 +90,19 @@ CORPUS = [
     ("devanagari-vowel-sign-missing", "कमर", "light.turn_on", "none", "combining marks"),
     ("devanagari-same-word", "कमरा", "light.turn_on", "light.hindi_room", "combining marks"),
     ("only-a-mark", "\u0e31", "light.turn_on", "error", "combining marks"),
+    # People name the kind of device after its name: "the media room overhead light" (rule 6).
+    ("trailing-light", "media room overhead light", "light.turn_on", "light.media_room_overhead", "domain word"),
+    ("trailing-lights", "Media Room Overhead Lights", "light.turn_on", "light.media_room_overhead",
+     "domain word"),
+    ("trailing-lamp-exact-short-wins", "office overhead lamp", "light.turn_on", "light.office_overhead",
+     "domain word"),
+    ("trailing-switch", "office overhead switch", "switch.turn_off", "switch.office_overhead", "domain word"),
+    ("light-in-the-name", "light strip", "light.turn_on", "light.light_strip", "domain word"),
+    ("light-in-the-name-and-after", "light strip light", "light.turn_on", "light.light_strip", "domain word"),
+    ("only-the-domain-word", "lights", "light.turn_on", "none", "domain word"),
+    ("domain-word-of-another-domain", "media room overhead switch", "light.turn_on", "none", "domain word"),
+    ("trailing-word-two-exact", "porch light", "light.turn_on", "several", "domain word"),
+    ("domain-word-not-last", "light media room overhead", "light.turn_on", "none", "domain word"),
 ]
 
 
@@ -139,6 +153,28 @@ class RuleTests(unittest.TestCase):
         self.assertEqual(set(found["candidates"][0]), {"entity_id", "name", "state"})
         hidden = resolve(HOUSE, "hall", "light.turn_on")
         self.assertEqual(hidden, {"candidates": [], "total": 0})
+
+    def test_trailing_light_matches_an_area_and_device_name(self):
+        """The device name repeats the area in the object id, and the person adds the kind: one match."""
+        states = [light("den_den_ceiling", "Den Ceiling"), light("den_lamp", "Den Lamp")]
+        self.assertEqual(outcome("den ceiling light", "light.turn_on", states),
+                         "light.den_den_ceiling")
+
+    def test_exact_name_with_the_word_wins_over_one_without(self):
+        states = [light("kitchen", "Kitchen"), light("kitchen_light", "Kitchen Light")]
+        self.assertEqual(outcome("kitchen light", "light.turn_on", states), "light.kitchen_light")
+        self.assertEqual(outcome("kitchen", "light.turn_on", states), "light.kitchen")
+
+    def test_dropped_word_adds_no_match_across_two_areas(self):
+        states = [light("kitchen_overhead", "Kitchen Overhead"), light("office_overhead", "Office Overhead")]
+        self.assertEqual(outcome("overhead light", "light.turn_on", states), "several")
+        self.assertEqual(outcome("kitchen overhead light", "light.turn_on", states), "light.kitchen_overhead")
+        self.assertEqual(outcome("garage overhead light", "light.turn_on", states), "none")
+
+    def test_dropped_word_with_two_devices_in_one_area_is_a_question(self):
+        states = [light("media_room_overhead", "Media Room Overhead"), light("media_room_lamp", "Media Room Lamp")]
+        self.assertEqual(outcome("media room light", "light.turn_on", states), "several")
+        self.assertEqual(outcome("media room lamp", "light.turn_on", states), "light.media_room_lamp")
 
     def test_words_are_whole_and_folded(self):
         self.assertEqual(name_words("Café-Lamp_2 ​X"), ["café", "lamp", "2", "x"])

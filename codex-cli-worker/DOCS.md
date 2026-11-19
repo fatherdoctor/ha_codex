@@ -383,6 +383,10 @@ list and sends the call only when exactly one entity of the service's domain fit
 - The service picks the domain: `light.turn_on` with a name never changes a switch. `homeassistant` services
   act on many domains, so they need the entity id.
 - Credential-like and password-mode entities never match.
+- A last word that only says the kind of device may be left out: "media room overhead light" fits a light named
+  "Media Room Overhead". For `light` services that word is "light", "lights", "lamp" or "lamps"; for other
+  services it is the domain's own word, such as "switch" or "fan". A name that holds the word, such as "Light
+  Strip", still fits as it reads, and "kitchen light" picks "Kitchen Light" over "Kitchen".
 
 When no entity fits, or more than one, nothing is sent: the answer lists up to 10 candidates and the full count,
 and Codex asks you which one. After a call whose target is entity ids, the answer also holds the state right after

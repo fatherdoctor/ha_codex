@@ -1,6 +1,12 @@
 # Changelog
 
 ## 0.4.0 (unreleased)
+- A call by name no longer misses a device when the name ends in the kind of device. "Turn on the media room
+  overhead light" found no light named "Media Room Overhead", so Codex had to ask and try again. Now a last word
+  that names the service's domain ("light", "lights", "lamp" or "lamps" for lights; "switch", "fan" and so on for
+  other domains) may be left out. A name that holds the word, such as "Light Strip", matches as before, and the
+  rule adds no match that more than one entity fits: those still list the candidates and send nothing.
+
 - The app's tools no longer use a secret key for each message. Each tool request names its chat by the thread id
   that Codex adds to every tool call, and the worker answers it only while that chat's exchange runs; a sub-agent
   that the chat starts counts as the chat, and a thread that one chat holds is never given to another. The sandbox already stops a command in Read only, Default and Auto-review from
