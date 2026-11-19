@@ -1,7 +1,7 @@
 configuration:
   codex_model:
     name: Model
-    description: The model that new chats use. Leave it on default to let Codex pick. Your account decides which models you can use.
+    description: The model that new chats use. Leave it on default to let Codex pick. The retired gpt-5.5 now runs GPT-5.6 Sol.
   model_pin:
     name: Lock to one model
     description: Chats may run only on this model. A chat that asks for another model stops with an error. Enter none to turn the lock off.
@@ -43,7 +43,7 @@ configuration:
     description: How many days the app keeps backups after a chat, from 1 to 365. The default is 7.
   ha_url:
     name: Home Assistant API URL
-    description: The address Codex gets as HA_URL to call Home Assistant. Leave it empty to find it automatically. Change it for HTTPS or another port.
+    description: The address Codex uses to call Home Assistant. Set it only if the automatic address does not work.
   browser_verification:
     name: Built-in browser
     description: Let Codex open dashboards and take screenshots. The browser uses memory while it runs. Turn it off if memory is short.
@@ -55,7 +55,7 @@ configuration:
     description: Download the official documentation, about 25 MB, so Codex can search it without the web. Turn it off to stop the download.
   HA_TOKEN:
     name: Home Assistant access token
-    description: An optional token that lets Codex call the Home Assistant API with your rights. Leave it empty to give Codex no access.
+    description: An optional token for Codex to call Home Assistant, with the rights of the token's user. Codex keeps its read and call tools without it.
   remote_control_name:
     name: Remote control name
     description: The name this Home Assistant shows in the ChatGPT app. The default is Home Assistant. A new name applies after a restart.

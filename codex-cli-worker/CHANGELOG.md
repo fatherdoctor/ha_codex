@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 (unreleased)
 
 - The add-on Configuration page now uses plain option names and one short description for each option (25 words or fewer). A test keeps names free of code words and descriptions short.
 
