@@ -1,0 +1,19 @@
+{
+  "domain": "codex_cli",
+  "name": "Codex",
+  "codeowners": [
+    "@fatherdoctor"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "hassio",
+    "http",
+    "persistent_notification"
+  ],
+  "documentation": "https://github.com/fatherdoctor/ha_codex",
+  "integration_type": "service",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/fatherdoctor/ha_codex/issues",
+  "single_config_entry": true,
+  "version": "0.3.6"
+}

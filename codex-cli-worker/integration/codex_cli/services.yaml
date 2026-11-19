@@ -1,0 +1,86 @@
+start_task:
+  fields:
+    prompt:
+      required: true
+      selector:
+        text:
+          multiline: true
+
+start_login:
+  fields:
+    force:
+      required: false
+      default: false
+      selector:
+        boolean:
+
+get_login_status:
+
+logout:
+
+get_task:
+  fields:
+    task_id:
+      required: true
+      selector:
+        text:
+
+list_tasks:
+  fields:
+    limit:
+      selector:
+        number:
+          min: 1
+          max: 500
+          mode: box
+    offset:
+      selector:
+        number:
+          min: 0
+          mode: box
+    status:
+      selector:
+        select:
+          options: [queued, running, waiting_for_input, completed, failed, cancelled]
+    order:
+      selector:
+        select:
+          options: [created_asc, updated_desc]
+    summary:
+      selector:
+        boolean:
+
+cancel_task:
+  fields:
+    task_id:
+      required: true
+      selector:
+        text:
+
+reply_task:
+  fields:
+    task_id:
+      required: true
+      selector:
+        text:
+    reply:
+      required: true
+      selector:
+        text:
+          multiline: true
+    turn_id:
+      required: false
+      selector:
+        text:
+
+continue_task:
+  fields:
+    task_id:
+      required: true
+      selector:
+        text:
+    message:
+      required: true
+      selector:
+        text:
+          multiline: true
