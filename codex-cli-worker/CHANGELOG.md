@@ -2,6 +2,9 @@
 
 ## 0.4.0 (unreleased)
 
+- Not used yet: a new module, `codex_host.py`, can keep one Codex process running and hold each chat as a thread
+  in it, with at most three chats loaded at a time. Nothing in the app starts it in this version, so every message
+  still starts its own Codex process. A later change connects it, with an option to turn it off.
 - Tests only: two new checks run the packaged Codex CLI against a local stand-in model. One shows that a command in
   Read only, Default or Auto-review cannot connect to any of the app's tool sockets, and records that an
   escalated command, once approved, can. The other checks how `codex app-server` handles several chats in one
