@@ -39,7 +39,7 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/codex-test" @openai/codex@0.166.0
           echo "HA_TEST_CODEX=$RUNNER_TEMP/codex-test/node_modules/.bin/codex" >> "$GITHUB_ENV"
           npm install --prefix "$RUNNER_TEMP/browser-deps" playwright@1.63.0 ws@8.18.3
-          # The runner's package mirrors can fail to resolve or hang (11-11): bound every apt call,
+          # The runner's package mirrors can fail to resolve or hang: bound every apt call,
           # retry the system-library install, and keep the browser download (no apt) separate.
           printf 'Acquire::Retries "5";\nAcquire::http::Timeout "20";\nAcquire::https::Timeout "20";\n' | sudo tee /etc/apt/apt.conf.d/80-ci-retries >/dev/null
           PW="$RUNNER_TEMP/browser-deps/node_modules/.bin/playwright"
@@ -79,6 +79,10 @@ jobs:
           node codex-cli-worker/tests/browser_smoke.cjs
           node codex-cli-worker/tests/browser_copy.cjs
           node codex-cli-worker/tests/browser_permissions_ui.cjs
+          node codex-cli-worker/tests/browser_settings_phone.cjs
+          node codex-cli-worker/tests/browser_remote_name.cjs
+          node codex-cli-worker/tests/browser_full_access.cjs
+          node codex-cli-worker/tests/browser_four_modes.cjs
 
   container:
     name: Container (${{ matrix.arch }})
@@ -93,8 +97,19 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
+      - name: Bundle the integration into the app image
+        # The app installs this copy in /config at start (codex-cli-worker/integration/README.md).
+        run: |
+          rm -rf codex-cli-worker/integration/codex_cli
+          cp -R custom_components/codex_cli codex-cli-worker/integration/codex_cli
       - name: Build without publishing
         run: docker build --build-arg BUILD_ARCH=${{ matrix.arch }} --build-arg BUILD_VERSION=pr-test -t verification-test codex-cli-worker
+      - name: Check the bundled integration matches the app version
+        run: |
+          app="$(grep -E '^version:' codex-cli-worker/config.yaml | sed -E 's/^version:[[:space:]]*"?([^"]+)"?/\1/')"
+          bundled="$(docker run --rm --entrypoint python3 verification-test -c 'import json; print(json.load(open("/usr/share/ha_codex/integration/codex_cli/manifest.json"))["version"])')"
+          test "$app" = "$bundled" || { echo "Bundled integration $bundled does not match app $app" >&2; exit 1; }
+          docker run --rm --entrypoint test verification-test -f /integration_sync.py
       - name: Smoke test packaged Chromium
         run: |
           docker run --rm --entrypoint /usr/bin/chromium-browser verification-test --version

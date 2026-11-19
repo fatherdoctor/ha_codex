@@ -22,13 +22,16 @@ import websocket
 
 from browser_permissions import (BrowserPermissionStore, HEX, LIMITS, MAX_CANDIDATES, MAX_RETRIES, PATH,
                                  describe, scope, valid_rule)
+from relay_reads import PRIVATE, ReadError, fetch_states, password_state
 
 MAX_CHECKS = 24
+MAX_FIND_MATCHES = 10
 MAX_BROWSERS = 4
 DEFAULT_BROWSER_MEMORY_LIMIT_MIB = 1536
 SCREENSHOT_MAX_BYTES = 5 * 1024 * 1024
 RETENTION_SECONDS = 7 * 24 * 3600
 ENTITY_RE = re.compile(r"[a-z0-9_]+\.[a-z0-9_]+")
+DOMAIN_RE = re.compile(r"[a-z_][a-z0-9_]*")
 # One dashboard path rule, shared with the permission store.
 PATH_RE = PATH
 INTEGRATION_UPDATE_NOTE = "Update the Codex integration in Home Assistant to approve blocked browser requests."
@@ -56,6 +59,32 @@ def public_check(entry):
         if isinstance(entry.get(key), dict):
             result[key] = {**entry[key], **{name: labels(entry[key][name]) for name in ("approved", "carried") if name in entry[key]}}
     return result
+
+
+def find_row(row, words, domain):
+    """Return (other words, answer row) for one item of Core's state list, or None when it does not match or is hidden.
+
+    A match holds every word in its friendly name or entity id. The answer row carries only the entity id,
+    the friendly name and the state. The count of other words in the name and id orders the answer.
+    """
+    entity_id = row.get("entity_id")
+    state = row.get("state")
+    if not isinstance(entity_id, str) or not ENTITY_RE.fullmatch(entity_id) or not isinstance(state, str):
+        return None
+    entity_domain, object_id = entity_id.split(".", 1)
+    if domain is not None and entity_domain != domain:
+        return None
+    if PRIVATE.search(object_id) or password_state(row):
+        return None
+    attributes = row.get("attributes")
+    friendly = attributes.get("friendly_name") if isinstance(attributes, dict) else None
+    name = friendly if isinstance(friendly, str) else ""
+    searched = f"{name} {object_id.replace('_', ' ')}".lower()
+    if not all(word in searched for word in words):
+        return None
+    # A light named "Office Overhead" has no other word; its "Office Overhead Ping" button has one.
+    other_words = len(set(re.findall(r"[a-z0-9]+", searched)) - set(words))
+    return other_words, {"entity_id": entity_id, "name": name[:120], "state": state[:120]}
 
 
 class Verification:
@@ -327,6 +356,8 @@ class Verification:
             try:
                 if operation == "entity":
                     entry.update(self.entity(payload))
+                elif operation == "find":
+                    entry.update(self.find(payload))
                 elif operation == "config_check":
                     entry.update(self.worker.check_home_assistant_config())
                     entry["status"] = {"valid": "passed", "invalid": "failed"}.get(entry["result"], "unavailable")
@@ -343,7 +374,7 @@ class Verification:
                 elif operation == "dashboard_readback":
                     entry.update(self.dashboard_readback(payload))
                 else:
-                    raise ValueError("Supported operations: entity, config_check, logs, dashboard, dashboard_readback")
+                    raise ValueError("Supported operations: entity, find, config_check, logs, dashboard, dashboard_readback")
             except Exception as exc:
                 # Do not persist network exception URLs, tokens, or response bodies.
                 detail = str(exc) if isinstance(exc, ValueError) and not isinstance(exc, json.JSONDecodeError) else type(exc).__name__
@@ -379,6 +410,41 @@ class Verification:
                 "entity_id": entity_id, "state": state.get("state"), "expected_state": expected,
                 "attributes": attributes, "last_updated": state.get("last_updated"),
                 "message": "Fresh entity state readback. This does not verify automation triggers, conditions, or actions."}
+
+    def find(self, payload):
+        """Find entities by the name a person uses for them, so a device command needs no search of the registry files.
+
+        An entity matches when its friendly name or entity id holds every word of the name. The answer is at
+        most MAX_FIND_MATCHES rows of entity id, friendly name and state, the closest name first.
+        Credential-like and password-mode entities are left out, as they are for relay reads.
+        """
+        name = payload.get("name")
+        if not isinstance(name, str) or len(name) > 120:
+            raise ValueError("name must be a short string")
+        words = re.findall(r"[a-z0-9]+", name.lower())
+        if not words:
+            raise ValueError("name must hold a letter or a digit")
+        domain = payload.get("domain")
+        if domain is not None and (not isinstance(domain, str) or len(domain) > 64 or not DOMAIN_RE.fullmatch(domain)):
+            raise ValueError("Invalid domain")
+        token = self.worker.ha_token()
+        if not token:
+            raise ValueError("Home Assistant authentication is unavailable")
+        try:
+            states = fetch_states("/states", token)
+        except ReadError as exc:
+            raise ValueError(str(exc)) from None
+        if not isinstance(states, list):
+            raise ValueError("Home Assistant returned an invalid entity list")
+        found = [find_row(row, words, domain) for row in states if isinstance(row, dict)]
+        # The closest name first: the device itself before its extra sensors, buttons and settings.
+        ranked = sorted((pair for pair in found if pair), key=lambda pair: (pair[0], pair[1]["entity_id"]))
+        matches = [row for _, row in ranked]
+        shown = matches[:MAX_FIND_MATCHES]
+        message = ("No entity matches this name. Try fewer words or another domain." if not matches
+                   else "Entities whose name or entity id holds every word. Use the exact entity_id for the action.")
+        return {"status": "observed", "name": name, "domain": domain, "matches": shown,
+                "total_matches": len(matches), "truncated": len(matches) > len(shown), "message": message}
 
     def dashboard_readback(self, payload):
         """Read a dashboard's configuration from Core and compare it with expected_config when one is given."""
@@ -633,12 +699,17 @@ class Verification:
             except (OSError, ValueError, KeyError):
                 self.run(task_id, {"operation": "dashboard", "path": ""})
 
+    def require_dashboard_save_permission(self, task_id):
+        """Worker writes obey the same narrowed mode as the current chat turn."""
+        options = self.worker.task_options(task_id)
+        if options.get("codex_sandbox") == "read-only":
+            raise ValueError("Dashboard saves are disabled in read-only mode")
+        if not options.get("auto_save_lovelace", True):
+            raise ValueError("Dashboard auto-save is disabled; inspect the loaded dashboard without save_pending")
+
     def save_pending_dashboard(self, task_id, path):
         """Save only a dashboard edited in this turn, before the AI views it."""
-        if self.worker.read_options().get("codex_sandbox") == "read-only":
-            raise ValueError("Dashboard saves are disabled in read-only mode")
-        if not self.worker.read_options().get("auto_save_lovelace", True):
-            raise ValueError("Dashboard auto-save is disabled; inspect the loaded dashboard without save_pending")
+        self.require_dashboard_save_permission(task_id)
         manifest = self.worker.get_run_dir(task_id) / "manifest-before.json"
         if not manifest.is_file():
             raise ValueError("The turn has no baseline for a dashboard save")
@@ -652,6 +723,7 @@ class Verification:
             errors = self.worker.validate_changed_files({"added": [], "changed": [ref["storage_file"]], "deleted": []})
             if errors:
                 raise ValueError("The edited dashboard failed JSON validation")
+            self.require_dashboard_save_permission(task_id)
             ok, _ = self.worker.save_lovelace_dashboard(ref)
             if not ok:
                 raise ValueError("Home Assistant did not accept the pending dashboard")

@@ -14,15 +14,15 @@ configuration:
   codex_sandbox:
     name: Codex sandbox
     description: workspace-write is the default and allows edits in /config; read-only allows inspection. Commands or file changes needing extra access ask a Home Assistant administrator for Allow once or Deny in the chat. There is no full-access mode in this fork.
-  refuse_categories:
-    name: Refuse actions by category
-    description: Off by default. Turn on to also refuse configuration edits involving device and message categories. The assistant keeps its house rules either way. Credential, sandbox escalation and planted-command checks stay on.
   task_root:
     name: Task root
     description: Folder where prompts, logs, backups, status files, and change lists are saved. Keep it inside /config so Codex can save a copy of each file before changing it.
   notify_service:
     name: Notification service
-    description: Optional Home Assistant notify service for task completion, failures, questions, and permission requests. Leave unset or blank to use persistent notifications. The app configuration page does not support Home Assistant service autocomplete, so this is a plain text field.
+    description: Optional Home Assistant notify service for questions, permission requests and failures. Leave unset or blank to use persistent notifications. The app configuration page does not support Home Assistant service autocomplete, so this is a plain text field.
+  github_client_id:
+    name: GitHub App client ID
+    description: Public client ID used for GitHub sign-in. The default uses The Backshop GitHub App. Change this only if you use your own GitHub App. The client ID is not a secret.
   task_timeout_seconds:
     name: Task timeout
     description: Maximum run time for one Codex task before the worker stops it.
@@ -43,7 +43,7 @@ configuration:
     description: How many days after an exchange its backups are kept, from 1 to 365. Applies to the copies Codex saves before changing a file and to full snapshots. Default is 7 days.
   ha_url:
     name: Home Assistant API URL
-    description: Address that Codex uses for its own Home Assistant API calls when HA_TOKEN is set. It is passed to Codex as the HA_URL environment variable. The default, http://homeassistant:8123, is Home Assistant's own address inside the app network; change it only if your Home Assistant uses HTTPS or another port. The earlier default, http://supervisor/core, does not accept a Home Assistant token and is treated as the default. The app's own calls do not use this address.
+    description: Address that Codex uses for its own Home Assistant API calls when HA_TOKEN is set. It is passed to Codex as the HA_URL environment variable. The default, http://homeassistant:8123, is Home Assistant's own address inside the app network; change it only if your Home Assistant uses HTTPS or another port. The earlier default, http://supervisor/core, does not accept a Home Assistant token and is treated as the default. The app's own calls do not use this address. From 0.1.81.2, leave the override empty to discover Core's actual port and SSL setting on each launch. Saved legacy defaults are treated as unset; an explicit HTTP(S) override wins. With SSL, use the certificate hostname and keep TLS verification enabled.
   browser_verification:
     name: Enable built-in browser
     description: Allow dashboard inspection and desktop/mobile screenshots. The browser uses RAM while it runs; set its budget with Browser memory limit below. Turn this off to completely disable browser launches and screenshots if you do not need them or your system has limited RAM. State and configuration checks remain available. No Home Assistant password or manually created token is needed.
@@ -58,4 +58,10 @@ configuration:
     description: Optional Home Assistant token exposed to Codex subprocesses as the HA_TOKEN environment variable, together with HA_URL, the address above. Codex can then call Home Assistant's API with the rights of the token's user, for example to reload automations or restart Home Assistant.
   remote_control_name:
     name: Remote control machine name
-    description: The name this Home Assistant shows in the ChatGPT app when remote control is on. The default is Home Assistant. Letters, digits, spaces, dots, dashes and underscores are kept, up to 63 characters; if the name cannot be used as written, Home-Assistant is used instead. Remote control itself is turned on and off in the app's Settings page, not here. Change the name while remote control is off.
+    description: The name this Home Assistant shows in the ChatGPT app when remote control is on. The default is Home Assistant. Letters, digits, spaces, dots, dashes and underscores are kept, up to 63 characters; if the name cannot be used as written, Home-Assistant is used instead. Remote control itself is turned on and off in the app's Settings page, not here. A new name takes effect when the app restarts; if the ChatGPT app still shows the old name, choose New pairing code in Settings.
+  interactions_to_keep:
+    name: Interactions to keep
+    description: How many recent interactions the app keeps for the integration's Download diagnostics, from 10 to 100. Leave it empty to keep the number you have, 25 on a new install. Lower numbers remove the oldest records first.
+  install_integration:
+    name: Install the Codex integration
+    description: On each start, install or update the Codex integration in /config/custom_components/codex_cli from the copy in this app, so the two always have the same version. After the app writes the folder, a notification asks you to restart Home Assistant. A folder installed another way (Marketplace, HACS or by hand), or changed after the app wrote it, is never changed. Turn this off to install and update the integration yourself. Uninstalling the app does not remove the integration.

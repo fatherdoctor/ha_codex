@@ -79,15 +79,26 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
+      - name: Bundle the integration into the app image
+        # The app installs this copy in /config at start (codex-cli-worker/integration/README.md).
+        run: |
+          rm -rf codex-cli-worker/integration/codex_cli
+          cp -R custom_components/codex_cli codex-cli-worker/integration/codex_cli
       - name: Build without publishing
         run: docker build --build-arg BUILD_ARCH=${{ matrix.arch }} --build-arg BUILD_VERSION=pr-test -t verification-test codex-cli-worker
+      - name: Check the bundled integration matches the app version
+        run: |
+          app="$(grep -E '^version:' codex-cli-worker/config.yaml | sed -E 's/^version:[[:space:]]*"?([^"]+)"?/\1/')"
+          bundled="$(docker run --rm --entrypoint python3 verification-test -c 'import json; print(json.load(open("/usr/share/ha_codex/integration/codex_cli/manifest.json"))["version"])')"
+          test "$app" = "$bundled" || { echo "Bundled integration $bundled does not match app $app" >&2; exit 1; }
+          docker run --rm --entrypoint test verification-test -f /integration_sync.py
       - name: Smoke test packaged Chromium
         run: |
           docker run --rm --entrypoint /usr/bin/chromium-browser verification-test --version
           docker run --rm --entrypoint node verification-test -e 'const {chromium}=require("playwright-core"); (async()=>{const browser=await chromium.launch({executablePath:"/usr/bin/chromium-browser",headless:true,chromiumSandbox:false,args:["--disable-dev-shm-usage"]}); const page=await browser.newPage(); await page.setContent("<h1>Verification</h1>"); if(await page.locator("h1").innerText()!=="Verification") throw Error("Render failed"); await browser.close();})().catch(e=>{console.error(e);process.exit(1);})'
       - name: Smoke test packaged historical data tools
         run: |
-          docker run --rm --workdir / --entrypoint python3 verification-test -c 'import server, ha_data, ha_data_mcp; assert {tool["name"] for tool in ha_data_mcp.TOOLS} == {"history", "statistics"}; assert server.ha_data is not server.verification'
+          docker run --rm --workdir / --entrypoint python3 verification-test -c 'import server, ha_data, ha_data_mcp; assert {tool["name"] for tool in ha_data_mcp.TOOLS} == {"history", "statistics", "exchange_info"}; assert {tool["name"] for tool in ha_data_mcp.STATUS_TOOLS} == {"ask_owner", "report_failure"}; assert server.ha_data is not server.verification'
       - name: Test packaged SSH with single-command approvals in both sandbox modes
         # Paramiko is a test-only SSH target in the disposable container.
         # The runtime image installs only the OpenSSH client, not an SSH server.

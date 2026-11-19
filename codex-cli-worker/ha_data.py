@@ -67,6 +67,8 @@ class HomeAssistantData:
         self.export_root = Path(export_root).absolute()
         self.export_dirs = {}
         self.export_bytes = {}
+        self.exchange_notes = {}
+        self.diagnostic_failures = 0
 
     def begin(self, task_id):
         """Replace the previous turn's credential and reset its independent data-query budget."""
@@ -84,11 +86,16 @@ class HomeAssistantData:
     def end(self, task_id):
         """Revoke access and remove the exchange's temporary files, including on cancellation."""
         with self.lock:
-            for records in (self.capabilities, self.turns, self.queries, self.export_bytes):
+            for records in (self.capabilities, self.turns, self.queries, self.export_bytes, self.exchange_notes):
                 records.pop(task_id, None)
             directory = self.export_dirs.pop(task_id, None)
             if directory is not None:
                 self.remove_exports(directory)
+
+    def set_exchange_info(self, task_id, info):
+        """Keep what exchange_info returns for the task's running exchange; end() removes it."""
+        with self.lock:
+            self.exchange_notes[task_id] = dict(info)
 
     def remove_exports(self, directory):
         """Delete only a direct export directory; never follow a replacement symlink."""
@@ -133,7 +140,7 @@ class HomeAssistantData:
     def validate(self, payload):
         """Validate every field before any network call and bound IDs, time range and output points."""
         operation = payload.get("operation")
-        tool = next((tool for tool in TOOLS if tool["name"] == operation), None)
+        tool = next((tool for tool in TOOLS if tool["name"] == operation and operation in ("history", "statistics")), None)
         if tool is None or set(payload) - {"operation", "capability", *tool["inputSchema"]["properties"]}:
             raise DataError("Only history and statistics arguments are supported")
         key = "entity_ids" if operation == "history" else "statistic_ids"
@@ -181,6 +188,8 @@ class HomeAssistantData:
             task_id = next((key for key, value in self.capabilities.items() if hmac.compare_digest(value, supplied)), None)
         if not task_id or not self.active(task_id, supplied):
             raise DataError("Data capability expired")
+        if payload.get("operation") == "exchange_info":
+            return self.read_exchange_info(task_id, payload)
         if not self.execution_lock.acquire(blocking=False):
             return {"status": "unavailable", "message": "Another historical data query is running"}
         try:
@@ -193,6 +202,15 @@ class HomeAssistantData:
                         if self.queries.get(task_id, MAX_QUERIES) >= MAX_QUERIES:
                             raise DataError("Historical data query limit reached for this turn")
                         self.queries[task_id] += 1
+                try:
+                    observer = getattr(self.worker, 'diagnostics', None)
+                    if observer is not None:
+                        ids = query.get('entity_ids') or query.get('statistic_ids') or []
+                        for domain in sorted({x.split('.', 1)[0] for x in ids}):
+                            observer.event(task_id, {'kind': 'ha_read', 'operation': operation, 'domain': domain}, entities=ids)
+                except Exception:
+                    self.diagnostic_failures += 1
+                    # Only a count is retained; exception text may contain private input.
                 result = self.history(query) if operation == "history" else self.statistics(query)
                 encoded = json.dumps(result, allow_nan=False)
                 # Bare configured credentials may occur as sensor values, not just in labelled fields.
@@ -217,6 +235,16 @@ class HomeAssistantData:
             return result
         finally:
             self.execution_lock.release()
+
+    def read_exchange_info(self, task_id, payload):
+        """Return the running exchange's notes. It reads no Home Assistant data and has no query budget."""
+        if set(payload) - {"operation", "capability"}:
+            raise DataError("exchange_info takes no arguments")
+        with self.lock:
+            info = self.exchange_notes.get(task_id)
+        if info is None:
+            return {"status": "unavailable", "message": "No details are recorded for this exchange"}
+        return {"status": "observed", "operation": "exchange_info", **info}
 
     def save_result(self, task_id, capability, operation, query, result, encoded):
         """Atomically save redacted data for this turn and return a small model-visible receipt.

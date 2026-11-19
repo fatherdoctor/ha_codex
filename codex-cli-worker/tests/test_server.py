@@ -22,6 +22,12 @@ assert SPEC is not None and SPEC.loader is not None
 server = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(server)
 
+# When a chat stops waiting, the worker starts a thread that dismisses its notice in Home Assistant. No worker test
+# may reach Home Assistant, so every test that imports this module gets a stand-in that starts nothing.
+# tests/test_wait_notice.py tests the dismissal itself and the real thread, kept here as dismiss_wait_notice_async.
+dismiss_wait_notice_async = server.dismiss_wait_notice_async
+server.dismiss_wait_notice_async = lambda task_id: None
+
 
 class SessionIdParsingTests(unittest.TestCase):
     """The session id the worker takes from Codex's JSON events, and how a resumed task ends."""
@@ -646,14 +652,15 @@ class ModelSelectionTests(unittest.TestCase):
         )
 
     def test_home_assistant_api_url_defaults_to_core(self) -> None:
-        """config.yaml and the worker default the API URL to Home Assistant's own address, where HA_TOKEN works."""
+        """An empty override must not invent a Core port before Supervisor discovery."""
         config = server.yaml.safe_load(
             (SERVER_PATH.parent / "config.yaml").read_text(encoding="utf-8")
         )
 
-        self.assertEqual(config["options"]["ha_url"], "http://homeassistant:8123")
-        self.assertEqual(server.DEFAULT_OPTIONS["ha_url"], "http://homeassistant:8123")
-        self.assertEqual(server.codex_ha_url(config["options"]), "http://homeassistant:8123")
+        self.assertEqual(config["options"]["ha_url"], "")
+        self.assertEqual(server.DEFAULT_OPTIONS["ha_url"], "")
+        with patch.object(server, "core_address", server.CoreAddress()):
+            self.assertIsNone(server.codex_ha_url(config["options"]))
         translations = server.yaml.safe_load(
             (SERVER_PATH.parent / "translations" / "en.yaml").read_text(encoding="utf-8")
         )
@@ -1102,7 +1109,7 @@ class TaskCancellationTests(unittest.TestCase):
                 patch.object(server, "get_task_dir", return_value=Path(temp_dir) / task_id),
                 patch.object(server, "save_task_index"),
                 patch.object(server, "api_token", return_value="test-token"),
-                patch.object(server, "build_prompt", return_value="prompt"),
+                patch.object(server, "page_message", return_value="prompt"),
                 patch.object(
                     server,
                     "read_options",
@@ -1206,7 +1213,7 @@ class TaskCancellationTests(unittest.TestCase):
                 patch.object(server, "get_task_dir", return_value=Path(temp_dir) / task_id),
                 patch.object(server, "save_task_index"),
                 patch.object(server, "api_token", return_value="test-token"),
-                patch.object(server, "build_prompt", return_value="prompt"),
+                patch.object(server, "page_message", return_value="prompt"),
                 patch.object(
                     server,
                     "read_options",

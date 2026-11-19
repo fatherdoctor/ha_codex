@@ -68,6 +68,15 @@ class VerificationTests(unittest.TestCase):
         self.engine.begin("chat")
         self.assertEqual(server.tasks["chat"]["verification"], [])
 
+    def test_find_runs_as_a_check_and_is_recorded_in_this_turn(self):
+        """Look an entity up by name through the same capability, limits and record as every other check."""
+        states = [{"entity_id": "light.kitchen_ceiling", "state": "on", "attributes": {"friendly_name": "Kitchen Ceiling"}}]
+        with patch("verification.fetch_states", return_value=states), patch.object(server, "ha_token", return_value="synthetic"):
+            result = self.engine.dispatch({"capability": self.capability, "operation": "find", "name": "kitchen ceiling"})
+        self.assertEqual(result["matches"], [{"entity_id": "light.kitchen_ceiling", "name": "Kitchen Ceiling", "state": "on"}])
+        recorded = server.tasks["chat"]["turns"][0]["verification"]
+        self.assertEqual([(check["operation"], check["status"]) for check in recorded], [("find", "observed")])
+
     def test_expired_check_cannot_record_results_in_a_finished_or_replaced_turn(self):
         """Discard the result of a check whose turn ended, completed, or was replaced while it ran."""
         for outcome in ("ended", "completed", "replaced"):
@@ -291,11 +300,13 @@ class VerificationTests(unittest.TestCase):
 
     def test_token_option_comes_with_the_address_it_works_at(self):
         """With the HA_TOKEN option Codex also gets HA_URL: Core's own address, or the ha_url option when it names another."""
-        with patch.dict(os.environ, {"HA_URL": "http://stale.example.test", "HA_TOKEN": "inherited"}):
-            # Without the option, neither variable reaches Codex, not even one the worker inherited.
+        with patch.object(server, "core_address", server.CoreAddress()), patch.dict(os.environ, {"HA_URL": "http://stale.example.test", "HA_TOKEN": "inherited"}):
+            # Before discovery, neither stale inherited variable reaches Codex.
             environment = server.codex_env()
             self.assertNotIn("HA_TOKEN", environment)
             self.assertNotIn("HA_URL", environment)
+            server.core_address.refresh({}, 'synthetic', fetch=lambda _: {'result': 'ok', 'data': {'port': 8123, 'ssl': False}})
+            self.assertIn('HA_URL', server.codex_env())
             addresses = {
                 None: "http://homeassistant:8123",
                 "  ": "http://homeassistant:8123",

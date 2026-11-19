@@ -1,6 +1,6 @@
 # Contributing to Codex for Home Assistant
 
-Thank you for your interest in improving Codex for Home Assistant. I welcome bug reports, documentation updates, and code contributions.
+Thank you for your interest in improving Codex for Home Assistant.
 
 This project has two main parts:
 
@@ -24,9 +24,18 @@ When reporting a bug, please include:
 - Whether you installed through HACS, manually, or from the development branch.
 - Your architecture, such as `amd64` or `aarch64`.
 - Clear steps to reproduce the issue.
-- Relevant logs from Home Assistant or the Codex CLI Worker app.
+- The date and time of the failed interaction, with your time zone.
+- Relevant logs (see "Getting your logs" below).
 - What you expected to happen.
 - What actually happened.
+
+### Getting your logs
+
+Logs are usually the fastest way to find a bug. On Home Assistant 2026.11, collect whichever of these apply:
+
+- **Worker app log:** go to Settings, Apps, Codex for Home Assistant, then the Log tab. Copy the lines around the time of the failure.
+- **Integration diagnostics:** go to Settings, Devices & services, Codex, open the three-dot menu, and choose Download diagnostics. Attach the downloaded file to the issue. It carries the anonymized details of the last interactions; read the whole file before you post it.
+- **Home Assistant Core log:** go to Settings, System, Logs and type `codex` in the filter box. Copy the matching lines.
 
 Please remove secrets, tokens, URLs, device codes, personal paths, and private Home Assistant configuration before sharing logs or screenshots.
 
@@ -118,6 +127,12 @@ For worker app changes, verify that the app can:
 
 For documentation-only changes, please check that links, paths, and examples are accurate.
 
+Codex is reached three ways: the chat page, the ChatGPT app through remote control, and the `codex_cli.start_task`
+action. A fix that works on one of them may be missing on another. [Ways in](codex-cli-worker/DOCS.md#ways-in) lists
+the Home Assistant tools each one gets, and `codex-cli-worker/tests/test_surface_matrix.py` checks that list against
+the real launch of each. If your change adds, removes or moves a tool, update both. In the pull request, name the ways
+in that you tested.
+
 Automated tests do not cover every installed dashboard, device, or HAOS kernel. Include clear manual test notes for behavior the suite does not exercise.
 
 ## Security Notes
@@ -151,22 +166,47 @@ Use plain, direct language and include Home Assistant examples where they make t
 
 ## Releases
 
-Container images for the worker app are built through GitHub Actions and published to GitHub Container Registry.
+The release workflow builds the HACS ZIP and the app images when a version tag is pushed. Ordinary pushes to
+`main` run validation and tests only. They do not make a release or publish images. A change to documentation
+only does not need a new version.
 
-Stable users should use the default repository URL:
+Version bumps happen only in the release pull request, never in a feature merge. The add-on store offers an update
+as soon as `config.yaml` on `main` names a newer version, so a version raised in a feature pull request offers a
+release that does not exist yet. A feature pull request adds its notes under the `## <version> (unreleased)` heading
+in `codex-cli-worker/CHANGELOG.md` and leaves both version lines as they are on `main`. The release pull request is
+the one whose title starts with `Release <version>`, for example `Release 0.3.6`; the
+[Version rule workflow](.github/workflows/version-rule.yml) runs `scripts/check_version_bump.py` on every pull request
+to `main` and fails any other pull request that changes either version line. If a wrong version reaches `main`, the
+pull request that sets it back fails this check; the maintainer merges it anyway and its text says why.
 
-```text
-https://github.com/fatherdoctor/ha_codex
-```
+A stable version is released from `main`. A beta is released from the `beta` branch, for the Home Assistant OS
+test machine only; there is no public beta. The version rules, what a beta install is, and how `beta` follows `main`
+are in [Updates and rollback](docs/updates-and-rollback.md#versions).
 
-For optional worker development and canary testing, use the `dev` branch:
+### A stable release
 
-```text
-https://github.com/fatherdoctor/ha_codex#dev
-```
+1. Open a pull request titled `Release <version>`. In it, set the same version in `codex-cli-worker/config.yaml` and
+   `custom_components/codex_cli/manifest.json`.
+2. Add the notes under `## <version> (unreleased)` in `codex-cli-worker/CHANGELOG.md`. Validation of branches and
+   pull requests accepts that heading. Tagging and the release build refuse it.
+3. Remove ` (unreleased)` from the heading. Merge to `main` and wait for green CI.
+4. Install that commit on a Home Assistant OS test machine and test it. Then add the test record
+   `release/lab-passes/v<version>.json` on `main`.
+5. Tag and push: `python3 scripts/fork_release.py tag <version> --push`. The script tags the tested commit.
 
-To prepare a release, set the same version in `codex-cli-worker/config.yaml` and `custom_components/codex_cli/manifest.json` and add its notes to `codex-cli-worker/CHANGELOG.md`. Until the version is released, its changelog heading reads `## <version> (unreleased)`; validation of branches and pull requests accepts that, but tagging and the release build (a tag, or `build_hacs_release.py --release`) refuse it, so the mark comes off in the commit that is lab-tested and tagged. A release is tagged only after it passes on a Home Assistant OS test machine, with `scripts/fork_release.py`; a bad release is undone by releasing the last good code under the next version. Both are described in [Updates and rollback](docs/updates-and-rollback.md). The release workflow checks version alignment, attaches the HACS ZIP, and publishes worker images. Ordinary pushes to `main` run validation and tests without creating a release or publishing images. Documentation-only changes do not need a version bump.
+### A beta for the test machine
 
-## Code of Conduct
+1. Check out `beta` and merge `main` into it. If the branch does not exist yet, make it from `main` and set the
+   name in `repository.yaml` to `Codex for Home Assistant (beta)`.
+2. Do steps 1 to 4 above with a beta version, for example `0.2.0-beta.1`, on `beta` instead of `main`. The test
+   record goes on `beta`.
+3. Tag and push from the `beta` checkout: `python3 scripts/fork_release.py tag 0.2.0-beta.1 --push`.
 
-Please be respectful, constructive, and patient. This project is intended to help Home Assistant users work more safely and effectively with their own configurations, and contributions should support that goal.
+How to undo a bad release is in [Updates and rollback](docs/updates-and-rollback.md).
+
+## Working together
+
+- Be respectful and specific. Say what you saw, what you expected, and what you tried.
+- Never post tokens, device codes, private logs, or personal configuration in an issue, pull request, or comment. Remove them first, and tell a maintainer if you posted one by mistake.
+- Maintainers may close, lock, or limit a thread that harms the project or the people in it.
+- Security problems go through [SECURITY.md](SECURITY.md), not a public issue.

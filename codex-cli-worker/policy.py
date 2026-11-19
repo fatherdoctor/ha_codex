@@ -6,16 +6,18 @@ every exchange. Nothing in /config, the app options or a chat message can
 loosen it: a setting the policy does not allow stops the worker at startup and
 refuses each task with a "needs support" state.
 
-The house rules for Codex (``policy/house-rules.md``, ``AGENTS.md`` in the image) are copied from
-the image into Codex's home folder at every start, so an edit made there by a
-task does not survive a restart. ``/config/AGENTS.md`` stays the owner's own
-notes, which Codex reads after these rules.
+Owner instructions remain in /config/AGENTS.md; no house rules ship with the app.
+The starter text a new install gets there (server.py: write_starter_agents_file)
+is an owner file from then on and is not part of this policy.
 """
 
 from __future__ import annotations
 
 import json
-import shutil
+import errno
+import hashlib
+import os
+import stat
 from pathlib import Path
 from typing import Any
 
@@ -31,27 +33,59 @@ def _shipped(name: str, source_name: str) -> Path:
 
 
 POLICY_PATH = _shipped("policy.json", "policy.json")
-# Kept as house-rules.md in the source tree, where AGENTS.md is a contributor's own file (and git-ignored).
-INSTRUCTIONS_PATH = _shipped("AGENTS.md", "house-rules.md")
+# Public fingerprint of the removed bundled text, for upgrade cleanup only.
+LEGACY_INSTRUCTIONS_SHA256 = frozenset({
+    (
+        '18215b691022cb4b'
+        'c23dcc1fef71bf2a'
+        '5ac60d6ce9a6bcd2'
+        'f9754deb729662b2'
+    ),
+    (
+        '9f75e46225425a42'
+        'e9b543f5d19abe4b'
+        '6c567657b1e53a6d'
+        '7a28f20290bd17a7'
+    ),
+    (
+        'ac4e2a269dcd7f0b'
+        '3f0edd9f569cb39c'
+        '95f02724b20221ec'
+        'ae9fc98df217503f'
+    ),
+})
 
 # Used only when the policy file is missing from the image, which is itself a
 # "needs support" fault: the defaults are the strict ones.
 STRICT_POLICY: dict[str, Any] = {
     "allowed_sandbox_modes": ["workspace-write", "read-only"],
-    "approval_policy": "on-request",
-    "approvals_reviewer": "user",
     "approvals_require_admin": True,
 }
 
 NEEDS_SUPPORT = "needs_support"
 
+# The four permission modes of the ChatGPT app, with the same names. Each one is
+# only the Codex settings below, passed when the worker starts Codex for a chat
+# turn. The worker adds no check of its own to any of them (David 2026-11-17:
+# "just pass the flags"). The app option codex_sandbox can narrow the sandbox of
+# Default and Auto-review to read-only (mode_settings).
+MODES: dict[str, dict[str, str]] = {
+    "default": {"sandbox": "workspace-write", "approval_policy": "on-request", "approvals_reviewer": "user"},
+    "auto-review": {"sandbox": "workspace-write", "approval_policy": "on-request",
+                    "approvals_reviewer": "auto_review"},
+    "read-only": {"sandbox": "read-only", "approval_policy": "on-request", "approvals_reviewer": "user"},
+    "full-access": {"sandbox": "danger-full-access", "approval_policy": "never", "approvals_reviewer": "user"},
+}
+DEFAULT_MODE = "default"
+FULL_ACCESS_MODE = "full-access"
+
 
 class PolicyError(ValueError):
-    """The protected policy file is missing, unreadable or loosens a fixed rule."""
+    """The protected policy file is missing, unreadable or malformed."""
 
 
 def load_policy(path: Path | None = None) -> dict[str, Any]:
-    """Return the protected policy; raise PolicyError when it cannot be read or weakens a fixed rule."""
+    """Return the protected policy; raise PolicyError when it cannot be read."""
     path = path or POLICY_PATH
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -65,52 +99,57 @@ def load_policy(path: Path | None = None) -> dict[str, Any]:
     modes = policy["allowed_sandbox_modes"]
     if not isinstance(modes, list) or not modes or not all(isinstance(mode, str) for mode in modes):
         raise PolicyError("allowed_sandbox_modes must be a non-empty list of sandbox modes.")
-    # These hold whatever the file says: the fork never ships an approval-free mode.
-    if "danger-full-access" in modes:
-        raise PolicyError("The protected policy may not allow danger-full-access.")
-    if policy["approval_policy"] == "never":
-        raise PolicyError('The protected policy may not set approval_policy to "never".')
-    if policy["approvals_reviewer"] != "user":
-        raise PolicyError('The protected policy must keep approvals_reviewer set to "user".')
-    if policy["approvals_require_admin"] is not True:
-        raise PolicyError("The protected policy must keep approvals_require_admin on.")
     return policy
 
 
-def effective_policy(options: dict[str, Any], policy: dict[str, Any]) -> dict[str, str]:
-    """Return the sandbox mode and approval policy an exchange would run with under these options."""
-    return {
-        "sandbox": str(options.get("codex_sandbox") or "workspace-write"),
-        "approval_policy": str(policy["approval_policy"]),
-        "approvals_reviewer": str(policy["approvals_reviewer"]),
-    }
+def mode_settings(mode: str, app_sandbox: str = "workspace-write") -> dict[str, str]:
+    """Return the Codex settings of one permission mode; an unknown mode gets Default's.
+
+    The app option codex_sandbox (app_sandbox) stays the limit for every chat:
+    when it is read-only, a Default or Auto-review chat runs in the read-only
+    sandbox too. Full access is the owner's choice for one chat (server.py
+    allows it only while the Full access switch is on) and keeps its own
+    settings.
+    """
+    settings = dict(MODES.get(mode, MODES[DEFAULT_MODE]))
+    if app_sandbox == "read-only" and settings["sandbox"] == "workspace-write":
+        settings["sandbox"] = "read-only"
+    return settings
 
 
 def policy_problem(options: dict[str, Any], path: Path | None = None) -> str:
-    """Return why these options may not run under the protected policy, or an empty string when they may."""
+    """Return why the app's sandbox option may not run under the protected policy, or an empty string."""
     try:
         policy = load_policy(path)
     except PolicyError as exc:
         return str(exc)
-    effective = effective_policy(options, policy)
-    if effective["sandbox"] not in policy["allowed_sandbox_modes"]:
+    sandbox = str(options.get("codex_sandbox") or "workspace-write")
+    if sandbox not in policy["allowed_sandbox_modes"]:
         allowed = " or ".join(policy["allowed_sandbox_modes"])
-        return (f'The sandbox mode "{effective["sandbox"]}" is not allowed in this app. '
+        return (f'The sandbox mode "{sandbox}" is not allowed in this app. '
                 f"Choose {allowed} in the app's settings and restart it.")
-    if effective["approval_policy"] == "never":
-        return 'The effective approval policy is "never", which this app refuses.'
     return ""
 
 
-def install_instructions(codex_home: Path, source: Path | None = None) -> bool:
-    """Copy the protected house rules into Codex's home folder, replacing any edited copy; return whether one was copied."""
-    source = source or INSTRUCTIONS_PATH
+def remove_legacy_instructions(codex_home: Path) -> bool:
+    """Remove only an exact old bundled copy; preserve owner edits and symlinks."""
     target = codex_home / "AGENTS.md"
-    if not source.is_file():
+    try:
+        fd = os.open(target, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
         return False
-    if target.exists():
-        target.chmod(0o600)
-        target.unlink()
-    shutil.copyfile(source, target)
-    target.chmod(0o444)
+    except OSError as error:
+        if error.errno == errno.ELOOP:  # Never follow a symlink.
+            return False
+        raise
+    with os.fdopen(fd, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size > 16384:
+            return False
+        if hashlib.sha256(stream.read()).hexdigest() not in LEGACY_INSTRUCTIONS_SHA256:
+            return False
+    current = target.lstat()
+    if (info.st_dev, info.st_ino) != (current.st_dev, current.st_ino):
+        return False
+    target.unlink()
     return True

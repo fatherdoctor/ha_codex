@@ -31,6 +31,13 @@ approval for shell networking, while `danger-full-access` does not. Review each
 approved command and keep connections short-lived. See [SSH setup and
 limits](codex-cli-worker/DOCS.md#ssh-connections).
 
+From 0.3.6 the app has no command check of its own: Codex's permission modes and the
+sandbox are the protection. A command you allow once runs outside the sandbox and can
+read private files or change the app's settings, and the app does not scan what Codex
+writes in `/config`. Read each permission card before you allow it.
+
+To check these protections in the code, see [AUDITING.md](AUDITING.md).
+
 ## Supported Versions
 
 Security fixes are intended for the latest published release and the current `main` branch.
@@ -41,9 +48,9 @@ Development and canary testing may happen on the `dev` branch. Older releases ar
 
 Please do not open a public issue with exploit details, working proof-of-concept code, private logs, tokens, device codes, or personal Home Assistant configuration.
 
-If GitHub private vulnerability reporting is available for this repository, use the **Report a vulnerability** button on the Security tab.
+Report a vulnerability privately: open the repository's **Security** tab, choose **Report a vulnerability**, and describe the issue there. Only the maintainers can see the report.
 
-If private vulnerability reporting is not available, open a minimal public issue that says you have a security concern and asks the maintainer to arrange private disclosure. Do not include sensitive details in that issue.
+If the button is missing, open a minimal public issue that says you have a security concern and asks for a private channel. Put no details in that issue.
 
 ## What to Include
 
@@ -75,4 +82,4 @@ Test security reports and fixes only in an environment you own or have permissio
 
 ## Public Disclosure
 
-Please give the maintainer reasonable time to investigate and fix confirmed vulnerabilities before publishing details publicly. Coordinated disclosure helps protect users while a fix is prepared.
+Please give the maintainers reasonable time to investigate and fix confirmed vulnerabilities before publishing details publicly. Coordinated disclosure helps protect users while a fix is prepared.

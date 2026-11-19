@@ -45,13 +45,22 @@ def main():
     with tempfile.TemporaryDirectory(prefix="codex-chat-preview-") as temp:
         root = Path(temp)
         server.DATA_ROOT = root
+        server.CONFIG_ROOT = root
+        # Full access keeps its setting and writes the requirements in the temporary folder, never in /data or /etc.
+        server.full_access.SETTING_PATH = root / "full_access.json"
+        server.full_access.REQUIREMENTS_PATH = root / "codex-etc" / "requirements.toml"
+        from interaction_diagnostics import RollingDiagnostics, InteractionRecorder
+        server.interaction_logs = RollingDiagnostics(root / "interaction-diagnostics.json")
+        server.diagnostics = InteractionRecorder(server.interaction_logs, "0.1.81.2", "0.166.0")
+        server.diagnostics.begin("synthetic", "addon_page", "gpt-6.1-sol")
+        server.diagnostics.event("synthetic", {"kind": "tool", "name": "read", "result": "done"})
+        server.diagnostics.finish("synthetic", "done")
         server.task_root = lambda: root / "tasks"
         server.TASK_STATE_FILE = root / "index.json"
         server.MESSAGE_QUEUE_FILE = root / "queue.json"
         server.AGENTS_PATH = root / "AGENTS.md"
         server.CODEX_HOME = root / "codex-home"
         server.api_token = lambda: "preview-only"
-        server.PAUSE_FILE = root / "paused.json"
         signed_in = {"status_ok": True, "message": "Signed in (local preview)"}
         server.auth_status_payload = lambda: {
             "status": "authenticated", "message": "Signed in (local preview)", "pending": False, "codex_login": signed_in,
@@ -130,6 +139,11 @@ def main():
                 {"type": "item.completed", "item": {"id": "item_4", "type": "agent_message",
                                                     "text": json.dumps({"status": "completed", "summary": text, "question": "", "details": ""})}},
             ]
+
+        @server.app.post('/fixture/studio-pairing')
+        def studio_pairing():
+            from remote_control import qr_data_url
+            return {'qr': qr_data_url('https://chatgpt.com/codex/pair?pairing_code=SAMPLE-NOT-VALID')}
 
         release = threading.Event()
 
@@ -211,17 +225,35 @@ def main():
                     session.thread_id, session.turn_id = session_id, "preview-native"
                     file_permission = (reply or prompt).startswith("Request permission to rename")
                     hidden_permission = (reply or prompt).startswith("Request permission with hidden")
-                    if file_permission:
-                        session.receive({"method": "item/started", "params": {
-                            "threadId": session_id, "turnId": "preview-native", "item": {
-                                "id": "preview-command", "type": "fileChange", "changes": [{
-                                    "path": "/other/original.yaml", "diff": "-name: Before\n+name: After",
-                                    "kind": {"type": "update", "move_path": "/other/renamed.yaml"}}]}}})
-                    session.receive({"id": 0, "method": "item/fileChange/requestApproval" if file_permission else "item/commandExecution/requestApproval", "params": {
-                        "threadId": session_id, "turnId": "preview-native", "itemId": "preview-command",
-                        "command": "tool --password 'private password'" if hidden_permission else "curl '$HA_URL/api/history/period' -H 'Authorization: Bearer $HA_TOKEN'\n# <img src=x onerror=alert(1)>",
-                        "cwd": "/config", "reason": "Read historical sensor states from Home Assistant", "startedAtMs": 1,
-                    }})
+                    if hidden_permission:
+                        command = "tool --password 'private password'"
+                    elif (reply or prompt).startswith("Request permission to read the energy history"):
+                        # The README screenshot shows an ordinary command, without the markup the safety tests use.
+                        command = 'curl "$HA_URL/api/history/period?filter_entity_id=sensor.energy" -H "Authorization: Bearer $HA_TOKEN"'
+                    else:
+                        command = "curl '$HA_URL/api/history/period' -H 'Authorization: Bearer $HA_TOKEN'\n# <img src=x onerror=alert(1)>"
+                    if (reply or prompt).startswith("Request permission to call"):
+                        # Codex's own request before a tool call, as Codex 0.166.0 sends it (CX-SIMPLE.B). A clipped
+                        # request carries an argument longer than the page shows, so it has no Allow button.
+                        text = "x" * 40000 if "clipped" in (reply or prompt) else "Dinner is ready.\n<img src=x onerror=alert(1)>"
+                        session.receive({"id": 0, "method": "mcpServer/elicitation/request", "params": {
+                            "threadId": session_id, "turnId": "preview-native", "serverName": "home_assistant_call",
+                            "mode": "form", "message": 'Allow the home_assistant_call MCP server to run tool "call"?',
+                            "requestedSchema": {"type": "object", "properties": {}},
+                            "_meta": {"codex_approval_kind": "mcp_tool_call", "tool_params": {
+                                "service": "notify.notify", "data": {"title": "Kitchen", "message": text}}}}})
+                    else:
+                        if file_permission:
+                            session.receive({"method": "item/started", "params": {
+                                "threadId": session_id, "turnId": "preview-native", "item": {
+                                    "id": "preview-command", "type": "fileChange", "changes": [{
+                                        "path": "/other/original.yaml", "diff": "-name: Before\n+name: After",
+                                        "kind": {"type": "update", "move_path": "/other/renamed.yaml"}}]}}})
+                        session.receive({"id": 0, "method": "item/fileChange/requestApproval" if file_permission else "item/commandExecution/requestApproval", "params": {
+                            "threadId": session_id, "turnId": "preview-native", "itemId": "preview-command",
+                            "command": command,
+                            "cwd": "/config", "reason": "Read historical sensor states from Home Assistant", "startedAtMs": 1,
+                        }})
                     answered.wait(120)
                     session.close()
                     with server.lock:

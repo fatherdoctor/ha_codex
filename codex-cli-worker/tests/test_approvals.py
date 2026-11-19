@@ -13,7 +13,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from test_server import server
-from approvals import AppServerSession, COMMAND_APPROVAL, FILE_APPROVAL, DISPLAY_LIMIT
+from approvals import AppServerSession, COMMAND_APPROVAL, FILE_APPROVAL, DISPLAY_LIMIT, REQUEST_LIMIT
 
 
 ADMIN_ID = "a" * 32
@@ -186,35 +186,6 @@ class ApprovalTests(unittest.TestCase):
         self.session.decide(approval_id, "allow")
         self.assertEqual(self.writer.messages()[-1]["result"], {"decision": "accept"})
 
-    def test_change_to_the_protected_policy_can_only_be_denied(self):
-        """A file change to the app's policy, its rules or its settings has no Allow, even when fully shown."""
-        for index, path in enumerate(["/usr/share/ha_codex/policy.json", "/data/codex-home/AGENTS.md", "/data/options.json"]):
-            self.session.receive({"method": "item/started", "params": {
-                "threadId": "thread", "turnId": "turn", "item": {"id": "item", "type": "fileChange",
-                    "changes": [{"path": path, "kind": {"type": "update"}, "diff": "-old\n+new"}]}}})
-            approval_id = self.request(method=FILE_APPROVAL, request_id=index)
-            self.assertFalse(self.records[-1]["can_allow"])
-            self.assertIn("permission policy", self.records[-1]["note"])
-            self.assertEqual(self.records[-1]["prompt_kind"], "file_change")
-            with self.assertRaises(ValueError):
-                self.session.decide(approval_id, "allow")
-            self.session.decide(approval_id, "deny")
-
-    def test_command_naming_the_protected_policy_can_only_be_denied(self):
-        """A command allowed once runs outside the sandbox, so one that names the policy or rules has no Allow."""
-        for index, command in enumerate([
-            "sed -i 's/never/x/' /usr/share/ha_codex/AGENTS.md",
-            "chmod u+w '/usr/share/ha_codex'/policy.json",
-            "cat /usr//share/ha_c*/policy.json",
-            "cd /data/codex-home && sed -i 1d AGENTS.md",
-            "rm /data/codex-home/*",
-        ]):
-            approval_id = self.request(request_id=index, command=command)
-            self.assertFalse(self.records[-1]["can_allow"], command)
-            self.assertIn("permission policy", self.records[-1]["note"])
-            with self.assertRaises(ValueError):
-                self.session.decide(approval_id, "allow")
-            self.session.decide(approval_id, "deny")
 
     def test_masked_file_diff_or_path_cannot_be_allowed(self):
         """A masked diff or path cannot hide an edit behind an Allow button."""
@@ -313,6 +284,65 @@ class ApprovalTests(unittest.TestCase):
         self.assertTrue(self.session.error)
         self.assertEqual(self.records[-1]["status"], "expired")
 
+    def test_request_before_the_turn_starts_is_refused(self):
+        """Before the turn starts, a request with an empty turn id does not match the empty active turn."""
+        early = AppServerSession(
+            Transport(), lock=threading.RLock(),
+            thread_params={"sandbox": "workspace-write", "approvalPolicy": "on-request", "approvalsReviewer": "user"},
+            turn_params={"input": []}, on_event=self.events.append,
+            on_approvals=lambda records: setattr(self, "records", records),
+            on_final=self.finals.append, is_active=lambda: True, redact=lambda text: text,
+        )
+        early.start()
+        early.receive({"id": "worker-1", "result": {}})
+        early.receive({"id": "worker-2", "result": {
+            "thread": {"id": "thread"}, "approvalPolicy": "on-request", "approvalsReviewer": "user"}})
+        self.assertEqual(early.turn_id, "")
+        for request_id, method in enumerate((COMMAND_APPROVAL, FILE_APPROVAL), 7):
+            with self.subTest(method=method), self.assertRaises(ValueError):
+                early.receive({"id": request_id, "method": method, "params": {
+                    "threadId": "thread", "turnId": "", "itemId": "item", "command": "ls", "cwd": "/config"}})
+        self.assertFalse(self.records)
+        self.assertFalse({7, 8} & {message.get("id") for message in early.writer.messages()})
+
+    def test_repeated_request_id_is_an_error_also_at_the_request_limit(self):
+        """At the limit a new request is declined, but a repeated live request id still stops the exchange."""
+        for request_id in range(REQUEST_LIMIT):
+            self.request(request_id=request_id)
+        self.assertEqual(len(self.records), REQUEST_LIMIT)
+        sent = len(self.writer.messages())
+        with self.assertRaises(ValueError):
+            self.request(request_id=0)
+        self.assertEqual(len(self.writer.messages()), sent)
+        self.request(request_id=REQUEST_LIMIT)
+        self.assertEqual(self.writer.messages()[-1], {"id": REQUEST_LIMIT, "result": {"decision": "decline"}})
+        self.assertEqual(len(self.records), REQUEST_LIMIT)
+
+    def test_plan_update_becomes_one_to_do_step_and_a_malformed_one_is_ignored(self):
+        """Codex's plan is shown as a to-do step; an update of the wrong shape or turn changes nothing."""
+        def plan(entries, *, turn="turn", thread="thread"):
+            self.session.receive({"method": "turn/plan/updated", "params": {
+                "threadId": thread, "turnId": turn, "plan": entries}})
+
+        plan([{"step": "Read the automation", "status": "completed"}, {"step": "Fix the trigger", "status": "inProgress"}])
+        self.assertEqual(self.events[-1], {"type": "item.updated", "item": {
+            "id": "app-server:plan", "type": "todo_list",
+            "items": [{"text": "Read the automation", "completed": True}, {"text": "Fix the trigger", "completed": False}]}})
+        seen = len(self.events)
+        malformed = (
+            None, "Read the automation", {"step": "Read", "status": "pending"}, [None], [["Read", "pending"]],
+            [{"status": "pending"}], [{"step": "Read"}], [{"step": 1, "status": "pending"}],
+            [{"step": "Read", "status": None}], [{"step": "Read", "status": "pending"}, "Fix"],
+            [{"step": "Read", "status": "pending"}] * 51,
+        )
+        for entries in malformed:
+            with self.subTest(entries=entries):
+                plan(entries)
+        plan([{"step": "Other turn", "status": "pending"}], turn="old")
+        plan([{"step": "Other thread", "status": "pending"}], thread="other")
+        self.assertEqual(len(self.events), seen)
+        self.assertIsNone(self.session.error or None)
+
     def test_final_answer_uses_completed_item_and_expires_pending_requests(self):
         """Only a completed assistant message becomes the structured final output."""
         self.request()
@@ -353,14 +383,6 @@ class ApprovalTests(unittest.TestCase):
         self.assertEqual(self.records[-1]["status"], "expired")
         with self.assertRaises(LookupError):
             self.session.decide(approval_id, "allow")
-
-    def test_init_policy_failure_is_terminal_without_starting_a_turn(self):
-        """A server that fails to enable user approval cannot run the model silently."""
-        self.session._requests["policy"] = "thread/resume"
-        self.session.read(io.StringIO(json.dumps({"id": "policy", "result": {
-            "thread": {"id": "thread"}, "approvalPolicy": "never", "approvalsReviewer": "auto_review"}}) + "\n"))
-        self.assertTrue(self.session.finished.is_set())
-        self.assertIn("did not enable user approval", self.session.error)
 
 
 class ApprovalApiTests(unittest.TestCase):
@@ -417,7 +439,7 @@ class ApprovalApiTests(unittest.TestCase):
         with patch.object(server, "lookup_ha_users", side_effect=RuntimeError("offline")):
             refused = self.answer()
         self.assertEqual(refused.status_code, 403)
-        self.assertIn("Could not confirm", refused.get_json()["error"])
+        self.assertEqual(refused.get_json()["error"], server.UNVERIFIED_ACCOUNT)
         # Nothing reached Codex and the request still waits.
         self.assertEqual(self.writer.messages(), [])
         self.assertEqual(server.tasks["task"]["approvals"][0]["status"], "pending")
@@ -467,13 +489,13 @@ class ApprovalApiTests(unittest.TestCase):
         self.assertTrue(self.notified.call_args.args[2].is_set())
         self.assertEqual(self.notified.call_count, 2)
 
-    def test_late_alert_cannot_replace_the_result_notification(self):
-        """An alert that is delivered only after the answer and the result is dropped, however the request ended."""
+    def test_late_alert_cannot_replace_a_later_notification(self):
+        """An alert that is delivered only after the answer and a later notification is dropped, however the request ended."""
         delivered = []
 
         def deliver(service, data):
-            """Stand in for Home Assistant and keep what it was asked to show."""
-            delivered.append((service, data["title"]))
+            """Stand in for Home Assistant and keep what it was asked to show; a dismissal has no title."""
+            delivered.append((service, data.get("title")))
             return True, "ok"
 
         def late_alert():
@@ -539,16 +561,26 @@ class ApprovalApiTests(unittest.TestCase):
         self.assertEqual(server.tasks["task"]["approvals"][0]["status"], "expired")
 
     def test_transport_configuration_and_policy_selection(self):
-        """The new transport supplies the output schema and never enables shell networking globally."""
+        """The new transport sends no output schema and never enables shell networking globally."""
         self.assertEqual(self.session.thread_params["approvalPolicy"], "on-request")
         self.assertEqual(self.session.thread_params["approvalsReviewer"], "user")
-        self.assertEqual(self.session.turn_params["outputSchema"], server.FINAL_RESPONSE_SCHEMA)
+        self.assertNotIn("outputSchema", self.session.turn_params)
         self.assertEqual(self.session.turn_params["sandboxPolicy"], {
-            "type": "workspaceWrite", "networkAccess": False, "writableRoots": ["/config"]})
+            "type": "workspaceWrite", "networkAccess": False, "writableRoots": ["/config", "/share"]})
         self.assertTrue(server.uses_user_approvals({}))
         self.assertTrue(server.uses_user_approvals({"codex_sandbox": "read-only"}))
         # A refused mode never gets the approval-free exec path either: run_task stops it before launch.
         self.assertFalse(server.uses_user_approvals({"codex_sandbox": "danger-full-access"}))
+
+    def test_a_task_can_write_under_share_but_never_the_github_folder(self):
+        """Owner ruling 2026-11-16: /share is writable like /config; /data/github never is, and read-only stays read-only."""
+        roots = self.session.turn_params["sandboxPolicy"]["writableRoots"]
+        self.assertIn("/share", roots)
+        self.assertIn("/config", roots)
+        self.assertFalse([root for root in roots if "/data/github".startswith(root.rstrip("/") + "/") or root.startswith("/data")])
+        reader = server.create_approval_session("task", self.proc, "Read history", Path(self.temp.name) / "final", None, {},
+                                                {**server.DEFAULT_OPTIONS, "codex_sandbox": "read-only"})
+        self.assertEqual(reader.turn_params["sandboxPolicy"], {"type": "readOnly", "networkAccess": False})
 
     def test_restore_marks_pending_audit_expired_and_active_task_failed(self):
         """Restart loads the audit for display while dropping every live grant capability."""
@@ -595,7 +627,9 @@ class PermissionNotificationTests(unittest.TestCase):
             server.notify_permission("task-1", {"kind": "file_change", "reason": "",
                                                 "changes": [{"path": "/other/a.yaml", "diff": "+name: After"}]}, waiting)
             server.notify_permission("task-1", {"kind": "command", "reason": "Why? " + "x" * 500}, waiting)
-        first, second, third = [call.args for call in notify.call_args_list]
+            server.notify_permission("task-1", {"kind": "tool", "reason": "",
+                                                "arguments": '{"service": "light.turn_off"}'}, waiting)
+        first, second, third, fourth = [call.args for call in notify.call_args_list]
         self.assertEqual(first, ("Codex needs permission",
                                  "Codex is waiting for your decision on a command. Reason: Read sensor history. "
                                  "Open the Codex chat to review it. Task: task-1"))
@@ -603,6 +637,8 @@ class PermissionNotificationTests(unittest.TestCase):
                                     "Open the Codex chat to review it. Task: task-1")
         self.assertIn("x… Open the Codex chat", third[1])
         self.assertLess(len(third[1]), server.PERMISSION_REASON_MAX + 120)
+        self.assertEqual(fourth[1], "Codex is waiting for your decision on a tool request. "
+                                    "Open the Codex chat to review it. Task: task-1")
 
     def test_notification_does_not_hold_up_the_caller(self):
         """Requests are saved under the worker lock, so sending must not wait for Home Assistant there."""
@@ -895,3 +931,4 @@ class ApprovalRunTests(unittest.TestCase):
         self.assertTrue(any(message.get("method") == "turn/interrupt" for message in proc.stdin.messages()))
         self.assertFalse(any("result" in message for message in proc.stdin.messages()))
         self.assertNotIn("task", server.running_processes)
+

@@ -61,7 +61,8 @@ class BubblewrapCompatibilityTests(unittest.TestCase):
         self.wrapper.write_text(
             (WORKER / "codex-bwrap").read_text(encoding="utf-8")
             .replace("REAL_BWRAP=/opt/codex-sandbox/bwrap.real", f"REAL_BWRAP={self.real}")
-            .replace('HIDDEN_DIRS="/run/s6"', f'HIDDEN_DIRS="{root}/run/s6"')
+            .replace('HIDDEN_DIRS="/run/s6 /data/remote_control_control /data/github"',
+                     f'HIDDEN_DIRS="{root}/run/s6 {root}/data/remote_control_control {root}/data/github"')
             .replace('HIDDEN_FILES="/config/secrets.yaml /config/.storage/auth',
                      f'HIDDEN_FILES="{root}/config/secrets.yaml {root}/config/.storage/auth')
             .replace("/usr/bin/python3 /opt/codex-sandbox/codex-bwrap-probe.py",
@@ -155,6 +156,23 @@ class BubblewrapCompatibilityTests(unittest.TestCase):
                  "--ro-bind", "/dev/null", str(root / "config" / "secrets.yaml"),
                  "--ro-bind", "/dev/null", str(root / "config" / ".storage" / "auth")]
         self.assertEqual(record["args"], ["--cap-drop", "ALL", *args[:6], *masks, *args[6:]])
+
+    def test_the_github_folder_is_hidden_in_every_sandbox(self) -> None:
+        """A task's sandbox cannot read the GitHub sign-in: /data/github gets an empty tmpfs before the first --."""
+        root = Path(self.directory.name)
+        (root / "data" / "github").mkdir(parents=True)
+        (root / "data" / "github" / "credential.json").write_text('{"token": "synthetic"}', encoding="utf-8")
+        args = ["--ro-bind", "/", "/", "--ro-bind", str(root / "data"), str(root / "data"), "--",
+                "/usr/local/bin/codex", "--apply-seccomp-then-exec", "--", "/bin/sh", "-c",
+                "cat /data/github/credential.json"]
+        _, record = self.run_wrapper(args, stderr=b"", exit_code=0)
+        separator = record["args"].index("--")
+        self.assertEqual(record["args"][separator - 2:separator], ["--tmpfs", str(root / "data" / "github")])
+        self.assertEqual(record["args"], ["--cap-drop", "ALL", *args[:6], "--tmpfs", str(root / "data" / "github"),
+                                          *args[6:]])
+        # The production wrapper names the real folder.
+        self.assertIn("/data/github", (WORKER / "codex-bwrap").read_text(encoding="utf-8").split("HIDDEN_DIRS=", 1)[1]
+                      .split("\n", 1)[0])
 
     def test_version_and_help_remain_usable(self) -> None:
         """The --version and --help options still reach Bubblewrap and return its output."""

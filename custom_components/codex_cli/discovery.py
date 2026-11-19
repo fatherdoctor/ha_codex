@@ -136,9 +136,10 @@ async def async_discover_worker(hass: HomeAssistant, session: ClientSession) -> 
     """Find the reachable worker app and its generated API token."""
     workers = await _async_worker_addons(session)
     if not workers:
-        raise CodexCliApiError("Codex CLI Worker app is not installed")
+        raise CodexCliApiError("Codex for Home Assistant app is not installed")
 
     last_error: CodexCliApiError | None = None
+    auth_error: CodexCliAuthError | None = None
     for addon in workers:
         options = addon.get("options") if isinstance(addon.get("options"), dict) else {}
         addon_slug = str(addon.get("slug") or "")
@@ -157,6 +158,7 @@ async def async_discover_worker(hass: HomeAssistant, session: ClientSession) -> 
             try:
                 await client.status()
             except CodexCliAuthError as exc:
+                auth_error = exc
                 last_error = exc
                 continue
             except CodexCliApiError as exc:
@@ -168,6 +170,10 @@ async def async_discover_worker(hass: HomeAssistant, session: ClientSession) -> 
                 addon_slug=str(addon.get("slug") or "") or None,
             )
 
+    # A reachable worker's rejection must survive failures at alternate URLs.
+    # A successful candidate above still takes precedence over any rejection.
+    if auth_error is not None:
+        raise CodexCliAuthError("Worker authentication failed") from auth_error
     if last_error is not None:
         raise CodexCliApiError(f"Could not connect to the Codex worker: {last_error}") from last_error
     raise CodexCliApiError("Could not discover the Codex worker app")

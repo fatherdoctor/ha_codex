@@ -56,8 +56,11 @@ class ForkReleaseTests(unittest.TestCase):
         self.write(fr.CHANGELOG, f"# Changelog\n\n## {version}\n\n{notes}\n\n{body}")
 
     def commit(self, message: str) -> str:
+        """Commit everything. A commit on main is also pushed, so origin/main follows it as on a real clone."""
         run(self.repo, "add", "-A")
         run(self.repo, "commit", "-q", "-m", message)
+        if run(self.repo, "branch", "--show-current") == "main":
+            run(self.repo, "update-ref", "refs/remotes/origin/main", "HEAD")
         return run(self.repo, "rev-parse", "HEAD")
 
     def record(self, version: str, commit: str, result: str = "pass") -> str:
@@ -129,6 +132,100 @@ class ForkReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(fr.ReleaseError, "not newer"):
             fr.plan_tag("0.1.81.0", self.repo)
 
+    # beta channel
+
+    def make_release(self, version: str) -> str:
+        self.write_version(version, code=f"print({version!r})\n")
+        commit = self.commit(version)
+        self.record(version, commit)
+        self.release(version)
+        return commit
+
+    def test_version_order_puts_a_beta_before_its_release(self) -> None:
+        ordered = ["0.1.81.2", "0.2.0-beta.1", "0.2.0-beta.2", "0.2.0-beta.10", "0.2.0", "0.2.0.1", "0.2.1-beta.1"]
+        self.assertEqual(sorted(reversed(ordered), key=fr.version_key), ordered)
+
+    def test_beta_is_tagged_after_its_lab_pass(self) -> None:
+        self.write_version("0.2.0-beta.1", code="print('beta')\n")
+        beta = self.commit("0.2.0-beta.1")
+        with self.assertRaisesRegex(fr.ReleaseError, "no lab-pass record"):
+            fr.plan_tag("0.2.0-beta.1", self.repo)
+        self.record("0.2.0-beta.1", beta)
+        commit, _ = fr.plan_tag("0.2.0-beta.1", self.repo)
+        self.assertEqual(commit, beta)
+
+    def test_beta_on_four_numbers_is_refused(self) -> None:
+        with self.assertRaisesRegex(fr.ReleaseError, "expected a version like"):
+            fr.plan_tag("0.1.81.2-beta.1", self.repo)
+
+    def test_beta_must_be_newer_than_every_tag(self) -> None:
+        self.make_release("0.2.0")
+        self.write_version("0.2.0-beta.3")
+        late = self.commit("late beta")
+        self.record("0.2.0-beta.3", late)
+        with self.assertRaisesRegex(fr.ReleaseError, "0.2.0-beta.3 is not newer than 0.2.0"):
+            fr.plan_tag("0.2.0-beta.3", self.repo)
+
+    def test_beta_must_be_newer_than_the_last_beta(self) -> None:
+        self.make_release("0.2.0-beta.2")
+        self.write_version("0.2.0-beta.1")
+        older = self.commit("older beta")
+        self.record("0.2.0-beta.1", older)
+        with self.assertRaisesRegex(fr.ReleaseError, "not newer than 0.2.0-beta.2"):
+            fr.plan_tag("0.2.0-beta.1", self.repo)
+
+    def test_stable_fix_is_not_held_back_by_a_newer_beta(self) -> None:
+        self.record("0.1.81.1", self.good)
+        self.release("0.1.81.1")
+        self.make_release("0.2.0-beta.1")
+        self.write_version("0.1.81.2", code="print('fix')\n")
+        fix = self.commit("0.1.81.2")
+        self.record("0.1.81.2", fix)
+        commit, _ = fr.plan_tag("0.1.81.2", self.repo)
+        self.assertEqual(commit, fix)
+
+    def test_stable_after_its_betas(self) -> None:
+        self.make_release("0.2.0-beta.1")
+        self.make_release("0.2.0-beta.2")
+        self.write_version("0.2.0", code="print('stable')\n")
+        stable = self.commit("0.2.0")
+        self.record("0.2.0", stable)
+        commit, _ = fr.plan_tag("0.2.0", self.repo)
+        self.assertEqual(commit, stable)
+
+    def test_stable_version_must_be_on_main(self) -> None:
+        run(self.repo, "checkout", "-q", "-b", "beta")
+        self.write_version("0.1.81.2", code="print('only on beta')\n")
+        on_beta = self.commit("0.1.81.2 on beta")
+        self.record("0.1.81.2", on_beta)
+        with self.assertRaisesRegex(fr.ReleaseError, "not on origin/main: a stable release comes from main"):
+            fr.plan_tag("0.1.81.2", self.repo)
+
+    def test_beta_may_come_from_the_beta_branch(self) -> None:
+        run(self.repo, "checkout", "-q", "-b", "beta")
+        self.write_version("0.2.0-beta.1", code="print('beta')\n")
+        beta = self.commit("0.2.0-beta.1")
+        self.record("0.2.0-beta.1", beta)
+        commit, _ = fr.plan_tag("0.2.0-beta.1", self.repo)
+        self.assertEqual(commit, beta)
+
+    def test_rollback_with_a_beta_version_is_refused(self) -> None:
+        self.make_bad_release()
+        self.write_version("0.2.0-beta.1")
+        rolled = self.commit("a rollback given a beta version")
+        self.write(f"{fr.RECORD_DIR}/v0.2.0-beta.1.json", json.dumps(
+            {"version": "0.2.0-beta.1", "kind": "rollback", "rollback_of": "0.1.81.1", "result": "pass",
+             "commit": rolled}))
+        self.commit("rollback record")
+        with self.assertRaisesRegex(fr.ReleaseError, "a rollback is a stable release"):
+            fr.plan_tag("0.2.0-beta.1", self.repo)
+
+    def test_rollback_skips_beta_tags(self) -> None:
+        self.make_bad_release()
+        self.make_release("0.2.0-beta.1")
+        run(self.repo, "checkout", "-q", "-b", "rollback", "v0.1.81.2")
+        self.assertEqual(fr.rollback("0.1.81.1", None, False, self.repo), "0.1.81.3")
+
     # rollback
 
     def make_bad_release(self, notes: str = "- Broke something.") -> None:
@@ -183,6 +280,40 @@ class ForkReleaseTests(unittest.TestCase):
         self.write("codex-cli-worker/server.py", "print('dirty')\n")
         with self.assertRaisesRegex(fr.ReleaseError, "working tree has changes"):
             fr.rollback("0.1.81.1", None, False, self.repo)
+
+
+class VersionRuleTests(unittest.TestCase):
+    """Both release scripts hold the version rule; they must accept and refuse the same versions."""
+
+    GOOD = ("0.1.81", "0.1.81.2", "0.2.0", "0.2.0.1", "0.2.0-beta.1", "0.2.0-beta.10")
+    BAD = ("0.2", "0.1.81.2-beta.1", "0.2.0-beta", "0.2.0-rc.1", "0.2.0-beta.1.1", "v0.2.0", "0.2.0 ")
+
+    def setUp(self) -> None:
+        spec = importlib.util.spec_from_file_location("build_hacs_release", ROOT / "scripts" / "build_hacs_release.py")
+        self.bhr = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.bhr)
+
+    def fork_release_accepts(self, version: str) -> bool:
+        try:
+            fr.check_version_text(version, allow_beta=True)
+        except fr.ReleaseError:
+            return False
+        return True
+
+    def build_accepts(self, version: str) -> bool:
+        return self.bhr.TAG_PATTERN.fullmatch(f"v{version}") is not None
+
+    def test_both_scripts_accept_the_same_versions(self) -> None:
+        for version in self.GOOD:
+            with self.subTest(version=version):
+                self.assertTrue(self.fork_release_accepts(version))
+                self.assertTrue(self.build_accepts(version))
+
+    def test_both_scripts_refuse_the_same_versions(self) -> None:
+        for version in self.BAD:
+            with self.subTest(version=version):
+                self.assertFalse(self.fork_release_accepts(version))
+                self.assertFalse(self.build_accepts(version))
 
 
 class RepositoryLayoutTests(unittest.TestCase):

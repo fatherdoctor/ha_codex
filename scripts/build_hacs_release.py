@@ -4,6 +4,8 @@ The version may move on main before it is released: its changelog heading then r
 "## <version> (unreleased)". That heading is accepted when validating a branch or a pull request, and refused for
 a release: when --release is given, or when GitHub Actions runs for a tag (GITHUB_REF_TYPE=tag). So a tag whose
 changelog still says "(unreleased)" builds nothing.
+
+A beta tag (v0.2.0-beta.1) is checked the same way. The release workflow publishes it as a GitHub pre-release.
 """
 
 from __future__ import annotations
@@ -18,7 +20,9 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-TAG_PATTERN = re.compile(r"v\d+\.\d+\.\d+(?:\.\d+)?")
+# A stable version has three or four numbers; a beta has three numbers and -beta.N (see scripts/fork_release.py).
+VERSION = r"\d+\.\d+\.\d+(?:\.\d+)?|\d+\.\d+\.\d+-beta\.\d+"
+TAG_PATTERN = re.compile(rf"v(?:{VERSION})")
 DOMAIN = "codex_cli"
 ASSET_NAME = "codex_cli.zip"
 CHANGELOG = ROOT / "codex-cli-worker" / "CHANGELOG.md"
@@ -27,7 +31,7 @@ CHANGELOG = ROOT / "codex-cli-worker" / "CHANGELOG.md"
 def build(tag: str, output_dir: Path, allow_unreleased: bool = False) -> Path:
     """Validate release metadata and write the integration ZIP and release notes."""
     if TAG_PATTERN.fullmatch(tag) is None:
-        raise ValueError(f"Expected a vX.Y.Z or vX.Y.Z.N tag, got {tag!r}")
+        raise ValueError(f"Expected a vX.Y.Z, vX.Y.Z.N or vX.Y.Z-beta.N tag, got {tag!r}")
 
     version = tag[1:]
     component_dir = ROOT / "custom_components" / DOMAIN
@@ -38,7 +42,7 @@ def build(tag: str, output_dir: Path, allow_unreleased: bool = False) -> Path:
         raise ValueError(f"Manifest version {manifest.get('version')!r} does not match {tag}")
 
     worker_config = (ROOT / "codex-cli-worker" / "config.yaml").read_text(encoding="utf-8")
-    worker_version = re.search(r'^version:\s*"?(\d+\.\d+\.\d+(?:\.\d+)?)"?\s*$', worker_config, re.MULTILINE)
+    worker_version = re.search(rf'^version:\s*"?({VERSION})"?\s*$', worker_config, re.MULTILINE)
     if worker_version is None or worker_version.group(1) != version:
         raise ValueError(f"Worker config version does not match {tag}")
 
@@ -111,7 +115,7 @@ def build(tag: str, output_dir: Path, allow_unreleased: bool = False) -> Path:
 def main() -> int:
     """Build the requested release and return a command-line exit status."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("tag", help="vX.Y.Z release tag")
+    parser.add_argument("tag", help="vX.Y.Z, vX.Y.Z.N or vX.Y.Z-beta.N release tag")
     parser.add_argument("output_dir", type=Path, help="Directory outside the repository for the ZIP")
     parser.add_argument(
         "--release",

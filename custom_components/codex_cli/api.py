@@ -43,6 +43,10 @@ class CodexCliApiClient:
         """Fetch authenticated worker status."""
         return await self._request("GET", "/status")
 
+    async def interaction_diagnostics(self) -> dict[str, Any]:
+        """Download only the worker's bounded, anonymized interaction metadata."""
+        return await self._request("GET", "/diagnostics/export")
+
     async def start_login(self, force: bool = False) -> dict[str, Any]:
         """Start the Codex device-code login flow."""
         return await self._request("POST", "/auth/start", json={"force": force})

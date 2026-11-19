@@ -1,4 +1,4 @@
-"""Sign-in without a terminal, the pause switch, and the model pin."""
+"""Sign-in without a terminal, no pause switch, and the model pin."""
 from __future__ import annotations
 
 import importlib.util
@@ -45,7 +45,6 @@ class _Worker(unittest.TestCase):
         self.stack.enter_context(patch.object(server, "task_root", return_value=self.root / "tasks"))
         self.stack.enter_context(patch.object(server, "TASK_STATE_FILE", self.root / "index.json"))
         self.stack.enter_context(patch.object(server, "MESSAGE_QUEUE_FILE", self.root / "queue.json"))
-        self.stack.enter_context(patch.object(server, "PAUSE_FILE", self.root / "paused.json"))
         self.stack.enter_context(patch.object(server, "CODEX_HOME", self.root / "codex"))
         self.stack.enter_context(patch.object(server, "api_token", return_value="test-token"))
         self.stack.enter_context(patch.object(server, "fire_ha_event", return_value=(True, "")))
@@ -129,47 +128,130 @@ class SignInTests(_Worker):
         with patch.object(server.subprocess, "Popen") as popen, patch.object(server, "update_auth_state") as update:
             popen.return_value.stdout = io.StringIO("")
             popen.return_value.wait.return_value = -15
-            server.auth_state.update({"status": "canceled", "login_id": "L1"})
+            server.auth_state.update({"status": "canceled", "login_id": "L1", "canceled_login_id": "L1"})
             update.side_effect = lambda **kw: None
             server.run_codex_device_login("L1")
         server.notify.assert_not_called()
 
-    def test_status_reports_the_sign_in_flow_and_pause_for_the_integration(self):
+    def test_cancel_of_a_real_sign_in_process_raises_no_failure_notice(self):
+        """A real child process stands in for `codex login`, so the sign-in thread wakes when Cancel stops it.
+
+        Cancel must be recorded before the process stops; otherwise the thread sees a stopped sign-in that is
+        not canceled and reports a failure.
+        """
+        fixture = Path(__file__).resolve().parent / "fixtures" / "codex-login-device-auth.txt"
+        child = [sys.executable, "-c",
+                 "import sys, time; sys.stdout.write(open(sys.argv[1]).read()); sys.stdout.flush(); time.sleep(30)",
+                 str(fixture)]
+        real_popen = server.subprocess.Popen
+
+        def start_child(*_args, **kwargs):
+            return real_popen(child, stdout=kwargs["stdout"], stderr=kwargs["stderr"], text=True)
+        for attempt in range(3):
+            with self.subTest(attempt=attempt), patch.object(server.subprocess, "Popen", side_effect=start_child):
+                server.notify.reset_mock()
+                before = set(server.threading.enumerate())
+                server.start_codex_login_flow()
+                for _ in range(250):
+                    if server.auth_state.get("user_code"):
+                        break
+                    server.time.sleep(0.02)
+                self.assertEqual(server.auth_state.get("user_code"), "ABCD-EFGH2")
+                server.cancel_codex_login()
+                for started in set(server.threading.enumerate()) - before:
+                    started.join(timeout=10)
+                server.notify.assert_not_called()
+                self.assertEqual(server.auth_state["status"], "canceled")
+                self.assertEqual(server.auth_state["user_code"], "")
+
+    def test_the_code_lifetime_is_read_and_counted_by_the_worker(self):
+        """The page gets the seconds left from the worker's clock, never the private monotonic deadline."""
+        class Running:
+            def poll(self):
+                return None
+        self.read_login(LOGIN_OUTPUT)
+        with patch.object(server, "auth_process", Running()):
+            auth = self.client.get("/auth/status", headers=self.headers).get_json()["auth"]
+        self.assertTrue(auth["pending"])
+        self.assertTrue(895 <= auth["expires_in"] <= 900, auth["expires_in"])
+        self.assertTrue(auth["expires_at"])
+        self.assertNotIn("code_deadline", auth)
+
+    def test_no_lifetime_in_the_output_gives_no_countdown(self):
+        class Running:
+            def poll(self):
+                return None
+        self.read_login([line.replace("(expires in 15 minutes)", "") for line in LOGIN_OUTPUT])
+        with patch.object(server, "auth_process", Running()):
+            auth = self.client.get("/auth/status", headers=self.headers).get_json()["auth"]
+        self.assertEqual(auth["user_code"], "ABCD-EFGH2")
+        self.assertIsNone(auth["expires_in"])
+
+    def test_a_failed_sign_in_says_why_without_repeating_the_code(self):
+        output = "".join(LOGIN_OUTPUT) + "Error: device code ABCD-EFGH2 was denied by the server\n"
+        with patch.object(server.subprocess, "Popen") as popen:
+            popen.return_value.stdout = io.StringIO(output)
+            popen.return_value.wait.return_value = 1
+            server.auth_state.update({"login_id": "L1"})
+            server.run_codex_device_login("L1")
+        self.assertEqual(server.auth_state["status"], "failed")
+        self.assertIn("was denied by the server", server.auth_state["error"])
+        self.assertNotIn("ABCD-EFGH2", server.auth_state["error"])
+        server.notify.assert_called_once_with("Codex sign-in failed", server.auth_state["error"])
+
+    def test_an_expired_code_is_named_as_the_reason(self):
+        server.auth_state.update({"code_deadline": server.time.monotonic() - 1, "output": "Error: timed out"})
+        self.assertIn("The code expired", server.sign_in_failure_reason(1))
+        server.auth_state.update({"code_deadline": None, "output": "nothing useful"})
+        self.assertIn("exit code 1", server.sign_in_failure_reason(1))
+
+    def test_get_a_new_code_leaves_the_new_sign_in_alone(self):
+        """Cancel then start: the old sign-in's end must not clear the new process or mark the new one failed."""
+        newer = object()
+
+        def replaced_while_waiting(*_args, **_kwargs):
+            server.auth_state.update({"login_id": "L2", "status": "starting"})
+            server.auth_process = newer
+            return -15
+        with patch.object(server.subprocess, "Popen") as popen:
+            popen.return_value.stdout = io.StringIO("")
+            popen.return_value.wait.side_effect = replaced_while_waiting
+            server.auth_state.update({"login_id": "L1"})
+            server.run_codex_device_login("L1")
+        self.assertIs(server.auth_process, newer)
+        self.assertEqual(server.auth_state["status"], "starting")
+        server.notify.assert_not_called()
+
+    def test_the_reader_of_a_replaced_sign_in_stops(self):
+        server.auth_state.update({"login_id": "L2", "status": "starting"})
+        server.auth_reader_thread(io.StringIO("".join(LOGIN_OUTPUT)), "L1")
+        self.assertNotIn("user_code", server.auth_state)
+        server.create_persistent_notification.assert_not_called()
+
+    def test_status_reports_the_sign_in_flow_and_pin_for_the_integration(self):
         data = self.client.get("/status", headers=self.headers).get_json()
         self.assertIn("pending", data["auth_flow"])
-        self.assertEqual(data["pause"], {"paused": False})
+        self.assertNotIn("pause", data)
         self.assertEqual(data["model_pin"], PIN)
 
 
-class PauseTests(_Worker):
-    """Pause refuses new messages and holds the queue; resume starts what waited."""
+class NoPauseTests(_Worker):
+    """The assistant has no pause switch: no route, no refusal and no hold on the queue."""
 
-    def test_pause_refuses_new_chats_and_messages_and_resume_allows_them(self):
-        self.assertTrue(self.client.post("/pause", json={"paused": True}, headers=self.headers).get_json()["paused"])
-        response = self.client.post("/tasks", json={"prompt": "hello"}, headers=self.headers)
-        self.assertEqual(response.status_code, 409)
-        self.assertTrue(response.get_json()["paused"])
-        response = self.client.post("/tasks/x/continue", json={"message": "hello"}, headers=self.headers)
-        self.assertEqual(response.status_code, 409)
-        self.runner.assert_not_called()
-        self.assertFalse(self.client.post("/pause", json={"paused": False}, headers=self.headers).get_json()["paused"])
+    def test_the_pause_route_is_gone(self):
+        self.assertEqual(self.client.get("/pause", headers=self.headers).status_code, 404)
+        self.assertEqual(self.client.post("/pause", json={"paused": True}, headers=self.headers).status_code, 404)
+        self.assertFalse(hasattr(server, "assistant_paused"))
+
+    def test_a_new_chat_starts_without_a_pause_check(self):
         response = self.client.post("/tasks", json={"prompt": "hello"}, headers=self.headers)
         self.assertEqual(response.status_code, 200)
         self.runner.assert_called_once()
 
-    def test_pause_survives_a_restart_and_rejects_a_bad_body(self):
-        self.client.post("/pause", json={"paused": True}, headers=self.headers)
-        self.assertTrue((self.root / "paused.json").exists())
-        self.assertTrue(self.client.get("/pause", headers=self.headers).get_json()["paused"])
-        self.assertEqual(self.client.post("/pause", json={"paused": "yes"}, headers=self.headers).status_code, 400)
-
-    def test_queued_messages_wait_while_paused_and_start_on_resume(self):
+    def test_a_queued_message_starts_once_nothing_runs(self):
         server.message_queue.append({"task_id": "t1"})
         with patch.object(server, "start_queued_message", return_value=None) as start:
-            server.set_assistant_paused(True)
             server.start_next_queued()
-            start.assert_not_called()
-            server.set_assistant_paused(False)
             start.assert_called_once()
 
 
