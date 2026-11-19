@@ -4,12 +4,6 @@
 // then once more against a fixture started with CODEX_FIXTURE_SIGN_IN=pending for the sign-in shots.
 // Files go to SCREENSHOT_DIR (default: screenshots/ at the repository root) under stable names that
 // screenshots/SCREENSHOTS.md lists.
-// Scheduled runs are off in this series. This test checks Settings colors through the schedule form, so it needs
-// the fixture started with CODEX_FIXTURE_SCHEDULED_RUNS=1.
-if (process.env.CODEX_FIXTURE_SCHEDULED_RUNS !== "1") {
-  console.log("SKIP: scheduled runs are switched off (start the fixture with CODEX_FIXTURE_SCHEDULED_RUNS=1)");
-  process.exit(0);
-}
 const {chromium} = require('playwright');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
