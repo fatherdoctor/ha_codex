@@ -462,7 +462,7 @@ restrictive tool component while `NoNewPrivs=1`. An immutable guard verifies the
 before starting native Bubblewrap; the chat tool label is unchanged.
 This prevents the base abstraction's same-label ptrace-read rule from granting a sandbox access to
 the relay's `/proc/<pid>/root`, `cwd` or `environ` in the no-proc fallback. Loaded-label and proc-view
-isolation still require the lead's HAOS acceptance check described in
+isolation still require the maintainer's HAOS acceptance check described in
 [SANDBOX_TESTING.md](SANDBOX_TESTING.md#remote-control-profile-regression).
 
 **Relay execution.** The reproduced unified-exec failure was a `nodev` root bind, not
@@ -490,7 +490,7 @@ the image changed. The pinned
 loads enrollment from the state database, keyed by relay target, account and stable app-server client
 name. This is separate from a transient control socket and the replaceable image. An update preserves
 data; uninstalling, clearing data, changing account or revoking enrollment is a different operation.
-Actual reconnect without a new code remains a lead lab acceptance check.
+Actual reconnect without a new code remains a maintainer lab acceptance check.
 
 **First pairing (Codex 0.166).** Turn remote control on, wait for the connected state, then choose
 **New pairing code** and type the displayed code into the ChatGPT app. The button calls
@@ -960,7 +960,7 @@ For local browser checks, run `python codex-cli-worker/tests/web_fixture.py` fro
 
 ### ABI and relay fallback acceptance (N8/N9)
 
-The AppArmor ABI declaration enables domain/stack and network_v8 mediation on HAOS; ptrace was already mediated. Both tool labels keep their existing Unix/raw-netlink socket permissions, so sandboxed AF_INET/AF_INET6/packet socket creation is denied. Approved escalations keep the existing parent/relay policy. The lead must run an ordinary chat-page shell read and the history MCP tool after loading the updated HAOS profile; CI's Ubuntu kernel is not that acceptance.
+The AppArmor ABI declaration enables domain/stack and network_v8 mediation on HAOS; ptrace was already mediated. Both tool labels keep their existing Unix/raw-netlink socket permissions, so sandboxed AF_INET/AF_INET6/packet socket creation is denied. Approved escalations keep the existing parent/relay policy. The maintainer must run an ordinary chat-page shell read and the history MCP tool after loading the updated HAOS profile; CI's Ubuntu kernel is not that acceptance.
 
 The plain relay route still creates a user namespace and maps to the fixed non-root identity. It omits the private hostname, not the namespace requirement. If namespace creation is refused, it fails closed and retries with backoff. No working fallback is promised in that case. See [sandbox checks](SANDBOX_TESTING.md#abi-socket-family-change-and-namespace-fallback). The scratch-folder proposal is in [CX-HA-URL's design note](../docs/design/CX-HA-URL.md#scratch-folder-proposal-do-not-build); this change creates no notes folder or sandbox bind.
 

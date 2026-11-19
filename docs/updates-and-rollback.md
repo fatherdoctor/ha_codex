@@ -117,14 +117,14 @@ The Supervisor never offers an older version, so a rollback is a new release who
 
 ```bash
 git checkout -b rollback-0.3.8 origin/main
-python3 scripts/fork_release.py rollback 0.3.6          # the version to go back to
+python3 scripts/fork_release.py rollback 0.3.6 --to 0.3.8   # the version to go back to, and the new version
 git commit -m "Roll back to 0.3.6 as 0.3.8"
 # open a pull request titled "Release 0.3.8: roll back to 0.3.6", merge it, then on main:
 python3 scripts/fork_release.py tag 0.3.8 --push
 ```
 
 `rollback` puts `codex-cli-worker/` and `custom_components/` back exactly as they were at `v0.3.6` (files added
-since are removed), sets the next version (`0.3.8` here, when `0.3.7` is the bad release; `--to` picks another), adds a changelog entry above the
+since are removed), sets the new version (without `--to`, the next four-number build: `next_version('0.3.7')` is `0.3.7.1`; `--to` sets a three-number version such as `0.3.8`), adds a changelog entry above the
 existing history, and writes a rollback record. The install takes it as an ordinary update, with no action there.
 
 A rollback needs no new lab pass, because its code already passed one: `tag` checks that the version it restores has
