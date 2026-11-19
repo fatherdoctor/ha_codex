@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 from contextlib import ExitStack
 from dataclasses import dataclass
@@ -42,6 +43,8 @@ from .discovery import async_discover_worker
 from .notification_actions import async_listen_for_choices
 from .browser_auth import STORAGE_KEY, BrowserSessions, BrowserSessionView, DiagnosticView
 from .kiosk import KioskScreenshotsView
+
+_LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -164,7 +167,13 @@ async def _async_remove_mailbox_leftovers(hass: HomeAssistant, entry: ConfigEntr
     unique_id = f"{entry.entry_id}_{REMOVED_MAILBOX_SENSOR_KEY}"
     if entity_id := registry.async_get_entity_id(Platform.SENSOR, DOMAIN, unique_id):
         registry.async_remove(entity_id)
-    await Store(hass, 1, f"{DOMAIN}_mailbox_seen_{entry.entry_id}").async_remove()
+    store = Store(hass, 1, f"{DOMAIN}_mailbox_seen_{entry.entry_id}")
+    try:
+        await store.async_remove()
+    except OSError as err:
+        # A file left behind is harmless, since nothing reads it any more.
+        # Do not let it stop the setup.
+        _LOGGER.warning("Could not remove the old mailbox file %s: %s", store.path, err)
 
 
 def _first_runtime(hass: HomeAssistant) -> CodexCliRuntimeData:

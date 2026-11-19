@@ -43,6 +43,11 @@ async def _set_up(hass, entry, client):
             current_entry.reset(context)
 
 
+async def _stop_polling(entry):
+    """Stop the coordinator's refresh timer, so the test leaves no timer behind."""
+    await entry.runtime_data.coordinator.async_shutdown()
+
+
 async def test_setup_removes_the_old_sensor_entity_and_saved_ids(hass, hass_storage):
     """The old sensor entity and its saved message IDs are gone; another entity of the entry stays."""
     entry = MockConfigEntry(domain="codex_cli", data={"base_url": "http://worker"},
@@ -63,6 +68,7 @@ async def test_setup_removes_the_old_sensor_entity_and_saved_ids(hass, hass_stor
     assert registry.async_get(old.entity_id) is None
     assert registry.async_get(kept.entity_id) is not None
     assert store_key not in hass_storage
+    await _stop_polling(entry)
 
 
 async def test_setup_without_leftovers_and_a_status_with_mail_fires_no_event(hass, hass_storage):
@@ -82,6 +88,26 @@ async def test_setup_without_leftovers_and_a_status_with_mail_fires_no_event(has
     assert client.status.await_count == 2
     assert events == []
     assert not any(key.startswith("codex_cli_mailbox_seen_") for key in hass_storage)
+    await _stop_polling(entry)
+
+
+async def test_setup_continues_when_the_saved_ids_file_cannot_be_removed(hass, caplog):
+    """An error from deleting the old file logs one warning, and setup still finishes."""
+    entry = MockConfigEntry(domain="codex_cli", data={"base_url": "http://worker"},
+                            state=ConfigEntryState.SETUP_IN_PROGRESS)
+    entry.add_to_hass(hass)
+    client = AsyncMock()
+    client.status.return_value = STATUS
+
+    with patch.object(integration.Store, "async_remove", side_effect=PermissionError("read-only")):
+        await _set_up(hass, entry, client)
+
+    warnings = [record for record in caplog.records if record.levelname == "WARNING"
+                and "old mailbox file" in record.getMessage()]
+    assert len(warnings) == 1
+    assert "read-only" in warnings[0].getMessage()
+    assert entry.runtime_data.coordinator is not None
+    await _stop_polling(entry)
 
 
 def test_no_sensor_reads_the_mailbox():
