@@ -32,6 +32,7 @@ class SwitchTests(unittest.TestCase):
         self.assertEqual(server.scheduling_mcp_args(), [])
         self.assertNotIn('codex_scheduling', ' '.join(server.build_app_server_args()))
         self.assertNotIn('codex_scheduling', server.PAGE_INSTRUCTIONS)
+        self.assertNotIn('codex_scheduling', server.build_page_instructions())
 
     def test_turning_the_switch_on_brings_back_the_page_the_tool_and_the_text(self):
         with patch.object(scheduling, 'SCHEDULED_RUNS', True):
@@ -40,6 +41,7 @@ class SwitchTests(unittest.TestCase):
                 with self.subTest(marker=marker):
                     self.assertIn(marker, page)
             self.assertNotIn('scheduling:begin', page)
+            self.assertIn('Use the codex_scheduling tools', server.build_page_instructions())
             args = ' '.join(server.scheduling_mcp_args())
             for tool in server.SCHEDULING_TOOLS:
                 self.assertIn(f'codex_scheduling.tools.{tool}.approval_mode', args)
@@ -47,6 +49,39 @@ class SwitchTests(unittest.TestCase):
     def test_the_instruction_paragraph_is_kept_in_the_code(self):
         source = Path(server.__file__).read_text(encoding='utf-8')
         self.assertIn('@@SCHEDULING_PARAGRAPH@@', source)  # The paragraph is kept in the code, not deleted.
+
+
+class DocsTests(unittest.TestCase):
+    """DOCS.md and README.md say nothing about scheduled runs in this series."""
+
+    ROOT = Path(server.__file__).resolve().parent.parent
+    # The lead channel section is CX-04-LEAD-RM.a's to reword; it still names the lead schedule routes.
+    LEAD_HEADING = '## The lead agent channel and mailbox'
+    # Plain uses of the word that are not about scheduled runs.
+    ALLOWED = ('not refreshed on a schedule', 'instead schedules')
+
+    def docs_without_lead_section(self):
+        text = (self.ROOT / 'codex-cli-worker' / 'DOCS.md').read_text(encoding='utf-8')
+        start = text.index(self.LEAD_HEADING)
+        end = text.find('\n## ', start + 1)
+        return text[:start] + (text[end:] if end != -1 else '')
+
+    def hits(self, text):
+        return [line for line in text.splitlines()
+                if 'schedul' in line.lower() and not any(phrase in line for phrase in self.ALLOWED)]
+
+    def test_docs_outside_the_lead_section_do_not_mention_scheduling(self):
+        self.assertEqual(self.hits(self.docs_without_lead_section()), [])
+
+    def test_the_readme_does_not_mention_scheduling(self):
+        self.assertEqual(self.hits((self.ROOT / 'README.md').read_text(encoding='utf-8')), [])
+
+    def test_the_lead_section_title_and_the_readme_link_agree(self):
+        docs = (self.ROOT / 'codex-cli-worker' / 'DOCS.md').read_text(encoding='utf-8')
+        self.assertIn(self.LEAD_HEADING + '\n', docs)
+        self.assertNotIn('scheduled-runs', docs)
+        readme = (self.ROOT / 'README.md').read_text(encoding='utf-8')
+        self.assertIn('DOCS.md#the-lead-agent-channel-and-mailbox', readme)
 
 
 class ScheduleEngineTests(unittest.TestCase):

@@ -194,7 +194,7 @@ Settings. The token shows once, and the app stores only a hash.
 - A sensor counts unread messages for the other agent, and an event announces each new message without its text.
 - Limits: 500 messages, and 20 writes per turn and 64 per UTC day for each writer.
 
-Details: [The lead agent channel and mailbox](codex-cli-worker/DOCS.md#scheduled-runs-and-the-lead-agent-channel).
+Details: [The lead agent channel and mailbox](codex-cli-worker/DOCS.md#the-lead-agent-channel-and-mailbox).
 
 ## Using it from Assist and automations
 

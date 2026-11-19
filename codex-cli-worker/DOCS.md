@@ -341,7 +341,7 @@ Home Assistant action (a service call), for example `light.turn_off` with a targ
 `homeassistant.restart`. The app sets the tool's approval mode to `prompt`, so Codex asks you each time, with no
 remembered answer: the question has no "Allow for this session" and no "don't ask again". It shows the service,
 the target and the data.
-A scheduled run does not get the tool, since nobody is there to answer.
+A task the lead agent starts does not get the tool, since nobody is there to answer.
 
 The ChatGPT app has the same tool while remote control is on. There, Codex asks in the app before each call; the
 worker does not see that answer. The tool's key in the app holds while the remote-control process runs, and each
@@ -417,9 +417,9 @@ Codex can be reached three ways: the chat page, the ChatGPT app paired through r
   way in. On the chat page and for `codex_cli.start_task`, a request for more access shows on the chat page as a
   [permission request](#permission-requests). The ChatGPT app shows Codex's own requests in the app instead, as
   [Remote control from the ChatGPT app](#remote-control-from-the-chatgpt-app) describes.
-- A scheduled run and a message on the lead agent channel also start a task. They use the same launcher as the chat
-  page and get the page's tools, except the `call` tool: nobody is there to answer. A Read only schedule narrows the sandbox, not the tools
-  ([Scheduled runs and the lead agent channel](#scheduled-runs-and-the-lead-agent-channel)).
+- A message on the lead agent channel also starts a task. It uses the same launcher as the chat
+  page and gets the page's tools, except the `call` tool: nobody is there to answer
+  ([The lead agent channel and mailbox](#the-lead-agent-channel-and-mailbox)).
 - "Not available" means the way in has no tool for that request.
 
 `tests/test_surface_matrix.py` starts each way in's tool servers and compares their tools with this table. A change
@@ -538,7 +538,7 @@ After you choose **Sign in**, the app posts a Home Assistant persistent notifica
 
 While the app is not signed in, a banner above the chat offers **Sign in**. During a sign-in, the banner and **Settings** show the one-time code in large letters, a QR code of the sign-in page served by the app itself, and the link. The code stays on screen, unchanged, until the sign-in completes or you press **Cancel**; pressing **Sign in** again keeps the running sign-in and its code. Under the code, a countdown shows how long it still works (Codex 0.166.0 gives codes 15 minutes); each status reply from the app sets it again, so it stays right after the phone sleeps. When it runs out, the page says so and offers **Get a new code**. If a sign-in stops without signing in, **Settings** says why when it can, and **Sign in** becomes **Get a new code**. The GitHub code in **Settings > Accounts and connections > GitHub** has the same countdown and button.
 
-Every section of **Settings** starts collapsed, and one top-level section is open at a time: opening one closes the others. The parts inside a section, such as **GitHub**, keep their own state. The window keeps one size; an open section scrolls inside it. Its header shows a one-line status, such as **Signed in**, **Connected as owner, 1 repository** or **Keeps 25**. A section that needs attention shows its status in red: a sign-in that waits or failed, a schedule that waits for your approval, or schedules paused because the Home Assistant time zone is unknown. Tap a header to open the section. When a saved sign-in expires or is revoked, the banner returns and the integration raises a Home Assistant repair; the integration's **Signed in** binary sensor turns off. **Accounts and connections** holds the three sign-ins and pairings: **ChatGPT account**, **GitHub** and **ChatGPT app pairing**, each under its own collapsed header. Its header joins their states, for example "ChatGPT signed in · GitHub connected · app off"; when one of them needs you, the header names only that one. The app pairing part shows the remote connection state, **Get a pairing code** while remote control is on, **Manage remote connection** and **Turn off**. Turn off stops the connection; it does not remove the pairing in the ChatGPT app. A pairing code shows no countdown, because the worker does not know how long Codex keeps it.
+Every section of **Settings** starts collapsed, and one top-level section is open at a time: opening one closes the others. The parts inside a section, such as **GitHub**, keep their own state. The window keeps one size; an open section scrolls inside it. Its header shows a one-line status, such as **Signed in**, **Connected as owner, 1 repository** or **Keeps 25**. A section that needs attention shows its status in red: a sign-in that waits or failed. Tap a header to open the section. When a saved sign-in expires or is revoked, the banner returns and the integration raises a Home Assistant repair; the integration's **Signed in** binary sensor turns off. **Accounts and connections** holds the three sign-ins and pairings: **ChatGPT account**, **GitHub** and **ChatGPT app pairing**, each under its own collapsed header. Its header joins their states, for example "ChatGPT signed in · GitHub connected · app off"; when one of them needs you, the header names only that one. The app pairing part shows the remote connection state, **Get a pairing code** while remote control is on, **Manage remote connection** and **Turn off**. Turn off stops the connection; it does not remove the pairing in the ChatGPT app. A pairing code shows no countdown, because the worker does not know how long Codex keeps it.
 
 The page reaches the app through a Home Assistant ingress session, which the Home Assistant tab renews. If a request finds that session expired (for example after a phone slept), the page asks Home Assistant for a new session once and sends the request again. If that fails, a banner says the session expired and offers **Reload**; the page never shows the bare HTTP error.
 
@@ -582,7 +582,7 @@ You can also ask the assistant in chat to clone or link a connected repository. 
 
 ### The `github_git` tool
 
-Codex can call `repos`, `fetch`, `pull`, `push`, `clone` and `link`, for connected repositories only and only during a chat or scheduled run. Every operation is available in every sandbox mode (0.3.6). A pull fetches only; the assistant then fast-forwards the work tree in its own shell (`git merge --ff-only`), so the app never checks files out into a folder a task can change. A push never forces, deletes or pushes tags.
+Codex can call `repos`, `fetch`, `pull`, `push`, `clone` and `link`, for connected repositories only and only during a chat. Every operation is available in every sandbox mode (0.3.6). A pull fetches only; the assistant then fast-forwards the work tree in its own shell (`git merge --ff-only`), so the app never checks files out into a folder a task can change. A push never forces, deletes or pushes tags.
 
 Limits of a push:
 
@@ -764,7 +764,7 @@ The notification stays until you dismiss it; another block in the same task repl
 Detection uses `codexErrorInfo: "cyberPolicy"` from the pinned Codex 0.166.0 app-server.
 It accepts an `error` notification or a failed `turn/completed` notification for the current thread and turn.
 It does not guess from an assistant's answer, a screenshot, a generic error or an exit code.
-It covers tasks the worker launches, including scheduled tasks.
+It covers tasks the worker launches.
 The paired ChatGPT app's own remote threads are not observed through this transport.
 Other filter errors without this typed signal keep the normal error path.
 
@@ -953,7 +953,7 @@ The AppArmor ABI declaration enables domain/stack and network_v8 mediation on HA
 
 The plain relay route still creates a user namespace and maps to the fixed non-root identity. It omits the private hostname, not the namespace requirement. If namespace creation is refused, it fails closed and retries with backoff. No working fallback is promised in that case. See [sandbox checks](SANDBOX_TESTING.md#abi-socket-family-change-and-namespace-fallback). The scratch-folder proposal is in [CX-HA-URL's design note](../docs/design/CX-HA-URL.md#scratch-folder-proposal-do-not-build); this change creates no notes folder or sandbox bind.
 
-## Scheduled runs and the lead agent channel
+## The lead agent channel and mailbox
 
 **Permission requests remain human decisions.** The run log shows **waiting for approval** while a native request is pending. Open its chat to review the command or diff and choose **Allow once** or **Deny** as an administrator. No scheduler, lead token or mailbox reply can answer it. The parked exchange keeps the worker's normal execution slot; other schedules do not bypass it. Existing task timeouts, cancellation and restart expiration still apply. A question instead shows **waiting for input**. Scheduled and lead tasks report completion, failure, cancellation and questions in the run log/chat without pushes. Only their existing permission-wait notification uses `notify_service` (or persistent Home Assistant notifications). The lead accepted Home Assistant phone notification and the responsive permission page; a ChatGPT approval mirror is not required or provided.
 
@@ -1059,8 +1059,8 @@ of diagnostic collection never decide whether an action runs or a queue advances
 
 **Remote ChatGPT thread events are not recorded in this first delivery.** Every
 export includes `remote ChatGPT threads: not recorded`. No diagnostic connection,
-subscription, resume, attachment or remote history read is added. Add-on page,
-scheduled and lead-channel tasks are recorded by their worker lifecycle. Relay
+subscription, resume, attachment or remote history read is added. Add-on page
+and lead-channel tasks are recorded by their worker lifecycle. Relay
 read RPCs are grouped separately within one capability lifetime, with counts per
 operation/domain; they do not describe the remote conversation or its approvals.
 Only worker-visible launch-policy refusals and approval events are included. The export
@@ -1124,7 +1124,6 @@ own to any of them.
   access is on, a ChatGPT app thread can also ask for it; the app never sees those threads, so such a thread can
   mix the settings (for example "never ask" with `workspace-write`). No mix reaches further than Full access itself.
   A turn that is running when the switch goes off finishes in Full access; the chat's next turn runs in Default.
-- Scheduled runs use Default or Read only only.
 - A queued message keeps the choice submitted with it. Camera and Plan mode are not offered in this build.
 
 A chat's menu holds Rename, Pin, Share, Archive and Delete ([Managing chats](#managing-chats)). The Status
@@ -1140,7 +1139,7 @@ URLs and QR images remain limited to verified Ingress administrators; API tokens
 or start pairing. No live account enrollment or device handoff is implied by local rendering tests.
 
 Settings → Workspace instructions → Workspace rules opens a separate editor. The file is read only when that editor
-opens, and Save remains an explicit action. Existing account, diagnostic, scheduling and browser-permission
+opens, and Save remains an explicit action. Existing account, diagnostic and browser-permission
 controls remain in Settings; **Browser permissions** is a part of **Advanced**, the last section, which starts
 collapsed and shows in its header how many permissions are remembered, or that they could not be read. The
 **Add-on configuration** row at the foot of Settings opens the app's Configuration tab in Home Assistant
