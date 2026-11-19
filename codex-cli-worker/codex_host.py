@@ -49,6 +49,7 @@ UNLOAD_ARGS = ["--config", "thread_unload_delay_secs=0"]
 REPLY_TIMEOUT = 30.0  # No reply to a host request in this time counts as a crash.
 READY_TIMEOUT = 60.0  # A woken chat's tool programs must be ready in this time, or the wake fails.
 INTERRUPT_TIMEOUT = 10.0  # A canceled turn must complete in this time, or a restart is due.
+THREAD_JOIN_TIMEOUT = 2.0  # How long a stop waits for the reader threads of the process it reaped.
 CRASH_LIMIT = 3
 CRASH_WINDOW = 600.0
 CRASH_PAUSE = 3600.0
@@ -108,6 +109,15 @@ class Chat:
         return self.session is not None or self.turn_running
 
 
+@dataclass
+class _Taken:
+    """A process that a stop or a crash took from the host, with what must be ended outside the lock."""
+
+    process: Any
+    sessions: list[Any]
+    readers: list[threading.Thread]
+
+
 class CodexHost:
     """One long-lived app-server process and the chats that live in it.
 
@@ -123,6 +133,9 @@ class CodexHost:
     - redact(text) hides credentials in text that goes to a log.
     - log(line) writes one line to the worker log. The host never logs a fingerprint value.
     - lock is the worker's reentrant lock, the one that AppServerSession uses.
+
+    A caller of wake, pause, select, attach, detach, cancel, ready_for_message, stop or close must not hold that
+    lock: these methods wait for replies that the reader thread delivers, and the reader needs the lock to do it.
     """
 
     def __init__(
@@ -161,9 +174,13 @@ class CodexHost:
         self._generation = 0  # Counts processes, so a reader of an old process cannot touch a new one.
         self._crashes: list[float] = []
         self._paused_until = 0.0
-        self._tool_status: dict[str, str] = {}
+        # The status of each tool program by (thread id or None, name), from the notices since the last wake began.
+        self._tool_status: dict[tuple[str | None, str], str] = {}
         self._closed_threads: set[str] = set()
-        self._waking = ""  # The chat that wake() loads now.
+        self._readers: list[threading.Thread] = []  # The two reader threads of the current process.
+        self._restart_thread: threading.Thread | None = None
+        self._closed = False  # Set by close(): no process starts again.
+        self.stop_due = ""  # The reason of a stop that waits for the running exchanges (switch off, sign-out).
         self._notice = threading.Condition(self.lock)
         self._wake_lock = threading.Lock()  # One wake or pause at a time, so ready notices belong to it.
 
@@ -178,16 +195,20 @@ class CodexHost:
         """Compare the fingerprint, restart when due and possible, and say whether a new exchange may start here.
 
         False means: use the start path of today, or (when a restart is due) keep the message in the queue. The
-        caller tells the two apart with `restart_due`.
+        caller tells the two apart with `restart_due`. A restart, the owner switch off and a sign-out never cut a
+        running exchange off: the process goes away only when no chat works, and the check and the stop are one
+        step under the lock, so an exchange cannot start between them.
         """
-        if not self.enabled():
-            self.stop("the owner switch is off")
+        if self._closed:
             return False
+        if not self.enabled():
+            return self._stop_when_idle("the owner switch is off")
         rows = self.fingerprint_rows()
         if rows.get("sign_in") is None:
-            self.stop("signed out")
-            return False
+            return self._stop_when_idle("signed out")
+        taken = None
         with self.lock:
+            self.stop_due = ""
             if self.clock() < self._paused_until:
                 return False
             new = fingerprint(rows)
@@ -195,17 +216,39 @@ class CodexHost:
                 names = changed_rows(self._fingerprint, new)
                 self.log(f"Codex host: restart due, changed: {', '.join(names)}.")
                 self.restart_due = True
-            if self.restart_due and any(chat.working for chat in self.chats.values()):
-                return False
             if self.process is not None and not self.restart_due:
                 return True
-        if self.restart_due:
-            self.stop("restart")
+            if self.process is not None:
+                if self._anyone_working():
+                    return False
+                taken = self._take_process()
+        if taken is not None:
+            self._finish_stop(taken, "restart")
         return self._start(new)
 
-    def _start(self, new_fingerprint: dict[str, str]) -> bool:
-        """Start a process and initialize it. On failure, stop it again and return False."""
+    def _stop_when_idle(self, reason: str) -> bool:
+        """Stop the process now when no chat works, else when the last exchange ends (detach). Return False."""
         with self.lock:
+            if self.process is None:
+                self.stop_due = ""
+                return False
+            if self._anyone_working():
+                self.stop_due = reason
+                return False
+            self.stop_due = ""
+            taken = self._take_process()
+        self._finish_stop(taken, reason)
+        return False
+
+    def _anyone_working(self) -> bool:
+        """True while any chat has a running exchange. Lock held."""
+        return any(chat.working for chat in self.chats.values())
+
+    def _start(self, new_fingerprint: dict[str, str]) -> bool:
+        """Start a process and initialize it. On failure, stop that process again and return False."""
+        with self.lock:
+            if self._closed:
+                return False
             if self.process is not None:
                 return True
             try:
@@ -219,35 +262,70 @@ class CodexHost:
             self.writer = process.stdin
             self._fingerprint = new_fingerprint
             self.restart_due = False
-            threading.Thread(target=self._read, args=(process.stdout, generation), daemon=True,
-                             name="codex-host-reader").start()
-            threading.Thread(target=self._read_errors, args=(process.stderr,), daemon=True,
-                             name="codex-host-stderr").start()
+            self._readers = [
+                threading.Thread(target=self._read, args=(process.stdout, generation), daemon=True,
+                                 name="codex-host-reader"),
+                threading.Thread(target=self._read_errors, args=(process.stderr,), daemon=True,
+                                 name="codex-host-stderr"),
+            ]
+            for reader in self._readers:
+                reader.start()
         try:
             self._call("initialize", {"clientInfo": {
                 "name": "home_assistant_worker", "title": "Home Assistant", "version": "1"}})
             with self.lock:
                 self._write({"method": "initialized"})
-        except HostError:
-            self.stop("initialize failed")
+        except (HostError, OSError, ValueError) as exc:
+            # Only this start's process: a crash in _call may already have started the next one.
+            self.stop(f"initialize failed: {exc}", generation=generation)
             return False
         self.log("Codex host: the process started.")
         self._wake_selected()
         return True
 
-    def stop(self, reason: str) -> None:
-        """Stop the process. Every chat is paused. A running exchange is failed (a stop is only for no-work cases)."""
+    def stop(self, reason: str, generation: int | None = None) -> None:
+        """Stop the process at once. Every chat is paused, and a running exchange is failed.
+
+        The routine stops (restart, switch off, sign-out) go through ready_for_message, which waits for work. This
+        is for a failed start and for close(). With a generation, it stops only the process of that generation.
+        """
         with self.lock:
-            process = self.process
-            if process is None:
+            if self.process is None or generation not in (None, self._generation):
                 return
-            self.process = None
-            self.writer = None
-            sessions = self._forget_all()
-        for session in sessions:
-            session.fail("The Codex process stopped before the exchange finished.")
-        self.reap(process)
-        self.log(f"Codex host: the process stopped ({reason}).")
+            taken = self._take_process()
+        self._finish_stop(taken, reason)
+
+    def close(self) -> None:
+        """Stop for good, as the worker shuts down: no process starts after this."""
+        with self.lock:
+            self._closed = True
+            restart = self._restart_thread
+        if restart is not None and restart is not threading.current_thread():
+            restart.join(THREAD_JOIN_TIMEOUT)
+        self.stop("the worker stops")
+
+    def _take_process(self) -> _Taken:
+        """Take the process away from the host: every chat is paused, every waiter wakes. Lock held."""
+        taken = _Taken(self.process, self._forget_all(), self._readers)
+        self.process = None
+        self.writer = None
+        self._readers = []
+        return taken
+
+    def _finish_stop(self, taken: _Taken, reason: str | None,
+                     failure: str = "The Codex process stopped before the exchange finished.") -> None:
+        """Fail the taken sessions, reap the process and wait a short time for its readers; log unless reason is None.
+
+        The lock is not held. A reader that calls this (the end of the output) does not wait for itself.
+        """
+        for session in taken.sessions:
+            session.fail(failure)
+        self.reap(taken.process)
+        for reader in taken.readers:
+            if reader is not threading.current_thread():
+                reader.join(THREAD_JOIN_TIMEOUT)
+        if reason is not None:
+            self.log(f"Codex host: the process stopped ({reason}).")
 
     def _forget_all(self) -> list[Any]:
         """Mark every chat paused and wake every waiter; return the sessions that were attached. Lock held."""
@@ -268,25 +346,25 @@ class CodexHost:
         with self.lock:
             if generation != self._generation or self.process is None:
                 return
-            process = self.process
-            self.process = None
-            self.writer = None
-            sessions = self._forget_all()
+            taken = self._take_process()
             now = self.clock()
             self._crashes = [moment for moment in self._crashes if now - moment < CRASH_WINDOW] + [now]
             too_many = len(self._crashes) >= CRASH_LIMIT
             if too_many:
                 self._paused_until = now + CRASH_PAUSE
                 self._crashes = []
-        for session in sessions:
-            session.fail("Codex stopped before the exchange finished.")
-        self.reap(process)
+        self._finish_stop(taken, None, failure="Codex stopped before the exchange finished.")
         if too_many:
             self.log(f"Codex host: {CRASH_LIMIT} crashes in {int(CRASH_WINDOW // 60)} minutes ({reason}); no live "
                      f"process for {int(CRASH_PAUSE // 60)} minutes. Each message starts its own Codex process.")
             return
         self.log(f"Codex host: the process crashed ({reason}); starting a new one.")
-        threading.Thread(target=self.ready_for_message, daemon=True, name="codex-host-restart").start()
+        with self.lock:
+            if self._closed:
+                return
+            self._restart_thread = threading.Thread(target=self.ready_for_message, daemon=True,
+                                                    name="codex-host-restart")
+            self._restart_thread.start()
 
     # Requests of the host ------------------------------------------------------------------------------------
 
@@ -368,12 +446,18 @@ class CodexHost:
         """Make a chat live and return its thread id. Raise AllChatsBusy or HostError when that cannot be done.
 
         thread_params are those of thread/start, or of thread/resume when the chat has a thread. tool_names are the
-        tool programs that must be ready before the chat is live.
+        tool programs that must be ready before the chat is live. A wake holds the wake lock for up to
+        reply_timeout (the thread request) plus ready_timeout (the tool programs), and longer when it first pauses
+        another chat, so a page request that calls it (select) can wait that long.
+
+        When the thread loaded but its tool programs failed or were not ready in time, the thread is paused again
+        before the error is raised, so that every thread that holds tool programs is a live chat inside the cap.
         """
         with self._wake_lock:
             with self.lock:
                 if self.process is None:
                     raise HostError("no Codex process")
+                generation = self._generation
                 chat = self.chats.setdefault(chat_id, Chat(chat_id))
                 chat.last_used = self.clock()
                 if chat.live:
@@ -383,7 +467,6 @@ class CodexHost:
                 self._pause_locked_out(victim)
             with self.lock:
                 self._tool_status = {}
-                self._waking = chat_id
                 params = dict(thread_params)
                 if chat.thread_id:
                     params["threadId"] = chat.thread_id
@@ -398,23 +481,52 @@ class CodexHost:
                 chat.tool_names = tuple(tool_names)
                 self._threads[thread_id] = chat_id
                 self._closed_threads.discard(thread_id)
-                ready = self._notice.wait_for(lambda: self._tools_settled(tool_names), self.ready_timeout)
-                failed = sorted(name for name in tool_names if self._tool_status.get(name) not in (None, "ready",
-                                                                                                  "starting"))
-                if not ready or failed:
-                    raise HostError("tool programs not ready: " + ", ".join(failed or sorted(
-                        name for name in tool_names if self._tool_status.get(name) != "ready")))
-                chat.live = True
-                chat.file_signature = file_signature(self.session_file(thread_id))
-                return thread_id
 
-    def _tools_settled(self, names: list[str]) -> bool:
-        """True when each named tool program is ready, or one has failed, or the process is gone. Lock held."""
-        if self.process is None:
-            return True
-        status = [self._tool_status.get(name) for name in names]
-        return all(value == "ready" for value in status) or any(value not in (None, "ready", "starting")
-                                                                  for value in status)
+                def settled() -> bool:
+                    failed, waiting = self._tool_report(tool_names, thread_id)
+                    return self._generation != generation or self.process is None or bool(failed) or not waiting
+
+                self._notice.wait_for(settled, self.ready_timeout)
+                if self._generation != generation or self.process is None:
+                    raise HostError("the Codex process stopped while the chat woke")
+                failed, waiting = self._tool_report(tool_names, thread_id)
+                if not failed and not waiting:
+                    chat.live = True
+                    chat.file_signature = file_signature(self.session_file(thread_id))
+                    return thread_id
+            self._unload_after_failed_wake(chat_id, thread_id)
+            if failed:
+                raise HostError("tool programs failed: " + ", ".join(failed))
+            raise HostError("tool programs not ready in time: " + ", ".join(waiting))
+
+    def _tool_report(self, names: list[str], thread_id: str) -> tuple[list[str], list[str]]:
+        """Return the named tool programs that failed and those not ready yet, for one thread. Lock held.
+
+        A notice counts when it names this thread or names no thread. A notice of any other thread (a sub-agent
+        that the host does not know yet, or another chat) is not about this wake.
+        """
+        failed, waiting = [], []
+        for name in names:
+            status = self._tool_status.get((thread_id, name), self._tool_status.get((None, name)))
+            if status == "ready":
+                continue
+            if status in (None, "starting"):
+                waiting.append(name)
+            else:
+                failed.append(name)
+        return sorted(failed), sorted(waiting)
+
+    def _unload_after_failed_wake(self, chat_id: str, thread_id: str) -> None:
+        """Unload a thread that loaded but did not become a live chat; when that fails, a restart is due."""
+        try:
+            closed = self._unload(thread_id)
+        except HostError:
+            closed = False
+        with self.lock:
+            self._forget_sub_agents(chat_id, thread_id)
+            if not closed and self.process is not None:
+                self.restart_due = True
+                self.log("Codex host: a chat that did not wake did not unload; restart due.")
 
     def _victim_for(self, chat_id: str) -> str:
         """Return the chat to pause so that one more can be live, or "" when there is room. Lock held.
@@ -444,18 +556,27 @@ class CodexHost:
             if chat.working:
                 raise HostError("a working chat is never paused")
             thread_id = chat.thread_id
-        self._call("thread/unsubscribe", {"threadId": thread_id})
+        closed = self._unload(thread_id)
         with self.lock:
-            closed = self._notice.wait_for(lambda: thread_id in self._closed_threads or self.process is None,
-                                           self.reply_timeout)
             chat.live = False
-            for sub, owner in list(self._threads.items()):
-                if owner == chat_id and sub != thread_id:
-                    del self._threads[sub]
+            self._forget_sub_agents(chat_id, thread_id)
             if not closed:
                 # The thread may still hold memory; a fresh process frees it.
                 self.restart_due = True
                 self.log("Codex host: a paused chat did not unload; restart due.")
+
+    def _unload(self, thread_id: str) -> bool:
+        """Send thread/unsubscribe and wait for thread/closed. True when the thread closed or the process is gone."""
+        self._call("thread/unsubscribe", {"threadId": thread_id})
+        with self.lock:
+            return self._notice.wait_for(lambda: thread_id in self._closed_threads or self.process is None,
+                                         self.reply_timeout)
+
+    def _forget_sub_agents(self, chat_id: str, thread_id: str) -> None:
+        """Drop the sub-agent threads of a chat that is no longer loaded. Lock held."""
+        for sub, owner in list(self._threads.items()):
+            if owner == chat_id and sub != thread_id:
+                del self._threads[sub]
 
     # Exchanges -------------------------------------------------------------------------------------------------
 
@@ -486,7 +607,11 @@ class CodexHost:
             chat.last_used = self.clock()
 
     def detach(self, chat_id: str) -> None:
-        """End an exchange: the chat stays live. Record its session file; restart now if a restart is due."""
+        """End an exchange: the chat stays live. Record its session file.
+
+        When a restart or a stop waits and this was the last running exchange, it runs now, on the caller's thread:
+        a restart can take as long as a start (reply_timeout for initialize, then a wake of the selected chat).
+        """
         with self.lock:
             chat = self.chats.get(chat_id)
             if chat is None:
@@ -495,7 +620,7 @@ class CodexHost:
             chat.last_used = self.clock()
             if chat.live:
                 chat.file_signature = file_signature(self.session_file(chat.thread_id))
-            restart = self.restart_due and not any(other.working for other in self.chats.values())
+            restart = (self.restart_due or bool(self.stop_due)) and not self._anyone_working()
         if restart:
             self.ready_for_message()
 
@@ -596,10 +721,10 @@ class CodexHost:
         thread_id = _thread_of(params)
         if method == "mcpServer/startupStatus/updated":
             name = params.get("name")
-            # A notice that names another chat's thread (a sub-agent there starts a tool) is not about this wake.
-            other = isinstance(thread_id, str) and self._threads.get(thread_id) not in (None, self._waking)
-            if isinstance(name, str) and not other:
-                self._tool_status[name] = str(params.get("status") or "")
+            if isinstance(name, str):
+                # Kept by thread, so a wake reads only its own thread's notices (see _tool_report).
+                key = thread_id if isinstance(thread_id, str) else None
+                self._tool_status[(key, name)] = str(params.get("status") or "")
         elif method == "thread/closed" and isinstance(thread_id, str):
             self._closed_threads.add(thread_id)
         elif method in ("item/started", "item/completed"):

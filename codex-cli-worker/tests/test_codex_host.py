@@ -48,7 +48,10 @@ class Input:
 
     def write(self, text: str) -> None:
         for line in text.splitlines():
-            self.codex.handle(json.loads(line))
+            message = json.loads(line)
+            if message.get("method") in self.codex.broken:
+                raise OSError("broken pipe")
+            self.codex.handle(message)
 
     def flush(self) -> None:
         pass
@@ -64,8 +67,13 @@ class FakeCodex:
         self.stderr = Pipe()
         self.sent: list[dict] = []
         self.silent: set[str] = set()  # Methods that get no reply.
+        self.broken: set[str] = set()  # Methods whose write fails, as on a closed pipe.
         self.no_closed = False
         self.tool_status = "ready"
+        self.notice_thread = False  # Put the thread id on each tool notice.
+        self.after_thread: list[dict] = []  # Lines sent after the tool notices of each thread/start or resume.
+        self.crash_after_thread = False  # End the output right after the reply to thread/start or resume.
+        self.loaded: set[str] = set()  # Threads that hold their tool programs now.
         self.threads = 0
         self.reaped = False
 
@@ -80,12 +88,22 @@ class FakeCodex:
                 thread_id = f"p{self.number}-thread-{self.threads}"
             else:
                 thread_id = params["threadId"]
+            self.loaded.add(thread_id)
             self.stdout.put({"id": request_id, "result": {"thread": {"id": thread_id}}})
+            if self.crash_after_thread:
+                self.crash()
+                return
+            where = {"threadId": thread_id} if self.notice_thread else {}
             for name in TOOLS:
-                self.stdout.put({"method": "mcpServer/startupStatus/updated", "params": {"name": name, "status": "starting"}})
                 self.stdout.put({"method": "mcpServer/startupStatus/updated",
-                                 "params": {"name": name, "status": self.tool_status}})
+                                 "params": {"name": name, "status": "starting", **where}})
+                if self.tool_status != "starting":
+                    self.stdout.put({"method": "mcpServer/startupStatus/updated",
+                                     "params": {"name": name, "status": self.tool_status, **where}})
+            for line in self.after_thread:
+                self.stdout.put(line)
         elif method == "thread/unsubscribe":
+            self.loaded.discard(params["threadId"])
             self.stdout.put({"id": request_id, "result": {}})
             if not self.no_closed:
                 self.stdout.put({"method": "thread/closed", "params": {"threadId": params["threadId"]}})
@@ -100,6 +118,7 @@ class FakeCodex:
 
     def crash(self) -> None:
         self.stdout.close()
+        self.stderr.close()
 
 
 class FakeSession:
@@ -145,6 +164,40 @@ class Clock:
         return self.now
 
 
+class ReleaseHookLock:
+    """A reentrant lock that runs one hook, once, right after its outermost release, on the releasing thread."""
+
+    def __init__(self) -> None:
+        self.inner = threading.RLock()
+        self.after_release = None
+
+    def acquire(self, *args) -> bool:
+        return self.inner.acquire(*args)
+
+    def release(self) -> None:
+        self.inner.release()
+        hook, self.after_release = self.after_release, None
+        if hook is not None and not self.inner._is_owned():
+            hook()
+        elif hook is not None:
+            self.after_release = hook
+
+    __enter__ = acquire
+
+    def __exit__(self, *_exc) -> None:
+        self.release()
+
+    # threading.Condition uses these to wait with a reentrant lock held.
+    def _is_owned(self) -> bool:
+        return self.inner._is_owned()
+
+    def _release_save(self):
+        return self.inner._release_save()
+
+    def _acquire_restore(self, state) -> None:
+        self.inner._acquire_restore(state)
+
+
 class HostTest(unittest.TestCase):
     live_max = 3
 
@@ -159,6 +212,10 @@ class HostTest(unittest.TestCase):
                      "rules": "hash-of-rule-files"}
         self.on = True
         self.clock = Clock()
+        self.on_spawn = lambda process: None
+        # Each host ends with its test, with its reader threads (make_host adds the close). This check is added
+        # first, so it runs last: the Home Assistant test plugin fails a test that leaves a thread behind.
+        self.addCleanup(self.assert_no_host_threads)
         self.host = self.make_host()
 
     def make_host(self, **overrides) -> CodexHost:
@@ -166,6 +223,7 @@ class HostTest(unittest.TestCase):
             self.spawned_args.append(args)
             process = FakeCodex(len(self.processes) + 1)
             self.processes.append(process)
+            self.on_spawn(process)
             return process
 
         def reap(process):
@@ -180,7 +238,13 @@ class HostTest(unittest.TestCase):
             "lock": threading.RLock(), "live_max": self.live_max, "clock": self.clock, "reply_timeout": 1.0,
             "ready_timeout": 1.0}
         options.update(overrides)
-        return CodexHost(**options)
+        host = CodexHost(**options)
+        self.addCleanup(host.close)
+        return host
+
+    def assert_no_host_threads(self) -> None:
+        names = [thread.name for thread in threading.enumerate() if thread.name.startswith("codex-host-")]
+        self.assertEqual(names, [])
 
     @property
     def codex(self) -> FakeCodex:
@@ -649,6 +713,152 @@ class ExchangeTests(HostTest):
         self.codex.emit({"method": "item/completed", "params": {"threadId": "marker"}})
         time.sleep(0.05)
         self.assertTrue(self.host.chat("chat-a").turn_running)
+
+
+class FailurePathTests(HostTest):
+    """What the host does when a wake, a stop or a start goes wrong part of the way."""
+
+    def test_a_crash_while_the_tools_start_fails_the_wake(self) -> None:
+        self.start()
+        self.codex.crash_after_thread = True
+        with self.assertRaisesRegex(HostError, "stopped while the chat woke"):
+            self.wake("chat-a")
+        self.assertEqual(self.host.live_chats(), [])
+        with self.assertRaises(HostError):
+            self.host.attach("chat-a", FakeSession("worker-a"))
+        self.assertTrue(wait_until(lambda: len(self.processes) == 2 and self.host.running()))
+        self.assertEqual(self.codex.methods("thread/resume"), [])
+
+    def test_a_chat_whose_tools_fail_is_unloaded_so_the_cap_holds(self) -> None:
+        self.start()
+        self.codex.tool_status = "failed"
+        for number in range(5):
+            with self.assertRaises(HostError):
+                self.wake(f"chat-{number}")
+        self.assertEqual(len(self.codex.methods("thread/start")), 5)
+        self.assertEqual(self.codex.loaded, set())
+        self.assertFalse(self.host.restart_due)
+
+    def test_a_chat_whose_tools_are_late_is_unloaded(self) -> None:
+        self.start()
+        self.codex.tool_status = "starting"
+        with self.assertRaisesRegex(HostError, "not ready in time"):
+            self.wake("chat-a")
+        self.assertEqual(self.codex.loaded, set())
+
+    def test_a_failed_wake_that_does_not_unload_makes_a_restart_due(self) -> None:
+        self.start()
+        self.codex.tool_status = "failed"
+        self.codex.no_closed = True
+        with self.assertRaises(HostError):
+            self.wake("chat-a")
+        self.assertTrue(self.host.restart_due)
+
+    def test_a_restart_never_fails_an_exchange_that_starts_during_the_check(self) -> None:
+        lock = ReleaseHookLock()
+        self.host = self.make_host(lock=lock)
+        self.start()
+        self.wake("chat-a")
+        self.rows["rules"] = "edited-agents-md"
+        session = FakeSession("worker-a")
+        attached: list[str] = []
+
+        def attach_now() -> None:
+            # A second message thread starts an exchange the moment the restart check lets go of the lock.
+            try:
+                self.host.attach("chat-a", session)
+                attached.append("attached")
+            except HostError as exc:
+                attached.append(str(exc))
+
+        def log(line: str) -> None:
+            self.logs.append(line)
+            if "restart due" in line:
+                lock.after_release = attach_now
+
+        self.host.log = log
+        self.host.ready_for_message()
+        # The check and the stop are one step: the exchange finds the chat paused and takes the start path.
+        self.assertEqual(attached, ["the chat is not live"])
+        self.assertEqual(session.failed, "")
+        self.assertEqual(len(self.processes), 2)
+
+    def test_the_owner_switch_off_waits_for_the_running_exchange(self) -> None:
+        self.start()
+        session = self.begin("chat-a")
+        self.on = False
+        self.assertFalse(self.host.ready_for_message())
+        self.assertEqual(session.failed, "")
+        self.assertTrue(self.host.running())
+        self.host.detach("chat-a")  # The exchange ends: now the process stops.
+        self.assertFalse(self.host.running())
+        self.assertTrue(self.processes[0].reaped)
+
+    def test_a_sign_out_waits_for_the_running_exchange(self) -> None:
+        self.start()
+        session = self.begin("chat-a")
+        self.rows["sign_in"] = None
+        self.assertFalse(self.host.ready_for_message())
+        self.assertEqual(session.failed, "")
+        self.host.detach("chat-a")
+        self.assertFalse(self.host.running())
+        self.assertEqual(len(self.processes), 1)
+
+    def test_a_stop_that_waits_is_dropped_when_the_switch_is_on_again(self) -> None:
+        self.start()
+        self.begin("chat-a")
+        self.on = False
+        self.assertFalse(self.host.ready_for_message())
+        self.on = True
+        self.assertTrue(self.host.ready_for_message())
+        self.host.detach("chat-a")
+        self.assertTrue(self.host.running())
+        self.assertFalse(self.processes[0].reaped)
+
+    def test_a_failed_initialize_never_stops_the_next_process(self) -> None:
+        def first_never_answers(process: FakeCodex) -> None:
+            if process.number == 1:
+                process.silent.add("initialize")
+
+        self.on_spawn = first_never_answers
+        self.assertFalse(self.host.ready_for_message())
+        self.assertTrue(wait_until(lambda: len(self.processes) == 2 and self.host.running()))
+        time.sleep(0.05)
+        self.assertTrue(self.host.running())
+        self.assertFalse(self.processes[1].reaped)
+
+    def test_a_broken_pipe_at_the_start_is_a_failed_start(self) -> None:
+        self.on_spawn = lambda process: process.broken.add("initialized")
+        self.assertFalse(self.host.ready_for_message())
+        self.assertFalse(self.host.running())
+        self.assertTrue(self.processes[0].reaped)
+
+    def test_a_stop_of_an_old_process_leaves_the_new_one(self) -> None:
+        self.start()
+        self.host.stop("an old caller", generation=0)
+        self.assertTrue(self.host.running())
+
+    def test_a_tool_notice_of_an_unknown_thread_does_not_count(self) -> None:
+        self.start()
+        self.codex.tool_status = "starting"
+        self.codex.after_thread = [{"method": "mcpServer/startupStatus/updated",
+                                    "params": {"name": name, "status": "ready", "threadId": "unknown-thread"}}
+                                   for name in TOOLS]
+        with self.assertRaisesRegex(HostError, "not ready in time"):
+            self.wake("chat-a")
+        self.assertEqual(self.host.live_chats(), [])
+
+    def test_a_tool_notice_of_the_chat_own_thread_counts(self) -> None:
+        self.start()
+        self.codex.notice_thread = True
+        self.wake("chat-a")
+        self.assertEqual(self.host.live_chats(), ["chat-a"])
+
+    def test_a_stop_waits_for_the_reader_threads(self) -> None:
+        self.start()
+        readers = list(self.host._readers)
+        self.host.stop("test")
+        self.assertFalse(any(reader.is_alive() for reader in readers))
 
 
 if __name__ == "__main__":
