@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0 (unreleased)
+
+- The integration no longer reads the mailbox. The **Mailbox unread for the lead** sensor and the
+  `codex_cli_mailbox_message` event are removed, and the status poll no longer saves message IDs. When the integration
+  starts, it removes that sensor from the entity registry and deletes its saved message IDs, so an update leaves no
+  orphan entity. Automations that use the sensor or the event stop working. The app removes the lead channel and the
+  mailbox in the same release.
+
 ## 0.3.6 - 2026-11-18
 
 - The app's own guards are removed. Codex's own permission modes and the sandbox are now the whole protection, as in

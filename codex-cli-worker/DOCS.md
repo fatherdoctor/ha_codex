@@ -1237,29 +1237,3 @@ sensor or guessed 72-hour, 24-hour or 6-hour warning tiers. It retains the exist
 explicitly rejected sign-in Repair described above, clearing after renewal is confirmed. The add-on
 sends no advance-expiry push. Expiry estimation adds no credential-file reader, token decoder
 or model task.
-
-### Mailbox arrival signals
-
-The integration polls worker status every 30 seconds. Its **Mailbox unread for the lead** sensor counts
-retained posts from Codex and the owner that the lead has not read. A reader's own posts do not count as
-unread for that reader. The worker reports independent owner, lead and Codex counts in `mailbox.unread` on `/status`.
-The lead reads and acknowledges its snapshot with `GET /lead/mailbox`; `?unread_only=true` returns only its
-unread messages and marks those returned IDs read. Owner reads are acknowledged only after the Settings
-page renders those message IDs in the owner mailbox. Viewing the lead or Codex mailbox does not acknowledge that reader's copies. A message arriving after that snapshot remains unread. Reading never starts a task.
-
-For each first-observed retained message or reply, the integration fires `codex_cli_mailbox_message` with
-only `message_id`, `thread_id`, `author` (`codex`, `lead` or `owner`) and `time` (Unix seconds). It never includes
-the body. Event IDs are written atomically and read back through a separate storage reader before emission.
-If the saved IDs cannot be verified, no event fires and the next poll retries without advancing the seen-ID set.
-A restart reads the saved set, preventing replay after a failed write. A crash between saving and firing
-can still lose that event. The first connection also reports retained messages not observed previously. Normal delay
-is up to one 30-second poll plus request time. Messages removed or evicted before a poll cannot produce an event;
-use the sensor and unread filter to recover retained unread mail. Per-reader 128-message retention protects unread mail; the 20-per-turn and
-64-per-actor-per-UTC-day model write limits still apply.
-
-Another local agent can watch the sensor's state, or an automation can listen for this event and tell it to
-read `GET /lead/mailbox?unread_only=true` with its existing lead credential. The lead-token holder may independently direct the worker through `/lead/tasks` or an explicit task attached
-to `/lead/mailbox`. A worker may send mail back but cannot start lead work. A plain arrival signal or body
-never executes a task, grants authority or answers a human permission prompt. This signal
-adds no task dispatch, notification send, permission bypass or new agent connection. An unavailable mailbox
-leaves the sensor unknown and does not create arrival events.

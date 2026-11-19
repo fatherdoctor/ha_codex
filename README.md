@@ -191,7 +191,6 @@ another app or agent that runs on the same Home Assistant host; it connects with
 Settings. The token shows once, and the app stores only a hash.
 
 - A message is only data. It never starts work, and it grants no permission.
-- A sensor counts unread messages for the other agent, and an event announces each new message without its text.
 - Limits: 500 messages, and 20 writes per turn and 64 per UTC day for each writer.
 
 **Schedules.** Open a chat's menu and choose **Schedule**. You save a name, a prompt, a model and a trigger: hourly,
