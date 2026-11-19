@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0 (unreleased)
+
+- Documentation only: the README, the integration README, `SECURITY.md`, `DOCS.md` and three option descriptions
+  now say what the code does. The README no longer promises a question before every change, or a saved copy and a
+  configuration check after every change; it says when each one happens. It says that an automation with no user
+  may call the `codex_cli.*` actions. `DOCS.md` has a new section, "Task time limits", for `task_timeout_seconds`.
+  The integration README's install steps match the app's own install of the integration. The usage sensors' two
+  sources are named. The **Full snapshot** and **Codex sandbox** option descriptions say what a snapshot leaves out
+  and where Full access is turned on.
+
 ## 0.3.6 - 2026-11-18
 
 - The app's own guards are removed. Codex's own permission modes and the sandbox are now the whole protection, as in

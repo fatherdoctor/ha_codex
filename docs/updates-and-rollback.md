@@ -15,7 +15,8 @@ and the Supervisor pulls the tag equal to the version, which the release workflo
 
 So the order of a release is fixed: the version change merges to `main`, the tag is pushed, the workflow publishes the
 images and the HACS ZIP. Until the images exist, an install that sees the new version cannot pull it; publish the tag
-soon after the merge. (The release and image workflows are disabled on this fork until its first release is planned.)
+soon after the merge. The app image and the GitHub release with the HACS ZIP are separate results of that workflow:
+a version can have its image and no release. The app's own install of the integration needs only the image.
 
 The integration (`custom_components/codex_cli`) carries the same version and updates through HACS from the release's
 `codex_cli.zip`.

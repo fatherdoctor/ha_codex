@@ -26,9 +26,12 @@ wake action is performed. See [Fully Kiosk screenshots](codex-cli-worker/VERIFIC
 SSH connections use user-managed keys and server permissions. Keys stored under
 `/data/.ssh` are accessible to Codex tasks and are excluded from app backups;
 this storage is not a secret vault isolated from the AI process. Remote key
-restrictions must be enforced by the SSH server. Sandboxed modes require
-approval for shell networking, while `danger-full-access` does not. Review each
-approved command and keep connections short-lived. See [SSH setup and
+restrictions must be enforced by the SSH server. The Default and Read only
+permission modes ask an administrator before shell networking. Auto-review lets
+Codex's own reviewer answer. Full access runs without the sandbox and asks
+nothing; it is off until an administrator turns it on in the app's Settings, and
+the `codex_sandbox` option does not accept it. Review each approved command and
+keep connections short-lived. See [SSH setup and
 limits](codex-cli-worker/DOCS.md#ssh-connections).
 
 From 0.3.6 the app has no command check of its own: Codex's permission modes and the

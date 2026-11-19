@@ -3,18 +3,26 @@
 [![License][license-badge]][license-url]
 
 Ask OpenAI's Codex, in plain words, to explain your Home Assistant or to change its configuration. You talk to it in a
-chat page inside Home Assistant. It reads your files, proposes a change, and waits for you where it matters. It is for
-the household member who looks after Home Assistant and can read a configuration file, but does not want to write
-every automation by hand.
+chat page inside Home Assistant. It reads your files and makes the change you ask for. In the default mode it edits
+files in your configuration folder without a question, and it asks for your permission before a step that needs more
+access. It is for the household member who looks after Home Assistant and can read a configuration file, but does not
+want to write every automation by hand.
 
-**Status: pre-release.** Nothing from this fork is installed on a public release yet. It is built on
+**Status: pre-release.** The app image is published for each version, but no version is called stable yet. Install it
+on a test Home Assistant first. It is built on
 [moryoav/home-assistant-codex](https://github.com/moryoav/home-assistant-codex) release **0.1.81**.
 
 ## What it does
 
 - A chat page in Home Assistant, with saved conversations and a task queue. Codex works in a sandbox.
-- It asks before anything that matters, and only an administrator can answer.
-- It saves the earlier copy of a file before it changes it, so you can undo.
+- In the default mode, Codex edits files in your configuration folder without a question. It asks before a command
+  that uses the network, a write outside your configuration folder and `/share`, or a change to a device. Only an
+  administrator can answer. The other [permission modes](#permission-modes) ask less or more.
+- Codex is told to save the earlier copy of a file before it changes it, and the chat lists the copies it saved. A
+  copy can be missing, and credential files are never copied, so keep your own Home Assistant backups
+  ([Backups](codex-cli-worker/DOCS.md#backups)).
+- After a change to YAML, the app asks Home Assistant to check the configuration, unless you turned that option off
+  or Home Assistant cannot run the check. The chat says which ([Validation](codex-cli-worker/DOCS.md#validation)).
 - The Codex program is pinned and never updates itself.
 
 ## Quick start
@@ -26,7 +34,8 @@ every automation by hand.
 4. Add **Discovered: Codex** under **Settings** > **Devices & services**.
 5. Open the chat and [sign in](#sign-in).
 
-Details and other ways to install: [Installation](#installation).
+Details and other ways to install: [Installation](#installation). If a step fails because a download is not there,
+see [If a download is missing](#if-a-download-is-missing).
 
 ## Contents
 
@@ -79,6 +88,17 @@ notification buttons. The web page opens only through Home Assistant Ingress; th
 The app never changes an integration folder that it did not install, or that was changed after it installed it. It
 says so once in a notification.
 
+### If a download is missing
+
+The app image for each version is published at `ghcr.io/fatherdoctor/codex-cli-worker`, for `amd64` and `aarch64`.
+The app's own install of the integration (steps 2 to 4) needs nothing else.
+
+- **The app does not install or update.** The image for that version is not published yet. Wait and try again, or
+  [report it](#reporting-a-problem-and-testing).
+- **Marketplace or HACS does not offer Codex, or the download fails.** That route needs a GitHub release of this
+  repository that holds `codex_cli.zip`, and a version can have an image and no such release. Let the app install the
+  integration, or copy the folder by hand.
+
 Every app option is in [codex-cli-worker/DOCS.md](codex-cli-worker/DOCS.md).
 
 Put rules for your house in `/config/AGENTS.md`. The chat has an editor for it under **Settings** > **Workspace instructions** >
@@ -121,10 +141,12 @@ flowchart LR
 1. You write the request. Codex reads your files and the local copy of the Home Assistant documentation. It may ask a
    question and offer two or three short answers as buttons.
 2. Codex edits the automation file. In the default `workspace-write` mode, an edit inside your configuration folder
-   needs no permission. It saves the earlier copy first.
-3. Codex runs a configuration check on the changed YAML and asks to reload automations. A permission card shows the
-   command, and you choose **Allow once** or **Deny**.
-4. You read the summary. If you do not like it, ask Codex to undo it, or restore the saved earlier copy.
+   needs no permission. Codex is told to save the earlier copy first, and the chat lists the copies that were saved.
+3. Codex asks to reload automations. A permission card shows the action, and you choose **Allow once** or **Deny**.
+4. When Codex ends its turn, the app asks Home Assistant to check the configuration, unless the `config_check`
+   option is off or Home Assistant cannot run the check. The chat shows the result.
+5. You read the summary. If you do not like it, ask Codex to undo it, or restore the saved earlier copy if the chat
+   lists one.
 
 Screenshots of these screens are listed in [SCREENSHOTS.md](SCREENSHOTS.md).
 
@@ -135,7 +157,7 @@ only Codex's own settings.
 
 | Mode | What Codex can do without asking |
 |---|---|
-| Default | Edit files in your configuration folder. Shell networking and writes outside it need your permission. |
+| Default | Edit files in your configuration folder. Shell networking and a write outside your configuration folder and `/share` need your permission. |
 | Auto-review | As Default, but Codex's own reviewer answers each request instead of you. |
 | Read only | Read files. A write, a device change or shell networking needs your permission for that one action. |
 | Full access | Everything, without a sandbox and without asking. Off until an administrator turns it on in Settings. |
@@ -209,9 +231,11 @@ The integration adds actions that scripts, automations and Assist can call.
 | `codex_cli.cancel_task` | Stop a task. |
 | `codex_cli.start_login`, `codex_cli.logout`, `codex_cli.get_login_status` | Manage the sign-in. |
 
-The actions refuse a caller who is not an administrator. A task started this way still uses the normal permission
-cards; the integration cannot answer them. A notification about a chat shows only while the chat waits for you, and
-goes away when the wait ends; a completed answer or a failure sends none. The one exception is a block by OpenAI's
+Who can call them: a call that carries a Home Assistant user is refused unless that user is an administrator. A call
+with no user is allowed. An automation that runs by its own trigger has no user, so it can start a task while nobody
+is there. An automation or script that a person starts carries that person. A task started this way still uses the
+normal permission cards; the integration cannot answer them. A notification about a chat shows only while the chat
+waits for you, and goes away when the wait ends; a completed answer or a failure sends none. The one exception is a block by OpenAI's
 safety filter, which sends one notification that stays until you dismiss it. Set `notify_service` in the app options for
 phone pushes, or leave it empty for persistent notifications.
 
@@ -237,8 +261,9 @@ A daily workflow opens one issue when upstream releases something newer.
 
 | Version | Changes |
 |---|---|
+| 0.3.6 | The app's own command checks are removed: Codex's permission modes and the sandbox are the protection. Four permission modes, with Full access off until an administrator turns it on. A notification shows only while a chat waits for you. |
 | 0.3.0 (unreleased) | GitHub sign-in on the page (device sign-in, clone and link under /share or /config, every push through the push guard, a Repairs issue when access changes). The app installs and updates its own integration (one install and one restart); setup from discovery asks for confirmation. |
-| 0.1.81.2 (unreleased) | No full-access mode; a protected permission policy in the image, no bundled house rules and owner workspace instructions; permission answers and the integration's actions only from Home Assistant administrators; a permission-prompt sensor. |
+| 0.1.81.2 (unreleased) | No full-access mode (changed in 0.3.6); a protected permission policy in the image, no bundled house rules and owner workspace instructions; permission answers and the integration's actions only from Home Assistant administrators; a permission-prompt sensor. |
 | 0.1.81.1 (unreleased) | Codex CLI 0.166.0 pinned by checksum, no self-update, base image pinned by digest, links and maintainer for the fork. |
 
 The full list is in the [changelog](codex-cli-worker/CHANGELOG.md).

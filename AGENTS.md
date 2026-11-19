@@ -4,7 +4,9 @@
 
 ha_codex is a public fork (MIT) of moryoav/home-assistant-codex: a Home Assistant app (add-on) that runs the Codex
 CLI against a configuration folder, and a custom integration (`codex_cli`) that exposes it to Home Assistant.
-Pre-release: nothing is tagged or published from this fork yet, and no change here reaches any install by itself.
+Pre-release: the app image is published for each version and tag `v0.3.6` exists, but no version is called stable
+and no GitHub release holds `codex_cli.zip` yet. An install is offered an update only when a merge to `main` changes
+the version.
 
 ## Commands
 
@@ -67,8 +69,9 @@ Pre-release: nothing is tagged or published from this fork yet, and no change he
 
 ## Release
 
-Not released yet: nothing is tagged or published, and the release and image workflows stay disabled until the
-first release is planned. When one is:
+No stable release yet. The image build workflow publishes the app image for each version, and tag `v0.3.6` exists.
+No GitHub release holds `codex_cli.zip` yet: the release workflow stays disabled until the first release is planned.
+When one is:
 
 1. In a pull request titled `Release <version>`, set the same version in `codex-cli-worker/config.yaml` and
    `custom_components/codex_cli/manifest.json`; a fork version is upstream's version plus one more number, counted

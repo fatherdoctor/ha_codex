@@ -145,7 +145,9 @@ This app is distributed from:
 https://github.com/fatherdoctor/ha_codex
 ```
 
-Prebuilt images are published to `ghcr.io/fatherdoctor/codex-cli-worker` for `amd64` and `aarch64`.
+Prebuilt images are published to `ghcr.io/fatherdoctor/codex-cli-worker` for `amd64` and `aarch64`, one tag for each version. Home Assistant pulls the image; nothing is built on your machine. The project is a pre-release: no version is called stable yet.
+
+The integration is inside the image, and the app installs it (see [Integration install](#integration-install)). Installing the integration from Marketplace or HACS instead needs a GitHub release of the repository that holds `codex_cli.zip`. A version can have an image and no such release; then let the app install the integration, or copy the folder by hand.
 
 ## Security Model
 
@@ -252,6 +254,15 @@ The app configuration offers `low`, `medium`, `high`, and `xhigh` for all listed
 - `none`: no reasoning in the activity list. Commands, file edits, searches, progress notes, and tool calls are still shown.
 
 There is no chat UI control for this setting; change it in the app configuration.
+
+## Task time limits
+
+Two options stop a task that runs too long. Both are in seconds, on the app's Configuration tab.
+
+- **Task timeout** (`task_timeout_seconds`, default `3600`, one hour) is the longest one message may run, from the moment Codex starts on it. The time a permission request waits for your answer counts. When the limit is reached, the worker stops Codex and the task fails with "Codex timed out after 3600 seconds." You can send another message in the same chat to continue. If `0` is saved, the worker uses 3600.
+- **Stall limit** (`task_stall_seconds`, default `600`, ten minutes) stops a task when Codex sends nothing for that long while no permission request waits. `0` turns it off. See [Permission requests](#permission-requests).
+
+Example: a task that rebuilds a large dashboard and waits 50 minutes for your answer to a permission card has 10 minutes left. For work like that, set `task_timeout_seconds: 7200`.
 
 ## Validation
 
@@ -427,7 +438,7 @@ that adds, removes or moves a tool updates this table and the test in the same p
 
 ## Remote control from the ChatGPT app
 
-OpenAI's remote control (`codex remote-control`) lets the ChatGPT app on a phone or tablet work on this Home Assistant through OpenAI's relay. The app runs it for you; there is no terminal step.
+OpenAI's remote control (`codex remote-control`) lets the ChatGPT app on a phone or tablet work on this Home Assistant through OpenAI's relay. The app runs it for you; there is no terminal step. The ChatGPT desktop app does not list paired machines, so the phone app and the chat page are the two ways in.
 
 **Startup on Home Assistant OS.** An immutable launcher enters a dedicated relay AppArmor label.
 Its separate Bubblewrap binary sets a private UTS host name and maps container root to UID/GID
