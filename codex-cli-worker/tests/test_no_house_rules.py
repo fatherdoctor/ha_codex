@@ -18,7 +18,7 @@ class NoHouseRules(unittest.TestCase):
             root = Path(folder); home = root / 'home'; home.mkdir()
             instructions = home / 'AGENTS.md'; instructions.write_text('Owner instructions, unchanged.')
             with patch.multiple(server, CODEX_HOME=home, CODEX_CONFIG_PATH=home/'config.toml', DATA_ROOT=root,
-                                SCHEMA_PATH=root/'schema.json', AUTH_QR_DIR=root/'qr'), \
+                                AUTH_QR_DIR=root/'qr'), \
                  patch.object(server, 'task_root', return_value=root/'tasks'), \
                  patch.object(server, 'api_token', return_value='synthetic'):
                 server.ensure_runtime_files()

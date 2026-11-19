@@ -126,7 +126,7 @@ def main():
         (sessions / f"rollout-preview-{session_id}.jsonl").write_text("{}\n")
 
         def preview_events(text):
-            """The `codex exec --json` lines a short review of the config would produce."""
+            """The events, in the shape record_activity_event reads, that a short review of the config would produce."""
             command = "/bin/sh -lc 'cat /config/automations.yaml'"
             return [
                 {"type": "item.completed", "item": {"id": "item_0", "type": "reasoning", "text": "**Checking the automation**"}},

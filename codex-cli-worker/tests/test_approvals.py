@@ -567,10 +567,10 @@ class ApprovalApiTests(unittest.TestCase):
         self.assertNotIn("outputSchema", self.session.turn_params)
         self.assertEqual(self.session.turn_params["sandboxPolicy"], {
             "type": "workspaceWrite", "networkAccess": False, "writableRoots": ["/config", "/share"]})
-        self.assertTrue(server.uses_user_approvals({}))
-        self.assertTrue(server.uses_user_approvals({"codex_sandbox": "read-only"}))
-        # A refused mode never gets the approval-free exec path either: run_task stops it before launch.
-        self.assertFalse(server.uses_user_approvals({"codex_sandbox": "danger-full-access"}))
+        self.assertFalse(server.protected_policy.policy_problem({}))
+        self.assertFalse(server.protected_policy.policy_problem({"codex_sandbox": "read-only"}))
+        # A refused mode never reaches Codex: run_task stops it before launch.
+        self.assertTrue(server.protected_policy.policy_problem({"codex_sandbox": "danger-full-access"}))
 
     def test_a_task_can_write_under_share_but_never_the_github_folder(self):
         """Owner ruling 2026-11-16: /share is writable like /config; /data/github never is, and read-only stays read-only."""

@@ -100,7 +100,6 @@ ha_call = HomeAssistantCall(_ToolWorker(), relay_running=lambda: relay_running()
 CODEX_HOME = DATA_ROOT / "codex-home"
 OPTIONS_PATH = DATA_ROOT / "options.json"
 WORKER_TOKEN_PATH = DATA_ROOT / "worker_api_token"
-SCHEMA_PATH = DATA_ROOT / "codex-output-schema.json"
 CODEX_CONFIG_PATH = CODEX_HOME / "config.toml"
 CODEX_BINARY = "/usr/local/bin/codex"
 AGENTS_PATH = CONFIG_ROOT / "AGENTS.md"
@@ -224,7 +223,7 @@ DIAGNOSTIC_ERROR_MAX_CHARS = 1000
 CANCELLABLE_TASK_STATUSES = frozenset({"queued", "running"})
 CANCELLED_TASK_SUMMARY = "Task cancelled"
 # Built-in Codex image generation writes files under CODEX_HOME and records
-# each result in the session rollout; `codex exec --json` does not report it.
+# each result in the session rollout; the app server's item events do not report it.
 IMAGE_GENERATION_KIND = "image_gen.generation"
 ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024
 ATTACHMENTS_PER_TURN_MAX = 12
@@ -873,7 +872,7 @@ FINAL_RESPONSE_SCHEMA = {
 
 
 def ensure_runtime_files() -> None:
-    """Create the worker's folders, make an API token if there is none, and write Codex's output schema and config."""
+    """Create the worker's folders, make an API token if there is none, and write Codex's config."""
     CODEX_HOME.mkdir(parents=True, exist_ok=True)
     DATA_ROOT.mkdir(parents=True, exist_ok=True)
     remote_control.prepare_control_parent(DATA_ROOT)
@@ -883,7 +882,6 @@ def ensure_runtime_files() -> None:
     github_service.store.ensure()
     if not api_token():
         set_api_token(secrets.token_urlsafe(32))
-    SCHEMA_PATH.write_text(json.dumps(FINAL_RESPONSE_SCHEMA, indent=2), encoding="utf-8")
     # Default's settings; each chat turn passes its own mode's settings (mode_settings).
     default = protected_policy.MODES[protected_policy.DEFAULT_MODE]
     CODEX_CONFIG_PATH.write_text(
@@ -1652,7 +1650,7 @@ def is_final_answer(text: str) -> bool:
 
 
 def activity_step_from_item(item: dict[str, Any]) -> dict[str, Any] | None:
-    """Turn one `codex exec --json` item into a step for the chat, or None to skip it."""
+    """Turn one item event's item into a step for the chat, or None to skip it."""
     kind = str(item.get("type") or "")
     raw_status = str(item.get("status") or "")
     step: dict[str, Any] = {"id": str(item.get("id") or ""), "kind": kind, "status": "done", "text": ""}
@@ -1820,7 +1818,12 @@ def auto_review_step(event: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def record_activity_event(task_id: str, event: Any) -> None:
-    """Map one line of `codex exec --json` output onto the running exchange's steps."""
+    """Map one event onto the running exchange's steps.
+
+    The events have the shape of Codex's JSON event stream (thread.started,
+    item.completed, turn.failed, ...); AppServerSession turns the app server's
+    notifications into this shape before they reach here.
+    """
     if not isinstance(event, dict):
         return
     record_diagnostic("activity", task_id, event)
@@ -4626,69 +4629,8 @@ def task_mode_settings(task_id: str, options: dict[str, Any] | None = None) -> d
     return protected_policy.mode_settings(mode, str(options.get("codex_sandbox") or "workspace-write"))
 
 
-def build_codex_args(task_id: str, prompt_file: Path, final_file: Path, session_id: str | None) -> list[str]:
-    """Return the `codex exec` command line for the task's latest turn, resuming the session when one is given.
-
-    Kept from upstream: `codex exec` has no live permission requests, and
-    run_task refuses every mode that would choose it before this is called.
-
-    It carries the turn's model and reasoning level, the sandbox, the output
-    files, the verification tool, and the attached images; the prompt itself
-    is read from stdin.
-    """
-    options = task_options(task_id)
-    with lock:
-        task = tasks.get(task_id, {})
-        turns = task.get("turns") or []
-        execution = copy.deepcopy(turns[-1].get("execution_settings")) if turns else None
-        latest_turn = copy.deepcopy(turns[-1]) if turns else {}
-    if execution is None:
-        execution = resolve_chat_settings(task.get("chat_settings", DEFAULT_CHAT_SETTINGS), options)
-    images = prompt_attachment_paths(task_id, latest_turn)
-    args = [CODEX_BINARY, "exec"]
-    # `exec --image` is repeatable; keeping each one before another flag stops
-    # the variadic option from swallowing the "-" that selects stdin.
-    if not session_id:
-        for path in images:
-            args.extend(["--image", str(path)])
-    args += [
-        "--cd",
-        "/config",
-        "--skip-git-repo-check",
-        "--sandbox",
-        str(options.get("codex_sandbox") or "workspace-write"),
-        "--json",
-        "--output-schema",
-        str(SCHEMA_PATH),
-        "--output-last-message",
-        str(final_file),
-    ]
-    model = execution["model"]
-    if model in {"default", "gpt-5.3-codex"}:
-        model = ""
-    if model:
-        args.extend(["--model", model])
-    args.extend(["--config", f'model_reasoning_effort="{execution["reasoning_effort"]}"'])
-    args.extend(["--config", f'model_reasoning_summary="{reasoning_summary(options)}"'])
-    args.extend(["--config", "developer_instructions=" + json.dumps(build_page_instructions())])
-    args.extend(shell_exclude_args())
-    args.extend(verification_mcp_args())
-    args.extend(data_mcp_args())
-    args.extend(scheduling_mcp_args())
-    args.extend(github_mcp_args())
-    if session_id:
-        # `resume` has its own single-value --image option, so the flags go after the subcommand.
-        args.extend(["resume", session_id])
-        for path in images:
-            args.extend(["--image", str(path)])
-        args.append("-")
-    else:
-        args.append("-")
-    return args
-
-
 def latest_execution(task_id: str, options: dict[str, Any]) -> dict[str, Any]:
-    """Return the model and level the task's latest turn runs with, as build_codex_args resolves them."""
+    """Return the model and level the task's latest turn runs with, as the app-server turn resolves them."""
     with lock:
         task = copy.deepcopy(tasks.get(task_id, {}))
     turns = task.get("turns") or []
@@ -4702,23 +4644,16 @@ def latest_execution(task_id: str, options: dict[str, Any]) -> dict[str, Any]:
         return {"model": current_model((task.get("chat_settings") or {}).get("model")) or "default"}
 
 
-def reader_thread(task_id: str, stream_name: str, handle, session_holder: dict[str, str]) -> None:
-    """Copy one Codex output stream to the task log; from stdout also record the steps and the session id."""
+def reader_thread(task_id: str, stream_name: str, handle) -> None:
+    """Copy one Codex output stream to the task log, line by line, until it closes.
+
+    The app-server session reads stdout itself (AppServerSession.read); this
+    thread only copies stderr.
+    """
     for line in iter(handle.readline, ""):
         if not line:
             break
         write_task_log(task_id, stream_name, line)
-        if stream_name == "stdout":
-            try:
-                event = json.loads(line)
-                record_activity_event(task_id, event)
-                found = extract_session_id(event)
-                existing = session_holder.get("session_id")
-                if found and not existing:
-                    session_holder["session_id"] = found
-                    update_task(task_id, session_id=found)
-            except (json.JSONDecodeError, TypeError):
-                pass
 
 
 PROMPT_KINDS = ("command", "command_input", "file_change", "other")
@@ -4755,18 +4690,6 @@ def build_app_server_args(attended: bool = True) -> list[str]:
     return [CODEX_BINARY, "app-server", "--config", 'approval_policy="on-request"',
             "--config", 'approvals_reviewer="user"', *shell_exclude_args(), *verification_mcp_args(),
             *data_mcp_args(), *scheduling_mcp_args(), *github_mcp_args(), *(call_mcp_args() if attended else [])]
-
-
-def uses_user_approvals(options: dict[str, Any]) -> bool:
-    """Return True when the options pass the protected policy, so the chat runs on the app server transport.
-
-    The transport carries each mode's own settings: in Default and Read only
-    the person answers, in Auto-review Codex's reviewer answers, and in Full
-    access Codex does not ask. Options the protected policy refuses never
-    reach Codex: run_task stops them first, so the exec path without live
-    approvals is not used for them.
-    """
-    return not protected_policy.policy_problem(options)
 
 
 def create_approval_session(
@@ -4845,7 +4768,7 @@ def create_approval_session(
                 notify_permission_async(task_id, item, alerts[item["approval_id"]])
 
     def event(event: dict[str, Any]) -> None:
-        """Reuse the existing exec event consumer without logging raw RPC requests."""
+        """Record one event in the task log and the chat's steps, without logging raw RPC requests."""
         event = redact_event(event)
         write_task_log(task_id, "stdout", json.dumps(event))
         record_activity_event(task_id, event)
@@ -4907,7 +4830,7 @@ OLD_ANSWER_FENCE = re.compile(r"```[A-Za-z]*\n(.*)\n```", re.DOTALL)
 def old_style_answer(text: str) -> dict[str, Any] | None:
     """Return a JSON answer in the form of FINAL_RESPONSE_SCHEMA, or None for any other text.
 
-    Threads from version 0.3.2 or earlier and the exec path answer with that object. The object must be the whole
+    Threads from version 0.3.2 or earlier answer with that object. The object must be the whole
     answer, alone or inside one code fence. A plain-text answer that also contains some JSON, such as an example
     of the old answer, is plain text.
     """
@@ -5469,14 +5392,12 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
             detail_prefix="Model pin",
         )
         return
-    interactive_approvals = uses_user_approvals(options)
-    # Upstream's `codex exec` path has no live permission requests; the policy check at the top of run_task
-    # refuses every mode that would choose it, so it is reached only by the tests that drive it directly.
+    # Every exchange runs on the app server, which carries live permission requests. The policy check at the
+    # top of run_task has already refused the modes that this transport must never be given.
     attended = not background_task(task_id)
-    args = (build_app_server_args(attended) if interactive_approvals
-            else build_codex_args(task_id, prompt_file, final_file, session_id))
+    args = build_app_server_args(attended)
     tool_keys = {"HA_VERIFICATION_CAPABILITY": verification_capability, "HA_DATA_CAPABILITY": data_capability}
-    if interactive_approvals and attended:
+    if attended:
         tool_keys["HA_CALL_CAPABILITY"] = ha_call.begin(task_id)
     write_task_log(task_id, "worker", "Starting Codex: " + " ".join(args))
 
@@ -5529,61 +5450,41 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     assert proc.stdin is not None
     assert proc.stdout is not None
     assert proc.stderr is not None
-    approval_session = None
-    if interactive_approvals:
-        approval_session = create_approval_session(
-            task_id, proc, prompt_file.read_text(encoding="utf-8"), final_file, session_id, session_holder, options,
-            status_calls)
-        with lock:
-            approval_sessions[task_id] = approval_session
-    stdout_thread = threading.Thread(
-        target=approval_session.read if approval_session else reader_thread,
-        args=(proc.stdout,) if approval_session else (task_id, "stdout", proc.stdout, session_holder),
-        daemon=True,
-    )
-    stderr_thread = threading.Thread(
-        target=reader_thread,
-        args=(task_id, "stderr", proc.stderr, session_holder),
-        daemon=True,
-    )
+    approval_session = create_approval_session(
+        task_id, proc, prompt_file.read_text(encoding="utf-8"), final_file, session_id, session_holder, options,
+        status_calls)
+    with lock:
+        approval_sessions[task_id] = approval_session
+    stdout_thread = threading.Thread(target=approval_session.read, args=(proc.stdout,), daemon=True)
+    stderr_thread = threading.Thread(target=reader_thread, args=(task_id, "stderr", proc.stderr), daemon=True)
     stdout_thread.start()
     stderr_thread.start()
 
     timed_out = False
     stalled = False
     lifecycle_error: Exception | None = None
-    stdin_closed = False
     returncode = -1
     process_exit_confirmed = False
     try:
         try:
-            if approval_session:
-                approval_session.start()
-            else:
-                proc.stdin.write(prompt_file.read_text(encoding="utf-8"))
-                proc.stdin.close()
-                stdin_closed = True
+            approval_session.start()
         except (OSError, ValueError) as exc:
             lifecycle_error = exc
             process_exit_confirmed = terminate_and_reap_process(proc)
         if lifecycle_error is None:
             try:
-                if approval_session:
-                    outcome = wait_for_exchange(approval_session, timeout, stall_seconds)
-                    timed_out = outcome == "timeout"
-                    stalled = outcome == "stalled"
-                    if stalled:
-                        write_task_log(task_id, "worker", f"No activity from Codex for {stall_seconds} seconds; stopping the task.")
-                    approval_session.close()
-                    returncode = approval_session.returncode
-                    if approval_session.error:
-                        lifecycle_error = RuntimeError(approval_session.error)
-                    # The app-server is long-lived; one worker process owns one
-                    # exchange, and must be reaped before the queue advances.
-                    process_exit_confirmed = reap_approval_process(proc)
-                else:
-                    returncode = proc.wait(timeout=timeout)
-                    process_exit_confirmed = True
+                outcome = wait_for_exchange(approval_session, timeout, stall_seconds)
+                timed_out = outcome == "timeout"
+                stalled = outcome == "stalled"
+                if stalled:
+                    write_task_log(task_id, "worker", f"No activity from Codex for {stall_seconds} seconds; stopping the task.")
+                approval_session.close()
+                returncode = approval_session.returncode
+                if approval_session.error:
+                    lifecycle_error = RuntimeError(approval_session.error)
+                # The app-server is long-lived; one worker process owns one
+                # exchange, and must be reaped before the queue advances.
+                process_exit_confirmed = reap_approval_process(proc)
             except subprocess.TimeoutExpired:
                 timed_out = True
                 process_exit_confirmed = terminate_and_reap_process(proc)
@@ -5592,16 +5493,14 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
                 lifecycle_error = exc
                 process_exit_confirmed = terminate_and_reap_process(proc)
     finally:
-        if approval_session:
-            approval_session.close()
-            with lock:
-                if approval_sessions.get(task_id) is approval_session:
-                    approval_sessions.pop(task_id, None)
-        if not stdin_closed:
-            try:
-                proc.stdin.close()
-            except (OSError, ValueError):
-                pass
+        approval_session.close()
+        with lock:
+            if approval_sessions.get(task_id) is approval_session:
+                approval_sessions.pop(task_id, None)
+        try:
+            proc.stdin.close()
+        except (OSError, ValueError):
+            pass
         if process_exit_confirmed:
             with lock:
                 if running_processes.get(task_id) is proc:
@@ -5611,17 +5510,17 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
 
     if task_cancellation_requested(task_id):
         return
-    if lifecycle_error is not None and not (approval_session and approval_session.turn_id):
+    if lifecycle_error is not None and not approval_session.turn_id:
         fail_task_launch(
             task_id,
             lifecycle_error,
             session_id=session_holder.get("session_id") or session_id,
-            summary="The Codex exchange could not finish." if approval_session else "Codex exited before accepting the task prompt.",
-            detail_prefix="Codex permission connection failed" if approval_session else "Could not send the task prompt to Codex",
+            summary="The Codex exchange could not finish.",
+            detail_prefix="Codex permission connection failed",
         )
         return
 
-    safety_blocked = bool(approval_session and approval_session.safety_blocked)
+    safety_blocked = bool(approval_session.safety_blocked)
     if lifecycle_error is not None:
         # A started turn may already have changed files. Keep the normal review,
         # backup, validation, and recovery path even when its transport fails.
@@ -5684,6 +5583,10 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
         final["question"] = ""
         final["details"] = "\n\n".join(part for part in (str(final.get("details") or "").strip(), reason) if part)
     elif returncode != 0 and final.get("status") in {"completed", "needs_input"}:
+        # A backstop, kept on purpose. The app server path does not reach it today: the session's
+        # returncode stays non-zero only when it also sets an error (approvals.py, turn/completed and
+        # fail), and the lifecycle_error branch above takes that case. It stops a non-zero exit from
+        # ever reading as a finished answer if that changes.
         final["status"] = "failed"
         final["question"] = ""
         reason = f"Codex exited with {returncode}."

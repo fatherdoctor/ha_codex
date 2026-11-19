@@ -15,6 +15,8 @@ from unittest.mock import patch
 
 import yaml
 
+from app_server_fixture import StubAppServer
+
 SERVER_PATH = Path(__file__).resolve().parents[1] / "server.py"
 CONFIG_PATH = Path(__file__).resolve().parents[1] / "config.yaml"
 if importlib.util.find_spec("websocket") is None:
@@ -275,8 +277,8 @@ class ModelPinTests(_Worker):
         execution = server.resolve_chat_settings(server.DEFAULT_CHAT_SETTINGS, self.options)
         self.assertEqual(execution["model"], PIN)
         with patch.object(server, "tasks", {"t": {"turns": [{"execution_settings": execution}]}}):
-            args = server.build_codex_args("t", Path("p"), Path("f"), None)
-        self.assertEqual(args[args.index("--model") + 1], PIN)
+            session = server.create_approval_session("t", StubAppServer("thread"), "Prompt", Path("f"), None, {}, self.options)
+        self.assertEqual(session.thread_params["model"], PIN)
 
     def test_another_model_is_refused_before_anything_runs(self):
         response = self.client.post("/tasks", json={"prompt": "hi", "chat_settings": {"model": "gpt-6-astra"}},

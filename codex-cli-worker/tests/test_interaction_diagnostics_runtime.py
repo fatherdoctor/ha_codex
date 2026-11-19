@@ -192,7 +192,6 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
                 'sample',
                 'stderr',
                 io.StringIO('PRIVATE_PERSON_CANARY\n' + message + '\nPRIVATE_SECRET_CANARY\n'),
-                {},
             )
         self.recorder.finish('sample', 'failed')
         row = self.store.export()['interactions'][0]
