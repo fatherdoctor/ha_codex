@@ -1,4 +1,9 @@
 // Synthetic schedule editor (opened from a chat's menu and from Settings) and mailbox UI against the disposable web fixture.
+// Scheduled runs are off in this series; this test needs the fixture started with CODEX_FIXTURE_SCHEDULED_RUNS=1.
+if (process.env.CODEX_FIXTURE_SCHEDULED_RUNS !== "1") {
+  console.log("SKIP: scheduled runs are switched off (start the fixture with CODEX_FIXTURE_SCHEDULED_RUNS=1)");
+  process.exit(0);
+}
 const {chromium} = require('playwright');
 const assert = require('node:assert/strict');
 (async () => {

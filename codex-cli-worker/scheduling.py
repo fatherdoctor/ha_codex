@@ -17,6 +17,11 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+# Build-time switch for scheduled runs. While it is False (the 0.4 and 0.5 series), no page offers a schedule,
+# Codex gets no scheduling tool and no saved schedule fires. The code and the saved schedules stay in place;
+# set it to True to bring all of it back.
+SCHEDULED_RUNS = False
+
 MAX_SCHEDULES = 100
 MAX_PROPOSALS = 20
 MAX_MAIL_PER_TURN = 20
@@ -719,7 +724,7 @@ class Engine:
             self.tick_lock.release()
 
     def dispatch_due(self, now):
-        if self.worker.busy():
+        if not SCHEDULED_RUNS or self.worker.busy():
             return
         for schedule in sorted(self.store.schedules(), key=lambda s: s['next_due'] or float('inf')):
             if schedule['enabled'] and schedule['approved'] and schedule['next_due'] is not None and schedule['next_due'] <= now:

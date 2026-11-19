@@ -319,7 +319,9 @@
       <button type="button" role="menuitem" data-action="rename">Rename</button>
       <button type="button" role="menuitem" data-action="pin">Pin chat</button>
       <button type="button" role="menuitem" data-action="share">Share</button>
+      <!-- scheduling:begin -->
       <button type="button" role="menuitem" data-action="schedule">Schedule</button>
+      <!-- scheduling:end -->
       <button type="button" role="menuitem" data-action="archive">Archive</button>
       <button type="button" role="menuitem" data-action="delete" class="danger">Delete</button>
       <button type="button" role="menuitem" data-action="close">Cancel</button>
@@ -373,6 +375,7 @@
         </button>
       </div>
     </dialog>
+    <!-- scheduling:begin -->
     <dialog id="schedule-dialog" class="studio-sheet" aria-labelledby="schedule-title">
       <div class="dialog-header"><h2 id="schedule-title">Schedule this chat</h2><button type="button" class="icon icon-close" data-close="schedule-dialog" aria-label="Close schedule"></button></div>
       <form id="schedule-form">
@@ -406,6 +409,7 @@
         <div class="dialog-actions"><button type="button" class="subtle" data-close="schedule-dialog">Cancel</button><button id="schedule-save" type="submit">Create schedule</button></div>
       </form>
     </dialog>
+    <!-- scheduling:end -->
     <dialog id="permissions-dialog" class="studio-sheet" aria-labelledby="permissions-title">
       <div class="dialog-header"><h2 id="permissions-title">Permissions</h2><button class="icon icon-close" data-close="permissions-dialog" aria-label="Close permissions"></button></div>
       <p class="muted">Choose how this chat starts its next turn. These are the four modes of the ChatGPT app, with Codex's own settings.</p>
@@ -576,11 +580,13 @@
         </details>
       </section>
       <section id="scheduled-work">
+        <!-- scheduling:begin -->
         <h3>Scheduled runs</h3>
         <p class="muted">To schedule a chat, open its menu in the chat list and choose Schedule. Proposals from agents stay off until you approve them here.</p>
         <p id="schedule-timezone" class="muted"></p>
         <div id="schedule-list"></div>
         <h4>Run log</h4><div id="schedule-runs"></div>
+        <!-- scheduling:end -->
         <h3>Lead agent channel</h3>
         <p class="muted">Create a separate token for the other agent on this box. Copy it to that agent's private configuration. It can propose schedules and exchange local messages, but cannot approve actions or schedules. Rotation revokes the old token.</p>
         <button id="lead-token-create" type="button">Create or rotate lead token</button>

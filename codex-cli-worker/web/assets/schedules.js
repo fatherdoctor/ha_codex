@@ -10,6 +10,8 @@
   const el = (id) => document.getElementById(id);
   const dialog = el("settings");
   const editor = el("schedule-dialog");
+  /** False while scheduled runs are switched off: the page then has no schedule markup at all. */
+  const scheduleUi = Boolean(editor);
   /** The newest answer of the schedules API: every schedule and the recent runs. */
   let latest = { schedules: [], runs: [] };
   let timer;
@@ -224,7 +226,7 @@
     } catch (error) { showError(error); }
   }
   document.addEventListener("thread-action", (event) => {
-    if (event.detail.action === "schedule") openForChat(event.detail.id);
+    if (scheduleUi && event.detail.action === "schedule") openForChat(event.detail.id);
   });
   /**
    * The Scheduled runs header: how many schedules there are. It needs the owner
@@ -243,6 +245,7 @@
     refreshing = true;
     try {
       const data = await load();
+      if (scheduleUi) {
       el("schedule-timezone").textContent = zone ? `Home Assistant time zone: ${zone}` : data.timezone_error;
       const list = el("schedule-list"); list.replaceChildren();
       for (const schedule of data.schedules) {
@@ -264,7 +267,9 @@
       const runs = el("schedule-runs"); runs.replaceChildren();
       for (const run of data.runs) runs.append(runLine(run, dialog));
       if (!data.runs.length) runs.append(node("p", "No runs yet.", "muted"));
+      }
       el("lead-token-status").textContent = data.lead_token_configured ? "A lead token is configured." : "No lead token is configured.";
+      if (!scheduleUi) setSectionStatus("scheduled-work", data.lead_token_configured ? "Lead token set" : "No lead token", false);
       const mailbox = el("schedule-mailbox"); mailbox.replaceChildren();
       const mailboxStatus = data.mailbox_status;
       if (mailboxStatus?.full[reader]) mailbox.append(node("p", "Mailbox full of unread messages. Read or clear it before sending more.", "muted"));
@@ -312,6 +317,7 @@
     } catch (error) { message(error); }
     finally { refreshing = false; }
   }
+  if (scheduleUi) {
   el("schedule-form").onsubmit = async (event) => {
     event.preventDefault();
     if (!zone) { editorError("Home Assistant time zone unavailable; schedule entry is paused."); return; }
@@ -351,6 +357,7 @@
   };
   el("schedule-trigger").onchange = showTrigger;
   el("schedule-kind").onchange = showTrigger;
+  }
   el("lead-token-create").onclick = async () => {
     try {
       const data = await api("lead-token", {confirm: true});
@@ -377,5 +384,5 @@
     else { hideToken(); cancelMailClear(); }
   }).observe(dialog, {attributes: true, attributeFilter: ["open"]});
   dialog.addEventListener("close", () => { clearInterval(timer); hideToken(); cancelMailClear(); });
-  showTrigger();
+  if (scheduleUi) showTrigger();
 })();

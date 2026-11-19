@@ -37,7 +37,7 @@ Details and other ways to install: [Installation](#installation).
 - [Permission modes](#permission-modes)
 - [Safety](#safety)
 - [Sign-in](#sign-in)
-- [Mailbox and schedules](#mailbox-and-schedules)
+- [Mailbox](#mailbox)
 - [Using it from Assist and automations](#using-it-from-assist-and-automations)
 - [Troubleshooting](#troubleshooting)
 - [Versions](#versions)
@@ -184,7 +184,7 @@ When the sign-in is missing, ended or rejected, a banner returns above the chat,
 Assistant repair, and the **Signed in** sensor turns off. A good sign-in clears all three. The Codex program does not
 report when a sign-in will end, so the app shows no countdown. Sign out any time with **Settings** > **Sign out**.
 
-## Mailbox and schedules
+## Mailbox
 
 **Mailbox.** You, Codex and one other local agent can leave plain-text messages for each other. The other agent is
 another app or agent that runs on the same Home Assistant host; it connects with a separate token that you create in
@@ -194,17 +194,7 @@ Settings. The token shows once, and the app stores only a hash.
 - A sensor counts unread messages for the other agent, and an event announces each new message without its text.
 - Limits: 500 messages, and 20 writes per turn and 64 per UTC day for each writer.
 
-**Schedules.** Open a chat's menu and choose **Schedule**. You save a name, a prompt, a model and a trigger: hourly,
-daily, weekly, or a custom interval, cron rule or single time, in your Home Assistant time zone. Each run starts a
-new chat. **Settings** > **Scheduled runs** lists every schedule.
-
-- A schedule you save is approved when you save it. An agent can only propose one; it stays off until an
-  administrator reads the full prompt and approves it.
-- A scheduled run asks for permission like any other run and waits for you in its chat.
-- Limits: 100 approved schedules, 24 runs per schedule per UTC day, and 64 scheduled or agent-started runs per UTC
-  day.
-
-Details: [Scheduled runs and the lead agent channel](codex-cli-worker/DOCS.md#scheduled-runs-and-the-lead-agent-channel).
+Details: [The lead agent channel and mailbox](codex-cli-worker/DOCS.md#the-lead-agent-channel-and-mailbox).
 
 ## Using it from Assist and automations
 

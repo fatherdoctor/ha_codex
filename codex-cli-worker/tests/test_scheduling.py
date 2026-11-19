@@ -16,6 +16,18 @@ import scheduling
 import schedule_api
 import scheduling_mcp
 
+
+def setUpModule():
+    """These tests cover the scheduling code, which is switched off in this series; turn it on for them."""
+    global _saved_switch
+    _saved_switch = scheduling.SCHEDULED_RUNS
+    scheduling.SCHEDULED_RUNS = True
+
+
+def tearDownModule():
+    scheduling.SCHEDULED_RUNS = _saved_switch
+
+
 NOW = datetime(2027, 3, 1, tzinfo=timezone.utc).timestamp()
 
 

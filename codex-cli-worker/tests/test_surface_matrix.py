@@ -19,6 +19,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from test_server import server
+import scheduling
 
 ROOT = Path(__file__).resolve().parents[2]
 DOCS = ROOT / "codex-cli-worker" / "DOCS.md"
@@ -43,15 +44,19 @@ WAYS_IN = {
         PAGE: ("home_assistant_data.ask_owner", "home_assistant_data.report_failure", "home_assistant_data.exchange_info"),
         APP: NONE,
         SERVICE: ("home_assistant_data.ask_owner", "home_assistant_data.report_failure", "home_assistant_data.exchange_info")},
-    "Propose a schedule or use the mailbox": {
+    "Work with a GitHub repository": {
+        PAGE: ("codex_github.github_git",), APP: NONE, SERVICE: ("codex_github.github_git",)},
+}
+
+# Scheduled runs are off in this series (scheduling.SCHEDULED_RUNS): the row, the tools and the DOCS.md row are
+# there only when the switch is on.
+if scheduling.SCHEDULED_RUNS:
+    WAYS_IN["Propose a schedule or use the mailbox"] = {
         PAGE: ("codex_scheduling.propose_schedule", "codex_scheduling.list_schedules",
                "codex_scheduling.read_mailbox", "codex_scheduling.post_mailbox"),
         APP: NONE,
         SERVICE: ("codex_scheduling.propose_schedule", "codex_scheduling.list_schedules",
-                  "codex_scheduling.read_mailbox", "codex_scheduling.post_mailbox")},
-    "Work with a GitHub repository": {
-        PAGE: ("codex_github.github_git",), APP: NONE, SERVICE: ("codex_github.github_git",)},
-}
+                  "codex_scheduling.read_mailbox", "codex_scheduling.post_mailbox")}
 
 # The one tool that changes the house: Codex asks for it each time, so only a launch that can ask gets it.
 CALL_TOOL = "home_assistant_call.call"
