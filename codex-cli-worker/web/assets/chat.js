@@ -1570,8 +1570,8 @@ function renderTask(force = false) {
     const latest = turn === turns[turns.length - 1];
     const exchange = textNode("section", "", "exchange");
     const source = turn.task_source || (turn === turns[0] ? task.task_source : null);
-    if (source === "schedule" || source === "lead")
-      exchange.append(textNode("p", source === "schedule" ? "Scheduled run" : "Started by lead", "muted task-source"));
+    // Chats the removed lead channel started keep their limits but show no lead label.
+    if (source === "schedule") exchange.append(textNode("p", "Scheduled run", "muted task-source"));
     const sent = messageAttachments(turn.prompt_attachments);
     if (sent.length)
       exchange.append(
