@@ -36,6 +36,38 @@ The fake-Bubblewrap tests cover both true-command paths, recognized error reason
 
 These tests do not prove HAOS/AppArmor compatibility or filesystem isolation on the affected host.
 
+### The worker's sockets and the sandbox (live proof)
+
+`codex-cli-worker/tests/test_sandbox_sockets.py` runs the pinned Codex CLI with a local stand-in model and
+asks it to run one probe command. The probe tries to connect to a stream socket at the path of each socket the
+worker serves (the `.serve(DATA_ROOT / ...)` lines in `server.py`; a new socket joins the test by itself).
+
+| Mode | What the test expects |
+|---|---|
+| Read only, Default, Auto-review | the probe gets `EPERM` for every socket, and no socket accepts a connection |
+| Full access | the probe reaches every socket (skipped where the managed requirements leave the mode out) |
+| Default, an escalated command the person approves | the probe runs outside the sandbox and reaches every socket |
+| Auto-review, an escalated command Codex's reviewer allows | the same, and the person is not asked |
+| Auto-review, an escalated command the reviewer denies | the probe does not run |
+| No Codex (the control) | the probe reaches every socket |
+
+The first row is the protection that lets a tool request be trusted without a key: with no network, Codex's
+seccomp filter denies `connect` on a Unix socket too. The two escalated rows are what an approved command
+outside the sandbox can reach; the test keeps them visible, so a reader of the permission model finds them
+here and not only in the code.
+
+It runs in the Verification checks container job. By hand, with the pinned package unpacked anywhere:
+
+```sh
+HA_TEST_CODEX=/path/to/codex-package/bin/codex python -m unittest codex-cli-worker/tests/test_sandbox_sockets.py -v
+```
+
+It needs Python 3.12 or later with the worker's test packages, no account and no network. Without the pinned
+CLI each test is skipped. The container job sets `HA_TEST_REQUIRE_CODEX=1`, which turns a missing or
+wrong-version CLI into a failure, so a move of the Codex pin must also move `PINNED_VERSION` in
+`test_live_proofs.py` (`test_fork_pins.py` checks that the two agree). Under `pytest`, the Home Assistant test
+plugin blocks sockets; these tests allow only 127.0.0.1 and Unix sockets for themselves.
+
 ### HAOS parser and policy ABI
 
 HAOS 16–18.5 pins AppArmor 3.1.7. The profile declares `abi <abi/3.0>,` so
