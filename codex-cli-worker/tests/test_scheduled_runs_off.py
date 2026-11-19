@@ -55,33 +55,25 @@ class DocsTests(unittest.TestCase):
     """DOCS.md and README.md say nothing about scheduled runs in this series."""
 
     ROOT = Path(server.__file__).resolve().parent.parent
-    # The lead channel section is CX-04-LEAD-RM.a's to reword; it still names the lead schedule routes.
-    LEAD_HEADING = '## The lead agent channel and mailbox'
     # Plain uses of the word that are not about scheduled runs.
     ALLOWED = ('not refreshed on a schedule', 'instead schedules')
-
-    def docs_without_lead_section(self):
-        text = (self.ROOT / 'codex-cli-worker' / 'DOCS.md').read_text(encoding='utf-8')
-        start = text.index(self.LEAD_HEADING)
-        end = text.find('\n## ', start + 1)
-        return text[:start] + (text[end:] if end != -1 else '')
 
     def hits(self, text):
         return [line for line in text.splitlines()
                 if 'schedul' in line.lower() and not any(phrase in line for phrase in self.ALLOWED)]
 
-    def test_docs_outside_the_lead_section_do_not_mention_scheduling(self):
-        self.assertEqual(self.hits(self.docs_without_lead_section()), [])
+    def test_the_docs_do_not_mention_scheduling(self):
+        self.assertEqual(self.hits((self.ROOT / 'codex-cli-worker' / 'DOCS.md').read_text(encoding='utf-8')), [])
 
     def test_the_readme_does_not_mention_scheduling(self):
         self.assertEqual(self.hits((self.ROOT / 'README.md').read_text(encoding='utf-8')), [])
 
-    def test_the_lead_section_title_and_the_readme_link_agree(self):
+    def test_the_removed_lead_section_has_no_link_left(self):
         docs = (self.ROOT / 'codex-cli-worker' / 'DOCS.md').read_text(encoding='utf-8')
-        self.assertIn(self.LEAD_HEADING + '\n', docs)
-        self.assertNotIn('scheduled-runs', docs)
         readme = (self.ROOT / 'README.md').read_text(encoding='utf-8')
-        self.assertIn('DOCS.md#the-lead-agent-channel-and-mailbox', readme)
+        self.assertNotIn('scheduled-runs', docs)
+        for text in (docs, readme):
+            self.assertNotIn('the-lead-agent-channel-and-mailbox', text)
 
 
 class ScheduleEngineTests(unittest.TestCase):

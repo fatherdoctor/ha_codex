@@ -2,6 +2,11 @@
 
 ## 0.4.0 (unreleased)
 
+- The lead agent channel and the local mailbox are removed from the app. The lead token, its Settings section, the
+  `/lead/` routes and the `/schedule-mailbox` routes are gone, and Codex no longer has the `read_mailbox` and
+  `post_mailbox` tools. Saved messages stay in the schedule file, unread, so an older version still finds them after
+  a rollback. `/status` reports the mailbox as not available, so the integration's unread-mail sensor shows unknown
+  until the integration removes it. Saved schedules are kept.
 - New Courtyard mark: the app icon and logo, the integration's brand images, the chat page's tab icon and header mark, and
   the README logo.
 - The app no longer pins a model by default. The **Model pin** option is empty, and empty means the account's
