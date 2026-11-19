@@ -11,6 +11,7 @@ compared whole against ids that the worker itself bound, and no shell, YAML or t
 Add a case to CORPUS below.
 """
 import io
+from contextlib import redirect_stdout
 import tempfile
 import unittest
 from pathlib import Path
@@ -52,6 +53,17 @@ CORPUS = [
     ("T17", CHAT * 2, "refuse", "size"),
     ("T18", "x" * 100000, "refuse", "size"),
     ("T19", CHAT + "," + OTHER, "refuse", "separators"),
+    # Reviewer cases of the second read (CX-SPEED.c3.kc addendum).
+    ("T20", CHAT + "\r", "refuse", "form"),
+    ("T21", CHAT.encode(), "refuse", "nesting"),
+    ("T22", True, "refuse", "nesting"),
+    ("T23", CHAT[:8] + "\u2010" + CHAT[9:], "refuse", "invisible"),  # a Unicode hyphen
+    ("T24", CHAT[:2] + "A" + CHAT[3:], "refuse", "case"),  # one upper-case letter
+    ("T25", float("nan"), "refuse", "nesting"),
+    ("T26", "\ufeff" + CHAT, "refuse", "invisible"),  # a byte order mark
+    ("T27", CHAT[:-1] + "\uff15", "refuse", "invisible"),  # a full-width digit five
+    ("T28", "urn:uuid:" + CHAT, "refuse", "form"),
+    ("T29", "\u200f" + CHAT, "refuse", "invisible"),  # a right-to-left mark
 ]
 
 
@@ -463,6 +475,48 @@ class TheWorkerBindsAndReleases(TwoChats):
                     patcher.stop()
         self.assertEqual(tool_threads.CHATS.threads_of("a"), [])
         self.assertEqual(tool_threads.CHATS.task_for(OTHER), "b")
+
+
+class TheEndAndTheLog(TwoChats):
+    """Addendum A2 and A3 of the closer: a late event at the end of an exchange, and a refused bind."""
+
+    def setUp(self):
+        super().setUp()
+        patcher = patch.object(server, "write_task_log", lambda *_args: None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_an_event_while_the_session_closes_leaves_no_thread(self):
+        class LateSession:
+            def close(self):
+                server.bind_chat_thread("a", CHILD)  # one more agent.threads event from the reader
+
+        quiet = [patch.object(server, name, lambda *_args, **_kwargs: None)
+                 for name in ("record_diagnostic", "finish_activity", "remove_run_artifacts", "start_next_queued",
+                              "cleanup_backups")]
+        with patch.object(server, "run_task", lambda *_args: None), \
+             patch.dict(server.approval_sessions, {"a": LateSession()}), \
+             patch.object(server, "verification", self.checks), patch.object(server, "ha_data", self.data):
+            for patcher in quiet:
+                patcher.start()
+            try:
+                server._run_background_task("a", "Check the porch light", None, None)
+            finally:
+                for patcher in quiet:
+                    patcher.stop()
+        self.assertEqual(tool_threads.CHATS.threads_of("a"), [])
+
+    def test_a_refused_bind_is_logged(self):
+        for value in (OTHER, CHAT.upper()):
+            with self.subTest(value=value):
+                out = io.StringIO()
+                with redirect_stdout(out):
+                    server.bind_chat_thread("a", value)
+                self.assertIn("not bound to task a", out.getvalue())
+        out = io.StringIO()
+        with redirect_stdout(out):
+            server.bind_chat_thread("a", CHAT)
+        self.assertEqual(out.getvalue(), "")
 
 
 class StopRun(Exception):

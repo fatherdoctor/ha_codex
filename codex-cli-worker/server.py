@@ -4689,6 +4689,16 @@ def build_app_server_args(attended: bool = True) -> list[str]:
             *data_mcp_args(), *scheduling_mcp_args(), *github_mcp_args(), *(call_mcp_args() if attended else [])]
 
 
+def bind_chat_thread(task_id: str, thread_id: Any) -> None:
+    """Bind a Codex thread to the task's chat, and log one line when the map refuses it.
+
+    A refused thread leaves the chat's tools answering "No running exchange", so the log says why.
+    """
+    if not tool_threads.CHATS.bind(task_id, thread_id):
+        print(f"Tool requests of thread {str(thread_id)[:64]!r} are not bound to task {task_id}: the id is not a "
+              "lower-case Codex thread id, or another chat holds the thread.", flush=True)
+
+
 def create_approval_session(
     task_id: str, proc: subprocess.Popen, prompt: str, final_file: Path,
     session_id: str | None, session_holder: dict[str, str], options: dict[str, Any],
@@ -4778,11 +4788,11 @@ def create_approval_session(
             session_holder["session_id"] = found
             update_task(task_id, session_id=found)
         if found:
-            tool_threads.CHATS.bind(task_id, found)
+            bind_chat_thread(task_id, found)
         if event.get("type") == "agent.threads" and event.get("parent") == session_holder.get("session_id"):
             # A sub-agent of this chat: its tool calls name its own thread (design CX-SPEED cut 3, review F2).
             for child in event.get("threads") or []:
-                tool_threads.CHATS.bind(task_id, child)
+                bind_chat_thread(task_id, child)
 
     # The chat's permission mode is only these three Codex settings (protected_policy.MODES).
     settings = task_mode_settings(task_id, options)
@@ -5319,7 +5329,8 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     verification.begin(task_id)
     ha_data.begin(task_id)
     # A follow-up names its thread now; a new chat's thread is bound when Codex reports it (event below).
-    tool_threads.CHATS.bind(task_id, session_id)
+    if session_id:
+        bind_chat_thread(task_id, session_id)
     with lock:
         current_turn_id = str(tasks.get(task_id, {}).get("current_turn_id") or "")
     start_activity(task_id, current_turn_id)
@@ -5847,18 +5858,21 @@ def _run_background_task(
         verification.end(task_id)
         ha_data.end(task_id)
         ha_call.end(task_id)
-        tool_threads.CHATS.release(task_id)
-        with lock:
-            approval_session = approval_sessions.pop(task_id, None)
-            if approval_session:
-                approval_session.close()
-            proc = running_processes.get(task_id)
-        if proc is not None:
-            process_exit_confirmed = terminate_and_reap_process(proc)
-            if process_exit_confirmed:
-                with lock:
-                    if running_processes.get(task_id) is proc:
-                        running_processes.pop(task_id, None)
+        try:
+            with lock:
+                approval_session = approval_sessions.pop(task_id, None)
+                if approval_session:
+                    approval_session.close()
+                proc = running_processes.get(task_id)
+            if proc is not None:
+                process_exit_confirmed = terminate_and_reap_process(proc)
+                if process_exit_confirmed:
+                    with lock:
+                        if running_processes.get(task_id) is proc:
+                            running_processes.pop(task_id, None)
+        finally:
+            # After the session is closed and its process reaped, so no late event binds a thread again.
+            tool_threads.CHATS.release(task_id)
         with lock:
             result = tasks.get(task_id, {}).get("status")
         record_diagnostic("finish", task_id, {"completed": "done", "waiting_for_input": "done", "cancelled": "stopped",
