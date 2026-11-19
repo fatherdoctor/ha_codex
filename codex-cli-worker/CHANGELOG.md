@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.0 (unreleased)
+
+- The add-on Configuration page now uses plain option names and one short description for each option (25 words or fewer). A test keeps names free of code words and descriptions short.
+
 ## 0.3.6 - 2026-11-18
 
 - The app's own guards are removed. Codex's own permission modes and the sandbox are now the whole protection, as in
