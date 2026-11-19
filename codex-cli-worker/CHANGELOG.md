@@ -45,6 +45,11 @@
   keep; the unused `CORE_URL` and `ALLOW_MARK` constants are gone; the three test files that prove a removed part
   stays removed are now one, `tests/test_removed_surfaces.py`, with the same tests; `AGENTS.md` no longer
   describes the bundled house rules file, which was removed in an earlier version.
+- Internal, no change in behavior: the permission bridge (`approvals.py`) can now run one turn on a Codex process
+  that it does not own. In that mode it sends only `turn/start` on a thread that is already loaded, with the chat's
+  model in the turn; it uses request IDs that no other chat on the process uses; and a cancel sends `turn/interrupt`
+  but leaves the process input open for the other chats. Nothing uses this mode yet. A later change keeps one Codex
+  process alive for many chats and uses it. Each exchange still starts its own process, as before.
 
 ## 0.3.6 - 2026-11-18
 

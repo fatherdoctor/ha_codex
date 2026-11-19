@@ -234,6 +234,19 @@ class AppServerSession:
     All state and writes use the worker's reentrant lock, including cancellation
     and the HTTP decision route. A browser cannot supply protocol request IDs,
     commands, permission scopes, or policy amendments.
+
+    The session works in one of two ways:
+
+    - It owns the connection (the default): one new app-server process for one
+      exchange. The session sends initialize, then thread/start or thread/resume,
+      then turn/start, and close ends the process input.
+    - It does not own the connection (owns_connection=False): the process is
+      shared by many chats and the thread in thread_params["threadId"] is already
+      loaded. The session sends only turn/start, with the chat's model in the
+      turn, because no thread request carries it. Its request IDs are unique to
+      the session, so a reader of the shared output can give each reply to its
+      session (owns_request). Close interrupts a running turn and leaves the
+      input open for the other chats.
     """
 
     def __init__(
@@ -241,10 +254,17 @@ class AppServerSession:
         turn_params: dict[str, Any], on_event: Callable[[dict[str, Any]], None],
         on_approvals: Callable[[list[dict[str, Any]]], None],
         on_final: Callable[[str], None], is_active: Callable[[], bool],
-        redact: Callable[[str], str],
+        redact: Callable[[str], str], owns_connection: bool = True,
     ) -> None:
         """Bind a live transport to one worker exchange and its persistence callbacks."""
+        attached_thread = thread_params.get("threadId")
+        if not owns_connection and (not isinstance(attached_thread, str) or not attached_thread):
+            raise ValueError("A session on a shared connection needs the thread id of a loaded thread.")
         self.writer = writer
+        self.owns_connection = owns_connection
+        # The prefix of every request ID that this session sends. On a shared connection a reply has no thread id,
+        # so the ID alone says which session sent the request.
+        self.request_prefix = "worker" if owns_connection else f"worker-{uuid.uuid4().hex}"
         self.lock = lock
         self.thread_params = copy.deepcopy(thread_params)
         self.turn_params = copy.deepcopy(turn_params)
@@ -262,6 +282,7 @@ class AppServerSession:
         self.turn_id = ""
         self._closed = False
         self._turn_ended = False
+        self._turn_requested = False
         self._next_id = 0
         self._requests: dict[str, str] = {}
         self._pending: dict[str, Any] = {}
@@ -278,19 +299,49 @@ class AppServerSession:
     def _request(self, method: str, params: dict[str, Any]) -> None:
         """Send a client request with a namespace distinct from server request IDs."""
         self._next_id += 1
-        request_id = f"worker-{self._next_id}"
+        request_id = f"{self.request_prefix}-{self._next_id}"
         self._requests[request_id] = method
         self._write({"id": request_id, "method": method, "params": params})
 
+    def owns_request(self, request_id: Any) -> bool:
+        """Return True when a reply with this ID answers a request that this session sent."""
+        return isinstance(request_id, str) and request_id.startswith(self.request_prefix + "-")
+
+    @property
+    def turn_running(self) -> bool:
+        """Return True when turn/start was sent and turn/completed has not arrived.
+
+        On a shared connection, a caller reads this after close: the turn can still run in the process. With a turn
+        id, close sent turn/interrupt, and turn/completed follows. Without one, nothing could stop the turn.
+        """
+        with self.lock:
+            return self._turn_requested and not self._turn_ended
+
     def start(self) -> None:
-        """Initialize the protocol; thread and turn creation follow their replies."""
+        """Initialize the protocol; thread and turn creation follow their replies.
+
+        On a shared connection the process is initialized and the thread is loaded, so the turn starts at once.
+        """
         with self.lock:
             if self._closed or not self.is_active():
                 self.close()
                 return
+            if not self.owns_connection:
+                self.thread_id = self.thread_params["threadId"]
+                self.on_event({"type": "thread.started", "thread_id": self.thread_id})
+                turn = {**self.turn_params, "threadId": self.thread_id}
+                if "model" in self.thread_params and "model" not in turn:
+                    turn["model"] = self.thread_params["model"]
+                self._start_turn(turn)
+                return
             self._request("initialize", {"clientInfo": {
                 "name": "home_assistant_worker", "title": "Home Assistant", "version": "1",
             }})
+
+    def _start_turn(self, params: dict[str, Any]) -> None:
+        """Send turn/start and remember that a turn can now run."""
+        self._turn_requested = True
+        self._request("turn/start", params)
 
     def read(self, handle: TextIO) -> None:
         """Read the JSONL transport until completion or EOF, failing closed on errors."""
@@ -315,14 +366,17 @@ class AppServerSession:
                 pass
 
     def close(self) -> None:
-        """Expire all live requests and close stdin; saved records cannot grant access."""
+        """Expire all live requests and close stdin; saved records cannot grant access.
+
+        On a shared connection the input stays open: other chats use it. A running turn gets turn/interrupt there.
+        """
         with self.lock:
             if self._closed:
                 return
             self._closed = True
             if self.thread_id and self.turn_id and not self._turn_ended:
                 try:
-                    self._write({"id": "worker-stop", "method": "turn/interrupt", "params": {
+                    self._write({"id": f"{self.request_prefix}-stop", "method": "turn/interrupt", "params": {
                         "threadId": self.thread_id, "turnId": self.turn_id,
                     }})
                 except (OSError, ValueError):
@@ -337,10 +391,11 @@ class AppServerSession:
                     self.on_approvals(copy.deepcopy(self._records))
             finally:
                 self.finished.set()
-                try:
-                    self.writer.close()
-                except (OSError, ValueError):
-                    pass
+                if self.owns_connection:
+                    try:
+                        self.writer.close()
+                    except (OSError, ValueError):
+                        pass
 
     def _display(self, value: Any) -> tuple[str, bool]:
         """Redact display text and signal when review would hide part of an action."""
@@ -543,7 +598,7 @@ class AppServerSession:
             if expected and self.thread_id != expected:
                 raise ValueError("Codex resumed a different conversation")
             self.on_event({"type": "thread.started", "thread_id": self.thread_id})
-            self._request("turn/start", {**self.turn_params, "threadId": self.thread_id})
+            self._start_turn({**self.turn_params, "threadId": self.thread_id})
         elif method == "turn/start":
             self.turn_id = result["turn"]["id"]
 
