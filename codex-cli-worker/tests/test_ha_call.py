@@ -367,8 +367,7 @@ class LaunchTests(unittest.TestCase):
         task = {"task_id": "t", "turns": [], "chat_settings": server.DEFAULT_CHAT_SETTINGS}
         with patch.object(server, "tasks", {"t": task}), patch.object(server, "read_options", return_value={}):
             return {"page": server.build_app_server_args(),
-                    "schedule": server.build_app_server_args(attended=False),
-                    "exec": server.build_codex_args("t", Path("p"), Path("f"), None)}
+                    "schedule": server.build_app_server_args(attended=False)}
 
     def test_only_an_attended_page_chat_gets_the_tool(self):
         launches = self.launches()
@@ -377,7 +376,6 @@ class LaunchTests(unittest.TestCase):
                        for name, args in launches.items()}
         self.assertTrue(call_values["page"])
         self.assertEqual(call_values["schedule"], [])
-        self.assertEqual(call_values["exec"], [])
         self.assertIn('mcp_servers.home_assistant_call.env_vars=["HA_CALL_CAPABILITY"]', call_values["page"])
 
     def test_the_page_launch_asks_for_each_call(self):
@@ -433,7 +431,7 @@ class RunTaskLaunchTests(unittest.TestCase):
         replaced = {
             "tasks": {"t": task}, "ha_call": HomeAssistantCall(call_worker()), "get_run_dir": temp,
             "read_options": {}, "task_options": {}, "codex_backup_dir": None, "model_pin_error": "",
-            "uses_user_approvals": True, "sandbox_readiness": {"required": False, "ready": True},
+            "sandbox_readiness": {"required": False, "ready": True},
         }
         quiet = ("record_diagnostic", "write_task_log", "update_task", "note_task_sign_in", "start_activity",
                  "refresh_core_address", "start_phase", "prepare_ha_docs")

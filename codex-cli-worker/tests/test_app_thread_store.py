@@ -134,12 +134,13 @@ class ExchangeRecordTests(unittest.TestCase):
         # A resume never marks the thread: only a thread this page starts gets the rules at its first turn.
         self.assertNotIn("page_instructions", server.tasks[task_id])
 
-    def test_the_exec_path_passes_the_rules_as_developer_instructions(self):
-        """Upstream's codex exec path, reached only by tests, gets the same rules through its configuration."""
+    def test_the_rules_are_the_threads_developer_instructions(self):
+        """Every thread this page starts gets the fixed rules through the app-server thread settings."""
         task_id = self.create(OWNER_TEXT)
-        with patch.object(server, "read_options", return_value={"codex_sandbox": "workspace-write"}):
-            args = server.build_codex_args(task_id, Path("prompt"), Path("final"), None)
-        self.assertIn("developer_instructions=" + json.dumps(server.PAGE_INSTRUCTIONS), args)
+        session = server.create_approval_session(
+            task_id, attachments.StubAppServer(attachments.SESSION_ID), "Prompt", Path("final"), None, {},
+            {"codex_sandbox": "workspace-write"})
+        self.assertEqual(session.thread_params["developerInstructions"], server.PAGE_INSTRUCTIONS)
 
     def run_and_record_plain(self, task_id, session_id=None, reply=None):
         """Run one exchange through run_codex's fake process and return exchange_info's details and the message."""
@@ -498,37 +499,13 @@ class StatusRunTests(unittest.TestCase):
                 self.assertEqual((task["question"], task["choices"]), ("", []))
                 self.assertIn("automations.yaml", task["error"])
 
-    def test_a_non_zero_exit_wins_over_a_question_in_an_old_json_answer(self):
-        """A Codex run that exits with an error fails the task, also when an old JSON answer asks a question.
-
-        Only the exec path (codex exec, no user approvals) has an exit code of its own; the app server path
-        reports a failed turn as a connection error, which other tests cover.
-        """
-        old_question = json.dumps({"status": "needs_input", "summary": "Edited.", "question": "Remove one?",
-                                   "details": "", "choices": ["Yes"]})
-
-        class ExecProcess:
-            """codex exec: it writes the old JSON answer, then exits with code 1."""
-
-            def __init__(self, args, **kwargs):
-                """Remember where codex exec writes its last message."""
-                del kwargs
-                self.output = Path(args[args.index("--output-last-message") + 1])
-                self.stdin, self.stdout, self.stderr = io.StringIO(), io.StringIO(""), io.StringIO("")
-                self.returncode = None
-
-            def poll(self):
-                """Running until the worker waits for it."""
-                return self.returncode
-
-            def wait(self, timeout=None):
-                """Write the answer and exit with an error."""
-                self.output.write_text(old_question, encoding="utf-8")
-                self.returncode = 1
-                return 1
-
-        self.stack.enter_context(patch.object(server, "uses_user_approvals", return_value=False))
-        self.stack.enter_context(patch.object(server.subprocess, "Popen", side_effect=ExecProcess))
+    def test_a_failed_turn_wins_over_a_question_in_an_old_json_answer(self):
+        """A turn that ends as failed fails the task, also when an old JSON answer asks a question."""
+        old_question = {"status": "needs_input", "summary": "Edited.", "question": "Remove one?",
+                        "details": "", "choices": ["Yes"]}
+        proc = attachments.StubAppServer("019fc242-910a-7c92-a17d-54c014e19fc4", old_question,
+                                         turn_error="Model connection lost")
+        self.stack.enter_context(patch.object(server.subprocess, "Popen", return_value=proc))
         self.stack.enter_context(patch.object(server, "assess_changes", return_value={
             "validation_errors": [], "recovery_files": [], "lovelace_results": [],
             "config_check": {"result": "skipped", "errors": "", "warnings": ""}}))
@@ -536,7 +513,7 @@ class StatusRunTests(unittest.TestCase):
         task = server.tasks["task"]
         self.assertEqual(task["status"], "failed")
         self.assertEqual(task["question"], "")
-        self.assertIn("Codex exited with 1.", task["details"])
+        self.assertIn("Model connection lost", task["details"])
 
 
 class OwnerNoticeTests(unittest.TestCase):
