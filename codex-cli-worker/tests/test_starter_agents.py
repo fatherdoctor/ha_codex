@@ -169,8 +169,12 @@ class StarterAgentsText(unittest.TestCase):
                 self.assertIn(heading, self.text)
 
     def test_it_has_the_safeguard_defaults_and_says_they_are_not_locks(self):
-        section = self.text.split("## Safeguards: defaults you can change", 1)[1].split("## About this home", 1)[0]
+        section = self.text.split("## Safeguards: defaults the owner can change", 1)[1].split("## About this home", 1)[0]
         self.assertIn("not locks in the app", section)
+        # Showing the Home Assistant log is daily work: the secrets line must not list logs as a thing to keep back.
+        self.assertNotRegex(section, r"(?i)logs and|, logs")
+        # The app enforces only the sandbox and the permission mode; the bracket must not claim a wider refusal.
+        self.assertNotIn("refuses git work", section)
         # The owner, not Codex, may change the rules; Codex reads "you" as itself.
         self.assertIn("The owner can edit or delete any of them", " ".join(section.split()))
         self.assertNotRegex(section, r"(?im)defaults that you set|^edit or delete")
