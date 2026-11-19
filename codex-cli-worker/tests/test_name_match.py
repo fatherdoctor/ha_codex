@@ -46,6 +46,17 @@ HOUSE = [
     light("light_strip", "Light Strip"),
 ]
 
+# A second house for the cases of rule 6 that need a room light next to longer names of the same room; in HOUSE
+# these lights would also fit "lamp" and "light strip light".
+ROOMS = [
+    light("bedroom", "Bedroom"),
+    light("bedroom_lamp_left", "Bedroom Lamp Left"),
+    light("bedroom_lamp_right", "Bedroom Lamp Right"),
+    light("desk", "Desk"),
+    light("desk_light_strip", "Desk Light Strip"),
+    {"entity_id": "switch.pool", "state": "off", "attributes": {"friendly_name": "Pool"}},
+]
+
 # (id, name, service, expected: an entity id, "none", "several", or "error"; family)
 CORPUS = [
     ("exact", "media room overhead", "light.turn_on", "light.media_room_overhead", "allow"),
@@ -105,6 +116,15 @@ CORPUS = [
     ("domain-word-not-last", "light media room overhead", "light.turn_on", "none", "domain word"),
 ]
 
+# The same form, matched against ROOMS. An exact name without the domain word never beats entities that hold
+# every word of the request (review CX-NAME-LIGHTc F1); plurals that are not the domain plus "s" (N1).
+CORPUS_ROOMS = [
+    ("short-exact-vs-two-full-fits", "bedroom lamp", "light.turn_on", "several", "domain word"),
+    ("short-exact-vs-one-full-fit", "desk light", "light.turn_on", "several", "domain word"),
+    ("short-exact-alone", "bedroom light", "light.turn_on", "light.bedroom", "domain word"),
+    ("plural-switches", "pool switches", "switch.turn_on", "switch.pool", "domain word"),
+]
+
 
 def outcome(name, service, states=HOUSE):
     try:
@@ -119,12 +139,14 @@ def outcome(name, service, states=HOUSE):
 class CorpusTests(unittest.TestCase):
 
     def test_every_corpus_case(self):
-        failing = [(case_id, outcome(name, service), expected)
-                   for case_id, name, service, expected, _ in CORPUS if outcome(name, service) != expected]
+        failing = [(case_id, outcome(name, service, states), expected)
+                   for corpus, states in ((CORPUS, HOUSE), (CORPUS_ROOMS, ROOMS))
+                   for case_id, name, service, expected, _ in corpus
+                   if outcome(name, service, states) != expected]
         self.assertEqual(failing, [], "failing corpus ids")
 
     def test_each_family_has_two_cases(self):
-        families = [family for *_, family in CORPUS]
+        families = [family for *_, family in CORPUS + CORPUS_ROOMS]
         self.assertTrue(all(families.count(family) >= 2 for family in families))
 
 
@@ -175,6 +197,19 @@ class RuleTests(unittest.TestCase):
         states = [light("media_room_overhead", "Media Room Overhead"), light("media_room_lamp", "Media Room Lamp")]
         self.assertEqual(outcome("media room light", "light.turn_on", states), "several")
         self.assertEqual(outcome("media room lamp", "light.turn_on", states), "light.media_room_lamp")
+
+    def test_exact_name_without_the_word_never_beats_a_name_with_every_word(self):
+        """Review CX-NAME-LIGHTc F1: these picked the shorter name, or moved an old match to it."""
+        for names, request in (
+                (("Bedroom", "Bedroom Lamp Left", "Bedroom Lamp Right"), "bedroom lamp"),
+                (("Desk", "Desk Light Strip"), "desk light"),
+                (("Kitchen", "Kitchen Lights Under Cabinet"), "kitchen lights")):
+            states = [light(name.lower().replace(" ", "_"), name) for name in names]
+            found = resolve(states, request, "light.turn_on")
+            self.assertEqual(found.get("total"), len(names), request)
+        locks = [{"entity_id": f"lock.{object_id}", "state": "locked", "attributes": {"friendly_name": name}}
+                 for object_id, name in (("front_door", "Front Door"), ("front_door_lock_child", "Front Door Lock Child"))]
+        self.assertEqual(outcome("front door lock", "lock.unlock", locks), "several")
 
     def test_words_are_whole_and_folded(self):
         self.assertEqual(name_words("Café-Lamp_2 ​X"), ["café", "lamp", "2", "x"])

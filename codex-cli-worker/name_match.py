@@ -17,7 +17,11 @@ A wrong match changes the wrong device, so this rule is stricter than the find t
    domain's own word for switch, fan, cover and the rest) may be left out: people say "the media room overhead
    light" for a light named "Media Room Overhead". It is left out only for an entity whose words do not hold it,
    and never when it is the only word, so "Light Strip" and "lamp" still match as they read. An exact name with
-   the word wins over an exact name without it: "kitchen light" picks "Kitchen Light" over "Kitchen".
+   the word wins over an exact name without it: "kitchen light" picks "Kitchen Light" over "Kitchen". An exact
+   name without the word is the match only when no entity holds every word of the request: "bedroom lamp" with
+   "Bedroom", "Bedroom Lamp Left" and "Bedroom Lamp Right" lists all three and sends nothing, and "desk light"
+   with "Desk" and "Desk Light Strip" lists both. The domain words are the domain, the domain plus "s" and the
+   words in EXTRA_DOMAIN_WORDS ("switches" for switch).
 
 The hostile cases for this rule are in tests/test_name_match.py (CORPUS); add a case there.
 """
@@ -34,7 +38,7 @@ MAX_CANDIDATES = 10
 # Services of these domains act on entities of other domains, so a name cannot pick the domain for them.
 NO_OWN_ENTITIES = frozenset({"homeassistant"})
 # Words people add after a device name to say what kind of device it is, beyond the domain's own word.
-EXTRA_DOMAIN_WORDS = {"light": ("lamp", "lamps")}
+EXTRA_DOMAIN_WORDS = {"light": ("lamp", "lamps"), "switch": ("switches",)}
 
 
 def domain_words(domain):
@@ -106,6 +110,7 @@ def resolve(states, name, service):
         raise ValueError(f"{service} acts on other domains: give target.entity_id, not a name")
     short = without_domain_word(words, domain)
     exact, exact_short, fitting = [], [], []
+    every_word = False  # some entity holds every word of the request, the domain word too
     for row in states:
         found = entity_row(row, domain) if isinstance(row, dict) else None
         if found is None:
@@ -115,6 +120,7 @@ def resolve(states, name, service):
         searched = set(friendly_words) | set(name_words(entity_id.split(".", 1)[1]))
         if all(word in searched for word in words):
             used = words
+            every_word = True
         elif short is not None and all(word in searched for word in short):
             used = short
         else:
@@ -126,7 +132,8 @@ def resolve(states, name, service):
             exact.append(candidate)
         elif friendly_words == short:
             exact_short.append(candidate)
-    chosen = exact or exact_short or fitting
+    # An exact name without the domain word does not beat an entity that holds every word: then all are asked.
+    chosen = exact or (exact_short if not every_word else []) or fitting
     if len(chosen) == 1:
         return {"entity_id": chosen[0]["entity_id"]}
     # The closest name first, as the find tool orders them: the device before its extra sensors and buttons.

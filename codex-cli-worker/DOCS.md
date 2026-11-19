@@ -385,8 +385,10 @@ list and sends the call only when exactly one entity of the service's domain fit
 - Credential-like and password-mode entities never match.
 - A last word that only says the kind of device may be left out: "media room overhead light" fits a light named
   "Media Room Overhead". For `light` services that word is "light", "lights", "lamp" or "lamps"; for other
-  services it is the domain's own word, such as "switch" or "fan". A name that holds the word, such as "Light
-  Strip", still fits as it reads, and "kitchen light" picks "Kitchen Light" over "Kitchen".
+  services it is the domain's own word or its plural, such as "switch", "switches" or "fan". A name that holds
+  the word, such as "Light Strip", still fits as it reads, and "kitchen light" picks "Kitchen Light" over
+  "Kitchen". A name without the word is picked only when no entity holds every word you said: "desk light" with
+  lights "Desk" and "Desk Light Strip" lists both and sends nothing.
 
 When no entity fits, or more than one, nothing is sent: the answer lists up to 10 candidates and the full count,
 and Codex asks you which one. After a call whose target is entity ids, the answer also holds the state right after
