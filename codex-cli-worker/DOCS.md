@@ -827,6 +827,7 @@ Type `/` at the start of the message box to see the commands, with an icon and a
 | `/rename` | Rename this chat (listed only with a chat open) |
 | `/usage` or `/status` | Show how much of your ChatGPT plan is used |
 | `/size` | Change the text size |
+| `/connection` | Open the remote connection and its status (not listed once Settings has shown that remote control is unavailable) |
 | `/settings` | Open Settings |
 | `/pin` | Pin or unpin this chat (listed only with a chat open) |
 | `/share` | Download this chat as a file (listed only with a chat open) |

@@ -74,6 +74,7 @@ async function testSlash(browser, output, errors) {
       "/reasoning",
       "/usage",
       "/size",
+      "/connection",
       "/settings",
     ]);
     assert.equal(
@@ -87,6 +88,12 @@ async function testSlash(browser, output, errors) {
     assert.deepEqual(await listed(page), ["/size"]);
     await typeMessage(page, "/stat");
     assert.deepEqual(await listed(page), ["/usage"]);
+    // /connection opens the Remote connection dialog.
+    await typeMessage(page, "/conn");
+    assert.deepEqual(await listed(page), ["/connection"]);
+    await page.locator("#message").press("Enter");
+    await page.locator("#connection-dialog[open]").waitFor();
+    await page.keyboard.press("Escape");
     // No match, or a space after the word, closes the list.
     await typeMessage(page, "/zz");
     assert.equal(await page.locator("#slash-popover").isHidden(), true);
@@ -105,6 +112,7 @@ async function testSlash(browser, output, errors) {
     // The typed letters are marked, and every row has an icon.
     assert.equal(await page.locator("#slash-popover .slash-match").textContent(), "se");
     assert.notEqual(await page.locator("#slash-popover .slash-icon").textContent(), "");
+    assert.equal(await page.locator("#slash-popover .slash-icon").getAttribute("aria-hidden"), "true");
 
     // The tap path: tap /size, the box empties and Settings opens at Text size, on every screen.
     await typeMessage(page, "/si");
@@ -202,6 +210,7 @@ async function testSlash(browser, output, errors) {
       "/rename",
       "/usage",
       "/size",
+      "/connection",
       "/settings",
       "/pin",
       "/share",

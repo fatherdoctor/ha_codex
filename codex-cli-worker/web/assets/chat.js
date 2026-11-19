@@ -3003,7 +3003,6 @@ const SLASH_COMMANDS = [
     name: "new",
     icon: "＋",
     description: "Start a new chat",
-    when: "always",
     available: () => !$("new-chat").disabled,
     run: () => selectChat(null),
   },
@@ -3011,7 +3010,6 @@ const SLASH_COMMANDS = [
     name: "stop",
     icon: "■",
     description: "Stop the chat that is working",
-    when: "while a chat is working",
     available: () => !$("cancel").hidden && !$("cancel").disabled,
     run: () => $("cancel").click(),
   },
@@ -3019,7 +3017,6 @@ const SLASH_COMMANDS = [
     name: "model",
     icon: "◇",
     description: "Choose the model for this chat",
-    when: "always",
     available: () => Boolean(state.catalog) && !$("model-button").disabled,
     run: () => openPicker("model"),
   },
@@ -3027,7 +3024,6 @@ const SLASH_COMMANDS = [
     name: "reasoning",
     icon: "✦",
     description: "Choose how long Codex thinks before it answers",
-    when: "always",
     available: () => Boolean(state.catalog) && !$("effort-button").disabled,
     run: () => openPicker("effort"),
   },
@@ -3035,7 +3031,6 @@ const SLASH_COMMANDS = [
     name: "rename",
     icon: "✎",
     description: "Rename this chat",
-    when: "with a chat open",
     available: () => Boolean(state.id && chatById(state.id)),
     run: () => openRename(state.id),
   },
@@ -3044,7 +3039,6 @@ const SLASH_COMMANDS = [
     icon: "◔",
     aliases: ["status"],
     description: "Show how much of your ChatGPT plan is used",
-    when: "always",
     available: () => true,
     run: () => {
       loadUsage();
@@ -3056,15 +3050,21 @@ const SLASH_COMMANDS = [
     name: "size",
     icon: "Aa",
     description: "Change the text size",
-    when: "always",
     available: () => true,
     run: () => openSettingsAt("text-size-section"),
+  },
+  {
+    name: "connection",
+    icon: "⇄",
+    description: "Open the remote connection and its status",
+    // Listed until Settings has shown that remote control cannot run here.
+    available: () => state.remoteAvailable !== false,
+    run: () => openConnection(),
   },
   {
     name: "settings",
     icon: "⚙",
     description: "Open Settings",
-    when: "always",
     available: () => true,
     run: () => $("settings-button").click(),
   },
@@ -3072,7 +3072,6 @@ const SLASH_COMMANDS = [
     name: "pin",
     icon: "⚲",
     description: "Pin or unpin this chat",
-    when: "with a chat open",
     available: () => Boolean(state.id && chatById(state.id)),
     run: () => togglePin(state.id),
   },
@@ -3080,7 +3079,6 @@ const SLASH_COMMANDS = [
     name: "share",
     icon: "↗",
     description: "Download this chat as a file",
-    when: "with a chat open",
     available: () => Boolean(state.id && chatById(state.id)),
     run: () => openShare(state.id),
   },
@@ -3088,7 +3086,6 @@ const SLASH_COMMANDS = [
     name: "archive",
     icon: "▤",
     description: "Archive this chat, or restore it",
-    when: "with an idle chat open",
     available: () => chatIdle(),
     run: () =>
       document.dispatchEvent(
@@ -3101,7 +3098,6 @@ const SLASH_COMMANDS = [
     name: "delete",
     icon: "⌫",
     description: "Delete this chat and its history",
-    when: "with an idle chat open",
     available: () => chatIdle(),
     run: () => openDelete(state.id),
   },
@@ -3155,6 +3151,12 @@ function slashCommand(value) {
     ) || null
   );
 }
+/** Build a command's icon; screen readers skip it and read the name. */
+function slashIcon(glyph) {
+  const icon = textNode("span", glyph, "slash-icon");
+  icon.setAttribute("aria-hidden", "true");
+  return icon;
+}
 /** Show or hide the command list for the message box's current text. */
 function renderSlash() {
   const value = $("message").value;
@@ -3183,7 +3185,7 @@ function renderSlash() {
       document.createTextNode(command.name.slice(marked)),
     );
     option.append(
-      textNode("span", command.icon, "slash-icon"),
+      slashIcon(command.icon),
       name,
       textNode("span", command.description, "slash-description"),
     );
@@ -3929,6 +3931,7 @@ async function loadRemoteControl() {
 }
 /** Draw one remote-control state; the buttons follow what can be done now. */
 function renderRemoteControl(rc) {
+  state.remoteAvailable = Boolean(rc.available);
   const name = rc.machine_name || rc.configured_name;
   let status = rc.message || rc.state || "Unknown";
   if (!rc.available) status = rc.blocked_reason;

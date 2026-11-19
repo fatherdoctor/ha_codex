@@ -1990,26 +1990,6 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   background: color-mix(in srgb, var(--accent, currentColor) 22%, transparent);
   border-radius: 3px;
 }
-.command-list dt {
-  font-weight: 600;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
-.command-list dd {
-  margin: 0;
-  color: var(--muted);
-  min-width: 0;
-}
-/* On a narrow phone the two columns leave each description a word wide, so
-   each command goes above its description instead. */
-@media (max-width: 480px) {
-  .command-list {
-    grid-template-columns: minmax(0, 1fr);
-    row-gap: 2px;
-  }
-  .command-list dd {
-    margin-bottom: 8px;
-  }
-}
 /* Remote-control pairing code: large, steady, and in a font that tells 0 from O. */
 .pairing-code {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
