@@ -2,6 +2,9 @@
 
 ## 0.4.0 (unreleased)
 
+- Chat page: while Codex works, the steps stay closed under the "Working on your request…" line until you tap it.
+  Your choice holds until the turn ends; then the steps close under "Worked for…" as before. A permission request
+  stays visible outside the closed list.
 - Chat page: the plus on the attach button is now an icon centered in a round button, on a desktop and a phone.
   The banner across the top of the page while Full access is on is gone; in a chat's Permissions menu, **Full
   access** is now shown in bold while the setting is on, and the other choices are not bold.
