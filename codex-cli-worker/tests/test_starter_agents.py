@@ -168,6 +168,13 @@ class StarterAgentsText(unittest.TestCase):
             with self.subTest(rule=heading):
                 self.assertIn(heading, self.text)
 
+    def test_it_has_the_safeguard_defaults_and_says_they_are_not_locks(self):
+        section = self.text.split("## Safeguards: defaults you can change", 1)[1].split("## About this home", 1)[0]
+        self.assertIn("not locks in the app", section)
+        for word in ("secrets.yaml", ".storage", "/config/.git/hooks", "/share/HomeAssistant", "backup"):
+            with self.subTest(word=word):
+                self.assertIn(word, section)
+
     def test_it_does_not_ask_for_backup_copies_inside_the_config_folder(self):
         # The worker gives each message its own backup folder and tells Codex to leave no other copies in /config.
         self.assertNotRegex(self.text, r"\.bak|\.orig|backup cop")

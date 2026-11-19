@@ -29,6 +29,16 @@ delete it. The editor is in the chat page under Settings > Workspace instruction
    them unasked.
 7. When you are not sure what the owner means or what a change will do, stop and ask.
 
+## Safeguards: defaults you can change
+
+The rules above are defaults that you set, not locks in the app. Edit or delete any of them. The app enforces only
+the sandbox and the permission mode of each chat.
+
+- Secrets: do not print, log, commit or send a token, password, PIN or anything in `secrets.yaml` or `.storage`.
+- Protected places: ask before you touch `/config/secrets.yaml`, `/config/.storage`, `/config/.git/hooks` or
+  `/share/HomeAssistant`.
+- Backups: make a backup before you change a configuration file.
+
 ## About this home
 
 Add what Codex cannot know by itself. For example: the names people use for rooms and devices, devices that must

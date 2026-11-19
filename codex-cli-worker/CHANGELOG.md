@@ -2,6 +2,8 @@
 
 ## 0.4.0 (unreleased)
 
+- The starter `AGENTS.md` has a short section of safeguard defaults (secrets, protected places, backups). The
+  section says they are defaults the owner can change or delete, not locks in the app. No app code changes.
 - Tests only: two new checks run the packaged Codex CLI against a local stand-in model. One shows that a command in
   Read only, Default or Auto-review cannot connect to any of the app's tool sockets, and records that an
   escalated command, once approved, can. The other checks how `codex app-server` handles several chats in one
