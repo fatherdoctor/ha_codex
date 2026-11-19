@@ -1,4 +1,4 @@
-"""Scheduled runs are switched off in this series: no page, tool or timer shows or runs them, and the switch restores all."""
+"""Scheduled runs are on in this series. The build-time switch still hides them all when it is turned off."""
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -14,66 +14,61 @@ SCHEDULE_IDS = ('schedule-dialog', 'schedule-form', 'schedule-list', 'schedule-r
 
 
 class SwitchTests(unittest.TestCase):
-    def test_the_switch_is_off_in_this_series(self):
-        self.assertIs(scheduling.SCHEDULED_RUNS, False)
+    def test_the_switch_is_on_in_this_series(self):
+        self.assertIs(scheduling.SCHEDULED_RUNS, True)
 
-    def test_no_page_carries_a_scheduling_surface_while_off(self):
+    def test_the_page_carries_the_scheduling_surfaces(self):
         page = server.render_index()
-        for marker in SCHEDULE_IDS + ('Schedule this chat', 'Scheduled runs', 'scheduling:begin'):
+        for marker in SCHEDULE_IDS + ('Schedule this chat', 'Scheduled runs'):
             with self.subTest(marker=marker):
-                self.assertNotIn(marker, page)
+                self.assertIn(marker, page)
+        self.assertNotIn('scheduling:begin', page)
+        self.assertNotIn('scheduling:end', page)
 
-    def test_the_page_served_at_the_root_is_the_same(self):
-        body = server.app.test_client().get('/').get_data(as_text=True)
-        self.assertNotIn('schedule-dialog', body)
-        self.assertNotIn('data-action="schedule"', body)
+    def test_codex_is_offered_the_scheduling_tools_and_the_text(self):
+        args = ' '.join(server.scheduling_mcp_args())
+        for tool in server.SCHEDULING_TOOLS:
+            self.assertIn(f'codex_scheduling.tools.{tool}.approval_mode', args)
+        self.assertIn('codex_scheduling', ' '.join(server.build_app_server_args()))
+        self.assertIn('Use the codex_scheduling tools', server.PAGE_INSTRUCTIONS)
+        self.assertIn('Use the codex_scheduling tools', server.build_page_instructions())
 
-    def test_codex_is_offered_no_scheduling_tool_while_off(self):
-        self.assertEqual(server.scheduling_mcp_args(), [])
-        self.assertNotIn('codex_scheduling', ' '.join(server.build_app_server_args()))
-        self.assertNotIn('codex_scheduling', server.PAGE_INSTRUCTIONS)
-        self.assertNotIn('codex_scheduling', server.build_page_instructions())
-
-    def test_turning_the_switch_on_brings_back_the_page_the_tool_and_the_text(self):
-        with patch.object(scheduling, 'SCHEDULED_RUNS', True):
+    def test_turning_the_switch_off_hides_the_page_the_tool_and_the_text(self):
+        with patch.object(scheduling, 'SCHEDULED_RUNS', False):
             page = server.render_index()
-            for marker in SCHEDULE_IDS:
+            for marker in SCHEDULE_IDS + ('Schedule this chat', 'Scheduled runs', 'scheduling:begin'):
                 with self.subTest(marker=marker):
-                    self.assertIn(marker, page)
-            self.assertNotIn('scheduling:begin', page)
-            self.assertIn('Use the codex_scheduling tools', server.build_page_instructions())
-            args = ' '.join(server.scheduling_mcp_args())
-            for tool in server.SCHEDULING_TOOLS:
-                self.assertIn(f'codex_scheduling.tools.{tool}.approval_mode', args)
+                    self.assertNotIn(marker, page)
+            self.assertEqual(server.scheduling_mcp_args(), [])
+            self.assertNotIn('codex_scheduling', server.build_page_instructions())
 
     def test_the_instruction_paragraph_is_kept_in_the_code(self):
         source = Path(server.__file__).read_text(encoding='utf-8')
-        self.assertIn('@@SCHEDULING_PARAGRAPH@@', source)  # The paragraph is kept in the code, not deleted.
+        self.assertIn('@@SCHEDULING_PARAGRAPH@@', source)
 
 
 class DocsTests(unittest.TestCase):
-    """DOCS.md and README.md say nothing about scheduled runs in this series."""
+    """DOCS.md and README.md describe scheduled runs as available."""
 
     ROOT = Path(server.__file__).resolve().parent.parent
-    # Plain uses of the word that are not about scheduled runs.
-    ALLOWED = ('not refreshed on a schedule', 'instead schedules')
 
-    def hits(self, text):
-        return [line for line in text.splitlines()
-                if 'schedul' in line.lower() and not any(phrase in line for phrase in self.ALLOWED)]
-
-    def test_the_docs_do_not_mention_scheduling(self):
-        self.assertEqual(self.hits((self.ROOT / 'codex-cli-worker' / 'DOCS.md').read_text(encoding='utf-8')), [])
-
-    def test_the_readme_does_not_mention_scheduling(self):
-        self.assertEqual(self.hits((self.ROOT / 'README.md').read_text(encoding='utf-8')), [])
-
-    def test_the_removed_lead_section_has_no_link_left(self):
+    def test_the_docs_describe_scheduled_runs(self):
         docs = (self.ROOT / 'codex-cli-worker' / 'DOCS.md').read_text(encoding='utf-8')
+        self.assertIn('\n## Scheduled runs\n', docs)
+        self.assertIn('choose **Schedule**', docs)
+        self.assertIn('`propose_schedule` and `list_schedules`', docs)
+
+    def test_the_readme_describes_scheduled_runs_and_links_the_section(self):
         readme = (self.ROOT / 'README.md').read_text(encoding='utf-8')
-        self.assertNotIn('scheduled-runs', docs)
-        for text in (docs, readme):
+        self.assertIn('\n## Scheduled runs\n', readme)
+        self.assertIn('codex-cli-worker/DOCS.md#scheduled-runs', readme)
+        self.assertIn('(#scheduled-runs)', readme)
+
+    def test_the_documents_name_no_lead_channel_or_mailbox_for_schedules(self):
+        for name in ('README.md', 'codex-cli-worker/DOCS.md'):
+            text = (self.ROOT / name).read_text(encoding='utf-8')
             self.assertNotIn('the-lead-agent-channel-and-mailbox', text)
+            self.assertNotIn('scheduled-runs-and-the-lead-agent-channel', text)
 
 
 class ScheduleEngineTests(unittest.TestCase):
@@ -85,19 +80,19 @@ class ScheduleEngineTests(unittest.TestCase):
         self.store.save(test_scheduling.proposal(), owner=True, now=NOW)
 
     def test_a_due_schedule_does_not_fire_while_off_and_is_kept(self):
-        self.engine.tick(NOW + 7200)
+        with patch.object(scheduling, 'SCHEDULED_RUNS', False):
+            self.engine.tick(NOW + 7200)
         self.assertEqual(self.worker.sent, [])
         self.assertEqual(len(self.store.schedules()), 1)
         self.assertTrue(self.store.schedules()[0]['enabled'])
 
-    def test_the_same_schedule_fires_once_the_switch_is_on(self):
-        with patch.object(scheduling, 'SCHEDULED_RUNS', True):
-            self.engine.tick(NOW + 7200)
+    def test_a_due_schedule_fires_while_on(self):
+        self.engine.tick(NOW + 7200)
         self.assertEqual(len(self.worker.sent), 1)
 
 
 class ScheduleApiTests(test_scheduling.SchedulingApiTests):
-    """The owner routes while off, on the same fixture the scheduling tests use."""
+    """The owner routes while the switch is off, on the same fixture the scheduling tests use."""
 
     def setUp(self):
         super().setUp()

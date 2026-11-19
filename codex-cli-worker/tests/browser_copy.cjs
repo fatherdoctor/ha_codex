@@ -52,9 +52,7 @@ async function openSavedChat(page) {
     const items = await page.locator("#chat-menu [role=menuitem]").evaluateAll((nodes) =>
       nodes.filter((node) => node.offsetParent !== null).map((node) => node.textContent.trim()),
     );
-    // Schedule is in the menu only while scheduled runs are on (the fixture starts with them off).
-    const scheduled = process.env.CODEX_FIXTURE_SCHEDULED_RUNS === "1" ? ["Schedule"] : [];
-    assert.deepEqual(items, ["Rename", "Pin chat", "Share", ...scheduled, "Archive", "Delete"]);
+    assert.deepEqual(items, ["Rename", "Pin chat", "Share", "Schedule", "Archive", "Delete"]);
     for (const gone of ["New chat", "Conversations", "Copy thread ID", "Status"])
       assert.equal(await page.locator("#chat-menu").getByRole("menuitem", { name: gone, exact: true }).count(), 0, gone);
 

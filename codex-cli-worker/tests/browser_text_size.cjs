@@ -25,13 +25,15 @@ const PARTS = [
   ["chat list", ".chat-row"],
   // studio.css styles these two, so they prove its sizes scale too.
   ["message box", "#message"],
-  ["dialog title", "#permissions-title"],
+  ["dialog title", "#schedule-title"],
 ];
 
-/** Parts inside Settings: a section header, and the sign-in text. */
+/** Parts inside Settings: a section header, the sign-in text and the schedule form's two selects. */
 const SETTINGS_PARTS = [
   ["settings header", "#text-size-section .settings-title"],
   ["sign-in text", "#login-status"],
+  ["schedule mode", "#schedule-mode"],
+  ["schedule kind", "#schedule-kind"],
 ];
 
 /**
@@ -162,7 +164,7 @@ async function testTextSize(browser, output, errors) {
       await page.locator("#text-size-section .settings-status").textContent(),
       "Largest",
     );
-    // Settings scales with the rest: a header and the sign-in text.
+    // Settings scales with the rest: a header, the sign-in text, the schedule selects.
     const largest = {};
     for (const [part, selector] of SETTINGS_PARTS)
       largest[part] = await fontSize(page, selector);
