@@ -1,2 +1,4 @@
 # The mechanical ruff format and import sort (git config blame.ignoreRevsFile .git-blame-ignore-revs)
-aabf5915dc9b6e3bb88de8924fbcdcb9e877f604
+# This ID holds only if the PR merges with a merge commit or a rebase merge, which keep it.
+# After a squash merge, a second small PR lists the ID of the squash commit.
+a3332fcd5dea5fbb1d02179d9e50803fd3d140d0
