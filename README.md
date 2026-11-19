@@ -16,8 +16,8 @@ on a test Home Assistant first. It is built on
 
 - A chat page in Home Assistant, with saved conversations and a task queue. Codex works in a sandbox.
 - In the default mode, Codex edits files in your configuration folder without a question. It asks before a command
-  that uses the network, a write outside that folder and `/share`, or a change to a device. Only an administrator
-  can answer. The other [permission modes](#permission-modes) ask less or more.
+  that uses the network, a write outside your configuration folder and `/share`, or a change to a device. Only an
+  administrator can answer. The other [permission modes](#permission-modes) ask less or more.
 - Codex is told to save the earlier copy of a file before it changes it, and the chat lists the copies it saved. A
   copy can be missing, and credential files are never copied, so keep your own Home Assistant backups
   ([Backups](codex-cli-worker/DOCS.md#backups)).
@@ -157,7 +157,7 @@ only Codex's own settings.
 
 | Mode | What Codex can do without asking |
 |---|---|
-| Default | Edit files in your configuration folder. Shell networking and writes outside it need your permission. |
+| Default | Edit files in your configuration folder. Shell networking and a write outside your configuration folder and `/share` need your permission. |
 | Auto-review | As Default, but Codex's own reviewer answers each request instead of you. |
 | Read only | Read files. A write, a device change or shell networking needs your permission for that one action. |
 | Full access | Everything, without a sandbox and without asking. Off until an administrator turns it on in Settings. |
