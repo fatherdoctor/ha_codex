@@ -1,6 +1,6 @@
 # Sandbox compatibility workaround and verification
 
-This worker includes a temporary workaround for [upstream Codex issue #44329](https://github.com/openai/codex/issues/44329), reported here as [issue #9](https://github.com/moryoav/home-assistant-codex/issues/9).
+This worker includes a temporary workaround for [upstream Codex issue #44329](https://github.com/openai/codex/issues/44329), reported in the project this one started from as [issue #9](https://github.com/moryoav/home-assistant-codex/issues/9).
 
 ## Scope
 
@@ -62,7 +62,7 @@ proc views. A same-label positive control proves the synthetic marker was
 readable before the stack. Removing only the stack permission must make the
 guard refuse execution. Missing enforcement support fails the job; it never
 silently skips. The job removes only its own profiles and fixture files.
-This is loaded-policy evidence; the lead must still perform the HAOS version
+This is loaded-policy evidence; the maintainer must still perform the HAOS version
 update and enrolled phone acceptance below.
 
 Both relay paths map outside root to UID/GID 1000 inside their outer user
@@ -97,7 +97,7 @@ with a higher version and an add-on version update, then confirm the os-agent pr
 count a rebuild against a stale loaded profile as a test of this policy. The HAOS worker container is `app_local_codex_cli_worker`, not an `addon_`
 prefix. If the existing SSH add-on has no Docker CLI/socket, stop that step and report
 not run; do not disable its protection or add an unreviewed endpoint to get around it.
-No `aa-exec` or source tests are needed in the image. From the lead's SSH add-on shell, select the
+No `aa-exec` or source tests are needed in the image. From the maintainer's SSH add-on shell, select the
 candidate worker container (not a host-wide profile change) and run:
 
 ```sh
@@ -163,7 +163,7 @@ Supervisor rewrites the root declaration only. The stack target is computed from
 kernel's current relay label; the permission pattern uses AppArmor's `profile_name` expansion.
 The image does not use a hard-coded local/repository prefix or an unconfined transition.
 
-The lead must additionally use the real phone relay to deny an escalation, allow a fresh one once,
+The maintainer must additionally use the real phone relay to deny an escalation, allow a fresh one once,
 verify the ordinary sandboxed read and Core API call using configured variables, and repeat after
 an add-on image update: the app should reconnect with the same enrollment and no new pairing code.
 The key is relay URL + account + stable initialize client name `ha_codex`, not the display/UTS name.
@@ -198,7 +198,7 @@ Once the pinned upstream CLI recognizes both proc error formats, remove the wrap
 On HAOS's kernel features, ABI 3.0 enables network_v8 mediation for both chat
 and relay tool labels. Those labels retain Unix sockets and raw netlink only;
 AF_INET/AF_INET6/packet socket creation in sandboxed commands is refused.
-Approved escalations retain the existing parent/relay policy. The lead must
+Approved escalations retain the existing parent/relay policy. The maintainer must
 run one ordinary chat-page sandboxed shell read plus the history MCP tool on
 HAOS after a profile reload. Runner tests do not substitute for that acceptance.
 
@@ -211,5 +211,5 @@ errno 13. The pinned command/exec rows can instead hide that pid in Codex's pid
 namespace, where errno 2 is not evidence of ptrace enforcement. Ubuntu runner
 kernel features, including its socket mediation, differ from HAOS. N10 now
 requires EACCES (13) on every direct-row proc read. Pinned command/exec rows
-retain accepted denials 1, 2 and 13. The named lead exception permits only this
+retain accepted denials 1, 2 and 13. The named maintainer exception permits only this
 assertion in the existing CI helper; loaded-policy CI proves it on real profiles.
