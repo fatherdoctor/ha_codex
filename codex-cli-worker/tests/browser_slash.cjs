@@ -75,7 +75,6 @@ async function testSlash(browser, output, errors) {
       "/usage",
       "/size",
       "/settings",
-      "/help",
     ]);
     assert.equal(
       await page.locator("#message").getAttribute("aria-expanded"),
@@ -101,8 +100,11 @@ async function testSlash(browser, output, errors) {
     await page.locator("#message").press("Escape");
     assert.equal(await page.locator("#slash-popover").isHidden(), true);
     assert.equal(await page.locator("#message").inputValue(), "/");
-    await page.locator("#message").pressSequentially("h");
-    assert.deepEqual(await listed(page), ["/help"]);
+    await page.locator("#message").pressSequentially("se");
+    assert.deepEqual(await listed(page), ["/settings"]);
+    // The typed letters are marked, and every row has an icon.
+    assert.equal(await page.locator("#slash-popover .slash-match").textContent(), "se");
+    assert.notEqual(await page.locator("#slash-popover .slash-icon").textContent(), "");
 
     // The tap path: tap /size, the box empties and Settings opens at Text size, on every screen.
     await typeMessage(page, "/si");
@@ -149,42 +151,15 @@ async function testSlash(browser, output, errors) {
     await page.locator("#message").press("ArrowUp");
     await page.locator("#message").press("ArrowUp");
     assert.equal(
-      await page.locator('.slash-option[aria-selected="true"]').textContent(),
-      "/helpList these commands",
+      await page.locator('.slash-option[aria-selected="true"] .slash-name').textContent(),
+      "/settings",
     );
     await page.locator("#message").press("Enter");
     await page.locator("#settings").waitFor();
     assert.equal(await page.locator("#message").inputValue(), "");
-    const commands = await page.locator("#command-list dt").allTextContents();
-    assert.equal(commands.length, 9);
-    assert(commands.includes("/usage or /status"));
-    assert(
-      (await page.locator("#command-list").textContent()).includes(
-        "Stop the chat that is working (while a chat is working)",
-      ),
-    );
-    // /help opens the Commands section, which starts closed like every section.
-    await page.locator("#command-list").waitFor();
-    // At Largest, even on a 320 px phone, the open section does not scroll
-    // sideways and each description has room for more than a word a line.
-    const fit = await page.evaluate(() => {
-      const list = document.querySelector("#command-list");
-      const settings = document.querySelector("#settings");
-      return {
-        settings: settings.scrollWidth <= settings.clientWidth,
-        list: list.scrollWidth <= list.clientWidth,
-        narrowest: Math.min(
-          ...[...list.querySelectorAll("dd")].map((dd) => dd.getBoundingClientRect().width),
-        ),
-      };
-    });
-    assert(fit.settings && fit.list, `${name}: the Commands section scrolls sideways at Largest`);
-    assert(fit.narrowest >= 120, `${name}: a command description is ${fit.narrowest} px wide`);
-    if (touch)
-      await page.screenshot({
-        path: path.join(output, `slash-${name}-commands-largest.png`),
-        animations: "disabled",
-      });
+    // Settings has no Commands section: the list lives only in the message box.
+    assert.equal(await page.locator("#settings-commands, #command-list").count(), 0);
+    assert.equal(await page.locator("#settings").getByText("Commands", { exact: true }).count(), 0);
     const sizeToggle = page.locator("#text-size-section .settings-toggle");
     if ((await sizeToggle.getAttribute("aria-expanded")) !== "true") await sizeToggle.click();
     await page.locator("#settings").getByLabel("Normal").check();
@@ -217,6 +192,28 @@ async function testSlash(browser, output, errors) {
     await page.locator("#message").press("Enter");
     await page.locator("#rename-dialog").waitFor();
     await page.locator("#rename-cancel").click();
+
+    // The chat commands are listed with a chat open, and a press outside closes the list.
+    await typeMessage(page, "/");
+    assert.deepEqual(await listed(page), [
+      "/new",
+      "/model",
+      "/reasoning",
+      "/rename",
+      "/usage",
+      "/size",
+      "/settings",
+      "/pin",
+      "/share",
+      "/archive",
+      "/delete",
+    ]);
+    await typeMessage(page, "/sh");
+    assert.deepEqual(await listed(page), ["/share"]);
+    assert.equal(await page.locator("#slash-popover .slash-match").textContent(), "sh");
+    await page.locator("#messages").click({ position: { x: 5, y: 5 }, force: true });
+    assert.equal(await page.locator("#slash-popover").isHidden(), true);
+    await page.locator("#message").fill("");
 
     // While a chat works, /stop is listed and stops it.
     if (name === "phone" || name === "desktop") {

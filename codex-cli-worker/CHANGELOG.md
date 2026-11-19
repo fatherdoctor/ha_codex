@@ -2,6 +2,9 @@
 
 ## 0.4.0 (unreleased)
 
+- The command list above the message box now shows an icon for each command and marks the letters you typed, and a
+  press outside the list closes it. New commands `/pin`, `/share`, `/archive` and `/delete` do what the chat menu
+  does. `/help` and **Settings** > **Commands** are gone: the list in the message box is the only one.
 - Documentation only: the README, the integration README, `SECURITY.md`, `DOCS.md` and three option descriptions
   now say what the code does. The README no longer promises a question before every change, or a saved copy and a
   configuration check after every change; it says when each one happens. It says that an automation with no user

@@ -1981,12 +1981,14 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.command-list {
-  margin: 0;
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 6px 14px;
-  font-size: calc(14px * var(--text-scale));
+.slash-icon {
+  flex: 0 0 1.6em;
+  text-align: center;
+  color: var(--muted);
+}
+.slash-match {
+  background: color-mix(in srgb, var(--accent, currentColor) 22%, transparent);
+  border-radius: 3px;
 }
 .command-list dt {
   font-weight: 600;

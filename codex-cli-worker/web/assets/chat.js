@@ -3001,6 +3001,7 @@ window.addEventListener("resize", () => {
 const SLASH_COMMANDS = [
   {
     name: "new",
+    icon: "＋",
     description: "Start a new chat",
     when: "always",
     available: () => !$("new-chat").disabled,
@@ -3008,6 +3009,7 @@ const SLASH_COMMANDS = [
   },
   {
     name: "stop",
+    icon: "■",
     description: "Stop the chat that is working",
     when: "while a chat is working",
     available: () => !$("cancel").hidden && !$("cancel").disabled,
@@ -3015,6 +3017,7 @@ const SLASH_COMMANDS = [
   },
   {
     name: "model",
+    icon: "◇",
     description: "Choose the model for this chat",
     when: "always",
     available: () => Boolean(state.catalog) && !$("model-button").disabled,
@@ -3022,6 +3025,7 @@ const SLASH_COMMANDS = [
   },
   {
     name: "reasoning",
+    icon: "✦",
     description: "Choose how long Codex thinks before it answers",
     when: "always",
     available: () => Boolean(state.catalog) && !$("effort-button").disabled,
@@ -3029,6 +3033,7 @@ const SLASH_COMMANDS = [
   },
   {
     name: "rename",
+    icon: "✎",
     description: "Rename this chat",
     when: "with a chat open",
     available: () => Boolean(state.id && chatById(state.id)),
@@ -3036,6 +3041,7 @@ const SLASH_COMMANDS = [
   },
   {
     name: "usage",
+    icon: "◔",
     aliases: ["status"],
     description: "Show how much of your ChatGPT plan is used",
     when: "always",
@@ -3048,6 +3054,7 @@ const SLASH_COMMANDS = [
   },
   {
     name: "size",
+    icon: "Aa",
     description: "Change the text size",
     when: "always",
     available: () => true,
@@ -3055,17 +3062,48 @@ const SLASH_COMMANDS = [
   },
   {
     name: "settings",
+    icon: "⚙",
     description: "Open Settings",
     when: "always",
     available: () => true,
     run: () => $("settings-button").click(),
   },
   {
-    name: "help",
-    description: "List these commands",
-    when: "always",
-    available: () => true,
-    run: () => openSettingsAt("settings-commands"),
+    name: "pin",
+    icon: "⚲",
+    description: "Pin or unpin this chat",
+    when: "with a chat open",
+    available: () => Boolean(state.id && chatById(state.id)),
+    run: () => togglePin(state.id),
+  },
+  {
+    name: "share",
+    icon: "↗",
+    description: "Download this chat as a file",
+    when: "with a chat open",
+    available: () => Boolean(state.id && chatById(state.id)),
+    run: () => openShare(state.id),
+  },
+  {
+    name: "archive",
+    icon: "▤",
+    description: "Archive this chat, or restore it",
+    when: "with an idle chat open",
+    available: () => chatIdle(),
+    run: () =>
+      document.dispatchEvent(
+        new CustomEvent("thread-action", {
+          detail: { action: "archive", id: state.id },
+        }),
+      ),
+  },
+  {
+    name: "delete",
+    icon: "⌫",
+    description: "Delete this chat and its history",
+    when: "with an idle chat open",
+    available: () => chatIdle(),
+    run: () => openDelete(state.id),
   },
 ];
 /** Open Settings with one section open and in view, as the GitHub banner does. */
@@ -3073,6 +3111,19 @@ async function openSettingsAt(sectionId) {
   await $("settings-button").onclick();
   openSettingsSection($(sectionId));
   $(sectionId).scrollIntoView({ block: "start" });
+}
+/**
+ * True when a saved chat is open and nothing is running or queued in it: the
+ * same rule the chat menu uses to enable Archive and Delete.
+ */
+function chatIdle() {
+  const chat = state.id && chatById(state.id);
+  return Boolean(
+    chat &&
+      !["queued", "running"].includes(chat.status) &&
+      state.active !== state.id &&
+      !state.task?.queued_message,
+  );
 }
 const slash = { matches: [], index: 0, dismissed: null };
 /**
@@ -3120,8 +3171,20 @@ function renderSlash() {
     option.id = `slash-${command.name}`;
     option.setAttribute("role", "option");
     option.setAttribute("aria-selected", String(index === slash.index));
+    const typed = /^\/(\S*)$/.exec(value)[1];
+    const name = textNode("span", "/", "slash-name");
+    // Mark the letters the person typed; an alias match, such as /stat for
+    // /usage, marks nothing.
+    const marked = command.name.startsWith(typed.toLowerCase())
+      ? typed.length
+      : 0;
+    name.append(
+      textNode("span", command.name.slice(0, marked), "slash-match"),
+      document.createTextNode(command.name.slice(marked)),
+    );
     option.append(
-      textNode("span", `/${command.name}`, "slash-name"),
+      textNode("span", command.icon, "slash-icon"),
+      name,
       textNode("span", command.description, "slash-description"),
     );
     // Keep the focus, and the phone keyboard, on the message box.
@@ -3181,26 +3244,20 @@ $("message").addEventListener("blur", () => {
     renderSlash();
   }
 });
+// A press anywhere outside the message box and the list closes the list.
+document.addEventListener("pointerdown", (event) => {
+  if (
+    !$("slash-popover").hidden &&
+    !event.target.closest("#slash-popover, #message")
+  ) {
+    slash.dismissed = $("message").value;
+    renderSlash();
+  }
+});
 $("message").addEventListener("focus", () => {
   slash.dismissed = null;
   renderSlash();
 });
-/** Fill the Commands section of Settings from the same list. */
-function renderCommandList() {
-  const list = $("command-list");
-  list.replaceChildren();
-  for (const command of SLASH_COMMANDS) {
-    const names = [command.name, ...(command.aliases || [])]
-      .map((name) => `/${name}`)
-      .join(" or ");
-    const note = command.when === "always" ? "" : ` (${command.when})`;
-    list.append(
-      textNode("dt", names),
-      textNode("dd", command.description + note),
-    );
-  }
-}
-renderCommandList();
 /*
  * Settings sections start collapsed (add-on 0.3.2). Each section's first
  * heading becomes a button with the title and a one-line status; the rest of
@@ -3287,7 +3344,6 @@ function setAccountPart(sectionId, word, attention = false) {
 }
 collapseSettingsSections();
 setSectionStatus("workspace-section", "AGENTS.md");
-setSectionStatus("settings-commands", `${SLASH_COMMANDS.length} commands`);
 const TEXT_SIZES = ["normal", "larger", "largest"];
 const TEXT_SIZE_KEY = "codex-text-size";
 /**
