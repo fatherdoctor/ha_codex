@@ -34,6 +34,7 @@ Pre-release: nothing is tagged or published from this fork yet, and no change he
 | `codex-cli-worker/policy/` | the permission policy and house rules built into the image |
 | `codex-cli-worker/web/` | the chat page (plain JavaScript and CSS, no build step) |
 | `codex-cli-worker/tests/` | every test: `test_*.py`, the Home Assistant tests in `ha/`, browser checks `browser_*.cjs` |
+| `tests/compat/` | the compatibility drivers: one script per step of an upgrade check on a lab, run by a compatibility runner (its README) |
 | `custom_components/codex_cli/` | the integration; `manifest.json` holds its version |
 | `scripts/` | `build_hacs_release.py`, `fork_release.py` (tag after a lab pass, rollback) |
 | `docs/` | `updates-and-rollback.md`, design notes under `design/` and `designs/` |
