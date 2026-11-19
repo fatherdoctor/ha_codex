@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import os
 import secrets
-from dataclasses import dataclass
 from typing import Any
 
 from aiohttp import ClientError, ClientSession
@@ -65,7 +65,9 @@ async def _async_supervisor_get(session: ClientSession, path: str) -> dict[str, 
                 raise CodexCliApiError(f"Supervisor returned HTTP {response.status}")
             payload = await response.json(content_type=None)
     except (ClientError, TimeoutError, ValueError):
-        raise CodexCliApiError("Could not query Supervisor for the Codex worker") from None
+        raise CodexCliApiError(
+            "Could not query Supervisor for the Codex worker"
+        ) from None
 
     data = payload.get("data", payload) if isinstance(payload, dict) else {}
     if not isinstance(data, dict):
@@ -80,7 +82,9 @@ async def _async_supervisor_addons(session: ClientSession) -> list[dict[str, Any
     return [addon for addon in addons if isinstance(addon, dict)]
 
 
-async def _async_supervisor_addon_info(session: ClientSession, slug: str) -> dict[str, Any]:
+async def _async_supervisor_addon_info(
+    session: ClientSession, slug: str
+) -> dict[str, Any]:
     """Return one Supervisor app info payload."""
     return await _async_supervisor_get(session, f"/addons/{slug}/info")
 
@@ -113,7 +117,9 @@ async def _async_worker_addons(session: ClientSession) -> list[dict[str, Any]]:
     return workers
 
 
-async def _async_provision_worker_token(hass: HomeAssistant, addon_slug: str, api_token: str) -> None:
+async def _async_provision_worker_token(
+    hass: HomeAssistant, addon_slug: str, api_token: str
+) -> None:
     """Provision the worker API token through Supervisor-managed app stdin."""
     try:
         await hass.services.async_call(
@@ -129,10 +135,14 @@ async def _async_provision_worker_token(hass: HomeAssistant, addon_slug: str, ap
             blocking=True,
         )
     except HomeAssistantError as exc:
-        raise CodexCliApiError("Could not provision the Codex worker API token") from exc
+        raise CodexCliApiError(
+            "Could not provision the Codex worker API token"
+        ) from exc
 
 
-async def async_discover_worker(hass: HomeAssistant, session: ClientSession) -> WorkerConnection:
+async def async_discover_worker(
+    hass: HomeAssistant, session: ClientSession
+) -> WorkerConnection:
     """Find the reachable worker app and its generated API token."""
     workers = await _async_worker_addons(session)
     if not workers:
@@ -175,5 +185,7 @@ async def async_discover_worker(hass: HomeAssistant, session: ClientSession) -> 
     if auth_error is not None:
         raise CodexCliAuthError("Worker authentication failed") from auth_error
     if last_error is not None:
-        raise CodexCliApiError(f"Could not connect to the Codex worker: {last_error}") from last_error
+        raise CodexCliApiError(
+            f"Could not connect to the Codex worker: {last_error}"
+        ) from last_error
     raise CodexCliApiError("Could not discover the Codex worker app")

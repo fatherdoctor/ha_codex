@@ -3,12 +3,15 @@
 Every token, code and account here is invented. No test reaches GitHub: the HTTP calls go to a fake, and the
 git tests push to a local bare repository that stands in for github.com.
 """
+
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import hashlib
 import io
 import json
 import os
+from pathlib import Path, PurePosixPath
 import shutil
 import stat
 import subprocess
@@ -16,8 +19,6 @@ import sys
 import tarfile
 import tempfile
 import unittest
-from datetime import datetime, timedelta, timezone
-from pathlib import Path, PurePosixPath
 from unittest.mock import patch
 
 WORKER = Path(__file__).resolve().parents[1]
@@ -33,8 +34,12 @@ REPO = "example-owner/house"
 OTHER = "example-owner/garage"
 # The kit's guard at fatherdoctor/whole_home_assistant afb8282 (templates/guard/push_guard.py), copied unchanged.
 KIT_GUARD_SHA256 = "c864ae31dd0190d71235aad389379c487dc8ca7090eef2e06cb8068e85a5c3e9"
-GIT_ID = {"GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.invalid",
-          "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.invalid"}
+GIT_ID = {
+    "GIT_AUTHOR_NAME": "Test",
+    "GIT_AUTHOR_EMAIL": "test@example.invalid",
+    "GIT_COMMITTER_NAME": "Test",
+    "GIT_COMMITTER_EMAIL": "test@example.invalid",
+}
 
 
 class Response:
@@ -69,33 +74,78 @@ class FakeHttp:
         return self.posts.pop(0)
 
 
-def app_answers(repos=(REPO,), permissions=None, admin=True, push=True, user_status=200):
+def app_answers(
+    repos=(REPO,), permissions=None, admin=True, push=True, user_status=200
+):
     """Canned GitHub answers for an App user token. The owner owns the repositories, so admin is true (F2)."""
     return {
         gh.API + "/user": Response(user_status, {"login": "example-owner", "id": 1}),
-        gh.API + "/user/installations": Response(200, {"installations": [
-            {"id": 7, "account": {"login": "example-owner"},
-             "permissions": permissions if permissions is not None else {"contents": "write", "metadata": "read"}}]}),
-        gh.API + "/user/installations/7/repositories": Response(200, {"repositories": [
-            {"full_name": name, "private": True, "permissions": {"admin": admin, "push": push, "pull": True}}
-            for name in repos]}),
+        gh.API + "/user/installations": Response(
+            200,
+            {
+                "installations": [
+                    {
+                        "id": 7,
+                        "account": {"login": "example-owner"},
+                        "permissions": permissions
+                        if permissions is not None
+                        else {"contents": "write", "metadata": "read"},
+                    }
+                ]
+            },
+        ),
+        gh.API + "/user/installations/7/repositories": Response(
+            200,
+            {
+                "repositories": [
+                    {
+                        "full_name": name,
+                        "private": True,
+                        "permissions": {"admin": admin, "push": push, "pull": True},
+                    }
+                    for name in repos
+                ]
+            },
+        ),
     }
 
 
-def token_answers(listed=(REPO,), hooks=403, push=True, expires="2026-12-20 12:00:00 UTC"):
+def token_answers(
+    listed=(REPO,), hooks=403, push=True, expires="2026-12-20 12:00:00 UTC"
+):
     return {
         gh.API + "/user": Response(200, {"login": "example-owner", "id": 1}),
-        f"{gh.API}/repos/{REPO}": Response(200, {"full_name": REPO, "private": True,
-                                                 "permissions": {"admin": True, "push": push, "pull": True}},
-                                           {"GitHub-Authentication-Token-Expiration": expires}),
+        f"{gh.API}/repos/{REPO}": Response(
+            200,
+            {
+                "full_name": REPO,
+                "private": True,
+                "permissions": {"admin": True, "push": push, "pull": True},
+            },
+            {"GitHub-Authentication-Token-Expiration": expires},
+        ),
         gh.API + "/user/repos": Response(200, [{"full_name": name} for name in listed]),
-        f"{gh.API}/repos/{REPO}/hooks": Response(hooks, {"message": "Resource not accessible"}),
+        f"{gh.API}/repos/{REPO}/hooks": Response(
+            hooks, {"message": "Resource not accessible"}
+        ),
     }
 
 
 def git(repo, *args, env=None, check=True):
-    full = {**os.environ, **GIT_ID, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1", **(env or {})}
-    return subprocess.run(["git", "-C", str(repo), *args], env=full, capture_output=True, text=True, check=check)
+    full = {
+        **os.environ,
+        **GIT_ID,
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_NOSYSTEM": "1",
+        **(env or {}),
+    }
+    return subprocess.run(
+        ["git", "-C", str(repo), *args],
+        env=full,
+        capture_output=True,
+        text=True,
+        check=check,
+    )
 
 
 class ServiceCase(unittest.TestCase):
@@ -106,11 +156,14 @@ class ServiceCase(unittest.TestCase):
         self.events, self.notices, self.logs = [], [], []
         self.http = FakeHttp(app_answers())
         self.service = gh.GitHubService(
-            self.root / "data" / "github", client_id=lambda: "Iv23liExampleClient", http=self.http,
+            self.root / "data" / "github",
+            client_id=lambda: "Iv23liExampleClient",
+            http=self.http,
             fire_event=lambda event, data: self.events.append((event, data)),
             notify=lambda title, message: self.notices.append((title, message)),
             find_task=lambda thread: "task-1" if thread == THREAD else None,
-            log=self.logs.append)
+            log=self.logs.append,
+        )
 
     def connect_app(self):
         self.service._complete_app(APP_TOKEN)
@@ -123,7 +176,9 @@ class StoreTests(ServiceCase):
         self.connect_app()
         folder = self.root / "data" / "github"
         self.assertEqual(stat.S_IMODE(folder.stat().st_mode), 0o700)
-        self.assertEqual(stat.S_IMODE((folder / "credential.json").stat().st_mode), 0o600)
+        self.assertEqual(
+            stat.S_IMODE((folder / "credential.json").stat().st_mode), 0o600
+        )
         self.assertEqual(stat.S_IMODE((folder / "state.json").stat().st_mode), 0o600)
         self.assertNotIn(APP_TOKEN, (folder / "state.json").read_text())
         self.assertNotIn(APP_TOKEN, json.dumps(self.service.status()))
@@ -135,7 +190,9 @@ class StoreTests(ServiceCase):
             self.service.store.write_credential("app", APP_TOKEN, None)
         finally:
             os.umask(old)
-        self.assertEqual(stat.S_IMODE(self.service.store.credential_path.stat().st_mode), 0o600)
+        self.assertEqual(
+            stat.S_IMODE(self.service.store.credential_path.stat().st_mode), 0o600
+        )
 
     def test_disconnect_forgets_the_sign_in_and_gives_the_revoke_link(self):
         self.connect_app()
@@ -149,10 +206,25 @@ class StoreTests(ServiceCase):
 
 class DeviceFlowTests(ServiceCase):
     def flow(self, *answers):
-        self.http.posts = [Response(200, {"device_code": "synthetic-device-code", "user_code": "WXYZ-1234",
-                                          "verification_uri": "https://github.com/login/device",
-                                          "expires_in": 900, "interval": 5}), *answers]
-        flow = gh.DeviceFlow(self.http, "Iv23liExampleClient", self.service._complete_app, sleep=lambda s: False)
+        self.http.posts = [
+            Response(
+                200,
+                {
+                    "device_code": "synthetic-device-code",
+                    "user_code": "WXYZ-1234",
+                    "verification_uri": "https://github.com/login/device",
+                    "expires_in": 900,
+                    "interval": 5,
+                },
+            ),
+            *answers,
+        ]
+        flow = gh.DeviceFlow(
+            self.http,
+            "Iv23liExampleClient",
+            self.service._complete_app,
+            sleep=lambda s: False,
+        )
         public = flow.start()
         self.assertEqual(public["status"], "waiting_for_user")
         self.assertEqual(public["user_code"], "WXYZ-1234")
@@ -160,15 +232,21 @@ class DeviceFlowTests(ServiceCase):
         return flow
 
     def test_pending_then_slow_down_then_success(self):
-        flow = self.flow(Response(200, {"error": "authorization_pending"}), Response(200, {"error": "slow_down"}),
-                         Response(200, {"access_token": APP_TOKEN, "token_type": "bearer"}))
+        flow = self.flow(
+            Response(200, {"error": "authorization_pending"}),
+            Response(200, {"error": "slow_down"}),
+            Response(200, {"access_token": APP_TOKEN, "token_type": "bearer"}),
+        )
         flow.run()
         self.assertEqual(flow.interval, 10)
         self.assertEqual(flow.public["status"], "completed")
         self.assertEqual(flow.public["user_code"], "")
         self.assertEqual(self.service.store.read_token(), APP_TOKEN)
         self.assertEqual(self.service.status()["state"], "ok")
-        self.assertEqual(self.service.status()["repositories"], [{"full_name": REPO, "private": True, "push": True}])
+        self.assertEqual(
+            self.service.status()["repositories"],
+            [{"full_name": REPO, "private": True, "push": True}],
+        )
         self.assertNotIn(APP_TOKEN, json.dumps(self.service.status()))
         posted = [call for call in self.http.calls if call[0] == "POST"]
         self.assertTrue(all("client_secret" not in call[2] for call in posted))
@@ -177,11 +255,16 @@ class DeviceFlowTests(ServiceCase):
         """The page counts down from the worker's clock; an ended flow has no countdown."""
         self.service.flow = self.flow()
         self.assertTrue(895 <= self.service.status()["flow"]["expires_in"] <= 900)
-        self.service.flow.finish("expired", "The code expired before it was entered on GitHub.")
+        self.service.flow.finish(
+            "expired", "The code expired before it was entered on GitHub."
+        )
         self.assertNotIn("expires_in", self.service.status()["flow"])
 
     def test_expired_and_denied_store_nothing(self):
-        for error, status in (("expired_token", "expired"), ("access_denied", "failed")):
+        for error, status in (
+            ("expired_token", "expired"),
+            ("access_denied", "failed"),
+        ):
             with self.subTest(error=error):
                 flow = self.flow(Response(200, {"error": error}))
                 flow.run()
@@ -190,9 +273,13 @@ class DeviceFlowTests(ServiceCase):
 
     def test_the_built_in_client_id_and_the_option_override(self):
         self.assertEqual(gh.GITHUB_CLIENT_ID, "Iv23liyct2Akj5MXK0eF")
-        self.assertEqual(self.service.client_id_value(), ("Iv23liExampleClient", "option"))
+        self.assertEqual(
+            self.service.client_id_value(), ("Iv23liExampleClient", "option")
+        )
         self.service.client_id = lambda: ""
-        self.assertEqual(self.service.client_id_value(), ("Iv23liyct2Akj5MXK0eF", "built_in"))
+        self.assertEqual(
+            self.service.client_id_value(), ("Iv23liyct2Akj5MXK0eF", "built_in")
+        )
 
     def test_no_client_id_is_a_plain_refusal(self):
         with self.assertRaises(gh.GitHubError):
@@ -213,10 +300,30 @@ class CheckTests(ServiceCase):
     def test_each_bad_state_from_canned_answers(self):
         cases = [
             ("missing repository", app_answers(repos=()), "access_changed", "missing"),
-            ("extra repository", app_answers(repos=(REPO, OTHER)), "access_changed", "extra"),
-            ("administration permission", app_answers(permissions={"contents": "write", "metadata": "read",
-                                                                   "administration": "write"}), "access_changed", None),
-            ("read only", app_answers(permissions={"contents": "read", "metadata": "read"}), "access_changed", None),
+            (
+                "extra repository",
+                app_answers(repos=(REPO, OTHER)),
+                "access_changed",
+                "extra",
+            ),
+            (
+                "administration permission",
+                app_answers(
+                    permissions={
+                        "contents": "write",
+                        "metadata": "read",
+                        "administration": "write",
+                    }
+                ),
+                "access_changed",
+                None,
+            ),
+            (
+                "read only",
+                app_answers(permissions={"contents": "read", "metadata": "read"}),
+                "access_changed",
+                None,
+            ),
             ("user lost write", app_answers(push=False), "access_changed", None),
             ("revoked", app_answers(user_status=401), "revoked", None),
         ]
@@ -228,7 +335,9 @@ class CheckTests(ServiceCase):
                 status = self.check_with(answers)
                 self.assertEqual(status["state"], state)
                 if field:
-                    self.assertEqual(status[field], [REPO] if field == "missing" else [OTHER])
+                    self.assertEqual(
+                        status[field], [REPO] if field == "missing" else [OTHER]
+                    )
                 self.assertEqual(len(self.events), 1)
                 self.assertEqual(self.events[0][0], "codex_cli_github_access")
                 self.assertEqual(self.events[0][1]["state"], state)
@@ -236,8 +345,12 @@ class CheckTests(ServiceCase):
                 self.assertEqual(self.events[0][1]["source"], "worker")
                 self.assertEqual(len(self.notices), 1)
                 # The notice names where the GitHub part is now: inside Accounts and connections.
-                self.assertIn("Settings > Accounts and connections > GitHub", self.notices[0][1])
-                self.assertNotIn(APP_TOKEN, json.dumps(self.events) + json.dumps(self.notices))
+                self.assertIn(
+                    "Settings > Accounts and connections > GitHub", self.notices[0][1]
+                )
+                self.assertNotIn(
+                    APP_TOKEN, json.dumps(self.events) + json.dumps(self.notices)
+                )
                 # The same state again: no second event, no second notice (one cause, one warning).
                 self.check_with(answers)
                 self.assertEqual(len(self.events), 1)
@@ -245,18 +358,44 @@ class CheckTests(ServiceCase):
 
     def test_more_or_less_is_named(self):
         self.connect_app()
-        status = self.check_with(app_answers(permissions={"contents": "write", "metadata": "read", "issues": "write"}))
-        self.assertEqual(status["permission_problem"], "more than Contents read and write")
-        status = self.check_with(app_answers(permissions={"contents": "read", "metadata": "read"}))
+        status = self.check_with(
+            app_answers(
+                permissions={"contents": "write", "metadata": "read", "issues": "write"}
+            )
+        )
+        self.assertEqual(
+            status["permission_problem"], "more than Contents read and write"
+        )
+        status = self.check_with(
+            app_answers(permissions={"contents": "read", "metadata": "read"})
+        )
         self.assertEqual(status["permission_problem"], "read only")
 
     def test_expiry_near_and_past(self):
         now = datetime.now(timezone.utc)
-        live = {"repositories": [{"full_name": REPO, "push": True}], "permission_problem": None}
-        near = gh.judge({**live, "expires_at": gh.iso(now + timedelta(days=3))}, {"repositories": [REPO]}, now)
-        past = gh.judge({**live, "expires_at": gh.iso(now - timedelta(minutes=1))}, {"repositories": [REPO]}, now)
-        far = gh.judge({**live, "expires_at": gh.iso(now + timedelta(days=60))}, {"repositories": [REPO]}, now)
-        self.assertEqual((near["state"], past["state"], far["state"]), ("near_expiry", "expired", "ok"))
+        live = {
+            "repositories": [{"full_name": REPO, "push": True}],
+            "permission_problem": None,
+        }
+        near = gh.judge(
+            {**live, "expires_at": gh.iso(now + timedelta(days=3))},
+            {"repositories": [REPO]},
+            now,
+        )
+        past = gh.judge(
+            {**live, "expires_at": gh.iso(now - timedelta(minutes=1))},
+            {"repositories": [REPO]},
+            now,
+        )
+        far = gh.judge(
+            {**live, "expires_at": gh.iso(now + timedelta(days=60))},
+            {"repositories": [REPO]},
+            now,
+        )
+        self.assertEqual(
+            (near["state"], past["state"], far["state"]),
+            ("near_expiry", "expired", "ok"),
+        )
 
     def test_an_unreachable_github_is_failed_only_after_three_tries(self):
         self.connect_app()
@@ -273,7 +412,15 @@ class CheckTests(ServiceCase):
         status = self.service.accept()
         self.assertEqual(status["state"], "ok")
         self.assertEqual(status["expected_repositories"], [OTHER, REPO])
-        self.check_with(app_answers(permissions={"contents": "write", "metadata": "read", "administration": "read"}))
+        self.check_with(
+            app_answers(
+                permissions={
+                    "contents": "write",
+                    "metadata": "read",
+                    "administration": "read",
+                }
+            )
+        )
         with self.assertRaises(gh.GitHubError):
             self.service.accept()
 
@@ -286,7 +433,11 @@ class CheckTests(ServiceCase):
         self.assertFalse(result["ok"])
         self.assertIn("HTTP 404", result["text"])
         # Astro F5: a plain summary and a next step, with the HTTP number kept as the detail.
-        self.assertTrue(result["text"].startswith(f"Read failed: GitHub did not return {REPO} (HTTP 404)."))
+        self.assertTrue(
+            result["text"].startswith(
+                f"Read failed: GitHub did not return {REPO} (HTTP 404)."
+            )
+        )
         self.assertIn("Choose Check now", result["text"])
 
 
@@ -304,21 +455,31 @@ class TokenFallbackTests(ServiceCase):
     def test_a_token_ends_the_page_message_of_an_earlier_app_sign_in(self):
         """Astro F2: a failed App sign-in no longer shows once a token connected; a waiting one stays."""
         self.http.gets = token_answers()
-        self.service.flow = gh.DeviceFlow(self.http, "Iv23liExampleClient", self.service._complete_app)
+        self.service.flow = gh.DeviceFlow(
+            self.http, "Iv23liExampleClient", self.service._complete_app
+        )
         self.service.flow.finish("failed", "The sign-in was refused on GitHub.")
         status = self.service.paste_token(PAT, REPO)
         self.assertEqual(status["flow"]["status"], "idle")
         self.assertIsNone(self.service.flow)
-        waiting = gh.DeviceFlow(self.http, "Iv23liExampleClient", self.service._complete_app)
-        waiting.public = {**waiting.public, "status": "waiting_for_user", "user_code": "WXYZ-1234"}
+        waiting = gh.DeviceFlow(
+            self.http, "Iv23liExampleClient", self.service._complete_app
+        )
+        waiting.public = {
+            **waiting.public,
+            "status": "waiting_for_user",
+            "user_code": "WXYZ-1234",
+        }
         self.service.flow = waiting
         self.service.paste_token(PAT, REPO)
         self.assertIs(self.service.flow, waiting)
 
     def test_a_wider_token_is_refused_and_never_echoed(self):
-        for name, answers in (("administration", token_answers(hooks=200)),
-                              ("two repositories", token_answers(listed=(REPO, OTHER))),
-                              ("read only", token_answers(push=False))):
+        for name, answers in (
+            ("administration", token_answers(hooks=200)),
+            ("two repositories", token_answers(listed=(REPO, OTHER))),
+            ("read only", token_answers(push=False)),
+        ):
             with self.subTest(name=name):
                 self.http.gets = answers
                 with self.assertRaises(gh.GitHubError) as raised:
@@ -327,13 +488,20 @@ class TokenFallbackTests(ServiceCase):
                 self.assertIsNone(self.service.store.read_token())
 
     def test_only_a_fine_grained_token_and_a_plain_repository_name(self):
-        for token, repository in (("ghp_" + "a" * 36, REPO), (PAT, "../etc"), (PAT, "owner/repo/extra"), (PAT, "-x/y")):
+        for token, repository in (
+            ("ghp_" + "a" * 36, REPO),
+            (PAT, "../etc"),
+            (PAT, "owner/repo/extra"),
+            (PAT, "-x/y"),
+        ):
             with self.subTest(repository=repository), self.assertRaises(gh.GitHubError):
                 self.service.paste_token(token, repository)
         self.assertEqual(self.http.calls, [])
 
     def test_a_near_expiry_token_is_reported(self):
-        soon = (datetime.now(timezone.utc) + timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S UTC")
+        soon = (datetime.now(timezone.utc) + timedelta(days=2)).strftime(
+            "%Y-%m-%d %H:%M:%S UTC"
+        )
         self.http.gets = token_answers(expires=soon)
         self.service.paste_token(PAT, REPO)
         self.assertEqual(self.service.check()["state"], "near_expiry")
@@ -342,16 +510,40 @@ class TokenFallbackTests(ServiceCase):
 class NameTests(unittest.TestCase):
     def test_branch_names_that_force_delete_or_pass_options_are_refused(self):
         """F4."""
-        for name in ("+main", ":main", "--force", "-d", "main:other", "a..b", "main.lock", "HEAD@{1}", "refs/../x",
-                     "/main", "main/", "ma in", "main~1", "main^", "", ".hidden"):
+        for name in (
+            "+main",
+            ":main",
+            "--force",
+            "-d",
+            "main:other",
+            "a..b",
+            "main.lock",
+            "HEAD@{1}",
+            "refs/../x",
+            "/main",
+            "main/",
+            "ma in",
+            "main~1",
+            "main^",
+            "",
+            ".hidden",
+        ):
             with self.subTest(name=name), self.assertRaises(gh.GitHubError):
                 gh.valid_branch(name)
         for name in ("main", "feature/github-sign-in", "release-0.3", "v1.2_fix"):
             self.assertEqual(gh.valid_branch(name), name)
 
     def test_repository_and_folder_names(self):
-        for name in ("owner/repo/extra", "../repo", "owner/..", "owner/.git", "+owner/repo", ":owner/repo", "owner",
-                     "owner/repo.git"):
+        for name in (
+            "owner/repo/extra",
+            "../repo",
+            "owner/..",
+            "owner/.git",
+            "+owner/repo",
+            ":owner/repo",
+            "owner",
+            "owner/repo.git",
+        ):
             with self.subTest(name=name), self.assertRaises(gh.GitHubError):
                 gh.valid_repository(name)
         for name in ("..", ".", "a/b", "-x", ".git", "a..b", ""):
@@ -360,7 +552,9 @@ class NameTests(unittest.TestCase):
 
     def test_redaction_knows_github_token_shapes(self):
         text = f"x {APP_TOKEN} y {PAT} z ghp_{'b' * 36}"
-        self.assertEqual(gh.redact_token(text), "x [redacted] y [redacted] z [redacted]")
+        self.assertEqual(
+            gh.redact_token(text), "x [redacted] y [redacted] z [redacted]"
+        )
 
 
 class AskpassTests(unittest.TestCase):
@@ -371,21 +565,40 @@ class AskpassTests(unittest.TestCase):
         credential = root / "credential.json"
         credential.write_text(json.dumps({"kind": "app", "token": APP_TOKEN}))
         self.helper = root / "askpass.py"
-        self.helper.write_text((WORKER / "github_askpass.py").read_text().replace(
-            'CREDENTIAL = "/data/github/credential.json"', f"CREDENTIAL = {str(credential)!r}"))
+        self.helper.write_text(
+            (WORKER / "github_askpass.py")
+            .read_text()
+            .replace(
+                'CREDENTIAL = "/data/github/credential.json"',
+                f"CREDENTIAL = {str(credential)!r}",
+            )
+        )
 
     def ask(self, prompt):
-        return subprocess.run([sys.executable, "-I", str(self.helper), prompt], capture_output=True, text=True)
+        return subprocess.run(
+            [sys.executable, "-I", str(self.helper), prompt],
+            capture_output=True,
+            text=True,
+        )
 
     def test_answers_only_github_prompts_and_only_on_stdout(self):
         user = self.ask("Username for 'https://github.com': ")
-        self.assertEqual((user.returncode, user.stdout, user.stderr), (0, "x-access-token\n", ""))
+        self.assertEqual(
+            (user.returncode, user.stdout, user.stderr), (0, "x-access-token\n", "")
+        )
         password = self.ask("Password for 'https://x-access-token@github.com': ")
-        self.assertEqual((password.returncode, password.stdout, password.stderr), (0, APP_TOKEN + "\n", ""))
-        for prompt in ("Password for 'https://x-access-token@github.com.example.net': ",
-                       "Password for 'https://x-access-token@example.net': ",
-                       "Password for 'https://someone@github.com': ", "Username for 'https://example.net': ",
-                       "Password for 'http://x-access-token@github.com': ", ""):
+        self.assertEqual(
+            (password.returncode, password.stdout, password.stderr),
+            (0, APP_TOKEN + "\n", ""),
+        )
+        for prompt in (
+            "Password for 'https://x-access-token@github.com.example.net': ",
+            "Password for 'https://x-access-token@example.net': ",
+            "Password for 'https://someone@github.com': ",
+            "Username for 'https://example.net': ",
+            "Password for 'http://x-access-token@github.com': ",
+            "",
+        ):
             with self.subTest(prompt=prompt):
                 other = self.ask(prompt)
                 self.assertEqual((other.returncode, other.stdout), (1, ""))
@@ -421,9 +634,17 @@ class GitRunnerCase(unittest.TestCase):
             def env(self, credentialed=True):
                 env = super().env(credentialed)
                 count = int(env["GIT_CONFIG_COUNT"])
-                for key, value in ((f"url.{remote.as_uri()}.insteadOf", f"https://github.com/{REPO}.git"),
-                                   ("protocol.file.allow", "always")):
-                    env[f"GIT_CONFIG_KEY_{count}"], env[f"GIT_CONFIG_VALUE_{count}"] = key, value
+                for key, value in (
+                    (
+                        f"url.{remote.as_uri()}.insteadOf",
+                        f"https://github.com/{REPO}.git",
+                    ),
+                    ("protocol.file.allow", "always"),
+                ):
+                    env[f"GIT_CONFIG_KEY_{count}"], env[f"GIT_CONFIG_VALUE_{count}"] = (
+                        key,
+                        value,
+                    )
                     count += 1
                 env["GIT_CONFIG_COUNT"] = str(count)
                 env.update(GIT_ID)
@@ -432,8 +653,14 @@ class GitRunnerCase(unittest.TestCase):
             def origin_repository(self, repo):
                 return REPO
 
-        return LocalRemote(lambda: APP_TOKEN, lambda: [REPO], config_root=self.config, share_root=self.share,
-                           askpass="/bin/false", guard=str(WORKER / "push_guard.py"))
+        return LocalRemote(
+            lambda: APP_TOKEN,
+            lambda: [REPO],
+            config_root=self.config,
+            share_root=self.share,
+            askpass="/bin/false",
+            guard=str(WORKER / "push_guard.py"),
+        )
 
 
 class GitRunnerTests(GitRunnerCase):
@@ -441,9 +668,18 @@ class GitRunnerTests(GitRunnerCase):
         env = gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO]).env()
         self.assertEqual(env["GIT_ASKPASS"], gh.ASKPASS_PATH)
         self.assertNotIn(APP_TOKEN, json.dumps(env))
-        for key in ("SUPERVISOR_TOKEN", "HASSIO_TOKEN", "HA_TOKEN", "GIT_TRACE", "GIT_CURL_VERBOSE"):
+        for key in (
+            "SUPERVISOR_TOKEN",
+            "HASSIO_TOKEN",
+            "HA_TOKEN",
+            "GIT_TRACE",
+            "GIT_CURL_VERBOSE",
+        ):
             self.assertNotIn(key, env)
-        pairs = {env[f"GIT_CONFIG_KEY_{i}"]: env[f"GIT_CONFIG_VALUE_{i}"] for i in range(int(env["GIT_CONFIG_COUNT"]))}
+        pairs = {
+            env[f"GIT_CONFIG_KEY_{i}"]: env[f"GIT_CONFIG_VALUE_{i}"]
+            for i in range(int(env["GIT_CONFIG_COUNT"]))
+        }
         self.assertEqual(pairs["core.hooksPath"], "/dev/null")
         self.assertEqual(pairs["credential.helper"], "")
         self.assertEqual(pairs["core.fsmonitor"], "false")
@@ -467,7 +703,14 @@ class GitRunnerTests(GitRunnerCase):
         git(outside, "init", "-q")
         (self.config / ".storage").mkdir()
         git(self.config / ".storage", "init", "-q")
-        for path in (str(outside), "../elsewhere", str(self.config / ".storage"), str(self.repo / ".git"), "", "x\x00y"):
+        for path in (
+            str(outside),
+            "../elsewhere",
+            str(self.config / ".storage"),
+            str(self.repo / ".git"),
+            "",
+            "x\x00y",
+        ):
             with self.subTest(path=path), self.assertRaises(gh.GitHubError):
                 self.runner.prepare(path)
 
@@ -479,10 +722,19 @@ class GitRunnerTests(GitRunnerCase):
             self.runner.prepare(str(linked))
 
     def test_a_remote_that_is_not_a_connected_github_repository_is_refused(self):
-        real = gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO], config_root=self.config, share_root=self.share)
+        real = gh.GitRunner(
+            lambda: APP_TOKEN,
+            lambda: [REPO],
+            config_root=self.config,
+            share_root=self.share,
+        )
         self.assertEqual(real.prepare(str(self.repo))[1], REPO)
-        for url in ("https://example.net/example-owner/house.git", f"https://github.com/{OTHER}.git",
-                    f"https://user@github.com/{REPO}.git", f"git@github.com:{REPO}.git"):
+        for url in (
+            "https://example.net/example-owner/house.git",
+            f"https://github.com/{OTHER}.git",
+            f"https://user@github.com/{REPO}.git",
+            f"git@github.com:{REPO}.git",
+        ):
             with self.subTest(url=url):
                 git(self.repo, "remote", "set-url", "origin", url)
                 with self.assertRaises(gh.GitHubError):
@@ -490,7 +742,12 @@ class GitRunnerTests(GitRunnerCase):
 
     def test_planted_repo_config_cannot_run_or_redirect(self):
         """F1: planted settings refuse the operation, and the overrides alone keep them from running."""
-        real = gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO], config_root=self.config, share_root=self.share)
+        real = gh.GitRunner(
+            lambda: APP_TOKEN,
+            lambda: [REPO],
+            config_root=self.config,
+            share_root=self.share,
+        )
         fsmonitor = self.markers / "fsmonitor"
         helper = self.markers / "helper"
         hook = self.markers / "hook"
@@ -504,16 +761,36 @@ class GitRunnerTests(GitRunnerCase):
             real.prepare(str(self.repo))
         self.assertIn("core.fsmonitor", str(refused.exception))
         self.assertIn("credential.helper", str(refused.exception))
-        self.assertNotIn("touch", str(refused.exception))  # key names only, never values
+        self.assertNotIn(
+            "touch", str(refused.exception)
+        )  # key names only, never values
         self.assertFalse(fsmonitor.exists() or helper.exists() or hook.exists())
 
         def exercise(env):
-            subprocess.run(["git", "-C", str(self.repo), "status"], env=env, capture_output=True)
-            subprocess.run(["git", "-C", str(self.repo), "commit", "-q", "--allow-empty", "-m", "x"], env=env,
-                           capture_output=True)
-            subprocess.run(["git", "-C", str(self.repo), "credential", "approve"], env=env, capture_output=True,
-                           input="protocol=https\nhost=github.com\nusername=x-access-token\npassword=synthetic\n\n",
-                           text=True)
+            subprocess.run(
+                ["git", "-C", str(self.repo), "status"], env=env, capture_output=True
+            )
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(self.repo),
+                    "commit",
+                    "-q",
+                    "--allow-empty",
+                    "-m",
+                    "x",
+                ],
+                env=env,
+                capture_output=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(self.repo), "credential", "approve"],
+                env=env,
+                capture_output=True,
+                input="protocol=https\nhost=github.com\nusername=x-access-token\npassword=synthetic\n\n",
+                text=True,
+            )
 
         # The allowlist bypassed: the environment overrides alone leave no marker file.
         exercise({**real.env(), **GIT_ID})
@@ -530,13 +807,24 @@ class GitRunnerTests(GitRunnerCase):
         self.assertTrue(hook.exists())
 
     def test_push_url_rewrites_includes_and_filters_are_refused(self):
-        real = gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO], config_root=self.config, share_root=self.share)
-        for key, value in (("remote.origin.pushurl", "https://example.net/collect.git"),
-                           ("url.https://example.net/.insteadOf", "https://github.com/"),
-                           ("url.https://example.net/.pushInsteadOf", "https://github.com/"),
-                           ("include.path", "/tmp/other"), ("filter.x.smudge", "touch y"),
-                           ("http.proxy", "http://127.0.0.1:1"), ("http.https://github.com/.sslVerify", "false"),
-                           ("pull.rebase", "true"), ("core.worktree", "/"), ("remote.origin.uploadpack", "touch z")):
+        real = gh.GitRunner(
+            lambda: APP_TOKEN,
+            lambda: [REPO],
+            config_root=self.config,
+            share_root=self.share,
+        )
+        for key, value in (
+            ("remote.origin.pushurl", "https://example.net/collect.git"),
+            ("url.https://example.net/.insteadOf", "https://github.com/"),
+            ("url.https://example.net/.pushInsteadOf", "https://github.com/"),
+            ("include.path", "/tmp/other"),
+            ("filter.x.smudge", "touch y"),
+            ("http.proxy", "http://127.0.0.1:1"),
+            ("http.https://github.com/.sslVerify", "false"),
+            ("pull.rebase", "true"),
+            ("core.worktree", "/"),
+            ("remote.origin.uploadpack", "touch z"),
+        ):
             with self.subTest(key=key):
                 git(self.repo, "config", key, value)
                 try:
@@ -555,7 +843,9 @@ class PushTests(GitRunnerCase):
         git(self.repo, "commit", "-q", "-m", "change " + name)
 
     def remote_heads(self):
-        return git(self.remote, "for-each-ref", "--format=%(refname) %(objectname)").stdout.strip()
+        return git(
+            self.remote, "for-each-ref", "--format=%(refname) %(objectname)"
+        ).stdout.strip()
 
     def test_a_clean_push_runs_the_guard_and_pins_the_commit(self):
         result = self.runner.push(str(self.repo))
@@ -575,14 +865,25 @@ class PushTests(GitRunnerCase):
 
     def test_allow_mark_added_by_the_push_is_refused(self):
         """F3: a mark the agent adds cannot clear the guard; nothing is pushed."""
-        self.commit("secrets_here.yaml", "api_password: Synthetic9Value42  # guard: allow test fixture value\n")
+        self.commit(
+            "secrets_here.yaml",
+            "api_password: Synthetic9Value42  # guard: allow test fixture value\n",
+        )
         result = self.runner.push(str(self.repo))
         self.assertFalse(result["ok"])
         self.assertIn("An allow mark needs the owner", result["text"])
         self.assertEqual(self.remote_heads(), "")
 
     def test_force_delete_and_option_branches_never_reach_git(self):
-        for branch in ("+main", ":main", "--force", "-d", "main:refs/tags/x", "--tags", "--all"):
+        for branch in (
+            "+main",
+            ":main",
+            "--force",
+            "-d",
+            "main:refs/tags/x",
+            "--tags",
+            "--all",
+        ):
             with self.subTest(branch=branch), self.assertRaises(gh.GitHubError):
                 self.runner.push(str(self.repo), branch)
         self.assertEqual(self.remote_heads(), "")
@@ -590,8 +891,13 @@ class PushTests(GitRunnerCase):
     def test_a_guard_refusal_stops_the_push(self):
         fake = Path(self.temp.name) / "guard" / "push_guard.py"
         fake.parent.mkdir()
-        fake.write_text((WORKER / "push_guard.py").read_text().replace(
-            'print("push_guard: clean")', 'print("ABORT test: forced"); return 1'))
+        fake.write_text(
+            (WORKER / "push_guard.py")
+            .read_text()
+            .replace(
+                'print("push_guard: clean")', 'print("ABORT test: forced"); return 1'
+            )
+        )
         runner = self.make_runner(gh.GitRunner)
         runner.guard = str(fake)
         result = runner.push(str(self.repo))
@@ -604,7 +910,11 @@ class PushTests(GitRunnerCase):
         self.assertTrue(self.runner.push(str(self.repo))["ok"])
         git(self.remote, "symbolic-ref", "HEAD", "refs/heads/main")
         other = Path(self.temp.name) / "other"
-        subprocess.run(["git", "clone", "-q", str(self.remote), str(other)], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "clone", "-q", str(self.remote), str(other)],
+            check=True,
+            capture_output=True,
+        )
         (other / ".gitattributes").write_text("*.txt filter=planted\n")
         (other / "new.txt").write_text("upstream\n")
         git(other, "add", ".gitattributes", "new.txt")
@@ -620,7 +930,9 @@ class PushTests(GitRunnerCase):
             real_check(repo)
             if not planted:  # the race: settings written after the check passed
                 planted.append(True)
-                git(self.repo, "config", "filter.planted.smudge", f"touch {marker}; cat")
+                git(
+                    self.repo, "config", "filter.planted.smudge", f"touch {marker}; cat"
+                )
 
         with patch.object(runner, "check_config", side_effect=plant_after_check):
             result = runner.pull(str(self.repo))
@@ -629,10 +941,14 @@ class PushTests(GitRunnerCase):
         self.assertFalse(marker.exists(), "a planted filter ran in the worker")
         self.assertFalse((self.repo / "new.txt").exists())
         self.assertEqual(git(self.repo, "rev-parse", "HEAD").stdout, before)
-        self.assertEqual(git(self.repo, "rev-parse", "origin/main").stdout,
-                         git(other, "rev-parse", "HEAD").stdout)
+        self.assertEqual(
+            git(self.repo, "rev-parse", "origin/main").stdout,
+            git(other, "rev-parse", "HEAD").stdout,
+        )
         self.assertIn("settings changed while git ran", result["text"])
-        with self.assertRaises(gh.GitHubError):  # and from now on the planted setting refuses the repository
+        with self.assertRaises(
+            gh.GitHubError
+        ):  # and from now on the planted setting refuses the repository
             self.runner.fetch(str(self.repo))
 
     def plant_after_check(self, runner, plant):
@@ -649,7 +965,9 @@ class PushTests(GitRunnerCase):
 
     def test_settings_planted_after_the_check_never_run_in_fetch_or_push(self):
         """The overrides, not the check, keep a hook, fsmonitor or ssh command planted in the gap from running."""
-        hook_marker, fsmonitor, ssh = (self.markers / name for name in ("hook", "fsmonitor", "ssh"))
+        hook_marker, fsmonitor, ssh = (
+            self.markers / name for name in ("hook", "fsmonitor", "ssh")
+        )
 
         def plant():
             hooks = self.repo / ".git" / "hooks"
@@ -684,18 +1002,41 @@ class PushTests(GitRunnerCase):
         credential.write_text(json.dumps({"kind": "app", "token": APP_TOKEN}))
         log = self.markers / "asked"
         helper = Path(self.temp.name) / "askpass"
-        helper.write_text(f"#!{sys.executable} -I\n" + (WORKER / "github_askpass.py").read_text()
-                          .replace('CREDENTIAL = "/data/github/credential.json"', f"CREDENTIAL = {str(credential)!r}")
-                          .replace("def main(argv):", f"def main(argv):\n    open({str(log)!r}, 'a').write(repr(argv[1:]) + '\\n')"))
+        helper.write_text(
+            f"#!{sys.executable} -I\n"
+            + (WORKER / "github_askpass.py")
+            .read_text()
+            .replace(
+                'CREDENTIAL = "/data/github/credential.json"',
+                f"CREDENTIAL = {str(credential)!r}",
+            )
+            .replace(
+                "def main(argv):",
+                f"def main(argv):\n    open({str(log)!r}, 'a').write(repr(argv[1:]) + '\\n')",
+            )
+        )
         helper.chmod(0o755)
-        runner = gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO], config_root=self.config, share_root=self.share, askpass=str(helper))
+        runner = gh.GitRunner(
+            lambda: APP_TOKEN,
+            lambda: [REPO],
+            config_root=self.config,
+            share_root=self.share,
+            askpass=str(helper),
+        )
 
         def plant():
-            git(self.repo, "config", "url.http://127.0.0.1:9/.insteadOf", "https://github.com/")
+            git(
+                self.repo,
+                "config",
+                "url.http://127.0.0.1:9/.insteadOf",
+                "https://github.com/",
+            )
 
         real_origin = runner.origin_repository
 
-        def origin(repo):  # planted after the effective-URL check too, the last check before git runs
+        def origin(
+            repo,
+        ):  # planted after the effective-URL check too, the last check before git runs
             name = real_origin(repo)
             plant()
             return name
@@ -705,11 +1046,16 @@ class PushTests(GitRunnerCase):
         self.assertFalse(result["ok"])
         self.assertNotIn(APP_TOKEN, result["text"])
         if log.exists():
-            self.assertNotIn("github.com", log.read_text())  # never asked as GitHub, so never given the token
+            self.assertNotIn(
+                "github.com", log.read_text()
+            )  # never asked as GitHub, so never given the token
 
     def test_the_overrides_clear_a_remote_proxy(self):
         env = gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO]).env()
-        pairs = {env[f"GIT_CONFIG_KEY_{i}"]: env[f"GIT_CONFIG_VALUE_{i}"] for i in range(int(env["GIT_CONFIG_COUNT"]))}
+        pairs = {
+            env[f"GIT_CONFIG_KEY_{i}"]: env[f"GIT_CONFIG_VALUE_{i}"]
+            for i in range(int(env["GIT_CONFIG_COUNT"]))
+        }
         self.assertEqual(pairs["remote.origin.proxy"], "")
 
 
@@ -758,21 +1104,72 @@ class PlantedServer:
         ext.write_text("subjectAltName=DNS:github.com,DNS:localhost\n")
 
         def ssl_cmd(*args):
-            subprocess.run(["openssl", *args], check=True, capture_output=True, cwd=folder)
+            subprocess.run(
+                ["openssl", *args], check=True, capture_output=True, cwd=folder
+            )
 
-        ssl_cmd("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", "ca.key", "-out", str(self.ca), "-days",
-                "2", "-subj", "/CN=Planted CA", "-addext", "basicConstraints=critical,CA:TRUE",
-                "-addext", "keyUsage=critical,keyCertSign")
-        ssl_cmd("req", "-newkey", "rsa:2048", "-nodes", "-keyout", "srv.key", "-out", "srv.csr", "-subj", "/CN=github.com")
-        ssl_cmd("x509", "-req", "-in", "srv.csr", "-CA", str(self.ca), "-CAkey", "ca.key", "-CAcreateserial",
-                "-out", "srv.pem", "-days", "2", "-extfile", str(ext))
-        name = subprocess.run(["openssl", "x509", "-noout", "-subject_hash", "-in", str(self.ca)], check=True,
-                              capture_output=True, text=True).stdout.strip()
+        ssl_cmd(
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-keyout",
+            "ca.key",
+            "-out",
+            str(self.ca),
+            "-days",
+            "2",
+            "-subj",
+            "/CN=Planted CA",
+            "-addext",
+            "basicConstraints=critical,CA:TRUE",
+            "-addext",
+            "keyUsage=critical,keyCertSign",
+        )
+        ssl_cmd(
+            "req",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-keyout",
+            "srv.key",
+            "-out",
+            "srv.csr",
+            "-subj",
+            "/CN=github.com",
+        )
+        ssl_cmd(
+            "x509",
+            "-req",
+            "-in",
+            "srv.csr",
+            "-CA",
+            str(self.ca),
+            "-CAkey",
+            "ca.key",
+            "-CAcreateserial",
+            "-out",
+            "srv.pem",
+            "-days",
+            "2",
+            "-extfile",
+            str(ext),
+        )
+        name = subprocess.run(
+            ["openssl", "x509", "-noout", "-subject_hash", "-in", str(self.ca)],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
         (self.capath / f"{name}.0").write_bytes(self.ca.read_bytes())
         # A child process serves, so a test run that blocks sockets in the test process still works.
         self.log = folder / "requests.log"
-        self.process = subprocess.Popen([sys.executable, "-I", "-c", PLANTED_SERVER, str(folder), str(self.log)],
-                                        stdout=subprocess.PIPE, text=True)
+        self.process = subprocess.Popen(
+            [sys.executable, "-I", "-c", PLANTED_SERVER, str(folder), str(self.log)],
+            stdout=subprocess.PIPE,
+            text=True,
+        )
         self.port = int(self.process.stdout.readline())
 
     @property
@@ -788,7 +1185,10 @@ class PlantedServer:
         self.process.stdout.close()
 
 
-@unittest.skipUnless(shutil.which("openssl") and os.path.exists(gh.CA_BUNDLE), "needs openssl and the system CA bundle")
+@unittest.skipUnless(
+    shutil.which("openssl") and os.path.exists(gh.CA_BUNDLE),
+    "needs openssl and the system CA bundle",
+)
 class PlantedTransportTests(GitRunnerCase):
     """SG1: transport settings planted after the check never make git trust another server with the token."""
 
@@ -806,16 +1206,27 @@ class PlantedTransportTests(GitRunnerCase):
 
             def env(self, credentialed=True):
                 env = super().env(credentialed)
-                pairs = [(env[f"GIT_CONFIG_KEY_{i}"], env[f"GIT_CONFIG_VALUE_{i}"])
-                         for i in range(int(env["GIT_CONFIG_COUNT"]))]
+                pairs = [
+                    (env[f"GIT_CONFIG_KEY_{i}"], env[f"GIT_CONFIG_VALUE_{i}"])
+                    for i in range(int(env["GIT_CONFIG_COUNT"]))
+                ]
                 if not pinned:  # the 0.3.0 settings, to show the planted folder would be trusted without the pin
-                    pairs = [pair for pair in pairs if pair[0] not in ("http.sslCAInfo", "http.sslCAPath")]
+                    pairs = [
+                        pair
+                        for pair in pairs
+                        if pair[0] not in ("http.sslCAInfo", "http.sslCAPath")
+                    ]
                     env.pop("GIT_SSL_CAPATH", None)
-                pairs.append((f"url.https://localhost:{port}/.insteadOf", "https://github.com/"))
+                pairs.append(
+                    (f"url.https://localhost:{port}/.insteadOf", "https://github.com/")
+                )
                 for key in [key for key in env if key.startswith("GIT_CONFIG_")]:
                     del env[key]
                 for index, (key, value) in enumerate(pairs):
-                    env[f"GIT_CONFIG_KEY_{index}"], env[f"GIT_CONFIG_VALUE_{index}"] = key, value
+                    env[f"GIT_CONFIG_KEY_{index}"], env[f"GIT_CONFIG_VALUE_{index}"] = (
+                        key,
+                        value,
+                    )
                 env["GIT_CONFIG_COUNT"] = str(len(pairs))
                 env.update(GIT_ID)
                 return env
@@ -823,8 +1234,14 @@ class PlantedTransportTests(GitRunnerCase):
             def origin_repository(self, repo):
                 return REPO
 
-        return PortRemote(lambda: APP_TOKEN, lambda: [REPO], config_root=self.config, share_root=self.share,
-                          askpass="/bin/false", guard=str(WORKER / "push_guard.py"))
+        return PortRemote(
+            lambda: APP_TOKEN,
+            lambda: [REPO],
+            config_root=self.config,
+            share_root=self.share,
+            askpass="/bin/false",
+            guard=str(WORKER / "push_guard.py"),
+        )
 
     def plants(self):
         url = f"https://localhost:{self.server.port}/"
@@ -836,8 +1253,14 @@ class PlantedTransportTests(GitRunnerCase):
             "url sslCAInfo": [resolve, (f"http.{url}.sslCAInfo", ca)],
             "url sslCAPath": [resolve, (f"http.{url}{REPO}.git.sslCAPath", capath)],
             "sslVerify": [resolve, ("http.sslVerify", "false")],
-            "all": [resolve, ("http.sslCAInfo", ca), ("http.sslCAPath", capath), ("http.extraHeader", "X-Planted: 1"),
-                    ("http.cookieFile", str(self.server.ca)), ("http.saveCookies", "true")],
+            "all": [
+                resolve,
+                ("http.sslCAInfo", ca),
+                ("http.sslCAPath", capath),
+                ("http.extraHeader", "X-Planted: 1"),
+                ("http.cookieFile", str(self.server.ca)),
+                ("http.saveCookies", "true"),
+            ],
         }
 
     def run_planted(self, runner, operation, settings):
@@ -866,22 +1289,37 @@ class PlantedTransportTests(GitRunnerCase):
                     self.server.clear()
                     result = self.run_planted(runner, operation, settings)
                     self.assertFalse(result["ok"], result["text"])
-                    self.assertEqual(self.server.requests, [], "git trusted the planted server")
+                    self.assertEqual(
+                        self.server.requests, [], "git trusted the planted server"
+                    )
                     self.assertNotIn(APP_TOKEN, result["text"])
-                    if operation == "fetch":  # the push guard's own ls-remote fails first and keeps git's message
+                    if (
+                        operation == "fetch"
+                    ):  # the push guard's own ls-remote fails first and keeps git's message
                         self.assertIn("certificate", result["text"].lower())
                     self.assertIn("settings changed while git ran", result["text"])
 
     def test_without_the_pin_the_planted_folder_is_trusted(self):
         """The control: the same plant reaches the server on the 0.3.0 settings, so the test above can fail."""
-        result = self.run_planted(self.https_runner(pinned=False), "fetch", self.plants()["sslCAPath"])
+        result = self.run_planted(
+            self.https_runner(pinned=False), "fetch", self.plants()["sslCAPath"]
+        )
         self.assertFalse(result["ok"])
         self.assertNotEqual(self.server.requests, [])
 
     def test_the_overrides_pin_the_transport(self):
         env = gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO]).env()
-        pairs = {env[f"GIT_CONFIG_KEY_{i}"]: env[f"GIT_CONFIG_VALUE_{i}"] for i in range(int(env["GIT_CONFIG_COUNT"]))}
-        for key in ("http.sslCAInfo", "http.sslCAPath", "http.proxy", "http.extraHeader", "http.cookieFile"):
+        pairs = {
+            env[f"GIT_CONFIG_KEY_{i}"]: env[f"GIT_CONFIG_VALUE_{i}"]
+            for i in range(int(env["GIT_CONFIG_COUNT"]))
+        }
+        for key in (
+            "http.sslCAInfo",
+            "http.sslCAPath",
+            "http.proxy",
+            "http.extraHeader",
+            "http.cookieFile",
+        ):
             self.assertEqual(pairs[key], "", key)
         self.assertEqual(pairs["http.sslVerify"], "true")
         self.assertEqual(pairs["http.saveCookies"], "false")
@@ -908,7 +1346,12 @@ class CloneLinkTests(GitRunnerCase):
         self.assertNotIn("helper", config)
         hooks = target / ".git" / "hooks"
         self.assertEqual(list(hooks.glob("*")) if hooks.exists() else [], [])
-        real = gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO], config_root=self.config, share_root=self.share)
+        real = gh.GitRunner(
+            lambda: APP_TOKEN,
+            lambda: [REPO],
+            config_root=self.config,
+            share_root=self.share,
+        )
         self.assertEqual(real.prepare(str(target))[1], REPO)
 
     def test_clone_into_a_named_folder_under_share(self):
@@ -919,26 +1362,52 @@ class CloneLinkTests(GitRunnerCase):
                 self.assertTrue(result["ok"], result["text"])
                 self.assertTrue((self.share / folder / "README.md").exists())
 
-    def test_clone_refuses_bad_names_existing_folders_elsewhere_and_other_repositories(self):
+    def test_clone_refuses_bad_names_existing_folders_elsewhere_and_other_repositories(
+        self,
+    ):
         outside = Path(self.temp.name) / "outside"
         outside.mkdir()
         (self.share / "HomeAssistant").mkdir()
         (self.share / "escape").symlink_to(outside)
         (self.share / "taken").mkdir()
-        for repository, folder in ((REPO, ".."), (REPO, "a/b"), (REPO, ".hidden"), (REPO, "a..b"), (REPO, "-x"),
-                                   (REPO, "taken"), (OTHER, "new"), ("+example-owner/house", "new"),
-                                   (REPO, "/etc/x"), (REPO, f"{outside}/x"), (REPO, f"{self.share}/x"),
-                                   (REPO, f"{self.config}/x"), (REPO, "HomeAssistant"), (REPO, "escape"), (REPO, 7)):
-            with self.subTest(repository=repository, folder=folder), self.assertRaises(gh.GitHubError):
+        for repository, folder in (
+            (REPO, ".."),
+            (REPO, "a/b"),
+            (REPO, ".hidden"),
+            (REPO, "a..b"),
+            (REPO, "-x"),
+            (REPO, "taken"),
+            (OTHER, "new"),
+            ("+example-owner/house", "new"),
+            (REPO, "/etc/x"),
+            (REPO, f"{outside}/x"),
+            (REPO, f"{self.share}/x"),
+            (REPO, f"{self.config}/x"),
+            (REPO, "HomeAssistant"),
+            (REPO, "escape"),
+            (REPO, 7),
+        ):
+            with (
+                self.subTest(repository=repository, folder=folder),
+                self.assertRaises(gh.GitHubError),
+            ):
                 self.runner.clone(repository, folder)
         self.assertEqual(list(outside.iterdir()), [])
 
     def test_link_sets_origin_and_writes_no_credential(self):
-        real = gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO, OTHER], config_root=self.config, share_root=self.share)
+        real = gh.GitRunner(
+            lambda: APP_TOKEN,
+            lambda: [REPO, OTHER],
+            config_root=self.config,
+            share_root=self.share,
+        )
         git(self.repo, "remote", "remove", "origin")
         result = real.link(OTHER, str(self.repo))
         self.assertTrue(result["ok"], result["text"])
-        self.assertEqual(git(self.repo, "remote", "get-url", "origin").stdout.strip(), f"https://github.com/{OTHER}.git")
+        self.assertEqual(
+            git(self.repo, "remote", "get-url", "origin").stdout.strip(),
+            f"https://github.com/{OTHER}.git",
+        )
         self.assertTrue(real.link(REPO, str(self.repo))["ok"])
         self.assertEqual(real.prepare(str(self.repo))[1], REPO)
         config = (self.repo / ".git" / "config").read_text()
@@ -949,12 +1418,22 @@ class CloneLinkTests(GitRunnerCase):
         local = self.share / "notes"
         local.mkdir()
         git(local, "init", "-q", "-b", "main")
-        real = gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO], config_root=self.config, share_root=self.share)
+        real = gh.GitRunner(
+            lambda: APP_TOKEN,
+            lambda: [REPO],
+            config_root=self.config,
+            share_root=self.share,
+        )
         self.assertTrue(real.link(REPO, str(local))["ok"])
         self.assertEqual(real.prepare(str(local))[1], REPO)
 
     def test_link_keeps_the_allowlist_and_refuses_protected_and_escaping_paths(self):
-        real = gh.GitRunner(lambda: APP_TOKEN, lambda: [REPO], config_root=self.config, share_root=self.share)
+        real = gh.GitRunner(
+            lambda: APP_TOKEN,
+            lambda: [REPO],
+            config_root=self.config,
+            share_root=self.share,
+        )
         git(self.repo, "config", "core.fsmonitor", "touch marker")
         with self.assertRaises(gh.GitHubError):
             real.link(REPO, str(self.repo))
@@ -967,9 +1446,18 @@ class CloneLinkTests(GitRunnerCase):
         git(outside, "init", "-q")
         (self.share / "through_link").symlink_to(outside)
         before = (house / ".git" / "config").read_text()
-        for repository, path in (("example-owner/other", str(self.repo)), (REPO, "/tmp"), ("../x", str(self.repo)),
-                                 (REPO, str(house)), (REPO, str(self.share / "through_link")), (REPO, str(outside))):
-            with self.subTest(repository=repository, path=path), self.assertRaises(gh.GitHubError):
+        for repository, path in (
+            ("example-owner/other", str(self.repo)),
+            (REPO, "/tmp"),
+            ("../x", str(self.repo)),
+            (REPO, str(house)),
+            (REPO, str(self.share / "through_link")),
+            (REPO, str(outside)),
+        ):
+            with (
+                self.subTest(repository=repository, path=path),
+                self.assertRaises(gh.GitHubError),
+            ):
                 real.link(repository, path)
         self.assertEqual((house / ".git" / "config").read_text(), before)
         self.assertNotIn("github.com", (outside / ".git" / "config").read_text())
@@ -981,18 +1469,30 @@ class DispatchTests(ServiceCase):
 
     def test_a_wrong_or_unbound_thread_id_is_refused(self):
         self.connect_app()
-        for thread in ("", "99999999-2222-4333-8444-555555555555", "abcdefab-2222-4333-8444-555555555555".upper(),
-                       "\u05e9\u05dc\u05d5\u05dd", ["x"], None, 7):
+        for thread in (
+            "",
+            "99999999-2222-4333-8444-555555555555",
+            "abcdefab-2222-4333-8444-555555555555".upper(),
+            "\u05e9\u05dc\u05d5\u05dd",
+            ["x"],
+            None,
+            7,
+        ):
             with self.subTest(thread=thread):
-                answer = self.service.answer(json.dumps(self.payload("repos", thread=thread)).encode())
+                answer = self.service.answer(
+                    json.dumps(self.payload("repos", thread=thread)).encode()
+                )
                 self.assertFalse(answer["ok"])
                 self.assertIn("ended", answer["text"])
 
     def test_a_request_with_a_capability_key_or_without_a_thread_id_is_refused(self):
         self.connect_app()
         base = self.payload("repos")
-        for payload in ({**base, "capability": "x"}, {key: value for key, value in base.items() if key != "thread_id"},
-                        {"operation": "repos", "arguments": {}, "capability": THREAD}):
+        for payload in (
+            {**base, "capability": "x"},
+            {key: value for key, value in base.items() if key != "thread_id"},
+            {"operation": "repos", "arguments": {}, "capability": THREAD},
+        ):
             with self.subTest(payload=payload):
                 answer = self.service.answer(json.dumps(payload).encode())
                 self.assertFalse(answer["ok"])
@@ -1019,64 +1519,126 @@ class DispatchTests(ServiceCase):
         self.service.runner = Runner()
         self.assertFalse(hasattr(self.service, "read_only"))
         for operation in ("fetch", "pull", "push"):
-            answer = self.service.answer(json.dumps(self.payload(operation, path="/config")).encode())
+            answer = self.service.answer(
+                json.dumps(self.payload(operation, path="/config")).encode()
+            )
             self.assertTrue(answer["ok"], answer)
-        self.assertEqual(calls, [("fetch", "/config"), ("pull", "/config"), ("push", "/config")])
+        self.assertEqual(
+            calls, [("fetch", "/config"), ("pull", "/config"), ("push", "/config")]
+        )
 
     def test_no_reply_ever_holds_the_token(self):
         """F9: the socket has no operation that returns the credential."""
         self.connect_app()
-        replies = [self.service.answer(json.dumps(self.payload(op, **args)).encode()) for op, args in (
-            ("repos", {}), ("fetch", {"path": "/nowhere"}), ("push", {"path": "/config", "branch": "+main"}),
-            ("token", {}), ("credential", {}), ("repos", {"path": "x"}))]
+        replies = [
+            self.service.answer(json.dumps(self.payload(op, **args)).encode())
+            for op, args in (
+                ("repos", {}),
+                ("fetch", {"path": "/nowhere"}),
+                ("push", {"path": "/config", "branch": "+main"}),
+                ("token", {}),
+                ("credential", {}),
+                ("repos", {"path": "x"}),
+            )
+        ]
         replies.append(self.service.answer(b"not json"))
         self.assertNotIn(APP_TOKEN, json.dumps(replies))
         self.assertNotIn(APP_TOKEN, json.dumps(self.service.status()))
 
     def test_not_connected_is_one_plain_sentence(self):
         answer = self.service.answer(json.dumps(self.payload("repos")).encode())
-        self.assertEqual(answer, {"ok": False, "text": "GitHub is not connected on this box; the owner connects it "
-                                                       "on the add-on page."})
+        self.assertEqual(
+            answer,
+            {
+                "ok": False,
+                "text": "GitHub is not connected on this box; the owner connects it "
+                "on the add-on page.",
+            },
+        )
 
     def test_the_mcp_tool_schema_is_closed_and_bounded(self):
         (tool,) = github_mcp.TOOLS
         self.assertEqual(tool["name"], "github_git")
         schema = tool["inputSchema"]
         self.assertFalse(schema["additionalProperties"])
-        self.assertEqual(set(schema["properties"]["operation"]["enum"]), set(gh.OPERATIONS))
-        self.assertTrue(all("maxLength" in value for key, value in schema["properties"].items() if key != "operation"))
+        self.assertEqual(
+            set(schema["properties"]["operation"]["enum"]), set(gh.OPERATIONS)
+        )
+        self.assertTrue(
+            all(
+                "maxLength" in value
+                for key, value in schema["properties"].items()
+                if key != "operation"
+            )
+        )
 
 
 class GuardRowsTests(unittest.TestCase):
     """The text checks name the folder too; the mask in codex-bwrap is the one that holds."""
 
-
     def test_the_backup_leaves_the_github_folder_out(self):
-        lines = (WORKER / "config.yaml").read_text().split("backup_exclude:\n", 1)[1].splitlines()
-        exclusions = [line.split("- ", 1)[1].strip('"') for line in lines[:lines.index(next(
-            line for line in lines if not line.startswith("  - ")))]]
+        lines = (
+            (WORKER / "config.yaml")
+            .read_text()
+            .split("backup_exclude:\n", 1)[1]
+            .splitlines()
+        )
+        exclusions = [
+            line.split("- ", 1)[1].strip('"')
+            for line in lines[
+                : lines.index(
+                    next(line for line in lines if not line.startswith("  - "))
+                )
+            ]
+        ]
         self.assertIn("*/github", exclusions)
         with tempfile.TemporaryDirectory() as temporary:
             data = Path(temporary) / "data"
-            for relative in ("github/credential.json", "github/state.json", "github/credential.json.tmp",
-                             "github-notes", "tasks/kept.txt"):
+            for relative in (
+                "github/credential.json",
+                "github/state.json",
+                "github/credential.json.tmp",
+                "github-notes",
+                "tasks/kept.txt",
+            ):
                 (data / relative).parent.mkdir(parents=True, exist_ok=True)
                 (data / relative).write_text("fixture")
             buffer = io.BytesIO()
             with tarfile.open(fileobj=buffer, mode="w") as archive:
-                archive.add(data, arcname="data", filter=lambda info: None if any(
-                    PurePosixPath(info.name).match(pattern) for pattern in exclusions) else info)
+                archive.add(
+                    data,
+                    arcname="data",
+                    filter=lambda info: (
+                        None
+                        if any(
+                            PurePosixPath(info.name).match(pattern)
+                            for pattern in exclusions
+                        )
+                        else info
+                    ),
+                )
             buffer.seek(0)
             names = tarfile.open(fileobj=buffer).getnames()
         self.assertIn("data/github-notes", names)
-        self.assertFalse(any(name == "data/github" or name.startswith("data/github/") for name in names), names)
+        self.assertFalse(
+            any(
+                name == "data/github" or name.startswith("data/github/")
+                for name in names
+            ),
+            names,
+        )
 
     def test_the_bundled_guard_is_the_kit_guard_unchanged(self):
-        self.assertEqual(hashlib.sha256((WORKER / "push_guard.py").read_bytes()).hexdigest(), KIT_GUARD_SHA256)
+        self.assertEqual(
+            hashlib.sha256((WORKER / "push_guard.py").read_bytes()).hexdigest(),
+            KIT_GUARD_SHA256,
+        )
 
     def test_the_image_installs_the_helper_and_a_read_only_guard(self):
         docker = (WORKER / "Dockerfile").read_text()
-        self.assertIn("COPY github_askpass.py /usr/local/bin/codex-github-askpass", docker)
+        self.assertIn(
+            "COPY github_askpass.py /usr/local/bin/codex-github-askpass", docker
+        )
         self.assertIn("COPY push_guard.py /usr/share/ha_codex/push_guard.py", docker)
         self.assertIn("chmod 0444 /usr/share/ha_codex/push_guard.py", docker)
         self.assertIn("COPY github_access.py github_mcp.py /", docker)

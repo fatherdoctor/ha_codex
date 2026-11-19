@@ -14,22 +14,22 @@ so Codex needs no second tool call.
 
 It refuses no service by name: the person's answer to Codex's request is the gate.
 """
+
 from __future__ import annotations
 
 import hmac
 import json
 import os
+from pathlib import Path
 import re
 import secrets
 import socketserver
 import threading
-from pathlib import Path
-
-import requests
 
 import name_match
-import tool_threads
 from relay_reads import ATTRIBUTES, PRIVATE, fetch_states, password_state
+import requests
+import tool_threads
 
 SERVICE_RE = re.compile(r"[a-z0-9_]+\.[a-z0-9_]+")
 TARGET_KEYS = frozenset({"entity_id", "device_id", "area_id", "floor_id", "label_id"})
@@ -70,7 +70,9 @@ def parse_target(target):
     for key, value in target.items():
         ids = [value] if isinstance(value, str) else value
         if not isinstance(ids, list) or not ids or len(ids) > MAX_TARGET_IDS:
-            raise CallRefused(f"target {key} must be one id or a list of 1 to {MAX_TARGET_IDS} ids")
+            raise CallRefused(
+                f"target {key} must be one id or a list of 1 to {MAX_TARGET_IDS} ids"
+            )
         if not all(isinstance(item, str) and item and len(item) <= 255 for item in ids):
             raise CallRefused(f"target {key} must hold text ids")
         parsed[key] = ids if isinstance(value, list) else value
@@ -98,7 +100,9 @@ def parse_request(arguments):
         raise CallRefused("data must be an object")
     overlap = TARGET_KEYS & set(data)
     if overlap:
-        raise CallRefused("put " + ", ".join(sorted(overlap)) + " in target, not in data")
+        raise CallRefused(
+            "put " + ", ".join(sorted(overlap)) + " in target, not in data"
+        )
     return service, {**data, **target}
 
 
@@ -158,7 +162,11 @@ class HomeAssistantCall:
             return RELAY_TASK if self.relay_running() else None
         task_id = tool_threads.CHATS.task_for(payload.get("thread_id"))
         with self.lock:
-            attended = task_id is not None and task_id != RELAY_TASK and task_id in self.capabilities
+            attended = (
+                task_id is not None
+                and task_id != RELAY_TASK
+                and task_id in self.capabilities
+            )
         if not attended:
             return None
         if self.worker.task_cancellation_requested(task_id):
@@ -174,7 +182,10 @@ class HomeAssistantCall:
             return {"status": "unavailable", "message": "Invalid call request"}
         task_id = self.task_for(payload)
         if task_id is None:
-            return {"status": "unavailable", "message": "No running exchange that a person attends: nothing was sent"}
+            return {
+                "status": "unavailable",
+                "message": "No running exchange that a person attends: nothing was sent",
+            }
         arguments = payload.get("arguments")
         try:
             if isinstance(arguments, dict) and "name" in arguments:
@@ -204,10 +215,17 @@ class HomeAssistantCall:
             raise CallRefused("Home Assistant authentication is unavailable")
         try:
             states = fetch_states("/states", token)
-        except (ValueError, requests.RequestException) as exc:  # relay_reads.ReadError is a ValueError
-            raise CallRefused(f"Could not read the entity list ({type(exc).__name__}). Nothing was sent.") from None
+        except (
+            ValueError,
+            requests.RequestException,
+        ) as exc:  # relay_reads.ReadError is a ValueError
+            raise CallRefused(
+                f"Could not read the entity list ({type(exc).__name__}). Nothing was sent."
+            ) from None
         if not isinstance(states, list):
-            raise CallRefused("Home Assistant returned an invalid entity list. Nothing was sent.")
+            raise CallRefused(
+                "Home Assistant returned an invalid entity list. Nothing was sent."
+            )
         try:
             found = name_match.resolve(states, arguments["name"], service)
         except ValueError as exc:
@@ -216,12 +234,20 @@ class HomeAssistantCall:
             return {**rest, "target": {"entity_id": found["entity_id"]}}
         count = found["total"]
         if count:
-            message = (f"{count} entities fit this name. Nothing was sent: ask the person which one, "
-                       "then call again with target.entity_id.")
+            message = (
+                f"{count} entities fit this name. Nothing was sent: ask the person which one, "
+                "then call again with target.entity_id."
+            )
         else:
             message = f"No {service.split('.', 1)[0]} entity fits this name. Nothing was sent."
-        raise NotSent({"status": "not_sent", "message": message, "candidates": found["candidates"],
-                       "total_matches": count})
+        raise NotSent(
+            {
+                "status": "not_sent",
+                "message": message,
+                "candidates": found["candidates"],
+                "total_matches": count,
+            }
+        )
 
     def read_back(self, entity_ids):
         """Return the new state and the common attributes of up to MAX_READBACK target entities.
@@ -237,31 +263,60 @@ class HomeAssistantCall:
             try:
                 row = fetch_states(f"/states/{entity_id}", token)
             except (ValueError, requests.RequestException) as exc:
-                rows.append({"entity_id": entity_id, "error": f"read back failed ({type(exc).__name__})"})
+                rows.append(
+                    {
+                        "entity_id": entity_id,
+                        "error": f"read back failed ({type(exc).__name__})",
+                    }
+                )
                 continue
             if not isinstance(row, dict) or password_state(row):
                 continue
-            attributes = row.get("attributes") if isinstance(row.get("attributes"), dict) else {}
-            rows.append({"entity_id": entity_id, "state": str(row.get("state"))[:120],
-                         "attributes": {key: attributes[key] for key in sorted(ATTRIBUTES & set(attributes))}})
+            attributes = (
+                row.get("attributes") if isinstance(row.get("attributes"), dict) else {}
+            )
+            rows.append(
+                {
+                    "entity_id": entity_id,
+                    "state": str(row.get("state"))[:120],
+                    "attributes": {
+                        key: attributes[key]
+                        for key in sorted(ATTRIBUTES & set(attributes))
+                    },
+                }
+            )
         return rows
 
     def send(self, service, body):
         """Send one service call to Home Assistant, once, and return the result for Codex."""
         token = self.worker.ha_token()
         if not token:
-            return {"status": "failed", "message": "Home Assistant authentication is unavailable"}
+            return {
+                "status": "failed",
+                "message": "Home Assistant authentication is unavailable",
+            }
         domain, name = service.split(".", 1)
         try:
-            response = requests.post(CORE_SERVICES_URL + f"{domain}/{name}", json=body,
-                                     headers={"Authorization": f"Bearer {token}"},
-                                     timeout=CALL_TIMEOUT_SECONDS, allow_redirects=False)
+            response = requests.post(
+                CORE_SERVICES_URL + f"{domain}/{name}",
+                json=body,
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=CALL_TIMEOUT_SECONDS,
+                allow_redirects=False,
+            )
         except requests.RequestException as exc:
             # The request may have reached Home Assistant; it is not sent again.
-            return {"status": "failed", "message": f"No answer from Home Assistant ({type(exc).__name__})"}
+            return {
+                "status": "failed",
+                "message": f"No answer from Home Assistant ({type(exc).__name__})",
+            }
         if response.status_code != 200:
-            return {"status": "failed", "http_status": response.status_code,
-                    "message": response.text[:500] or f"Home Assistant returned HTTP {response.status_code}"}
+            return {
+                "status": "failed",
+                "http_status": response.status_code,
+                "message": response.text[:500]
+                or f"Home Assistant returned HTTP {response.status_code}",
+            }
         try:
             changed = changed_entities(response.json())
         except ValueError:
@@ -284,7 +339,10 @@ class HomeAssistantCall:
                         raise ValueError("Request too large")
                     result = engine.dispatch(json.loads(raw))
                 except (OSError, ValueError):
-                    result = {"status": "unavailable", "message": "Invalid call request"}
+                    result = {
+                        "status": "unavailable",
+                        "message": "Invalid call request",
+                    }
                 try:
                     self.wfile.write(json.dumps(result).encode() + b"\n")
                 except OSError:

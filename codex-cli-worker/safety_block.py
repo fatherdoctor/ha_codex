@@ -6,7 +6,6 @@ from typing import Any
 
 from approvals import AppServerSession
 
-
 SUMMARY = "OpenAI's safety filter blocked this task."
 NEXT_STEP = "Rephrase the request or retry it. Normal use needs no special access."
 MESSAGE = f"{SUMMARY} {NEXT_STEP}"
@@ -29,7 +28,11 @@ def is_safety_block(message: Any, thread_id: str, turn_id: str) -> bool:
         error = params.get("error")
     elif message.get("method") == "turn/completed":
         turn = params.get("turn")
-        if not isinstance(turn, dict) or turn.get("id") != turn_id or turn.get("status") != "failed":
+        if (
+            not isinstance(turn, dict)
+            or turn.get("id") != turn_id
+            or turn.get("status") != "failed"
+        ):
             return False
         error = turn.get("error")
     else:
@@ -49,7 +52,9 @@ class SafetyBlockSession(AppServerSession):
         with self.lock:
             if self._closed:
                 return
-            if self.is_active() and is_safety_block(message, self.thread_id, self.turn_id):
+            if self.is_active() and is_safety_block(
+                message, self.thread_id, self.turn_id
+            ):
                 self.safety_blocked = True
                 self.fail(MESSAGE)
                 return

@@ -18,7 +18,9 @@ def ssh_probe(root: Path, probes: list):
     identity = directory / "fixture_ed25519"
     subprocess.run(
         ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(identity)],
-        check=True, capture_output=True, timeout=10,
+        check=True,
+        capture_output=True,
+        timeout=10,
     )
     public_key = paramiko.Ed25519Key.from_private_key_file(str(identity))
     host_key = paramiko.RSAKey.generate(2048)
@@ -28,7 +30,9 @@ def ssh_probe(root: Path, probes: list):
     listener.settimeout(0.2)
     port = listener.getsockname()[1]
     known_hosts = directory / "known_hosts"
-    known_hosts.write_text(f"[127.0.0.1]:{port} {host_key.get_name()} {host_key.get_base64()}\n")
+    known_hosts.write_text(
+        f"[127.0.0.1]:{port} {host_key.get_name()} {host_key.get_base64()}\n"
+    )
     configuration = directory / "config"
     configuration.write_text(
         "Host ssh-fixture\n"
@@ -52,7 +56,9 @@ def ssh_probe(root: Path, probes: list):
     )
     configuration.chmod(0o600)
     known_hosts.chmod(0o600)
-    command = shlex.join(["ssh", "-F", str(configuration), "-n", "ssh-fixture", "probe"])
+    command = shlex.join(
+        ["ssh", "-F", str(configuration), "-n", "ssh-fixture", "probe"]
+    )
     stopped = threading.Event()
     transports = []
     clients = []
@@ -77,7 +83,11 @@ def ssh_probe(root: Path, probes: list):
 
         def check_channel_request(self, kind, channel_id):
             """Allow a command session while rejecting forwarding channels."""
-            return paramiko.OPEN_SUCCEEDED if kind == "session" else paramiko.OPEN_FAILED_ADMINISTRATIVELY_PROHIBITED
+            return (
+                paramiko.OPEN_SUCCEEDED
+                if kind == "session"
+                else paramiko.OPEN_FAILED_ADMINISTRATIVELY_PROHIBITED
+            )
 
         def check_channel_exec_request(self, channel, command):
             """Record the requested operation for the target-side dispatcher."""
@@ -120,21 +130,29 @@ def ssh_probe(root: Path, probes: list):
                 continue
             except OSError:
                 return
-            client = threading.Thread(target=serve_client, args=(connection,), daemon=True)
+            client = threading.Thread(
+                target=serve_client, args=(connection,), daemon=True
+            )
             clients.append(client)
             client.start()
 
     acceptor = threading.Thread(target=accept_connections, daemon=True)
     acceptor.start()
     try:
-        settings = subprocess.check_output(["ssh", "-G", "-F", str(configuration), "ssh-fixture"], text=True)
+        settings = subprocess.check_output(
+            ["ssh", "-G", "-F", str(configuration), "ssh-fixture"], text=True
+        )
         effective = dict(line.split(" ", 1) for line in settings.splitlines())
         assert effective["identityfile"] == str(identity), settings
         assert effective["userknownhostsfile"] == str(known_hosts), settings
         assert effective["controlmaster"] in {"false", "no"}, settings
         assert effective.get("controlpath", "none") == "none", settings
-        control = subprocess.run(shlex.split(command), capture_output=True, text=True, timeout=10)
-        assert control.returncode == 0 and "network-action-executed" in control.stdout, (control.stdout, control.stderr)
+        control = subprocess.run(
+            shlex.split(command), capture_output=True, text=True, timeout=10
+        )
+        assert (
+            control.returncode == 0 and "network-action-executed" in control.stdout
+        ), (control.stdout, control.stderr)
         assert probes == ["ssh-probe"], probes
         probes.clear()
         yield command

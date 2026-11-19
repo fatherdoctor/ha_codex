@@ -1,11 +1,11 @@
 """Read screenshots only from Fully Kiosk devices displaying the requested view."""
+
 from __future__ import annotations
 
 import re
 from urllib.parse import urlsplit
 
 from aiohttp import web
-
 from homeassistant.components.image import async_get_image
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
@@ -24,8 +24,14 @@ def matching_screenshots(hass: HomeAssistant, path: str) -> list[dict[str, str]]
     registry = er.async_get(hass)
     matches = []
     for entry in registry.entities.values():
-        if (entry.platform != "fully_kiosk" or entry.domain != "sensor" or entry.disabled
-            or not entry.device_id or not entry.config_entry_id or not entry.unique_id.endswith("-currentPage")):
+        if (
+            entry.platform != "fully_kiosk"
+            or entry.domain != "sensor"
+            or entry.disabled
+            or not entry.device_id
+            or not entry.config_entry_id
+            or not entry.unique_id.endswith("-currentPage")
+        ):
             continue
         state = hass.states.get(entry.entity_id)
         if state is None or state.state in {STATE_UNAVAILABLE, STATE_UNKNOWN}:
@@ -35,19 +41,33 @@ def matching_screenshots(hass: HomeAssistant, path: str) -> list[dict[str, str]]
             continue
         try:
             current = urlsplit(current_url)
-            if (current.scheme not in {"http", "https"} or current.username or current.password
-                or current.path.rstrip("/") != path.rstrip("/") or not is_hass_url(hass, current_url)):
+            if (
+                current.scheme not in {"http", "https"}
+                or current.username
+                or current.password
+                or current.path.rstrip("/") != path.rstrip("/")
+                or not is_hass_url(hass, current_url)
+            ):
                 continue
         except ValueError:
             continue
         unique_id = entry.unique_id.removesuffix("-currentPage") + "-screenshot"
         entity_id = registry.async_get_entity_id("image", "fully_kiosk", unique_id)
         screenshot = registry.async_get(entity_id) if entity_id else None
-        if (screenshot is None or screenshot.disabled or screenshot.device_id != entry.device_id
-            or screenshot.config_entry_id != entry.config_entry_id):
+        if (
+            screenshot is None
+            or screenshot.disabled
+            or screenshot.device_id != entry.device_id
+            or screenshot.config_entry_id != entry.config_entry_id
+        ):
             continue
         image_state = hass.states.get(screenshot.entity_id)
-        name = (image_state.attributes.get("friendly_name") if image_state else None) or screenshot.name or screenshot.original_name or screenshot.entity_id
+        name = (
+            (image_state.attributes.get("friendly_name") if image_state else None)
+            or screenshot.name
+            or screenshot.original_name
+            or screenshot.entity_id
+        )
         matches.append({"entity_id": screenshot.entity_id, "name": name})
     return matches
 
@@ -67,14 +87,24 @@ class KioskScreenshotsView(DiagnosticView):
             raise web.HTTPBadRequest()
         screenshots = matching_screenshots(self.hass, path)
         if "entity_id" not in data:
-            return self.json({"screenshots": screenshots}, headers={"Cache-Control": "no-store"})
+            return self.json(
+                {"screenshots": screenshots}, headers={"Cache-Control": "no-store"}
+            )
         entity_id = data["entity_id"]
-        if not isinstance(entity_id, str) or not any(shot["entity_id"] == entity_id for shot in screenshots):
+        if not isinstance(entity_id, str) or not any(
+            shot["entity_id"] == entity_id for shot in screenshots
+        ):
             raise web.HTTPNotFound()
         try:
             image = await async_get_image(self.hass, entity_id, timeout=10)
         except HomeAssistantError as err:
             raise web.HTTPBadGateway() from err
         if len(image.content) > SCREENSHOT_MAX_BYTES:
-            raise web.HTTPRequestEntityTooLarge(max_size=SCREENSHOT_MAX_BYTES, actual_size=len(image.content))
-        return web.Response(body=image.content, content_type=image.content_type, headers={"Cache-Control": "no-store"})
+            raise web.HTTPRequestEntityTooLarge(
+                max_size=SCREENSHOT_MAX_BYTES, actual_size=len(image.content)
+            )
+        return web.Response(
+            body=image.content,
+            content_type=image.content_type,
+            headers={"Cache-Control": "no-store"},
+        )

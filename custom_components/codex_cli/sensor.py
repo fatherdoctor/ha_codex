@@ -5,9 +5,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory, PERCENTAGE
+from homeassistant.const import PERCENTAGE, EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -48,7 +52,9 @@ class _CodexSensor(CoordinatorEntity[CodexCliCoordinator], SensorEntity):
     _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
-    def __init__(self, coordinator: CodexCliCoordinator, entry: ConfigEntry, key: str) -> None:
+    def __init__(
+        self, coordinator: CodexCliCoordinator, entry: ConfigEntry, key: str
+    ) -> None:
         """Set the unique ID from the entry ID and key, and attach the sensor to the Codex device of the config entry."""
         super().__init__(coordinator)
         self._entry = entry
@@ -322,7 +328,8 @@ class CodexWeeklyLimitSensor(_CodexSensor):
             "reset_text": usage.get("weekly_reset"),
             "five_hour_limit": usage.get("five_hour_limit"),
             "five_hour_percent": usage.get("five_hour_percent"),
-            "five_hour_reset": usage.get("five_hour_reset_at") or usage.get("five_hour_reset"),
+            "five_hour_reset": usage.get("five_hour_reset_at")
+            or usage.get("five_hour_reset"),
             "five_hour_reset_text": usage.get("five_hour_reset"),
             "context_remaining": usage.get("context_remaining"),
             "context_percent": usage.get("context_percent"),

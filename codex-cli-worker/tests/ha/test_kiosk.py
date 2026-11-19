@@ -1,17 +1,18 @@
 """Fully Kiosk screenshot discovery and paired-worker HTTP boundaries."""
+
 import importlib.util
+from pathlib import Path
 import sys
 import types
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-import pytest
 from homeassistant.components.image import Image, ImageEntity
 from homeassistant.components.image.const import DATA_COMPONENT
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.config_entries import ConfigEntryState
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.setup import async_setup_component
+import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 ROOT = Path(__file__).resolve().parents[3] / "custom_components" / "codex_cli"
@@ -32,14 +33,36 @@ def tablet(hass, key, url=URL):
     """Register a real Fully device and its independently renamed sensor and image."""
     config = MockConfigEntry(domain="fully_kiosk", title=key)
     config.add_to_hass(hass)
-    device = dr.async_get(hass).async_get_or_create(config_entry_id=config.entry_id, identifiers={("fully_kiosk", key)})
+    device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=config.entry_id, identifiers={("fully_kiosk", key)}
+    )
     registry = er.async_get(hass)
-    sensor = registry.async_get_or_create("sensor", "fully_kiosk", f"{key}-currentPage", config_entry=config, device_id=device.id)
-    image = registry.async_get_or_create("image", "fully_kiosk", f"{key}-screenshot", config_entry=config, device_id=device.id)
-    sensor = registry.async_update_entity(sensor.entity_id, new_entity_id=f"sensor.renamed_{key}")
-    image = registry.async_update_entity(image.entity_id, new_entity_id=f"image.other_name_{key}")
+    sensor = registry.async_get_or_create(
+        "sensor",
+        "fully_kiosk",
+        f"{key}-currentPage",
+        config_entry=config,
+        device_id=device.id,
+    )
+    image = registry.async_get_or_create(
+        "image",
+        "fully_kiosk",
+        f"{key}-screenshot",
+        config_entry=config,
+        device_id=device.id,
+    )
+    sensor = registry.async_update_entity(
+        sensor.entity_id, new_entity_id=f"sensor.renamed_{key}"
+    )
+    image = registry.async_update_entity(
+        image.entity_id, new_entity_id=f"image.other_name_{key}"
+    )
     hass.states.async_set(sensor.entity_id, url)
-    hass.states.async_set(image.entity_id, "2026-10-27T00:00:00+00:00", {"friendly_name": f"{key} tablet screenshot"})
+    hass.states.async_set(
+        image.entity_id,
+        "2026-10-27T00:00:00+00:00",
+        {"friendly_name": f"{key} tablet screenshot"},
+    )
     return sensor, image
 
 
@@ -65,39 +88,60 @@ async def test_discovery_matches_each_device_and_exact_view(hass):
     first, first_image = tablet(hass, "first")
     second, second_image = tablet(hass, "second", "https://ha.example.test" + VIEW)
     full_url = URL + "&display=" + "a" * 300
-    hass.states.async_set(first.entity_id, full_url[:255], {"full_url": full_url, "truncated": True})
+    hass.states.async_set(
+        first.entity_id, full_url[:255], {"full_url": full_url, "truncated": True}
+    )
     tablet(hass, "other_view", "http://192.168.1.229:8123/dashboard-home/kitchen")
     tablet(hass, "other_origin", "https://other.example.test" + VIEW)
     tablet(hass, "malformed", "http://[invalid" + VIEW)
     disabled, _ = tablet(hass, "disabled")
-    er.async_get(hass).async_update_entity(disabled.entity_id, disabled_by=er.RegistryEntryDisabler.USER)
+    er.async_get(hass).async_update_entity(
+        disabled.entity_id, disabled_by=er.RegistryEntryDisabler.USER
+    )
     unavailable, _ = tablet(hass, "unavailable")
     hass.states.async_set(unavailable.entity_id, "unavailable", {"full_url": URL})
     _, disabled_image = tablet(hass, "disabled_image")
-    er.async_get(hass).async_update_entity(disabled_image.entity_id, disabled_by=er.RegistryEntryDisabler.USER)
+    er.async_get(hass).async_update_entity(
+        disabled_image.entity_id, disabled_by=er.RegistryEntryDisabler.USER
+    )
     assert kiosk.matching_screenshots(hass, VIEW) == [
         {"entity_id": first_image.entity_id, "name": "first tablet screenshot"},
         {"entity_id": second_image.entity_id, "name": "second tablet screenshot"},
     ]
 
 
-async def test_http_requires_both_credentials_and_skips_no_matches(hass, hass_client, hass_client_no_auth, kiosk_view):
+async def test_http_requires_both_credentials_and_skips_no_matches(
+    hass, hass_client, hass_client_no_auth, kiosk_view
+):
     """Return an empty list silently and enforce HA administrator authentication plus pairing."""
     client = await hass_client()
-    response = await client.post(kiosk.KioskScreenshotsView.url, json={"worker_token": "paired-worker", "path": VIEW})
+    response = await client.post(
+        kiosk.KioskScreenshotsView.url,
+        json={"worker_token": "paired-worker", "path": VIEW},
+    )
     assert response.status == 200
     assert await response.json() == {"screenshots": []}
     assert response.headers["Cache-Control"] == "no-store"
-    response = await client.post(kiosk.KioskScreenshotsView.url, json={"worker_token": "wrong", "path": VIEW})
+    response = await client.post(
+        kiosk.KioskScreenshotsView.url, json={"worker_token": "wrong", "path": VIEW}
+    )
     assert response.status == 403
     response = await client.delete(kiosk.KioskScreenshotsView.url)
     assert response.status == 405
     no_auth = await hass_client_no_auth()
-    response = await no_auth.post(kiosk.KioskScreenshotsView.url, json={"worker_token": "paired-worker", "path": VIEW})
+    response = await no_auth.post(
+        kiosk.KioskScreenshotsView.url,
+        json={"worker_token": "paired-worker", "path": VIEW},
+    )
     assert response.status == 401
     token = await hass.auth.async_create_refresh_token(kiosk_view.user)
-    read_only = await hass_client(access_token=hass.auth.async_create_access_token(token))
-    response = await read_only.post(kiosk.KioskScreenshotsView.url, json={"worker_token": "paired-worker", "path": VIEW})
+    read_only = await hass_client(
+        access_token=hass.auth.async_create_access_token(token)
+    )
+    response = await read_only.post(
+        kiosk.KioskScreenshotsView.url,
+        json={"worker_token": "paired-worker", "path": VIEW},
+    )
     assert response.status == 403
 
 
@@ -107,12 +151,26 @@ async def test_http_revalidates_view_and_limits_image(hass, hass_client, kiosk_v
     sensor, image = tablet(hass, "first")
     body = {"worker_token": "paired-worker", "path": VIEW, "entity_id": image.entity_id}
     with patch.object(kiosk, "async_get_image", new_callable=AsyncMock) as fetch:
-        for path in ("https://example.test/", "//example.test", "/dashboard-home/../other", VIEW + "?kiosk", VIEW + "#other", "/dashboard/%2e%2e"):
-            response = await client.post(kiosk.KioskScreenshotsView.url, json={**body, "path": path})
+        for path in (
+            "https://example.test/",
+            "//example.test",
+            "/dashboard-home/../other",
+            VIEW + "?kiosk",
+            VIEW + "#other",
+            "/dashboard/%2e%2e",
+        ):
+            response = await client.post(
+                kiosk.KioskScreenshotsView.url, json={**body, "path": path}
+            )
             assert response.status == 400
-        response = await client.post(kiosk.KioskScreenshotsView.url, json={**body, "entity_id": "image.private_camera"})
+        response = await client.post(
+            kiosk.KioskScreenshotsView.url,
+            json={**body, "entity_id": "image.private_camera"},
+        )
         assert response.status == 404
-        hass.states.async_set(sensor.entity_id, "http://192.168.1.229:8123/dashboard-home/kitchen")
+        hass.states.async_set(
+            sensor.entity_id, "http://192.168.1.229:8123/dashboard-home/kitchen"
+        )
         response = await client.post(kiosk.KioskScreenshotsView.url, json=body)
         assert response.status == 404
         fetch.assert_not_called()

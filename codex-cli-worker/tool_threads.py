@@ -17,7 +17,9 @@ import re
 import threading
 
 # Codex thread ids are UUIDs. Anything else is refused before the lookup.
-THREAD_ID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+THREAD_ID_RE = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+)
 
 
 def valid_thread_id(value):
@@ -63,7 +65,9 @@ class ChatThreads:
     def release(self, task_id):
         """Remove every thread of the task, its own and its sub-agents'."""
         with self.lock:
-            for thread_id in [key for key, value in self.tasks.items() if value == task_id]:
+            for thread_id in [
+                key for key, value in self.tasks.items() if value == task_id
+            ]:
                 del self.tasks[thread_id]
 
     def task_for(self, thread_id):

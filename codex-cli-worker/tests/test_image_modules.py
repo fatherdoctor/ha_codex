@@ -3,9 +3,10 @@
 The worker runs from the image's root folder, so a module that the source tree has and the
 Dockerfile does not copy is found by the tests and missing at startup.
 """
+
 import ast
-import unittest
 from pathlib import Path
+import unittest
 
 WORKER = Path(__file__).resolve().parents[1]
 
@@ -38,14 +39,21 @@ class ImageModulesTests(unittest.TestCase):
         self.assertIn("server.py", copied)
         missing = {}
         for name in sorted(item for item in copied if item.endswith(".py")):
-            needed = {f"{module}.py" for module in local_imports(WORKER / name)} - copied
+            needed = {
+                f"{module}.py" for module in local_imports(WORKER / name)
+            } - copied
             if needed:
                 missing[name] = sorted(needed)
-        self.assertEqual(missing, {}, "modules imported in the image but not copied to /")
+        self.assertEqual(
+            missing, {}, "modules imported in the image but not copied to /"
+        )
 
     def test_the_call_tool_takes_its_name_matcher_into_the_image(self):
         self.assertIn("name_match", local_imports(WORKER / "ha_call.py"))
-        self.assertIn("name_match.py", root_copies((WORKER / "Dockerfile").read_text(encoding="utf-8")))
+        self.assertIn(
+            "name_match.py",
+            root_copies((WORKER / "Dockerfile").read_text(encoding="utf-8")),
+        )
 
 
 if __name__ == "__main__":

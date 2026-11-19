@@ -1,19 +1,24 @@
 """Private, bounded storage for user-approved dashboard browser exceptions."""
+
 from __future__ import annotations
 
 import hashlib
 import json
 import math
 import os
-import re
-import threading
-import tempfile
 from pathlib import Path
+import re
+import tempfile
+import threading
 from urllib.parse import urlparse
 
 # The controller (browser_permissions.cjs) loads the same policy, so both sides
 # agree on which requests can be approved and on every limit.
-POLICY = json.loads(Path(__file__).with_name("browser_permission_policy.json").read_text(encoding="utf-8"))
+POLICY = json.loads(
+    Path(__file__)
+    .with_name("browser_permission_policy.json")
+    .read_text(encoding="utf-8")
+)
 LIMITS = POLICY["limits"]
 MAX_RULES = LIMITS["saved_rules"]
 MAX_CANDIDATES = LIMITS["candidates"]
@@ -25,8 +30,10 @@ HEX = re.compile(r"[a-f0-9]{64}")
 PATH = re.compile(POLICY["dashboard_path_pattern"])
 TYPE = re.compile(POLICY["type_pattern"])
 HTTP_PATH = re.compile(POLICY["http_path_pattern"])
-STORE_ERROR = ("Saved browser permissions could not be read, so none are applied. "
-               "Remove them in Settings > Browser permissions to start over.")
+STORE_ERROR = (
+    "Saved browser permissions could not be read, so none are applied. "
+    "Remove them in Settings > Browser permissions to start over."
+)
 
 
 def _any(words):
@@ -36,15 +43,25 @@ def _any(words):
 
 SENSITIVE = re.compile(_any(POLICY["sensitive_names"]), FLAGS)
 CREDENTIAL = re.compile(
-    f"bearer{POLICY['whitespace']}|(?:{_any(POLICY['credential_value_names'])}){POLICY['whitespace']}*[=:]", FLAGS)
-READ = re.compile(f"(?:^|/)(?:{_any(POLICY['read_prefixes'])})(?:_|$)|/(?:{_any(POLICY['read_suffixes'])})$")
+    f"bearer{POLICY['whitespace']}|(?:{_any(POLICY['credential_value_names'])}){POLICY['whitespace']}*[=:]",
+    FLAGS,
+)
+READ = re.compile(
+    f"(?:^|/)(?:{_any(POLICY['read_prefixes'])})(?:_|$)|/(?:{_any(POLICY['read_suffixes'])})$"
+)
 DENIED_TYPE = re.compile(f"^(?:{_any(POLICY['denied_websocket_prefixes'])})(?:/|$)")
 WRITE_WORDS = frozenset(POLICY["write_words"])
 
 
 def words(text):
     """Split a command or path into lowercase words at punctuation and camelCase."""
-    return [word for word in re.split(r"[^a-z0-9]+", re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", text).lower()) if word]
+    return [
+        word
+        for word in re.split(
+            r"[^a-z0-9]+", re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", text).lower()
+        )
+        if word
+    ]
 
 
 def writes(text):
@@ -69,24 +86,33 @@ def _inspectable(item, depth=0):
     if isinstance(item, str):
         return not CREDENTIAL.search(item)
     if isinstance(item, dict):
-        return all(not SENSITIVE.search(key) and _inspectable(child, depth + 1) for key, child in item.items())
+        return all(
+            not SENSITIVE.search(key) and _inspectable(child, depth + 1)
+            for key, child in item.items()
+        )
     if isinstance(item, list):
         return all(_inspectable(child, depth + 1) for child in item)
     if type(item) is int:
-        return abs(item) <= 2 ** 53 - 1
+        return abs(item) <= 2**53 - 1
     if type(item) is float:
-        return math.isfinite(item) and (not item.is_integer() or abs(item) <= 2 ** 53 - 1)
+        return math.isfinite(item) and (not item.is_integer() or abs(item) <= 2**53 - 1)
     return item is None or type(item) is bool
 
 
 def valid_rule(value):
     """Validate fingerprints and eligibility again before storing an exception."""
-    if (not isinstance(value, dict) or not isinstance(value.get("kind"), str)
-        or value["kind"] not in {"websocket", "http", "map_tiles"}):
+    if (
+        not isinstance(value, dict)
+        or not isinstance(value.get("kind"), str)
+        or value["kind"] not in {"websocket", "http", "map_tiles"}
+    ):
         return None
     kind, snapshot, identifier = value["kind"], value.get("request"), value.get("id")
-    if (not isinstance(snapshot, str) or len(snapshot.encode("utf-8")) > LIMITS["request_bytes"]
-        or not isinstance(identifier, str)):
+    if (
+        not isinstance(snapshot, str)
+        or len(snapshot.encode("utf-8")) > LIMITS["request_bytes"]
+        or not isinstance(identifier, str)
+    ):
         return None
     if hashlib.sha256(f"{kind}\n{snapshot}".encode()).hexdigest() != identifier:
         return None
@@ -101,20 +127,45 @@ def valid_rule(value):
             return None
     elif kind == "websocket":
         name = request.get("type")
-        if (not isinstance(name, str) or len(name) > LIMITS["type_length"] or "id" in request
-            or not TYPE.fullmatch(name) or writes(name) or DENIED_TYPE.match(name)
-            or name in POLICY["denied_websocket_types"] or SENSITIVE.search(name) or not READ.search(name)):
+        if (
+            not isinstance(name, str)
+            or len(name) > LIMITS["type_length"]
+            or "id" in request
+            or not TYPE.fullmatch(name)
+            or writes(name)
+            or DENIED_TYPE.match(name)
+            or name in POLICY["denied_websocket_types"]
+            or SENSITIVE.search(name)
+            or not READ.search(name)
+        ):
             return None
     else:
         path, query = request.get("path"), request.get("query")
-        if (set(request) != {"method", "path", "query"} or not isinstance(request.get("method"), str)
+        if (
+            set(request) != {"method", "path", "query"}
+            or not isinstance(request.get("method"), str)
             or request["method"] not in {"GET", "HEAD"}
-            or not isinstance(path, str) or len(path) > LIMITS["path_length"] or not HTTP_PATH.fullmatch(path)
-            or "//" in path or re.search(r"(?:^|/)\.{1,2}(?:/|$)", path) or writes(path) or SENSITIVE.search(path)
-            or any(path == prefix or path.startswith(f"{prefix}/") for prefix in POLICY["denied_http_prefixes"])
-            or not isinstance(query, list) or len(query) > LIMITS["query_pairs"]
-            or any(not isinstance(pair, list) or len(pair) != 2 or any(not isinstance(item, str) for item in pair)
-                   or SENSITIVE.search(pair[0]) for pair in query)):
+            or not isinstance(path, str)
+            or len(path) > LIMITS["path_length"]
+            or not HTTP_PATH.fullmatch(path)
+            or "//" in path
+            or re.search(r"(?:^|/)\.{1,2}(?:/|$)", path)
+            or writes(path)
+            or SENSITIVE.search(path)
+            or any(
+                path == prefix or path.startswith(f"{prefix}/")
+                for prefix in POLICY["denied_http_prefixes"]
+            )
+            or not isinstance(query, list)
+            or len(query) > LIMITS["query_pairs"]
+            or any(
+                not isinstance(pair, list)
+                or len(pair) != 2
+                or any(not isinstance(item, str) for item in pair)
+                or SENSITIVE.search(pair[0])
+                for pair in query
+            )
+        ):
             return None
     if not _inspectable(request):
         return None
@@ -125,9 +176,16 @@ def describe(rule):
     """Return a readable label and the complete, already-validated request."""
     request = json.loads(rule["request"])
     if rule["kind"] == "map_tiles":
-        return {"label": "Load raster map tiles", "description": "Allows the map-only token and validated raster tile images. The token stays outside page scripts."}
-    return {"label": f"WebSocket {request['type']}" if rule["kind"] == "websocket" else f"{request['method']} {request['path']}",
-            "description": rule["request"]}
+        return {
+            "label": "Load raster map tiles",
+            "description": "Allows the map-only token and validated raster tile images. The token stays outside page scripts.",
+        }
+    return {
+        "label": f"WebSocket {request['type']}"
+        if rule["kind"] == "websocket"
+        else f"{request['method']} {request['path']}",
+        "description": rule["request"],
+    }
 
 
 def scope(session):
@@ -141,9 +199,16 @@ def scope(session):
     url = urlparse(session.get("url", ""))
     if not isinstance(identity, str) or not re.fullmatch(r"[a-f0-9]{32}", identity):
         return None
-    if url.scheme not in {"http", "https"} or not url.hostname or url.username or url.password:
+    if (
+        url.scheme not in {"http", "https"}
+        or not url.hostname
+        or url.username
+        or url.password
+    ):
         return None
-    return hashlib.sha256(f"{identity}\n{url.scheme}://{url.netloc}".encode()).hexdigest()
+    return hashlib.sha256(
+        f"{identity}\n{url.scheme}://{url.netloc}".encode()
+    ).hexdigest()
 
 
 class BrowserPermissionStore:
@@ -177,17 +242,28 @@ class BrowserPermissionStore:
     @staticmethod
     def _valid(entry):
         """Return whether one stored entry is still an eligible, untampered exception."""
-        return bool(isinstance(entry, dict) and isinstance(entry.get("scope"), str) and HEX.fullmatch(entry["scope"])
-                    and isinstance(entry.get("path"), str) and PATH.fullmatch(entry["path"])
-                    and valid_rule(entry.get("rule")) is not None
-                    and entry.get("id") == _entry_id(entry["scope"], entry["path"], entry["rule"]["id"]))
+        return bool(
+            isinstance(entry, dict)
+            and isinstance(entry.get("scope"), str)
+            and HEX.fullmatch(entry["scope"])
+            and isinstance(entry.get("path"), str)
+            and PATH.fullmatch(entry["path"])
+            and valid_rule(entry.get("rule")) is not None
+            and entry.get("id")
+            == _entry_id(entry["scope"], entry["path"], entry["rule"]["id"])
+        )
 
     def rules(self, installation, path):
         """Return valid rules for this installation and dashboard view; other entries are ignored, never fatal."""
         key = dashboard_key(path)
         with self.lock:
-            return [entry["rule"] for entry in self._read() if self._valid(entry)
-                    and entry["scope"] == installation and dashboard_key(entry["path"]) == key]
+            return [
+                entry["rule"]
+                for entry in self._read()
+                if self._valid(entry)
+                and entry["scope"] == installation
+                and dashboard_key(entry["path"]) == key
+            ]
 
     def list(self):
         """Describe saved exceptions, including ignored ones the user can still revoke."""
@@ -196,19 +272,42 @@ class BrowserPermissionStore:
         listed = []
         for entry in entries:
             if self._valid(entry):
-                listed.append({"id": entry["id"], "path": dashboard_key(entry["path"]), **describe(entry["rule"]),
-                               "created_at": str(entry.get("created_at", ""))})
-            elif isinstance(entry, dict) and isinstance(entry.get("id"), str) and len(entry["id"]) <= 128:
+                listed.append(
+                    {
+                        "id": entry["id"],
+                        "path": dashboard_key(entry["path"]),
+                        **describe(entry["rule"]),
+                        "created_at": str(entry.get("created_at", "")),
+                    }
+                )
+            elif (
+                isinstance(entry, dict)
+                and isinstance(entry.get("id"), str)
+                and len(entry["id"]) <= 128
+            ):
                 path = entry.get("path")
-                listed.append({"id": entry["id"], "path": path if isinstance(path, str) and PATH.fullmatch(path) else "",
-                               "label": "Unsupported saved permission", "unsupported": True,
-                               "description": "This saved permission is no longer supported, so it is ignored. Revoke it to free its slot.",
-                               "created_at": str(entry.get("created_at", ""))})
+                listed.append(
+                    {
+                        "id": entry["id"],
+                        "path": path
+                        if isinstance(path, str) and PATH.fullmatch(path)
+                        else "",
+                        "label": "Unsupported saved permission",
+                        "unsupported": True,
+                        "description": "This saved permission is no longer supported, so it is ignored. Revoke it to free its slot.",
+                        "created_at": str(entry.get("created_at", "")),
+                    }
+                )
         return listed
 
     def remember(self, installation, path, rules):
         """Atomically save a selected batch; malformed input never partially applies."""
-        if not isinstance(installation, str) or not HEX.fullmatch(installation) or not isinstance(path, str) or not PATH.fullmatch(path):
+        if (
+            not isinstance(installation, str)
+            or not HEX.fullmatch(installation)
+            or not isinstance(path, str)
+            or not PATH.fullmatch(path)
+        ):
             raise ValueError("Invalid browser permission")
         if any(valid_rule(rule) is None for rule in rules):
             raise ValueError("Invalid browser permission")
@@ -221,19 +320,32 @@ class BrowserPermissionStore:
                 identifier = _entry_id(installation, key, rule["id"])
                 if identifier not in known:
                     known.add(identifier)
-                    added.append({"id": identifier, "scope": installation, "path": key,
-                                  "rule": rule, "created_at": self.worker.utc_now()})
+                    added.append(
+                        {
+                            "id": identifier,
+                            "scope": installation,
+                            "path": key,
+                            "rule": rule,
+                            "created_at": self.worker.utc_now(),
+                        }
+                    )
             if not added:
                 return
             if len(entries) + len(added) > MAX_RULES:
-                raise ValueError("Saved browser permission limit reached. Revoke unused permissions in Settings.")
+                raise ValueError(
+                    "Saved browser permission limit reached. Revoke unused permissions in Settings."
+                )
             self._write([*entries, *added])
 
     def revoke(self, identifier):
         """Revoke one rule, valid or ignored; captures using a revoked rule stop."""
         with self.lock:
             entries = self._read()
-            remaining = [entry for entry in entries if not (isinstance(entry, dict) and entry.get("id") == identifier)]
+            remaining = [
+                entry
+                for entry in entries
+                if not (isinstance(entry, dict) and entry.get("id") == identifier)
+            ]
             if len(remaining) == len(entries):
                 raise ValueError("Saved browser permission no longer exists")
             self._write(remaining)
@@ -248,13 +360,21 @@ class BrowserPermissionStore:
         path = self._path()
         content = json.dumps(entries)
         if len(content.encode("utf-8")) > MAX_FILE_BYTES:
-            raise ValueError("Saved browser permission storage limit reached. Revoke unused permissions in Settings.")
+            raise ValueError(
+                "Saved browser permission storage limit reached. Revoke unused permissions in Settings."
+            )
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = None
         try:
             # NamedTemporaryFile creates mode 0600 before any contents exist.
-            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
-                                             prefix=".browser-permissions-", suffix=".tmp", delete=False) as output:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=path.parent,
+                prefix=".browser-permissions-",
+                suffix=".tmp",
+                delete=False,
+            ) as output:
                 temporary = Path(output.name)
                 output.write(content)
                 output.flush()

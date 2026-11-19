@@ -23,9 +23,9 @@ from __future__ import annotations
 import json
 import math
 import os
+from pathlib import Path
 import stat
 import time
-from pathlib import Path
 from typing import Any
 
 SETTING_PATH = Path("/data/full_access.json")
@@ -44,7 +44,9 @@ WARNING = (
 
 # The one line of the shipped requirements that names the allowed sandbox modes.
 STRICT_MODES_LINE = 'allowed_sandbox_modes = ["read-only", "workspace-write"]'
-OPEN_MODES_LINE = 'allowed_sandbox_modes = ["read-only", "workspace-write", "danger-full-access"]'
+OPEN_MODES_LINE = (
+    'allowed_sandbox_modes = ["read-only", "workspace-write", "danger-full-access"]'
+)
 # The one line that names the allowed approval policies.
 STRICT_APPROVALS_LINE = 'allowed_approval_policies = ["on-request"]'
 OPEN_APPROVALS_LINE = 'allowed_approval_policies = ["on-request", "never"]'
@@ -68,11 +70,19 @@ def read_setting(path: Path | None = None) -> dict[str, Any]:
         return off
     # bool is a kind of int in Python, and NaN is a float, so each is refused by name.
     changed_at = data["changed_at"]
-    if isinstance(changed_at, bool) or not isinstance(changed_at, (int, float)) or not math.isfinite(changed_at):
+    if (
+        isinstance(changed_at, bool)
+        or not isinstance(changed_at, (int, float))
+        or not math.isfinite(changed_at)
+    ):
         return off
     if not isinstance(data["changed_by"], str):
         return off
-    return {"enabled": True, "changed_at": data["changed_at"], "changed_by": data["changed_by"]}
+    return {
+        "enabled": True,
+        "changed_at": data["changed_at"],
+        "changed_by": data["changed_by"],
+    }
 
 
 def is_on(path: Path | None = None) -> bool:
@@ -80,7 +90,9 @@ def is_on(path: Path | None = None) -> bool:
     return read_setting(path)["enabled"]
 
 
-def set_enabled(enabled: bool, changed_by: str, path: Path | None = None) -> dict[str, Any]:
+def set_enabled(
+    enabled: bool, changed_by: str, path: Path | None = None
+) -> dict[str, Any]:
     """Save the setting, readable and writable by the worker only, and return it as read_setting() sees it.
 
     The caller checks that the request comes from an administrator and that,
@@ -90,7 +102,12 @@ def set_enabled(enabled: bool, changed_by: str, path: Path | None = None) -> dic
     if not enabled:
         path.unlink(missing_ok=True)
         return read_setting(path)
-    data = {"enabled": True, "warning": WARNING_ID, "changed_at": time.time(), "changed_by": changed_by}
+    data = {
+        "enabled": True,
+        "warning": WARNING_ID,
+        "changed_at": time.time(),
+        "changed_by": changed_by,
+    }
     temporary = path.with_name(path.name + ".tmp")
     temporary.unlink(missing_ok=True)
     descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -111,13 +128,21 @@ def requirements_text(enabled: bool, shipped: str) -> str:
     if not enabled:
         return shipped
     if shipped.count(STRICT_MODES_LINE) != 1:
-        raise ValueError("The shipped requirements do not hold the expected sandbox modes line.")
+        raise ValueError(
+            "The shipped requirements do not hold the expected sandbox modes line."
+        )
     if shipped.count(STRICT_APPROVALS_LINE) != 1:
-        raise ValueError("The shipped requirements do not hold the expected approval policies line.")
-    return shipped.replace(STRICT_MODES_LINE, OPEN_MODES_LINE).replace(STRICT_APPROVALS_LINE, OPEN_APPROVALS_LINE)
+        raise ValueError(
+            "The shipped requirements do not hold the expected approval policies line."
+        )
+    return shipped.replace(STRICT_MODES_LINE, OPEN_MODES_LINE).replace(
+        STRICT_APPROVALS_LINE, OPEN_APPROVALS_LINE
+    )
 
 
-def write_requirements(target: Path | None = None, shipped: Path | None = None, setting: Path | None = None) -> bool:
+def write_requirements(
+    target: Path | None = None, shipped: Path | None = None, setting: Path | None = None
+) -> bool:
     """Write Codex's managed requirements for the current setting; return False when there is nothing to write.
 
     Outside the app image (tests, development) the target folder is missing and
@@ -125,7 +150,9 @@ def write_requirements(target: Path | None = None, shipped: Path | None = None, 
     file stays and Codex keeps refusing full access, which is the safe side.
     """
     target = target or REQUIREMENTS_PATH
-    shipped = shipped or (IMAGE_REQUIREMENTS if IMAGE_REQUIREMENTS.is_file() else SOURCE_REQUIREMENTS)
+    shipped = shipped or (
+        IMAGE_REQUIREMENTS if IMAGE_REQUIREMENTS.is_file() else SOURCE_REQUIREMENTS
+    )
     if not target.parent.is_dir():
         return False
     text = requirements_text(is_on(setting), shipped.read_text(encoding="utf-8"))

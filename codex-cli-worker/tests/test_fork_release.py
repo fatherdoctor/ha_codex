@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import importlib.util
 import json
+from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
-from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SPEC = importlib.util.spec_from_file_location("fork_release", ROOT / "scripts" / "fork_release.py")
+SPEC = importlib.util.spec_from_file_location(
+    "fork_release", ROOT / "scripts" / "fork_release.py"
+)
 fr = importlib.util.module_from_spec(SPEC)
 sys.modules["fork_release"] = fr
 SPEC.loader.exec_module(fr)
@@ -21,7 +23,9 @@ MANIFEST = '{{\n  "domain": "codex_cli",\n  "name": "Codex",\n  "version": "{v}"
 
 
 def run(repo: Path, *args: str) -> str:
-    return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
+    return subprocess.run(
+        ["git", *args], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
 
 
 class ForkReleaseTests(unittest.TestCase):
@@ -33,7 +37,9 @@ class ForkReleaseTests(unittest.TestCase):
         run(self.repo, "config", "user.name", "Test")
         run(self.repo, "config", "commit.gpgsign", "false")
         run(self.repo, "config", "tag.gpgsign", "false")
-        self.write_version("0.1.81.1", code="print('good')\n", notes="- First fork build.")
+        self.write_version(
+            "0.1.81.1", code="print('good')\n", notes="- First fork build."
+        )
         self.good = self.commit("0.1.81.1")
 
     def tearDown(self) -> None:
@@ -46,12 +52,18 @@ class ForkReleaseTests(unittest.TestCase):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding="utf-8")
 
-    def write_version(self, version: str, code: str | None = None, notes: str = "- Changes.") -> None:
+    def write_version(
+        self, version: str, code: str | None = None, notes: str = "- Changes."
+    ) -> None:
         self.write(fr.WORKER_CONFIG, CONFIG.format(v=version))
         self.write(fr.MANIFEST, MANIFEST.format(v=version))
         if code is not None:
             self.write("codex-cli-worker/server.py", code)
-        old = (self.repo / fr.CHANGELOG).read_text(encoding="utf-8") if (self.repo / fr.CHANGELOG).exists() else ""
+        old = (
+            (self.repo / fr.CHANGELOG).read_text(encoding="utf-8")
+            if (self.repo / fr.CHANGELOG).exists()
+            else ""
+        )
         body = old.split("\n", 2)[2] if old.startswith("# Changelog") else ""
         self.write(fr.CHANGELOG, f"# Changelog\n\n## {version}\n\n{notes}\n\n{body}")
 
@@ -64,8 +76,17 @@ class ForkReleaseTests(unittest.TestCase):
         return run(self.repo, "rev-parse", "HEAD")
 
     def record(self, version: str, commit: str, result: str = "pass") -> str:
-        self.write(f"{fr.RECORD_DIR}/v{version}.json",
-                   json.dumps({"version": version, "commit": commit, "result": result, "lab": "HAOS lab VM"}))
+        self.write(
+            f"{fr.RECORD_DIR}/v{version}.json",
+            json.dumps(
+                {
+                    "version": version,
+                    "commit": commit,
+                    "result": result,
+                    "lab": "HAOS lab VM",
+                }
+            ),
+        )
         return self.commit(f"lab pass {version}")
 
     def release(self, version: str) -> str:
@@ -114,11 +135,17 @@ class ForkReleaseTests(unittest.TestCase):
     def test_an_unreleased_changelog_heading_is_not_tagged(self) -> None:
         self.write_version("0.1.81.2", code="print('next')\n")
         changelog = self.repo / fr.CHANGELOG
-        changelog.write_text(changelog.read_text(encoding="utf-8").replace("## 0.1.81.2\n", "## 0.1.81.2 (unreleased)\n"),
-                             encoding="utf-8")
+        changelog.write_text(
+            changelog.read_text(encoding="utf-8").replace(
+                "## 0.1.81.2\n", "## 0.1.81.2 (unreleased)\n"
+            ),
+            encoding="utf-8",
+        )
         marked = self.commit("0.1.81.2 still unreleased")
         self.record("0.1.81.2", marked)
-        with self.assertRaisesRegex(fr.ReleaseError, r"still marks 0\.1\.81\.2 as \(unreleased\)"):
+        with self.assertRaisesRegex(
+            fr.ReleaseError, r"still marks 0\.1\.81\.2 as \(unreleased\)"
+        ):
             fr.plan_tag("0.1.81.2", self.repo)
 
     def test_a_version_is_never_tagged_twice_or_backwards(self) -> None:
@@ -142,7 +169,15 @@ class ForkReleaseTests(unittest.TestCase):
         return commit
 
     def test_version_order_puts_a_beta_before_its_release(self) -> None:
-        ordered = ["0.1.81.2", "0.2.0-beta.1", "0.2.0-beta.2", "0.2.0-beta.10", "0.2.0", "0.2.0.1", "0.2.1-beta.1"]
+        ordered = [
+            "0.1.81.2",
+            "0.2.0-beta.1",
+            "0.2.0-beta.2",
+            "0.2.0-beta.10",
+            "0.2.0",
+            "0.2.0.1",
+            "0.2.1-beta.1",
+        ]
         self.assertEqual(sorted(reversed(ordered), key=fr.version_key), ordered)
 
     def test_beta_is_tagged_after_its_lab_pass(self) -> None:
@@ -163,7 +198,9 @@ class ForkReleaseTests(unittest.TestCase):
         self.write_version("0.2.0-beta.3")
         late = self.commit("late beta")
         self.record("0.2.0-beta.3", late)
-        with self.assertRaisesRegex(fr.ReleaseError, "0.2.0-beta.3 is not newer than 0.2.0"):
+        with self.assertRaisesRegex(
+            fr.ReleaseError, "0.2.0-beta.3 is not newer than 0.2.0"
+        ):
             fr.plan_tag("0.2.0-beta.3", self.repo)
 
     def test_beta_must_be_newer_than_the_last_beta(self) -> None:
@@ -198,7 +235,9 @@ class ForkReleaseTests(unittest.TestCase):
         self.write_version("0.1.81.2", code="print('only on beta')\n")
         on_beta = self.commit("0.1.81.2 on beta")
         self.record("0.1.81.2", on_beta)
-        with self.assertRaisesRegex(fr.ReleaseError, "not on origin/main: a stable release comes from main"):
+        with self.assertRaisesRegex(
+            fr.ReleaseError, "not on origin/main: a stable release comes from main"
+        ):
             fr.plan_tag("0.1.81.2", self.repo)
 
     def test_beta_may_come_from_the_beta_branch(self) -> None:
@@ -213,9 +252,18 @@ class ForkReleaseTests(unittest.TestCase):
         self.make_bad_release()
         self.write_version("0.2.0-beta.1")
         rolled = self.commit("a rollback given a beta version")
-        self.write(f"{fr.RECORD_DIR}/v0.2.0-beta.1.json", json.dumps(
-            {"version": "0.2.0-beta.1", "kind": "rollback", "rollback_of": "0.1.81.1", "result": "pass",
-             "commit": rolled}))
+        self.write(
+            f"{fr.RECORD_DIR}/v0.2.0-beta.1.json",
+            json.dumps(
+                {
+                    "version": "0.2.0-beta.1",
+                    "kind": "rollback",
+                    "rollback_of": "0.1.81.1",
+                    "result": "pass",
+                    "commit": rolled,
+                }
+            ),
+        )
         self.commit("rollback record")
         with self.assertRaisesRegex(fr.ReleaseError, "a rollback is a stable release"):
             fr.plan_tag("0.2.0-beta.1", self.repo)
@@ -246,10 +294,19 @@ class ForkReleaseTests(unittest.TestCase):
         self.make_bad_release()
         new = fr.rollback("0.1.81.1", None, False, self.repo)
         self.assertEqual(new, "0.1.81.3")
-        self.assertEqual((self.repo / "codex-cli-worker/server.py").read_text(), "print('good')\n")
-        self.assertFalse((self.repo / "codex-cli-worker/new_module.py").exists(), "files added since are removed")
+        self.assertEqual(
+            (self.repo / "codex-cli-worker/server.py").read_text(), "print('good')\n"
+        )
+        self.assertFalse(
+            (self.repo / "codex-cli-worker/new_module.py").exists(),
+            "files added since are removed",
+        )
         changelog = (self.repo / fr.CHANGELOG).read_text()
-        self.assertLess(changelog.index("## 0.1.81.3"), changelog.index("## 0.1.81.2"), "history is kept, newest first")
+        self.assertLess(
+            changelog.index("## 0.1.81.3"),
+            changelog.index("## 0.1.81.2"),
+            "history is kept, newest first",
+        )
         self.assertIn("exactly 0.1.81.1 again", changelog)
         self.commit("rollback to 0.1.81.1 as 0.1.81.3")
         commit, why = fr.plan_tag("0.1.81.3", self.repo)
@@ -261,7 +318,9 @@ class ForkReleaseTests(unittest.TestCase):
         fr.rollback("0.1.81.1", None, False, self.repo)
         self.write("codex-cli-worker/server.py", "print('good, mostly')\n")
         self.commit("rollback plus an edit")
-        with self.assertRaisesRegex(fr.ReleaseError, "differs from v0.1.81.1 in codex-cli-worker/server.py"):
+        with self.assertRaisesRegex(
+            fr.ReleaseError, "differs from v0.1.81.1 in codex-cli-worker/server.py"
+        ):
             fr.plan_tag("0.1.81.3", self.repo)
 
     def test_rollback_only_to_a_build_that_passed(self) -> None:
@@ -270,7 +329,9 @@ class ForkReleaseTests(unittest.TestCase):
             fr.rollback("0.1.80", None, False, self.repo)
 
     def test_rollback_stops_at_a_stored_data_change(self) -> None:
-        self.make_bad_release(notes="- Stored data: conversations move to a new format.")
+        self.make_bad_release(
+            notes="- Stored data: conversations move to a new format."
+        )
         with self.assertRaisesRegex(fr.ReleaseError, "0.1.81.2 changed stored data"):
             fr.rollback("0.1.81.1", None, False, self.repo)
         self.assertEqual(fr.rollback("0.1.81.1", None, True, self.repo), "0.1.81.3")
@@ -286,10 +347,20 @@ class VersionRuleTests(unittest.TestCase):
     """Both release scripts hold the version rule; they must accept and refuse the same versions."""
 
     GOOD = ("0.1.81", "0.1.81.2", "0.2.0", "0.2.0.1", "0.2.0-beta.1", "0.2.0-beta.10")
-    BAD = ("0.2", "0.1.81.2-beta.1", "0.2.0-beta", "0.2.0-rc.1", "0.2.0-beta.1.1", "v0.2.0", "0.2.0 ")
+    BAD = (
+        "0.2",
+        "0.1.81.2-beta.1",
+        "0.2.0-beta",
+        "0.2.0-rc.1",
+        "0.2.0-beta.1.1",
+        "v0.2.0",
+        "0.2.0 ",
+    )
 
     def setUp(self) -> None:
-        spec = importlib.util.spec_from_file_location("build_hacs_release", ROOT / "scripts" / "build_hacs_release.py")
+        spec = importlib.util.spec_from_file_location(
+            "build_hacs_release", ROOT / "scripts" / "build_hacs_release.py"
+        )
         self.bhr = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(self.bhr)
 
@@ -325,14 +396,20 @@ class RepositoryLayoutTests(unittest.TestCase):
         config = (ROOT / fr.WORKER_CONFIG).read_text(encoding="utf-8")
         version = fr.CONFIG_VERSION.search(config).group("version")
         self.assertRegex(version, fr.VERSION_PATTERN)
-        self.assertIn("image: ghcr.io/fatherdoctor/codex-cli-worker", config, "the Supervisor pulls a built image")
+        self.assertIn(
+            "image: ghcr.io/fatherdoctor/codex-cli-worker",
+            config,
+            "the Supervisor pulls a built image",
+        )
         manifest = json.loads((ROOT / fr.MANIFEST).read_text(encoding="utf-8"))
         self.assertEqual(manifest["version"], version)
 
     def test_current_version_has_changelog_notes(self) -> None:
         config = (ROOT / fr.WORKER_CONFIG).read_text(encoding="utf-8")
         version = fr.CONFIG_VERSION.search(config).group("version")
-        sections = dict(fr.changelog_sections((ROOT / fr.CHANGELOG).read_text(encoding="utf-8")))
+        sections = dict(
+            fr.changelog_sections((ROOT / fr.CHANGELOG).read_text(encoding="utf-8"))
+        )
         self.assertIn(version, sections)
 
 

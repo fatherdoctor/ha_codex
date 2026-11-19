@@ -5,11 +5,11 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+from pathlib import Path
 import shutil
 import sys
 import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
 SYNC_PATH = Path(__file__).resolve().parents[1] / "integration_sync.py"
@@ -42,16 +42,24 @@ class SyncTestCase(unittest.TestCase):
     def write_folder(folder: Path, version: str, code: str) -> None:
         """Write an integration folder with a manifest and one code file."""
         folder.mkdir(parents=True, exist_ok=True)
-        (folder / "manifest.json").write_text(json.dumps({"domain": "codex_cli", "version": version}))
+        (folder / "manifest.json").write_text(
+            json.dumps({"domain": "codex_cli", "version": version})
+        )
         (folder / "__init__.py").write_text(code)
 
     def sync(self, app_version: str = "0.2.0"):
         """Run one sync of the bundle into the target."""
-        return integration_sync.sync(self.bundled, self.target, self.backup, app_version, self.work)
+        return integration_sync.sync(
+            self.bundled, self.target, self.backup, app_version, self.work
+        )
 
     def leftovers(self) -> list[str]:
         """Return what a sync left behind: anything in custom_components but the target, and the work folder."""
-        found = [p.name for p in self.target.parent.iterdir() if p != self.target] if self.target.parent.exists() else []
+        found = (
+            [p.name for p in self.target.parent.iterdir() if p != self.target]
+            if self.target.parent.exists()
+            else []
+        )
         if self.work.exists() or self.work.is_symlink():
             found.append(self.work.name)
         return sorted(found)
@@ -63,7 +71,10 @@ class InstallAndUpdateTests(SyncTestCase):
     def test_fresh_install_writes_the_bundle_and_a_marker(self):
         """With no folder, the bundle is written as it is, plus a marker naming the app and bundle."""
         result = self.sync()
-        self.assertEqual((result.action, result.version, result.installed_version), ("installed", "0.2.0", ""))
+        self.assertEqual(
+            (result.action, result.version, result.installed_version),
+            ("installed", "0.2.0", ""),
+        )
         self.assertEqual((self.target / "__init__.py").read_text(), "new code")
         marker = json.loads((self.target / MARKER).read_text())
         self.assertEqual(marker["app_version"], "0.2.0")
@@ -84,9 +95,14 @@ class InstallAndUpdateTests(SyncTestCase):
         self.sync()
         self.make_bundle("0.3.0", "newer code")
         result = self.sync("0.3.0")
-        self.assertEqual((result.action, result.version, result.installed_version), ("updated", "0.3.0", "0.2.0"))
+        self.assertEqual(
+            (result.action, result.version, result.installed_version),
+            ("updated", "0.3.0", "0.2.0"),
+        )
         self.assertEqual((self.target / "__init__.py").read_text(), "newer code")
-        self.assertEqual(json.loads((self.target / MARKER).read_text())["version"], "0.3.0")
+        self.assertEqual(
+            json.loads((self.target / MARKER).read_text())["version"], "0.3.0"
+        )
         self.assertEqual((self.backup / "__init__.py").read_text(), "new code")
         self.assertEqual(self.leftovers(), [])
 
@@ -122,7 +138,9 @@ class OtherInstallTests(SyncTestCase):
         """A folder from the Marketplace, HACS or a manual copy has no marker and is not touched."""
         self.write_folder(self.target, "0.1.0", "marketplace code")
         result = self.sync()
-        self.assertEqual((result.action, result.installed_version), ("foreign", "0.1.0"))
+        self.assertEqual(
+            (result.action, result.installed_version), ("foreign", "0.1.0")
+        )
         self.assertEqual((self.target / "__init__.py").read_text(), "marketplace code")
         self.assertFalse((self.target / MARKER).exists())
         self.assertFalse(self.backup.exists())
@@ -150,11 +168,15 @@ class OtherInstallTests(SyncTestCase):
         self.sync()
         self.write_folder(self.target, "0.5.0", "other installer code")
         result = self.sync()
-        self.assertEqual((result.action, result.installed_version), ("foreign", "0.5.0"))
+        self.assertEqual(
+            (result.action, result.installed_version), ("foreign", "0.5.0")
+        )
         self.assertIn("changed after the app wrote it", result.detail)
         self.make_bundle("0.2.1", "app update")
         self.assertEqual(self.sync("0.2.1").action, "foreign")
-        self.assertEqual((self.target / "__init__.py").read_text(), "other installer code")
+        self.assertEqual(
+            (self.target / "__init__.py").read_text(), "other installer code"
+        )
         self.assertFalse(self.backup.exists())
 
     def test_a_hand_edit_is_kept_through_an_app_update(self):
@@ -205,12 +227,18 @@ class FailureTests(SyncTestCase):
         self.assertEqual(result.action, "failed")
         self.assertTrue(result.detail)
         self.assertEqual((self.target / "__init__.py").read_text(), "old code")
-        self.assertEqual(json.loads((self.target / MARKER).read_text())["version"], "0.1.0")
+        self.assertEqual(
+            json.loads((self.target / MARKER).read_text())["version"], "0.1.0"
+        )
         self.assertEqual(self.leftovers(), [])
 
     def test_a_failed_copy_leaves_the_old_folder(self):
         """A copy that stops part way (for example a full disk) changes nothing in the target."""
-        with patch.object(integration_sync.shutil, "copytree", side_effect=OSError(28, "No space left on device")):
+        with patch.object(
+            integration_sync.shutil,
+            "copytree",
+            side_effect=OSError(28, "No space left on device"),
+        ):
             self.assert_old_folder_kept(self.sync())
 
     def test_a_failed_swap_puts_the_old_folder_back(self):
@@ -303,7 +331,9 @@ class NoticeTests(unittest.TestCase):
 
     def notice(self, action, **fields):
         """Return the notice for a result with the given action and fields."""
-        return integration_sync.notice_for(integration_sync.SyncResult(action, **fields), "0.2.0")
+        return integration_sync.notice_for(
+            integration_sync.SyncResult(action, **fields), "0.2.0"
+        )
 
     def test_install_and_update_ask_for_one_restart(self):
         """Both ask for a restart, under one id, so an update replaces an unread install notice."""
@@ -319,7 +349,9 @@ class NoticeTests(unittest.TestCase):
 
     def test_another_install_is_explained(self):
         """The notice says the folder was left as it is and how to hand it to the app."""
-        title_and_text = " ".join(self.notice("foreign", version="0.2.0", installed_version="0.1.0")[1:])
+        title_and_text = " ".join(
+            self.notice("foreign", version="0.2.0", installed_version="0.1.0")[1:]
+        )
         self.assertIn("left", title_and_text)
         self.assertIn("version 0.1.0", title_and_text)
         self.assertIn("(0.2.0)", title_and_text)
@@ -349,10 +381,16 @@ class MainTests(SyncTestCase):
             "NOTICE_RETRY_SECONDS": 0,
         }.items():
             self.enterContext(patch.object(integration_sync, name, value))
-        self.enterContext(patch.dict(os.environ, {"ADDON_VERSION": "0.2.0", "SUPERVISOR_TOKEN": "token"}))
+        self.enterContext(
+            patch.dict(
+                os.environ, {"ADDON_VERSION": "0.2.0", "SUPERVISOR_TOKEN": "token"}
+            )
+        )
         self.posts: list[tuple[str, dict]] = []
         self.accept = True
-        self.enterContext(patch.object(integration_sync, "supervisor_post", side_effect=self.post))
+        self.enterContext(
+            patch.object(integration_sync, "supervisor_post", side_effect=self.post)
+        )
         self.enterContext(patch("builtins.print"))
 
     def post(self, path, payload, token):
@@ -362,9 +400,15 @@ class MainTests(SyncTestCase):
 
     def notices(self) -> list[str]:
         """Return the ids of the notifications shown."""
-        return [p["notification_id"] for path, p in self.posts if path.endswith("persistent_notification/create")]
+        return [
+            p["notification_id"]
+            for path, p in self.posts
+            if path.endswith("persistent_notification/create")
+        ]
 
-    def test_fresh_install_shows_the_restart_notice_and_leaves_discovery_to_announce(self):
+    def test_fresh_install_shows_the_restart_notice_and_leaves_discovery_to_announce(
+        self,
+    ):
         """A first start installs and asks for a restart; it does not post discovery, which --announce does."""
         self.assertEqual(integration_sync.main([]), 0)
         self.assertTrue((self.target / "manifest.json").exists())
@@ -386,7 +430,11 @@ class MainTests(SyncTestCase):
         shutil.rmtree(self.target)  # the owner removes the other install
         integration_sync.main([])  # the app installs its own copy
         integration_sync.main([])  # and finds it current
-        dismissed = [p["notification_id"] for path, p in self.posts if path.endswith("persistent_notification/dismiss")]
+        dismissed = [
+            p["notification_id"]
+            for path, p in self.posts
+            if path.endswith("persistent_notification/dismiss")
+        ]
         self.assertEqual(dismissed, [integration_sync.NOTICE_KEPT])
         self.assertNotIn("kept_notice_version", json.loads(self.state.read_text()))
 
@@ -395,7 +443,9 @@ class MainTests(SyncTestCase):
         self.state.write_text(json.dumps({"kept_notice_version": "0.2.0"}))
         self.accept = False
         integration_sync.main([])
-        self.assertEqual(json.loads(self.state.read_text())["kept_notice_version"], "0.2.0")
+        self.assertEqual(
+            json.loads(self.state.read_text())["kept_notice_version"], "0.2.0"
+        )
         self.accept = True
         integration_sync.main([])
         self.assertNotIn("kept_notice_version", json.loads(self.state.read_text()))
@@ -404,13 +454,19 @@ class MainTests(SyncTestCase):
         """Only a restart notice is ever owed; a record holding another id shows nothing."""
         integration_sync.main([])
         self.posts.clear()
-        self.state.write_text(json.dumps({"restart_notice": ["something_else", "title", "message"]}))
+        self.state.write_text(
+            json.dumps({"restart_notice": ["something_else", "title", "message"]})
+        )
         integration_sync.main([])
         self.assertEqual(self.notices(), [])
 
     def test_a_file_name_that_cannot_be_encoded_is_reported_not_raised(self):
         """A ValueError from the copy (a name that cannot be encoded) gives the failed notice, not a traceback."""
-        with patch.object(integration_sync, "tree_digest", side_effect=UnicodeEncodeError("utf-8", "x", 0, 1, "bad")):
+        with patch.object(
+            integration_sync,
+            "tree_digest",
+            side_effect=UnicodeEncodeError("utf-8", "x", 0, 1, "bad"),
+        ):
             self.assertEqual(integration_sync.main([]), 0)
         self.assertEqual(self.notices(), [integration_sync.NOTICE_FAILED])
 
@@ -436,7 +492,10 @@ class MainTests(SyncTestCase):
         self.write_folder(self.target, "0.1.0", "marketplace code")
         self.accept = False
         integration_sync.main([])
-        self.assertEqual(self.notices(), [integration_sync.NOTICE_KEPT] * integration_sync.NOTICE_ATTEMPTS)
+        self.assertEqual(
+            self.notices(),
+            [integration_sync.NOTICE_KEPT] * integration_sync.NOTICE_ATTEMPTS,
+        )
         self.assertFalse(self.state.exists())
         self.accept = True
         self.posts.clear()
@@ -447,7 +506,10 @@ class MainTests(SyncTestCase):
         """If Core cannot take the restart notice, the next starts post it until it is shown once."""
         self.accept = False
         integration_sync.main([])
-        self.assertEqual(self.notices(), [integration_sync.NOTICE_RESTART] * integration_sync.NOTICE_ATTEMPTS)
+        self.assertEqual(
+            self.notices(),
+            [integration_sync.NOTICE_RESTART] * integration_sync.NOTICE_ATTEMPTS,
+        )
         self.accept = True
         self.posts.clear()
         integration_sync.main([])
@@ -458,7 +520,11 @@ class MainTests(SyncTestCase):
 
     def test_an_io_error_before_the_copy_is_reported(self):
         """An error reading the bundle or the folder gives the failed notice, and the start goes on."""
-        with patch.object(integration_sync, "tree_digest", side_effect=OSError(5, "Input/output error")):
+        with patch.object(
+            integration_sync,
+            "tree_digest",
+            side_effect=OSError(5, "Input/output error"),
+        ):
             self.assertEqual(integration_sync.main([]), 0)
         self.assertEqual(self.notices(), [integration_sync.NOTICE_FAILED])
 
@@ -471,7 +537,11 @@ class MainTests(SyncTestCase):
 
     def test_a_failed_copy_does_not_stop_the_start(self):
         """A failure is reported in a notice and main still returns 0, so run.sh starts the worker."""
-        with patch.object(integration_sync.shutil, "copytree", side_effect=OSError(28, "No space left on device")):
+        with patch.object(
+            integration_sync.shutil,
+            "copytree",
+            side_effect=OSError(28, "No space left on device"),
+        ):
             self.assertEqual(integration_sync.main([]), 0)
         self.assertEqual(self.notices(), [integration_sync.NOTICE_FAILED])
 
@@ -484,8 +554,16 @@ class AnnounceTests(unittest.TestCase):
         self.answers: list = []
         self.posts: list[str] = []
         self.waits = 0
-        self.enterContext(patch.object(integration_sync, "core_knows_integration", side_effect=lambda token: self.answers.pop()))
-        self.enterContext(patch.object(integration_sync, "supervisor_post", side_effect=self.post))
+        self.enterContext(
+            patch.object(
+                integration_sync,
+                "core_knows_integration",
+                side_effect=lambda token: self.answers.pop(),
+            )
+        )
+        self.enterContext(
+            patch.object(integration_sync, "supervisor_post", side_effect=self.post)
+        )
         self.enterContext(patch("builtins.print"))
 
     def post(self, path, payload, token):
@@ -521,9 +599,11 @@ class AnnounceTests(unittest.TestCase):
 
     def test_main_with_announce_only_announces(self):
         """main(["--announce"]) does not sync and calls announce with the Supervisor token."""
-        with patch.dict(os.environ, {"SUPERVISOR_TOKEN": "token"}), \
-                patch.object(integration_sync, "announce") as announce, \
-                patch.object(integration_sync, "sync") as sync:
+        with (
+            patch.dict(os.environ, {"SUPERVISOR_TOKEN": "token"}),
+            patch.object(integration_sync, "announce") as announce,
+            patch.object(integration_sync, "sync") as sync,
+        ):
             self.assertEqual(integration_sync.main(["--announce"]), 0)
         announce.assert_called_once_with("token")
         sync.assert_not_called()
@@ -534,18 +614,24 @@ class CoreKnowsIntegrationTests(unittest.TestCase):
 
     def answer(self, response):
         """Return what core_knows_integration says when the Supervisor request gives this response."""
-        with patch.object(integration_sync, "supervisor_request", return_value=response) as request:
+        with patch.object(
+            integration_sync, "supervisor_request", return_value=response
+        ) as request:
             known = integration_sync.core_knows_integration("token")
-        request.assert_called_once_with("GET", integration_sync.FLOW_HANDLERS_PATH, "token")
+        request.assert_called_once_with(
+            "GET", integration_sync.FLOW_HANDLERS_PATH, "token"
+        )
         return known
 
     @staticmethod
     def response(body):
         """A response whose json() returns body, or raises ValueError when body is that class."""
+
         def json_body():
             if body is ValueError:
                 raise ValueError("not JSON")
             return body
+
         return type("Response", (), {"json": staticmethod(json_body)})()
 
     def test_listed_unlisted_and_unreadable(self):
@@ -584,7 +670,9 @@ class SupervisorRequestTests(unittest.TestCase):
         with patch.object(integration_sync.requests, "Session", Session):
             self.assertTrue(integration_sync.supervisor_post("/discovery", {}, "token"))
         (session,) = sessions
-        self.assertEqual((session.method, session.url), ("POST", "http://supervisor/discovery"))
+        self.assertEqual(
+            (session.method, session.url), ("POST", "http://supervisor/discovery")
+        )
         self.assertFalse(session.trust_env_at_post)
         self.assertIs(session.kwargs["allow_redirects"], False)
 
@@ -613,30 +701,50 @@ class PackagingTests(unittest.TestCase):
 
     def test_app_and_integration_versions_match(self):
         """config.yaml and manifest.json carry the same version, so the bundle matches the app."""
-        config = (self.REPO / "codex-cli-worker" / "config.yaml").read_text(encoding="utf-8")
-        app_version = next(
-            line.split(":", 1)[1].strip().strip('"') for line in config.splitlines() if line.startswith("version:")
+        config = (self.REPO / "codex-cli-worker" / "config.yaml").read_text(
+            encoding="utf-8"
         )
-        manifest = json.loads((self.REPO / "custom_components" / "codex_cli" / "manifest.json").read_text())
+        app_version = next(
+            line.split(":", 1)[1].strip().strip('"')
+            for line in config.splitlines()
+            if line.startswith("version:")
+        )
+        manifest = json.loads(
+            (
+                self.REPO / "custom_components" / "codex_cli" / "manifest.json"
+            ).read_text()
+        )
         self.assertEqual(app_version, manifest["version"])
 
     def test_the_option_is_declared_and_defaults_on(self):
         """install_integration is an option with a bool schema, default true, and a translated label."""
-        config = (self.REPO / "codex-cli-worker" / "config.yaml").read_text(encoding="utf-8")
+        config = (self.REPO / "codex-cli-worker" / "config.yaml").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("  install_integration: true\n", config)
         self.assertIn("  install_integration: bool\n", config)
-        translations = (self.REPO / "codex-cli-worker" / "translations" / "en.yaml").read_text(encoding="utf-8")
+        translations = (
+            self.REPO / "codex-cli-worker" / "translations" / "en.yaml"
+        ).read_text(encoding="utf-8")
         self.assertIn("  install_integration:\n    name: ", translations)
 
     def test_the_image_bundles_the_integration_and_runs_the_sync_first(self):
         """The Dockerfile copies the bundle and the script; run.sh runs the script before the server."""
-        dockerfile = (self.REPO / "codex-cli-worker" / "Dockerfile").read_text(encoding="utf-8")
+        dockerfile = (self.REPO / "codex-cli-worker" / "Dockerfile").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("COPY integration /usr/share/ha_codex/integration\n", dockerfile)
         self.assertIn("COPY integration_sync.py /\n", dockerfile)
         run = (self.REPO / "codex-cli-worker" / "run.sh").read_text(encoding="utf-8")
-        self.assertLess(run.index("python3 /integration_sync.py ||"), run.index("python3 /server.py"))
+        self.assertLess(
+            run.index("python3 /integration_sync.py ||"),
+            run.index("python3 /server.py"),
+        )
         # Discovery waits in the background for Home Assistant to load the integration; it must not block.
-        self.assertLess(run.index("python3 /integration_sync.py --announce &\n"), run.index("python3 /server.py"))
+        self.assertLess(
+            run.index("python3 /integration_sync.py --announce &\n"),
+            run.index("python3 /server.py"),
+        )
 
 
 if __name__ == "__main__":
