@@ -362,7 +362,8 @@ the same time, and every tool call carries the thread id in `_meta.threadId` (a 
 thread's id). It also prints three start-up times and what Codex does when a second process resumes a thread
 that is live. Each tool program runs behind a small relay that logs what Codex sends it; the tool sockets do not
 exist in the test, so tool calls fail after Codex has sent them. Set `HA_TEST_CODEX` as above; without the pinned
-CLI the tests are skipped. The socket check of the same kind is in
+CLI the tests are skipped, unless `HA_TEST_REQUIRE_CODEX=1` (set in the container job) makes that a failure. The
+socket check of the same kind is in
 [SANDBOX_TESTING.md](SANDBOX_TESTING.md#the-workers-sockets-and-the-sandbox-live-proof).
 `node codex-cli-worker/tests/browser_verification.cjs` uses real Chromium and a protocol fixture to
 check viewports, external auth, registered local resources, blocked writes, broken resources/cards, rejected

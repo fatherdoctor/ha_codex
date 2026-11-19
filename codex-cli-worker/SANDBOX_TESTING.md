@@ -63,7 +63,10 @@ HA_TEST_CODEX=/path/to/codex-package/bin/codex python -m unittest codex-cli-work
 ```
 
 It needs Python 3.12 or later with the worker's test packages, no account and no network. Without the pinned
-CLI each test is skipped. Run it again on every move of the Codex pin.
+CLI each test is skipped. The container job sets `HA_TEST_REQUIRE_CODEX=1`, which turns a missing or
+wrong-version CLI into a failure, so a move of the Codex pin must also move `PINNED_VERSION` in
+`test_live_proofs.py` (`test_fork_pins.py` checks that the two agree). Under `pytest`, the Home Assistant test
+plugin blocks sockets; these tests allow only 127.0.0.1 and Unix sockets for themselves.
 
 ### HAOS parser and policy ABI
 

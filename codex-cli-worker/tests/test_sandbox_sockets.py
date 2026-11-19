@@ -15,7 +15,8 @@ a Unix socket. This test runs that claim on the pinned Codex CLI, for every sock
   sandbox and not a broken probe.
 
 It runs in the Verification checks container job, and by hand with HA_TEST_CODEX (SANDBOX_TESTING.md). It skips
-without the pinned CLI. A later move of the Codex pin runs it again.
+without the pinned CLI, except where HA_TEST_REQUIRE_CODEX=1 (the container job) makes that a failure, so a later
+move of the Codex pin must run it again.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ import json
 import re
 import shlex
 import socketserver
+import subprocess
 import sys
 import tempfile
 import threading
@@ -33,11 +35,12 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_live_proofs import (
-    NEEDS_CLI,
     THREAD,
     WORKER,
     AppServer,
     ScriptedModel,
+    allow_local_sockets,
+    needs_cli,
 )
 
 REQUIREMENTS = Path("/etc/codex/requirements.toml")
@@ -92,12 +95,13 @@ def full_access_allowed() -> bool:
     return "danger-full-access" in REQUIREMENTS.read_text(encoding="utf-8")
 
 
-@NEEDS_CLI
+@needs_cli
 class SandboxSockets(unittest.TestCase):
     """P8: run one probe command through Codex in each mode and read what it reached."""
 
     @classmethod
     def setUpClass(cls) -> None:
+        allow_local_sockets()
         cache = Path.home() / ".cache"
         cache.mkdir(exist_ok=True)
         cls.temporary = tempfile.TemporaryDirectory(prefix="ha-sandbox-sockets-", dir=cache)
@@ -119,6 +123,10 @@ class SandboxSockets(unittest.TestCase):
             listener.server_close()
         cls.model.close()
         cls.temporary.cleanup()
+
+    def setUp(self) -> None:
+        # The class's servers live through every test; their accepted sockets need the block lifted each time.
+        allow_local_sockets()
 
     def accepted(self) -> int:
         """Return the connections all listeners accepted so far."""
@@ -148,23 +156,23 @@ class SandboxSockets(unittest.TestCase):
             app.close()
 
     def sandboxed(self, label: str, thread: dict[str, Any], turn: dict[str, Any]) -> None:
-        """Assert that the probe reached no socket in one sandbox mode."""
+        """Assert that the probe ran in one sandbox mode and that the sandbox refused every socket with EPERM.
+
+        A probe that printed nothing did not run, which proves nothing about the sandbox, so it fails the test.
+        """
         before = self.accepted()
         result, _requests = self.run_probe(label, thread, turn)
+        self.assertIsNotNone(result, f"{label}: the probe printed nothing, so it did not run in the sandbox")
+        self.assertEqual(set(result), set(self.paths), (label, result))
+        self.assertEqual(set(result.values()), {"EPERM"}, (label, result))
         self.assertEqual(self.accepted(), before, f"{label}: a socket accepted a connection")
-        if result is not None:
-            self.assertEqual({path for path, outcome in result.items() if outcome == "connected"}, set(),
-                             (label, result))
-        print(f"\nP8 {label}: no socket reached ({len(self.paths)} sockets); the probe saw "
-              f"{sorted(set(result.values())) if result else 'no output (the command did not run)'}.")
+        print(f"\nP8 {label}: the sandbox refused all {len(self.paths)} sockets with EPERM.")
 
     def workspace_policy(self) -> dict[str, Any]:
         """Return the workspaceWrite policy the worker sends, with the test's folder as the writable root."""
         return {"type": "workspaceWrite", "networkAccess": False, "writableRoots": [str(self.root / "workspace")]}
 
     def test_control_the_probe_reaches_every_socket_outside_codex(self) -> None:
-        import subprocess
-
         before = self.accepted()
         output = subprocess.run(self.command, shell=True, capture_output=True, text=True, timeout=30, check=True).stdout
         result = json.loads(output.split("PROBE ", 1)[1])

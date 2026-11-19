@@ -27,8 +27,9 @@ tool programs are the worker's own, launched with the worker's own arguments (se
 each behind a small relay that writes every line Codex sends it to a log. Their sockets do not exist here, so a
 tool call returns an error to Codex; the proofs read only what Codex sent.
 
-The tests skip when the pinned CLI is not present. They run in the Verification checks container job, and by
-hand with HA_TEST_CODEX=<path to the codex binary of the pinned package> (SANDBOX_TESTING.md).
+The tests skip when the pinned CLI is not present, and fail instead when HA_TEST_REQUIRE_CODEX=1 (the
+Verification checks container job sets it). Run them by hand with HA_TEST_CODEX=<path to the codex binary of the
+pinned package> (SANDBOX_TESTING.md).
 """
 
 from __future__ import annotations
@@ -48,6 +49,7 @@ from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 WORKER = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(WORKER))
@@ -67,7 +69,33 @@ def pinned_cli_present() -> bool:
     return PINNED_VERSION in version
 
 
-NEEDS_CLI = unittest.skipUnless(pinned_cli_present(), f"the pinned Codex CLI {PINNED_VERSION} is not at {CODEX}")
+def needs_cli(test_class: type) -> type:
+    """Skip a test class without the pinned CLI, or fail at once when HA_TEST_REQUIRE_CODEX=1 asks for it.
+
+    The container step of the verification workflow sets HA_TEST_REQUIRE_CODEX=1. A move of the Codex pin that
+    leaves PINNED_VERSION behind then fails the step, so a green step always means the proofs ran.
+    """
+    if pinned_cli_present():
+        return test_class
+    reason = f"the pinned Codex CLI {PINNED_VERSION} is not at {CODEX}"
+    if os.environ.get("HA_TEST_REQUIRE_CODEX") == "1":
+        raise RuntimeError(f"HA_TEST_REQUIRE_CODEX=1, but {reason}")
+    return unittest.skip(reason)(test_class)
+
+
+
+def allow_local_sockets() -> None:
+    """Allow the stand-in model's local HTTP server and the Unix sockets under pytest.
+
+    The Home Assistant pytest plugin blocks socket creation before each test. These tests need a TCP server on
+    127.0.0.1 and Unix sockets, so they lift the block and keep connections limited to 127.0.0.1 and Unix
+    sockets. Call it in setUp: the plugin blocks again before the next test. Outside pytest it does nothing.
+    """
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        import pytest_socket
+
+        pytest_socket.enable_socket()
+        pytest_socket.socket_allow_hosts(["127.0.0.1"], allow_unix_socket=True)
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -506,11 +534,12 @@ THREAD = {"cwd": None, "sandbox": "workspace-write", "approvalPolicy": "on-reque
           "model": MODEL}
 
 
-@NEEDS_CLI
+@needs_cli
 class LiveProofs(unittest.TestCase):
     """Each test starts its own app-server with the worker's tool programs and a scripted model."""
 
     def setUp(self) -> None:
+        allow_local_sockets()
         cache = Path.home() / ".cache"
         cache.mkdir(exist_ok=True)
         self.temporary = tempfile.TemporaryDirectory(prefix="ha-live-proofs-", dir=cache)
@@ -593,7 +622,8 @@ class LiveProofs(unittest.TestCase):
         app.turn(thread_id, "[script:p3a] first turn")
         mark = app.mark()
         app.request("thread/unsubscribe", {"threadId": thread_id})
-        app.wait_for(lambda m: m.get("method") == "thread/closed", mark)
+        app.wait_for(lambda m: m.get("method") == "thread/closed"
+                     and (m.get("params") or {}).get("threadId") == thread_id, mark)
         mark = app.mark()
         resumed = app.request("thread/resume", {"threadId": thread_id, "cwd": str(self.root / "workspace")})
         self.assertEqual(resumed["thread"]["id"], thread_id)
@@ -721,15 +751,14 @@ class LiveProofs(unittest.TestCase):
               "whole.")
 
     # P9 -------------------------------------------------------------------------------------------------------
-    def test_p9_every_tool_call_names_its_thread(self) -> None:
+    def every_tool_call_names_its_thread(self) -> list[str]:
+        """Call one tool of each tool program in one turn; assert each call names the thread. Return the servers."""
         app = self.start()
         mark = app.mark()
         thread_id = self.thread(app)
         wait_ready(app, self.names, mark)
         # A new chat's id is known from the thread/start answer, before any tool call.
         self.assertFalse(tool_calls(self.root, self.names))
-        import server
-
         steps: list[dict[str, Any]] = [
             {"tool": ("home_assistant", "verify"), "arguments": {"checks": []}},
             {"tool": ("home_assistant_data", "exchange_info"), "arguments": {}},
@@ -745,9 +774,24 @@ class LiveProofs(unittest.TestCase):
         self.assertEqual(set(by_server), set(self.names), calls)
         for name, params in calls:
             self.assertEqual((params.get("_meta") or {}).get("threadId"), thread_id, (name, params))
-        print(f"\nP9 holds: each of the {len(by_server)} tool programs received _meta.threadId equal to the "
-              f"thread id of thread/start ({sorted(by_server)}); the scheduling tool is "
-              f"{'on' if server.scheduling.SCHEDULED_RUNS else 'off (SCHEDULED_RUNS), so not offered'}.")
+        return sorted(by_server)
+
+    def test_p9_every_tool_call_names_its_thread(self) -> None:
+        servers = self.every_tool_call_names_its_thread()
+        print(f"\nP9 holds: each of the {len(servers)} tool programs received _meta.threadId equal to the thread id "
+              f"of thread/start ({servers}); scheduled runs are off by default, so the scheduling tool is not offered.")
+
+    def test_p9_with_scheduled_runs_on_the_scheduling_tool_names_its_thread_too(self) -> None:
+        """Review N2: with SCHEDULED_RUNS on, the worker starts a fifth tool program; it gets the thread id too."""
+        import server
+
+        with patch.object(server.scheduling, "SCHEDULED_RUNS", True):
+            self.tool_args, self.names = worker_app_server_args(self.root)
+        self.assertIn("codex_scheduling", self.names)
+        self.assertEqual(len(self.names), 5, self.names)
+        servers = self.every_tool_call_names_its_thread()
+        print(f"\nP9 holds with scheduled runs on: each of the {len(servers)} tool programs received "
+              f"_meta.threadId ({servers}).")
 
     def test_p9_a_sub_agent_names_its_own_thread(self) -> None:
         """Review F2 of the design: a sub-agent is its own thread, so its tool calls carry its own id."""
