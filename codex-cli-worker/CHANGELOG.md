@@ -2,6 +2,9 @@
 
 ## 0.4.0 (unreleased)
 
+- The app no longer pins a model by default. The **Model pin** option is empty, and empty means the account's
+  default model. A value you set still pins the app. On the first start of this version, an install that still has
+  the old default value (`gpt-6.1-sol`) has it cleared once, with a line in the app log; a value set later is kept.
 - Chat page: while Codex works, the steps stay closed under the "Working on your request…" line until you tap it.
   Your choice holds until the turn ends; then the steps close under "Worked for…" as before. A permission request
   stays visible outside the closed list.
