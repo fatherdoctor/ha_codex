@@ -2,6 +2,8 @@
 
 ## 0.4.0 (unreleased)
 
+- New Courtyard mark: the app icon and logo, the integration's brand images, the chat page's tab icon and header mark, and
+  the README logo.
 - The app no longer pins a model by default. The **Model pin** option is empty, and empty means the account's
   default model. A value you set still pins the app. On the first start of this version, an install that still has
   the old default value (`gpt-6.1-sol`) has it cleared once, with a line in the app log; a value set later is kept.

@@ -1,3 +1,5 @@
+<p align="center"><img src="brand/courtyard/logo.svg" alt="Codex for Home Assistant" width="320"></p>
+
 # Codex for Home Assistant
 
 [![License][license-badge]][license-url]
