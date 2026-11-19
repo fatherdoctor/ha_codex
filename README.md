@@ -47,7 +47,6 @@ see [If a download is missing](#if-a-download-is-missing).
 - [Permission modes](#permission-modes)
 - [Safety](#safety)
 - [Sign-in](#sign-in)
-- [Mailbox](#mailbox)
 - [Using it from Assist and automations](#using-it-from-assist-and-automations)
 - [Troubleshooting](#troubleshooting)
 - [Versions](#versions)
@@ -206,18 +205,6 @@ Codex uses your ChatGPT account.
 When the sign-in is missing, ended or rejected, a banner returns above the chat, the integration raises a Home
 Assistant repair, and the **Signed in** sensor turns off. A good sign-in clears all three. The Codex program does not
 report when a sign-in will end, so the app shows no countdown. Sign out any time with **Settings** > **Sign out**.
-
-## Mailbox
-
-**Mailbox.** You, Codex and one other local agent can leave plain-text messages for each other. The other agent is
-another app or agent that runs on the same Home Assistant host; it connects with a separate token that you create in
-Settings. The token shows once, and the app stores only a hash.
-
-- A message is only data. It never starts work, and it grants no permission.
-- A sensor counts unread messages for the other agent, and an event announces each new message without its text.
-- Limits: 500 messages, and 20 writes per turn and 64 per UTC day for each writer.
-
-Details: [The lead agent channel and mailbox](codex-cli-worker/DOCS.md#the-lead-agent-channel-and-mailbox).
 
 ## Using it from Assist and automations
 

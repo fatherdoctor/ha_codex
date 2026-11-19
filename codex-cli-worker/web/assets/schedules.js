@@ -1,45 +1,22 @@
 "use strict";
 /**
- * Schedules and local messages, without rendering stored HTML.
+ * Schedules, without rendering stored HTML.
  *
  * A schedule is made and edited in one window, the schedule editor, opened by
  * Schedule in a chat's menu. Settings keeps the list of every schedule, where
- * an agent's proposal is approved, and the local mailbox.
+ * an agent's proposal is approved.
  */
 (() => {
   const el = (id) => document.getElementById(id);
   const dialog = el("settings");
   const editor = el("schedule-dialog");
-  /** False while scheduled runs are switched off: the page then has no schedule markup at all. */
-  const scheduleUi = Boolean(editor);
+  // While scheduled runs are switched off, the page has no schedule markup at all, and nothing here runs.
+  if (!editor) return;
   /** The newest answer of the schedules API: every schedule and the recent runs. */
   let latest = { schedules: [], runs: [] };
   let timer;
-  let reader = "owner";
-  const selector = node("select", ""); selector.id = "schedule-mail-reader";
-  selector.setAttribute("aria-label", "Mailbox");
-  for (const role of ["owner", "lead", "codex"]) {
-    const option = node("option", role); option.value = role; selector.append(option);
-  }
-  selector.onchange = () => { reader = selector.value; cancelMailClear(); refresh(); };
-  el("schedule-mailbox").before(selector);
-  const recipient = node("select", ""); recipient.id = "schedule-mail-to";
-  recipient.setAttribute("aria-label", "To");
-  for (const role of ["all", "owner", "lead", "codex"]) {
-    const option = node("option", role); option.value = role; recipient.append(option);
-  }
-  const due = node("input", ""); due.id = "schedule-mail-due"; due.type = "text";
-  due.placeholder = "Optional ISO 8601 due time, including zone";
-  due.setAttribute("aria-label", "Due (optional, include time zone)");
-  el("schedule-mail-body").before(node("label", "To"), recipient, node("label", "Due (optional)"), due);
-  const mailboxPath = path => `${path}?mailbox=${reader}`;
-  function mailWhen(value) {
-    return `${new Intl.DateTimeFormat(undefined, {timeZone: zone || "UTC", dateStyle: "medium", timeStyle: "medium"}).format(new Date(value))} (${zone || "UTC"})`;
-  }
   let zone = null;
   let refreshing = false;
-  let clearConfirmation = false;
-  let focusClearCancel = false;
   function message(error) {
     el("schedule-result").textContent = String(error.message || error);
   }
@@ -68,7 +45,6 @@
     };
     return value;
   }
-  function cancelMailClear() { clearConfirmation = false; focusClearCancel = false; }
   const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
   function describe(spec) {
     const shown = triggerOf(spec), place = zone || "time zone unavailable";
@@ -81,7 +57,7 @@
   }
   /** Read every schedule and the recent runs, and learn Home Assistant's time zone. */
   async function load() {
-    latest = await api(mailboxPath("schedules"));
+    latest = await api("schedules");
     zone = latest.timezone || null;
     return latest;
   }
@@ -226,7 +202,7 @@
     } catch (error) { showError(error); }
   }
   document.addEventListener("thread-action", (event) => {
-    if (scheduleUi && event.detail.action === "schedule") openForChat(event.detail.id);
+    if (event.detail.action === "schedule") openForChat(event.detail.id);
   });
   /**
    * The Scheduled runs header: how many schedules there are. It needs the owner
@@ -245,7 +221,6 @@
     refreshing = true;
     try {
       const data = await load();
-      if (scheduleUi) {
       el("schedule-timezone").textContent = zone ? `Home Assistant time zone: ${zone}` : data.timezone_error;
       const list = el("schedule-list"); list.replaceChildren();
       for (const schedule of data.schedules) {
@@ -267,57 +242,9 @@
       const runs = el("schedule-runs"); runs.replaceChildren();
       for (const run of data.runs) runs.append(runLine(run, dialog));
       if (!data.runs.length) runs.append(node("p", "No runs yet.", "muted"));
-      }
-      el("lead-token-status").textContent = data.lead_token_configured ? "A lead token is configured." : "No lead token is configured.";
-      if (!scheduleUi) setSectionStatus("scheduled-work", data.lead_token_configured ? "Lead token set" : "No lead token", false);
-      const mailbox = el("schedule-mailbox"); mailbox.replaceChildren();
-      const mailboxStatus = data.mailbox_status;
-      if (mailboxStatus?.full[reader]) mailbox.append(node("p", "Mailbox full of unread messages. Read or clear it before sending more.", "muted"));
-      if (data.mailbox.length) {
-        if (clearConfirmation) {
-          const confirmation = node("div", "");
-          confirmation.id = "schedule-mail-clear-confirmation";
-          confirmation.setAttribute("role", "group");
-          confirmation.setAttribute("aria-label", "Clear mailbox confirmation");
-          confirmation.append(node("p", "Delete every message in this mailbox? Other mailbox copies remain. This cannot be undone."));
-          const actions = node("div", "", "settings-actions");
-          const cancel = button("Cancel", cancelMailClear);
-          actions.append(cancel, button("Clear all messages", async () => {
-            await api(mailboxPath("schedule-mailbox"), {confirm: true}, "DELETE");
-            cancelMailClear();
-            el("schedule-mail-parent").value = "";
-            el("schedule-mail-target").textContent = "New message";
-          }));
-          confirmation.append(actions); mailbox.append(confirmation);
-          if (focusClearCancel) { cancel.focus(); focusClearCancel = false; }
-        } else {
-          mailbox.append(button("Clear mailbox", () => { clearConfirmation = true; focusClearCancel = true; }));
-        }
-      } else cancelMailClear();
-      for (const mail of data.mailbox) {
-        const item = node("div", "");
-        const envelope = mail.envelope;
-        if (mail.origin) item.append(node("strong", mail.origin === "schedule" ? "Scheduled run" : "Started by lead"));
-        for (const key of ["to", "from", "sent", "last_modified", "due", "message"]) {
-          if (envelope[key] == null) continue;
-          const label = {to: "To", from: "From", sent: "Sent", last_modified: "Last modified", due: "Due", message: "Message"}[key];
-          const value = ["sent", "last_modified", "due"].includes(key) ? mailWhen(envelope[key]) : envelope[key];
-          item.append(node("strong", label), node(key === "message" ? "pre" : "p", value));
-        }
-        if (envelope.due && Date.parse(envelope.due) <= Date.now()) item.append(node("p", "Due / overdue", "muted"));
-        const plain = node("details", "", "disclosure"); plain.append(node("summary", "Plain text"), node("pre", mail.text)); item.append(plain);
-        item.append(button("Reply", () => { el("schedule-mail-parent").value = mail.parent || mail.id; el("schedule-mail-target").textContent = "Reply to selected thread"; el("schedule-mail-body").focus(); }));
-        if (!mail.parent) item.append(button("Delete thread", () => api(mailboxPath(`schedule-mailbox/${mail.id}`), undefined, "DELETE")));
-        mailbox.append(item);
-      }
-      if (!data.mailbox.length) mailbox.append(node("p", "No local messages.", "muted"));
-      if (dialog.open && reader === "owner" && data.mailbox.length) {
-        await api(mailboxPath("schedule-mailbox/read"), {ids: data.mailbox.map(mail => mail.id)});
-      }
     } catch (error) { message(error); }
     finally { refreshing = false; }
   }
-  if (scheduleUi) {
   el("schedule-form").onsubmit = async (event) => {
     event.preventDefault();
     if (!zone) { editorError("Home Assistant time zone unavailable; schedule entry is paused."); return; }
@@ -357,32 +284,10 @@
   };
   el("schedule-trigger").onchange = showTrigger;
   el("schedule-kind").onchange = showTrigger;
-  }
-  el("lead-token-create").onclick = async () => {
-    try {
-      const data = await api("lead-token", {confirm: true});
-      el("lead-token-value").value = data.token; el("lead-token-result").hidden = false;
-      message("Copy this token now. It is cleared when you close settings."); await refresh();
-    } catch (error) { message(error); }
-  };
-  function hideToken() { el("lead-token-value").value = ""; el("lead-token-result").hidden = true; }
-  el("lead-token-hide").onclick = hideToken;
-  el("lead-token-copy").onclick = async () => {
-    try { await navigator.clipboard.writeText(el("lead-token-value").value); message("Token copied. Store it only in the other agent's private configuration."); }
-    catch (error) { message(error); }
-  };
-  el("schedule-mail-reset").onclick = () => { el("schedule-mail-parent").value = ""; el("schedule-mail-target").textContent = "New message"; };
-  el("schedule-mail-form").onsubmit = async (event) => {
-    event.preventDefault();
-    const parent = el("schedule-mail-parent").value;
-    try { await api(parent ? `schedule-mailbox/${parent}/reply` : "schedule-mailbox", {message: el("schedule-mail-body").value, to: recipient.value, due: due.value.trim() || null}); el("schedule-mail-body").value = ""; message("Message saved locally."); await refresh(); }
-    catch (error) { message(error); }
-  };
   new MutationObserver(() => {
     clearInterval(timer);
     if (dialog.open) { refresh(); timer = setInterval(refresh, 15000); }
-    else { hideToken(); cancelMailClear(); }
   }).observe(dialog, {attributes: true, attributeFilter: ["open"]});
-  dialog.addEventListener("close", () => { clearInterval(timer); hideToken(); cancelMailClear(); });
-  if (scheduleUi) showTrigger();
+  dialog.addEventListener("close", () => clearInterval(timer));
+  showTrigger();
 })();
