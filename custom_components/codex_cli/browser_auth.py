@@ -1,24 +1,24 @@
 """Issue bounded browser sessions to the paired worker, without user credentials."""
+
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta
+from functools import partial
 import hmac
 import json
 import os
-from datetime import timedelta
-from functools import partial
 from typing import Any
 
 from aiohttp import web
-
 from homeassistant.auth.const import GROUP_ID_READ_ONLY
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.components.http.const import KEY_HASS_USER
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.network import get_url, get_supervisor_network_url
-from homeassistant.helpers.storage import Store
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.network import get_supervisor_network_url, get_url
+from homeassistant.helpers.storage import Store
 
 from .const import DOMAIN
 
@@ -40,22 +40,36 @@ def browser_resources(hass: HomeAssistant) -> dict[str, list[str]]:
                 # HA registers individual static files as partials of these
                 # serving functions, moved to http.server in newer Core releases.
                 # A .js-looking URL alone proves nothing.
-                if (route.method == "GET" and isinstance(handler, partial)
-                    and getattr(handler.func, "__module__", "") in {
-                        "homeassistant.components.http", "homeassistant.components.http.server",
+                if (
+                    route.method == "GET"
+                    and isinstance(handler, partial)
+                    and getattr(handler.func, "__module__", "")
+                    in {
+                        "homeassistant.components.http",
+                        "homeassistant.components.http.server",
                     }
-                    and getattr(handler.func, "__name__", "") in {"_serve_file", "_serve_file_with_cache_headers"}):
+                    and getattr(handler.func, "__name__", "")
+                    in {"_serve_file", "_serve_file_with_cache_headers"}
+                ):
                     files.add(resource.canonical)
     extra_urls = set()
     for key in ("frontend_extra_module_url", "frontend_extra_js_url_es5"):
         extra_urls.update(getattr(hass.data.get(key), "urls", ()))
     result = {}
     remaining = 32000
-    for key, values in (("files", files), ("directories", directories), ("extra_urls", extra_urls)):
+    for key, values in (
+        ("files", files),
+        ("directories", directories),
+        ("extra_urls", extra_urls),
+    ):
         selected = []
         for value in sorted(value for value in values if isinstance(value, str))[:256]:
             size = len(json.dumps(value).encode("utf-8"))
-            if value != "/" and 0 < len(value.encode("utf-8")) <= 1024 and size <= remaining:
+            if (
+                value != "/"
+                and 0 < len(value.encode("utf-8")) <= 1024
+                and size <= remaining
+            ):
                 selected.append(value)
                 remaining -= size
         result[key] = selected
@@ -87,7 +101,9 @@ class BrowserSessions:
             raise ValueError("Browser identity is not a system user")
         if user is None:
             user = await self.hass.auth.async_create_system_user(
-                "Dashboard verification", group_ids=[GROUP_ID_READ_ONLY], local_only=True
+                "Dashboard verification",
+                group_ids=[GROUP_ID_READ_ONLY],
+                local_only=True,
             )
             await store.async_save({"user_id": user.id})
         await self.hass.auth.async_update_user(
@@ -108,7 +124,9 @@ class BrowserSessions:
             if self.closed or self.user is None:
                 raise web.HTTPServiceUnavailable()
             if self.sessions:
-                raise web.HTTPTooManyRequests(reason="A verification browser is already active")
+                raise web.HTTPTooManyRequests(
+                    reason="A verification browser is already active"
+                )
             # Direct Core connection: the Supervisor API proxy is not a frontend.
             url = get_supervisor_network_url(self.hass) or get_url(
                 self.hass, allow_external=False, allow_cloud=False
@@ -127,10 +145,14 @@ class BrowserSessions:
                 raise
             timer = self.hass.loop.call_later(SESSION_SECONDS, self.revoke, refresh.id)
             self.sessions[refresh.id] = (refresh, timer)
-            return {"session_id": refresh.id, "access_token": access,
-                    "installation_id": self.user.id,
-                    "expires_in": SESSION_SECONDS, "url": url,
-                    "resources": resources}
+            return {
+                "session_id": refresh.id,
+                "access_token": access,
+                "installation_id": self.user.id,
+                "expires_in": SESSION_SECONDS,
+                "url": url,
+                "resources": resources,
+            }
 
     def revoke(self, session_id: str) -> None:
         """Remove the session's refresh token and cancel its expiry timer; unknown session IDs are ignored."""
@@ -173,8 +195,10 @@ class BrowserSessionView(HomeAssistantView):
         if broker is None:
             raise web.HTTPServiceUnavailable()
         supplied = data.get("worker_token", "")
-        if not isinstance(supplied, str) or not request[KEY_HASS_USER].is_admin or not hmac.compare_digest(
-            supplied.encode(), broker.worker_token.encode()
+        if (
+            not isinstance(supplied, str)
+            or not request[KEY_HASS_USER].is_admin
+            or not hmac.compare_digest(supplied.encode(), broker.worker_token.encode())
         ):
             raise web.HTTPForbidden()
         return broker
@@ -234,20 +258,30 @@ class DiagnosticView(BrowserSessionView):
         if not token:
             raise web.HTTPServiceUnavailable()
         async with async_get_clientsession(self.hass).get(
-            "http://supervisor/core/logs", params={"lines": 100},
+            "http://supervisor/core/logs",
+            params={"lines": 100},
             headers={"Authorization": f"Bearer {token}"},
-            timeout=15, allow_redirects=False,
+            timeout=15,
+            allow_redirects=False,
         ) as response:
             if response.status != 200:
-                return self.json({"error": f"Log read returned HTTP {response.status}"}, status_code=502)
+                return self.json(
+                    {"error": f"Log read returned HTTP {response.status}"},
+                    status_code=502,
+                )
             content = bytearray()
             async for chunk in response.content.iter_chunked(4096):
                 content.extend(chunk)
                 if len(content) > 32768:
                     break
         # Final redaction is applied by the worker before persistence or model access.
-        return self.json({"text": bytes(content[:32768]).decode("utf-8", "replace"),
-                          "truncated": len(content) > 32768}, headers={"Cache-Control": "no-store"})
+        return self.json(
+            {
+                "text": bytes(content[:32768]).decode("utf-8", "replace"),
+                "truncated": len(content) > 32768,
+            },
+            headers={"Cache-Control": "no-store"},
+        )
 
     async def delete(self, request: web.Request) -> web.Response:
         """Refuse DELETE, which the parent view handles but this view does not support."""

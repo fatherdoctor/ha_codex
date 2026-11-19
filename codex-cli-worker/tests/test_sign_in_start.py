@@ -1,9 +1,10 @@
 """At start the app never makes a sign-in code by itself; it points to Sign in, and the owner starts one."""
+
 from __future__ import annotations
 
+from pathlib import Path
 import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
 from test_server import server
@@ -19,10 +20,16 @@ class StartSignInTests(unittest.TestCase):
         self.enterContext(patch.object(server, "AUTO_SIGN_IN_MARK", self.mark))
         self.signed_in = False
         self.enterContext(
-            patch.object(server, "codex_login_status", side_effect=lambda: {"status_ok": self.signed_in})
+            patch.object(
+                server,
+                "codex_login_status",
+                side_effect=lambda: {"status_ok": self.signed_in},
+            )
         )
         self.starts = self.enterContext(patch.object(server, "start_codex_login_flow"))
-        self.notices = self.enterContext(patch.object(server, "create_persistent_notification"))
+        self.notices = self.enterContext(
+            patch.object(server, "create_persistent_notification")
+        )
         self.enterContext(patch.object(server, "refresh_usage_status_async"))
         self.enterContext(patch.object(server, "update_auth_state"))
         self.enterContext(patch("builtins.print"))

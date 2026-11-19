@@ -10,7 +10,11 @@ from queue import Queue
 from threading import Event
 from typing import Any, Callable
 
-SANDBOX_TYPES = {"read-only": "readOnly", "workspace-write": "workspaceWrite", "danger-full-access": "dangerFullAccess"}
+SANDBOX_TYPES = {
+    "read-only": "readOnly",
+    "workspace-write": "workspaceWrite",
+    "danger-full-access": "dangerFullAccess",
+}
 
 
 class StubAppServer:
@@ -25,9 +29,18 @@ class StubAppServer:
 
     turn_id = "fixture-turn"
 
-    def __init__(self, session_id: str, final: dict[str, Any] | None = None, *, items=(),
-                 on_turn: Callable[[], None] | None = None, hold: bool = False,
-                 turn_error: str | None = None, failure: str | None = None, stderr: str = "") -> None:
+    def __init__(
+        self,
+        session_id: str,
+        final: dict[str, Any] | None = None,
+        *,
+        items=(),
+        on_turn: Callable[[], None] | None = None,
+        hold: bool = False,
+        turn_error: str | None = None,
+        failure: str | None = None,
+        stderr: str = "",
+    ) -> None:
         self.session_id = session_id
         self.final = final
         self.items = items
@@ -62,10 +75,15 @@ class StubAppServer:
         if method == "initialize":
             self.emit(id=message["id"], result={})
         elif method in {"thread/start", "thread/resume"}:
-            self.emit(id=message["id"], result={
-                "thread": {"id": self.session_id}, "approvalPolicy": "on-request", "approvalsReviewer": "user",
-                "sandbox": {"type": SANDBOX_TYPES[message["params"]["sandbox"]]},
-            })
+            self.emit(
+                id=message["id"],
+                result={
+                    "thread": {"id": self.session_id},
+                    "approvalPolicy": "on-request",
+                    "approvalsReviewer": "user",
+                    "sandbox": {"type": SANDBOX_TYPES[message["params"]["sandbox"]]},
+                },
+            )
         elif method == "turn/start":
             self.start_turn(message)
         return len(line)
@@ -74,7 +92,9 @@ class StubAppServer:
         """Answer turn/start, then send the exchange's items, its answer and the end of the turn."""
         turn = {"id": self.turn_id}
         self.emit(id=message["id"], result={"turn": turn})
-        self.emit(method="turn/started", params={"threadId": self.session_id, "turn": turn})
+        self.emit(
+            method="turn/started", params={"threadId": self.session_id, "turn": turn}
+        )
         if self.on_turn:
             self.on_turn()
         self.started.set()
@@ -87,13 +107,25 @@ class StubAppServer:
         for item in self.items:
             self.emit(method="item/completed", params={**context, "item": item})
         if self.final is not None:
-            self.emit(method="item/completed", params={**context, "item": {
-                "id": "final", "type": "agentMessage", "phase": "final_answer", "text": json.dumps(self.final),
-            }})
+            self.emit(
+                method="item/completed",
+                params={
+                    **context,
+                    "item": {
+                        "id": "final",
+                        "type": "agentMessage",
+                        "phase": "final_answer",
+                        "text": json.dumps(self.final),
+                    },
+                },
+            )
         outcome: dict[str, Any] = {**turn, "status": "completed"}
         if self.turn_error:
             outcome.update(status="failed", error={"message": self.turn_error})
-        self.emit(method="turn/completed", params={"threadId": self.session_id, "turn": outcome})
+        self.emit(
+            method="turn/completed",
+            params={"threadId": self.session_id, "turn": outcome},
+        )
 
     def readline(self) -> str:
         """Return the next line for the worker, or "" once the stub is closed."""

@@ -23,9 +23,13 @@ class CodexSandboxReadinessTests(unittest.TestCase):
         for mode in ("read-only", "workspace-write"):
             with (
                 self.subTest(mode=mode),
-                patch.object(server, "codex_binary_path", return_value=server.CODEX_BINARY),
+                patch.object(
+                    server, "codex_binary_path", return_value=server.CODEX_BINARY
+                ),
                 patch.object(server, "CONFIG_ROOT", Path("/config")),
-                patch.object(server, "codex_env", return_value={"CODEX_HOME": "/data/codex-home"}),
+                patch.object(
+                    server, "codex_env", return_value={"CODEX_HOME": "/data/codex-home"}
+                ),
                 patch.object(server.subprocess, "run", return_value=completed()) as run,
             ):
                 self.assertTrue(server._codex_sandbox_probe(mode)["ok"])
@@ -35,22 +39,28 @@ class CodexSandboxReadinessTests(unittest.TestCase):
                 self.assertEqual(args[-2:], ["--", "/bin/true"])
                 # The pinned CLI has no platform subcommand: `codex sandbox linux ...`
                 # runs a program named "linux". Only options may precede `--`.
-                options = args[2:args.index("--")]
+                options = args[2 : args.index("--")]
                 self.assertEqual(len(options) % 2, 0)
                 self.assertEqual(set(options[0::2]), {"--config"})
                 self.assertNotIn("linux", args)
                 self.assertNotIn("exec", args)
                 self.assertEqual(run.call_args.kwargs["cwd"], "/config")
-                self.assertEqual(run.call_args.kwargs["env"]["CODEX_HOME"], "/data/codex-home")
+                self.assertEqual(
+                    run.call_args.kwargs["env"]["CODEX_HOME"], "/data/codex-home"
+                )
                 self.assertEqual(run.call_args.kwargs["stdin"], subprocess.DEVNULL)
-                self.assertEqual(run.call_args.kwargs["timeout"], server.CODEX_SANDBOX_PROBE_TIMEOUT_SECONDS)
+                self.assertEqual(
+                    run.call_args.kwargs["timeout"],
+                    server.CODEX_SANDBOX_PROBE_TIMEOUT_SECONDS,
+                )
                 self.assertEqual(run.call_args.kwargs["errors"], "replace")
 
     def test_codex_probe_allows_more_time_than_the_raw_probes(self) -> None:
         """The Codex execution probe gets a longer timeout than the raw Bubblewrap probes."""
         # A timeout blocks every task; the Codex probe does far more work than bwrap alone.
         self.assertGreater(
-            server.CODEX_SANDBOX_PROBE_TIMEOUT_SECONDS, server.RUNTIME_PROBE_TIMEOUT_SECONDS
+            server.CODEX_SANDBOX_PROBE_TIMEOUT_SECONDS,
+            server.RUNTIME_PROBE_TIMEOUT_SECONDS,
         )
 
     def test_missing_cli_fails_closed(self) -> None:
@@ -76,7 +86,9 @@ class CodexSandboxReadinessTests(unittest.TestCase):
         for error in (subprocess.TimeoutExpired("codex", 5), OSError("exec failed")):
             with (
                 self.subTest(error=error),
-                patch.object(server, "codex_binary_path", return_value=server.CODEX_BINARY),
+                patch.object(
+                    server, "codex_binary_path", return_value=server.CODEX_BINARY
+                ),
                 patch.object(server, "codex_env", return_value={}),
                 patch.object(server.subprocess, "run", side_effect=error),
             ):
@@ -90,18 +102,26 @@ class CodexSandboxReadinessTests(unittest.TestCase):
         with (
             patch.object(server, "codex_binary_path", return_value=server.CODEX_BINARY),
             patch.object(server, "codex_env", return_value={}),
-            patch.object(server.subprocess, "run", return_value=completed(1, f"token={secret}\nfailed")),
+            patch.object(
+                server.subprocess,
+                "run",
+                return_value=completed(1, f"token={secret}\nfailed"),
+            ),
         ):
             result = server._codex_sandbox_probe("workspace-write")
         self.assertFalse(result["ok"])
         self.assertNotIn(secret, result["error"])
         self.assertNotIn("\n", result["error"])
 
-    def readiness(self, results: list[subprocess.CompletedProcess], mode: str = "workspace-write") -> dict:
+    def readiness(
+        self, results: list[subprocess.CompletedProcess], mode: str = "workspace-write"
+    ) -> dict:
         """Return the readiness report when the probe commands give these results in order; all must be used."""
         with (
             patch.object(server, "read_options", return_value={"codex_sandbox": mode}),
-            patch.object(server.shutil, "which", return_value="/opt/codex-sandbox/bwrap"),
+            patch.object(
+                server.shutil, "which", return_value="/opt/codex-sandbox/bwrap"
+            ),
             patch.object(server, "codex_binary_path", return_value=server.CODEX_BINARY),
             patch.object(server, "codex_env", return_value={}),
             patch.object(server.subprocess, "run", side_effect=results) as run,
@@ -123,7 +143,9 @@ class CodexSandboxReadinessTests(unittest.TestCase):
         """A passing namespace probe does not make the sandbox ready when Codex execution fails."""
         for proc in (completed(), completed(1, "proc denied")):
             with self.subTest(proc=proc.returncode):
-                result = self.readiness([completed(), completed(1, "Codex failed"), proc])
+                result = self.readiness(
+                    [completed(), completed(1, "Codex failed"), proc]
+                )
                 self.assertFalse(result["ready"])
                 self.assertFalse(result["bubblewrap_ready"])
                 self.assertTrue(result["namespace_probe"]["namespace_ok"])

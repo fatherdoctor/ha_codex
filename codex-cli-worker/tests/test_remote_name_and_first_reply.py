@@ -1,13 +1,13 @@
 """The machine name is set on the Configuration tab only (0.3.5), and a first message gets a plain reply (0.3.2)."""
+
 from __future__ import annotations
 
+from contextlib import ExitStack
 import json
+from pathlib import Path
 import tempfile
 import unittest
-from contextlib import ExitStack
-from pathlib import Path
 from unittest.mock import MagicMock, patch
-
 
 from test_server import server
 
@@ -25,31 +25,62 @@ def supervisor_reply(payload=None, error=None):
 class RenameRoute(unittest.TestCase):
     """The page no longer renames: POST /remote-control/name is refused and nothing reaches Supervisor (0.3.5)."""
 
-    SAVED = {"remote_control_name": "Home Assistant", "HA_TOKEN": "!secret synthetic_token", "local_docs": True}
+    SAVED = {
+        "remote_control_name": "Home Assistant",
+        "HA_TOKEN": "!secret synthetic_token",
+        "local_docs": True,
+    }
 
     def setUp(self):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
         self.options = root / "options.json"
-        self.options.write_text(json.dumps({"remote_control_name": "Home Assistant", "HA_TOKEN": "resolved-synthetic",
-                                            "local_docs": True}))
+        self.options.write_text(
+            json.dumps(
+                {
+                    "remote_control_name": "Home Assistant",
+                    "HA_TOKEN": "resolved-synthetic",
+                    "local_docs": True,
+                }
+            )
+        )
         self.options.chmod(0o600)
         self.stack.enter_context(patch.object(server, "OPTIONS_PATH", self.options))
         self.stack.enter_context(patch.object(server, "api_token", return_value="tok"))
-        self.stack.enter_context(patch.object(server, "ha_token", return_value="synthetic-supervisor"))
-        self.stack.enter_context(patch.object(server, "ingress_admin",
-                                              return_value=({"user_id": "fixture-admin"}, "")))
+        self.stack.enter_context(
+            patch.object(server, "ha_token", return_value="synthetic-supervisor")
+        )
+        self.stack.enter_context(
+            patch.object(
+                server, "ingress_admin", return_value=({"user_id": "fixture-admin"}, "")
+            )
+        )
         self.enabled = self.stack.enter_context(
-            patch.object(server.remote_control_supervisor, "enabled", return_value=False))
-        self.stack.enter_context(patch.object(server.remote_control_supervisor, "snapshot",
-                                              side_effect=self.snapshot))
-        self.get = self.stack.enter_context(patch.object(
-            server.requests, "get", return_value=supervisor_reply({"data": {"options": dict(self.SAVED)}})))
-        self.post = self.stack.enter_context(patch.object(server.requests, "post", return_value=supervisor_reply()))
+            patch.object(
+                server.remote_control_supervisor, "enabled", return_value=False
+            )
+        )
+        self.stack.enter_context(
+            patch.object(
+                server.remote_control_supervisor, "snapshot", side_effect=self.snapshot
+            )
+        )
+        self.get = self.stack.enter_context(
+            patch.object(
+                server.requests,
+                "get",
+                return_value=supervisor_reply({"data": {"options": dict(self.SAVED)}}),
+            )
+        )
+        self.post = self.stack.enter_context(
+            patch.object(server.requests, "post", return_value=supervisor_reply())
+        )
         self.client = server.app.test_client()
-        self.ingress = {"headers": {"X-Ingress-Path": "/api/hassio_ingress/test"},
-                        "environ_overrides": {"REMOTE_ADDR": server.INGRESS_PROXY_IP}}
+        self.ingress = {
+            "headers": {"X-Ingress-Path": "/api/hassio_ingress/test"},
+            "environ_overrides": {"REMOTE_ADDR": server.INGRESS_PROXY_IP},
+        }
 
     @staticmethod
     def snapshot():
@@ -58,7 +89,9 @@ class RenameRoute(unittest.TestCase):
         return {"configured_name": server.remote_control.machine_name(name)}
 
     def rename(self, body, **request):
-        return self.client.post("/remote-control/name", json=body, **(request or self.ingress))
+        return self.client.post(
+            "/remote-control/name", json=body, **(request or self.ingress)
+        )
 
     def test_rename_action_is_gone_and_options_stay(self):
         before = self.options.read_text()
@@ -71,7 +104,7 @@ class RenameRoute(unittest.TestCase):
     def test_page_has_no_path_that_writes_add_on_options(self):
         # The one writer of /addons/self/options was the rename; the Configuration tab is now the only one.
         source = (Path(server.__file__)).read_text()
-        self.assertNotIn("/options\"", source)
+        self.assertNotIn('/options"', source)
         self.assertFalse(hasattr(server, "save_remote_control_name"))
         self.assertFalse(hasattr(server, "write_local_option"))
 
@@ -82,12 +115,18 @@ class FirstReplyPrompt(unittest.TestCase):
     def test_page_rules_follow_agents_file_only_when_it_exists(self):
         # The rules are read once for each thread, so they name the file with a condition, not a fact.
         text = server.PAGE_INSTRUCTIONS
-        self.assertIn("Owner workspace instructions: if /config/AGENTS.md exists, follow it.", text)
+        self.assertIn(
+            "Owner workspace instructions: if /config/AGENTS.md exists, follow it.",
+            text,
+        )
         self.assertNotIn("Follow /config/AGENTS.md.", text)
 
     def test_answer_is_a_reply_not_a_worker_report(self):
-        line = next(line for line in server.PAGE_INSTRUCTIONS.splitlines()
-                    if line.startswith("Answer in plain text"))
+        line = next(
+            line
+            for line in server.PAGE_INSTRUCTIONS.splitlines()
+            if line.startswith("Answer in plain text")
+        )
         self.assertIn("Answer a greeting, a test message or a question directly", line)
         self.assertIn("Do not describe this worker", line)
         self.assertIn("do not report that an optional instruction file is absent", line)
@@ -99,8 +138,10 @@ class FirstReplyPrompt(unittest.TestCase):
             with patch.object(server, "AGENTS_PATH", agents):
                 self.assertNotIn("AGENTS.md", server.remote_control_instructions({}))
                 agents.write_text("Synthetic owner rules")
-                self.assertIn("Owner workspace instructions: /config/AGENTS.md. ",
-                              server.remote_control_instructions({}))
+                self.assertIn(
+                    "Owner workspace instructions: /config/AGENTS.md. ",
+                    server.remote_control_instructions({}),
+                )
 
 
 class PageControls(unittest.TestCase):
@@ -111,7 +152,9 @@ class PageControls(unittest.TestCase):
         chat = (WEB / "assets" / "chat.js").read_text()
         self.assertNotIn('id="remote-control-name-form"', html)
         self.assertIn('<strong id="remote-control-name"></strong>', html)
-        self.assertIn("Change it with Remote control machine name in Add-on configuration.", html)
+        self.assertIn(
+            "Change it with Remote control machine name in Add-on configuration.", html
+        )
         self.assertNotIn("remote-control/name", chat)
 
     def test_agents_hint_is_dismissible_and_outside_the_chat(self):

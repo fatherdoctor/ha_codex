@@ -6,6 +6,7 @@ only GitHub's own two prompts: the user name `x-access-token`, and the token for
 Any other prompt (another host, a rewritten URL, a user name in the remote) gets nothing and exit status 1,
 so the token is offered to GitHub and to nobody else. It prints only to standard output, which git reads.
 """
+
 import json
 import os
 import sys

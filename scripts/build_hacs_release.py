@@ -13,11 +13,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from pathlib import Path
 import re
 import subprocess
 import sys
 import zipfile
-from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 # A stable version has three or four numbers; a beta has three numbers and -beta.N (see scripts/fork_release.py).
@@ -31,7 +31,9 @@ CHANGELOG = ROOT / "codex-cli-worker" / "CHANGELOG.md"
 def build(tag: str, output_dir: Path, allow_unreleased: bool = False) -> Path:
     """Validate release metadata and write the integration ZIP and release notes."""
     if TAG_PATTERN.fullmatch(tag) is None:
-        raise ValueError(f"Expected a vX.Y.Z, vX.Y.Z.N or vX.Y.Z-beta.N tag, got {tag!r}")
+        raise ValueError(
+            f"Expected a vX.Y.Z, vX.Y.Z.N or vX.Y.Z-beta.N tag, got {tag!r}"
+        )
 
     version = tag[1:]
     component_dir = ROOT / "custom_components" / DOMAIN
@@ -39,19 +41,34 @@ def build(tag: str, output_dir: Path, allow_unreleased: bool = False) -> Path:
     if manifest.get("domain") != DOMAIN:
         raise ValueError(f"Integration domain must be {DOMAIN}")
     if manifest.get("version") != version:
-        raise ValueError(f"Manifest version {manifest.get('version')!r} does not match {tag}")
+        raise ValueError(
+            f"Manifest version {manifest.get('version')!r} does not match {tag}"
+        )
 
-    worker_config = (ROOT / "codex-cli-worker" / "config.yaml").read_text(encoding="utf-8")
-    worker_version = re.search(rf'^version:\s*"?({VERSION})"?\s*$', worker_config, re.MULTILINE)
+    worker_config = (ROOT / "codex-cli-worker" / "config.yaml").read_text(
+        encoding="utf-8"
+    )
+    worker_version = re.search(
+        rf'^version:\s*"?({VERSION})"?\s*$', worker_config, re.MULTILINE
+    )
     if worker_version is None or worker_version.group(1) != version:
         raise ValueError(f"Worker config version does not match {tag}")
 
     lines = CHANGELOG.read_text(encoding="utf-8").splitlines()
     heading = re.compile(rf"^## {re.escape(version)}(?:\s+-\s+.*)?$")
     unreleased = re.compile(rf"^## {re.escape(version)} \(unreleased\)$")
-    start = next((index + 1 for index, line in enumerate(lines) if heading.fullmatch(line)), None)
+    start = next(
+        (index + 1 for index, line in enumerate(lines) if heading.fullmatch(line)), None
+    )
     if start is None:
-        marked = next((index + 1 for index, line in enumerate(lines) if unreleased.fullmatch(line)), None)
+        marked = next(
+            (
+                index + 1
+                for index, line in enumerate(lines)
+                if unreleased.fullmatch(line)
+            ),
+            None,
+        )
         if marked is None:
             raise ValueError(f"{CHANGELOG.relative_to(ROOT)} has no heading for {tag}")
         if not allow_unreleased:
@@ -60,7 +77,10 @@ def build(tag: str, output_dir: Path, allow_unreleased: bool = False) -> Path:
                 "remove the mark before tagging"
             )
         start = marked
-    end = next((index for index in range(start, len(lines)) if lines[index].startswith("## ")), len(lines))
+    end = next(
+        (index for index in range(start, len(lines)) if lines[index].startswith("## ")),
+        len(lines),
+    )
     notes = "\n".join(lines[start:end]).strip()
     if not notes:
         raise ValueError(f"{CHANGELOG.relative_to(ROOT)} has no notes for {tag}")
@@ -116,7 +136,9 @@ def main() -> int:
     """Build the requested release and return a command-line exit status."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("tag", help="vX.Y.Z, vX.Y.Z.N or vX.Y.Z-beta.N release tag")
-    parser.add_argument("output_dir", type=Path, help="Directory outside the repository for the ZIP")
+    parser.add_argument(
+        "output_dir", type=Path, help="Directory outside the repository for the ZIP"
+    )
     parser.add_argument(
         "--release",
         action="store_true",
@@ -126,7 +148,12 @@ def main() -> int:
     release = args.release or os.environ.get("GITHUB_REF_TYPE") == "tag"
     try:
         print(build(args.tag, args.output_dir, allow_unreleased=not release))
-    except (OSError, ValueError, subprocess.CalledProcessError, zipfile.BadZipFile) as exc:
+    except (
+        OSError,
+        ValueError,
+        subprocess.CalledProcessError,
+        zipfile.BadZipFile,
+    ) as exc:
         print(f"HACS release build failed: {exc}", file=sys.stderr)
         return 1
     return 0

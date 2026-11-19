@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 import subprocess
 import sys
 import unittest
-from pathlib import Path
 
 
 class UndumpableWorkerTests(unittest.TestCase):
@@ -21,8 +21,13 @@ class UndumpableWorkerTests(unittest.TestCase):
             "assert ns['make_worker_undumpable']();"
             "libc = ctypes.CDLL(None); print(libc.prctl(3, 0, 0, 0, 0))"
         )
-        result = subprocess.run([sys.executable, "-c", code, str(Path(__file__).resolve().parents[1])],
-                                capture_output=True, text=True, timeout=10, check=True)
+        result = subprocess.run(
+            [sys.executable, "-c", code, str(Path(__file__).resolve().parents[1])],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        )
         self.assertEqual(result.stdout.strip(), "0")
 
 
