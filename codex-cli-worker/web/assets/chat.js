@@ -2014,9 +2014,10 @@ async function pollActivity() {
 }
 /**
  * Draw the latest exchange's step list. While Codex works, the heading counts
- * the steps and shows the running time, and the list stays open. When the
- * exchange is over, the heading becomes the closed "Worked for" line above the
- * answer, and the list holds the steps and then the answer's checks.
+ * the steps and shows the running time, and the list starts closed. A tap on
+ * the heading opens it and holds until the turn ends. When the exchange is
+ * over, the heading becomes the closed "Worked for" line above the answer, and
+ * the list holds the steps and then the answer's checks.
  */
 function renderActivity() {
   const block = $("activity");
