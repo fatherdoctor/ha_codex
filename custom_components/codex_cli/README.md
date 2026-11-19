@@ -4,16 +4,15 @@ Codex connects Home Assistant to the local Codex for Home Assistant app. It lets
 
 ## Installation
 
-Use the My Home Assistant buttons in the repository README for the fastest setup.
+The Codex for Home Assistant app installs this integration for you. The steps with every detail are in the [repository README](../../README.md#installation).
 
-1. Add `https://github.com/fatherdoctor/ha_codex` as a Home Assistant app repository.
-2. Install and start the Codex for Home Assistant app.
-3. Open the app web UI and choose **Settings > Sign in** to sign in to Codex. See the [sign-in prerequisites](../../README.md#sign-in).
-4. Open HACS, search for **Codex** under **Integrations**, select it, and choose **Download**.
-5. Restart Home Assistant.
-6. Add the **Codex** integration from **Settings** > **Devices & services**.
+1. Add `https://github.com/fatherdoctor/ha_codex` as a Home Assistant app repository: **Settings** > **Apps** > **Install app** > menu > **Repositories**.
+2. Install and start the Codex for Home Assistant app. At start it copies this integration, in its own version, to `/config/custom_components/codex_cli`.
+3. Restart Home Assistant when the notification asks.
+4. Add **Discovered: Codex** under **Settings** > **Devices & services**.
+5. Open the app web UI and choose **Settings > Sign in** to sign in to Codex. See the [sign-in prerequisites](../../README.md#sign-in).
 
-As a manual fallback, copy `custom_components/codex_cli` into `/config/custom_components/codex_cli`, restart Home Assistant, and then add the integration from **Settings** > **Devices & services**.
+To install the integration yourself, first turn off the app option **Install the Codex integration**. Then add `https://github.com/fatherdoctor/ha_codex` as a custom repository of the category **Integration**, in **Settings** > **Marketplace** on Home Assistant 2026.11 or later, or in HACS on older releases; Codex is not in the default list, so a search finds it only after that step. Or copy `custom_components/codex_cli` into `/config/custom_components/codex_cli`. Restart Home Assistant, and add the integration from **Settings** > **Devices & services**. If the download fails, see [If a download is missing](../../README.md#if-a-download-is-missing).
 
 ## Configuration
 
@@ -49,6 +48,8 @@ Reset sensors are `unknown` when no reset time is available. Usage sensors keep 
 - `codex_cli.reply_task`: Send a reply to a waiting task. Requires `task_id` and `reply`. With the optional `turn_id`, taken from the `codex_cli_task_result` event or the **Last task** sensor, the reply is refused once that question is no longer the one waiting.
 
 All actions require a loaded integration entry; they return an error while it is setting up, retrying or unloading.
+
+A call that carries a Home Assistant user is refused unless that user is an active administrator. A call with no user is allowed: an automation that runs by its own trigger has none, so it can start a task while nobody is there. A task still asks for permission in the chat, and no action can answer a permission request.
 
 These actions do not queue messages. Starting or continuing a task while another task is active or messages are already queued returns an error; the worker chat UI provides the queue.
 
@@ -136,4 +137,4 @@ The integration polls the worker every 30 seconds. Actions that start, cancel, o
 
 - This integration controls a single local Codex for Home Assistant instance.
 - It depends on the worker app for task execution, Codex authentication, and notification delivery.
-- Usage-limit sensors are best-effort values parsed from interactive Codex `/status` output. Reported windows vary by account and plan; omitted windows remain `unknown` with `reported: false`.
+- Usage-limit sensors read Codex's own account figures first. If that read fails, the worker reads Codex's `/status` screen, and those figures are estimates. The `source` attribute says which: `rate_limits` or `status_screen`; the `note` attribute says when a figure is estimated. Reported windows vary by account and plan; omitted windows remain `unknown` with `reported: false`.

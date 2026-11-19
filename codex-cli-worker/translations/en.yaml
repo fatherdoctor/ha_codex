@@ -13,7 +13,7 @@ configuration:
     description: How much of its thinking Codex reports while it works. concise shows short headlines in the chat activity list, detailed asks for fuller summaries, and none hides reasoning from the list. Commands, file edits, searches, and progress notes are shown regardless.
   codex_sandbox:
     name: Codex sandbox
-    description: workspace-write is the default and allows edits in /config; read-only allows inspection. Commands or file changes needing extra access ask a Home Assistant administrator for Allow once or Deny in the chat. There is no full-access mode in this fork.
+    description: workspace-write is the default and allows edits in /config; read-only allows inspection. Commands or file changes needing extra access ask a Home Assistant administrator for Allow once or Deny in the chat. This option has no full-access value. A chat can run without the sandbox only in the Full access permission mode, which is off until an administrator turns it on in the app's Settings page.
   task_root:
     name: Task root
     description: Folder where prompts, logs, backups, status files, and change lists are saved. Keep it inside /config so Codex can save a copy of each file before changing it.
@@ -25,7 +25,7 @@ configuration:
     description: Public client ID used for GitHub sign-in. The default uses The Backshop GitHub App. Change this only if you use your own GitHub App. The client ID is not a secret.
   task_timeout_seconds:
     name: Task timeout
-    description: Maximum run time for one Codex task before the worker stops it.
+    description: The longest one message may run, in seconds, before the worker stops it. The default is 3600, one hour. Time spent waiting for your answer to a permission request counts.
   task_stall_seconds:
     name: Stall limit
     description: Stop a task when Codex sends nothing for this many seconds while no permission request is waiting, for example after a network drop. A command that prints nothing for this long counts too. 0 turns the check off.
@@ -37,7 +37,7 @@ configuration:
     description: After a task changes YAML files, ask Home Assistant to check its configuration, as Developer Tools does. A failing check marks the task as failed and points to the saved previous version of the affected files. Turn off to skip the check on slow systems.
   full_snapshot:
     name: Full snapshot before every message
-    description: Also archive the whole configuration folder before every message. Codex still saves a copy of each file before changing it, and the archive supplies the previous version of any file it did not copy. Off by default. On a large configuration this adds a wait before every message and uses a lot of disk space.
+    description: Also archive the tracked files of the configuration folder before every message. Codex is still told to save a copy of each file before changing it, and the archive can supply the previous version of a tracked file that it did not copy. It is not a complete backup - credential files, files larger than 8 MiB, databases, logs and media folders are left out. Off by default. On a large configuration this adds a wait before every message and uses a lot of disk space.
   backup_retention_days:
     name: Keep backups for (days)
     description: How many days after an exchange its backups are kept, from 1 to 365. Applies to the copies Codex saves before changing a file and to full snapshots. Default is 7 days.
