@@ -2733,10 +2733,7 @@ a.ha-nav-row:focus-visible {
   mask: var(--mdi-chevron-right) center / 24px no-repeat;
 }
 
-/* Full access is on: the banner and a chat set to Full access are marked in the error color. */
-#full-access-banner {
-  border-color: var(--error);
-}
+/* A chat set to Full access is marked in the error color. */
 #permission-button.full-access {
   color: var(--error);
 }

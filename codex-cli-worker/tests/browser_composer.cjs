@@ -40,6 +40,15 @@ async function checkComposer(page, label) {
     `${label}: chevron centered on the label (${labelCenter.y} vs ${chevronCenter.y})`);
   assert.ok(chevronCenter.x > labelCenter.x, `${label}: chevron after the label`);
 
+  // The plus is an icon centered on both axes in a round button.
+  assert.equal((await page.locator('#attach').innerText()).trim(), '', `${label}: the attach button holds no text glyph`);
+  const attachBox = await page.locator('#attach').boundingBox();
+  assert.ok(Math.abs(attachBox.width - attachBox.height) <= 1, `${label}: the attach button is round (${attachBox.width} x ${attachBox.height})`);
+  const attachCenter = await center(page, '#attach');
+  const plusCenter = await center(page, '#attach svg');
+  assert.ok(Math.abs(attachCenter.x - plusCenter.x) <= TOLERANCE && Math.abs(attachCenter.y - plusCenter.y) <= TOLERANCE,
+    `${label}: plus centered in the attach button`);
+
   const send = page.locator('#send');
   if (await send.isVisible()) {
     assert.equal((await send.innerText()).trim(), '', `${label}: the send button holds no text glyph`);
