@@ -246,7 +246,10 @@ class AppServerSession:
       turn, because no thread request carries it. Its request IDs are unique to
       the session, so a reader of the shared output can give each reply to its
       session (owns_request). Close interrupts a running turn and leaves the
-      input open for the other chats.
+      input open for the other chats. The caller routes each message of the
+      shared output by thread id and request ID; read is for an owned
+      connection only, because on a shared output it would take the lines of
+      the other chats.
     """
 
     def __init__(
@@ -304,15 +307,21 @@ class AppServerSession:
         self._write({"id": request_id, "method": method, "params": params})
 
     def owns_request(self, request_id: Any) -> bool:
-        """Return True when a reply with this ID answers a request that this session sent."""
+        """Return True when the ID has this session's prefix, so a reply with it belongs to this session.
+
+        The check is by prefix only: it does not say whether the request still waits. _reply ignores an ID it does
+        not know.
+        """
         return isinstance(request_id, str) and request_id.startswith(self.request_prefix + "-")
 
     @property
     def turn_running(self) -> bool:
-        """Return True when turn/start was sent and turn/completed has not arrived.
+        """Return True when turn/start was sent, Codex did not refuse it, and turn/completed has not arrived.
 
-        On a shared connection, a caller reads this after close: the turn can still run in the process. With a turn
-        id, close sent turn/interrupt, and turn/completed follows. Without one, nothing could stop the turn.
+        On a shared connection, a caller reads this after close: the turn can still run in the process. Close sends
+        turn/interrupt when it knows the turn id; when the reply to turn/start comes later, the session sends it
+        then. The session still reads that reply and turn/completed after close, so the value turns False when the
+        turn ends. On an owned connection close ends the process, and the value is not kept after close.
         """
         with self.lock:
             return self._turn_requested and not self._turn_ended
@@ -519,6 +528,8 @@ class AppServerSession:
         with self.lock:
             self.last_activity = time.monotonic()
             if self._closed:
+                if not self.owns_connection:
+                    self._track_closed_turn(message)
                 return
             if not isinstance(message, dict):
                 raise ValueError("invalid app-server message")
@@ -581,12 +592,46 @@ class AppServerSession:
                     self.error = self.redact(str((turn.get("error") or {}).get("message") or "Codex finished without a final answer."))
                 self.close()
 
+    def _track_closed_turn(self, message: Any) -> None:
+        """Keep the turn state of a closed session on a shared connection, and nothing else.
+
+        The process goes on with the turn after close, so turn_running must still see it end. Three messages count:
+        the reply to turn/start (an error means no turn ran; a turn id gets the turn/interrupt that close could not
+        send yet), and turn/completed for this thread and turn. A closed session sends no event, final text,
+        approval or decision.
+        """
+        if not isinstance(message, dict):
+            return
+        params = message.get("params") or {}
+        if "id" in message and "method" not in message:
+            if self._requests.get(message["id"]) != "turn/start":
+                return
+            self._requests.pop(message["id"])
+            turn = (message.get("result") or {}).get("turn") or {}
+            if message.get("error") or not turn.get("id"):
+                self._turn_requested = False
+                return
+            self.turn_id = turn["id"]
+            if not self._turn_ended:
+                try:
+                    self._write({"id": f"{self.request_prefix}-stop", "method": "turn/interrupt", "params": {
+                        "threadId": self.thread_id, "turnId": self.turn_id,
+                    }})
+                except (OSError, ValueError):
+                    pass
+        elif (message.get("method") == "turn/completed" and self.turn_id
+              and params.get("threadId") == self.thread_id and (params.get("turn") or {}).get("id") == self.turn_id):
+            self._turn_ended = True
+
     def _reply(self, message: dict[str, Any]) -> None:
         """Advance initialization only after the preceding request succeeded."""
         method = self._requests.pop(message["id"], None)
         if method is None:
             return
         if message.get("error"):
+            if method == "turn/start":
+                # Codex refused the turn, so no turn runs.
+                self._turn_requested = False
             raise ValueError(f"{method}: {message['error'].get('message', 'request failed')}")
         result = message.get("result") or {}
         if method == "initialize":

@@ -503,6 +503,79 @@ class SharedConnectionTests(unittest.TestCase):
         self.assertTrue(session.turn_running)
         self.assertFalse(self.writer.ended)
 
+    def test_the_turn_ends_when_turn_completed_arrives_after_close(self):
+        """Case A, the normal cancel: the interrupt works, turn/completed follows, and the turn is no longer running."""
+        session = self.make()
+        session.start()
+        session.receive({"id": self.writer.messages()[0]["id"], "result": {"turn": {"id": "turn-1"}}})
+        session.close()
+        session.receive({"method": "item/completed", "params": {"threadId": "live-thread", "turnId": "turn-1", "item": {
+            "id": "message", "type": "agentMessage", "text": "Partial answer."}}})
+        # A completion of another chat's thread, or of another turn, does not end this turn.
+        session.receive({"method": "turn/completed", "params": {"threadId": "other-thread", "turn": {
+            "id": "turn-1", "status": "interrupted"}}})
+        session.receive({"method": "turn/completed", "params": {"threadId": "live-thread", "turn": {
+            "id": "turn-0", "status": "interrupted"}}})
+        self.assertTrue(session.turn_running)
+        session.receive({"method": "turn/completed", "params": {"threadId": "live-thread", "turn": {
+            "id": "turn-1", "status": "interrupted"}}})
+        self.assertFalse(session.turn_running)
+        self.assertEqual(self.finals, [])
+        self.assertNotIn({"type": "turn.started"}, self.events)
+        self.assertEqual([item.get("method") for item in self.writer.messages()], ["turn/start", "turn/interrupt"])
+        self.assertFalse(self.writer.ended)
+
+    def test_a_turn_id_that_arrives_after_close_gets_the_interrupt(self):
+        """Case B: close came before the reply to turn/start, so the session sends turn/interrupt when the id arrives."""
+        session = self.make()
+        session.start()
+        turn_request = self.writer.messages()[0]["id"]
+        session.close()
+        self.assertEqual([item.get("method") for item in self.writer.messages()], ["turn/start"])
+        session.receive({"id": turn_request, "result": {"turn": {"id": "turn-1"}}})
+        interrupt = self.writer.messages()[-1]
+        self.assertEqual(interrupt["method"], "turn/interrupt")
+        self.assertEqual(interrupt["params"], {"threadId": "live-thread", "turnId": "turn-1"})
+        self.assertTrue(session.owns_request(interrupt["id"]))
+        self.assertTrue(session.turn_running)
+        # A second copy of the reply sends nothing more.
+        session.receive({"id": turn_request, "result": {"turn": {"id": "turn-1"}}})
+        self.assertEqual(len(self.writer.messages()), 2)
+        session.receive({"method": "turn/completed", "params": {"threadId": "live-thread", "turn": {
+            "id": "turn-1", "status": "interrupted"}}})
+        self.assertFalse(session.turn_running)
+        self.assertEqual(self.finals, [])
+        self.assertFalse(self.writer.ended)
+
+    def test_a_refused_turn_start_is_not_running(self):
+        """Case C: Codex refuses turn/start, so no turn runs, whether the refusal comes before or after close."""
+        session = self.make()
+        session.start()
+        with self.assertRaises(ValueError):
+            session.receive({"id": self.writer.messages()[0]["id"], "error": {"message": "thread not loaded"}})
+        session.fail("turn/start failed")
+        self.assertFalse(session.turn_running)
+
+        late = self.make()
+        late.start()
+        late.close()
+        late.receive({"id": self.writer.messages()[-1]["id"], "error": {"message": "thread not loaded"}})
+        self.assertFalse(late.turn_running)
+        self.assertEqual(self.writer.messages()[-1]["method"], "turn/start")
+
+    def test_a_closed_session_answers_no_request(self):
+        """After close the session gives no decision: a request of Codex gets no reply and no card."""
+        session = self.make()
+        session.start()
+        session.receive({"id": self.writer.messages()[0]["id"], "result": {"turn": {"id": "turn-1"}}})
+        session.close()
+        sent = len(self.writer.messages())
+        session.receive({"id": 0, "method": COMMAND_APPROVAL, "params": {
+            "threadId": "live-thread", "turnId": "turn-1", "itemId": "item", "startedAtMs": 1,
+            "command": "ls /config", "cwd": "/config", "reason": "List files"}})
+        self.assertEqual(len(self.writer.messages()), sent)
+        self.assertEqual(self.records, [])
+
     def test_a_pending_approval_expires_at_close(self):
         """A permission request of the shared session cannot be answered after a cancel."""
         session = self.make()
@@ -538,6 +611,28 @@ class SharedConnectionTests(unittest.TestCase):
                          ["initialize", "initialized", "thread/start", "turn/start", "turn/interrupt"])
         self.assertEqual(messages[-1]["id"], "worker-stop")
         self.assertTrue(writer.ended)
+
+
+    def test_a_closed_owned_session_ignores_every_message(self):
+        """On its own process a closed session reads nothing: a late turn id gets no interrupt, the state stays."""
+        writer = Transport()
+        writer.ended = False
+        session = AppServerSession(
+            writer, lock=threading.RLock(), thread_params={}, turn_params={"input": []},
+            on_event=lambda event: None, on_approvals=lambda records: None, on_final=lambda text: None,
+            is_active=lambda: True, redact=lambda text: text,
+        )
+        session.start()
+        session.receive({"id": "worker-1", "result": {}})
+        session.receive({"id": "worker-2", "result": {"thread": {"id": "thread"}}})
+        session.close()
+        session.receive({"id": "worker-3", "result": {"turn": {"id": "turn"}}})
+        session.receive({"method": "turn/completed", "params": {"threadId": "thread", "turn": {
+            "id": "turn", "status": "interrupted"}}})
+        self.assertEqual(session.turn_id, "")
+        self.assertTrue(session.turn_running)
+        self.assertEqual([item.get("method") for item in writer.messages()],
+                         ["initialize", "initialized", "thread/start", "turn/start"])
 
 
 class ApprovalApiTests(unittest.TestCase):

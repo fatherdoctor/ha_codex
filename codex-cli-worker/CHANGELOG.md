@@ -48,7 +48,8 @@
 - Internal, no change in behavior: the permission bridge (`approvals.py`) can now run one turn on a Codex process
   that it does not own. In that mode it sends only `turn/start` on a thread that is already loaded, with the chat's
   model in the turn; it uses request IDs that no other chat on the process uses; and a cancel sends `turn/interrupt`
-  but leaves the process input open for the other chats. Nothing uses this mode yet. A later change keeps one Codex
+  but leaves the process input open for the other chats. After a cancel the bridge still reads the end of its own
+  turn, so it can tell when the turn stopped; it sends no event or answer then. Nothing uses this mode yet. A later change keeps one Codex
   process alive for many chats and uses it. Each exchange still starts its own process, as before.
 
 ## 0.3.6 - 2026-11-18
