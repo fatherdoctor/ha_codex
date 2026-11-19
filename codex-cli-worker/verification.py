@@ -93,6 +93,9 @@ class Verification:
     def __init__(self, worker):
         """Keep the worker that provides tasks, options and Home Assistant access; no capability is issued yet."""
         self.worker = worker
+        # One private exchange id per running task; the manual check from the page still sends one. A chat's tool
+        # request names its thread instead (tool_threads.py); the name and the "capability expired" answer are
+        # kept from earlier versions.
         self.capabilities = {}
         self.lock = threading.RLock()
         self.execution_lock = threading.Lock()

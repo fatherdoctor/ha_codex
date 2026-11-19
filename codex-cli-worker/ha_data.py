@@ -61,6 +61,8 @@ class HomeAssistantData:
         self.worker = worker
         self.lock = threading.RLock()
         self.execution_lock = threading.Lock()
+        # One private exchange id per running task. A chat's tool request no longer carries it (it names its
+        # thread, tool_threads.py); the name and the "capability expired" answers are kept from earlier versions.
         self.capabilities = {}
         self.turns = {}
         self.queries = {}

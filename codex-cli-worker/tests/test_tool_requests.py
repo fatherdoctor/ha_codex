@@ -10,6 +10,7 @@ n/a: quotes, comments, line ends, multiline, wrappers, separators, git shapes, t
 compared whole against ids that the worker itself bound, and no shell, YAML or template reads it.
 Add a case to CORPUS below.
 """
+import io
 import tempfile
 import unittest
 from pathlib import Path
@@ -97,11 +98,13 @@ class ToolThreadsCorpus(unittest.TestCase):
                     self.assertFalse(chats.bind("a", value))
         self.assertEqual(chats.threads_of("a"), [])
 
-    def test_a_later_exchange_takes_the_thread(self):
+    def test_a_later_exchange_takes_the_thread_only_after_the_first_ends(self):
         chats = tool_threads.ChatThreads()
-        chats.bind("a", CHAT)
-        chats.bind("b", CHAT)
+        self.assertTrue(chats.bind("a", CHAT))
+        self.assertFalse(chats.bind("b", CHAT))
+        self.assertEqual(chats.task_for(CHAT), "a")
         chats.release("a")
+        self.assertTrue(chats.bind("b", CHAT))
         self.assertEqual(chats.task_for(CHAT), "b")
 
 
@@ -154,8 +157,8 @@ class BridgesSendTheThreadId(unittest.TestCase):
         self.assertNotIn(b"capability", sent[1])
 
 
-class ModulesFindTheChat(unittest.TestCase):
-    """The three checks of the design, section 6, in each module that answers a tool request."""
+class TwoChats(unittest.TestCase):
+    """Chat a, which a person attends, and chat b, a scheduled run, both with a running exchange."""
 
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
@@ -180,6 +183,13 @@ class ModulesFindTheChat(unittest.TestCase):
             self.data.set_exchange_info(task_id, {"backup_folder": "folder-" + task_id})
             self.checks.begin(task_id)
         self.calls.begin("a")  # a person attends chat a; chat b is a scheduled run
+
+    def info(self, thread_id):
+        return self.data.dispatch({"operation": "exchange_info", "thread_id": thread_id})
+
+
+class ModulesFindTheChat(TwoChats):
+    """The three checks of the design, section 6, in each module that answers a tool request."""
 
     def info(self, thread_id):
         return self.data.dispatch({"operation": "exchange_info", "thread_id": thread_id})
@@ -287,8 +297,19 @@ class TheChatHoldsNoKey(unittest.TestCase):
         self.assertIn("env=codex_env(),", body)
 
 
+# The collab tools in which the model writes the receiver (CollabAgentTool, app-server-protocol at rust-v0.166.0).
+MODEL_TARGETED_TOOLS = ("sendInput", "wait", "closeAgent", "resumeAgent", "sendMessage", "followupTask",
+                        "interruptAgent", "listAgents")
+
+
+def collab_item(tool, receivers, sender=CHAT):
+    """Return a collabAgentToolCall item as the app server sends it."""
+    return {"id": "1", "type": "collabAgentToolCall", "tool": tool, "status": "completed",
+            "senderThreadId": sender, "receiverThreadIds": receivers}
+
+
 class SubAgentThreads(unittest.TestCase):
-    """A sub-agent's tool calls name its own thread; the parent's spawn item links it to the chat."""
+    """A sub-agent's tool calls name its own thread; only the parent's spawn item links it to the chat."""
 
     def session(self, events):
         session = approvals.AppServerSession.__new__(approvals.AppServerSession)
@@ -298,21 +319,154 @@ class SubAgentThreads(unittest.TestCase):
 
     def test_the_spawn_item_reports_the_sub_agent_threads(self):
         events = []
-        session = self.session(events)
-        session._item("item/completed", {"id": "1", "type": "collabAgentToolCall",
-                                         "senderThreadId": CHAT, "receiverThreadIds": [CHILD, 5]})
+        self.session(events)._item("item/completed", collab_item("spawnAgent", [CHILD, 5]))
         self.assertEqual(events, [{"type": "agent.threads", "parent": CHAT, "threads": [CHILD]}])
 
-    def test_another_thread_spawn_is_not_reported(self):
+    def test_r10_another_thread_spawn_is_not_reported(self):
         events = []
-        self.session(events)._item("item/completed", {"id": "1", "type": "collabAgentToolCall",
-                                                      "senderThreadId": OTHER, "receiverThreadIds": [CHILD]})
+        self.session(events)._item("item/completed", collab_item("spawnAgent", [CHILD], sender=OTHER))
         self.assertEqual(events, [])
 
-    def test_the_chat_binds_the_sub_agent_and_releases_it(self):
-        source = Path(server.__file__).read_text(encoding="utf-8")
-        self.assertIn('event.get("type") == "agent.threads"', source)
-        self.assertIn("tool_threads.CHATS.release(task_id)", source)
+    def test_r1_r2_a_model_written_receiver_is_not_reported(self):
+        for tool in MODEL_TARGETED_TOOLS:
+            for method in ("item/started", "item/completed"):
+                with self.subTest(tool=tool, method=method):
+                    events = []
+                    self.session(events)._item(method, collab_item(tool, [OTHER]))
+                    self.assertEqual(events, [])
+
+    def test_a_spawn_counts_only_when_it_completes(self):
+        events = []
+        session = self.session(events)
+        session._item("item/started", collab_item("spawnAgent", [CHILD]))
+        for item in ({**collab_item("spawnAgent", [CHILD]), "tool": None},
+                     {key: value for key, value in collab_item("spawnAgent", [CHILD]).items() if key != "tool"},
+                     collab_item("SpawnAgent", [CHILD]), collab_item(["spawnAgent"], [CHILD])):
+            session._item("item/completed", item)
+        self.assertEqual(events, [])
+
+
+class TheFirstChatKeepsItsThread(unittest.TestCase):
+    """ChatThreads.bind refuses a thread that another task holds; the same task may bind it again."""
+
+    def test_bind(self):
+        threads = tool_threads.ChatThreads()
+        self.assertTrue(threads.bind("b", OTHER))
+        self.assertTrue(threads.bind("b", OTHER))
+        self.assertFalse(threads.bind("a", OTHER))
+        self.assertEqual(threads.task_for(OTHER), "b")
+        threads.release("a")
+        self.assertEqual(threads.task_for(OTHER), "b")
+        threads.release("b")
+        self.assertTrue(threads.bind("a", OTHER))
+        self.assertEqual(threads.task_for(OTHER), "a")
+
+
+class TheWorkerBindsAndReleases(TwoChats):
+    """The wiring in server.py: the event function of create_approval_session, run_task and its finally."""
+
+    def setUp(self):
+        super().setUp()
+        for name, value in (("running_processes", {}), ("write_task_log", lambda *_args: None)):
+            patcher = patch.object(server, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def exchange(self, task_id, thread_id):
+        """Return the app-server session of the task's exchange, with the thread that Codex reported."""
+        writer = io.StringIO()
+        proc = type("Process", (), {"stdin": writer, "poll": lambda _: None})()
+        server.running_processes[task_id] = proc
+        holder = {}
+        session = server.create_approval_session(task_id, proc, "Check the porch light", self.root / "final",
+                                                 None, holder, server.DEFAULT_OPTIONS)
+        session.on_event({"type": "thread.started", "thread_id": thread_id})
+        session.thread_id = thread_id
+        return session, holder
+
+    def test_the_reported_thread_is_bound(self):
+        tool_threads.CHATS.release("a")
+        _session, holder = self.exchange("a", CHAT)
+        self.assertEqual(holder["session_id"], CHAT)
+        self.assertEqual(tool_threads.CHATS.task_for(CHAT), "a")
+
+    def test_r9_the_chat_binds_its_spawned_sub_agent(self):
+        session, _holder = self.exchange("a", CHAT)
+        session._item("item/completed", collab_item("spawnAgent", [CHILD]))
+        self.assertEqual(tool_threads.CHATS.task_for(CHILD), "a")
+        self.assertEqual(self.info(CHILD)["backup_folder"], "folder-a")
+
+    def test_agent_threads_of_another_parent_bind_nothing(self):
+        session, _holder = self.exchange("a", CHAT)
+        session.on_event({"type": "agent.threads", "parent": OTHER, "threads": [CHILD]})
+        self.assertIsNone(tool_threads.CHATS.task_for(CHILD))
+
+    def test_r3_to_r6_a_model_written_target_cannot_take_another_chat(self):
+        for tool in ("sendInput", "wait"):
+            with self.subTest(tool=tool):
+                self.setUp()
+                session, _holder = self.exchange("a", CHAT)
+                session._item("item/started", collab_item(tool, [OTHER]))
+                session._item("item/completed", collab_item(tool, [OTHER]))
+                # Even an agent.threads event of this chat that names b's thread leaves it with b.
+                session.on_event({"type": "agent.threads", "parent": CHAT, "threads": [OTHER]})
+                self.assertEqual(tool_threads.CHATS.task_for(OTHER), "b")                                # R3
+                self.assertIsNone(self.calls.task_for({"thread_id": OTHER, "arguments": {}}))             # R4
+                self.assertEqual(self.info(OTHER)["backup_folder"], "folder-b")                           # R6
+                tool_threads.CHATS.release("a")
+                self.assertEqual(self.info(OTHER)["backup_folder"], "folder-b")                           # R5
+
+    def test_r7_a_stray_key_field_never_names_a_chat(self):
+        with self.assertRaises(ValueError):
+            self.checks.dispatch({"operation": "unsupported", "capability": self.checks.capabilities["a"]})
+        self.checks.dispatch({"operation": "unsupported", "thread_id": CHAT,
+                              "capability": self.checks.capabilities["b"]})
+        self.assertFalse(server.tasks["b"].get("verification"))
+
+    def test_r8_a_null_key_beside_a_thread_id_is_refused(self):
+        # A request with a key field is a remote-control request; a null key is no key, and never the chat.
+        self.assertIsNone(self.calls.task_for({"capability": None, "thread_id": CHAT, "arguments": {}}))
+
+    def test_a_follow_up_binds_its_thread_at_the_start(self):
+        follow_up = "cccccccc-dddd-4eee-8fff-000000000000"
+        server.tasks["c"] = {"task_id": "c", "status": "queued", "current_turn_id": "turn-c", "session_id": follow_up}
+        seen = []
+
+        def stop_here(task_id, _turn_id):
+            seen.append(tool_threads.CHATS.task_for(follow_up))
+            raise StopRun
+
+        with patch.object(server, "start_activity", side_effect=stop_here), \
+             patch.object(server, "verification", self.checks), patch.object(server, "ha_data", self.data):
+            with self.assertRaises(StopRun):
+                server.run_task("c", "And the back door?", follow_up, "And the back door?")
+        tool_threads.CHATS.release("c")
+        self.assertEqual(seen, ["c"])
+
+    def test_the_end_of_the_exchange_releases_every_thread(self):
+        def run(task_id, *_args):
+            tool_threads.CHATS.bind(task_id, CHAT)
+            tool_threads.CHATS.bind(task_id, CHILD)
+
+        tool_threads.CHATS.release("a")
+        quiet = {name: patch.object(server, name, lambda *_args, **_kwargs: None)
+                 for name in ("record_diagnostic", "finish_activity", "remove_run_artifacts", "start_next_queued",
+                              "cleanup_backups")}
+        with patch.object(server, "run_task", side_effect=run), \
+             patch.object(server, "verification", self.checks), patch.object(server, "ha_data", self.data):
+            for patcher in quiet.values():
+                patcher.start()
+            try:
+                server._run_background_task("a", "Check the porch light", None, None)
+            finally:
+                for patcher in quiet.values():
+                    patcher.stop()
+        self.assertEqual(tool_threads.CHATS.threads_of("a"), [])
+        self.assertEqual(tool_threads.CHATS.task_for(OTHER), "b")
+
+
+class StopRun(Exception):
+    """Ends run_task in a test at the point that the test checks."""
 
 
 if __name__ == "__main__":

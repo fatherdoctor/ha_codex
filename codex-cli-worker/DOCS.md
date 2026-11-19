@@ -389,7 +389,7 @@ the call of up to 5 of them, so Codex does not need a second step to read it bac
 that moves can still show its old state there. The answer names the entity that changed. If Home Assistant does
 not answer these reads, the answer can come up to 40 seconds late; the call itself is sent once.
 
-A chat holds no key for the app's tools (0.5). Each tool request carries the chat's thread id, which Codex adds
+A chat holds no key for the app's tools (0.4). Each tool request carries the chat's thread id, which Codex adds
 to every tool call, and the worker answers it only while that chat's exchange runs. In Read only, Default and
 Auto-review a command cannot connect to the tool sockets at all: the sandbox has no network, and Codex denies the
 connection. A command that runs outside the sandbox - one you approve when Codex asks to run it with more access,

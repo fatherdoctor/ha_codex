@@ -3,7 +3,7 @@
 ## 0.4.0 (unreleased)
 - The app's tools no longer use a secret key for each message. Each tool request names its chat by the thread id
   that Codex adds to every tool call, and the worker answers it only while that chat's exchange runs; a sub-agent
-  of the chat counts as the chat. The sandbox already stops a command in Read only, Default and Auto-review from
+  that the chat starts counts as the chat, and a thread that one chat holds is never given to another. The sandbox already stops a command in Read only, Default and Auto-review from
   reaching the tool sockets. Remote control keeps its keys for now.
 
 - Tests only: two new checks run the packaged Codex CLI against a local stand-in model. One shows that a command in

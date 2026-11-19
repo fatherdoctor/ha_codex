@@ -4251,6 +4251,7 @@ def codex_env() -> dict[str, str]:
     from the add-on option, together with HA_URL, the address it works at.
     """
     env = dict(os.environ)
+    # The *_CAPABILITY names are no longer set for a chat; they are still removed in case a parent process has them.
     for key in ("SUPERVISOR_TOKEN", "HASSIO_TOKEN", "HA_TOKEN", "HA_URL", "HA_VERIFICATION_CAPABILITY", "HA_DATA_CAPABILITY", "HA_DATA_SOCKET", "HA_RELAY_CAPABILITY", "HA_RELAY_SOCKET", "CODEX_SCHEDULE_SOCKET",
                 "HA_CALL_CAPABILITY", "HA_CALL_SOCKET"):
         env.pop(key, None)

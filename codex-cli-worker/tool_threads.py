@@ -8,7 +8,9 @@ keys unnecessary.
 
 A chat's own thread is bound when its exchange starts or when Codex reports the new thread. A sub-agent that
 Codex starts for the chat is its own thread, and its tool calls name that thread, so it is bound to the same
-chat when the chat's spawn item names it. Every binding of a chat goes when its exchange ends.
+chat when the chat's completed spawn item names it. Only a spawn counts: in the other collab tools the model
+writes the target thread. A thread that one chat holds is never bound to another. Every binding of a chat goes
+when its exchange ends.
 """
 
 import re
@@ -44,15 +46,18 @@ class ChatThreads:
         self.tasks = {}
 
     def bind(self, task_id, thread_id):
-        """Bind a thread to the task, in the place of an earlier binding. Return False for a bad id.
+        """Bind a thread to the task. Return False for a bad id or a thread that another task holds.
 
-        Only the worker binds, from its own exchange start and from Codex's events for that exchange.
+        The first task to bind a thread keeps it until its exchange ends; the same task may bind it again. Only
+        the worker binds, from its own exchange start, from the thread that Codex reports for that exchange, and
+        from the chat's completed spawn items.
         """
         thread_id = valid_thread_id(thread_id)
         if thread_id is None or not task_id:
             return False
         with self.lock:
-            self.tasks[thread_id] = task_id
+            if self.tasks.setdefault(thread_id, task_id) != task_id:
+                return False
         return True
 
     def release(self, task_id):
