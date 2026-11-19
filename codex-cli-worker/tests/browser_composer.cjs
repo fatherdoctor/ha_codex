@@ -49,6 +49,11 @@ async function checkComposer(page, label) {
   assert.ok(Math.abs(attachCenter.x - plusCenter.x) <= TOLERANCE && Math.abs(attachCenter.y - plusCenter.y) <= TOLERANCE,
     `${label}: plus centered in the attach button`);
 
+  // The New chat icon is about 20 px, not the 142 px an unsized SVG fills on a desktop.
+  const newChatIcon = await page.locator('#new-chat svg').boundingBox();
+  assert.ok(newChatIcon && Math.abs(newChatIcon.width - 20) <= 2 && Math.abs(newChatIcon.height - 20) <= 2,
+    `${label}: the New chat icon is about 20 px (${newChatIcon && newChatIcon.width} x ${newChatIcon && newChatIcon.height})`);
+
   const send = page.locator('#send');
   if (await send.isVisible()) {
     assert.equal((await send.innerText()).trim(), '', `${label}: the send button holds no text glyph`);

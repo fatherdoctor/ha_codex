@@ -5,6 +5,8 @@
 - Chat page: the plus on the attach button is now an icon centered in a round button, on a desktop and a phone.
   The banner across the top of the page while Full access is on is gone; in a chat's Permissions menu, **Full
   access** is now shown in bold while the setting is on, and the other choices are not bold.
+- Chat page: the plus on the **New chat** button is now a 20 px icon, in the same style as the attach plus, on a
+  desktop and a phone.
 - Documentation only: the README, the integration README, `SECURITY.md`, `DOCS.md` and three option descriptions
   now say what the code does. The README no longer promises a question before every change, or a saved copy and a
   configuration check after every change; it says when each one happens. It says that an automation with no user
