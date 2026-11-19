@@ -782,7 +782,7 @@ Other filter errors without this typed signal keep the normal error path.
 The source contract is Codex's [TurnError](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/app-server-protocol/src/protocol/v2/thread_data.rs#L439),
 [ErrorNotification](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/app-server-protocol/src/protocol/v2/notification.rs#L62),
 and [CyberPolicy translation](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/app-server-protocol/src/protocol/v2/shared.rs#L86).
-The older `codex exec` JSONL path drops the type and exposes only a message; it cannot prove this block.
+The worker reads this type from the app server notification. Earlier versions could also start `codex exec`, whose JSONL output drops the type and has only a message.
 No test sends a request to a model to cause a block. Tests simulate the source-defined notifications.
 
 The worker reads these calls from the exchange's events and decides the status in this order:
@@ -830,7 +830,7 @@ Type `/` at the start of the message box to see the commands, with a line on wha
 | `/settings` | Open Settings |
 | `/help` | List the commands |
 
-The page runs these commands itself. Messages reach Codex through `codex exec`, which does not read the slash commands of the Codex terminal app, so a command sent as a message would reach the model as plain words. Text that only starts with `/`, such as `/config/automations.yaml has an error`, is sent to Codex as usual.
+The page runs these commands itself. Messages reach Codex as plain text through the Codex app server, which does not read the slash commands of the Codex terminal app, so a command sent as a message would reach the model as plain words. Text that only starts with `/`, such as `/config/automations.yaml has an error`, is sent to Codex as usual.
 
 Below **Home Assistant workspace**, the sidebar shows how much of the account's 5-hour and 7-day quota is left. From **0.1.67**, each has a bar next to the percentage. The filled part is the quota left: green, and red when less than 5% is left. Hover over a bar to see when the quota resets. The worker checks the quota every few minutes, and not while a task is running. Until it has a value, the bar is an empty outline.
 

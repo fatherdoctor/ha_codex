@@ -86,6 +86,7 @@ class ConversationTests(unittest.TestCase):
                 self.finish(task_id)
 
     def codex_session(self, task_id, session_id=None):
+        """Return the approval session the worker would make for this chat, without starting it."""
         return server.create_approval_session(
             task_id, StubAppServer(session_id or self.session_id), "Prompt", self.root / "final",
             session_id, {}, server.read_options(),

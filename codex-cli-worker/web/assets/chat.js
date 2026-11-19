@@ -2997,7 +2997,7 @@ window.addEventListener("resize", () => {
   if (innerWidth > 700) setWidth($("divider").getAttribute("aria-valuenow"));
 });
 /**
- * Slash commands. Messages go to Codex as plain text through `codex exec`,
+ * Slash commands. Messages go to Codex as plain text through the app server,
  * which does not read the TUI's slash commands, so "/new" sent as a message
  * would only reach the model as words. The page runs these commands itself
  * instead: typing "/" at the start of the message box lists them, filtered as

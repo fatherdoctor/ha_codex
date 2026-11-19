@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import importlib.util
-import io
 import json
 import os
 import subprocess
@@ -1087,6 +1086,10 @@ class TaskCancellationTests(unittest.TestCase):
 
         self.assertFalse(thread.is_alive())
         self.assertEqual(cancelled, [200])
+        # The worker stops an app-server turn by interrupting it and waiting for the process to exit;
+        # it terminates only when that wait runs out (reap_approval_process).
+        self.assertIn("turn/interrupt", [message.get("method") for message in proc.requests])
+        self.assertTrue(proc.reaping.is_set())
         self.assertIsNotNone(proc.poll())
         self.assertNotIn(task_id, server.running_processes)
         self.assertNotIn(task_id, server.active_task_runners)

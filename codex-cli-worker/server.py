@@ -5583,6 +5583,10 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
         final["question"] = ""
         final["details"] = "\n\n".join(part for part in (str(final.get("details") or "").strip(), reason) if part)
     elif returncode != 0 and final.get("status") in {"completed", "needs_input"}:
+        # A backstop, kept on purpose. The app server path does not reach it today: the session's
+        # returncode stays non-zero only when it also sets an error (approvals.py, turn/completed and
+        # fail), and the lifecycle_error branch above takes that case. It stops a non-zero exit from
+        # ever reading as a finished answer if that changes.
         final["status"] = "failed"
         final["question"] = ""
         reason = f"Codex exited with {returncode}."

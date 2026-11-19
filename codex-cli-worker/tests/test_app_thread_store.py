@@ -6,7 +6,6 @@ The app-server messages here are written by hand from the Codex 0.166.0 protocol
 thread/resume take developerInstructions; turn/start takes input; an mcpToolCall item carries server, tool, status
 and arguments). They are not recordings of a real app server.
 """
-import io
 import json
 import os
 from pathlib import Path
@@ -355,6 +354,17 @@ class StatusCallTests(unittest.TestCase):
             self.assertEqual(server.parse_final(final_file, 0), old)
             final_file.write_text("```json\n" + json.dumps(old) + "\n```")
             self.assertEqual(server.parse_final(final_file, 0), old)
+
+    def test_a_non_zero_exit_code_fails_the_answer_and_names_the_code(self):
+        """A timeout or a broken exchange passes a non-zero code; the answer is then failed, also without a file."""
+        with tempfile.TemporaryDirectory() as folder:
+            final_file = Path(folder) / "final.json"
+            missing = server.parse_final(final_file, -1)
+            self.assertEqual(missing["status"], "failed")
+            self.assertIn("returncode=-1", missing["summary"])
+            final_file.write_text("Partly done.")
+            self.assertEqual(server.parse_final(final_file, 1),
+                             {"status": "failed", "summary": "Partly done.", "details": "returncode=1"})
 
     def test_an_example_of_the_old_answer_inside_a_plain_answer_stays_plain(self):
         """Only a whole answer is read as an old JSON answer, so an example of one does not set the status."""
