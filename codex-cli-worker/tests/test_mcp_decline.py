@@ -10,6 +10,19 @@ from test_server import server
 from approvals import AppServerSession
 from test_approvals import Transport
 import scheduling_mcp
+import scheduling
+
+
+def setUpModule():
+    """These tests cover the scheduling code, which is switched off in this series; turn it on for them."""
+    global _saved_switch
+    _saved_switch = scheduling.SCHEDULED_RUNS
+    scheduling.SCHEDULED_RUNS = True
+
+
+def tearDownModule():
+    scheduling.SCHEDULED_RUNS = _saved_switch
+
 
 TOOLS = ("propose_schedule", "list_schedules", "read_mailbox", "post_mailbox")
 

@@ -8,6 +8,19 @@ from unittest.mock import patch
 import test_scheduling as fixtures
 from test_scheduling import NOW, proposal, scheduling
 from test_server import server
+import scheduling
+
+
+def setUpModule():
+    """These tests cover the scheduling code, which is switched off in this series; turn it on for them."""
+    global _saved_switch
+    _saved_switch = scheduling.SCHEDULED_RUNS
+    scheduling.SCHEDULED_RUNS = True
+
+
+def tearDownModule():
+    scheduling.SCHEDULED_RUNS = _saved_switch
+
 
 MODEL = server.CHAT_MODELS[0][0]
 OTHER_MODEL = server.CHAT_MODELS[1][0]

@@ -116,6 +116,17 @@ class Service:
                     self._engine.store.timezone = None
             return self._engine
 
+    def log_held_schedules(self):
+        """Say once, at start, that scheduled runs are off and how many saved schedules wait."""
+        if scheduling.SCHEDULED_RUNS:
+            return
+        try:
+            held = len(self.engine().store.schedules())
+        except Exception:
+            print('Scheduled runs are off; the saved schedules could not be counted.', flush=True)
+            return
+        print(f'Scheduled runs are off in this version; {held} saved schedule(s) kept and not run.', flush=True)
+
     def mailbox_status(self):
         """Read mailbox metadata without refreshing Core time-zone metadata or dispatching work."""
         path = Path(self.worker.DATA_ROOT) / 'schedules.sqlite3'
@@ -355,7 +366,10 @@ def register(worker):
                 # deleting read history to advance it.
                 unread = engine.store.messages(reader=reader, unread_only=True, limit=scheduling.MAX_MESSAGES)
                 mailbox = unread or mailbox
-            return jsonify(ok=True, schedules=[schedule_payload(row) for row in engine.store.schedules()], runs=clean(engine.store.runs()),
+            shown = scheduling.SCHEDULED_RUNS
+            return jsonify(ok=True, scheduled_runs=shown,
+                           schedules=[schedule_payload(row) for row in engine.store.schedules()] if shown else [],
+                           runs=clean(engine.store.runs()) if shown else [],
                            mailbox=[mail_payload(row, engine.store.timezone) for row in
                                     mailbox[:scheduling.MAX_MESSAGES]],
                            mailbox_reader=reader, mailbox_status=engine.store.mail_status(), timezone=engine.store.timezone,
@@ -371,10 +385,15 @@ def register(worker):
     def schedules_list():
         return state()
 
+    def require_scheduled_runs():
+        if not scheduling.SCHEDULED_RUNS:
+            raise LookupError()
+
     @app.post('/schedules')
     @guarded
     @owner
     def schedules_create():
+        require_scheduled_runs()
         value = service.engine().store.save(owner_schedule(body()), owner=True, now=time.time())
         return jsonify(ok=True, schedule=schedule_payload(value)), 201
 
@@ -382,6 +401,7 @@ def register(worker):
     @guarded
     @owner
     def schedules_edit(schedule_id):
+        require_scheduled_runs()
         value = service.engine().store.save(owner_schedule(body(), schedule_id), owner=True, now=time.time(), schedule_id=schedule_id)
         return jsonify(ok=True, schedule=schedule_payload(value))
 
@@ -389,6 +409,7 @@ def register(worker):
     @guarded
     @owner
     def schedules_action(schedule_id, action):
+        require_scheduled_runs()
         data = body()
         if set(data) - {'revision'}:
             raise ValueError('Unexpected action fields.')

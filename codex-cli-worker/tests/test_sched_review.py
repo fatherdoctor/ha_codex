@@ -18,6 +18,17 @@ import test_scheduling as fixtures
 from test_server import server
 
 
+def setUpModule():
+    """These tests cover the scheduling code, which is switched off in this series; turn it on for them."""
+    global _saved_switch
+    _saved_switch = scheduling.SCHEDULED_RUNS
+    scheduling.SCHEDULED_RUNS = True
+
+
+def tearDownModule():
+    scheduling.SCHEDULED_RUNS = _saved_switch
+
+
 class ReviewStoreTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
