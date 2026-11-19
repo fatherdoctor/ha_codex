@@ -1,9 +1,8 @@
-name: Codex for Home Assistant
-description: Run Codex CLI tasks against the Home Assistant config folder.
-version: "0.3.6"
+name: ChatGPT (0.4 drop)
+description: Daily test build of release/0.4, built on this box. Not a release.
+version: "0.4.0-drop.20261119"
 slug: codex_cli_worker
 url: https://github.com/fatherdoctor/ha_codex
-image: ghcr.io/fatherdoctor/codex-cli-worker
 init: false
 startup: services
 boot: auto
