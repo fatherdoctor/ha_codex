@@ -9,7 +9,7 @@ from functools import wraps
 from typing import Any
 
 import voluptuous as vol
-from homeassistant.config_entries import ConfigEntry, ConfigEntryState
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady, HomeAssistantError, ServiceValidationError, Unauthorized
@@ -36,10 +36,10 @@ from .const import (
     SERVICE_START_LOGIN,
     SERVICE_START_TASK,
 )
-from .coordinator import CodexCliCoordinator
+from .coordinator import CodexCliCoordinator, async_delete_repair_issues
 from .discovery import async_discover_worker
 from .notification_actions import async_listen_for_choices
-from .browser_auth import STORAGE_KEY, BrowserSessions, BrowserSessionView, DiagnosticView
+from .browser_auth import STORAGE_KEY, BrowserSessions, BrowserSessionView, DiagnosticView, loaded_runtime_data
 from .kiosk import KioskScreenshotsView
 
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR]
@@ -122,15 +122,19 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a Codex CLI config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
+        # Revoke browser sessions here, before Core marks the entry not loaded. The cleanup stack that setup hands
+        # to entry.async_on_unload closes the broker again (closing twice is harmless): it also covers a failed setup.
         runtime_data = getattr(entry, "runtime_data", None)
         if isinstance(runtime_data, CodexCliRuntimeData):
             runtime_data.browser_sessions.close()
         entry.runtime_data = None
+        async_delete_repair_issues(hass)
     return unload_ok
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Remove the integration-owned identity and its credentials on uninstall."""
+    """Remove the integration-owned identity, its credentials and its repair issues on uninstall."""
+    async_delete_repair_issues(hass)
     store = Store(hass, 1, STORAGE_KEY)
     data = await store.async_load() or {}
     user = await hass.auth.async_get_user(data.get("user_id", ""))
@@ -153,9 +157,8 @@ def _async_update_discovered_entry(hass: HomeAssistant, entry: ConfigEntry, base
 
 def _first_runtime(hass: HomeAssistant) -> CodexCliRuntimeData:
     """Return the first loaded Codex runtime."""
-    for entry in hass.config_entries.async_entries(DOMAIN):
-        runtime_data = getattr(entry, "runtime_data", None)
-        if entry.state is ConfigEntryState.LOADED and isinstance(runtime_data, CodexCliRuntimeData):
+    for runtime_data in loaded_runtime_data(hass):
+        if isinstance(runtime_data, CodexCliRuntimeData):
             return runtime_data
     raise ServiceValidationError("Codex integration is not configured or is not loaded")
 

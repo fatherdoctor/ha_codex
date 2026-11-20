@@ -65,6 +65,11 @@
 - The chat page's rules no longer tell Codex how to answer a question about Codex cloud tasks (the
   `codex cloud list --json` line from 0.3.4). That line belonged to a feature that is not built; it returns with the
   feature. Codex can still run those commands when you ask it to.
+- **Repairs go away with the integration.** The sign-in, Remote control and GitHub repairs are deleted when the
+  Codex integration is unloaded or removed. Before, an owner who removed the integration kept a "sign in" repair
+  that nothing would clear.
+- **The Codex device is shown as a service.** Home Assistant now marks the Codex device as a service (an app that
+  runs on the same machine), not as a piece of hardware.
 
 ### Known issues
 - Remote control still uses its own keys. The tool requests of a chat no longer do (see "Under the hood").
