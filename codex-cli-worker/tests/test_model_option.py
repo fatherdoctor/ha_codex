@@ -16,6 +16,11 @@ class ModelOptionSchemaTests(unittest.TestCase):
         self.assertEqual(self.config["schema"]["codex_model"], "str")
         self.assertEqual(self.config["options"]["codex_model"], "default")
 
+    def test_reasoning_effort_is_free_text_with_medium_default(self):
+        # The pinned Codex takes any level a model advertises (max and ultra included), so no list here.
+        self.assertEqual(self.config["schema"]["model_reasoning_effort"], "str")
+        self.assertEqual(self.config["options"]["model_reasoning_effort"], "medium")
+
     def test_translation_says_how_to_find_model_names(self):
         translations = yaml.safe_load(
             (CONFIG_PATH.parent / "translations" / "en.yaml").read_text(encoding="utf-8"))

@@ -19,6 +19,11 @@
 - **The Codex model option is free text.** It was a fixed list, so a new model works as soon as Codex offers it.
   Every value the old list had keeps working, and an empty value means `default`. Type the model name exactly as
   Codex lists it.
+- **The chat's model picker follows Codex.** The picker shows the models Codex lists for your account, with the
+  reasoning levels each one supports, so a new model appears with no app update. The app asks Codex again after an
+  hour. Until Codex answers, or if it cannot, the picker shows the built-in list as before.
+- **The reasoning effort option is free text.** `model_reasoning_effort` now takes `max` and `ultra`, and any level a
+  new model adds. A saved value keeps working. A model that does not support the level runs on `medium`, as before.
 - **Steps stay closed while Codex works.** Under the "Working on your request…" line, the steps stay closed until you
   tap it. Your choice holds until the turn ends. Then the steps close under "Worked for…" as before. A permission
   request stays visible outside the closed list.

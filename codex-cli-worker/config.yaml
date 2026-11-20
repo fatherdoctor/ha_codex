@@ -55,7 +55,7 @@ options:
 schema:
   codex_model: str
   model_pin: str?
-  model_reasoning_effort: list(minimal|low|medium|high|xhigh)
+  model_reasoning_effort: str
   reasoning_summary: list(concise|detailed|none)
   codex_sandbox: list(workspace-write|read-only)
   notify_service: str?

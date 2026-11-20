@@ -7,7 +7,7 @@ configuration:
     description: Leave empty to use your account's default model. Set it to make this the only model the assistant runs on. A chat or a saved conversation that asks for another model is stopped with an error instead of running on it, and the Codex model option must be default or this model. Clear it to turn the pin off.
   model_reasoning_effort:
     name: Model reasoning effort
-    description: Reasoning effort passed to Codex CLI for supported models. low is lighter; medium is balanced; high uses more reasoning; xhigh uses extra reasoning. minimal is not supported by the current models and runs medium.
+    description: Reasoning effort passed to Codex CLI, as free text. low is lighter; medium is balanced; high, xhigh, max and ultra use more reasoning. A model that does not support the level runs medium.
   reasoning_summary:
     name: Reasoning summaries
     description: How much of its thinking Codex reports while it works. concise shows short headlines in the chat activity list, detailed asks for fuller summaries, and none hides reasoning from the list. Commands, file edits, searches, and progress notes are shown regardless.
