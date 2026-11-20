@@ -49,6 +49,7 @@ from ha_data import HomeAssistantData
 from ha_call import RELAY_TASK as RELAY_CALL_TASK, HomeAssistantCall
 import ha_data_mcp
 import remote_control
+import task_store
 import tool_threads
 from core_address import CoreAddress, probe_core
 from relay_reads import RelayReads, ReadError as RelayReadError
@@ -383,12 +384,20 @@ SENSITIVE_REPLACEMENTS = [
 WEB_ROOT = Path(__file__).resolve().parent / "web"
 app = Flask(__name__, static_folder=str(WEB_ROOT / "assets"), static_url_path="/assets")
 app.config["MAX_CONTENT_LENGTH"] = REQUEST_MAX_BYTES
-lock = threading.RLock()
+# The chats, their lock and their files (task_store.py). The names below are the same objects, for the code here.
+store = task_store.TaskStore(
+    root=lambda: task_root(),
+    index_file=lambda: TASK_STATE_FILE,
+    now=lambda: utc_now(),
+    waits_on_owner=lambda task: task_waits_on_owner(task),
+    wait_ended=lambda task_id: dismiss_wait_notice_async(task_id),
+)
+lock = store.lock
 auth_lock = threading.RLock()
-tasks: dict[str, dict[str, Any]] = {}
+tasks = store.tasks
 running_processes: dict[str, subprocess.Popen] = {}
 approval_sessions: dict[str, AppServerSession] = {}
-active_task_runners: set[str] = set()
+active_task_runners = store.active_runners
 # Messages sent while another task was running, oldest first. Each one starts
 # on its own once the tasks ahead of it have finished.
 message_queue: list[dict[str, Any]] = []
@@ -1161,59 +1170,13 @@ def ensure_runtime_files() -> None:
 
 
 def save_task_index() -> None:
-    """Write every task, without its prompt, reply history, and turns, to the task index file while holding the lock."""
-    with lock:
-        slim = {
-            task_id: {
-                key: value
-                for key, value in task.items()
-                if key not in {"prompt", "reply_history", "turns"}
-            }
-            for task_id, task in tasks.items()
-        }
-        atomic_json_write(TASK_STATE_FILE, slim)
+    """Write every task, without its prompt, reply history, and turns, to the task index file."""
+    store.save_index()
 
 
 def load_task_index() -> None:
-    """Load the saved tasks into memory at startup, marking any that were still active as failed.
-
-    Each task's own task.json is read first; the task index only adds the
-    tasks that have none.
-    """
-    root = task_root()
-    # A restart expires waiting permission cards, and an expired card keeps no changed lines of a secret file:
-    # the files that held them are written again, so no copy stays on disk.
-    secrets_forgotten = False
-    if root.exists():
-        for task_file in root.glob("*/task.json"):
-            try:
-                task = json.loads(task_file.read_text(encoding="utf-8"))
-                task_id = str(task.get("task_id") or task_file.parent.name)
-                task["task_id"] = task_id
-                if restore_saved_task(task_id, task):
-                    secrets_forgotten = True
-                    atomic_json_write(task_file, task)
-                tasks[task_id] = task
-            except Exception as exc:
-                print(f"Could not load task metadata from {task_file}: {exc}", flush=True)
-    if TASK_STATE_FILE.exists():
-        try:
-            loaded = json.loads(TASK_STATE_FILE.read_text(encoding="utf-8"))
-            if isinstance(loaded, dict):
-                for task_id, task in loaded.items():
-                    if task_id not in tasks:
-                        secrets_forgotten = restore_saved_task(task_id, task) or secrets_forgotten
-                    tasks.setdefault(task_id, task)
-                # The index also holds each task's approvals; a diff it saved for a secret file goes too.
-                if any(stored_secret_diff(task) for task in loaded.values() if isinstance(task, dict)):
-                    secrets_forgotten = True
-        except Exception as exc:
-            print(f"Could not load task index: {exc}", flush=True)
-    if secrets_forgotten:
-        try:
-            save_task_index()
-        except OSError as exc:
-            print(f"Could not save the task index: {redact(str(exc))}", flush=True)
+    """Load the saved tasks into memory at startup, marking any that were still active as failed."""
+    store.load(restore_saved_task, stored_secret_diff, redact)
 
 
 def restore_saved_task(task_id: str, task: dict[str, Any]) -> bool:
@@ -1973,7 +1936,7 @@ def write_task_log(task_id: str, stream: str, text: str) -> None:
 
 def get_task_dir(task_id: str) -> Path:
     """Return the folder that holds a task's files."""
-    return task_root() / task_id
+    return store.task_dir(task_id)
 
 
 def upload_dir(task_id: str, turn_id: str) -> Path:
@@ -2315,7 +2278,7 @@ def finish_activity(task_id: str) -> None:
     try:
         path = activity_file(task_id, turn_id)
         path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_json_write(path, payload)
+        task_store.atomic_json_write(path, payload)
     except OSError as exc:
         print(f"Could not save task activity for {task_id}: {redact(str(exc))}", flush=True)
     with lock:
@@ -2337,11 +2300,7 @@ def load_stored_activity(task_id: str, turn_id: str) -> dict[str, Any] | None:
     return stored
 
 
-TURN_RESULT_FIELDS = (
-    "status", "summary", "details", "question", "choices", "started_at", "completed_at",
-    "returncode", "changes", "validation_errors", "lovelace_results", "error",
-    "attachments", "config_check", "recovery_files", "backups", "verification", "verification_attachments", "approvals",
-)
+TURN_RESULT_FIELDS = task_store.TURN_RESULT_FIELDS
 # The check result recorded when no check ran: launch failures, cancellations, and new turns.
 EMPTY_CONFIG_CHECK = {"result": "skipped", "errors": "", "warnings": ""}
 CONTINUABLE_STATUSES = frozenset({"completed", "waiting_for_input", "failed", "cancelled"})
@@ -2363,41 +2322,17 @@ CHOICE_ACTION_PREFIX = "CODEX_CLI_CHOICE_"
 QUESTION_NOT_WAITING = "This question is no longer waiting for an answer."
 
 
+task_turns = task_store.task_turns
+
+
 def atomic_json_write(path: Path, value: Any) -> None:
-    """Replace metadata only after the complete new document has been written."""
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(value, indent=2), encoding="utf-8")
-    temporary.replace(path)
-
-
-def task_turns(task: dict[str, Any]) -> list[dict[str, Any]]:
-    """Adapt legacy records without inventing missing intermediate responses."""
-    if "turns" in task:
-        return copy.deepcopy(task["turns"])
-    turns = [{
-        "turn_id": "legacy", "message": task.get("prompt", ""),
-        "created_at": task.get("created_at", ""), "legacy": True,
-    }]
-    for index, reply in enumerate(task.get("reply_history") or []):
-        turns.append({
-            "turn_id": f"legacy-{index + 1}", "message": reply.get("reply", ""),
-            "created_at": reply.get("at", ""), "legacy": True,
-        })
-    # The task index still knows the latest turn id when task.json was lost; with it, the
-    # recovered chat finds that turn's saved activity.
-    current_turn = task.get("current_turn_id")
-    if isinstance(current_turn, str) and TURN_ID_RE.fullmatch(current_turn):
-        turns[-1]["turn_id"] = current_turn
-    turns[-1].update({key: copy.deepcopy(task[key]) for key in TURN_RESULT_FIELDS if key in task})
-    return turns
+    """Replace a JSON file in one step; the worker-owned tools write task.json through this name."""
+    task_store.atomic_json_write(path, value)
 
 
 def sync_current_turn(task: dict[str, Any]) -> None:
     """Keep this exchange's outcome alongside the compatible task-level result."""
-    turns = task.get("turns") or []
-    if turns and turns[-1].get("turn_id") == task.get("current_turn_id"):
-        turns[-1].update({key: copy.deepcopy(task[key]) for key in TURN_RESULT_FIELDS if key in task})
-        turns[-1]["updated_at"] = task.get("updated_at", utc_now())
+    task_store.sync_current_turn(task, utc_now())
 
 
 def new_turn(message: str) -> dict[str, Any]:
@@ -2407,10 +2342,7 @@ def new_turn(message: str) -> dict[str, Any]:
 
 def get_run_dir(task_id: str) -> Path:
     """Keep each exchange's prompts, output and snapshot in its own directory."""
-    with lock:
-        turn_id = tasks.get(task_id, {}).get("current_turn_id")
-    root = get_task_dir(task_id)
-    return root / "turns" / turn_id if turn_id else root
+    return store.run_dir(task_id)
 
 
 def session_rollout_path(session_id: str) -> Path | None:
@@ -2779,36 +2711,13 @@ def task_payload(
     return result
 
 
-def _save_task_update(task_id: str, updates: dict[str, Any], *, touch: bool) -> bool:
-    """Apply changes under the lock and persist them; see update_task and update_task_evidence."""
-    with lock:
-        if not touch and task_id not in tasks:
-            return False
-        task = tasks.setdefault(task_id, {"task_id": task_id})
-        if task.get("cancellation_requested") and updates.get("status") != "cancelled" and updates.get("cancellation_requested") is not False:
-            return False
-        waited = task_waits_on_owner(task)
-        task.update(updates)
-        wait_ended = waited and not task_waits_on_owner(task)
-        if touch:
-            task["updated_at"] = utc_now()
-        sync_current_turn(task)
-        task_dir = get_task_dir(task_id)
-        task_dir.mkdir(parents=True, exist_ok=True)
-        atomic_json_write(task_dir / "task.json", task)
-    save_task_index()
-    if wait_ended:
-        dismiss_wait_notice_async(task_id)
-    return True
-
-
 def update_task(task_id: str, **updates: Any) -> bool:
     """Apply changes to a task, creating it if needed, and save it to task.json and the task index.
 
     Once cancellation was requested, nothing is changed and False is returned,
     unless the update sets the cancelled status or clears the request.
     """
-    return _save_task_update(task_id, updates, touch=True)
+    return store.update(task_id, updates, touch=True)
 
 
 def update_task_evidence(task_id: str, **updates: Any) -> bool:
@@ -2817,7 +2726,7 @@ def update_task_evidence(task_id: str, **updates: Any) -> bool:
     A dashboard inspection retried after the exchange ended must neither move
     the chat in the recent list nor make it the integration's latest task.
     """
-    return _save_task_update(task_id, updates, touch=False)
+    return store.update(task_id, updates, touch=False)
 
 
 def normalize_title(value: Any) -> str:
@@ -2850,7 +2759,7 @@ def save_task_fields(task_id: str, **fields: Any) -> tuple[dict[str, Any] | None
         try:
             task_dir = get_task_dir(task_id)
             task_dir.mkdir(parents=True, exist_ok=True)
-            atomic_json_write(task_dir / "task.json", task)
+            task_store.atomic_json_write(task_dir / "task.json", task)
         except OSError:
             for key, value in previous.items():
                 if value is missing:
@@ -2883,9 +2792,7 @@ def remove_session_files(session_id: str) -> None:
 
 def task_cancellation_requested(task_id: str) -> bool:
     """Return whether cancellation won the task's terminal-state race."""
-    with lock:
-        task = tasks.get(task_id, {})
-        return bool(task.get("cancellation_requested"))
+    return store.cancellation_requested(task_id)
 
 
 def version_tuple(value: Any) -> tuple[int, ...] | None:
@@ -4526,7 +4433,7 @@ def download_ha_docs(target: Path) -> dict[str, Any]:
         "ha_version": ha_version,
         "license": "CC BY-NC-SA 4.0",
     }
-    atomic_json_write(target / HA_DOCS_INFO_FILE, info)
+    task_store.atomic_json_write(target / HA_DOCS_INFO_FILE, info)
     return info
 
 
@@ -5452,7 +5359,7 @@ def request_task_cancellation(
         sync_current_turn(task)
         task_dir = get_task_dir(task_id)
         task_dir.mkdir(parents=True, exist_ok=True)
-        atomic_json_write(task_dir / "task.json", task)
+        task_store.atomic_json_write(task_dir / "task.json", task)
         proc = running_processes.get(task_id)
         approval_session = approval_sessions.get(task_id)
         if approval_session is not None:
@@ -5480,7 +5387,7 @@ def publish_cancelled_task_outcome(task_id: str, returncode: int | None = None) 
         sync_current_turn(task)
         task_dir = get_task_dir(task_id)
         task_dir.mkdir(parents=True, exist_ok=True)
-        atomic_json_write(task_dir / "task.json", task)
+        task_store.atomic_json_write(task_dir / "task.json", task)
         final_task = dict(task)
     save_task_index()
 
@@ -6144,7 +6051,7 @@ def publish_safety_block(task_id: str, turn_id: str) -> None:
     )
 
 
-TURN_ID_RE = re.compile(r"[0-9a-f]{32}")
+TURN_ID_RE = task_store.TURN_ID_RE
 # Only needed while an exchange runs; exchanges from before 0.1.63 left them behind.
 WORKING_FILES = (BASELINE_FILE, "manifest-after.json")
 BACKUP_ARTIFACTS = (SNAPSHOT_FILE, BACKUP_DIR, RECOVERY_DIR)
@@ -6232,7 +6139,7 @@ def cleanup_backups() -> None:
                     if turn.get("turn_id") in turn_ids:
                         turn["backups_removed"] = True
                 try:
-                    atomic_json_write(get_task_dir(task_id) / "task.json", task)
+                    task_store.atomic_json_write(get_task_dir(task_id) / "task.json", task)
                 except OSError as exc:
                     print(f"Could not record the backup cleanup for {task_id}: {redact(str(exc))}", flush=True)
     finally:
@@ -6373,7 +6280,7 @@ def migrate_attachments() -> int:
                     changed = True
             if changed:
                 try:
-                    atomic_json_write(get_task_dir(task_id) / "task.json", task)
+                    task_store.atomic_json_write(get_task_dir(task_id) / "task.json", task)
                 except OSError as exc:
                     print(f"Could not save task {task_id} after moving attachments: {exc}", flush=True)
     if failed:
@@ -6519,7 +6426,7 @@ def open_turn(task_id: str, task: dict[str, Any], turn: dict[str, Any], settings
 def save_message_queue() -> None:
     """Write the queue to disk so waiting messages survive a worker restart."""
     with lock:
-        atomic_json_write(MESSAGE_QUEUE_FILE, message_queue)
+        task_store.atomic_json_write(MESSAGE_QUEUE_FILE, message_queue)
 
 
 def load_message_queue() -> None:
@@ -7008,7 +6915,7 @@ def save_chat_settings(task_id: str) -> Response:
         try:
             task_dir = get_task_dir(task_id)
             task_dir.mkdir(parents=True, exist_ok=True)
-            atomic_json_write(task_dir / "task.json", updated)
+            task_store.atomic_json_write(task_dir / "task.json", updated)
         except OSError:
             return jsonify({"ok": False, "error": "Could not save conversation settings. Try again."}), 500
         tasks[task_id] = updated
@@ -7031,7 +6938,7 @@ def archive_task(task_id):
             return jsonify({'ok': False, 'error': 'Wait for this task and its queued message to finish.'}), 409
         updated = {**task, 'archived': payload['archived']}
         try:
-            atomic_json_write(get_task_dir(task_id) / 'task.json', updated)
+            task_store.atomic_json_write(get_task_dir(task_id) / 'task.json', updated)
         except OSError:
             return jsonify({'ok': False, 'error': 'Could not save the archive choice.'}), 500
         tasks[task_id] = updated
@@ -7742,7 +7649,7 @@ def return_full_access_chats_to_default() -> None:
             try:
                 task_dir = get_task_dir(task_id)
                 task_dir.mkdir(parents=True, exist_ok=True)
-                atomic_json_write(task_dir / "task.json", task)
+                task_store.atomic_json_write(task_dir / "task.json", task)
             except OSError as exc:
                 print(f"Could not save chat {task_id} with Default permissions: {exc}", flush=True)
         for entry in message_queue:

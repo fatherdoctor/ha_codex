@@ -176,7 +176,10 @@ class TwoChats(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
-        for key, value in {"DATA_ROOT": self.root, "TASK_STATE_FILE": self.root / "index.json", "tasks": {}}.items():
+        patcher = patch.dict(server.tasks, {}, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        for key, value in {"DATA_ROOT": self.root, "TASK_STATE_FILE": self.root / "index.json"}.items():
             patcher = patch.object(server, key, value)
             patcher.start()
             self.addCleanup(patcher.stop)

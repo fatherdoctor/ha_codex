@@ -35,7 +35,8 @@ class ActivityStepTests(unittest.TestCase):
         """Start collecting steps for one running exchange."""
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
-        for name, value in (("tasks", {}), ("task_activity", {}), ("active_task_runners", set())):
+        self.stack.enter_context(patch.dict(server.tasks, clear=True))
+        for name, value in (("task_activity", {}), ("active_task_runners", set())):
             self.stack.enter_context(patch.object(server, name, value))
         server.tasks["t"] = {"task_id": "t", "status": "running", "current_turn_id": "turn-1"}
         server.start_activity("t", "turn-1")
@@ -142,7 +143,7 @@ class ActivityStepTests(unittest.TestCase):
         self.assertEqual(payload["steps"][-1]["kind"], "notice")
         server.tasks["t"]["status"] = "failed"
         server.tasks["t"]["summary"] = "Codex timed out after 5 seconds."
-        with patch.object(server, "atomic_json_write"):
+        with patch.object(server.task_store, "atomic_json_write"):
             with patch.object(server, "task_root", return_value=Path(tempfile.gettempdir())):
                 server.finish_activity("t")
         self.assertNotIn("t", server.task_activity)
@@ -163,7 +164,8 @@ class ActivityApiTests(unittest.TestCase):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
-        for name, value in (("tasks", {}), ("task_activity", {}), ("active_task_runners", set()), ("running_processes", {})):
+        self.stack.enter_context(patch.dict(server.tasks, clear=True))
+        for name, value in (("task_activity", {}), ("active_task_runners", set()), ("running_processes", {})):
             self.stack.enter_context(patch.object(server, name, value))
         self.stack.enter_context(patch.object(server, "task_root", return_value=self.root / "tasks"))
         self.stack.enter_context(patch.object(server, "TASK_STATE_FILE", self.root / "index.json"))
@@ -321,7 +323,7 @@ class ReasoningSummaryOptionTests(unittest.TestCase):
         for configured, expected in (("detailed", "detailed"), ("none", "none"), (None, "concise"), ("auto", "concise"), ("  Concise ", "concise")):
             with self.subTest(configured=configured):
                 self.assertEqual(server.reasoning_summary({"reasoning_summary": configured}), expected)
-        with patch.object(server, "tasks", {"t": {"task_id": "t", "turns": [], "chat_settings": server.DEFAULT_CHAT_SETTINGS}}):
+        with patch.dict(server.tasks, {"t": {"task_id": "t", "turns": [], "chat_settings": server.DEFAULT_CHAT_SETTINGS}}, clear=True):
             session = server.create_approval_session(
                 "t", StubAppServer("thread"), "Prompt", Path("final"), None, {}, {"reasoning_summary": "detailed"},
             )

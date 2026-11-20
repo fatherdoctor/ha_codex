@@ -30,8 +30,11 @@ class VerificationTests(unittest.TestCase):
         self.config = self.root / "config"
         self.config.mkdir()
         self.options = {**server.DEFAULT_OPTIONS, "task_root": str(self.root / "tasks")}
+        patcher = patch.dict(server.tasks, {}, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         for key, value in {"CONFIG_ROOT": self.config, "DATA_ROOT": self.root,
-                           "TASK_STATE_FILE": self.root / "index.json", "tasks": {}}.items():
+                           "TASK_STATE_FILE": self.root / "index.json"}.items():
             patcher = patch.object(server, key, value)
             patcher.start()
             self.addCleanup(patcher.stop)

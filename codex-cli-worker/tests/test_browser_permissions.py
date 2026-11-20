@@ -58,7 +58,10 @@ class BrowserPermissionTests(unittest.TestCase):
                 "verification": [self.check], "verification_attachments": [], "summary": "Original task answer",
                 "updated_at": "2026-01-01T00:00:00Z"}
         server.sync_current_turn(task)
-        for key, value in {"DATA_ROOT": self.root, "CONFIG_ROOT": self.root / "config", "tasks": {"chat": task},
+        patcher = patch.dict(server.tasks, {"chat": task}, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        for key, value in {"DATA_ROOT": self.root, "CONFIG_ROOT": self.root / "config",
                            "TASK_STATE_FILE": self.root / "index.json", "verification": self.engine,
                            "active_task_runners": set(), "running_processes": {}, "message_queue": []}.items():
             patcher = patch.object(server, key, value)

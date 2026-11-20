@@ -86,8 +86,8 @@ class SessionIdParsingTests(unittest.TestCase):
                     final_file.write_text(json.dumps(stale_payload), encoding="utf-8")
 
                 with (
-                    patch.object(server, "get_task_dir", return_value=task_dir),
-                    patch.object(server, "save_task_index"),
+                    patch.object(server.store, "task_dir", return_value=task_dir),
+                    patch.object(server.store, "save_index"),
                     patch.object(
                         server,
                         "read_options",
@@ -699,7 +699,7 @@ class TaskLaunchFailureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             task_dir = Path(temp_dir) / "task"
             with (
-                patch.object(server, "get_task_dir", return_value=task_dir),
+                patch.object(server.store, "task_dir", return_value=task_dir),
                 patch.object(server, "update_task", side_effect=lambda _task_id, **values: updates.append(values)),
                 patch.object(server, "read_options", return_value={"task_timeout_seconds": 30}),
                 patch.object(
@@ -773,8 +773,8 @@ class TaskLaunchFailureTests(unittest.TestCase):
                     return True
 
                 with (
-                    patch.object(server, "tasks", {task_id: task}),
-                    patch.object(server, "get_task_dir", return_value=task_dir),
+                    patch.dict(server.tasks, {task_id: task}, clear=True),
+                    patch.object(server.store, "task_dir", return_value=task_dir),
                     patch.object(
                         server,
                         "update_task",
@@ -851,8 +851,8 @@ class BackgroundStartFailureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             with (
-                patch.object(server, "get_task_dir", side_effect=lambda task_id: root / task_id),
-                patch.object(server, "save_task_index"),
+                patch.object(server.store, "task_dir", side_effect=lambda task_id: root / task_id),
+                patch.object(server.store, "save_index"),
                 patch.object(server, "api_token", return_value="test-token"),
                 patch.object(server.threading.Thread, "start", side_effect=RuntimeError("thread unavailable")),
                 patch.object(server, "fire_ha_event", side_effect=self.capture_event(events)),
@@ -891,9 +891,9 @@ class BackgroundStartFailureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             with (
-                patch.object(server, "get_task_dir", side_effect=lambda value: root / value),
+                patch.object(server.store, "task_dir", side_effect=lambda value: root / value),
                 patch.object(server, "session_available", return_value=True),
-                patch.object(server, "save_task_index"),
+                patch.object(server.store, "save_index"),
                 patch.object(server, "api_token", return_value="test-token"),
                 patch.object(server.threading.Thread, "start", side_effect=RuntimeError("thread unavailable")),
                 patch.object(server, "fire_ha_event", side_effect=self.capture_event(events)),
@@ -962,8 +962,8 @@ class TaskCancellationTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             with (
-                patch.object(server, "get_task_dir", return_value=Path(temp_dir) / task_id),
-                patch.object(server, "save_task_index"),
+                patch.object(server.store, "task_dir", return_value=Path(temp_dir) / task_id),
+                patch.object(server.store, "save_index"),
                 patch.object(server, "api_token", return_value="test-token"),
                 patch.object(server, "fire_ha_event", side_effect=self.capture_event(events)),
                 patch.object(server, "notify"),
@@ -995,8 +995,8 @@ class TaskCancellationTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             with (
-                patch.object(server, "get_task_dir", return_value=Path(temp_dir) / task_id),
-                patch.object(server, "save_task_index"),
+                patch.object(server.store, "task_dir", return_value=Path(temp_dir) / task_id),
+                patch.object(server.store, "save_index"),
                 patch.object(server, "api_token", return_value="test-token"),
                 patch.object(server, "page_message", return_value="prompt"),
                 patch.object(
@@ -1064,8 +1064,8 @@ class TaskCancellationTests(unittest.TestCase):
         proc = FakeProcess()
         with tempfile.TemporaryDirectory() as temp_dir:
             with (
-                patch.object(server, "get_task_dir", return_value=Path(temp_dir) / task_id),
-                patch.object(server, "save_task_index"),
+                patch.object(server.store, "task_dir", return_value=Path(temp_dir) / task_id),
+                patch.object(server.store, "save_index"),
                 patch.object(server, "api_token", return_value="test-token"),
                 patch.object(server, "page_message", return_value="prompt"),
                 patch.object(

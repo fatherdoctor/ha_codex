@@ -400,7 +400,7 @@ class LaunchTests(unittest.TestCase):
 
     def launches(self):
         task = {"task_id": "t", "turns": [], "chat_settings": server.DEFAULT_CHAT_SETTINGS}
-        with patch.object(server, "tasks", {"t": task}), patch.object(server, "read_options", return_value={}):
+        with patch.dict(server.tasks, {"t": task}, clear=True), patch.object(server, "read_options", return_value={}):
             return {"page": server.build_app_server_args()}
 
     def test_the_chat_launch_gets_the_tool_without_a_key(self):
@@ -475,7 +475,9 @@ class RunTaskLaunchTests(unittest.TestCase):
                  "refresh_core_address", "start_phase", "prepare_ha_docs")
         with ExitStack() as stack:
             for name, value in replaced.items():
-                if name in ("tasks", "ha_call"):
+                if name == "tasks":
+                    stack.enter_context(patch.dict(server.tasks, value, clear=True))
+                elif name == "ha_call":
                     stack.enter_context(patch.object(server, name, value))
                 else:
                     stack.enter_context(patch.object(server, name, return_value=value))
@@ -507,7 +509,7 @@ class RunTaskLaunchTests(unittest.TestCase):
             calls.begin(task_id)
 
         with patch.object(server, "ha_call", calls), patch.object(server, "run_task", side_effect=run_task), \
-                patch.object(server, "record_diagnostic"), patch.object(server, "tasks", {"t": {"task_id": "t"}}), \
+                patch.object(server, "record_diagnostic"), patch.dict(server.tasks, {"t": {"task_id": "t"}}, clear=True), \
                 patch.object(server, "running_processes", {}):
             server._run_background_task("t", "Turn off the kitchen ceiling.", None, None)
         self.assertNotIn("t", calls.capabilities)
@@ -516,7 +518,7 @@ class RunTaskLaunchTests(unittest.TestCase):
     def test_every_exchange_is_told_to_use_the_tool(self):
         for source, has_tool in (("page", True), ("schedule", True), ("lead", True)):
             task = {"task_id": "t", "turns": [], "task_source": source}
-            with self.subTest(task_source=source), patch.object(server, "tasks", {"t": task}), \
+            with self.subTest(task_source=source), patch.dict(server.tasks, {"t": task}, clear=True), \
                     patch.object(server, "read_options", return_value={"HA_TOKEN": "invented-token"}):
                 text = server.exchange_info("t", None)["home_assistant_api"]
             self.assertEqual("home_assistant_call" in text, has_tool)

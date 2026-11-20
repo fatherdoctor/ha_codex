@@ -19,8 +19,9 @@ def capture(payload):
         config.mkdir()
         options = {**server.DEFAULT_OPTIONS, "task_root": str(root / "tasks")}
         for key, value in {"CONFIG_ROOT": config, "DATA_ROOT": root,
-                           "TASK_STATE_FILE": root / "index.json", "tasks": {}}.items():
+                           "TASK_STATE_FILE": root / "index.json"}.items():
             stack.enter_context(patch.object(server, key, value))
+        stack.enter_context(patch.dict(server.tasks, clear=True))
         stack.enter_context(patch.object(server, "read_options", return_value=options))
         stack.enter_context(patch.object(server, "api_token", return_value="fixture-worker-token"))
         turn = server.new_turn("Browser verification fixture")

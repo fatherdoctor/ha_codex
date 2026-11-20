@@ -22,7 +22,8 @@ class ConversationTests(unittest.TestCase):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
-        for name, value in (("tasks", {}), ("active_task_runners", set()), ("running_processes", {})):
+        self.stack.enter_context(patch.dict(server.tasks, clear=True))
+        for name, value in (("active_task_runners", set()), ("running_processes", {})):
             self.stack.enter_context(patch.object(server, name, value))
         self.stack.enter_context(patch.object(server, "task_root", return_value=self.root / "tasks"))
         self.stack.enter_context(patch.object(server, "TASK_STATE_FILE", self.root / "index.json"))
@@ -280,7 +281,7 @@ class ConversationTests(unittest.TestCase):
         task_id = self.create()
         self.finish(task_id)
         before = copy.deepcopy(server.tasks[task_id])
-        with patch.object(server, "atomic_json_write", side_effect=OSError("disk full")):
+        with patch.object(server.task_store, "atomic_json_write", side_effect=OSError("disk full")):
             response = self.post(f"/tasks/{task_id}/settings", {"chat_settings": {"model": "gpt-6-astra"}})
         self.assertEqual(response.status_code, 500)
         self.assertEqual(server.tasks[task_id], before)
@@ -527,7 +528,7 @@ class ConversationTests(unittest.TestCase):
         self.assertEqual(task["title"], "x" * 200)
         summary = self.client.get("/tasks?summary=true", headers=self.headers).json["tasks"][0]
         self.assertEqual(summary["title"], "x" * 200)
-        with patch.object(server, "atomic_json_write", side_effect=OSError("disk full")):
+        with patch.object(server.task_store, "atomic_json_write", side_effect=OSError("disk full")):
             self.assertEqual(self.post(f"/tasks/{task_id}/title", {"title": "Lost"}).status_code, 500)
             self.assertEqual(self.post(f"/tasks/{task_id}/pin", {"pinned": True}).status_code, 500)
         self.assertEqual(server.tasks[task_id]["title"], "x" * 200)

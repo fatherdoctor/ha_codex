@@ -52,7 +52,7 @@ class GrantLayerLaunchTests(unittest.TestCase):
 
     def page_launches(self) -> dict[str, list[str]]:
         task = {"task_id": "t", "turns": [], "chat_settings": server.DEFAULT_CHAT_SETTINGS}
-        with patch.object(server, "tasks", {"t": task}), patch.object(server, "read_options", return_value={}):
+        with patch.dict(server.tasks, {"t": task}, clear=True), patch.object(server, "read_options", return_value={}):
             return {
                 "page": server.build_app_server_args(),
             }
