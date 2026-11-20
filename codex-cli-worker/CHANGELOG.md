@@ -113,6 +113,9 @@
   `codex_cli_task_result` event.
 
 ### Fixed
+- **Share masks three more shapes.** A password value whose first word another rule already masked (an `sk-` key, a
+  token) no longer keeps the rest of its line, and a quoted password that runs on to the next line is masked whole.
+  A very long run of the secret word itself (`password-password-...`) is masked about three times faster.
 - **Sign-in works on a phone.** On a small screen, the sign-in banner above the chat now scrolls, so the link to the
   sign-in page and the whole code are always in reach. The link now comes before the QR code. A phone cannot scan its
   own screen, so on a phone-sized window the QR code starts folded under **Show QR code**; a larger window shows it
