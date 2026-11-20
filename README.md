@@ -20,8 +20,8 @@ on a test Home Assistant first.
   that uses the network, a write outside your configuration folder and `/share`, or a change to a device. Only an
   administrator can answer. The other [permission modes](#permission-modes) ask less or more.
 - Codex is told to save the earlier copy of a file before it changes it, and the chat lists the copies it saved. A
-  copy can be missing, and credential files are never copied, so keep your own Home Assistant backups
-  ([Backups](codex-cli-worker/DOCS.md#backups)).
+  copy can be missing, and `secrets.yaml` and the files under `.storage` (dashboards kept there too) are never
+  copied, so keep your own Home Assistant backups ([Backups](codex-cli-worker/DOCS.md#backups)).
 - After a change to YAML, the app asks Home Assistant to check the configuration, unless you turned that option off
   or Home Assistant cannot run the check. The chat says which ([Validation](codex-cli-worker/DOCS.md#validation)).
 - The Codex program is pinned and never updates itself.
@@ -184,8 +184,8 @@ What the safeguards do not do:
   reading a private file or changing the app's settings.
 - The app does not check what Codex writes in `/config`. An edit can add a shell command that Home Assistant runs
   later; review what a chat changed before you reload or restart.
-- Backups depend on Codex following its instructions, and credential files are never copied. Keep your own Home
-  Assistant backups.
+- Backups depend on Codex following its instructions, and `secrets.yaml` and the files under `.storage` are never
+  copied. Keep your own Home Assistant backups.
 
 The app asks for no host networking, Docker access or elevated Supervisor roles, and it keeps AppArmor on. Your
 `/config` folder is mounted for writing, because editing it is the purpose of the app. More detail:

@@ -68,6 +68,14 @@
   copy at `/data/agents_before_move.md`. If both places hold a file, nothing moves and the app logs a line.
 
 ### Changed
+- **No copies of secret files.** The app keeps no readable copy of `secrets.yaml` or of any file under `.storage`.
+  The full snapshot leaves them out, and a copy in a message's backup folder is deleted when the message ends, in
+  every permission mode, also when you stop the message; the backup cleanup removes a copy that a restart left
+  behind. After you answer a permission card for a change to one of these files, the chat's record keeps the path
+  but not the changed lines. This includes dashboards kept in storage: to undo a change to one, use a Home
+  Assistant backup.
+- **`.storage` is read-only in the sandbox.** In Default, a change to a file under `.storage` now asks you on a
+  permission card first. In Auto-review, Codex's reviewer decides; Full access still runs without asking.
 - **Working files out of the configuration folder.** The chats (prompts, logs, per-turn backups, attachments) are now
   in the app's private `/data/codex_tasks`, not in `/config/codex_tasks`: the file editor, Samba and a backup of the
   configuration folder no longer hold them, and the app's own backup does. The first start of this version moves each

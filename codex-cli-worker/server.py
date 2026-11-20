@@ -1158,43 +1158,73 @@ def load_task_index() -> None:
     tasks that have none.
     """
     root = task_root()
+    # A restart expires waiting permission cards, and an expired card keeps no changed lines of a secret file:
+    # the files that held them are written again, so no copy stays on disk.
+    secrets_forgotten = False
     if root.exists():
         for task_file in root.glob("*/task.json"):
             try:
                 task = json.loads(task_file.read_text(encoding="utf-8"))
                 task_id = str(task.get("task_id") or task_file.parent.name)
                 task["task_id"] = task_id
-                restore_saved_task(task_id, task)
+                if restore_saved_task(task_id, task):
+                    secrets_forgotten = True
+                    atomic_json_write(task_file, task)
                 tasks[task_id] = task
             except Exception as exc:
                 print(f"Could not load task metadata from {task_file}: {exc}", flush=True)
-    if not TASK_STATE_FILE.exists():
-        return
-    try:
-        loaded = json.loads(TASK_STATE_FILE.read_text(encoding="utf-8"))
-        if isinstance(loaded, dict):
-            for task_id, task in loaded.items():
-                if task_id not in tasks:
-                    restore_saved_task(task_id, task)
-                tasks.setdefault(task_id, task)
-    except Exception as exc:
-        print(f"Could not load task index: {exc}", flush=True)
+    if TASK_STATE_FILE.exists():
+        try:
+            loaded = json.loads(TASK_STATE_FILE.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                for task_id, task in loaded.items():
+                    if task_id not in tasks:
+                        secrets_forgotten = restore_saved_task(task_id, task) or secrets_forgotten
+                    tasks.setdefault(task_id, task)
+                # The index also holds each task's approvals; a diff it saved for a secret file goes too.
+                if any(stored_secret_diff(task) for task in loaded.values() if isinstance(task, dict)):
+                    secrets_forgotten = True
+        except Exception as exc:
+            print(f"Could not load task index: {exc}", flush=True)
+    if secrets_forgotten:
+        try:
+            save_task_index()
+        except OSError as exc:
+            print(f"Could not save the task index: {redact(str(exc))}", flush=True)
 
 
-def restore_saved_task(task_id: str, task: dict[str, Any]) -> None:
+def restore_saved_task(task_id: str, task: dict[str, Any]) -> bool:
     """Restore a saved task after a restart: its prompts expire and a task that was active has failed.
 
     A task that waited for a permission decision no longer waits, so its notice
     is dismissed. A question still waits for its answer and keeps its notice.
+    An expired card keeps no changed lines of a secret file. Returns whether such
+    a diff was emptied, so that the caller writes the saved record again.
     """
     waited = task_waits_on_owner(task)
     expire_saved_approvals(task)
+    secrets_forgotten = False
+    for record in [task, *(task.get("turns") or [])]:
+        approvals = record.get("approvals") or []
+        if stored_secret_diff(record):
+            forget_secret_diffs(approvals)
+            secrets_forgotten = True
     if task.get("status") in {"queued", "running"}:
         task["status"] = "failed"
         task["summary"] = task["error"] = "Worker restarted while this task was active."
         sync_current_turn(task)
     if waited and not task_waits_on_owner(task):
         dismiss_wait_notice_async(task_id)
+    return secrets_forgotten
+
+
+def stored_secret_diff(record: dict[str, Any]) -> bool:
+    """Whether a saved record's answered or expired permission cards still hold changed lines of a secret file."""
+    return any(
+        change.get("diff") and (secret_config_path(change.get("path")) or secret_config_path(change.get("move_path")))
+        for approval in record.get("approvals") or [] if approval.get("status") != "pending"
+        for change in approval.get("changes") or []
+    )
 
 
 def expire_saved_approvals(task: dict[str, Any]) -> None:
@@ -2960,7 +2990,7 @@ def create_snapshot(task_id: str, manifest: dict[str, dict[str, Any]] | None = N
     file_count = 0
     with tarfile.open(snapshot_path, "w:gz") as tar:
         for rel in sorted(manifest):
-            if snapshot_secret_path(rel):
+            if secret_file_path(rel):
                 continue
             path = CONFIG_ROOT / rel
             if path.exists():
@@ -2970,12 +3000,19 @@ def create_snapshot(task_id: str, manifest: dict[str, dict[str, Any]] | None = N
     return {"path": str(snapshot_path), "file_count": file_count, "created_at": utc_now()}
 
 
-def snapshot_secret_path(relative: str) -> bool:
-    """Keep credential files in change detection, but out of recovery archives."""
+def secret_file_path(relative: str) -> bool:
+    """Whether a path under /config is a secret file, of which the add-on never keeps a readable copy.
+
+    These are every secrets.yaml (or secrets.yml), in any folder, and every file
+    under .storage, where Home Assistant keeps sign-ins, tokens and integration
+    credentials beside dashboards and other state. They stay in change detection,
+    but the full snapshot leaves them out and a copy in the backup folder is
+    deleted when the exchange ends, whoever made it.
+    """
     path = Path(relative)
-    return path.name in {"secrets.yaml", "secrets.yml"} or relative in {
-        ".storage/auth", ".storage/http.auth", ".storage/core.config_entries",
-    } or relative.startswith(".storage/auth_provider.")
+    if path.name in {"secrets.yaml", "secrets.yml"}:
+        return True
+    return bool(path.parts) and path.parts[0] == ".storage"
 
 
 # The first bytes of every cookie jar that the standard library saves in the LWP format.
@@ -3160,13 +3197,37 @@ def copied_files(run_dir: Path) -> dict[str, Path]:
 
 
 def drop_credential_backups(run_dir: Path) -> None:
-    """Delete copies of credential files, which Codex is told not to make."""
+    """Delete copies of secret files (secret_file_path), which Codex is told not to make."""
     for rel, path in copied_files(run_dir).items():
-        if snapshot_secret_path(rel):
+        if secret_file_path(rel):
             try:
                 path.unlink()
             except OSError:
                 pass
+
+
+def secret_config_path(path: Any) -> bool:
+    """Whether a path Codex names (absolute, or relative to /config) is a secret file under /config."""
+    text = str(path or "")
+    if not text:
+        return False
+    full = os.path.normpath(os.path.join(CONFIG_ROOT.as_posix(), text))
+    prefix = CONFIG_ROOT.as_posix() + "/"
+    return full.startswith(prefix) and secret_file_path(full[len(prefix):])
+
+
+def forget_secret_diffs(records: list[dict[str, Any]]) -> None:
+    """Empty the diff of a change to a secret file once its permission request no longer waits.
+
+    The card shows the diff while the person decides; after the answer the app has no use
+    for it, and the chat's task.json must not keep the changed lines of a secret file.
+    """
+    for record in records:
+        if record.get("status") == "pending":
+            continue
+        for change in record.get("changes") or []:
+            if secret_config_path(change.get("path")) or secret_config_path(change.get("move_path")):
+                change["diff"] = ""
 
 
 def saved_copy(run_dir: Path, rel: str, before: dict[str, Any]) -> dict[str, str]:
@@ -3181,7 +3242,7 @@ def saved_copy(run_dir: Path, rel: str, before: dict[str, Any]) -> dict[str, str
     # Codex can write in this folder, so never follow a link it may have left there.
     if not safe_relative_path(rel) or (run_dir / BACKUP_DIR).is_symlink():
         return entry
-    if snapshot_secret_path(rel):
+    if secret_file_path(rel):
         return {**entry, "status": "excluded"}
     root = (run_dir / BACKUP_DIR).resolve()
     target = root / rel
@@ -3347,7 +3408,7 @@ def validation_details(validation_errors: list[str], config_check: dict[str, str
     if added:
         lines.append("New files that did not exist before: " + code_spans(added))
     if excluded:
-        lines.append("Credential files excluded from recovery copies; use a Home Assistant backup: " + code_spans(excluded))
+        lines.append("Secret files (secrets.yaml and .storage) have no recovery copies; use a Home Assistant backup: " + code_spans(excluded))
     if unsaved:
         lines.append(unsaved_note(unsaved))
     if config_check.get("warnings"):
@@ -4537,10 +4598,10 @@ def backup_instructions(backup_dir: Path | None) -> str:
         return ""
     return (
         f"Before you change, move, or delete a file that already exists under /config, copy it to {backup_dir} under "
-        f"the same relative path, creating folders as needed: /config/automations.yaml goes to {backup_dir}/automations.yaml "
-        f"and /config/.storage/lovelace.kitchen goes to {backup_dir}/.storage/lovelace.kitchen. Copy each file once, before "
+        f"the same relative path, creating folders as needed: /config/automations.yaml goes to {backup_dir}/automations.yaml. "
+        "Copy each file once, before "
         "your first change to it for this message, and only the files you are about to change. Files you create need no copy. "
-        "Never copy secrets.yaml, .storage/auth, .storage/auth_provider.*, .storage/http.auth, or .storage/core.config_entries. "
+        "Never copy secrets.yaml or any file under .storage: they hold secrets, and the worker deletes such copies. "
         "Do not leave other backup copies in /config. The worker checks these copies when you finish and tells the user "
         "which changed files have none.\n\n"
     )
@@ -4959,6 +5020,7 @@ def create_approval_session(
 
     def save_approvals(records: list[dict[str, Any]]) -> None:
         """Save display-only decisions on the matching exchange, including expiration, and announce a new request."""
+        forget_secret_diffs(records)
         record_diagnostic("approvals", task_id, records)
         # Before anything can fail: an answered or expired request must not be announced late.
         for item in records:
@@ -6002,6 +6064,8 @@ def cleanup_backups() -> None:
         for task_id, turn_id, old in finished:
             run_dir = root / task_id / "turns" / turn_id if turn_id else root / task_id
             remove_run_artifacts(run_dir, WORKING_FILES)
+            # A stopped exchange, or one a restart cut off, never reached the deletion in run_task.
+            drop_credential_backups(run_dir)
             if old:
                 remove_run_artifacts(run_dir, BACKUP_ARTIFACTS)
                 expired.setdefault(task_id, set()).add(turn_id)
@@ -7208,6 +7272,11 @@ def cancel_task(task_id: str) -> Response:
             reap_approval_process(proc)
         else:
             terminate_and_reap_process(proc)
+    # run_task returns early for a stopped exchange, so the copies of secret files go here, once Codex has stopped.
+    try:
+        drop_credential_backups(get_run_dir(task_id))
+    except OSError as exc:
+        write_task_log(task_id, "worker", f"Could not tidy the backup folder: {exc}")
     publish_cancelled_task_outcome(task_id, proc.returncode if proc is not None else None)
     start_next_queued()
     return jsonify({"ok": True, "task_id": task_id, "status": "cancelled"})
