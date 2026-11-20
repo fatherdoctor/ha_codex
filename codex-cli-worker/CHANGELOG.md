@@ -1,6 +1,10 @@
 # Changelog
 
 ## 0.4.0 (unreleased)
+- A scheduled run now has the same tools as a chat on the page, the `home_assistant_call` tool that changes the
+  house included. Before, a scheduled run did not get that tool. Codex asks before each call as it does in a chat:
+  the question waits in the run's chat with the yellow warning until an administrator chooses **Allow once** or
+  **Deny**, and nothing is sent to Home Assistant before that. A schedule still runs in Default or Read only.
 - The chat page no longer shows the lead agent: an old chat that the removed lead channel started has no "Started by lead" label,
   and the schedule editor no longer mentions lead runs.
 - The mark in the chat page header now follows the page's theme (the Home Assistant theme when the page runs inside

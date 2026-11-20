@@ -126,8 +126,8 @@ class HomeAssistantCall:
     def begin(self, task_id):
         """Allow calls for the task's running exchange, or issue the relay's key for a relay launch, and return it.
 
-        run_task calls this only when a person attends the exchange. For a chat the value stays in the worker;
-        only the relay's value goes to a process. An earlier value of the same task stops working.
+        run_task calls this for every exchange, a scheduled run's included. For a chat the value stays in the
+        worker; only the relay's value goes to a process. An earlier value of the same task stops working.
         """
         capability = secrets.token_urlsafe(32)
         with self.lock:
@@ -144,7 +144,9 @@ class HomeAssistantCall:
 
         A request with a key comes from remote control: only the relay's key counts, and only while the relay
         runs. A request without a key names its chat by thread id: that chat needs a running exchange that is
-        not canceled and that a person attends (begin ran for it). A chat's thread never reaches the relay.
+        not canceled (begin ran for it and end did not). A chat's thread never reaches the relay. Who started
+        the exchange, a person or a schedule, makes no difference here: Codex's question before the call is the
+        gate, and it waits in the chat for a person.
         """
         if "capability" in payload:
             supplied = payload["capability"]
@@ -158,8 +160,8 @@ class HomeAssistantCall:
             return RELAY_TASK if self.relay_running() else None
         task_id = tool_threads.CHATS.task_for(payload.get("thread_id"))
         with self.lock:
-            attended = task_id is not None and task_id != RELAY_TASK and task_id in self.capabilities
-        if not attended:
+            begun = task_id is not None and task_id != RELAY_TASK and task_id in self.capabilities
+        if not begun:
             return None
         if self.worker.task_cancellation_requested(task_id):
             return None
@@ -174,7 +176,7 @@ class HomeAssistantCall:
             return {"status": "unavailable", "message": "Invalid call request"}
         task_id = self.task_for(payload)
         if task_id is None:
-            return {"status": "unavailable", "message": "No running exchange that a person attends: nothing was sent"}
+            return {"status": "unavailable", "message": "No running exchange: nothing was sent"}
         arguments = payload.get("arguments")
         try:
             if isinstance(arguments, dict) and "name" in arguments:
