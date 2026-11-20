@@ -29,6 +29,10 @@
   tools. Saved schedules are kept. Saved messages stay in the schedule file, unread, so an older version still finds
   them after a rollback. The chat page also no longer shows the lead agent: an old chat that the lead channel started has
   no "Started by lead" label, and the schedule editor no longer mentions lead runs.
+- **The mailbox sensor and event are removed from the integration.** The **Mailbox unread for the lead** sensor and
+  the `codex_cli_mailbox_message` event are gone, and the status poll no longer saves message IDs. When the
+  integration starts, it removes that sensor from the entity registry and deletes its saved message IDs, so an update
+  leaves no orphan entity. Automations that use the sensor or the event stop working.
 - **Starter `AGENTS.md` safeguards.** The starter file has a short section of safeguard defaults (secrets, protected
   places, backups). It says they are defaults you can change or delete, not locks in the app.
 - **Clearer documentation.** The README, the integration README, `SECURITY.md`, `DOCS.md` and three option
@@ -95,8 +99,6 @@
 
 ### Known issues
 - Remote control still uses its own keys. The tool requests of a chat no longer do (see "Under the hood").
-- `/status` reports the mailbox as not available, so the integration's unread-mail sensor shows unknown until a later
-  version of the integration removes it.
 - The new Codex host (see "Under the hood") is not connected. Every message still starts its own Codex process.
 
 ### Under the hood

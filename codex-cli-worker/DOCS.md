@@ -1228,10 +1228,3 @@ sensor or guessed 72-hour, 24-hour or 6-hour warning tiers. It retains the exist
 explicitly rejected sign-in Repair described above, clearing after renewal is confirmed. The add-on
 sends no advance-expiry push. Expiry estimation adds no credential-file reader, token decoder
 or model task.
-
-### Mailbox arrival signals
-
-From **0.4.0** the app has no mailbox and no lead agent channel. The worker's `/status` reports the mailbox as not
-available, so the integration's **Mailbox unread for the lead** sensor shows unknown and no
-`codex_cli_mailbox_message` event fires. A later version of the integration removes the sensor and the event.
-
