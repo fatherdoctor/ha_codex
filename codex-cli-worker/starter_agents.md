@@ -1,6 +1,6 @@
 # Instructions for Codex in this home
 
-This file is `/config/AGENTS.md`. Codex reads it when a chat starts. The app wrote this starter text once, on its
+This file is `AGENTS.md` in the app's own folder (`/addon_config` inside the app). Codex reads it when a chat starts. The app wrote this starter text once, on its
 first start, because the home had no instructions yet. The file is yours: change it, add the rules of your home, or
 delete it. The editor is in the chat page under Settings > Workspace instructions.
 

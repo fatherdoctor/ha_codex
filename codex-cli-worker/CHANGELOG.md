@@ -46,6 +46,11 @@
   do what the chat menu does, and `/connection` opens the remote connection and its status. `/help` and
   **Settings** > **Commands** are gone: the list in the message box is the only one. When you close a dialog that a
   command opened, the cursor stays in the message box.
+- **Changed: the workspace instructions file moved out of `/config`.** `AGENTS.md` now lives in the app's own
+  `addon_config` folder (`/addon_configs/<app folder>/AGENTS.md` on the host), not in the top level of `/config`.
+  Codex loads it as its global instructions, and **Settings** > **Workspace instructions** reads and writes it there.
+  On the first start of this version, a file an older version left in `/config` is moved, not copied, after a backup
+  copy at `/data/agents_before_move.md`. If both places hold a file, nothing moves and the app logs a line.
 
 ### Changed
 - **No more checks after each answer.** The app no longer judges a turn after Codex answers: it takes no dashboard
