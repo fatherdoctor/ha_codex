@@ -3526,8 +3526,10 @@ let loginTimer;
 let shownLogin = null;
 /**
  * Build the sign-in card: the code in large letters that stay put until the
- * sign-in ends or is canceled, the QR code of the sign-in page served by the
- * worker, and the link to the same page.
+ * sign-in ends or is canceled, the link to the sign-in page, and the QR code
+ * of the same page served by the worker. The link comes before the QR code, so
+ * a phone shows it without a scroll. A phone cannot scan its own screen, so on
+ * a phone-sized window the QR code starts folded behind "Show QR code".
  */
 function signInCard(auth) {
   const card = document.createElement("div");
@@ -3552,14 +3554,6 @@ function signInCard(auth) {
   } else {
     card.append(textNode("p", "Waiting for the sign-in code…", "muted"));
   }
-  if (auth.qr_path) {
-    const img = document.createElement("img");
-    img.src = auth.qr_path;
-    img.alt = "QR code that opens the ChatGPT sign-in page";
-    img.className = "signin-qr";
-    img.width = img.height = 220;
-    card.append(img);
-  }
   if (auth.verification_url) {
     const url = new URL(auth.verification_url, location.href);
     if (url.protocol === "https:") {
@@ -3569,6 +3563,18 @@ function signInCard(auth) {
       link.rel = "noreferrer";
       card.append(link);
     }
+  }
+  if (auth.qr_path) {
+    const img = document.createElement("img");
+    img.src = auth.qr_path;
+    img.alt = "QR code that opens the ChatGPT sign-in page";
+    img.className = "signin-qr";
+    img.width = img.height = 220;
+    const fold = document.createElement("details");
+    fold.className = "disclosure signin-qr-fold";
+    fold.open = !matchMedia("(max-width:700px)").matches;
+    fold.append(textNode("summary", "Show QR code"), img);
+    card.append(fold);
   }
   return card;
 }
