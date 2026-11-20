@@ -2,36 +2,39 @@
   "cancelled": {
     "events": [
       {
-        "attachments": [],
-        "backups": [],
-        "changes": {
-          "added": [],
-          "changed": [],
-          "deleted": []
-        },
-        "codex_status": "cancelled",
-        "completed_at": "<time>",
-        "config_check": {
-          "errors": "",
-          "result": "skipped",
-          "warnings": ""
-        },
-        "details": "",
-        "lovelace_results": [],
-        "question": "",
-        "recovery_files": [],
-        "response": {
+        "data": {
+          "attachments": [],
+          "backups": [],
+          "changes": {
+            "added": [],
+            "changed": [],
+            "deleted": []
+          },
+          "codex_status": "cancelled",
+          "completed_at": "<time>",
+          "config_check": {
+            "errors": "",
+            "result": "skipped",
+            "warnings": ""
+          },
           "details": "",
+          "lovelace_results": [],
           "question": "",
+          "recovery_files": [],
+          "response": {
+            "details": "",
+            "question": "",
+            "status": "cancelled",
+            "summary": "Task cancelled"
+          },
+          "returncode": null,
+          "session_id": "",
           "status": "cancelled",
-          "summary": "Task cancelled"
+          "summary": "Task cancelled",
+          "task_id": "<task>",
+          "validation_errors": []
         },
-        "returncode": null,
-        "session_id": "",
-        "status": "cancelled",
-        "summary": "Task cancelled",
-        "task_id": "<task>",
-        "validation_errors": []
+        "event": "codex_cli_task_result"
       }
     ],
     "index": {
@@ -56,7 +59,7 @@
         "warnings": ""
       },
       "created_at": "<time>",
-      "current_turn_id": "<id>",
+      "current_turn_id": "<turn-1>",
       "details": "",
       "error": "",
       "lovelace_results": [],
@@ -95,7 +98,7 @@
         "warnings": ""
       },
       "created_at": "<time>",
-      "current_turn_id": "<id>",
+      "current_turn_id": "<turn-1>",
       "deletion_warning": null,
       "details": "",
       "error": "",
@@ -143,7 +146,7 @@
           "returncode": null,
           "status": "cancelled",
           "summary": "Task cancelled",
-          "turn_id": "<id>",
+          "turn_id": "<turn-1>",
           "updated_at": "<time>",
           "validation_errors": []
         }
@@ -187,7 +190,7 @@
         "warnings": ""
       },
       "created_at": "<time>",
-      "current_turn_id": "<id>",
+      "current_turn_id": "<turn-1>",
       "details": "",
       "error": "",
       "lovelace_results": [],
@@ -232,7 +235,7 @@
           "returncode": null,
           "status": "cancelled",
           "summary": "Task cancelled",
-          "turn_id": "<id>",
+          "turn_id": "<turn-1>",
           "updated_at": "<time>",
           "validation_errors": []
         }
@@ -244,40 +247,43 @@
   "completed": {
     "events": [
       {
-        "attachments": [],
-        "changes": {
-          "added": [],
-          "changed": [],
-          "deleted": []
-        },
-        "choices": [],
-        "codex_status": "completed",
-        "completed_at": "<time>",
-        "config_check": {
-          "errors": "",
-          "result": "skipped",
-          "warnings": ""
-        },
-        "details": "Removed the copies.",
-        "lovelace_results": [],
-        "question": "",
-        "recovery_files": [],
-        "response": {
+        "data": {
+          "attachments": [],
+          "changes": {
+            "added": [],
+            "changed": [],
+            "deleted": []
+          },
           "choices": [],
+          "codex_status": "completed",
+          "completed_at": "<time>",
+          "config_check": {
+            "errors": "",
+            "result": "skipped",
+            "warnings": ""
+          },
           "details": "Removed the copies.",
+          "lovelace_results": [],
           "question": "",
+          "recovery_files": [],
+          "response": {
+            "choices": [],
+            "details": "Removed the copies.",
+            "question": "",
+            "status": "completed",
+            "summary": "Two duplicates removed."
+          },
+          "returncode": 0,
+          "session_id": "019fc242-910a-7c92-a17d-54c014e19fc4",
           "status": "completed",
-          "summary": "Two duplicates removed."
+          "summary": "Two duplicates removed.",
+          "task_id": "<task>",
+          "turn_id": "<turn-1>",
+          "validation_errors": [],
+          "verification": [],
+          "verification_attachments": []
         },
-        "returncode": 0,
-        "session_id": "019fc242-910a-7c92-a17d-54c014e19fc4",
-        "status": "completed",
-        "summary": "Two duplicates removed.",
-        "task_id": "<task>",
-        "turn_id": "<id>",
-        "validation_errors": [],
-        "verification": [],
-        "verification_attachments": []
+        "event": "codex_cli_task_result"
       }
     ],
     "index": {
@@ -301,7 +307,7 @@
         "warnings": ""
       },
       "created_at": "<time>",
-      "current_turn_id": "<id>",
+      "current_turn_id": "<turn-1>",
       "details": "Removed the copies.",
       "error": "",
       "lovelace_results": [],
@@ -344,7 +350,7 @@
         "warnings": ""
       },
       "created_at": "<time>",
-      "current_turn_id": "<id>",
+      "current_turn_id": "<turn-1>",
       "deletion_warning": null,
       "details": "Removed the copies.",
       "error": "",
@@ -395,7 +401,7 @@
           "started_at": "<time>",
           "status": "completed",
           "summary": "Two duplicates removed.",
-          "turn_id": "<id>",
+          "turn_id": "<turn-1>",
           "updated_at": "<time>",
           "validation_errors": [],
           "verification": [],
@@ -442,7 +448,7 @@
         "warnings": ""
       },
       "created_at": "<time>",
-      "current_turn_id": "<id>",
+      "current_turn_id": "<turn-1>",
       "details": "Removed the copies.",
       "error": "",
       "lovelace_results": [],
@@ -490,7 +496,7 @@
           "started_at": "<time>",
           "status": "completed",
           "summary": "Two duplicates removed.",
-          "turn_id": "<id>",
+          "turn_id": "<turn-1>",
           "updated_at": "<time>",
           "validation_errors": [],
           "verification": [],
@@ -506,36 +512,39 @@
   "failed": {
     "events": [
       {
-        "attachments": [],
-        "backups": [],
-        "changes": {
-          "added": [],
-          "changed": [],
-          "deleted": []
-        },
-        "codex_status": "failed",
-        "completed_at": "<time>",
-        "config_check": {
-          "errors": "",
-          "result": "skipped",
-          "warnings": ""
-        },
-        "details": "Could not start /usr/local/bin/codex: no such file",
-        "lovelace_results": [],
-        "question": "",
-        "recovery_files": [],
-        "response": {
+        "data": {
+          "attachments": [],
+          "backups": [],
+          "changes": {
+            "added": [],
+            "changed": [],
+            "deleted": []
+          },
+          "codex_status": "failed",
+          "completed_at": "<time>",
+          "config_check": {
+            "errors": "",
+            "result": "skipped",
+            "warnings": ""
+          },
           "details": "Could not start /usr/local/bin/codex: no such file",
+          "lovelace_results": [],
           "question": "",
+          "recovery_files": [],
+          "response": {
+            "details": "Could not start /usr/local/bin/codex: no such file",
+            "question": "",
+            "status": "failed",
+            "summary": "Could not start the Codex CLI executable."
+          },
+          "returncode": null,
+          "session_id": "",
           "status": "failed",
-          "summary": "Could not start the Codex CLI executable."
+          "summary": "Could not start the Codex CLI executable.",
+          "task_id": "<task>",
+          "validation_errors": []
         },
-        "returncode": null,
-        "session_id": "",
-        "status": "failed",
-        "summary": "Could not start the Codex CLI executable.",
-        "task_id": "<task>",
-        "validation_errors": []
+        "event": "codex_cli_task_result"
       }
     ],
     "index": {
@@ -560,7 +569,7 @@
         "warnings": ""
       },
       "created_at": "<time>",
-      "current_turn_id": "<id>",
+      "current_turn_id": "<turn-1>",
       "details": "Could not start /usr/local/bin/codex: no such file",
       "error": "Could not start /usr/local/bin/codex: no such file",
       "lovelace_results": [],
@@ -599,7 +608,7 @@
         "warnings": ""
       },
       "created_at": "<time>",
-      "current_turn_id": "<id>",
+      "current_turn_id": "<turn-1>",
       "deletion_warning": null,
       "details": "Could not start /usr/local/bin/codex: no such file",
       "error": "Could not start /usr/local/bin/codex: no such file",
@@ -647,7 +656,7 @@
           "returncode": null,
           "status": "failed",
           "summary": "Could not start the Codex CLI executable.",
-          "turn_id": "<id>",
+          "turn_id": "<turn-1>",
           "updated_at": "<time>",
           "validation_errors": []
         }
@@ -691,7 +700,7 @@
         "warnings": ""
       },
       "created_at": "<time>",
-      "current_turn_id": "<id>",
+      "current_turn_id": "<turn-1>",
       "details": "Could not start /usr/local/bin/codex: no such file",
       "error": "Could not start /usr/local/bin/codex: no such file",
       "lovelace_results": [],
@@ -736,7 +745,7 @@
           "returncode": null,
           "status": "failed",
           "summary": "Could not start the Codex CLI executable.",
-          "turn_id": "<id>",
+          "turn_id": "<turn-1>",
           "updated_at": "<time>",
           "validation_errors": []
         }
@@ -748,46 +757,49 @@
   "question": {
     "events": [
       {
-        "attachments": [],
-        "changes": {
-          "added": [],
-          "changed": [],
-          "deleted": []
-        },
-        "choices": [
-          "Go ahead",
-          "Don't change anything"
-        ],
-        "codex_status": "needs_input",
-        "completed_at": "",
-        "config_check": {
-          "errors": "",
-          "result": "skipped",
-          "warnings": ""
-        },
-        "details": "",
-        "lovelace_results": [],
-        "question": "Remove the duplicate?",
-        "recovery_files": [],
-        "response": {
+        "data": {
+          "attachments": [],
+          "changes": {
+            "added": [],
+            "changed": [],
+            "deleted": []
+          },
           "choices": [
             "Go ahead",
             "Don't change anything"
           ],
+          "codex_status": "needs_input",
+          "completed_at": "",
+          "config_check": {
+            "errors": "",
+            "result": "skipped",
+            "warnings": ""
+          },
           "details": "",
+          "lovelace_results": [],
           "question": "Remove the duplicate?",
-          "status": "needs_input",
-          "summary": "Two automations are duplicates."
+          "recovery_files": [],
+          "response": {
+            "choices": [
+              "Go ahead",
+              "Don't change anything"
+            ],
+            "details": "",
+            "question": "Remove the duplicate?",
+            "status": "needs_input",
+            "summary": "Two automations are duplicates."
+          },
+          "returncode": 0,
+          "session_id": "019fc242-910a-7c92-a17d-54c014e19fc4",
+          "status": "waiting_for_input",
+          "summary": "Two automations are duplicates.",
+          "task_id": "<task>",
+          "turn_id": "<turn-1>",
+          "validation_errors": [],
+          "verification": [],
+          "verification_attachments": []
         },
-        "returncode": 0,
-        "session_id": "019fc242-910a-7c92-a17d-54c014e19fc4",
-        "status": "waiting_for_input",
-        "summary": "Two automations are duplicates.",
-        "task_id": "<task>",
-        "turn_id": "<id>",
-        "validation_errors": [],
-        "verification": [],
-        "verification_attachments": []
+        "event": "codex_cli_task_result"
       }
     ],
     "index": {
@@ -814,7 +826,7 @@
         "warnings": ""
       },
       "created_at": "<time>",
-      "current_turn_id": "<id>",
+      "current_turn_id": "<turn-1>",
       "details": "",
       "error": "",
       "lovelace_results": [],
@@ -860,7 +872,7 @@
         "warnings": ""
       },
       "created_at": "<time>",
-      "current_turn_id": "<id>",
+      "current_turn_id": "<turn-1>",
       "deletion_warning": null,
       "details": "",
       "error": "",
@@ -914,7 +926,7 @@
           "started_at": "<time>",
           "status": "waiting_for_input",
           "summary": "Two automations are duplicates.",
-          "turn_id": "<id>",
+          "turn_id": "<turn-1>",
           "updated_at": "<time>",
           "validation_errors": [],
           "verification": [],
@@ -964,7 +976,7 @@
         "warnings": ""
       },
       "created_at": "<time>",
-      "current_turn_id": "<id>",
+      "current_turn_id": "<turn-1>",
       "details": "",
       "error": "",
       "lovelace_results": [],
@@ -1015,7 +1027,7 @@
           "started_at": "<time>",
           "status": "waiting_for_input",
           "summary": "Two automations are duplicates.",
-          "turn_id": "<id>",
+          "turn_id": "<turn-1>",
           "updated_at": "<time>",
           "validation_errors": [],
           "verification": [],
@@ -1031,80 +1043,86 @@
   "reply": {
     "events": [
       {
-        "attachments": [],
-        "changes": {
-          "added": [],
-          "changed": [],
-          "deleted": []
-        },
-        "choices": [
-          "Go ahead"
-        ],
-        "codex_status": "needs_input",
-        "completed_at": "",
-        "config_check": {
-          "errors": "",
-          "result": "skipped",
-          "warnings": ""
-        },
-        "details": "",
-        "lovelace_results": [],
-        "question": "Remove the duplicate?",
-        "recovery_files": [],
-        "response": {
+        "data": {
+          "attachments": [],
+          "changes": {
+            "added": [],
+            "changed": [],
+            "deleted": []
+          },
           "choices": [
             "Go ahead"
           ],
+          "codex_status": "needs_input",
+          "completed_at": "",
+          "config_check": {
+            "errors": "",
+            "result": "skipped",
+            "warnings": ""
+          },
           "details": "",
+          "lovelace_results": [],
           "question": "Remove the duplicate?",
-          "status": "needs_input",
-          "summary": "Two automations are duplicates."
+          "recovery_files": [],
+          "response": {
+            "choices": [
+              "Go ahead"
+            ],
+            "details": "",
+            "question": "Remove the duplicate?",
+            "status": "needs_input",
+            "summary": "Two automations are duplicates."
+          },
+          "returncode": 0,
+          "session_id": "019fc242-910a-7c92-a17d-54c014e19fc4",
+          "status": "waiting_for_input",
+          "summary": "Two automations are duplicates.",
+          "task_id": "<task>",
+          "turn_id": "<turn-1>",
+          "validation_errors": [],
+          "verification": [],
+          "verification_attachments": []
         },
-        "returncode": 0,
-        "session_id": "019fc242-910a-7c92-a17d-54c014e19fc4",
-        "status": "waiting_for_input",
-        "summary": "Two automations are duplicates.",
-        "task_id": "<task>",
-        "turn_id": "<id>",
-        "validation_errors": [],
-        "verification": [],
-        "verification_attachments": []
+        "event": "codex_cli_task_result"
       },
       {
-        "attachments": [],
-        "changes": {
-          "added": [],
-          "changed": [],
-          "deleted": []
-        },
-        "choices": [],
-        "codex_status": "completed",
-        "completed_at": "<time>",
-        "config_check": {
-          "errors": "",
-          "result": "skipped",
-          "warnings": ""
-        },
-        "details": "",
-        "lovelace_results": [],
-        "question": "",
-        "recovery_files": [],
-        "response": {
+        "data": {
+          "attachments": [],
+          "changes": {
+            "added": [],
+            "changed": [],
+            "deleted": []
+          },
           "choices": [],
+          "codex_status": "completed",
+          "completed_at": "<time>",
+          "config_check": {
+            "errors": "",
+            "result": "skipped",
+            "warnings": ""
+          },
           "details": "",
+          "lovelace_results": [],
           "question": "",
+          "recovery_files": [],
+          "response": {
+            "choices": [],
+            "details": "",
+            "question": "",
+            "status": "completed",
+            "summary": "Removed it."
+          },
+          "returncode": 0,
+          "session_id": "019fc242-910a-7c92-a17d-54c014e19fc4",
           "status": "completed",
-          "summary": "Removed it."
+          "summary": "Removed it.",
+          "task_id": "<task>",
+          "turn_id": "<turn-2>",
+          "validation_errors": [],
+          "verification": [],
+          "verification_attachments": []
         },
-        "returncode": 0,
-        "session_id": "019fc242-910a-7c92-a17d-54c014e19fc4",
-        "status": "completed",
-        "summary": "Removed it.",
-        "task_id": "<task>",
-        "turn_id": "<id>",
-        "validation_errors": [],
-        "verification": [],
-        "verification_attachments": []
+        "event": "codex_cli_task_result"
       }
     ],
     "index": {
@@ -1130,7 +1148,7 @@
         "warnings": ""
       },
       "created_at": "<time>",
-      "current_turn_id": "<id>",
+      "current_turn_id": "<turn-2>",
       "details": "",
       "error": "",
       "history_incomplete": false,
@@ -1176,7 +1194,7 @@
         "warnings": ""
       },
       "created_at": "<time>",
-      "current_turn_id": "<id>",
+      "current_turn_id": "<turn-2>",
       "deletion_warning": null,
       "details": "",
       "error": "",
@@ -1235,7 +1253,7 @@
           "started_at": "<time>",
           "status": "waiting_for_input",
           "summary": "Two automations are duplicates.",
-          "turn_id": "<id>",
+          "turn_id": "<turn-1>",
           "updated_at": "<time>",
           "validation_errors": [],
           "verification": [],
@@ -1274,7 +1292,7 @@
           "started_at": "<time>",
           "status": "completed",
           "summary": "Removed it.",
-          "turn_id": "<id>",
+          "turn_id": "<turn-2>",
           "updated_at": "<time>",
           "validation_errors": [],
           "verification": [],
@@ -1323,7 +1341,7 @@
         "warnings": ""
       },
       "created_at": "<time>",
-      "current_turn_id": "<id>",
+      "current_turn_id": "<turn-2>",
       "details": "",
       "error": "",
       "history_incomplete": false,
@@ -1380,7 +1398,7 @@
           "started_at": "<time>",
           "status": "waiting_for_input",
           "summary": "Two automations are duplicates.",
-          "turn_id": "<id>",
+          "turn_id": "<turn-1>",
           "updated_at": "<time>",
           "validation_errors": [],
           "verification": [],
@@ -1419,7 +1437,7 @@
           "started_at": "<time>",
           "status": "completed",
           "summary": "Removed it.",
-          "turn_id": "<id>",
+          "turn_id": "<turn-2>",
           "updated_at": "<time>",
           "validation_errors": [],
           "verification": [],
