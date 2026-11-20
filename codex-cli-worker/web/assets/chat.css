@@ -1970,6 +1970,13 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   padding: 0.75rem 1rem;
   border: 1px solid var(--line);
   border-radius: 8px;
+  /* The window clips the chat column and nothing else scrolls it, so a tall banner (a sign-in code on
+   * a phone) stops at 60 % of the window height and scrolls inside itself. */
+  flex-shrink: 0;
+  max-height: 60vh;
+  max-height: 60dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 #agents-hint {
   margin: 0 0 10px;
@@ -1996,10 +2003,18 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   user-select: all;
 }
 .signin-qr {
+  display: block;
   width: min(220px, 60vw);
   height: auto;
+  margin-top: 0.5rem;
   background: #fff;
   border-radius: 4px;
+}
+.signin-qr-fold > summary {
+  cursor: pointer;
+}
+.signin-card a {
+  overflow-wrap: anywhere;
 }
 
 /*

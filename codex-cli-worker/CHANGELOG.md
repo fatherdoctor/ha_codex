@@ -92,6 +92,10 @@
   `codex_cli_task_result` event.
 
 ### Fixed
+- **Sign-in works on a phone.** On a small screen, the sign-in banner above the chat now scrolls, so the link to the
+  sign-in page and the whole code are always in reach. The link now comes before the QR code. A phone cannot scan its
+  own screen, so on a phone-sized window the QR code starts folded under **Show QR code**; a larger window shows it
+  open. The sign-in cards in **Settings**, ChatGPT and GitHub, scroll the same way.
 - **Pop-ups are smaller and close on an outside click.** The Permissions control now opens a small menu right
   above its button instead of a full-width sheet. A click or tap outside any pop-up, menu or dialog closes it, like
   Escape does. A dialog where you changed a field stays open, so nothing you typed is lost.
