@@ -47,6 +47,15 @@
   **Settings** > **Commands** are gone: the list in the message box is the only one. When you close a dialog that a
   command opened, the cursor stays in the message box.
 
+### Changed
+- **No more checks after each answer.** The app no longer judges a turn after Codex answers: it takes no dashboard
+  screenshots of its own (they could catch a dashboard still loading), adds no "Verification needs review" note and
+  no "No previous version saved" lines. Those lines blamed the turn for files that something else, such as an
+  automation or another app, changed while it ran. Codex checks its own work during the turn, as its rules say. The
+  per-file copies of the files Codex changes are still made, and a change that fails the configuration check still
+  points to them. The `backups` field is gone from the task API, `codex_cli.get_task` and the
+  `codex_cli_task_result` event.
+
 ### Fixed
 - The "Codex" label with the command symbol no longer sits above each reply on the chat page. Screen readers still
   announce each reply as "Codex reply"; the reply's time and status line stay.

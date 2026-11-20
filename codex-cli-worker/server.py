@@ -1583,7 +1583,7 @@ def start_activity(task_id: str, turn_id: str) -> None:
         task_activity[task_id] = {
             "turn_id": turn_id, "seq": 0, "running": True, "capped": False,
             "steps": [], "by_id": {}, "clock": {},
-            "started": time.monotonic(), "edited": set(),
+            "started": time.monotonic(),
         }
 
 
@@ -1603,13 +1603,6 @@ def finish_phase(task_id: str, *phases: str, failed: bool = False) -> None:
             text = step["text"]
         status = "failed" if failed else "done"
         append_activity_step(task_id, {"id": f"worker:{phase}", "kind": "phase", "status": status, "text": text})
-
-
-def edited_paths(task_id: str) -> set[str]:
-    """Existing files under /config that Codex reported editing or deleting in the running exchange."""
-    with lock:
-        record = task_activity.get(task_id)
-        return set(record["edited"]) if record else set()
 
 
 def clip_activity_text(value: Any, limit: int) -> tuple[str, bool]:
@@ -1765,20 +1758,6 @@ def append_activity_error(task_id: str, message: Any) -> None:
     append_activity_step(task_id, {"id": "", "kind": "error", "status": "failed", "text": text})
 
 
-def note_edited_files(task_id: str, step: dict[str, Any]) -> None:
-    """Remember which existing files Codex says it edited, to check their backups afterwards."""
-    paths = {
-        change["path"] for change in step.get("files") or []
-        if change["kind"] != "add" and change["path"] and not change["path"].startswith("/")
-    }
-    if not paths:
-        return
-    with lock:
-        record = task_activity.get(task_id)
-        if record is not None:
-            record["edited"].update(paths)
-
-
 # What Codex's reviewer checked, in plain words (the action types of app-server-protocol at rust-v0.166.0).
 AUTO_REVIEW_ACTIONS = {
     "command": "a command", "execve": "a command", "writeStdin": "input to a command",
@@ -1838,7 +1817,6 @@ def record_activity_event(task_id: str, event: Any) -> None:
             step = activity_step_from_item(item)
             if step is not None:
                 append_activity_step(task_id, step)
-                note_edited_files(task_id, step)
     elif kind == "error":
         append_activity_error(task_id, event.get("message"))
     elif kind == "turn.failed":
@@ -2973,24 +2951,6 @@ def previous_versions(run_dir: Path, paths: list[str], before: dict[str, Any]) -
     except (OSError, tarfile.TarError) as exc:
         print(f"Could not read {run_dir / SNAPSHOT_FILE}: {redact(str(exc))}", flush=True)
     return entries
-
-
-def review_backups(run_dir: Path, before: dict[str, Any], changes: dict[str, list[str]], edited: set[str]) -> list[dict[str, str]]:
-    """Report which changed files have a copy of their previous version.
-
-    Home Assistant rewrites its own storage files all the time, so only files
-    that are Codex's doing are reviewed: the ones it reported editing, the ones
-    it copied, and changed YAML and dashboard files.
-    """
-    drop_credential_backups(run_dir)
-    copied = {rel for rel, path in copied_files(run_dir).items() if not path.is_symlink()}
-    existed = set(changes.get("changed", [])) | set(changes.get("deleted", []))
-    reviewed = sorted(
-        rel for rel in existed
-        if rel in edited or rel in copied or rel.startswith(DASHBOARD_STORAGE_PREFIX)
-        or (not rel.startswith(".storage/") and Path(rel).suffix.lower() in CONFIG_CHECK_SUFFIXES)
-    )
-    return previous_versions(run_dir, reviewed, before)
 
 
 def recovery_copies(run_dir: Path, changes: dict[str, list[str]], affected: list[str], before: dict[str, Any]) -> list[dict[str, str]]:
@@ -5556,11 +5516,13 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     (task_dir / "changes.json").write_text(json.dumps(changes, indent=2), encoding="utf-8")
     if task_cancellation_requested(task_id):
         return
+    # The add-on does not judge the turn: it lists no changed files, keeps no verdict on saved copies and takes
+    # no screenshots after it (Codex checks its own work, as its AGENTS.md says). Only credential copies in the
+    # backup folder are removed, whoever wrote them.
     try:
-        backups = review_backups(task_dir, before_manifest, changes, edited_paths(task_id))
+        drop_credential_backups(task_dir)
     except Exception as exc:
-        backups = []
-        write_task_log(task_id, "worker", f"Could not review the saved copies: {exc}")
+        write_task_log(task_id, "worker", f"Could not tidy the backup folder: {exc}")
     assessment = assess_changes(task_id, task_dir, changes, before_manifest)
     if task_cancellation_requested(task_id):
         return
@@ -5568,7 +5530,6 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     config_check = assessment["config_check"]
     recovery_files = assessment["recovery_files"]
     lovelace_results = assessment["lovelace_results"]
-    verification.after_changes(task_id, lovelace_results)
     if task_cancellation_requested(task_id):
         return
     finish_phase(task_id, "review")
@@ -5614,8 +5575,6 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
             task_id, reason, final.get("summary"), final.get("details"), lifecycle_error):
         final["summary"] = SIGN_IN_EXPIRED_SUMMARY
     status = str(final.get("status") or "failed")
-    # Files the validation details already report as having no saved copy.
-    named: set[str] = set()
     # A configuration that fails its check wins over a question too: the owner must not answer it unaware.
     if validation_errors and status in {"completed", "needs_input"}:
         status = "failed"
@@ -5623,19 +5582,10 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
         final["question"] = ""
         final["details"] = validation_details(validation_errors, config_check, recovery_files)
         reason = "Validation errors: " + "; ".join(validation_errors[:5])
-        named = {entry["path"] for entry in recovery_files if entry.get("reason") == "no_backup"}
     elif config_check["result"] == "unavailable" and status == "completed":
         note = "Home Assistant could not check the configuration, so the change is applied but unverified: " + config_check["errors"]
         final["details"] = "\n\n".join(part for part in (str(final.get("details") or "").strip(), note) if part)
 
-    checks = tasks.get(task_id, {}).get("verification") or []
-    incomplete = sum(check.get("status") in {"failed", "issues", "unavailable"} for check in checks)
-    if incomplete:
-        note = f"Verification needs review: {incomplete} check(s) failed, found issues, or could not run. See the evidence below."
-        final["details"] = "\n\n".join(part for part in (str(final.get("details") or "").strip(), note) if part)
-    unsaved =[entry["path"] for entry in backups if entry["status"] in {"missing", "unverified"} and entry["path"] not in named]
-    if unsaved:
-        final["details"] = "\n\n".join(part for part in (str(final.get("details") or "").strip(), unsaved_note(unsaved)) if part)
     task_status = "waiting_for_input" if status == "needs_input" else status
     completed_at = utc_now() if status != "needs_input" else ""
     choices = clean_choices(final.get("choices")) if status == "needs_input" else []
@@ -5668,7 +5618,6 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
         validation_errors=validation_errors,
         config_check=config_check,
         recovery_files=recovery_files,
-        backups=backups,
         lovelace_results=lovelace_results,
         attachments=attachments,
     ) is False:
@@ -5695,7 +5644,6 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
         "validation_errors": validation_errors,
         "config_check": config_check,
         "recovery_files": recovery_files,
-        "backups": backups,
         "lovelace_results": lovelace_results,
         "attachments": attachments,
         # Home Assistant events and its recorder get request labels, not exact blocked requests.
