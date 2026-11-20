@@ -94,7 +94,7 @@ body[data-full-access="on"] .permission-option[data-mode="full-access"] strong {
   .compose-tools { flex-wrap: wrap; }
 }
 @media (max-width: 700px) {
-  .phone-thread-tools { display: flex; align-items: center; padding: 4px 12px; gap: 6px; }
+  .phone-thread-tools { display: flex; align-items: center; padding: 4px 12px 4px 0; gap: 6px; }
   #phone-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(12px * var(--text-scale)); }
   .phone-thread-tools .icon { padding: 7px; }
   .welcome { padding: 13vh 16px 20px; }
