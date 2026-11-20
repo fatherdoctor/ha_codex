@@ -29,6 +29,7 @@ class QueueTests(unittest.TestCase):
             self.stack.enter_context(patch.object(server, name, value))
         self.stack.enter_context(patch.object(server, "task_root", return_value=self.root / "tasks"))
         self.stack.enter_context(patch.object(server, "TASK_STATE_FILE", self.root / "index.json"))
+        self.stack.enter_context(patch.object(server, "ATTACHMENTS_ROOT", self.root / "chat_uploads"))
         self.stack.enter_context(patch.object(server, "MESSAGE_QUEUE_FILE", self.root / "queue.json"))
         self.stack.enter_context(patch.object(server, "CODEX_HOME", self.root / "codex"))
         self.stack.enter_context(patch.object(server, "api_token", return_value="test-token"))
@@ -229,7 +230,7 @@ class QueueTests(unittest.TestCase):
         with self.client.get(url, headers=self.headers) as served:
             self.assertEqual(served.status_code, 200)
             self.assertEqual(served.mimetype, "image/png")
-        dropped_dir = server.get_task_dir(dropped["task_id"])
+        dropped_dir = server.ATTACHMENTS_ROOT / dropped["task_id"]
         self.assertTrue(dropped_dir.exists())
         self.assertEqual(self.client.delete(f"/queue/{dropped['queue_id']}", headers=self.headers).status_code, 200)
         self.assertFalse(dropped_dir.exists())

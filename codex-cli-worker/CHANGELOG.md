@@ -32,8 +32,15 @@
   tools. Saved schedules are kept. Saved messages stay in the schedule file, unread, so an older version still finds
   them after a rollback. The chat page also no longer shows the lead agent: an old chat that the lead channel started has
   no "Started by lead" label, and the schedule editor no longer mentions lead runs.
+- **The mailbox sensor and event are removed from the integration.** The **Mailbox unread for the lead** sensor and
+  the `codex_cli_mailbox_message` event are gone, and the status poll no longer saves message IDs. When the
+  integration starts, it removes that sensor from the entity registry and deletes its saved message IDs, so an update
+  leaves no orphan entity. Automations that use the sensor or the event stop working.
 - **Starter `AGENTS.md` safeguards.** The starter file has a short section of safeguard defaults (secrets, protected
   places, backups). It says they are defaults you can change or delete, not locks in the app.
+- **Starter `AGENTS.md` keeps private data out of git.** A new section tells Codex to check what is staged before
+  every commit, never to stage secrets, databases, logs, backups or personal data, to keep a `.gitignore`, to ask
+  before the first push to a new or public repository, and to make new repositories private.
 - **Clearer documentation.** The README, the integration README, `SECURITY.md`, `DOCS.md` and three option
   descriptions now say what the code does. The README no longer promises a question before every change, or a saved
   copy and a configuration check after every change; it says when each one happens. It says that an automation with
@@ -44,6 +51,11 @@
   rollback document speak for the project, not for one person, and give versions of this project in their examples.
   The changelog starts at this project's first version. `screenshots/SCREENSHOTS.md` lists the screenshots; the root
   `SCREENSHOTS.md` is removed.
+- **Scheduled runs can change the house, with your OK.** A scheduled run now has the same tools as a chat on the
+  page, the `home_assistant_call` tool that changes the house included. Before, a scheduled run did not get that tool.
+  Codex asks before each call as it does in a chat. The question waits in the run's chat with the yellow warning until
+  an administrator chooses **Allow once** or **Deny**, and nothing is sent to Home Assistant before that. A schedule
+  still runs in Default or Read only.
 - **A richer command list.** The command list above the message box now shows an icon for each command and marks the
   letters you typed, and a press outside the list closes it. New commands `/pin`, `/share`, `/archive` and `/delete`
   do what the chat menu does, and `/connection` opens the remote connection and its status. `/help` and
@@ -62,6 +74,12 @@
   chat (never copies it) and removes the old folder. The **Task root** option is removed; from a folder saved in it,
   only the chat folders and the sign-in log are moved, and the folder is removed only when it is then empty. Codex still keeps its copy
   of each file before a change: the exchange's own backup folder is added to the sandbox's writable places.
+- **Uploads kept for 7 days, outside the backup.** Files and photos you attach to a message are now stored in
+  `/data/chat_uploads`, which the app's backup leaves out, not with the chat in `/data/codex_tasks`. The app removes
+  uploads older than 7 days once a day. A chat that shows a removed upload then says "Attachment removed after 7
+  days". At each start, uploads that earlier versions kept with the chat are moved there, with one log line; a file
+  that fails to move, or a chat that moves out of `/config` only at a later start, is handled at that start. Images
+  that Codex generates stay with the chat and in the app's backup. The cleanup keeps a folder changed in the last hour, so it cannot remove the folder of an upload in progress.
 - **No sign-in images under `/config/www`.** The sign-in notification has the link and the code but no QR image,
   because Home Assistant serves `/config/www` to anyone who can reach it. The QR code stays on the app's own page.
   The first start of this version deletes the old `codex_login_*.svg` images and their folder.
@@ -74,6 +92,9 @@
   `codex_cli_task_result` event.
 
 ### Fixed
+- **Pop-ups are smaller and close on an outside click.** The Permissions control now opens a small menu right
+  above its button instead of a full-width sheet. A click or tap outside any pop-up, menu or dialog closes it, like
+  Escape does. A dialog where you changed a field stays open, so nothing you typed is lost.
 - The "Codex" label with the command symbol no longer sits above each reply on the chat page. Screen readers still
   announce each reply as "Codex reply"; the reply's time and status line stay.
 - The mark in the chat page header now follows the page's theme instead of the system's light or dark setting. Open
@@ -90,11 +111,13 @@
 
 ### Known issues
 - Remote control still uses its own keys. The tool requests of a chat no longer do (see "Under the hood").
-- `/status` reports the mailbox as not available, so the integration's unread-mail sensor shows unknown until a later
-  version of the integration removes it.
 - The new Codex host (see "Under the hood") is not connected. Every message still starts its own Codex process.
 
 ### Under the hood
+- Upgrade code for data that only test installs held is removed. The schedule file no longer adds the `author`,
+  `chat_id` and `model` columns to an old table: a new file has them from the start, in the same order. Startup no
+  longer looks for an exact copy of the house rules that versions before 0.3.0 bundled in Codex's home folder. An
+  install that went straight from a version before 0.3.6 to this one must first run 0.3.6 or later once.
 - Tool requests no longer use a secret key for each message. Each request names its chat by the thread id that Codex
   adds to every tool call, and the worker answers it only while that chat's exchange runs. A sub-agent that the chat
   starts counts as the chat, and a thread that one chat holds is never given to another. The sandbox already stops a
