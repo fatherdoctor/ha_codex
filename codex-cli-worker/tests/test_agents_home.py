@@ -131,12 +131,6 @@ class AgentsHome(unittest.TestCase):
         self.assertEqual(self.link.read_text(encoding="utf-8"), "Not ours\n")
         self.assertIn("left alone", self.log)
 
-    def test_the_link_survives_the_removal_of_an_old_bundled_copy(self):
-        self.agents.write_text("Owner rules\n", encoding="utf-8")
-        self.run_quiet(server.link_agents_file)
-        self.assertFalse(server.protected_policy.remove_legacy_instructions(self.home))
-        self.assertTrue(self.link.is_symlink())
-
     def test_the_editor_reads_and_writes_the_app_folder(self):
         server.write_agents_file("Edited in the editor")
         self.assertEqual(self.agents.read_text(encoding="utf-8"), "Edited in the editor\n")

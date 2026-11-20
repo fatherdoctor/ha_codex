@@ -14,7 +14,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import sys
 import tempfile
 import tomllib
@@ -28,7 +27,6 @@ sys.path.insert(0, str(WORKER))
 import test_approvals as fixtures
 
 import approvals
-import policy
 import remote_control
 
 server = fixtures.server  # the worker module as the approval fixtures loaded it (test_server's copy)
@@ -210,32 +208,6 @@ class HouseRulesTests(unittest.TestCase):
                  patch.object(server, "api_token", return_value="synthetic"):
                 server.ensure_runtime_files()
             self.assertEqual(instructions.read_text(), "Owner instructions, unchanged.")
-
-    def test_migration_removes_only_exact_legacy_copy(self):
-        with tempfile.TemporaryDirectory() as folder:
-            home = Path(folder)
-            target = home / "AGENTS.md"
-            old = b"synthetic old bundled copy"
-            with patch.object(policy, "LEGACY_INSTRUCTIONS_SHA256", frozenset({hashlib.sha256(old).hexdigest()})):
-                target.write_bytes(old)
-                target.chmod(0o444)
-                self.assertTrue(policy.remove_legacy_instructions(home))
-                self.assertFalse(target.exists())
-                self.assertFalse(policy.remove_legacy_instructions(home))
-                target.write_text("Edited by owner")
-                self.assertFalse(policy.remove_legacy_instructions(home))
-                self.assertEqual(target.read_text(), "Edited by owner")
-
-    def test_migration_never_follows_a_symlink(self):
-        with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
-            target = root / "owner.md"
-            target.write_text("synthetic owner text")
-            home = root / "home"
-            home.mkdir()
-            (home / "AGENTS.md").symlink_to(target)
-            self.assertFalse(policy.remove_legacy_instructions(home))
-            self.assertEqual(target.read_text(), "synthetic owner text")
 
     def test_config_agents_read_stays_unchanged(self):
         with tempfile.TemporaryDirectory() as folder:

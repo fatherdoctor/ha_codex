@@ -76,8 +76,7 @@ class RelayExecutionTests(unittest.TestCase):
             keys = []
             for name, socket in [('First room', 'one.sock'), ('Other room', 'two.sock')]:
                 with patch.multiple(server, **patches), patch.object(server, 'api_token', return_value='synthetic'), \
-                        patch.object(server, 'task_root', return_value=data / 'tasks'), \
-                        patch.object(server.protected_policy, 'remove_legacy_instructions'):
+                        patch.object(server, 'task_root', return_value=data / 'tasks'):
                     server.ensure_runtime_files()
                 config = tomllib.loads((home / 'config.toml').read_text())
                 self.assertEqual(config['sqlite_home'], str(home))

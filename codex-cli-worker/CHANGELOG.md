@@ -83,6 +83,10 @@
 - The new Codex host (see "Under the hood") is not connected. Every message still starts its own Codex process.
 
 ### Under the hood
+- Upgrade code for data that only test installs held is removed. The schedule file no longer adds the `author`,
+  `chat_id` and `model` columns to an old table: a new file has them from the start, in the same order. Startup no
+  longer looks for an exact copy of the house rules that versions before 0.3.0 bundled in Codex's home folder. An
+  install that went straight from a version before 0.3.6 to this one must first run 0.3.6 or later once.
 - Tool requests no longer use a secret key for each message. Each request names its chat by the thread id that Codex
   adds to every tool call, and the worker answers it only while that chat's exchange runs. A sub-agent that the chat
   starts counts as the chat, and a thread that one chat holds is never given to another. The sandbox already stops a
