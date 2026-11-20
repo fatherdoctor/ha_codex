@@ -32,7 +32,7 @@ backup_exclude:
   - "*/.ssh"
   - "*/github"
   - "*/github.sock"
-  - "*/attachments"
+  - "*/chat_uploads"
 discovery:
   - codex_cli
 options:

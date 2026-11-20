@@ -9,13 +9,15 @@ import tempfile
 import unittest
 import zlib
 from contextlib import ExitStack
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from unittest.mock import patch
 
 from app_server_fixture import StubAppServer
 from test_server import server
 
 SESSION_ID = "019fc242-910a-7c92-a17d-54c014e19fc4"
+# The real name of the upload folder, read before any test patches ATTACHMENTS_ROOT to a temporary folder.
+UPLOAD_FOLDER_NAME = server.ATTACHMENTS_ROOT.name
 
 
 def png_bytes(width=4, height=3, shade=200):
@@ -51,8 +53,7 @@ class AttachmentTests(unittest.TestCase):
             self.stack.enter_context(patch.object(server, name, value))
         self.stack.enter_context(patch.object(server, "task_root", return_value=self.root / "tasks"))
         self.stack.enter_context(patch.object(server, "TASK_STATE_FILE", self.root / "index.json"))
-        self.stack.enter_context(patch.object(server, "ATTACHMENTS_ROOT", self.root / "attachments"))
-        self.stack.enter_context(patch.object(server, "ATTACHMENT_MIGRATION_MARK", self.root / "migrated"))
+        self.stack.enter_context(patch.object(server, "ATTACHMENTS_ROOT", self.root / "chat_uploads"))
         self.stack.enter_context(patch.object(server, "CODEX_HOME", self.root / "codex"))
         self.stack.enter_context(patch.object(server, "CONFIG_ROOT", self.root / "config"))
         self.stack.enter_context(patch.object(server, "api_token", return_value="test-token"))
@@ -349,9 +350,8 @@ class AttachmentTests(unittest.TestCase):
         self.assertEqual(server.cleanup_attachments(), 0)
         self.assertTrue(folder.is_dir())
 
-    def test_a_failed_move_leaves_no_mark(self):
-        """When a file does not move, the mark is not written, so the next start tries again."""
-        task_id = "a" * 32
+    def legacy_upload(self, task_id):
+        """Put an upload where earlier versions kept it, under the task folder, and record it on a new chat."""
         task_dir = server.get_task_dir(task_id)
         legacy = task_dir / "turns" / "turn1" / "attachments" / ("b" * 32 + ".png")
         legacy.parent.mkdir(parents=True)
@@ -359,11 +359,25 @@ class AttachmentTests(unittest.TestCase):
         record = {"attachment_id": "b" * 32, "kind": "image", "origin": "user",
                   "path": legacy.relative_to(task_dir).as_posix()}
         server.tasks[task_id] = {"task_id": task_id, "turns": [{"turn_id": "turn1", "prompt_attachments": [record]}]}
+        return legacy, record
+
+    def test_a_failed_move_is_tried_again_at_the_next_start(self):
+        """When a file does not move, the record keeps its old path, and the next start moves it."""
+        legacy, record = self.legacy_upload("a" * 32)
         with patch.object(server.shutil, "move", side_effect=OSError("disk full")):
             self.assertEqual(server.migrate_attachments(), 0)
-        self.assertFalse(server.ATTACHMENT_MIGRATION_MARK.exists())
+        self.assertTrue(legacy.is_file())
+        self.assertNotIn("store", record)
         self.assertEqual(server.migrate_attachments(), 1)
-        self.assertTrue(server.ATTACHMENT_MIGRATION_MARK.exists())
+        self.assertEqual(record["store"], "data")
+
+    def test_a_chat_that_appears_at_a_later_start_gets_its_uploads_moved(self):
+        """A chat that moves out of /config only at the second start still has its old uploads moved then."""
+        self.assertEqual(server.migrate_attachments(), 0)
+        legacy, record = self.legacy_upload("c" * 32)
+        self.assertEqual(server.migrate_attachments(), 1)
+        self.assertFalse(legacy.exists())
+        self.assertTrue((server.ATTACHMENTS_ROOT / ("c" * 32) / record["path"]).is_file())
 
     def test_removed_upload_answers_with_the_removal_message(self):
         """A chat whose upload was cleaned up gets 410 and the plain message, not a broken image."""
@@ -379,24 +393,37 @@ class AttachmentTests(unittest.TestCase):
     def test_old_uploads_move_out_of_the_task_folder_once(self):
         """An upload that an earlier version kept under the task folder moves once, and the record follows."""
         task_id = "a" * 32
-        task_dir = server.get_task_dir(task_id)
-        legacy = task_dir / "turns" / "turn1" / "attachments" / ("b" * 32 + ".png")
-        legacy.parent.mkdir(parents=True)
-        legacy.write_bytes(png_bytes())
-        record = {"attachment_id": "b" * 32, "kind": "image", "origin": "user",
-                  "path": legacy.relative_to(task_dir).as_posix()}
-        server.tasks[task_id] = {"task_id": task_id, "turns": [{"turn_id": "turn1", "prompt_attachments": [record]}]}
+        legacy, record = self.legacy_upload(task_id)
         self.assertEqual(server.migrate_attachments(), 1)
         self.assertFalse(legacy.exists())
         self.assertEqual(record["store"], "data")
         self.assertTrue((server.ATTACHMENTS_ROOT / task_id / record["path"]).is_file())
-        self.assertTrue(server.ATTACHMENT_MIGRATION_MARK.exists())
         self.assertEqual(server.migrate_attachments(), 0)
 
-    def test_the_backup_leaves_attachments_out(self):
-        """config.yaml lists the attachments folder under backup_exclude."""
+    def test_the_backup_leaves_out_uploads_only(self):
+        """Each backup_exclude pattern, applied as the Supervisor applies it, leaves out the uploads and nothing else.
+
+        The Supervisor tests every path it archives with PurePath.match, which matches a relative pattern from the
+        right of the full path, and it does not enter a folder it leaves out. So a path is left out when it or any
+        folder above it matches a pattern. The data path below is made up; only the part from /data on is the app's.
+        """
         config = server.yaml.safe_load(Path(server.__file__).with_name("config.yaml").read_text(encoding="utf-8"))
-        self.assertIn("*/attachments", config["backup_exclude"])
+        patterns = config["backup_exclude"]
+        data = PurePosixPath("/mnt/data/supervisor/apps/data/local_codex_cli")
+        uploads = data / UPLOAD_FOLDER_NAME
+
+        def left_out(path):
+            """True when the Supervisor would leave this path out of the app backup."""
+            folders = [path, *path.parents]
+            return any(folder.match(pattern) for folder in folders if folder.is_relative_to(data) for pattern in patterns)
+
+        chat = data / "codex_tasks" / ("a" * 32)
+        self.assertTrue(left_out(uploads))
+        self.assertTrue(left_out(uploads / ("a" * 32) / "turn1" / ("b" * 32 + ".png")))
+        self.assertFalse(left_out(chat / "turns" / "turn1" / "attachments" / ("c" * 32 + ".png")))
+        self.assertFalse(left_out(chat / "turns" / "turn1" / "attachments"))
+        self.assertFalse(left_out(chat / "codex.log"))
+        self.assertFalse(left_out(chat / "task.json"))
 
     def test_attached_images_are_stored_served_and_passed_to_codex(self):
         """Images attached to a message stay with the exchange and reach Codex as localImage inputs."""

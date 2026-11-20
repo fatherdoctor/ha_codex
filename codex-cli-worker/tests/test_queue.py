@@ -29,7 +29,7 @@ class QueueTests(unittest.TestCase):
             self.stack.enter_context(patch.object(server, name, value))
         self.stack.enter_context(patch.object(server, "task_root", return_value=self.root / "tasks"))
         self.stack.enter_context(patch.object(server, "TASK_STATE_FILE", self.root / "index.json"))
-        self.stack.enter_context(patch.object(server, "ATTACHMENTS_ROOT", self.root / "attachments"))
+        self.stack.enter_context(patch.object(server, "ATTACHMENTS_ROOT", self.root / "chat_uploads"))
         self.stack.enter_context(patch.object(server, "MESSAGE_QUEUE_FILE", self.root / "queue.json"))
         self.stack.enter_context(patch.object(server, "CODEX_HOME", self.root / "codex"))
         self.stack.enter_context(patch.object(server, "api_token", return_value="test-token"))
