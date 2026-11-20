@@ -107,6 +107,12 @@ For the worker's standalone Python tests, without the Home Assistant pytest fixt
 python -m unittest discover -s codex-cli-worker/tests -v
 ```
 
+The suite includes `test_code_checks.py`, which runs `python scripts/code_checks.py` against the repository. You can
+also run that script alone; it needs only the standard library and takes about a second. It fails when a source file
+grows past 1,000 lines without an entry in its exemption list, or when Python code reads a module global by a
+computed name (`globals()[name]` and the like). It also prints, as a warning only, how many places in the tests patch
+a name inside `server.py`. The five rules behind these checks are listed under "Code standard" in `AGENTS.md`.
+
 For a local chat UI check, start `python codex-cli-worker/tests/web_fixture.py`, redirecting its output to a file, then run `node codex-cli-worker/tests/browser_smoke.cjs` in another terminal with Playwright on `NODE_PATH`. Set `CODEX_CHAT_BROWSER=msedge` to use installed Edge when Playwright's Chromium is unavailable. The fixture uses temporary data and never contacts Home Assistant or starts Codex. Stop it after testing and before starting another instance on port 9137. See [verification checks](codex-cli-worker/VERIFICATION.md#validation) and [sandbox checks](codex-cli-worker/SANDBOX_TESTING.md) for those features.
 
 For integration changes, verify that Home Assistant can:
