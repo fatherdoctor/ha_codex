@@ -1080,14 +1080,24 @@ function renderAttachments(
     img.alt = attachment.revised_prompt || alt;
     img.loading = "lazy";
     img.decoding = "async";
-    img.onerror = () =>
+    img.onerror = async () => {
+      // The worker answers 410 for an upload its daily cleanup has removed.
+      let removed = false;
+      try {
+        removed = (await fetch(link.href)).status === 410;
+      } catch {
+        // Offline or blocked: show the general message.
+      }
       figure.replaceChildren(
         textNode(
           "p",
-          "This image is no longer available.",
+          removed
+            ? "Attachment removed after 7 days."
+            : "This image is no longer available.",
           "attachment-missing",
         ),
       );
+    };
     link.append(img);
     const caption = textNode("figcaption", "");
     caption.append(

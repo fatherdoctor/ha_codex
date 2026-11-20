@@ -48,6 +48,8 @@ def main():
         server.scheduling.SCHEDULED_RUNS = os.environ.get("CODEX_FIXTURE_SCHEDULED_RUNS") != "0"
         server.DATA_ROOT = root
         server.CONFIG_ROOT = root
+        # These were fixed from /data when the module loaded, so point them at the temporary folder too.
+        server.ATTACHMENTS_ROOT = root / "chat_uploads"
         # Full access keeps its setting and writes the requirements in the temporary folder, never in /data or /etc.
         server.full_access.SETTING_PATH = root / "full_access.json"
         server.full_access.REQUIREMENTS_PATH = root / "codex-etc" / "requirements.toml"
@@ -309,6 +311,17 @@ def main():
 
         server.start_background_task = finish
         server.app.add_url_rule("/fixture/release", "fixture_release", release_held, methods=["POST"])
+
+        def remove_uploads():
+            """Delete the stored uploads, as the daily cleanup does after 7 days."""
+            removed = 0
+            for path in server.ATTACHMENTS_ROOT.rglob("*"):
+                if path.is_file():
+                    path.unlink()
+                    removed += 1
+            return {"removed": removed}
+
+        server.app.add_url_rule("/fixture/remove-uploads", "fixture_remove_uploads", remove_uploads, methods=["POST"])
         server.app.add_url_rule("/fixture/integration", "fixture_integration", set_integration, methods=["POST"])
         server.app.add_url_rule("/fixture/browser-permissions/corrupt", "fixture_corrupt_permissions",
                                 corrupt_permissions, methods=["POST"])

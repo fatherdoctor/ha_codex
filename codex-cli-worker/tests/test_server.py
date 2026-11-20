@@ -13,6 +13,7 @@ from pathlib import Path
 from threading import Event, Thread
 from unittest.mock import patch
 
+from app_folders import isolated_app_folders
 from app_server_fixture import StubAppServer
 
 
@@ -613,7 +614,7 @@ class RuntimeConfigTests(unittest.TestCase):
             with (
                 patch.object(server, "CODEX_HOME", root / "codex-home"),
                 patch.object(server, "DATA_ROOT", root),
-                patch.object(server, "AUTH_QR_DIR", root / "auth-qr"),
+                patch.object(server, "OLD_AUTH_QR_DIR", root / "auth-qr"),
                 patch.object(server, "CODEX_CONFIG_PATH", root / "codex-home" / "config.toml"),
                 patch.object(server, "task_root", return_value=root / "tasks"),
                 patch.object(server, "api_token", return_value="configured"),
@@ -909,6 +910,10 @@ class TaskCancellationTests(unittest.TestCase):
 
     def setUp(self) -> None:
         """Start with no tasks, running processes or task runners, and keep the existing ones to restore."""
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        # A run writes the interaction log under DATA_ROOT; here it goes to a temporary folder.
+        self.addCleanup(isolated_app_folders(server, Path(temporary.name)).close)
         self.saved_tasks = dict(server.tasks)
         self.saved_processes = dict(server.running_processes)
         self.saved_runners = set(server.active_task_runners)

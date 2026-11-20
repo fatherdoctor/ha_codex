@@ -22,7 +22,7 @@ class ParityTests(unittest.TestCase):
 
     def test_no_house_practice_is_bundled(self):
         self.assertFalse((ROOT / 'policy/house-rules.md').exists())
-        self.assertIn('/config/AGENTS.md', (ROOT / 'server.py').read_text())
+        self.assertIn('/addon_config/AGENTS.md', (ROOT / 'server.py').read_text())
 
 
 class DeviceCommandSpeedTests(unittest.TestCase):
@@ -63,7 +63,7 @@ class DeviceCommandSpeedTests(unittest.TestCase):
     def test_rules_no_longer_ask_for_the_owner_file_in_each_message(self):
         rules = server.PAGE_INSTRUCTIONS
         self.assertNotIn('check for it in each message', rules)
-        self.assertIn('Owner workspace instructions: if /config/AGENTS.md exists, follow it.', rules)
+        self.assertIn('Owner workspace instructions: if /addon_config/AGENTS.md exists, follow it.', rules)
         self.assertIn('read the file again only when its owner_instructions text says to', rules)
 
     def test_exchange_info_says_when_the_owner_file_changed_or_that_it_is_gone(self):
@@ -71,7 +71,7 @@ class DeviceCommandSpeedTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             target = Path(folder) / 'AGENTS.md'
             with patch.object(server, 'AGENTS_PATH', target):
-                self.assertIn('There is no /config/AGENTS.md now', server.exchange_info('chat', None)['owner_instructions'])
+                self.assertIn(f'There is no {target} now', server.exchange_info('chat', None)['owner_instructions'])
                 target.write_text('Synthetic owner rules')
                 os.utime(target, (1_800_000_000, 1_800_000_000))
                 first = server.exchange_info('chat', None)['owner_instructions']

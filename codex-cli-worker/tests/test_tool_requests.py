@@ -258,7 +258,7 @@ class ModulesFindTheChat(TwoChats):
         self.assertEqual(self.data.queries["b"], 0)
         self.assertEqual(self.data.exchange_for(OTHER)[0], "b")
 
-    def test_the_call_tool_needs_a_person_at_that_chat(self):
+    def test_the_call_tool_needs_a_running_exchange_of_that_chat(self):
         self.assertEqual(self.calls.task_for({"thread_id": CHAT, "arguments": {}}), "a")
         self.assertIsNone(self.calls.task_for({"thread_id": OTHER, "arguments": {}}))
         answer = self.calls.dispatch({"thread_id": OTHER, "arguments": {"service": "light.turn_off"}})
@@ -292,10 +292,9 @@ class TheChatHoldsNoKey(unittest.TestCase):
     """No HA_*_CAPABILITY name in the chat's Codex command line; remote control keeps its own."""
 
     def test_the_chat_command_line(self):
-        for attended in (True, False):
-            text = " ".join(server.build_app_server_args(attended))
-            self.assertNotIn("CAPABILITY", text)
-            self.assertNotIn("shell_environment_policy", text)
+        text = " ".join(server.build_app_server_args())
+        self.assertNotIn("CAPABILITY", text)
+        self.assertNotIn("shell_environment_policy", text)
 
     def test_remote_control_keeps_its_keys(self):
         text = " ".join(server.relay_tool_args())
