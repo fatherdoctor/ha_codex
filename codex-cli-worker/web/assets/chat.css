@@ -608,18 +608,6 @@ h1 {
 .answer {
   padding: 0 3px;
 }
-.answer-heading {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  margin-bottom: 12px;
-  font-size: calc(12px * var(--text-scale));
-  font-weight: 600;
-}
-.answer-heading .mark {
-  color: var(--accent);
-  font-size: calc(20px * var(--text-scale));
-}
 .answer .details {
   margin-top: 12px;
 }
@@ -1928,32 +1916,14 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.command-list {
-  margin: 0;
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 6px 14px;
-  font-size: calc(14px * var(--text-scale));
-}
-.command-list dt {
-  font-weight: 600;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
-.command-list dd {
-  margin: 0;
+.slash-icon {
+  flex: 0 0 1.6em;
+  text-align: center;
   color: var(--muted);
-  min-width: 0;
 }
-/* On a narrow phone the two columns leave each description a word wide, so
-   each command goes above its description instead. */
-@media (max-width: 480px) {
-  .command-list {
-    grid-template-columns: minmax(0, 1fr);
-    row-gap: 2px;
-  }
-  .command-list dd {
-    margin-bottom: 8px;
-  }
+.slash-match {
+  background: color-mix(in srgb, var(--accent, currentColor) 22%, transparent);
+  border-radius: 3px;
 }
 /* Remote-control pairing code: large, steady, and in a font that tells 0 from O. */
 .pairing-code {

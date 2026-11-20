@@ -538,15 +538,8 @@ function pngBuffer(width = 8, height = 6) {
       await page.locator("#messages .check-invalid .check-detail").textContent(),
       /required key 'trigger'/,
     );
-    // The same exchange says which changed files have a saved previous version.
-    assert.match(
-      await page.locator("#messages .backups-saved").textContent(),
-      /^✓Previous version saved for 1 file, kept for 7 daysautomations\.yaml → \/config\/codex_tasks\/.*\/backups\/automations\.yaml$/,
-    );
-    assert.equal(
-      await page.locator("#messages .backups-missing").textContent(),
-      "!No previous version saved for 1 filescripts.yaml",
-    );
+    // The answer gives no verdict on saved copies (CX-04-NO-CHECKS).
+    assert.equal(await page.locator("#messages .backups-saved, #messages .backups-missing").count(), 0);
     await page.screenshot({
       path: path.join(output, "config-check-failed.png"),
       fullPage: true,

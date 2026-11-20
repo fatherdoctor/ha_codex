@@ -46,7 +46,7 @@ async function removedInUse(page) {
       await page.locator('#messages .message').first().waitFor({state: 'visible', timeout: 10000});
       assert.deepEqual(await removedInUse(page), [], `a chat at ${viewport.width} px`);
 
-      await page.evaluate(() => openSettingsAt("settings-commands"));
+      await page.evaluate(() => openSettingsAt("text-size-section"));
       await page.locator('#settings').waitFor({state: 'visible', timeout: 5000});
       assert.deepEqual(await removedInUse(page), [], `Settings at ${viewport.width} px`);
       await page.keyboard.press('Escape');
