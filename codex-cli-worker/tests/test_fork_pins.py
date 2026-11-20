@@ -40,6 +40,11 @@ class ForkPinTests(unittest.TestCase):
         self.assertIn("sha256sum -c -", DOCKERFILE)
         self.assertNotIn("@openai/codex", DOCKERFILE, "the npm build cannot run remote control")
 
+    def test_live_proofs_expect_the_pinned_cli(self) -> None:
+        # The proofs skip a CLI of any other version; a pin move must move their constant too (SANDBOX_TESTING.md).
+        source = (WORKER / "tests" / "test_live_proofs.py").read_text(encoding="utf-8")
+        self.assertIn(f'PINNED_VERSION = "{CODEX_VERSION}"', source)
+
     def test_cli_cannot_replace_itself(self) -> None:
         self.assertIn('chmod -R a-w "/opt/codex/${CODEX_VERSION}"', DOCKERFILE)
         self.assertIn('ln -s "${CODEX_VERSION}" /opt/codex/current', DOCKERFILE, "current must be a relative link")

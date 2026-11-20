@@ -13,7 +13,6 @@ function updateStudio() {
   $("permission-button").setAttribute('aria-label', permissionLabel);
   $("permission-button").title = permissionLabel;
   $("permission-button").classList.toggle("full-access", selectedPermissionMode() === "full-access");
-  $("phone-new").disabled = state.busy || state.settingsBusy;
   $("permission-button").disabled = state.busy || state.loading || state.settingsBusy ||
     Boolean(state.task && ["queued", "running"].includes(state.task.status)) || Boolean(state.task?.queued_message);
   for (const choice of document.querySelectorAll("[data-mode]"))
@@ -24,7 +23,6 @@ document.addEventListener("chat-view", updateStudio);
 for (const button of document.querySelectorAll("[data-close]"))
   button.onclick = () => $(button.dataset.close).close();
 $("phone-history").onclick = () => sidebar(true);
-$("phone-new").onclick = () => selectChat(null);
 $("permission-button").onclick = () => {
   $("permission-result").textContent = "";
   updateStudio();
@@ -116,6 +114,8 @@ function renderStudioRemote(rc) {
   retryConnection.hidden = label.state !== "error" || !rc.enabled || !rc.available;
   // The Remote row at the foot of the side bar keeps to a word or two; its tooltip and the window's title say more.
   setFootRow("remote-status-row", ...remoteFootRow(rc, label));
+  // Only an error while the owner's switch is on counts as a sign-out; Off is the owner's choice.
+  noteAttention("remote", Boolean(rc.available && rc.enabled && label.state === "error"));
   $("remote-status-row").title = `Remote · ${label.text}`;
   document.body.dataset.connection = label.state;
   $("connection-title").textContent = `Remote connection · ${label.text}`;

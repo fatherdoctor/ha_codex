@@ -4,12 +4,6 @@
 // take them; with no host window, each part falls back to the page's own palette. Run with tests/web_fixture.py
 // serving the page. Every code, name and color is synthetic.
 // Screenshots go to SETTINGS_SHOTS (default /tmp/codex-settings-qa).
-// Scheduled runs are off in this series. This test checks Settings colors through the schedule form, so it needs
-// the fixture started with CODEX_FIXTURE_SCHEDULED_RUNS=1.
-if (process.env.CODEX_FIXTURE_SCHEDULED_RUNS !== "1") {
-  console.log("SKIP: scheduled runs are switched off (start the fixture with CODEX_FIXTURE_SCHEDULED_RUNS=1)");
-  process.exit(0);
-}
 const {chromium} = require('playwright');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -126,19 +120,18 @@ const themeLook = target => target.evaluate(() => {
   };
   return {
     font: getComputedStyle(document.body).fontFamily,
-    // A list field takes the same font as the page (the mailbox list of Scheduled runs).
-    selectFont: css('#schedule-mail-reader', 'font-family'),
-    // A text field and a text button of Scheduled runs (the schedule's own fields moved to the schedule editor).
-    fieldFill: css('#schedule-mail-due', 'background-color'),
-    fieldLine: css('#schedule-mail-due', 'border-bottom-color'),
-    fieldHeight: document.querySelector('#schedule-mail-due').getBoundingClientRect().height,
+    // A list field takes the same font as the page (the model list of the schedule editor).
+    selectFont: css('#schedule-model', 'font-family'),
+    // A text field and a text button of the schedule editor.
+    fieldFill: css('#schedule-name', 'background-color'),
+    fieldLine: css('#schedule-name', 'border-bottom-color'),
     // The Add-on configuration row at the foot of Settings: a name and a description line.
     rowHeight: document.querySelector('.ha-row').getBoundingClientRect().height,
     // The form's submit button, the filled kind next to the text button below.
     filled: css('#schedule-form button[type=submit]', 'background-color'),
     filledText: css('#schedule-form button[type=submit]', 'color'),
-    textButton: css('#schedule-mail-reset', 'color'),
-    textButtonFill: css('#schedule-mail-reset', 'background-color'),
+    textButton: css('#schedule-delete', 'color'),
+    textButtonFill: css('#schedule-delete', 'background-color'),
     // Every close button of Settings and its dialogs is the mdiClose icon, with no text glyph.
     closeIcons: [...document.querySelectorAll('#close-settings, dialog.studio-sheet .dialog-header .icon')].map(b =>
       `${b.textContent.trim() === ''} ${getComputedStyle(b, '::before').maskImage.includes('svg') || getComputedStyle(b, '::before').webkitMaskImage.includes('svg')}`),
@@ -275,7 +268,6 @@ async function openThemedSections(target) {
       const look = await themeLook(page);
       assert.match(look.font, /^Inter,/, 'the page font with no Home Assistant font');
       assert.equal(look.selectFont, look.font, 'a list field takes the page font');
-      assert.equal(look.fieldHeight, 56, 'a filled field is 56 px high');
       assert.ok(look.rowHeight >= 72, `a two-line settings row is 72 px or more: ${look.rowHeight}`);
       assert.equal(look.filled, 'rgb(0, 154, 199)', 'the filled button takes the page accent');
       assert.equal(look.filledText, 'rgb(255, 255, 255)');

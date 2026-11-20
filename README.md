@@ -1,3 +1,5 @@
+<p align="center"><img src="brand/courtyard/logo.svg" alt="Codex for Home Assistant" width="320"></p>
+
 # Codex for Home Assistant
 
 [![License][license-badge]][license-url]
@@ -9,8 +11,7 @@ access. It is for the household member who looks after Home Assistant and can re
 want to write every automation by hand.
 
 **Status: pre-release.** The app image is published for each version, but no version is called stable yet. Install it
-on a test Home Assistant first. It is built on
-[moryoav/home-assistant-codex](https://github.com/moryoav/home-assistant-codex) release **0.1.81**.
+on a test Home Assistant first.
 
 ## What it does
 
@@ -46,7 +47,7 @@ see [If a download is missing](#if-a-download-is-missing).
 - [Permission modes](#permission-modes)
 - [Safety](#safety)
 - [Sign-in](#sign-in)
-- [Mailbox](#mailbox)
+- [Scheduled runs](#scheduled-runs)
 - [Using it from Assist and automations](#using-it-from-assist-and-automations)
 - [Troubleshooting](#troubleshooting)
 - [Versions](#versions)
@@ -148,7 +149,7 @@ flowchart LR
 5. You read the summary. If you do not like it, ask Codex to undo it, or restore the saved earlier copy if the chat
    lists one.
 
-Screenshots of these screens are listed in [SCREENSHOTS.md](SCREENSHOTS.md).
+Screenshots of these screens are listed in [screenshots/SCREENSHOTS.md](screenshots/SCREENSHOTS.md).
 
 ## Permission modes
 
@@ -206,17 +207,18 @@ When the sign-in is missing, ended or rejected, a banner returns above the chat,
 Assistant repair, and the **Signed in** sensor turns off. A good sign-in clears all three. The Codex program does not
 report when a sign-in will end, so the app shows no countdown. Sign out any time with **Settings** > **Sign out**.
 
-## Mailbox
+## Scheduled runs
 
-**Mailbox.** You, Codex and one other local agent can leave plain-text messages for each other. The other agent is
-another app or agent that runs on the same Home Assistant host; it connects with a separate token that you create in
-Settings. The token shows once, and the app stores only a hash.
+Open a chat's menu and choose **Schedule**. You save a name, a prompt, a model and a trigger: hourly, daily, weekly,
+or a custom interval, cron rule or single time, in your Home Assistant time zone. Each run starts a new chat.
+**Settings** > **Scheduled runs** lists every schedule.
 
-- A message is only data. It never starts work, and it grants no permission.
-- A sensor counts unread messages for the other agent, and an event announces each new message without its text.
-- Limits: 500 messages, and 20 writes per turn and 64 per UTC day for each writer.
+- A schedule you save is approved when you save it. Codex can only propose one; it stays off until an administrator
+  reads the full prompt and approves it.
+- A scheduled run asks for permission like any other run and waits for you in its chat.
+- Limits: 100 approved schedules, 24 runs per schedule per UTC day, and 64 scheduled runs per UTC day.
 
-Details: [The lead agent channel and mailbox](codex-cli-worker/DOCS.md#the-lead-agent-channel-and-mailbox).
+Details: [Scheduled runs](codex-cli-worker/DOCS.md#scheduled-runs).
 
 ## Using it from Assist and automations
 
@@ -256,15 +258,15 @@ starter Assist script is in [examples/scripts.yaml](examples/scripts.yaml).
 
 ## Versions
 
-A fork version is the upstream version plus one number. `0.1.81.1` is the first build of this fork on upstream 0.1.81.
-A daily workflow opens one issue when upstream releases something newer.
+A version has three numbers, such as `0.3.6`. The first two versions, `0.1.81.1` and `0.1.81.2`, had four: the number
+of the release that the project started from ([Credit](#credit)), plus one more.
 
 | Version | Changes |
 |---|---|
 | 0.3.6 | The app's own command checks are removed: Codex's permission modes and the sandbox are the protection. Four permission modes, with Full access off until an administrator turns it on. A notification shows only while a chat waits for you. |
 | 0.3.0 (unreleased) | GitHub sign-in on the page (device sign-in, clone and link under /share or /config, every push through the push guard, a Repairs issue when access changes). The app installs and updates its own integration (one install and one restart); setup from discovery asks for confirmation. |
 | 0.1.81.2 (unreleased) | No full-access mode (changed in 0.3.6); a protected permission policy in the image, no bundled house rules and owner workspace instructions; permission answers and the integration's actions only from Home Assistant administrators; a permission-prompt sensor. |
-| 0.1.81.1 (unreleased) | Codex CLI 0.166.0 pinned by checksum, no self-update, base image pinned by digest, links and maintainer for the fork. |
+| 0.1.81.1 (unreleased) | Codex CLI 0.166.0 pinned by checksum, no self-update, base image pinned by digest, links and maintainer for this repository. |
 
 The full list is in the [changelog](codex-cli-worker/CHANGELOG.md).
 
@@ -287,17 +289,17 @@ security problem, use the **Report a vulnerability** button on the Security tab.
 ## Credit
 
 This project is a fork of [moryoav/home-assistant-codex](https://github.com/moryoav/home-assistant-codex) by Yoav Mor
-(MIT).
+(MIT). It started from release 0.1.81 of that project and has its own versions and its own code since then.
+
+This project is not affiliated with OpenAI or with Home Assistant.
 
 ## Contributing
 
-Issues and pull requests are welcome on this fork. Changes that are not specific to the fork belong upstream first;
-see [CONTRIBUTING.md](CONTRIBUTING.md).
+Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-MIT, as upstream: [LICENSE](LICENSE) (copyright Yoav Mor). Fork changes are copyright The Backshop, under the same
-license.
+MIT: [LICENSE](LICENSE). Copyright Yoav Mor and The Backshop.
 
 [license-badge]: https://img.shields.io/github/license/fatherdoctor/ha_codex
 [license-url]: LICENSE

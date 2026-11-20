@@ -10,10 +10,12 @@ from homeassistant.components.recorder import websocket_api
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from ha_data import HomeAssistantData
+import tool_threads
 from ha_data_mcp import STATISTIC_TYPES
 
 START = "2026-01-01T00:00:00+00:00"
 END = "2026-01-02T00:00:00+00:00"
+THREAD = "11111111-2222-4333-8444-555555555555"
 
 
 @pytest.mark.parametrize("period", ["5minute", "hour", "day", "week", "month"])
@@ -23,7 +25,8 @@ def test_generated_recorder_requests_match_core_schemas(period, tmp_path):
                              ha_token=lambda: "private-token", api_token=lambda: "", read_options=lambda: {},
                              redact=lambda text: text)
     engine = HomeAssistantData(worker, tmp_path / "exports")
-    capability = engine.begin("chat")
+    engine.begin("chat")
+    tool_threads.CHATS.bind("chat", THREAD)
     captured = []
 
     def recorder(messages):
@@ -33,9 +36,10 @@ def test_generated_recorder_requests_match_core_schemas(period, tmp_path):
 
     with patch.object(engine, "ws_read", side_effect=recorder):
         result = engine.dispatch({
-            "operation": "statistics", "capability": capability, "statistic_ids": ["sensor.kitchen", "external:meter"],
+            "operation": "statistics", "thread_id": THREAD, "statistic_ids": ["sensor.kitchen", "external:meter"],
             "start_time": START, "end_time": END, "period": period, "types": STATISTIC_TYPES,
         })
+    tool_threads.CHATS.release("chat")
     assert result["status"] == "observed"
     metadata = websocket_api.ws_get_statistics_metadata._ws_schema({"id": 1, **captured[0]})
     statistics = websocket_api.ws_get_statistics_during_period._ws_schema({"id": 2, **captured[1]})

@@ -28,6 +28,7 @@ from pathlib import Path
 import requests
 
 import name_match
+import tool_threads
 from relay_reads import ATTRIBUTES, PRIVATE, fetch_states, password_state
 
 SERVICE_RE = re.compile(r"[a-z0-9_]+\.[a-z0-9_]+")
@@ -123,9 +124,10 @@ class HomeAssistantCall:
         self.lock = threading.Lock()
 
     def begin(self, task_id):
-        """Issue a new call key for the task's turn, or for a relay launch, and return it.
+        """Allow calls for the task's running exchange, or issue the relay's key for a relay launch, and return it.
 
-        An earlier key of the same task stops working.
+        run_task calls this only when a person attends the exchange. For a chat the value stays in the worker;
+        only the relay's value goes to a process. An earlier value of the same task stops working.
         """
         capability = secrets.token_urlsafe(32)
         with self.lock:
@@ -133,22 +135,32 @@ class HomeAssistantCall:
         return capability
 
     def end(self, task_id):
-        """Withdraw the task's call key, so a later request that presents it sends nothing."""
+        """End the task's calls, so a later request for it sends nothing."""
         with self.lock:
             self.capabilities.pop(task_id, None)
 
-    def task_for(self, supplied):
-        """Return the running task that owns the key, or None when no running, uncancelled task holds it."""
-        if not isinstance(supplied, str) or not supplied or not supplied.isascii():
-            return None
-        with self.lock:
-            task_id = next((key for key, value in self.capabilities.items()
-                            if hmac.compare_digest(supplied, value)), None)
-        if not task_id:
-            return None
-        if task_id == RELAY_TASK:
+    def task_for(self, payload):
+        """Return the task that may send this request, or None.
+
+        A request with a key comes from remote control: only the relay's key counts, and only while the relay
+        runs. A request without a key names its chat by thread id: that chat needs a running exchange that is
+        not canceled and that a person attends (begin ran for it). A chat's thread never reaches the relay.
+        """
+        if "capability" in payload:
+            supplied = payload["capability"]
+            if not isinstance(supplied, str) or not supplied or not supplied.isascii():
+                return None
+            with self.lock:
+                key = self.capabilities.get(RELAY_TASK)
+            if key is None or not hmac.compare_digest(supplied, key):
+                return None
             # The app has no chat on the page. Codex in the relay asks the person before each call.
-            return task_id if self.relay_running() else None
+            return RELAY_TASK if self.relay_running() else None
+        task_id = tool_threads.CHATS.task_for(payload.get("thread_id"))
+        with self.lock:
+            attended = task_id is not None and task_id != RELAY_TASK and task_id in self.capabilities
+        if not attended:
+            return None
         if self.worker.task_cancellation_requested(task_id):
             return None
         with self.worker.lock:
@@ -160,9 +172,9 @@ class HomeAssistantCall:
         """Answer one request from the bridge: refuse it, or send it and report what Home Assistant said."""
         if not isinstance(payload, dict):
             return {"status": "unavailable", "message": "Invalid call request"}
-        task_id = self.task_for(payload.get("capability"))
+        task_id = self.task_for(payload)
         if task_id is None:
-            return {"status": "unavailable", "message": "No active call key: the chat turn has ended"}
+            return {"status": "unavailable", "message": "No running exchange that a person attends: nothing was sent"}
         arguments = payload.get("arguments")
         try:
             if isinstance(arguments, dict) and "name" in arguments:

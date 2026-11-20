@@ -78,7 +78,6 @@ class ProtectedPolicyTests(unittest.TestCase):
             patch.object(server, "CODEX_HOME", home),
             patch.object(server, "CODEX_CONFIG_PATH", home / "config.toml"),
             patch.object(server, "DATA_ROOT", self.root),
-            patch.object(server, "SCHEMA_PATH", self.root / "schema.json"),
             patch.object(server, "AUTH_QR_DIR", self.root / "qr"),
             patch.object(server, "task_root", return_value=self.root / "tasks"),
             patch.object(server, "api_token", return_value="x" * 40),

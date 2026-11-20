@@ -11,8 +11,12 @@ from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 from test_server import server
+import tool_threads
 from verification import DEFAULT_BROWSER_MEMORY_LIMIT_MIB, MAX_BROWSERS, Verification
 from verification import browser_memory_limit, browser_process_memory, kill_tracked_processes, track_browser_processes
+
+
+THREAD = "11111111-2222-4333-8444-555555555555"
 
 
 class VerificationTests(unittest.TestCase):
@@ -39,17 +43,25 @@ class VerificationTests(unittest.TestCase):
         server.tasks["chat"] = {"task_id": "chat", "status": "running",
                                 "current_turn_id": turn["turn_id"], "turns": [turn]}
         self.engine = Verification(server)
+        tool_threads.CHATS.bind("chat", THREAD)
+        self.addCleanup(tool_threads.CHATS.release, "chat")
         self.capability = self.engine.begin("chat")
 
-    def test_capability_expires_and_cannot_run_arbitrary_operations(self):
-        """Reject a wrong or ended capability and refuse operations outside the supported set."""
+    def test_an_ended_exchange_is_refused_and_unsupported_operations_are_not_run(self):
+        """Reject an unbound thread and an ended exchange, and refuse operations outside the supported set."""
         with self.assertRaises(ValueError):
-            self.engine.dispatch({"capability": "wrong", "operation": "entity"})
-        result = self.engine.dispatch({"capability": self.capability, "operation": "call_service"})
+            self.engine.dispatch({"thread_id": "99999999-2222-4333-8444-555555555555", "operation": "entity"})
+        with self.assertRaises(ValueError):
+            self.engine.dispatch({"capability": self.capability, "operation": "entity"})
+        result = self.engine.dispatch({"thread_id": THREAD, "operation": "call_service"})
         self.assertEqual(result["status"], "unavailable")
         self.engine.end("chat")
         with self.assertRaises(ValueError):
-            self.engine.dispatch({"capability": self.capability, "operation": "entity"})
+            self.engine.dispatch({"thread_id": THREAD, "operation": "entity"})
+        tool_threads.CHATS.release("chat")
+        self.engine.begin("chat")
+        with self.assertRaises(ValueError):
+            self.engine.dispatch({"thread_id": THREAD, "operation": "entity"})
 
     def test_fresh_state_assertion_persists_in_this_turn(self):
         """Read the entity state again for each check and record it in the turn, with only the requested attributes."""
@@ -72,7 +84,7 @@ class VerificationTests(unittest.TestCase):
         """Look an entity up by name through the same capability, limits and record as every other check."""
         states = [{"entity_id": "light.kitchen_ceiling", "state": "on", "attributes": {"friendly_name": "Kitchen Ceiling"}}]
         with patch("verification.fetch_states", return_value=states), patch.object(server, "ha_token", return_value="synthetic"):
-            result = self.engine.dispatch({"capability": self.capability, "operation": "find", "name": "kitchen ceiling"})
+            result = self.engine.dispatch({"thread_id": THREAD, "operation": "find", "name": "kitchen ceiling"})
         self.assertEqual(result["matches"], [{"entity_id": "light.kitchen_ceiling", "name": "Kitchen Ceiling", "state": "on"}])
         recorded = server.tasks["chat"]["turns"][0]["verification"]
         self.assertEqual([(check["operation"], check["status"]) for check in recorded], [("find", "observed")])
@@ -97,10 +109,13 @@ class VerificationTests(unittest.TestCase):
                 self.assertEqual(result["status"], "unavailable")
                 self.assertEqual(server.tasks["chat"]["verification"], [])
 
-    def test_non_ascii_capability_and_other_app_logs_fail_closed(self):
-        """Reject a non-ASCII capability and refuse another app's logs without calling Home Assistant."""
+    def test_malformed_thread_ids_and_other_app_logs_fail_closed(self):
+        """Reject malformed thread ids and refuse another app's logs without calling Home Assistant."""
+        for value in ("שלום", "", None, [], 1, THREAD.replace("1", "A"), "abcdefab-2222-4333-8444-555555555555".upper()):
+            with self.subTest(thread=value), self.assertRaises(ValueError):
+                self.engine.dispatch({"thread_id": value, "operation": "entity"})
         with self.assertRaises(ValueError):
-            self.engine.dispatch({"capability": "שלום", "operation": "entity"})
+            self.engine.dispatch({"operation": "entity"})
         with patch.object(self.engine, "core") as core:
             result = self.engine.run("chat", {"operation": "logs", "target": "core_mosquitto"})
         self.assertEqual(result["status"], "unavailable")

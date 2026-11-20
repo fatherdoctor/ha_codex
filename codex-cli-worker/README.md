@@ -14,7 +14,7 @@ Codex runs in a sandbox: `workspace-write` (the default) or `read-only`. A chat 
 
 Browser sign-in is automatic and uses a temporary, local, read-only identity. Update both the app and integration, and leave **Enable built-in browser** on. Ask for a specific dashboard view to inspect it. See [setup and verification limits](https://github.com/fatherdoctor/ha_codex/blob/main/codex-cli-worker/VERIFICATION.md).
 
-Matching Fully Kiosk devices can also supply fresh screenshots of the view they are displaying, without being navigated, refreshed, or woken. This requires the app and integration at 0.1.79 or newer, plus enabled current-page and screenshot entities in Home Assistant's Fully Kiosk Browser integration.
+Matching Fully Kiosk devices can also supply fresh screenshots of the view they are displaying, without being navigated, refreshed, or woken. This requires enabled current-page and screenshot entities in Home Assistant's Fully Kiosk Browser integration.
 
 For setup, security notes, and action examples, see the [repository README](https://github.com/fatherdoctor/ha_codex/blob/main/README.md) and [app documentation](https://github.com/fatherdoctor/ha_codex/blob/main/codex-cli-worker/DOCS.md).
 
@@ -50,6 +50,6 @@ Attach screenshots, photos, or design mockups to a message with the paperclip bu
 
 Hover over a chat and use its **⋯** button, right-click the row, or long-press it on a phone to rename, pin, share, archive or delete the conversation. **Share** downloads the chat, or its last lines, as a Markdown file with the steps Codex printed. Pinned chats stay at the top of the list, and deleting asks for confirmation first.
 
-Use the model name and reasoning label below the message box to customize each conversation. The shipped `model_pin` option limits the picker and runs to its pinned model; set `model_pin` to `none` in the app configuration to use the other available models. Choices are saved across restarts and apply to the next message. A chat that has no model of its own shows the model set in the app options, or the one Codex picks when that option is `default`. Choosing that model in the menu restores the app's model setting; the reasoning picker's reset button separately restores the app's reasoning setting. The slider only offers reasoning levels supported by the selected model.
+Use the model name and reasoning label below the message box to customize each conversation. The `model_pin` option is empty by default; when you set it, it limits the picker and runs to that model, and clearing it brings back the other available models. Choices are saved across restarts and apply to the next message. A chat that has no model of its own shows the model set in the app options, or the one Codex picks when that option is `default`. Choosing that model in the menu restores the app's model setting; the reasoning picker's reset button separately restores the app's reasoning setting. The slider only offers reasoning levels supported by the selected model.
 
 ![Saved conversations in the desktop chat UI](https://raw.githubusercontent.com/fatherdoctor/ha_codex/main/screenshots/chat-light-desktop.png)

@@ -44,8 +44,8 @@ def main():
     spec.loader.exec_module(server)
     with tempfile.TemporaryDirectory(prefix="codex-chat-preview-") as temp:
         root = Path(temp)
-        # Scheduled runs are off in this series; a test of the schedule pages starts the fixture with this set.
-        server.scheduling.SCHEDULED_RUNS = os.environ.get("CODEX_FIXTURE_SCHEDULED_RUNS") == "1"
+        # Scheduled runs are on; a test of the pages without them starts the fixture with CODEX_FIXTURE_SCHEDULED_RUNS=0.
+        server.scheduling.SCHEDULED_RUNS = os.environ.get("CODEX_FIXTURE_SCHEDULED_RUNS") != "0"
         server.DATA_ROOT = root
         server.CONFIG_ROOT = root
         # Full access keeps its setting and writes the requirements in the temporary folder, never in /data or /etc.
@@ -126,7 +126,7 @@ def main():
         (sessions / f"rollout-preview-{session_id}.jsonl").write_text("{}\n")
 
         def preview_events(text):
-            """The `codex exec --json` lines a short review of the config would produce."""
+            """The events, in the shape record_activity_event reads, that a short review of the config would produce."""
             command = "/bin/sh -lc 'cat /config/automations.yaml'"
             return [
                 {"type": "item.completed", "item": {"id": "item_0", "type": "reasoning", "text": "**Checking the automation**"}},
