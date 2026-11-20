@@ -57,7 +57,6 @@ class GrantLayerLaunchTests(unittest.TestCase):
         with patch.object(server, "tasks", {"t": task}), patch.object(server, "read_options", return_value={}):
             return {
                 "page": server.build_app_server_args(),
-                "schedule run": server.build_app_server_args(attended=False),
             }
 
     def test_no_page_or_schedule_launch_registers_the_act_tool(self):

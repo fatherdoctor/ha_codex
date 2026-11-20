@@ -41,6 +41,11 @@
   rollback document speak for the project, not for one person, and give versions of this project in their examples.
   The changelog starts at this project's first version. `screenshots/SCREENSHOTS.md` lists the screenshots; the root
   `SCREENSHOTS.md` is removed.
+- **Scheduled runs can change the house, with your OK.** A scheduled run now has the same tools as a chat on the
+  page, the `home_assistant_call` tool that changes the house included. Before, a scheduled run did not get that tool.
+  Codex asks before each call as it does in a chat. The question waits in the run's chat with the yellow warning until
+  an administrator chooses **Allow once** or **Deny**, and nothing is sent to Home Assistant before that. A schedule
+  still runs in Default or Read only.
 - **A richer command list.** The command list above the message box now shows an icon for each command and marks the
   letters you typed, and a press outside the list closes it. New commands `/pin`, `/share`, `/archive` and `/delete`
   do what the chat menu does, and `/connection` opens the remote connection and its status. `/help` and

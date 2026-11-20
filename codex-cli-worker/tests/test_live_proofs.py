@@ -309,7 +309,7 @@ RELAY = textwrap.dedent('''
 ''')
 
 
-def worker_app_server_args(root: Path, attended: bool = True) -> tuple[list[str], list[str]]:
+def worker_app_server_args(root: Path) -> tuple[list[str], list[str]]:
     """Return the worker's own app-server arguments with each tool program behind the relay, and the server names.
 
     server.build_app_server_args is the launch the chat page uses. Only the binary and each tool program's
@@ -319,7 +319,7 @@ def worker_app_server_args(root: Path, attended: bool = True) -> tuple[list[str]
 
     relay = root / "relay.py"
     relay.write_text(RELAY, encoding="utf-8")
-    args = server.build_app_server_args(attended=attended)
+    args = server.build_app_server_args()
     assert args[1] == "app-server", args[:2]
     args = args[2:]
     names = []

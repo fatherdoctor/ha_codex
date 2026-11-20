@@ -4510,21 +4510,14 @@ def backup_instructions(backup_dir: Path | None) -> str:
     )
 
 
-def home_assistant_api_instructions(options: dict[str, Any], call_tool: bool = True) -> str:
+def home_assistant_api_instructions(options: dict[str, Any]) -> str:
     """Tell Codex where its own Home Assistant API calls go; empty when the add-on gives it no token for them.
 
-    call_tool says whether this launch has the home_assistant_call tool: a chat on the page and the ChatGPT app
-    have it, a scheduled run does not.
+    Every launch has the home_assistant_call tool (a chat on the page, a scheduled run and the ChatGPT app), so
+    the text sends every change to the house through it.
     """
     if not str(options.get("HA_TOKEN") or "").strip():
         return ""
-    if not call_tool:
-        return (
-            "For Home Assistant API calls you make yourself, such as a reload or a restart the user asked for, use the "
-            "HA_URL and HA_TOKEN environment variables: send the request to $HA_URL, for example "
-            '$HA_URL/api/services/automation/reload, with the header "Authorization: Bearer $HA_TOKEN". '
-            "Do not use http://supervisor/core, which does not accept this token, and never print the token.\n\n"
-        )
     return (
         "To change the house, a reload and a restart included, use the home_assistant_call call tool, never a "
         "command. The HA_URL and HA_TOKEN environment variables are only for a Home Assistant API call that is not "
@@ -4639,9 +4632,7 @@ def exchange_info(task_id: str, backup_dir: Path | None, include_rules: bool = F
         or "This message has no backup folder. Make no backup copies.",
         "owner_instructions": owner_instructions_note(),
         "attachments": attached_image_note(task_id).strip(),
-        # A scheduled run has no call tool (run_task), so its text must not send changes to one.
-        "home_assistant_api": home_assistant_api_instructions(
-            read_options(), call_tool=not background_task(task_id)).strip(),
+        "home_assistant_api": home_assistant_api_instructions(read_options()).strip(),
         "documentation": ha_docs_note().strip(),
         "github": github_service.prompt_note().strip(),
     }
@@ -4857,18 +4848,19 @@ def count_new_prompts(counts: Any, records: list[dict[str, Any]], previous: dict
     return totals
 
 
-def build_app_server_args(attended: bool = True) -> list[str]:
+def build_app_server_args() -> list[str]:
     """Start the bidirectional CLI transport that the page uses for every permission mode.
 
     The two approval flags are Default's values for the process. Each thread and
     turn then sends its own mode's sandbox, approval policy and reviewer
     (task_mode_settings), and those replace them, so a chat gets only its mode's
-    settings. Only a chat someone attends gets the call tool: a scheduled run
-    has nobody to answer Codex's question.
+    settings. A scheduled run starts with the same tools as a chat on the page,
+    the call tool included: Codex's question before a call waits in the run's
+    chat until a person answers it.
     """
     return [CODEX_BINARY, "app-server", "--config", 'approval_policy="on-request"',
             "--config", 'approvals_reviewer="user"', *verification_mcp_args(),
-            *data_mcp_args(), *scheduling_mcp_args(), *github_mcp_args(), *(call_mcp_args() if attended else [])]
+            *data_mcp_args(), *scheduling_mcp_args(), *github_mcp_args(), *call_mcp_args()]
 
 
 def bind_chat_thread(task_id: str, thread_id: Any) -> None:
@@ -5592,10 +5584,8 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
         return
     # Every exchange runs on the app server, which carries live permission requests. The policy check at the
     # top of run_task has already refused the modes that this transport must never be given.
-    attended = not background_task(task_id)
-    args = build_app_server_args(attended)
-    if attended:
-        ha_call.begin(task_id)
+    args = build_app_server_args()
+    ha_call.begin(task_id)
     write_task_log(task_id, "worker", "Starting Codex: " + " ".join(args))
 
     start_phase(task_id, "launch", "Starting Codex")

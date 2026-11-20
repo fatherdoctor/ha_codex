@@ -348,7 +348,8 @@ Home Assistant action (a service call), for example `light.turn_off` with a targ
 `homeassistant.restart`. The app sets the tool's approval mode to `prompt`, so Codex asks you each time, with no
 remembered answer: the question has no "Allow for this session" and no "don't ask again". It shows the service,
 the target and the data.
-A scheduled run does not get the tool, since nobody is there to answer.
+A scheduled run has the same tool. Its question waits in the run's chat until an administrator answers it
+([Scheduled runs](#scheduled-runs)).
 
 The ChatGPT app has the same tool while remote control is on. There, Codex asks in the app before each call; the
 worker does not see that answer. The tool's key in the app holds while the remote-control process runs, and each
@@ -429,9 +430,9 @@ Codex can be reached three ways: the chat page, the ChatGPT app paired through r
   way in. On the chat page and for `codex_cli.start_task`, a request for more access shows on the chat page as a
   [permission request](#permission-requests). The ChatGPT app shows Codex's own requests in the app instead, as
   [Remote control from the ChatGPT app](#remote-control-from-the-chatgpt-app) describes.
-- A scheduled run also starts a task. It uses the same launcher as the chat page and gets the page's tools, except
-  the `call` tool: nobody is there to answer. A Read only schedule narrows the sandbox, not the tools
-  ([Scheduled runs](#scheduled-runs)).
+- A scheduled run also starts a task. It uses the same launcher as the chat page and gets the page's tools, the
+  `call` tool included; Codex asks before each `call`, and the question waits in the run's chat. A Read only
+  schedule narrows the sandbox, not the tools ([Scheduled runs](#scheduled-runs)).
 - "Not available" means the way in has no tool for that request.
 
 `tests/test_surface_matrix.py` starts each way in's tool servers and compares their tools with this table. A change
@@ -993,7 +994,7 @@ Intervals accept whole minutes or hours, with a minimum of one minute. Hourly is
 
 The worker checks due schedules every five seconds. It uses the ordinary task launcher, backups, validation and permission checks, and starts at most one scheduled task per check. Due work waits while the assistant is busy. A missed interval coalesces into one run, without a burst of catch-up tasks. Limits are 100 approved schedules plus 20 unapproved proposals, 24 runs per schedule per UTC day, and 64 scheduled runs total per UTC day. A run that reaches a limit waits until a later UTC day. Completed run history retains the latest 500 records; active records are kept separately. Schedules, occurrence reservations and run history live in `/data/schedules.sqlite3` and survive app restarts and updates. Reservation and launch share the normal chat-slot lock; a busy launch restores the due occurrence without overwriting a concurrent owner edit. A crash after reservation but before saving the ordinary task records an interrupted run and does not retry it automatically.
 
-**Permission requests remain human decisions.** The run log shows **waiting for approval** while a native request is pending. Open its chat to review the command or diff and choose **Allow once** or **Deny** as an administrator. The scheduler cannot answer it. The parked exchange keeps the worker's normal execution slot; other schedules do not bypass it. Existing task timeouts, cancellation and restart expiration still apply. A question instead shows **waiting for input**. Scheduled tasks report completion, failure, cancellation and questions in the run log and chat without pushes. Only their existing permission-wait notification uses `notify_service` (or persistent Home Assistant notifications).
+**Permission requests remain human decisions.** A scheduled run has the tools of a chat on the page, the `call` tool that changes the house included, and Codex asks before each `call` as it does in a chat. The run log shows **waiting for approval** while a request is pending, and the chat page shows its yellow warning. Open the run's chat to review the command, diff or Home Assistant action and choose **Allow once** or **Deny** as an administrator. Nothing that a chat on the page would ask about runs without that answer. The scheduler cannot answer it. The parked exchange keeps the worker's normal execution slot; other schedules do not bypass it. Existing task timeouts, cancellation and restart expiration still apply. A question instead shows **waiting for input**. Scheduled tasks report completion, failure, cancellation and questions in the run log and chat without pushes. Only their existing permission-wait notification uses `notify_service` (or persistent Home Assistant notifications).
 
 Codex on the worker receives the `codex_scheduling` tools `propose_schedule` and `list_schedules`. They use a running-turn capability that expires when the exchange ends. Proposal tools cannot approve schedules or grant native permissions. Schedule summaries are paginated in groups of 10 by default (`limit` can select 1–20; a larger number returns 20 with `next_offset` to read the rest, not an error); prompt excerpts are limited to 512 characters. A refused call says why in plain words, for example that `offset` is out of range or that the exchange has ended. Read the complete proposed prompt on the page before approving. They run without a permission card because these limits already bound them. If any other tool asks a question, the page cannot show it: the request is declined and the chat says so. Only the Home Assistant tool's own permission request gets a card (see [permission requests](#permission-requests)). These tools are for page tasks; native remote threads do not receive page-task capabilities.
 
