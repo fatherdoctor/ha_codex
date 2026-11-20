@@ -2,47 +2,63 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Awaitable, Callable
 from contextlib import ExitStack
 from dataclasses import dataclass
 from functools import wraps
+import logging
 from typing import Any
 
-import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady, HomeAssistantError, ServiceValidationError, Unauthorized
-from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers import entity_registry as er
+from homeassistant.core import (
+    HomeAssistant,
+    ServiceCall,
+    ServiceResponse,
+    SupportsResponse,
+)
+from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
+    ConfigEntryNotReady,
+    HomeAssistantError,
+    ServiceValidationError,
+    Unauthorized,
+)
+from homeassistant.helpers import config_validation as cv, entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
+import voluptuous as vol
 
 from .api import CodexCliApiClient, CodexCliApiError, CodexCliAuthError
+from .browser_auth import (
+    STORAGE_KEY,
+    BrowserSessions,
+    BrowserSessionView,
+    DiagnosticView,
+    loaded_runtime_data,
+)
 from .const import (
+    ATTR_FORCE,
     ATTR_PROMPT,
     ATTR_REPLY,
     ATTR_TASK_ID,
     ATTR_TURN_ID,
-    ATTR_FORCE,
     CONF_BASE_URL,
     DOMAIN,
     SERVICE_CANCEL_TASK,
     SERVICE_CONTINUE_TASK,
     SERVICE_GET_LOGIN_STATUS,
     SERVICE_GET_TASK,
-    SERVICE_LOGOUT,
     SERVICE_LIST_TASKS,
+    SERVICE_LOGOUT,
     SERVICE_REPLY_TASK,
     SERVICE_START_LOGIN,
     SERVICE_START_TASK,
 )
 from .coordinator import CodexCliCoordinator, async_delete_repair_issues
 from .discovery import async_discover_worker
-from .notification_actions import async_listen_for_choices
-from .browser_auth import STORAGE_KEY, BrowserSessions, BrowserSessionView, DiagnosticView, loaded_runtime_data
 from .kiosk import KioskScreenshotsView
+from .notification_actions import async_listen_for_choices
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -67,6 +83,8 @@ LIST_TASKS_SCHEMA = vol.Schema({
     vol.Optional("summary"): bool,
 })
 START_LOGIN_SCHEMA = vol.Schema({vol.Optional(ATTR_FORCE, default=False): bool})
+# A Codex action: it takes the service call and returns the worker's answer.
+type ServiceHandler = Callable[[ServiceCall], Awaitable[ServiceResponse]]
 # The key of the mailbox sensor that version 0.4 removed; installs before 0.4 have this entity.
 REMOVED_MAILBOX_SENSOR_KEY = "mailbox_unread_lead"
 
@@ -188,7 +206,7 @@ def _first_runtime(hass: HomeAssistant) -> CodexCliRuntimeData:
     raise ServiceValidationError("Codex integration is not configured or is not loaded")
 
 
-def _admin_only(hass: HomeAssistant, handler: Callable[[ServiceCall], Awaitable[Any]]) -> Callable[[ServiceCall], Awaitable[Any]]:
+def _admin_only(hass: HomeAssistant, handler: ServiceHandler) -> ServiceHandler:
     """Run a Codex action only for a Home Assistant administrator.
 
     A call that names a user (the UI, the API, a script started by a person)
@@ -198,7 +216,7 @@ def _admin_only(hass: HomeAssistant, handler: Callable[[ServiceCall], Awaitable[
     """
 
     @wraps(handler)
-    async def checked(call: ServiceCall) -> Any:
+    async def checked(call: ServiceCall) -> ServiceResponse:
         """Refuse a caller who is not an administrator, then run the action."""
         user_id = call.context.user_id
         if user_id is not None:
@@ -210,163 +228,127 @@ def _admin_only(hass: HomeAssistant, handler: Callable[[ServiceCall], Awaitable[
     return checked
 
 
+async def _handle_start_task(call: ServiceCall) -> ServiceResponse:
+    """Start a Codex task with the given prompt, refresh the coordinator and return the worker's response."""
+    runtime_data = _first_runtime(call.hass)
+    try:
+        result = await runtime_data.client.start_task(call.data[ATTR_PROMPT])
+    except CodexCliApiError as exc:
+        raise HomeAssistantError(str(exc)) from exc
+    await runtime_data.coordinator.async_request_refresh()
+    return result
+
+
+async def _handle_start_login(call: ServiceCall) -> ServiceResponse:
+    """Start the Codex login flow on the worker, even when logged in if forced, and refresh the coordinator."""
+    runtime_data = _first_runtime(call.hass)
+    try:
+        result = await runtime_data.client.start_login(bool(call.data.get(ATTR_FORCE, False)))
+    except CodexCliApiError as exc:
+        raise HomeAssistantError(str(exc)) from exc
+    await runtime_data.coordinator.async_request_refresh()
+    return result
+
+
+async def _handle_get_login_status(call: ServiceCall) -> ServiceResponse:
+    """Return the worker's Codex login flow status."""
+    runtime_data = _first_runtime(call.hass)
+    try:
+        return await runtime_data.client.login_status()
+    except CodexCliApiError as exc:
+        raise HomeAssistantError(str(exc)) from exc
+
+
+async def _handle_logout(call: ServiceCall) -> ServiceResponse:
+    """Remove the saved Codex credentials from the worker and refresh the coordinator."""
+    runtime_data = _first_runtime(call.hass)
+    try:
+        result = await runtime_data.client.logout()
+    except CodexCliApiError as exc:
+        raise HomeAssistantError(str(exc)) from exc
+    await runtime_data.coordinator.async_request_refresh()
+    return result
+
+
+async def _handle_get_task(call: ServiceCall) -> ServiceResponse:
+    """Return the worker's record of the task with the given task ID."""
+    runtime_data = _first_runtime(call.hass)
+    try:
+        return await runtime_data.client.get_task(call.data[ATTR_TASK_ID])
+    except CodexCliApiError as exc:
+        raise HomeAssistantError(str(exc)) from exc
+
+
+async def _handle_list_tasks(call: ServiceCall) -> ServiceResponse:
+    """Return the worker's tasks, passing the service data on as list filters."""
+    runtime_data = _first_runtime(call.hass)
+    try:
+        return await runtime_data.client.list_tasks(**call.data)
+    except CodexCliApiError as exc:
+        raise HomeAssistantError(str(exc)) from exc
+
+
+async def _handle_cancel_task(call: ServiceCall) -> ServiceResponse:
+    """Cancel the task with the given task ID on the worker and refresh the coordinator."""
+    runtime_data = _first_runtime(call.hass)
+    try:
+        result = await runtime_data.client.cancel_task(call.data[ATTR_TASK_ID])
+    except CodexCliApiError as exc:
+        raise HomeAssistantError(str(exc)) from exc
+    await runtime_data.coordinator.async_request_refresh()
+    return result
+
+
+async def _handle_reply_task(call: ServiceCall) -> ServiceResponse:
+    """Send a reply to a task that is waiting for input and refresh the coordinator.
+
+    With a turn ID, the worker takes the reply only while that turn's question is the one waiting.
+    """
+    runtime_data = _first_runtime(call.hass)
+    try:
+        result = await runtime_data.client.reply_task(
+            call.data[ATTR_TASK_ID], call.data[ATTR_REPLY], call.data.get(ATTR_TURN_ID)
+        )
+    except CodexCliApiError as exc:
+        raise HomeAssistantError(str(exc)) from exc
+    await runtime_data.coordinator.async_request_refresh()
+    return result
+
+
+async def _handle_continue_task(call: ServiceCall) -> ServiceResponse:
+    """Continue a saved conversation with a new message and refresh the coordinator."""
+    runtime_data = _first_runtime(call.hass)
+    try:
+        result = await runtime_data.client.continue_task(call.data[ATTR_TASK_ID], call.data["message"])
+    except CodexCliApiError as exc:
+        raise HomeAssistantError(str(exc)) from exc
+    await runtime_data.coordinator.async_request_refresh()
+    return result
+
+
+# Every Codex action: its name, its handler and the schema of its data (None for an action that takes no data).
+SERVICES: tuple[tuple[str, ServiceHandler, vol.Schema | None], ...] = (
+    (SERVICE_START_TASK, _handle_start_task, START_TASK_SCHEMA),
+    (SERVICE_START_LOGIN, _handle_start_login, START_LOGIN_SCHEMA),
+    (SERVICE_GET_LOGIN_STATUS, _handle_get_login_status, None),
+    (SERVICE_LOGOUT, _handle_logout, None),
+    (SERVICE_GET_TASK, _handle_get_task, TASK_ID_SCHEMA),
+    (SERVICE_LIST_TASKS, _handle_list_tasks, LIST_TASKS_SCHEMA),
+    (SERVICE_CANCEL_TASK, _handle_cancel_task, TASK_ID_SCHEMA),
+    (SERVICE_REPLY_TASK, _handle_reply_task, REPLY_TASK_SCHEMA),
+    (SERVICE_CONTINUE_TASK, _handle_continue_task, CONTINUE_TASK_SCHEMA),
+)
+
+
 def _async_register_services(hass: HomeAssistant) -> None:
-    """Register integration services once."""
+    """Register integration services once, each behind the administrator check."""
     if hass.services.has_service(DOMAIN, SERVICE_START_TASK):
         return
-
-    register_kwargs: dict[str, Any] = {}
-    try:
-        from homeassistant.core import SupportsResponse
-
-        register_kwargs["supports_response"] = SupportsResponse.OPTIONAL
-    except ImportError:
-        pass
-
-    async def handle_start_task(call: ServiceCall) -> dict[str, Any]:
-        """Start a Codex task with the given prompt, refresh the coordinator and return the worker's response."""
-        runtime_data = _first_runtime(hass)
-        try:
-            result = await runtime_data.client.start_task(call.data[ATTR_PROMPT])
-        except CodexCliApiError as exc:
-            raise HomeAssistantError(str(exc)) from exc
-        await runtime_data.coordinator.async_request_refresh()
-        return result
-
-    async def handle_start_login(call: ServiceCall) -> dict[str, Any]:
-        """Start the Codex login flow on the worker, even when logged in if forced, and refresh the coordinator."""
-        runtime_data = _first_runtime(hass)
-        try:
-            result = await runtime_data.client.start_login(bool(call.data.get(ATTR_FORCE, False)))
-        except CodexCliApiError as exc:
-            raise HomeAssistantError(str(exc)) from exc
-        await runtime_data.coordinator.async_request_refresh()
-        return result
-
-    async def handle_get_login_status(call: ServiceCall) -> dict[str, Any]:
-        """Return the worker's Codex login flow status."""
-        runtime_data = _first_runtime(hass)
-        try:
-            return await runtime_data.client.login_status()
-        except CodexCliApiError as exc:
-            raise HomeAssistantError(str(exc)) from exc
-
-    async def handle_logout(call: ServiceCall) -> dict[str, Any]:
-        """Remove the saved Codex credentials from the worker and refresh the coordinator."""
-        runtime_data = _first_runtime(hass)
-        try:
-            result = await runtime_data.client.logout()
-        except CodexCliApiError as exc:
-            raise HomeAssistantError(str(exc)) from exc
-        await runtime_data.coordinator.async_request_refresh()
-        return result
-
-    async def handle_get_task(call: ServiceCall) -> dict[str, Any]:
-        """Return the worker's record of the task with the given task ID."""
-        runtime_data = _first_runtime(hass)
-        try:
-            return await runtime_data.client.get_task(call.data[ATTR_TASK_ID])
-        except CodexCliApiError as exc:
-            raise HomeAssistantError(str(exc)) from exc
-
-    async def handle_list_tasks(call: ServiceCall) -> dict[str, Any]:
-        """Return the worker's tasks, passing the service data on as list filters."""
-        runtime_data = _first_runtime(hass)
-        try:
-            return await runtime_data.client.list_tasks(**call.data)
-        except CodexCliApiError as exc:
-            raise HomeAssistantError(str(exc)) from exc
-
-    async def handle_cancel_task(call: ServiceCall) -> dict[str, Any]:
-        """Cancel the task with the given task ID on the worker and refresh the coordinator."""
-        runtime_data = _first_runtime(hass)
-        try:
-            result = await runtime_data.client.cancel_task(call.data[ATTR_TASK_ID])
-        except CodexCliApiError as exc:
-            raise HomeAssistantError(str(exc)) from exc
-        await runtime_data.coordinator.async_request_refresh()
-        return result
-
-    async def handle_reply_task(call: ServiceCall) -> dict[str, Any]:
-        """Send a reply to a task that is waiting for input and refresh the coordinator.
-
-        With a turn ID, the worker takes the reply only while that turn's question is the one waiting.
-        """
-        runtime_data = _first_runtime(hass)
-        try:
-            result = await runtime_data.client.reply_task(
-                call.data[ATTR_TASK_ID], call.data[ATTR_REPLY], call.data.get(ATTR_TURN_ID)
-            )
-        except CodexCliApiError as exc:
-            raise HomeAssistantError(str(exc)) from exc
-        await runtime_data.coordinator.async_request_refresh()
-        return result
-
-    async def handle_continue_task(call: ServiceCall) -> dict[str, Any]:
-        """Continue a saved conversation with a new message and refresh the coordinator."""
-        runtime_data = _first_runtime(hass)
-        try:
-            result = await runtime_data.client.continue_task(call.data[ATTR_TASK_ID], call.data["message"])
-        except CodexCliApiError as exc:
-            raise HomeAssistantError(str(exc)) from exc
-        await runtime_data.coordinator.async_request_refresh()
-        return result
-
-    hass.services.async_register(
-        DOMAIN, SERVICE_CONTINUE_TASK, _admin_only(hass, handle_continue_task),
-        schema=CONTINUE_TASK_SCHEMA, **register_kwargs,
-    )
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_START_TASK,
-        _admin_only(hass, handle_start_task),
-        schema=START_TASK_SCHEMA,
-        **register_kwargs,
-    )
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_START_LOGIN,
-        _admin_only(hass, handle_start_login),
-        schema=START_LOGIN_SCHEMA,
-        **register_kwargs,
-    )
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_GET_LOGIN_STATUS,
-        _admin_only(hass, handle_get_login_status),
-        **register_kwargs,
-    )
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_LOGOUT,
-        _admin_only(hass, handle_logout),
-        **register_kwargs,
-    )
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_GET_TASK,
-        _admin_only(hass, handle_get_task),
-        schema=TASK_ID_SCHEMA,
-        **register_kwargs,
-    )
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_LIST_TASKS,
-        _admin_only(hass, handle_list_tasks),
-        schema=LIST_TASKS_SCHEMA,
-        **register_kwargs,
-    )
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_CANCEL_TASK,
-        _admin_only(hass, handle_cancel_task),
-        schema=TASK_ID_SCHEMA,
-        **register_kwargs,
-    )
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_REPLY_TASK,
-        _admin_only(hass, handle_reply_task),
-        schema=REPLY_TASK_SCHEMA,
-        **register_kwargs,
-    )
+    for name, handler, schema in SERVICES:
+        hass.services.async_register(
+            DOMAIN,
+            name,
+            _admin_only(hass, handler),
+            schema=schema,
+            supports_response=SupportsResponse.OPTIONAL,
+        )

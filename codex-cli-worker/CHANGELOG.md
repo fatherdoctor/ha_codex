@@ -141,6 +141,10 @@
   sends only `turn/start` on a thread that is already loaded, with the chat's model in the turn, and it uses request
   IDs that no other chat on the process uses. A cancel sends `turn/interrupt` and leaves the process input open for
   the other chats. Nothing uses this mode yet. Each exchange still starts its own Codex process.
+- Integration clean-up, with no change in behavior. Each Codex action now has its own function at the top level of
+  the integration, and one table lists every action with its data schema. The fallback for Home Assistant versions
+  that had no action responses is removed, because the oldest supported version has them. Imports are in Home
+  Assistant's order, and a `raise` of an HTTP error with no arguments has no empty parentheses.
 
 ## 0.3.6 - 2026-11-18
 
