@@ -68,6 +68,12 @@
   chat (never copies it) and removes the old folder. The **Task root** option is removed; from a folder saved in it,
   only the chat folders and the sign-in log are moved, and the folder is removed only when it is then empty. Codex still keeps its copy
   of each file before a change: the exchange's own backup folder is added to the sandbox's writable places.
+- **Uploads kept for 7 days, outside the backup.** Files and photos you attach to a message are now stored in
+  `/data/attachments`, which the app's backup leaves out, not with the chat in `/data/codex_tasks`. The app removes
+  uploads older than 7 days once a day. A chat that shows a removed upload then says "Attachment removed after 7
+  days". On the first start of this version, uploads that earlier versions kept with the chat are moved there, with
+  one log line; a file that fails to move is tried again at the next start. Images that Codex generates stay with the
+  chat. The cleanup keeps a folder changed in the last hour, so it cannot remove the folder of an upload in progress.
 - **No sign-in images under `/config/www`.** The sign-in notification has the link and the code but no QR image,
   because Home Assistant serves `/config/www` to anyone who can reach it. The QR code stays on the app's own page.
   The first start of this version deletes the old `codex_login_*.svg` images and their folder.
