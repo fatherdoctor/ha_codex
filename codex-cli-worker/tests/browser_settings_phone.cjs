@@ -183,7 +183,6 @@ async function openThemedSections(target) {
         {title: 'ChatGPT app pairing', status: 'Off', attention: false},
         {title: 'Full access', status: 'Off', attention: false},
         {title: 'Text size', status: 'Normal', attention: false},
-        {title: 'Commands', status: '9 commands', attention: false},
         {title: 'Scheduled runs', status: 'Paused: time zone unavailable', attention: true},
         {title: 'Workspace instructions', status: 'AGENTS.md', attention: false},
         {title: 'Advanced', status: 'Browser permissions: none remembered', attention: false},

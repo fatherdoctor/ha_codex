@@ -41,17 +41,43 @@
   rollback document speak for the project, not for one person, and give versions of this project in their examples.
   The changelog starts at this project's first version. `screenshots/SCREENSHOTS.md` lists the screenshots; the root
   `SCREENSHOTS.md` is removed.
+- **A richer command list.** The command list above the message box now shows an icon for each command and marks the
+  letters you typed, and a press outside the list closes it. New commands `/pin`, `/share`, `/archive` and `/delete`
+  do what the chat menu does, and `/connection` opens the remote connection and its status. `/help` and
+  **Settings** > **Commands** are gone: the list in the message box is the only one. When you close a dialog that a
+  command opened, the cursor stays in the message box.
+- **Changed: the workspace instructions file moved out of `/config`.** `AGENTS.md` now lives in the app's own
+  `addon_config` folder (`/addon_configs/<app folder>/AGENTS.md` on the host), not in the top level of `/config`.
+  Codex loads it as its global instructions, and **Settings** > **Workspace instructions** reads and writes it there.
+  On the first start of this version, a file an older version left in `/config` is moved, not copied, after a backup
+  copy at `/data/agents_before_move.md`. If both places hold a file, nothing moves and the app logs a line.
+
+### Changed
+- **No more checks after each answer.** The app no longer judges a turn after Codex answers: it takes no dashboard
+  screenshots of its own (they could catch a dashboard still loading), adds no "Verification needs review" note and
+  no "No previous version saved" lines. Those lines blamed the turn for files that something else, such as an
+  automation or another app, changed while it ran. Codex checks its own work during the turn, as its rules say. The
+  per-file copies of the files Codex changes are still made, and a change that fails the configuration check still
+  points to them. The `backups` field is gone from the task API, `codex_cli.get_task` and the
+  `codex_cli_task_result` event.
 
 ### Fixed
 - **Pop-ups are smaller and close on an outside click.** The Permissions control now opens a small menu right
   above its button instead of a full-width sheet. A click or tap outside any pop-up, menu or dialog closes it, like
   Escape does. A dialog where you changed a field stays open, so nothing you typed is lost.
+- The "Codex" label with the command symbol no longer sits above each reply on the chat page. Screen readers still
+  announce each reply as "Codex reply"; the reply's time and status line stay.
 - The mark in the chat page header now follows the page's theme instead of the system's light or dark setting. Open
   the chat page inside Home Assistant with a theme that differs from your system setting, and the mark matches the
   theme.
 - The chat page's rules no longer tell Codex how to answer a question about Codex cloud tasks (the
   `codex cloud list --json` line from 0.3.4). That line belonged to a feature that is not built; it returns with the
   feature. Codex can still run those commands when you ask it to.
+- **Repairs go away with the integration.** The sign-in, Remote control and GitHub repairs are deleted when the
+  Codex integration is unloaded or removed. Before, an owner who removed the integration kept a "sign in" repair
+  that nothing would clear.
+- **The Codex device is shown as a service.** Home Assistant now marks the Codex device as a service (an app that
+  runs on the same machine), not as a piece of hardware.
 
 ### Known issues
 - Remote control still uses its own keys. The tool requests of a chat no longer do (see "Under the hood").
