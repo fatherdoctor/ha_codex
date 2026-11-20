@@ -186,6 +186,13 @@ class StarterAgentsText(unittest.TestCase):
             with self.subTest(word=word):
                 self.assertIn(word, section)
 
+    def test_it_keeps_private_data_out_of_git_and_github(self):
+        section = self.text.split("## Git and GitHub", 1)[1].split("## About this home", 1)[0]
+        for word in ("staged", "secrets.yaml", ".storage", "databases", "log files", "backups", "personal or location data",
+                     ".gitignore", "Ask the owner before the first push", "private by default"):
+            with self.subTest(word=word):
+                self.assertIn(word, section)
+
     def test_it_does_not_ask_for_backup_copies_inside_the_config_folder(self):
         # The worker gives each message its own backup folder and tells Codex to leave no other copies in /config.
         self.assertNotRegex(self.text, r"(?i)\.bak|\.orig|backup cop|make a backup|backup before")

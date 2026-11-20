@@ -31,6 +31,9 @@
   no "Started by lead" label, and the schedule editor no longer mentions lead runs.
 - **Starter `AGENTS.md` safeguards.** The starter file has a short section of safeguard defaults (secrets, protected
   places, backups). It says they are defaults you can change or delete, not locks in the app.
+- **Starter `AGENTS.md` keeps private data out of git.** A new section tells Codex to check what is staged before
+  every commit, never to stage secrets, databases, logs, backups or personal data, to keep a `.gitignore`, to ask
+  before the first push to a new or public repository, and to make new repositories private.
 - **Clearer documentation.** The README, the integration README, `SECURITY.md`, `DOCS.md` and three option
   descriptions now say what the code does. The README no longer promises a question before every change, or a saved
   copy and a configuration check after every change; it says when each one happens. It says that an automation with
