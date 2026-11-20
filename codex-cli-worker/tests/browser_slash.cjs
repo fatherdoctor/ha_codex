@@ -199,7 +199,23 @@ async function testSlash(browser, output, errors) {
     await page.locator("#message").press("ArrowDown");
     await page.locator("#message").press("Enter");
     await page.locator("#rename-dialog").waitFor();
+    // A dialog that a command opened gives focus back to the message box and
+    // leaves it there. The dialog's close event comes after the close, so the
+    // check waits for that event: a page that moves focus in it fails here.
+    await page.evaluate(() => {
+      window.renameClosed = new Promise((resolve) =>
+        document
+          .getElementById("rename-dialog")
+          .addEventListener("close", () => setTimeout(resolve, 0), { once: true }),
+      );
+    });
     await page.locator("#rename-cancel").click();
+    await page.evaluate(() => window.renameClosed);
+    assert.equal(
+      await page.evaluate(() => document.activeElement?.id),
+      "message",
+      `${name}: focus left the message box after the rename dialog closed`,
+    );
 
     // The chat commands are listed with a chat open, and a press outside closes the list.
     await typeMessage(page, "/");

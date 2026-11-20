@@ -2642,12 +2642,15 @@ function openDelete(id) {
 $("delete-cancel").onclick = () => $("delete-dialog").close();
 for (const name of ["rename", "share", "delete"])
   $(name + "-dialog").addEventListener("close", () => {
-    // Return focus to the row's menu button, or to New chat when the row is gone.
-    const trigger = menu.returnId
-      ? $("chat-list").querySelector(
-          `[data-menu-for="${CSS.escape(menu.returnId)}"]`,
-        )
-      : null;
+    // A command in the message box opened the dialog: the browser has already
+    // put focus back in the box. This event comes later than the close, so a
+    // move of focus here takes it away while the person types.
+    if (!menu.returnId) return;
+    // The chat menu opened it: return focus to the row's menu button, or to
+    // New chat when the row is gone.
+    const trigger = $("chat-list").querySelector(
+      `[data-menu-for="${CSS.escape(menu.returnId)}"]`,
+    );
     menu.returnId = null;
     (trigger || $("new-chat")).focus();
   });
@@ -3290,6 +3293,9 @@ function renderSlash() {
 function runSlash(command) {
   $("message").value = "";
   slash.dismissed = null;
+  // A dialog this command opens returns focus to the message box, not to a
+  // row that the chat menu used earlier.
+  menu.returnId = null;
   resizeInput();
   renderSlash();
   controls();
