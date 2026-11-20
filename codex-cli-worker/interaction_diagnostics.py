@@ -32,7 +32,7 @@ def nonfatal(method):
 class RollingDiagnostics:
     """One worker process owns this private store and its installation HMAC key."""
 
-    def __init__(self, path, capacity=MAX_INTERACTIONS):
+    def __init__(self, path, capacity=MAX_INTERACTIONS, repair=True):
         self.path = Path(path)
         self.key_path = self.path.with_suffix('.key')
         self.settings_path = self.path.with_suffix('.settings.json')
@@ -52,6 +52,15 @@ class RollingDiagnostics:
             pass
         except Exception:
             self.unavailable = True
+        if repair:
+            self.close_abandoned()
+
+    def close_abandoned(self):
+        """Mark rows left running by an earlier process as ended by a restart.
+
+        Only startup calls this; reads never close this process's live rows. The rows are written back at the
+        current capacity, so the worker passes repair=False and calls this after it applies the capacity option.
+        """
         try:
             self._close_abandoned()
         except Exception:
@@ -60,7 +69,6 @@ class RollingDiagnostics:
             _LOGGER.warning('Interrupted diagnostic rows could not be closed at startup.')
 
     def _close_abandoned(self):
-        """Only startup closes persisted work; reads never close this process's live rows."""
         with self.lock:
             rows = self._read()
             ended = time.time()
@@ -306,30 +314,6 @@ class InteractionRecorder:
                 self._save(state)
 
     @nonfatal
-    def gate_message(self, key, value):
-        """Recognize fixed worker/hook refusal text without saving arbitrary stderr."""
-        if not isinstance(value, str):
-            return
-        reasons = {
-            'This request enables full access, which is never allowed.': 'full_access',
-            'This command reads a process environment, which can hold the Supervisor token, which is never allowed.': 'process_environment',
-            "This command reads the app's saved environment, which holds the Supervisor token, which is never allowed.": 'process_environment',
-            'This command uses the Supervisor token, which is never allowed.': 'credential',
-            'This command reads secrets.yaml, which is never allowed.': 'credential',
-            "This command reads Home Assistant's sign-in store, which is never allowed.": 'credential',
-            'This edit edits secrets.yaml, which is never allowed.': 'credential',
-            "This request changes the add-on's settings, which is never allowed.": 'protected_policy',
-            "This request changes the add-on's rules, which is never allowed.": 'protected_policy',
-            "This request changes the add-on's permission policy, which is never allowed.": 'protected_policy',
-            "This request accesses the add-on's private credential, which is never allowed.": 'credential',
-            'This command talks to the Home Assistant Supervisor, which is never allowed.': 'other',
-        }
-        for line in value[:8192].splitlines()[:64]:
-            rule = reasons.get(line.strip().removeprefix('Error: '))
-            if rule is not None:
-                self.event(key, {'kind': 'gate', 'rule': rule})
-
-    @nonfatal
     def activity(self, key, event):
         if not isinstance(event, dict):
             return
@@ -340,8 +324,6 @@ class InteractionRecorder:
             kind = event.get('type')
             if kind in {'error', 'turn.failed'}:
                 self.event(key, {'kind': 'error', 'type': 'RuntimeError'})
-                error = event.get('error')
-                self.gate_message(key, error.get('message') if isinstance(error, dict) else event.get('message'))
             item = event.get('item')
             if not isinstance(item, dict) or kind not in {'item.started', 'item.completed'}:
                 return
@@ -363,8 +345,6 @@ class InteractionRecorder:
             started = pending[0] if pending is not None else None
             status = item.get('status')
             result = 'failed' if status in {'failed', 'error'} or item.get('exit_code') not in (None, 0) else 'done' if status in {'completed', 'done'} else 'unknown'
-            if result == 'failed':
-                self.gate_message(key, item.get('aggregated_output'))
             changes = item.get('changes')
             paths = [x.get('path') for x in changes[:32] if isinstance(x, dict)] if isinstance(changes, list) else []
             self.event(key, {
@@ -396,10 +376,7 @@ class InteractionRecorder:
                     state['approvals'][identifier] = decision
                     self.event(key, {'kind': 'approval', 'decision': decision})
                     if item.get('can_allow') is False:
-                        self.event(key, {
-                            'kind': 'gate',
-                            'rule': 'protected_policy' if item.get('note') == "This request touches the app's permission policy or settings, which Codex may not edit. Deny it." else 'other',
-                        })
+                        self.event(key, {'kind': 'gate', 'rule': 'other'})
 
     @nonfatal
     def finish(self, key, outcome, error=None):

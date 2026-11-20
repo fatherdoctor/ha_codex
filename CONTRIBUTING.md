@@ -33,9 +33,8 @@ When reporting a bug, please include:
 
 Logs are usually the fastest way to find a bug. On Home Assistant 2026.11, collect whichever of these apply:
 
-- **Export logs file (attach this first):** open the worker app page, choose Settings, then Export logs. The file holds anonymized details of the last interactions. It is anonymized automatically, but read the whole file before you post it.
 - **Worker app log:** go to Settings, Apps, Codex for Home Assistant, then the Log tab. Copy the lines around the time of the failure.
-- **Integration diagnostics:** go to Settings, Devices & services, Codex, open the three-dot menu, and choose Download diagnostics. Attach the downloaded file to the issue. It carries the same anonymized interactions as Export logs, so either file will do; read it before posting.
+- **Integration diagnostics:** go to Settings, Devices & services, Codex, open the three-dot menu, and choose Download diagnostics. Attach the downloaded file to the issue. It carries the anonymized details of the last interactions; read the whole file before you post it.
 - **Home Assistant Core log:** go to Settings, System, Logs and type `codex` in the filter box. Copy the matching lines.
 
 Please remove secrets, tokens, URLs, device codes, personal paths, and private Home Assistant configuration before sharing logs or screenshots.
@@ -128,6 +127,12 @@ For worker app changes, verify that the app can:
 
 For documentation-only changes, please check that links, paths, and examples are accurate.
 
+Codex is reached three ways: the chat page, the ChatGPT app through remote control, and the `codex_cli.start_task`
+action. A fix that works on one of them may be missing on another. [Ways in](codex-cli-worker/DOCS.md#ways-in) lists
+the Home Assistant tools each one gets, and `codex-cli-worker/tests/test_surface_matrix.py` checks that list against
+the real launch of each. If your change adds, removes or moves a tool, update both. In the pull request, name the ways
+in that you tested.
+
 Automated tests do not cover every installed dashboard, device, or HAOS kernel. Include clear manual test notes for behavior the suite does not exercise.
 
 ## Security Notes
@@ -165,13 +170,23 @@ The release workflow builds the HACS ZIP and the app images when a version tag i
 `main` run validation and tests only. They do not make a release or publish images. A change to documentation
 only does not need a new version.
 
+Version bumps happen only in the release pull request, never in a feature merge. The add-on store offers an update
+as soon as `config.yaml` on `main` names a newer version, so a version raised in a feature pull request offers a
+release that does not exist yet. A feature pull request adds its notes under the `## <version> (unreleased)` heading
+in `codex-cli-worker/CHANGELOG.md` and leaves both version lines as they are on `main`. The release pull request is
+the one whose title starts with `Release <version>`, for example `Release 0.3.6`; the
+[Version rule workflow](.github/workflows/version-rule.yml) runs `scripts/check_version_bump.py` on every pull request
+to `main` and fails any other pull request that changes either version line. If a wrong version reaches `main`, the
+pull request that sets it back fails this check; the maintainer merges it anyway and its text says why.
+
 A stable version is released from `main`. A beta is released from the `beta` branch, for the Home Assistant OS
 test machine only; there is no public beta. The version rules, what a beta install is, and how `beta` follows `main`
 are in [Updates and rollback](docs/updates-and-rollback.md#versions).
 
 ### A stable release
 
-1. Set the same version in `codex-cli-worker/config.yaml` and `custom_components/codex_cli/manifest.json`.
+1. Open a pull request titled `Release <version>`. In it, set the same version in `codex-cli-worker/config.yaml` and
+   `custom_components/codex_cli/manifest.json`.
 2. Add the notes under `## <version> (unreleased)` in `codex-cli-worker/CHANGELOG.md`. Validation of branches and
    pull requests accepts that heading. Tagging and the release build refuse it.
 3. Remove ` (unreleased)` from the heading. Merge to `main` and wait for green CI.

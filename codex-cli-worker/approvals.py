@@ -8,348 +8,31 @@ responses never install command rules or grant access for a session.
 from __future__ import annotations
 
 import copy
-import fnmatch
 import json
-import posixpath
 import re
-import shlex
 import threading
 import time
 import uuid
 from typing import Any, Callable, TextIO
 
-from gate_rules import names_image_folder
-
 
 APPROVAL_GONE = "This permission request is no longer waiting for an answer."
 DISPLAY_LIMIT = 32000
 REQUEST_LIMIT = 50
+# A plan update with more entries than this is ignored: nobody reads a plan that long.
+PLAN_STEP_LIMIT = 50
 COMMAND_APPROVAL = "item/commandExecution/requestApproval"
-# The app's permission policy, its house rules and Codex's own configuration: a change there is never allowed here.
-PROTECTED_PREFIXES = ("/usr/share/ha_codex", "/data/codex-home/AGENTS.md", "/data/codex-home/config.toml",
-                      "/data/options.json", "/data/worker_api_token", "/data/schedules.sqlite3",
-                      "/data/schedules.sqlite3-journal", "/data/schedules.sqlite3-wal", "/data/schedules.sqlite3-shm",
-                      "/data/interaction-diagnostics.json", "/data/interaction-diagnostics.key",
-                      "/data/house-rules", "/data/interaction-diagnostics.settings.json", "/data/codex-home/house-rules",
-                      # The GitHub sign-in and its socket: only the worker reads or changes them.
-                      "/data/github", "/data/github.sock")
-
-
-def touches_protected_path(path: str) -> bool:
-    """Return whether a file change path is, or lies inside, a protected policy location."""
-    normalized = posixpath.normpath(posixpath.join("/config", str(path)))
-    if normalized.startswith('/data/interaction-diagnostics.json.corrupt-'):
-        return True
-    return any(normalized == prefix or normalized.startswith(prefix + "/") for prefix in PROTECTED_PREFIXES)
-
-
-# The same places as a command spells them: quotes, backslashes and doubled slashes are removed first, and the
-# names are matched loosely (a glob such as /usr/share/ha_c* still names the image folder). The image folder itself
-# is gate_rules.names_image_folder, shared with the hook, so the absolute /share/ha_<name> stays usable. Best
-# effort on the text, like the file-path check: it cannot see a path a command builds at run time.
-PROTECTED_COMMAND_RES = (
-    re.compile(r"codex-home/+house-rules(?:\b|[*?\[])", re.IGNORECASE),
-    re.compile(r"/data/+interaction-diagnostics(?:\b|[*?\[])", re.IGNORECASE),
-    re.compile(r"ha_codex/+(policy|agents|house)", re.IGNORECASE),
-    re.compile(r"codex-home/+[^\s/]*[*?\[]", re.IGNORECASE),
-    re.compile(r"codex-home.*(agents\.md|config\.toml)|(agents\.md|config\.toml).*codex-home", re.IGNORECASE | re.DOTALL),
-    re.compile(r"/data/+options\.json|worker_api_token|schedules\.sqlite3(?:-(?:journal|wal|shm))?|/data/+sched[^/\s]*[*?\[]", re.IGNORECASE),
-)
-
-
-# Characters after which a ``#`` starts a word. An escaped character is never one of them.
-WORD_BREAKS = frozenset(" \t\r\n;&|()<>")
-
-
-def _strip_comments(text: str) -> str:
-    """Remove shell comments: from a ``#`` that starts a word outside quotes to the end of its line.
-
-    A ``#`` inside a word, such as ``a#b``, is part of that word, as it is for the shell.
-    """
-    out: list[str] = []
-    quote = ""
-    i = 0
-    while i < len(text):
-        char = text[i]
-        if quote == "'":
-            if char == "'":
-                quote = ""
-        elif char == "\\":
-            # A backslash keeps the next character, except inside single quotes.
-            out.append(text[i:i + 2])
-            i += 2
-            continue
-        elif quote == '"':
-            if char == '"':
-                quote = ""
-        elif char in "'\"":
-            quote = char
-        elif char == "#" and (not out or out[-1] in WORD_BREAKS):
-            end = text.find("\n", i)
-            i = len(text) if end == -1 else end
-            continue
-        out.append(char)
-        i += 1
-    return "".join(out)
-
-
-def _split_words(text: str, punctuation: str) -> list[str]:
-    """Split text the way the shell does, with comments already removed; raise ValueError if unreadable."""
-    lexer = shlex.shlex(text, posix=True, punctuation_chars=punctuation)
-    lexer.whitespace = " \t\r"
-    lexer.whitespace_split = True
-    lexer.commenters = ""
-    return list(lexer)
-
-
-def _shell_words(text: str, punctuation: str) -> list[str]:
-    """Split command text into words and shell punctuation, without running it.
-
-    Raise ValueError when the text cannot be read with its quoting intact, such as an
-    unfinished quote from an apostrophe in a heredoc body or a quoted script that spans
-    lines in a way the splitter cannot follow. The caller treats that as touching a
-    protected place: a command allowed once runs outside the sandbox, so a command this
-    check cannot read is never offered Allow once. gate_rules.py reads such text again
-    line by line instead, because its Supervisor rule has a text floor behind it.
-    """
-    return _split_words(_strip_comments(text), punctuation)
-
-
-def _has_unreadable_structure(command: str) -> bool:
-    """Return whether the text holds shell structure this check does not read: ``<<`` or a backslash-newline.
-
-    A heredoc body is not shell words, but the splitter reads it as words, so a quote in the
-    body can pair with a quote later in the text and hide a command. A heredoc or here-string
-    marker anywhere, and a line joined with a backslash, count as protected before the splitter runs.
-    """
-    return "<<" in command or "\\\n" in command
-
-
-def _protected_ancestor_operations(command: str, initial_cwd: str = '', depth: int = 0) -> bool:
-    """Conservatively identify named requirements, root searches and writes into root or /etc.
-
-    Command text that holds a heredoc, a here-string or a backslash-newline, or that cannot
-    be split with its quoting intact, counts as protected.
-
-    This checks command text only; it does not follow aliases, symlinks or computed paths.
-    Rare forms such as bsdtar, cpio, 7z, remote rsync, find -O3 and computed Python paths can be missed.
-    """
-    if depth > 5:
-        return False
-    if _has_unreadable_structure(command):
-        # Fail closed by structure, whatever the splitter makes of it.
-        return True
-    try:
-        tokens = _shell_words(command, ';&|()\n<>')
-    except ValueError:
-        # Fail closed: text whose quoting cannot be read might hide a protected write.
-        return True
-    segments, segment = [], []
-    for token in tokens:
-        if token and all(ch in ';&|()\n<>' for ch in token):
-            if segment:
-                segments.append(segment); segment = []
-        else:
-            segment.append(token)
-    if segment:
-        segments.append(segment)
-    cwd = initial_cwd
-
-    def target_path(word: str) -> str:
-        path = posixpath.normpath(word if word.startswith('/') else posixpath.join(cwd, word))
-        return '/' + path.lstrip('/') if path.startswith('//') else path
-
-    def protected_destination(word: str) -> bool:
-        path = target_path(word).lower()
-        parts = path.split('/')
-        return path == '/' or (len(parts) > 1 and parts[0] == '' and fnmatch.fnmatchcase('etc', parts[1]))
-
-    for segment in segments:
-        for word in segment:
-            lower = word.lower()
-            base = posixpath.basename(lower)
-            readable = re.sub(r'\[([a-z0-9.])\]', r'\1', lower)
-            readable = re.sub(r'\\(.)', r'\1', readable)
-            if ('requirements.toml' in readable or
-                    (any(ch in base for ch in '*?[') and base not in ('*', '?')
-                     and fnmatch.fnmatchcase('requirements.toml', base))):
-                return True
-        index = 0
-        while index < len(segment):
-            word = segment[index]
-            if re.match(r'^[A-Za-z_][A-Za-z0-9_]*=', word):
-                index += 1
-                continue
-            wrapper = posixpath.basename(word).lower()
-            if wrapper not in ('sudo', 'env', 'command', 'nohup', 'timeout', 'nice', 'ionice',
-                               'doas', 'setsid', 'stdbuf', 'xargs', 'time', 'exec', 'unbuffer'):
-                break
-            index += 1
-            while index < len(segment) and segment[index].startswith('-'):
-                flag = segment[index]
-                index += 1
-                if wrapper == 'env' and (flag.startswith('--chdir=') or flag.startswith('-C') and len(flag) > 2):
-                    path = flag.split('=', 1)[1] if flag.startswith('--chdir=') else flag[2:]
-                    cwd = target_path(path) if path.startswith('/') or cwd else ''
-                elif ((wrapper in ('sudo', 'doas') and flag in ('-u', '--user', '-g', '--group'))
-                      or (wrapper == 'env' and flag in ('-u', '--unset', '-C', '--chdir'))
-                      or (wrapper == 'timeout' and flag in ('-s', '--signal', '-k', '--kill-after'))
-                      or (wrapper == 'nice' and flag in ('-n', '--adjustment'))
-                      or (wrapper == 'time' and flag in ('-f', '--format', '-o', '--output'))
-                      or (wrapper == 'exec' and flag == '-a')
-                      or (wrapper == 'ionice' and flag in ('-c', '--class', '-n', '--classdata', '-p', '-P'))
-                      or (wrapper == 'stdbuf' and flag in ('-i', '-o', '-e', '--input', '--output', '--error'))
-                      or (wrapper == 'xargs' and flag in ('-I', '-n', '-L', '-P', '-s', '-a', '-E', '-d',
-                                                        '--replace', '--max-args', '--max-lines', '--max-procs',
-                                                        '--max-chars', '--arg-file', '--eof', '--delimiter'))) and index < len(segment):
-                    value = segment[index]; index += 1
-                    if wrapper == 'env' and flag in ('-C', '--chdir'):
-                        cwd = target_path(value) if value.startswith('/') or cwd else ''
-            if wrapper == 'timeout' and index < len(segment):
-                index += 1  # duration
-        if index >= len(segment):
-            continue
-        program = posixpath.basename(segment[index]).lower()
-        args = segment[index + 1:]
-        if program in ('sh', 'bash', 'zsh'):
-            for i, flag in enumerate(args):
-                if flag.startswith('-') and 'c' in flag[1:]:
-                    script = i + 1
-                    if script < len(args) and args[script] == '--':
-                        script += 1
-                    if script < len(args) and _protected_ancestor_operations(args[script], cwd, depth + 1):
-                        return True
-                    break
-        if program in ('cd', 'pushd'):
-            paths = [word for word in args if not word.startswith('-')]
-            if paths:
-                candidate = paths[0]
-                cwd = target_path(candidate) if candidate.startswith('/') or cwd else ''
-            continue
-        if program == 'find':
-            starts = []
-            for word in args:
-                if word in ('-H', '-L', '-P', '--') and not starts:
-                    continue
-                if word.startswith('-'):
-                    break
-                starts.append(word)
-            for start in starts or ('.',):
-                if cwd.lower() in ('/', '/etc') and not start.startswith('/'):
-                    return True
-                path = target_path(start).lower()
-                if path in ('/', '/etc') or fnmatch.fnmatchcase('/etc', path):
-                    return True
-            for i, word in enumerate(args):
-                if word in ('-exec', '-execdir'):
-                    end = next((j for j in range(i + 1, len(args)) if args[j] == '+'), len(args))
-                    if _protected_ancestor_operations(shlex.join(args[i + 1:end]), cwd, depth + 1):
-                        return True
-        tar_extract = program == 'tar' and any(
-            word in ('--extract', '--get') or
-            (word.startswith('-') and not word.startswith('--') and 'x' in word[1:]) or
-            (i == 0 and not word.startswith('-') and 'x' in word)
-            for i, word in enumerate(args))
-        if cwd.lower() in ('/', '/etc') and (program in ('cp', 'mv', 'install', 'rsync', 'ln', 'unzip') or tar_extract):
-            return True
-        if program in ('cp', 'mv', 'install', 'rsync', 'ln'):
-            explicit = ''
-            for i, word in enumerate(args):
-                if word in ('-t', '--target-directory') and i + 1 < len(args):
-                    explicit = args[i + 1]
-                elif word.startswith('--target-directory='):
-                    explicit = word.split('=', 1)[1]
-                elif word.startswith('-t') and len(word) > 2:
-                    explicit = word[2:]
-                elif word.startswith('-') and not word.startswith('--') and 't' in word[1:]:
-                    rest = word[word.index('t') + 1:]
-                    explicit = rest or (args[i + 1] if i + 1 < len(args) else '')
-            operands = [word for word in args if not word.startswith('-')]
-            destination = explicit or (operands[-1] if operands else '')
-            if destination and protected_destination(destination):
-                return True
-        if tar_extract or program == 'unzip':
-            directory = ''
-            for i, word in enumerate(args):
-                if word in ('-C', '--directory', '-d') and i + 1 < len(args):
-                    directory = args[i + 1]
-                elif word.startswith('--directory='):
-                    directory = word.split('=', 1)[1]
-                elif len(word) > 2 and word[:2] in ('-C', '-d'):
-                    directory = word[2:]
-            if directory and protected_destination(directory):
-                return True
-            if not directory and cwd and protected_destination('.'):
-                return True
-    return False
-
-
-def command_names_protected_path(command: str) -> bool:
-    """Return whether a command's text names a protected policy location by any plain spelling."""
-    if _protected_ancestor_operations(str(command or '')):
-        return True
-    text = re.sub(r"[\'\"\\]", "", str(command or ""))
-    text = re.sub(r"/{2,}", "/", text)
-    if (any(pattern.search(text) for pattern in PROTECTED_COMMAND_RES) or names_image_folder(text)
-            or re.search(r"/etc/codex/requirements\.toml(?![\w./-])", text, re.IGNORECASE)):
-        return True
-    # Match per path component: a shell wildcard cannot cross a slash.
-    # Consider the complete command so cd, pushd, env -C and grouped commands
-    # cannot hide a relative requirements name. No filesystem expansion occurs.
-    target = "/etc/codex/requirements.toml"
-    def matches_path(pattern: str, path: str) -> bool:
-        expected, parts = path.lower().split('/'), posixpath.normpath(pattern).lower().split('/')
-        return len(parts) == len(expected) and all(fnmatch.fnmatchcase(part, pat)
-                                                    for pat, part in zip(parts, expected))
-
-    def names_directory(pattern: str) -> bool:
-        parts = posixpath.normpath(pattern).lower().split('/')
-        expected = '/etc/codex'.split('/')
-        return len(parts) >= len(expected) and all(fnmatch.fnmatchcase(part, pat)
-                                                    for pat, part in zip(parts, expected))
-
-    words = re.findall(r"[^\s<>;&|(){}]+(?:\{[^{}]*\}[^\s<>;&|(){}]*)?", text)
-    expanded = []
-    for word in words:
-        brace = re.search(r"\{([^{}]+)\}", word)
-        if brace:
-            expanded.extend(word[:brace.start()] + choice + word[brace.end():]
-                            for choice in brace[1].split(','))
-        else:
-            expanded.append(word)
-    # Paths may be embedded in options such as --chdir=/etc/codex or -C/etc/codex.
-    if any('/' in word and names_directory(word[word.index('/'):]) for word in expanded):
-        return True
-    # A find from an ancestor can select the managed requirements file.
-    if (re.search(r"\bfind\s+/(?:etc)?(?:\s|/|$)", text, re.IGNORECASE)
-            and any(fnmatch.fnmatchcase('requirements.toml', posixpath.basename(word).lower())
-                    for word in expanded)):
-        return True
-    directory = ""
-    for part in re.split(r"[;&|(){}\n]+", text):
-        words = re.findall(r"[^\s<>]+", part)
-        if not words:
-            continue
-        if words[0] in ("cd", "pushd"):
-            paths = [word for word in words[1:] if not word.startswith('-')]
-            if paths:
-                path = paths[0]
-                directory = posixpath.normpath(path if path.startswith("/") else posixpath.join(directory, path))
-        for word in words:
-            if word.startswith("/"):
-                candidate = posixpath.normpath(word)
-            elif directory:
-                candidate = posixpath.normpath(posixpath.join(directory, word))
-            else:
-                continue
-            if names_directory(candidate) or matches_path(candidate, target):
-                return True
-    if any(word.startswith('/') and matches_path(word, target) for word in expanded):
-        return True
-    return False
-
-
 FILE_APPROVAL = "item/fileChange/requestApproval"
+TOOL_APPROVAL = "mcpServer/elicitation/request"
+
+# The (server, tool) pairs whose action requests get a page card: the plain Home Assistant tool that server.py
+# registers as home_assistant_call. A question from any other server or tool is still declined (_elicitation_refusal).
+TOOL_CARDS = frozenset({("home_assistant_call", "call")})
+
+# Codex 0.166.0 asks before a tool call with a form whose _meta has codex_approval_kind "mcp_tool_call" and the full
+# arguments in tool_params. The tool name is only in its message, which for a tool outside the ChatGPT apps is always
+# this sentence (codex-rs/core/src/mcp_tool_call.rs, build_mcp_tool_approval_fallback_message).
+_TOOL_QUESTION = re.compile(r'Allow the ([A-Za-z0-9_-]{1,64}) MCP server to run tool "([A-Za-z0-9_-]{1,64})"\?')
 
 
 _SERVER_NAME = re.compile(r"[A-Za-z0-9_-]{1,64}")
@@ -360,6 +43,26 @@ def _elicitation_refusal(params: dict[str, Any]) -> str:
     name = params.get("serverName")
     source = f"The {name} tool" if isinstance(name, str) and _SERVER_NAME.fullmatch(name) else "A tool"
     return f"{source} asked a question this page cannot show, so it was declined and nothing was changed."
+
+
+def decision_result(kind: str, allow: bool) -> dict[str, Any]:
+    """The reply Codex reads for a request of this kind: a tool's form, or a command's or file change's decision."""
+    if kind == "tool":
+        # Accept with no remember option is one approval; Codex asks again before the next call.
+        return {"action": "accept" if allow else "decline", "content": None, "_meta": None}
+    return {"decision": "accept" if allow else "decline"}
+
+
+def tool_request(params: dict[str, Any]) -> tuple[str, str] | None:
+    """Return (server, tool) when this is Codex's own request to run a tool that has a page card, else None."""
+    meta = params.get("_meta")
+    if params.get("mode") != "form" or not isinstance(meta, dict) or meta.get("codex_approval_kind") != "mcp_tool_call":
+        return None
+    question = _TOOL_QUESTION.fullmatch(str(params.get("message") or ""))
+    server = params.get("serverName")
+    if not question or question.group(1) != server or (server, question.group(2)) not in TOOL_CARDS:
+        return None
+    return server, question.group(2)
 
 
 _SERVICE_PATH = re.compile(r"/api/services/([a-z0-9_]+)/([a-z0-9_]+)")
@@ -392,25 +95,71 @@ def _entity_ids(text: str) -> list[str]:
     """Return the entity ids a command names, in order, without repeats."""
     return list(dict.fromkeys(_ENTITY_ID.findall(text)))
 
+def _service_confirmation(domain: str, service: str, targets: list[str]) -> dict[str, str]:
+    """Plain words for one Home Assistant action on the named targets, or on all it reaches when none is named."""
+    if (domain, service) in _RELOADS:
+        what, effect = _RELOADS[(domain, service)]
+        return {"what": what, "where": "This Home Assistant.", "effect": effect}
+    where = ", ".join(targets) if targets else f"every {domain} the action reaches"
+    verb = _SERVICE_WORDS.get(service, f"runs {domain}.{service} on")
+    if domain == "scene" and service == "turn_on":
+        verb = "applies"
+    return {"what": f"Run the Home Assistant action {domain}.{service}.",
+            "where": (where[0].upper() + where[1:] if where.startswith("every ") else where) + ".",
+            "effect": f"This {verb} {where}."}
+
 def _command_confirmation(command: str, cwd: str, network: str) -> dict[str, str]:
     """Plain words for a command: a Home Assistant action when one is named, else the command itself."""
     lower = (command or "").lower()
     call = _SERVICE_PATH.search(lower)
     if call:
-        domain, service = call.groups()
-        if (domain, service) in _RELOADS:
-            what, effect = _RELOADS[(domain, service)]
-            return {"what": what, "where": "This Home Assistant.", "effect": effect}
+        domain = call.group(1)
         targets = [entity for entity in _entity_ids(lower) if entity.split(".")[0] == domain] or _entity_ids(lower)
-        where = ", ".join(targets) if targets else f"every {domain} the action reaches"
-        verb = _SERVICE_WORDS.get(service, f"runs {domain}.{service} on")
-        if domain == "scene" and service == "turn_on":
-            verb = "applies"
-        return {"what": f"Run the Home Assistant action {domain}.{service}.", "where": (where if targets else where.capitalize()) + ".",
-                "effect": f"This {verb} {where}."}
+        return _service_confirmation(domain, call.group(2), targets)
     where = f"In {cwd}" + (f", reaching {network}" if network else "") + "." if cwd else "On this Home Assistant."
     return {"what": "Run one command outside the sandbox, shown below.", "where": where,
             "effect": "Only what that command does; it may read files and use the network."}
+
+_SERVICE_NAME = re.compile(r"([a-z0-9_]+)\.([a-z0-9_]+)")
+
+# The id fields a target can hold besides entity_id, and how the card names each of their ids.
+_TARGET_WORDS = {"device_id": "of device", "area_id": "in area", "floor_id": "on floor", "label_id": "with label"}
+
+def _target_names(domain: str, target: Any) -> list[str]:
+    """Name every id the target holds, so the card says no less than the call reaches.
+
+    Entity ids are named as they are, of any domain; an area, device, floor or label id as "every <domain> in area
+    <id>" and so on. A target that is not an object of these fields, each one id or a list of ids, gives no names,
+    so the words fall back to every <domain> the action reaches; the JSON on the card still shows it in full.
+    """
+    if not isinstance(target, dict) or not set(target) <= {"entity_id", *_TARGET_WORDS}:
+        return []
+    names: list[str] = []
+    for key in ("entity_id", *_TARGET_WORDS):
+        value = target.get(key, [])
+        ids = [value] if isinstance(value, str) else value
+        if not isinstance(ids, list) or not all(isinstance(item, str) for item in ids):
+            return []
+        if key == "entity_id":
+            names += [f"every {domain}" if item == "all" else item for item in ids]
+        else:
+            names += [f"every {domain} {_TARGET_WORDS[key]} {item}" for item in ids]
+    return names
+
+def _tool_confirmation(tool: str, arguments: str) -> dict[str, str]:
+    """Plain words for a tool request: the Home Assistant action it names, else the tool and its arguments."""
+    try:
+        parsed = json.loads(arguments)
+    except ValueError:
+        parsed = None
+    service = parsed.get("service") if isinstance(parsed, dict) else None
+    call = _SERVICE_NAME.fullmatch(service) if isinstance(service, str) else None
+    if call:
+        # Only the target names what the action reaches; an entity id inside data (a message, say) is not one.
+        domain = call.group(1)
+        return _service_confirmation(domain, call.group(2), _target_names(domain, parsed.get("target")))
+    return {"what": f"Run the tool {tool}, with the arguments shown below.", "where": "This Home Assistant.",
+            "effect": "Only what the tool does with these arguments."}
 
 def _file_effect(paths: list[str]) -> str:
     """The plain effect of changing these files: the most specific one that applies to each, without repeats."""
@@ -433,23 +182,50 @@ def _changes_confirmation(changes: list[dict[str, Any]]) -> dict[str, str]:
 
 def confirmation(record: dict[str, Any]) -> dict[str, str]:
     """Describe the redacted action without making or suppressing its approval decision."""
-    text = (_command_confirmation(record["command"], record["cwd"], record.get("network", ""))
-            if record["kind"] == "command" else _changes_confirmation(record["changes"]))
+    if record["kind"] == "command":
+        text = _command_confirmation(record["command"], record["cwd"], record.get("network", ""))
+    elif record["kind"] == "tool":
+        text = _tool_confirmation(record["tool"], record["arguments"])
+    else:
+        text = _changes_confirmation(record["changes"])
     if not record["can_allow"]:
         text["effect"] = "This request cannot be allowed here. " + record["note"]
     return text
 
 
-def require_supported_policy(params: dict[str, Any]) -> None:
-    """Integration-owned requests must refuse full access instead of relying on Codex's fallback."""
-    config = params.get("config") or {}
-    policy = params.get("sandboxPolicy") or {}
-    modes = [params.get("sandbox"), config.get("sandbox_mode") if isinstance(config, dict) else None,
-             policy.get("type") if isinstance(policy, dict) else policy]
-    if any(mode in ("danger-full-access", "dangerFullAccess") for mode in modes):
-        raise ValueError("Full-access requests are refused by this integration; use workspace-write or read-only.")
-    if params.get("approvalPolicy") == "never" or (isinstance(config, dict) and config.get("approval_policy") == "never"):
-        raise ValueError("The never approval policy is refused by this integration; use on-request.")
+# Codex's reviewer reports each review it makes in an Auto-review chat (app-server-protocol common.rs at
+# rust-v0.166.0). It sends no request: it allows or denies in place of the person.
+AUTO_REVIEW_EVENTS = {"item/autoApprovalReview/started", "item/autoApprovalReview/completed"}
+AUTO_REVIEW_STATUSES = {"inProgress", "approved", "denied", "timedOut", "aborted"}
+AUTO_REVIEW_RISKS = {"low", "medium", "high", "critical"}
+AUTO_REVIEW_RATIONALE_LIMIT = 500
+
+
+def auto_review_event(method: str, params: dict[str, Any], redact: Callable[[str], str]) -> dict[str, Any]:
+    """Return the chat event for one review by Codex's reviewer: its id, status, risk, what it checked and why.
+
+    Only known words pass: an unknown status reads as "unknown" and is shown as
+    not allowed. The reviewer's reason is model text, so it is redacted and
+    clipped like any other text the chat shows.
+    """
+    review = params.get("review") if isinstance(params.get("review"), dict) else {}
+    action = params.get("action") if isinstance(params.get("action"), dict) else {}
+    # A list or an object is not a word, and a set lookup of it would raise, so only text is looked up.
+    status = review.get("status") if isinstance(review.get("status"), str) else None
+    if method.endswith("/started"):
+        status = "inProgress"
+    elif status not in AUTO_REVIEW_STATUSES - {"inProgress"}:
+        status = "unknown"
+    risk = review.get("riskLevel") if isinstance(review.get("riskLevel"), str) else ""
+    rationale = review.get("rationale") if isinstance(review.get("rationale"), str) else ""
+    return {
+        "type": "auto_review",
+        "review_id": str(params.get("reviewId") or "")[:128],
+        "status": status,
+        "risk_level": risk if risk in AUTO_REVIEW_RISKS else "",
+        "action": str(action.get("type") or "")[:40],
+        "rationale": redact(rationale)[:AUTO_REVIEW_RATIONALE_LIMIT],
+    }
 
 
 class AppServerSession:
@@ -501,8 +277,6 @@ class AppServerSession:
 
     def _request(self, method: str, params: dict[str, Any]) -> None:
         """Send a client request with a namespace distinct from server request IDs."""
-        if method in {"thread/start", "thread/resume", "turn/start"}:
-            require_supported_policy(params)
         self._next_id += 1
         request_id = f"worker-{self._next_id}"
         self._requests[request_id] = method
@@ -514,8 +288,6 @@ class AppServerSession:
             if self._closed or not self.is_active():
                 self.close()
                 return
-            require_supported_policy(self.thread_params)
-            require_supported_policy(self.turn_params)
             self._request("initialize", {"clientInfo": {
                 "name": "home_assistant_worker", "title": "Home Assistant", "version": "1",
             }})
@@ -578,27 +350,39 @@ class AppServerSession:
 
     def _publish_approval(self, request_id: Any, method: str, params: dict[str, Any]) -> None:
         """Expose only a request for the active thread and turn, with an opaque UI ID."""
-        if params.get("threadId") != self.thread_id or params.get("turnId") != self.turn_id:
+        # Before the turn starts, turn_id is empty and a request without a turnId would match it.
+        if not self.turn_id or params.get("threadId") != self.thread_id or params.get("turnId") != self.turn_id:
             raise ValueError("permission request does not belong to the active exchange")
-        if len(self._records) >= REQUEST_LIMIT:
-            self._write({"id": request_id, "result": {"decision": "decline"}})
-            self.on_event({"type": "error", "message": "Too many permission requests in this exchange; request denied."})
-            return
+        # A repeated request id is an error even when the request limit is reached.
         if request_id in self._pending.values():
             raise ValueError("duplicate live permission request")
+        kind = {COMMAND_APPROVAL: "command", FILE_APPROVAL: "file_change", TOOL_APPROVAL: "tool"}[method]
+        if len(self._records) >= REQUEST_LIMIT:
+            self._write({"id": request_id, "result": decision_result(kind, False)})
+            self.on_event({"type": "error", "message": "Too many permission requests in this exchange; request denied."})
+            return
         reason, _ = self._display(params.get("reason"))
         clipped = False
         # Anything but a new command, such as input typed into a running one, is shown but never allowed.
         request_kind = params.get("kind", "command") if method == COMMAND_APPROVAL else ""
+        # The counter's kind: a new command, input to a running one, a file change, or another request (a tool's too).
+        prompt_kind = "file_change" if kind == "file_change" else "other"
+        if kind == "command":
+            prompt_kind = {"command": "command", "writeStdin": "command_input"}.get(request_kind, "other")
         record: dict[str, Any] = {
-            "approval_id": uuid.uuid4().hex, "status": "pending", "reason": reason,
-            "kind": "command" if method == COMMAND_APPROVAL else "file_change",
-            # The counter's kind: a new command, input to a running one, another command request, or a file change.
-            "prompt_kind": ("file_change" if method != COMMAND_APPROVAL else "command" if request_kind == "command"
-                            else "command_input" if request_kind == "writeStdin" else "other"),
-            "can_allow": True, "command": "", "cwd": "", "changes": [],
+            "approval_id": uuid.uuid4().hex, "status": "pending", "reason": reason, "kind": kind,
+            "prompt_kind": prompt_kind, "can_allow": True, "command": "", "cwd": "", "changes": [],
         }
-        if method == COMMAND_APPROVAL:
+        if kind == "tool":
+            # Shown in full or not allowed: the arguments Codex will send, as JSON, after credentials are hidden.
+            server, tool = tool_request(params)
+            record["tool"] = f"{server}.{tool}"
+            arguments = params["_meta"].get("tool_params")
+            record["arguments"], clipped = self._display(
+                json.dumps(arguments, indent=2, sort_keys=True, ensure_ascii=False))
+            record["scope"] = "Allow this one tool call once. Codex asks again before the next one."
+            record["can_allow"] = isinstance(arguments, dict)
+        elif method == COMMAND_APPROVAL:
             record["command"], truncated = self._display(params.get("command"))
             record["cwd"], folder_truncated = self._display(params.get("cwd"))
             clipped |= truncated or folder_truncated
@@ -619,19 +403,13 @@ class AppServerSession:
                 change.get("path") and change.get("diff") and change.get("kind") in {"add", "update", "delete"}
                 for change in record["changes"])
             clipped |= any(change.get("truncated") or change.get("redacted") for change in record["changes"])
-        if method == COMMAND_APPROVAL:
-            # A command allowed once runs outside the sandbox, so it is held to the same protected places.
-            protected = command_names_protected_path(params.get("command") or "")
-        else:
-            protected = any(
-                touches_protected_path(change.get("path") or "") or touches_protected_path(change.get("move_path") or "")
-                for change in record["changes"])
-        if clipped or protected:
+        if clipped:
             record["can_allow"] = False
-        if protected:
-            record["note"] = "This request touches the app's permission policy or settings, which Codex may not edit. Deny it."
-        elif request_kind == "writeStdin":
+        if request_kind == "writeStdin":
             record["note"] = "Input to a running command cannot be allowed here. Deny it and ask for the whole action as one command."
+        elif kind == "tool" and record["can_allow"]:
+            record["note"] = ("Known credentials are hidden. Allow once runs this call only; it does not change your "
+                              "permission mode or approve the next call.")
         elif request_kind not in ("", "command"):
             record["note"] = "This kind of request cannot be allowed here. Deny it and ask for a single command or file change."
         elif not record["can_allow"]:
@@ -675,7 +453,7 @@ class AppServerSession:
                 record["decided_by"] = dict(decided_by)
             try:
                 self.on_approvals(copy.deepcopy(self._records))
-                self._write({"id": request_id, "result": {"decision": "accept" if decision == "allow" else "decline"}})
+                self._write({"id": request_id, "result": decision_result(record["kind"], decision == "allow")})
             except (OSError, ValueError):
                 record["status"] = "expired"
                 self.fail("Could not deliver the permission decision. The exchange was stopped.")
@@ -700,8 +478,10 @@ class AppServerSession:
                     # Broad turn/session grants are deliberately unsupported.
                     self._write({"id": message["id"], "result": {"permissions": {}, "scope": "turn"}})
                     self.on_event({"type": "error", "message": "Broad permission grant denied. Request a single command or file change instead."})
-                elif method == "mcpServer/elicitation/request":
-                    # The page has no card for a tool's own questions, so say so in the chat
+                elif method == TOOL_APPROVAL and tool_request(params):
+                    self._publish_approval(message["id"], method, params)
+                elif method == TOOL_APPROVAL:
+                    # The page has no card for any other tool question, so say so in the chat
                     # instead of declining where nobody can see it.
                     self._write({"id": message["id"], "result": {"action": "decline"}})
                     self.on_event({"type": "error", "message": _elicitation_refusal(params)})
@@ -727,6 +507,11 @@ class AppServerSession:
                     self.on_event({"type": "turn.started"})
             elif params.get("threadId") == self.thread_id and params.get("turnId") == self.turn_id and method in {"item/started", "item/completed"}:
                 self._item(method, params["item"])
+            elif method in AUTO_REVIEW_EVENTS and params.get("threadId") == self.thread_id and params.get("turnId") == self.turn_id:
+                self.on_event(auto_review_event(method, params, self.redact))
+            elif (method == "turn/plan/updated" and self.turn_id
+                  and params.get("threadId") == self.thread_id and params.get("turnId") == self.turn_id):
+                self._plan(params.get("plan"))
             elif method == "item/fileChange/patchUpdated" and params.get("threadId") == self.thread_id and params.get("turnId") == self.turn_id:
                 self._cache_file_changes(str(params["itemId"]), params.get("changes") or [])
             elif method == "turn/completed" and params.get("threadId") == self.thread_id:
@@ -753,9 +538,6 @@ class AppServerSession:
             self._write({"method": "initialized"})
             self._request("thread/resume" if self.thread_params.get("threadId") else "thread/start", self.thread_params)
         elif method in {"thread/start", "thread/resume"}:
-            if result.get("approvalPolicy") != "on-request" or result.get("approvalsReviewer") != "user":
-                raise ValueError("Codex did not enable user approval requests")
-            require_supported_policy(result)
             self.thread_id = result["thread"]["id"]
             expected = self.thread_params.get("threadId")
             if expected and self.thread_id != expected:
@@ -786,6 +568,21 @@ class AppServerSession:
             raise ValueError("File changes were updated while permission was pending. The exchange was stopped.")
         self._file_changes[item_id] = changes
         return changes
+
+    def _plan(self, plan: Any) -> None:
+        """Show Codex's plan as one to-do step; ignore an update that does not have the expected shape.
+
+        Each entry must be a dictionary with a text "step" and a text "status". The text is not
+        trusted here: the event goes to on_event like every other step, where server.py redacts it
+        (redact_event) and cuts it to the activity length limit (clip_activity_text).
+        """
+        if not isinstance(plan, list) or len(plan) > PLAN_STEP_LIMIT:
+            return
+        for entry in plan:
+            if not isinstance(entry, dict) or not isinstance(entry.get("step"), str) or not isinstance(entry.get("status"), str):
+                return
+        items = [{"text": entry["step"], "completed": entry["status"] == "completed"} for entry in plan]
+        self.on_event({"type": "item.updated", "item": {"id": "app-server:plan", "type": "todo_list", "items": items}})
 
     def _item(self, method: str, item: dict[str, Any]) -> None:
         """Translate app-server items into the worker's existing activity format."""

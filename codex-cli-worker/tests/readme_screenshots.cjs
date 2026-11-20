@@ -155,15 +155,11 @@ async function deleteCurrentChat(page) {
   assert.fail('the confirm chat was still running after 5 seconds');
 }
 
-/** Settings: the five action groups, a schedule proposal waiting for approval, and the local mailbox. */
+/** Settings: a schedule proposal waiting for approval, and the local mailbox. */
 async function settings(browser, size, scheme) {
   const page = await openPage(browser, size, scheme);
   await tallWindow(page, size);
   await openSettings(page);
-  const overrides = page.locator('#permission-overrides');
-  await overrides.locator('input[data-permission-group="everyday"]:not([disabled])').waitFor();
-  await overrides.scrollIntoViewIfNeeded();
-  await overrides.screenshot({path: path.join(output, `action-groups-${scheme}-${size}.png`), animations: 'disabled'});
   const schedules = page.locator('#schedule-list');
   await schedules.getByRole('button', {name: 'Approve this proposal', exact: true}).waitFor();
   await shootRange(page, page.locator('#scheduled-work h3').first(), schedules, `schedule-proposal-${scheme}-${size}.png`);

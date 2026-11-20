@@ -47,7 +47,6 @@ CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 CA_DIR = "/etc/ssl/certs"
 ALLOW_MARK = "guard: allow"
 OPERATIONS = ("repos", "fetch", "pull", "push", "clone", "link")
-READ_ONLY_OPERATIONS = ("repos", "fetch")
 BAD_STATES = ("near_expiry", "expired", "revoked", "access_changed", "failed")
 STATE_WORDS = {
     "ok": "working", "near_expiry": "expires within 7 days", "expired": "expired",
@@ -477,7 +476,7 @@ class DeviceFlow:
             self.finish("canceled")
             return False
         if time.monotonic() >= self.deadline:
-            self.finish("expired", "The code expired. Press Connect for a new one.")
+            self.finish("expired", "The code expired before it was entered on GitHub.")
             return False
         try:
             response = self.http.post(ACCESS_TOKEN_URL, {"client_id": self.client_id, "device_code": self.device_code,
@@ -502,7 +501,7 @@ class DeviceFlow:
             self.interval += 5
             return True
         if error == "expired_token":
-            self.finish("expired", "The code expired. Press Connect for a new one.")
+            self.finish("expired", "The code expired before it was entered on GitHub.")
         elif error == "access_denied":
             self.finish("failed", "The sign-in was refused on GitHub.")
         elif error == "device_flow_disabled":
@@ -624,7 +623,7 @@ class GitRunner:
         if refused:
             names = ", ".join(sorted(set(refused))[:12])
             raise GitHubError("This repository has git settings the add-on does not use with your GitHub sign-in: "
-                              + names + ".")
+                              + names + ". Use a fresh copy instead: Clone on the add-on page, Settings, GitHub.")
 
     def origin_repository(self, repo: Path) -> str:
         """F1: the effective fetch and push URLs (rewrites applied) must both be a connected GitHub repository."""
@@ -634,7 +633,8 @@ class GitRunner:
             proc = self._git(repo, *args)
             urls = [line for line in proc.stdout.splitlines() if line.strip()]
             if proc.returncode != 0 or len(urls) != 1:
-                raise GitHubError("The repository needs one origin remote at https://github.com/<owner>/<repository>.")
+                raise GitHubError("The repository needs one origin remote at https://github.com/<owner>/<repository>. "
+                                  "Set it with Link on the add-on page, Settings, GitHub.")
             match = re.fullmatch(r"https://github\.com/([A-Za-z0-9-]+/[A-Za-z0-9._-]+?)(?:\.git)?/?", urls[0].strip())
             if not match or match.group(1).lower() not in connected:
                 raise GitHubError("The origin remote is not one of the connected GitHub repositories.")
@@ -793,7 +793,6 @@ class GitHubService:
                  fire_event: Callable[[str, dict], Any] = lambda *_: None,
                  notify: Callable[[str, str], Any] = lambda *_: None,
                  find_task: Callable[[Any], str | None] = lambda _cap: None,
-                 read_only: Callable[[str], bool] = lambda _task: True,
                  runner: GitRunner | None = None, log: Callable[[str], Any] | None = None):
         self.store = Store(root)
         self.client_id = client_id
@@ -801,7 +800,6 @@ class GitHubService:
         self.fire_event = fire_event
         self.notify = notify
         self.find_task = find_task
-        self.read_only = read_only
         self.log = log or (lambda text: print(text, flush=True))
         self.lock = threading.RLock()
         self.git_lock = threading.Lock()
@@ -837,6 +835,10 @@ class GitHubService:
         last = state.get("last_check") if isinstance(state.get("last_check"), dict) else None
         flow = dict(self.flow.public) if self.flow else {"status": "idle", "user_code": "", "verification_uri": "",
                                                          "expires_at": None, "error": ""}
+        if self.flow and flow.get("status") == "waiting_for_user":
+            # Seconds the code still works, by the worker's clock, so the page's countdown does not depend
+            # on the phone's clock.
+            flow["expires_in"] = max(0, int(self.flow.deadline - time.monotonic()))
         return {
             "state": self.current_state(),
             "kind": credential.get("kind"),
@@ -933,6 +935,10 @@ class GitHubService:
                               "it cannot read the repository") + ". Make one for this repository only, with "
                               "Contents read and write and nothing else.")
         self._save_connection("token", token, live, repository)
+        with self.lock:
+            # The result of an earlier App sign-in no longer describes the connection, so the page stops showing it.
+            if self.flow and self.flow.public.get("status") != "waiting_for_user":
+                self.flow = None
         self.log("GitHub sign-in connected (token).")
         return self.status()
 
@@ -1022,7 +1028,7 @@ class GitHubService:
         if current in BAD_STATES:
             when = state.get("last_check", {}).get("at") or ""
             self.notify("GitHub sign-in", f"GitHub sign-in on the Codex add-on: {STATE_WORDS.get(current, current)} "
-                        f"since {when}. Open the Codex page > Settings > GitHub.")
+                        f"since {when}. Open the Codex page > Settings > Accounts and connections > GitHub.")
 
     def _fire(self, previous: str, state: dict[str, Any]) -> None:
         last = state.get("last_check") or {}
@@ -1051,15 +1057,16 @@ class GitHubService:
             try:
                 response = self.http.get(f"{API}/repos/{name}", credential["token"])
             except Exception:
-                failure = failure or f"{name}: GitHub could not be reached"
+                failure = failure or f"GitHub could not be reached for {name}"
                 continue
             if response.status_code == 200:
                 good += 1
             else:
-                failure = failure or f"{name}: HTTP {response.status_code}"
+                failure = failure or f"GitHub did not return {name} (HTTP {response.status_code})"
         ok = bool(names) and not failure
         text = (f"Read OK: {good} repositor{'y' if good == 1 else 'ies'}." if ok
-                else "Read failed: " + (failure or "no repository is connected") + ".")
+                else "Read failed: " + (failure or "no repository is connected") + ". Choose Check now to see "
+                "which repositories the sign-in reaches, or try again later.")
         self.last_test = {"at": iso(utc_now()), "ok": ok, "text": text}
         return self.status()
 
@@ -1092,8 +1099,6 @@ class GitHubService:
         required = {"repos": set(), "clone": {"repository"}, "link": {"repository", "path"}}.get(operation, {"path"})
         if not isinstance(args, dict) or set(args) - allowed or required - set(args):
             raise GitHubError(f"{operation} takes " + (", ".join(sorted(allowed)) or "no arguments") + ".")
-        if operation not in READ_ONLY_OPERATIONS and self.read_only(task_id):
-            raise GitHubError("This chat is read only; only repos and fetch are available.")
         if self.current_state() not in ("ok", "near_expiry"):
             return reply(False, "GitHub is not connected on this box; the owner connects it on the add-on page.")
         if operation == "repos":
@@ -1184,7 +1189,7 @@ def register(worker, service: GitHubService) -> GitHubService:
         @worker.require_ingress
         @wraps(func)
         def run(*args, **kwargs):
-            person, refusal = worker.ingress_admin()
+            person, refusal = worker.ingress_admin("manage GitHub")
             if person is None:
                 return jsonify(ok=False, error=refusal), 403
             try:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import math
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -35,6 +35,28 @@ GITHUB_STATE_WORDS = {
     "access_changed": "reaches different repositories or access",
     "failed": "cannot be checked",
 }
+
+
+def github_repair_key(state: str, kind: str) -> str:
+    """Return the Repair's translation key: what still works and the next step differ by state and sign-in kind.
+
+    Connect again on the page starts a GitHub App sign-in, so a token connection is sent to the token form.
+    """
+    if state == "near_expiry":
+        return "github_access_near_expiry_token" if kind == "token" else "github_access_near_expiry"
+    if state in ("expired", "revoked"):
+        return "github_access_lost_token" if kind == "token" else ISSUE_GITHUB_ACCESS_LOST
+    if state == "access_changed":
+        return "github_access_changed"
+    return "github_access_check_failed"
+
+
+def _expiry_date(value: Any) -> str:
+    """Return "on <date>" for the sign-in's expiry, or "within 7 days" when the worker gave no readable date."""
+    try:
+        return f"on {datetime.fromisoformat(str(value)).date().isoformat()}"
+    except ValueError:
+        return "within 7 days"
 
 
 class CodexCliCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -203,10 +225,11 @@ class CodexCliCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ISSUE_GITHUB_ACCESS_LOST,
             is_fixable=False,
             severity=severity,
-            translation_key=ISSUE_GITHUB_ACCESS_LOST,
+            translation_key=github_repair_key(state, str(github.get("kind") or "")),
             translation_placeholders={
                 "state": GITHUB_STATE_WORDS.get(state, state),
                 "reason": reason or "no reason given",
                 "account": login or "the connected account",
+                "expires": _expiry_date(github.get("expires_at")),
             },
         )

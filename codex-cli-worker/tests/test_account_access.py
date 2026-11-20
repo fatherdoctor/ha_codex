@@ -36,8 +36,11 @@ class AccountAccessTests(unittest.TestCase):
         self.assertTrue(self.check.refresh())
         self.assertEqual(self.read.call_count, 3)
 
-    def test_elapsed_time_does_not_invent_a_signin_expiry(self):
-        # Access-token refresh and the metadata check cadence are not a sign-in lifetime.
+    def test_elapsed_time_does_not_invent_a_signin_expiry(self) -> None:
+        """However much time passes, the access state stays unconfirmed and asks for no new sign-in.
+
+        Access-token refresh and the metadata check cadence are not a sign-in lifetime.
+        """
         for hours in (0, 6, 24, 72, 8 * 24, 30 * 24):
             with self.subTest(hours=hours):
                 self.now = 1.0 + hours * 3600
@@ -171,7 +174,7 @@ def status_from_usage_failure(error, screen_error='Usage unavailable'):
             ('active_task_id', lambda: None), ('codex_binary_path', lambda: 'synthetic-codex'),
             ('api_token', lambda: 'synthetic-worker-auth'), ('read_options', lambda: {}),
             ('integration_status', lambda: {}), ('remote_control_summary', lambda: {}),
-            ('auth_status_payload', lambda: {}), ('pause_payload', lambda: {})):
+            ('auth_status_payload', lambda: {})):
             stack.enter_context(patch.object(server, name, value))
         stack.enter_context(patch.object(server, 'tasks', {}))
         stack.enter_context(patch.object(server, 'message_queue', []))

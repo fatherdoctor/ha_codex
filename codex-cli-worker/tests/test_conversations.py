@@ -405,17 +405,18 @@ class ConversationTests(unittest.TestCase):
         self.assertEqual(server.tasks[task_id]["turns"][1]["status"], "cancelled")
 
     def test_followup_prompt_does_not_reissue_original_request(self):
-        """The prompt for a follow-up message carries that message and not the chat's original request."""
-        prompt = server.build_prompt("ORIGINAL_REQUEST", "task", reply="CURRENT_MESSAGE")
-        self.assertIn("CURRENT_MESSAGE", prompt)
-        self.assertNotIn("ORIGINAL_REQUEST", prompt)
+        """The text of a follow-up message is that message only, not the chat's original request."""
+        self.assertEqual(server.page_message("ORIGINAL_REQUEST", reply="CURRENT_MESSAGE"), "CURRENT_MESSAGE")
 
     def test_prompt_names_the_api_address_only_when_codex_has_a_token(self):
-        """With the HA_TOKEN option the prompt tells Codex to call Home Assistant at HA_URL; without it, nothing is said."""
-        self.assertNotIn("HA_URL", server.build_prompt("Reload the automations", "task"))
+        """With the HA_TOKEN option exchange_info tells Codex to call Home Assistant at HA_URL; without it, nothing is said."""
+        self.assertNotIn("home_assistant_api", server.exchange_info("task", None))
+        self.assertNotIn("HA_URL", server.PAGE_INSTRUCTIONS)
         with patch.object(server, "read_options", return_value={"HA_TOKEN": "token-value"}):
-            prompt = server.build_prompt("Reload the automations", "task")
-        self.assertIn('$HA_URL/api/services/automation/reload, with the header "Authorization: Bearer $HA_TOKEN"', prompt)
+            prompt = server.exchange_info("task", None)["home_assistant_api"]
+        # From 0.3.6 a reload goes through the call tool; the token is only for an API call that is not a service.
+        self.assertIn("a reload and a restart included, use the home_assistant_call call tool", prompt)
+        self.assertIn('$HA_URL/api/template, with the header "Authorization: Bearer $HA_TOKEN"', prompt)
         self.assertIn("Do not use http://supervisor/core, which does not accept this token", prompt)
         # The token itself is never written into the prompt.
         self.assertNotIn("token-value", prompt)
@@ -582,8 +583,8 @@ class ConversationTests(unittest.TestCase):
         self.assertIn(b'assets/chat.js', response.data)
         # The Markdown parser is bundled, so the chat never loads a script from another server.
         scripts = re.findall(rb'<script src="([^"]+)"', response.data)
-        self.assertEqual(scripts, [b"assets/vendor/marked.umd.js", b"assets/markdown.js", b"assets/chat.js", b"assets/studio.js", b"assets/schedules.js"])
-        for name in ("chat.js", "chat.css", "studio.js", "studio.css", "markdown.js", "vendor/marked.umd.js", "vendor/marked.LICENSE.md"):
+        self.assertEqual(scripts, [b"assets/text-size.js", b"assets/vendor/marked.umd.js", b"assets/markdown.js", b"assets/chat.js", b"assets/studio.js", b"assets/schedules.js", b"assets/full_access.js"])
+        for name in ("text-size.js", "chat.js", "chat.css", "studio.js", "studio.css", "markdown.js", "vendor/marked.umd.js", "vendor/marked.LICENSE.md"):
             with self.client.get("/assets/" + name) as asset:
                 self.assertEqual(asset.status_code, 200)
 

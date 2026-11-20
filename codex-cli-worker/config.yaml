@@ -1,6 +1,6 @@
 name: Codex for Home Assistant
 description: Run Codex CLI tasks against the Home Assistant config folder.
-version: "0.3.1"
+version: "0.3.6"
 slug: codex_cli_worker
 url: https://github.com/fatherdoctor/ha_codex
 image: ghcr.io/fatherdoctor/codex-cli-worker
@@ -71,4 +71,5 @@ schema:
   ha_url: str?
   HA_TOKEN: password?
   remote_control_name: str?
+  interactions_to_keep: int(10,100)?
   install_integration: bool

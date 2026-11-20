@@ -87,7 +87,9 @@ async def test_integration_scrubs_malicious_worker_and_reports_unavailable():
     assert result['availability'] == 'unavailable'
 
 
-async def test_override_event_survives_integration_boundary_without_payloads(tmp_path):
+async def test_old_override_event_exports_as_other_without_its_fields(tmp_path):
+    # The override event came from the removed permission overrides. An old record must keep
+    # none of its fields: no group, no decision, no operation, and no payload.
     store = RollingDiagnostics(tmp_path / 'interactions.json')
     store.append({'source': 'addon_page', 'outcome': 'done', 'events': [{
         'kind': 'override', 'operation': 'service', 'group': 'everyday',
@@ -99,7 +101,6 @@ async def test_override_event_survives_integration_boundary_without_payloads(tmp
     entry = SimpleNamespace(runtime_data=SimpleNamespace(client=client))
     result = await integration.async_get_config_entry_diagnostics(None, entry)
     event = result['interactions'][0]['events'][0]
-    assert event['kind'] == 'override' and event['operation'] == 'service'
-    assert event['group'] == 'everyday' and event['outcome'] == 'completed'
-    assert event['duration_seconds'] == 0.5
+    assert set(event) == {'kind', 'time'}
+    assert event['kind'] == 'other'
     assert 'CANARY' not in json.dumps(result)

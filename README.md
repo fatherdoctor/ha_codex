@@ -34,7 +34,7 @@ Details and other ways to install: [Installation](#installation).
 - [Updating](#updating)
 - [Uninstalling](#uninstalling)
 - [An example, step by step](#an-example-step-by-step)
-- [Permission modes and action groups](#permission-modes-and-action-groups)
+- [Permission modes](#permission-modes)
 - [Safety](#safety)
 - [Sign-in](#sign-in)
 - [Mailbox and schedules](#mailbox-and-schedules)
@@ -81,8 +81,9 @@ says so once in a notification.
 
 Every app option is in [codex-cli-worker/DOCS.md](codex-cli-worker/DOCS.md).
 
-Put rules for your house in `/config/AGENTS.md`. The chat has an editor for it under **Settings** > **Advanced** >
-**Workspace rules**. Codex uses its defaults and your workspace instructions; the app bundles no house rules.
+Put rules for your house in `/config/AGENTS.md`. The chat has an editor for it under **Settings** > **Workspace instructions** >
+**Workspace rules**. Codex uses its defaults and your workspace instructions; the app bundles no house rules. A new
+install that has no `/config/AGENTS.md` gets a short starter file there once, which is yours to change or delete.
 
 ## Updating
 
@@ -121,66 +122,45 @@ flowchart LR
    question and offer two or three short answers as buttons.
 2. Codex edits the automation file. In the default `workspace-write` mode, an edit inside your configuration folder
    needs no permission. It saves the earlier copy first.
-3. Codex runs a configuration check on the changed YAML and reloads automations. The reload is in the **Apply my
-   changes** group, which starts on. If you turned that group off, a permission card asks you first.
+3. Codex runs a configuration check on the changed YAML and asks to reload automations. A permission card shows the
+   command, and you choose **Allow once** or **Deny**.
 4. You read the summary. If you do not like it, ask Codex to undo it, or restore the saved earlier copy.
 
 Screenshots of these screens are listed in [SCREENSHOTS.md](SCREENSHOTS.md).
 
-## Permission modes and action groups
+## Permission modes
 
-Each chat turn runs in one of two modes.
+Each chat picks one of the four modes of the ChatGPT app: Default, Auto-review, Read only or Full access. Each mode is
+only Codex's own settings.
 
 | Mode | What Codex can do without asking |
 |---|---|
-| `read-only` | Read files. A write, or shell networking, needs your permission for that one action. |
-| `workspace-write` (default) | Edit files in your configuration folder. Shell networking and writes outside it need your permission. |
+| Default | Edit files in your configuration folder. Shell networking and writes outside it need your permission. |
+| Auto-review | As Default, but Codex's own reviewer answers each request instead of you. |
+| Read only | Read files. A write, a device change or shell networking needs your permission for that one action. |
+| Full access | Everything, without a sandbox and without asking. Off until an administrator turns it on in Settings. |
 
-Anything else shows a **Permission needed** card with the full command or file change, and the buttons **Allow once**
-and **Deny**. Only a Home Assistant administrator can answer it. This fork has no full-access mode; an old setting that
-names it stops the app at startup, with a log line that says why.
-
-### Pre-approved action groups
-
-In **Settings** > **Permissions overrides**, an administrator turns five groups of Home Assistant actions on or off.
-
-| Group | Starts | What it covers |
-|---|---|---|
-| Apply my changes | On | Reload automations, scripts, scenes, templates and groups. Run the configuration check. Start or continue an integration setup. |
-| Everyday control | On | Turn lights and switches on, off or toggle. Activate scenes. Enable, disable or trigger automations. Set helper values. |
-| Organize | On | Change a device or entity name, area and labels. Save a dashboard after its backup succeeds. |
-| Bigger changes | Off | Run a script. Change an entity ID, with a report of what refers to it. Back up or restart Core. Delete a device, entity, automation, script or dashboard. |
-| Security and people | Off | Locks, alarms, covers and garage doors, cameras, notifications and messages. |
-
-- The groups apply only to a turn that a person starts on the chat page in `workspace-write`. Scheduled runs, runs
-  started by another agent and `read-only` turns never use them. Turns started from the ChatGPT app also use the
-  normal permission card.
-- A group judges the service and the things it directly targets. What a scene or a script does next is your own setup.
-- Unknown limits, templated values, mixed targets and missing data fall back to the normal permission card.
-- A successful action is named in the answer, and the event is recorded before the action runs.
-
-You can add limits in a marked block in `/config/AGENTS.md`. If the block changes, all groups pause until an
-administrator uses **Review and confirm** in Settings. Details:
-[Permissions overrides](codex-cli-worker/DOCS.md#permissions-overrides).
+A request shows a **Permission needed** card with the full command or file change, and the buttons **Allow once**
+and **Deny**. Only a Home Assistant administrator can answer it.
 
 ## Safety
 
-Each of these protections stands on its own.
+Codex's own permission modes and the sandbox are the protection, as in the Claude add-on. The app adds no command
+check of its own.
 
-- **The sandbox.** Commands run with their own user, mount, process and network space.
-- **The gate.** A check runs before each command and answers within 1.5 seconds; a late answer is a refusal. It
-  refuses commands that reach the Supervisor, the app's own settings or the private sign-in files.
-- **Fail-closed cards.** A command that is incomplete, too large, redacted, or quoted in a way the check cannot read
-  can be denied but never allowed: its card has no **Allow once** button.
-- **The configuration watch.** At the end of an exchange, the app removes a new unsafe file and restores a changed one
-  only from a copy it verified. Otherwise it tells you which files to review.
+- **The sandbox.** Commands run with their own user, mount, process and network space. The sandbox hides
+  `secrets.yaml`, Home Assistant's sign-in store and the app's own private files.
+- **Complete cards.** A command or file change that is incomplete, too large or redacted can be denied but never
+  allowed: its card has no **Allow once** button.
 - **A protected policy.** The allowed modes come from a file inside the app image. Options and chats cannot loosen it.
 
 What the safeguards do not do:
 
 - They do not promise that every action is safe or can be undone. **Read each permission card before you allow it.**
-- The command check reads only text. It cannot see a path that a command builds while it runs, or a symbolic link.
-- An allowed command runs outside the sandbox, with the app's file and network access.
+- An allowed command runs outside the sandbox, with the app's file and network access. Nothing stops it from
+  reading a private file or changing the app's settings.
+- The app does not check what Codex writes in `/config`. An edit can add a shell command that Home Assistant runs
+  later; review what a chat changed before you reload or restart.
 - Backups depend on Codex following its instructions, and credential files are never copied. Keep your own Home
   Assistant backups.
 
@@ -197,8 +177,8 @@ Codex uses your ChatGPT account.
    managed workspace, an administrator may need to allow device-code sign-in; see
    [Codex Sign-In](codex-cli-worker/DOCS.md#codex-sign-in).
 2. In the chat, open **Settings** and choose **Sign in**.
-3. Scan the QR code, or open the link, and enter the one-time code. The code stays on screen until the sign-in ends or
-   you cancel it.
+3. Scan the QR code, or open the link, and enter the one-time code. The code stays on screen, with the time it still
+   works, until the sign-in ends or you cancel it. If it runs out, choose **Get a new code**.
 
 When the sign-in is missing, ended or rejected, a banner returns above the chat, the integration raises a Home
 Assistant repair, and the **Signed in** sensor turns off. A good sign-in clears all three. The Codex program does not
@@ -214,8 +194,9 @@ Settings. The token shows once, and the app stores only a hash.
 - A sensor counts unread messages for the other agent, and an event announces each new message without its text.
 - Limits: 500 messages, and 20 writes per turn and 64 per UTC day for each writer.
 
-**Schedules.** In **Settings** > **Scheduled runs**, you save a name, a prompt and a time rule: an interval, a cron
-rule or a single time, in your Home Assistant time zone.
+**Schedules.** Open a chat's menu and choose **Schedule**. You save a name, a prompt, a model and a trigger: hourly,
+daily, weekly, or a custom interval, cron rule or single time, in your Home Assistant time zone. Each run starts a
+new chat. **Settings** > **Scheduled runs** lists every schedule.
 
 - A schedule you save is approved when you save it. An agent can only propose one; it stays off until an
   administrator reads the full prompt and approves it.
@@ -239,9 +220,10 @@ The integration adds actions that scripts, automations and Assist can call.
 | `codex_cli.start_login`, `codex_cli.logout`, `codex_cli.get_login_status` | Manage the sign-in. |
 
 The actions refuse a caller who is not an administrator. A task started this way still uses the normal permission
-cards; the integration cannot answer them. Home Assistant
-sends a notification when a task finishes or waits for you. Set `notify_service` in the app options for phone pushes,
-or leave it empty for persistent notifications.
+cards; the integration cannot answer them. A notification about a chat shows only while the chat waits for you, and
+goes away when the wait ends; a completed answer or a failure sends none. The one exception is a block by OpenAI's
+safety filter, which sends one notification that stays until you dismiss it. Set `notify_service` in the app options for
+phone pushes, or leave it empty for persistent notifications.
 
 The event `codex_cli_task_result` carries the result for automations. The full list of entities and actions, the task
 output format and an Assist example are in the [integration README](custom_components/codex_cli/README.md). A
@@ -253,7 +235,6 @@ starter Assist script is in [examples/scripts.yaml](examples/scripts.yaml).
 |---|---|
 | A line at the top of the chat says the integration is missing, old or not connected | Restart Home Assistant if a notification asks for it, then add **Codex** under **Devices & services**. If you installed the integration yourself, update it to the app's version. |
 | A banner offers **Sign in** | The sign-in is missing, ended or rejected. Sign in again. |
-| The chat does not take new messages | The assistant may be paused. Choose **Resume the assistant** in the banner. |
 | A request waits and nothing moves | A permission card is open. Open the chat and answer it. |
 | A task stops with no output for 10 minutes | The stall limit (`task_stall_seconds`) ended it. A quiet long command can trigger it. Raise the limit. |
 | A task fails before it starts, with a sandbox error | The host may not allow the sandbox. See [the sandbox test steps](codex-cli-worker/SANDBOX_TESTING.md). |

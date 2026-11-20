@@ -28,8 +28,7 @@ class PrivateControlTests(unittest.TestCase):
             def popen(command, **kwargs):
                 commands.append(command)
                 return base.FakeProc()
-            sup = rc.Supervisor("codex", Path(tmp) / "state", dict, lambda: "",
-                                gate=lambda: "", popen=popen, control_factory=base.FakeControl)
+            sup = rc.Supervisor("codex", Path(tmp) / "state", dict, lambda: "", popen=popen, control_factory=base.FakeControl)
             self.addCleanup(sup.stop)
             sup.start()
             self.assertTrue(base.wait_for(lambda: sup.snapshot()["state"] == "ready"))
@@ -40,7 +39,7 @@ class PrivateControlTests(unittest.TestCase):
 
     def test_pair_reports_starting_instead_of_telling_enabled_owner_to_turn_on(self):
         with tempfile.TemporaryDirectory() as tmp:
-            sup = rc.Supervisor("codex", Path(tmp) / "state", dict, lambda: "", gate=lambda: "")
+            sup = rc.Supervisor("codex", Path(tmp) / "state", dict, lambda: "")
             sup.save_enabled(True)
             ok, result = sup.pair()
             self.assertFalse(ok)
@@ -134,17 +133,17 @@ class AdministratorPairingTests(unittest.TestCase):
 
     def test_each_mutator_refuses_missing_nonadmin_or_unverified_identity(self):
         for user in ("", "member-fixture", "unknown-fixture"):
-            for action in ("pair", "start", "stop", "review"):
+            for action in ("pair", "start", "stop"):
                 with self.subTest(user=user, action=action), patch.object(self.server.remote_control_supervisor, action) as call:
-                    call.return_value = (True, self.state) if action in ("pair", "start") else self.state
+                    call.return_value = (True, self.state) if action == "pair" else self.state
                     response = self.client.post("/remote-control/" + action, json={}, **self.ingress(user))
                     self.assertEqual(response.status_code, 403)
                     call.assert_not_called()
 
     def test_administrator_can_use_each_mutator(self):
-        for action in ("pair", "start", "stop", "review"):
+        for action in ("pair", "start", "stop"):
             with self.subTest(action=action), patch.object(self.server.remote_control_supervisor, action) as call:
-                call.return_value = (True, self.state) if action in ("pair", "start") else self.state
+                call.return_value = (True, self.state) if action == "pair" else self.state
                 response = self.client.post("/remote-control/" + action, json={}, **self.ingress("admin-fixture"))
                 self.assertEqual(response.status_code, 200)
                 call.assert_called_once()

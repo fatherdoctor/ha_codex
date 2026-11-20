@@ -38,7 +38,7 @@ function status(state, extra = {}) {
       await page.route('**/github', route => reply(route, 200, {ok: true, github}));
       const handlers = {
         connect: () => { github = status('connecting', {flow: {status: 'waiting_for_user', user_code: CODE,
-          verification_uri: 'https://github.com/login/device', expires_at: '2026-11-16T13:15:00Z', error: ''}}); return [200, {ok: true, github}]; },
+          verification_uri: 'https://github.com/login/device', expires_at: '2026-11-16T13:15:00Z', expires_in: 900, error: ''}}); return [200, {ok: true, github}]; },
         cancel: () => { github = status('disconnected', {flow: {...idle, status: 'canceled'}}); return [200, {ok: true, github}]; },
         test: () => { github = {...github, last_test: {at: '2026-11-16T13:01:00Z', ok: true, text: 'Read OK: 1 repository.'}}; return [200, {ok: true, github}]; },
         check: () => { github = status('access_changed', {extra: ['synthetic-owner/new'], missing: ['synthetic-owner/old'],
@@ -67,11 +67,20 @@ function status(state, extra = {}) {
       const conversations = page.getByRole('button', {name: 'Open conversations', exact: true});
       if (await conversations.isVisible()) await conversations.click();
       await page.getByRole('button', {name: 'Open settings', exact: true}).click();
+      // The GitHub card follows the ChatGPT account card inside Accounts and connections; all start collapsed.
+      assert.equal(await page.locator('#settings > section h3 .settings-title').first().textContent(), 'Accounts and connections');
+      await page.locator('#accounts-section > h3 .settings-toggle').click();
       const card = page.locator('#github-section');
       await card.waitFor({state: 'visible'});
-      // The GitHub card is the next settings section after the ChatGPT account card.
-      assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('#settings > section')].slice(0, 2)
-        .map(section => section.querySelector('h3')?.textContent)), ['ChatGPT account', 'GitHub']);
+      assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('#accounts-section-body > section')]
+        .map(section => (section.querySelector('h4 .settings-title') || section.querySelector('h4')).textContent)),
+        ['ChatGPT account', 'GitHub', 'ChatGPT app pairing']);
+      const toggle = card.locator('.settings-toggle');
+      assert.equal(await toggle.getAttribute('aria-expanded'), 'false');
+      assert.equal(await page.locator('#github-status').isHidden(), true);
+      await page.waitForFunction(() => document.querySelector('#github-section .settings-status').textContent === 'Not connected');
+      await toggle.click();
+      assert.equal(await toggle.getAttribute('aria-expanded'), 'true');
       await page.waitForFunction(() => document.querySelector('#github-status').textContent === 'Not connected to GitHub.');
       for (const id of ['github-test', 'github-check', 'github-accept', 'github-disconnect'])
         assert.equal(await page.locator('#' + id).isHidden(), true, id);
@@ -82,9 +91,27 @@ function status(state, extra = {}) {
       assert.equal(await card.locator('.signin-code').textContent(), CODE);
       assert.equal(await card.locator('a[href="https://github.com/login/device"]').count(), 1);
       assert.equal(await page.locator('#github-cancel').isVisible(), true);
+      assert.match(await card.locator('.signin-expiry').textContent(), /^The code expires in \d+:\d\d\.$/);
+      assert.equal(await card.locator('.settings-status').textContent(), 'Connecting: enter the code');
       await page.locator('#github-cancel').click();
       await card.locator('.signin-code').waitFor({state: 'detached'});
       await page.waitForFunction(() => document.querySelector('#github-flow').textContent.includes('canceled'));
+
+      // A code that runs out says so and offers a new one: Get a new code cancels and connects again.
+      const connect = handlers.connect;
+      handlers.connect = () => { github = status('connecting', {flow: {status: 'waiting_for_user', user_code: CODE,
+        verification_uri: 'https://github.com/login/device', expires_at: '2026-11-16T13:15:00Z', expires_in: 1, error: ''}});
+        return [200, {ok: true, github}]; };
+      await page.locator('#github-connect').click();
+      await card.getByRole('button', {name: 'Get a new code', exact: true}).waitFor({state: 'visible', timeout: 5000});
+      assert.equal(await card.locator('.signin-expiry').textContent(), 'This code has expired. Get a new code to sign in.');
+      handlers.connect = connect;
+      const before = posts.length;
+      await card.getByRole('button', {name: 'Get a new code', exact: true}).click();
+      await page.waitForFunction(() => /expires in/.test(document.querySelector('#github-flow .signin-expiry')?.textContent || ''));
+      assert.deepEqual(posts.slice(before).map(post => post.name), ['cancel', 'connect']);
+      await page.locator('#github-cancel').click();
+      await card.locator('.signin-code').waitFor({state: 'detached'});
 
       // Connect again; the worker finishes the flow and the 5-second poll shows the connection.
       await page.locator('#github-connect').click();
@@ -94,6 +121,7 @@ function status(state, extra = {}) {
       await page.waitForFunction(() => document.querySelector('#github-status').textContent.includes('synthetic-owner'),
         null, {timeout: 12000});
       await card.locator('.signin-code').waitFor({state: 'detached'});
+      assert.equal(await card.locator('.settings-status').textContent(), 'Connected as synthetic-owner, 1 repository');
       const shown = await card.textContent();
       assert.match(shown, /synthetic-owner\/house/);
       assert.match(shown, /Does not expire; revoke it on GitHub/);
@@ -120,6 +148,33 @@ function status(state, extra = {}) {
       github = status('ok');
       await page.locator('#github-check').click();
       await page.waitForFunction(() => document.querySelector('#github-result').textContent.includes('Check finished'));
+
+      // A failed Connect again shows its reason while the old sign-in stays (Astro F2).
+      for (const state of ['expired', 'revoked', 'near_expiry']) {
+        github = status(state, {flow: {...idle, status: 'failed', error: 'The sign-in was refused on GitHub.'}});
+        await page.locator('#github-check').click();
+        await page.waitForFunction(() => document.querySelector('#github-flow').textContent.includes('refused on GitHub'));
+        assert.equal(await page.locator('#github-flow').textContent(),
+          'The new GitHub sign-in failed. The sign-in was refused on GitHub. Your previous sign-in has not changed.');
+      }
+      // The recovery step fits the kind of sign-in: Connect again starts an App sign-in (Astro F4).
+      github = status('expired', {kind: 'token'});
+      await page.locator('#github-check').click();
+      await page.waitForFunction(() => document.querySelector('#github-status').textContent.includes('token expired'));
+      assert.match(await page.locator('#github-status').textContent(), /Create a new token on GitHub, then choose Use a token instead/);
+      assert.match(await page.locator('#github-banner-text').textContent(), /Use a token instead/);
+      assert.equal(await page.locator('#github-flow').textContent(), '');
+      github = status('revoked');
+      await page.locator('#github-check').click();
+      await page.waitForFunction(() => document.querySelector('#github-status').textContent.includes('no longer accepts this sign-in'));
+      assert.match(await page.locator('#github-status').textContent(), /Choose Connect again/);
+      github = status('near_expiry');
+      await page.locator('#github-check').click();
+      await page.waitForFunction(() => document.querySelector('#github-status').textContent.startsWith('GitHub still works'));
+      assert.equal(await page.locator('#github-banner').isHidden(), true);
+      github = status('ok');
+      await page.locator('#github-check').click();
+      await page.waitForFunction(() => document.querySelector('#github-status').textContent.startsWith('Connected to GitHub'));
 
       // Clone into /share/<repository> (the default folder name) and link existing folders, by buttons.
       await page.locator('#github-local summary').click();

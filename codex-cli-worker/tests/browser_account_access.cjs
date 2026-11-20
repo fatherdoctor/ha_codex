@@ -31,23 +31,23 @@ const assert = require('node:assert/strict');
       });
       assert.ok(beforeCode,'The requirement precedes the device code');
       assert.equal(await banner.locator('a[href*="11369540"]').count(),1);
-      // The same production handler serves the desktop button and phone menu.
-      await page.evaluate(()=>showStudioStatus());
-      await page.locator('#status-details dd').filter({hasText:/^free$/}).waitFor();
-      assert.match(await page.locator('#status-details').textContent(),/information only/);
-      assert.match(await page.locator('#status-details').textContent(),/cannot be confirmed/);
-      assert.doesNotMatch(await page.locator('#status-details').textContent(),/SYNTHETIC_PRIVATE_ACCOUNT/);
-      await page.locator('[data-close="status-dialog"]').click();
+      // The Codex row at the foot of the side bar follows the sign-in; a waiting code needs the owner.
+      await page.locator('#codex-status-summary').filter({hasText:/^Signing in$/}).waitFor();
+      assert.equal(await page.locator('#codex-status-row').getAttribute('data-state'),'needs-owner');
+      // The plan shows under the quota bars, as information only; the access line sits in the ChatGPT account part.
+      const access=page.locator('#codex-access');
+      await page.waitForFunction(()=>/cannot be confirmed/.test(document.querySelector('#codex-access').textContent));
+      assert.match(await page.locator('#usage-plan').textContent(),/^Free plan/);
+      assert.doesNotMatch(await page.locator('body').textContent(),/SYNTHETIC_PRIVATE_ACCOUNT/);
       plan=null;
-      await page.evaluate(()=>showStudioStatus());
-      await page.locator('#status-details').getByText('Codex access cannot be confirmed by a passive read. Plan type is information only.',{exact:true}).waitFor();
-      assert.doesNotMatch(await page.locator('#status-details').textContent(),/information only\)free/);
-      await page.locator('[data-close="status-dialog"]').click();
+      await page.evaluate(()=>loadUsage());
+      await page.locator('#usage-plan').filter({hasText:/^Plan unknown/}).waitFor();
+      assert.equal(await access.textContent(),'Codex access cannot be confirmed by a passive read. Plan type is information only.');
       unavailable=true;
-      await page.evaluate(()=>showStudioStatus());
-      await page.locator('#status-details').getByText('Codex access could not be checked.',{exact:true}).waitFor();
+      await page.evaluate(()=>loadUsage());
+      await page.waitForFunction(()=>document.querySelector('#codex-access').textContent==='Codex access could not be checked.');
       assert.deepEqual(errors,[]);
-      console.log(`PASS ${width}px: dated requirement before code, informational plan, uncertain access, no stale plan or account text`);
+      console.log(`PASS ${width}px: dated requirement before code, Codex row, informational plan, uncertain access, no stale plan or account text`);
       await page.close();
     }
   } finally { await browser.close(); }

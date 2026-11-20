@@ -109,7 +109,7 @@ class ServiceCase(unittest.TestCase):
             fire_event=lambda event, data: self.events.append((event, data)),
             notify=lambda title, message: self.notices.append((title, message)),
             find_task=lambda cap: "task-1" if cap == "cap-live" else None,
-            read_only=lambda task: False, log=self.logs.append)
+            log=self.logs.append)
 
     def connect_app(self):
         self.service._complete_app(APP_TOKEN)
@@ -172,6 +172,13 @@ class DeviceFlowTests(ServiceCase):
         posted = [call for call in self.http.calls if call[0] == "POST"]
         self.assertTrue(all("client_secret" not in call[2] for call in posted))
 
+    def test_status_gives_the_seconds_left_on_a_waiting_code_only(self):
+        """The page counts down from the worker's clock; an ended flow has no countdown."""
+        self.service.flow = self.flow()
+        self.assertTrue(895 <= self.service.status()["flow"]["expires_in"] <= 900)
+        self.service.flow.finish("expired", "The code expired before it was entered on GitHub.")
+        self.assertNotIn("expires_in", self.service.status()["flow"])
+
     def test_expired_and_denied_store_nothing(self):
         for error, status in (("expired_token", "expired"), ("access_denied", "failed")):
             with self.subTest(error=error):
@@ -227,6 +234,8 @@ class CheckTests(ServiceCase):
                 self.assertEqual(self.events[0][1]["previous_state"], "ok")
                 self.assertEqual(self.events[0][1]["source"], "worker")
                 self.assertEqual(len(self.notices), 1)
+                # The notice names where the GitHub part is now: inside Accounts and connections.
+                self.assertIn("Settings > Accounts and connections > GitHub", self.notices[0][1])
                 self.assertNotIn(APP_TOKEN, json.dumps(self.events) + json.dumps(self.notices))
                 # The same state again: no second event, no second notice (one cause, one warning).
                 self.check_with(answers)
@@ -275,6 +284,9 @@ class CheckTests(ServiceCase):
         result = self.service.read_test()["last_test"]
         self.assertFalse(result["ok"])
         self.assertIn("HTTP 404", result["text"])
+        # Astro F5: a plain summary and a next step, with the HTTP number kept as the detail.
+        self.assertTrue(result["text"].startswith(f"Read failed: GitHub did not return {REPO} (HTTP 404)."))
+        self.assertIn("Choose Check now", result["text"])
 
 
 class TokenFallbackTests(ServiceCase):
@@ -287,6 +299,20 @@ class TokenFallbackTests(ServiceCase):
         self.assertEqual(status["expires_at"], "2026-12-20T12:00:00+00:00")
         self.assertEqual(status["revoke_url"], gh.TOKEN_REVOKE_URL)
         self.assertNotIn(PAT, json.dumps(status) + "\n".join(self.logs))
+
+    def test_a_token_ends_the_page_message_of_an_earlier_app_sign_in(self):
+        """Astro F2: a failed App sign-in no longer shows once a token connected; a waiting one stays."""
+        self.http.gets = token_answers()
+        self.service.flow = gh.DeviceFlow(self.http, "Iv23liExampleClient", self.service._complete_app)
+        self.service.flow.finish("failed", "The sign-in was refused on GitHub.")
+        status = self.service.paste_token(PAT, REPO)
+        self.assertEqual(status["flow"]["status"], "idle")
+        self.assertIsNone(self.service.flow)
+        waiting = gh.DeviceFlow(self.http, "Iv23liExampleClient", self.service._complete_app)
+        waiting.public = {**waiting.public, "status": "waiting_for_user", "user_code": "WXYZ-1234"}
+        self.service.flow = waiting
+        self.service.paste_token(PAT, REPO)
+        self.assertIs(self.service.flow, waiting)
 
     def test_a_wider_token_is_refused_and_never_echoed(self):
         for name, answers in (("administration", token_answers(hooks=200)),
@@ -960,10 +986,9 @@ class DispatchTests(ServiceCase):
                 self.assertFalse(answer["ok"])
                 self.assertIn("ended", answer["text"])
 
-    def test_read_only_chats_get_repos_and_fetch_only(self):
-        """F5."""
+    def test_every_operation_reaches_the_runner_in_a_read_only_chat(self):
+        """0.3.6: the GitHub read-only limit is gone; Read only is Codex's read-only sandbox only."""
         self.connect_app()
-        self.service.read_only = lambda task: True
         calls = []
 
         class Runner:
@@ -973,20 +998,18 @@ class DispatchTests(ServiceCase):
 
             def pull(self, path, branch=None):
                 calls.append(("pull", path))
+                return gh.reply(True, "pulled")
 
             def push(self, path, branch=None):
                 calls.append(("push", path))
+                return gh.reply(True, "pushed")
 
         self.service.runner = Runner()
-        for operation, args in (("push", {"path": "/config"}), ("pull", {"path": "/config"}),
-                                ("clone", {"repository": REPO, "folder": "x"}),
-                                ("link", {"repository": REPO, "path": "/config"})):
-            answer = self.service.answer(json.dumps(self.payload(operation, **args)).encode())
-            self.assertFalse(answer["ok"])
-            self.assertIn("read only", answer["text"])
-        self.assertTrue(self.service.answer(json.dumps(self.payload("repos")).encode())["ok"])
-        self.assertTrue(self.service.answer(json.dumps(self.payload("fetch", path="/config")).encode())["ok"])
-        self.assertEqual(calls, [("fetch", "/config")])
+        self.assertFalse(hasattr(self.service, "read_only"))
+        for operation in ("fetch", "pull", "push"):
+            answer = self.service.answer(json.dumps(self.payload(operation, path="/config")).encode())
+            self.assertTrue(answer["ok"], answer)
+        self.assertEqual(calls, [("fetch", "/config"), ("pull", "/config"), ("push", "/config")])
 
     def test_no_reply_ever_holds_the_token(self):
         """F9: the socket has no operation that returns the credential."""
@@ -1015,15 +1038,6 @@ class DispatchTests(ServiceCase):
 class GuardRowsTests(unittest.TestCase):
     """The text checks name the folder too; the mask in codex-bwrap is the one that holds."""
 
-    def test_approvals_and_gate_protect_the_github_folder(self):
-        import approvals
-        import gate_rules
-        for path in ("/data/github/credential.json", "/data/github", "/data/github.sock", "/data//github/state.json"):
-            with self.subTest(path=path):
-                self.assertTrue(approvals.touches_protected_path(path))
-                self.assertEqual(gate_rules._policy_restriction(f"cat {path}"), "accesses the add-on's GitHub sign-in")
-        self.assertEqual(gate_rules._policy_restriction("cat '/data/git''hub/credential.json'"),
-                         "accesses the add-on's GitHub sign-in")
 
     def test_the_backup_leaves_the_github_folder_out(self):
         lines = (WORKER / "config.yaml").read_text().split("backup_exclude:\n", 1)[1].splitlines()

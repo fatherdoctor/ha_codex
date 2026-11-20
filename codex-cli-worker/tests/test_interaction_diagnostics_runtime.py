@@ -183,20 +183,20 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
         self.assertIn('COPY interaction_diagnostics.py diagnostics_scrub.py /', text)
         self.assertIn('ENV ADDON_VERSION=${BUILD_VERSION} CODEX_VERSION=${CODEX_VERSION}', text)
 
-    def test_fixed_refusal_from_stderr_is_recorded_but_arbitrary_prose_is_dropped(self):
+    def test_stderr_is_not_recorded(self):
+        # The add-on prints no refusal of its own since 0.3.6, so nothing in stderr becomes a diagnostic event.
         self.recorder.begin('sample', 'addon_page')
         message = 'This request enables full access, which is never allowed.'
         with patch.object(server, 'write_task_log'):
             server.reader_thread(
                 'sample',
                 'stderr',
-                # Arbitrary actor and secret prose surround the one fixed refusal in stderr.
                 io.StringIO('PRIVATE_PERSON_CANARY\n' + message + '\nPRIVATE_SECRET_CANARY\n'),
                 {},
             )
         self.recorder.finish('sample', 'failed')
         row = self.store.export()['interactions'][0]
-        self.assertEqual([x['rule'] for x in row['events'] if x['kind'] == 'gate'], ['full_access'])
+        self.assertEqual([x for x in row['events'] if x['kind'] == 'gate'], [])
         self.assertNotIn('CANARY', json.dumps(row))
 
     def test_history_read_metadata_follows_authorization_and_cannot_break_the_read(self):

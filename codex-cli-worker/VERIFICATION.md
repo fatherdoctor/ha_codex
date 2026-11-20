@@ -120,7 +120,7 @@ batches are recorded before a capture starts, so an interrupted retry cannot
 make an old approval reusable after a restart. Start a new inspection if the
 worker stops before it can record the retry result.
 
-Open **Settings > Browser permissions** to inspect and revoke saved exceptions.
+Open **Settings > Advanced > Browser permissions** to inspect and revoke saved exceptions.
 Revoking a saved exception stops captures that loaded it; other changes don't.
 Permissions are kept in private app storage, outside `/config`, with bounded,
 atomic storage. An entry a later version no longer accepts is ignored and listed
@@ -182,12 +182,19 @@ This bounded tool is approved for non-interactive calls; it does not grant gener
 shell network access, service calls, reloads, arbitrary URLs, clicks, or evaluation.
 
 ```json
+{"operation":"find","name":"kitchen ceiling","domain":"light"}
 {"operation":"entity","entity_id":"light.kitchen","expected_state":"on","attributes":["brightness"]}
 {"operation":"config_check"}
 {"operation":"logs"}
 {"operation":"dashboard_readback","path":"/lovelace/lights"}
 {"operation":"dashboard","path":"/lovelace/lights","save_pending":true}
 ```
+
+`find` looks an entity up by the words a person uses for it, so a device command needs no search of the files
+under `/config`. An entity matches when its friendly name or entity id holds every word; `domain` is optional.
+The answer holds at most 10 matches, each with its entity id, friendly name and state, the closest name first,
+and says how many matched in all. Entities with a credential-like name and password-mode text entities are left
+out. It is a read: it changes nothing and counts toward the message's check limit like any other check.
 
 Omit `save_pending` for an existing
 dashboard. Perform reloads/device actions only with the user's authorization,

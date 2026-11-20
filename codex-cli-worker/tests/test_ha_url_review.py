@@ -85,7 +85,7 @@ class ReviewTests(unittest.TestCase):
             def env():
                 self.assertFalse(supervisor.lock._is_owned(),'Supervisor I/O holds relay lock')
                 return {}
-            supervisor=remote_control.Supervisor('/synthetic/codex',Path(tmp)/'state',env,lambda:'Sample',gate=lambda:'',popen=Mock(return_value=proc),run=Mock(return_value=types.SimpleNamespace(returncode=0)))
+            supervisor=remote_control.Supervisor('/synthetic/codex',Path(tmp)/'state',env,lambda:'Sample',popen=Mock(return_value=proc),run=Mock(return_value=types.SimpleNamespace(returncode=0)))
             supervisor.enabled=lambda:True;supervisor.wake=Mock();supervisor.wake.is_set.return_value=False;supervisor.wake.wait.return_value=True
             supervisor._loop()
 
@@ -150,7 +150,7 @@ class TransportEdges(unittest.TestCase):
                 self.assertFalse(supervisor.lock._is_owned())
                 supervisor.wake.set()
                 return {}
-            popen=Mock();supervisor=remote_control.Supervisor('/synthetic/codex',Path(tmp)/'state',env,lambda:'Sample',gate=lambda:'',popen=popen,run=Mock(return_value=types.SimpleNamespace(returncode=0)))
+            popen=Mock();supervisor=remote_control.Supervisor('/synthetic/codex',Path(tmp)/'state',env,lambda:'Sample',popen=popen,run=Mock(return_value=types.SimpleNamespace(returncode=0)))
             supervisor.enabled=lambda:True
             supervisor._loop();popen.assert_not_called()
             self.assertEqual(list((Path(tmp)/'remote_control_control').glob('rc-*')),[])

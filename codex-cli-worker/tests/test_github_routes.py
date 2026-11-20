@@ -68,6 +68,28 @@ class GitHubRouteTests(unittest.TestCase):
                 self.assertEqual(self.ingress("POST", path, user="synthetic-user").status_code, 403)
                 self.assertEqual(self.ingress("POST", path, user="").status_code, 403)
 
+    def test_a_refused_change_says_what_the_owner_does_next(self):
+        """Astro F3: the refusal names GitHub, not permission requests or browser permissions."""
+        response = self.client.post("/github/connect", json={}, headers=self.worker)
+        self.assertEqual(response.json["error"], "Open Codex through Home Assistant to make this change.")
+        response = self.ingress("POST", "/github/connect", user="synthetic-user")
+        self.assertEqual(response.json["error"], "Only a Home Assistant administrator can manage GitHub.")
+        self.assertEqual(self.ingress("POST", "/github/connect", user="").json["error"], server.UNVERIFIED_ACCOUNT)
+        with patch.object(server, "lookup_ha_users", side_effect=RuntimeError("synthetic outage")):
+            server.admin_cache.clear()
+            self.assertEqual(self.ingress("POST", "/github/connect").json["error"], server.UNVERIFIED_ACCOUNT)
+
+    def test_a_permission_answer_keeps_its_own_refusal(self):
+        """The approval route still names permission requests, and still refuses the same people."""
+        path = "/tasks/synthetic-task/approvals/synthetic-approval"
+        response = self.client.post(path, json={"decision": "allow"}, headers=self.worker)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json["error"],
+                         "Open Codex through Home Assistant and sign in as an administrator to answer permission requests.")
+        response = self.ingress("POST", path, user="synthetic-user", body={"decision": "allow"})
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json["error"], "Only a Home Assistant administrator can answer permission requests.")
+
     def test_connect_shows_the_code_and_never_the_device_code(self):
         self.http.posts = [Response(200, {"device_code": "synthetic-device-code", "user_code": "WXYZ-1234",
                                           "verification_uri": "https://github.com/login/device",
@@ -84,7 +106,7 @@ class GitHubRouteTests(unittest.TestCase):
     def test_status_carries_github_without_the_token(self):
         self.service._complete_app(APP_TOKEN)
         quiet = {name: patch.object(server, name, return_value={}) for name in (
-            "codex_login_status", "auth_status_payload", "pause_payload", "model_pin", "usage_status_payload",
+            "codex_login_status", "auth_status_payload", "model_pin", "usage_status_payload",
             "integration_status", "remote_control_summary", "mailbox_status_payload", "refresh_usage_status_async")}
         quiet["account_access"] = patch.object(server.account_access, "snapshot", return_value={})
         quiet["tasks"] = patch.object(server, "tasks", {})
@@ -158,15 +180,6 @@ class GitHubRegistrationTests(unittest.TestCase):
         with patch.object(server.github_service, "current_state", return_value="ok"):
             self.assertIn("github_git", server.github_service.prompt_note())
 
-    def test_read_only_chats_and_schedules_are_read_only_for_the_tool(self):
-        """F5: the same narrowing task_options applies to the sandbox."""
-        with patch.object(server, "tasks", {"chat": {"permission_mode": "read-only"},
-                                            "lead": {"task_source": "lead", "background_mode": "read-only"},
-                                            "free": {}}), \
-                patch.object(server, "read_options", return_value=dict(server.DEFAULT_OPTIONS)):
-            self.assertTrue(server.github_task_read_only("chat"))
-            self.assertTrue(server.github_task_read_only("lead"))
-            self.assertFalse(server.github_task_read_only("free"))
 
     def test_worker_redaction_knows_github_tokens(self):
         self.assertNotIn(APP_TOKEN, server.redact(f"remote: {APP_TOKEN}"))
