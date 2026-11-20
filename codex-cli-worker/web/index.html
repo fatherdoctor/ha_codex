@@ -8,6 +8,8 @@
     />
     <meta name="color-scheme" content="light dark" />
     <title>Codex for Home Assistant</title>
+    <link rel="icon" type="image/svg+xml" href="assets/brand/icon.svg" media="(prefers-color-scheme: light)" />
+    <link rel="icon" type="image/svg+xml" href="assets/brand/dark_icon.svg" media="(prefers-color-scheme: dark)" />
     <link rel="stylesheet" href="assets/chat.css" />
     <link rel="stylesheet" href="assets/studio.css" />
     <script src="assets/text-size.js"></script>
@@ -28,7 +30,8 @@
       ></button>
       <aside id="sidebar" aria-label="Conversations">
         <div class="brand">
-          <span class="brand-icon" aria-hidden="true">⌘</span
+          <span class="brand-icon" aria-hidden="true"
+            ><img class="brand-mark-light" src="assets/brand/icon.svg" alt="" width="24" height="24" /><img class="brand-mark-dark" src="assets/brand/dark_icon.svg" alt="" width="24" height="24" /></span
           ><strong>Codex</strong><span class="tag">for Home Assistant</span
           ><button
             id="close-sidebar"
@@ -83,10 +86,15 @@
           </div>
           <p id="usage-plan" class="usage-plan">Plan unknown</p>
           <p id="usage-note" class="usage-note" role="status">Loading quota…</p>
-          <button id="settings-button" class="foot-row" type="button" aria-label="Open settings">
+          <button id="settings-button" class="foot-row" type="button" aria-label="Open settings" aria-describedby="attention-label">
             <span class="mdi-icon mdi-cog" aria-hidden="true"></span
             ><span class="foot-label">Settings</span>
           </button>
+          <button id="attention-dismiss" class="foot-row" type="button" hidden>
+            <span class="mdi-icon" aria-hidden="true"></span
+            ><span class="foot-label">Dismiss the warning</span>
+          </button>
+          <span id="attention-label" class="sr-only"></span>
         </div>
       </aside>
       <div
@@ -105,6 +113,7 @@
             id="menu"
             class="icon mobile"
             aria-label="Open conversations"
+            aria-describedby="attention-label"
             aria-expanded="false"
           >
             ☰
@@ -112,8 +121,8 @@
           <h1 id="chat-title">New chat</h1>
           <p id="chat-status" class="sr-only" role="status">Your Home Assistant, with a little help.</p>
         </header>
-        <div class="phone-thread-tools"><button id="phone-history" class="icon" aria-label="Open conversations">☰</button>
-          <span id="phone-title">New chat</span><button id="phone-new" class="icon" aria-label="New chat">＋</button></div>
+        <div class="phone-thread-tools"><button id="phone-history" class="icon" aria-label="Open conversations" aria-describedby="attention-label">☰</button>
+          <span id="phone-title">New chat</span></div>
         <p id="integration-notice" role="status" hidden></p>
         <section id="session-banner" class="page-banner" role="alert" hidden>
           <p><strong>Your Home Assistant session expired.</strong> Reload the page to continue.</p>
@@ -142,7 +151,7 @@
         <div class="compose-area">
           <!-- The hint sits above the composer, not above the chat: the integration notice stays next to the list. -->
           <section id="agents-hint" class="page-banner" role="status" hidden>
-            <p><strong>No workspace instructions yet.</strong> Codex works without /config/AGENTS.md. Write one to tell it the rules of your home.</p>
+            <p><strong>No workspace instructions yet.</strong> Codex works without an AGENTS.md file. Write one to tell it the rules of your home.</p>
             <div class="settings-actions"><button id="agents-hint-open">Write instructions</button
               ><button id="agents-hint-dismiss" class="subtle">Dismiss</button></div>
           </section>
@@ -395,7 +404,7 @@
           <summary>Advanced settings</summary>
           <label for="schedule-mode">Permissions</label><select id="schedule-mode"><option value="default">Default</option><option value="read-only">Read only</option></select>
           <p class="muted">Each run starts a new chat. A permission request waits in that chat; it is never allowed automatically.</p>
-          <p class="muted">Up to 24 runs per schedule and 64 scheduled or lead runs per UTC day. The assistant runs one task at a time.</p>
+          <p class="muted">Up to 24 runs per schedule and 64 scheduled runs per UTC day. The assistant runs one task at a time.</p>
           <div id="schedule-saved" hidden>
             <p id="schedule-state" class="muted"></p>
             <div class="settings-actions"><button id="schedule-toggle" type="button" class="subtle">Pause</button><button id="schedule-delete" type="button" class="subtle">Delete schedule</button></div>
@@ -531,15 +540,6 @@
               >
         </fieldset>
       </section>
-      <section id="settings-commands">
-        <h3>Commands</h3>
-        <p class="muted">
-          Type <kbd>/</kbd> at the start of the message box to see them, then
-          tap one or pick it with the arrow keys and Enter. The page runs them
-          itself; they are not sent to Codex.
-        </p>
-        <dl id="command-list" class="command-list"></dl>
-      </section>
       <section id="remote-control-section" data-own-dialog>
         <h3>Remote control from the ChatGPT app</h3>
         <p class="muted">
@@ -559,7 +559,7 @@
           runs outside the sandbox. This app adds no check of its own. Codex's
           managed requirements refuse a full-access request while Full access
           is off in Settings, and the sandbox hides credential files. Put limits
-          specific to your installation in /config/AGENTS.md. Codex may downgrade
+          specific to your installation in the app's AGENTS.md (Settings > Workspace instructions). Codex may downgrade
           a disallowed full-access relay request to read-only. Not every relay
           thread warning reaches this page; a missing warning does not prove
           the requested permissions were granted.
@@ -576,24 +576,16 @@
           <pre id="remote-control-log"></pre>
         </details>
       </section>
+      <!-- scheduling:begin -->
       <section id="scheduled-work">
-        <!-- scheduling:begin -->
         <h3>Scheduled runs</h3>
         <p class="muted">To schedule a chat, open its menu in the chat list and choose Schedule. Proposals from agents stay off until you approve them here.</p>
         <p id="schedule-timezone" class="muted"></p>
         <div id="schedule-list"></div>
         <h4>Run log</h4><div id="schedule-runs"></div>
-        <!-- scheduling:end -->
-        <h3>Lead agent channel</h3>
-        <p class="muted">Create a separate token for the other agent on this box. Copy it to that agent's private configuration. It can propose schedules and exchange local messages, but cannot approve actions or schedules. Rotation revokes the old token.</p>
-        <button id="lead-token-create" type="button">Create or rotate lead token</button>
-        <div id="lead-token-result" hidden><label for="lead-token-value">Token (shown once)</label><input id="lead-token-value" type="password" readonly autocomplete="off" /><button id="lead-token-copy" type="button">Copy token</button><button id="lead-token-hide" type="button" class="subtle">Clear token</button></div>
-        <p id="lead-token-status" class="muted"></p>
-        <h4>Local mailbox</h4><p class="muted">Messages stay on the box. They are not sent to people or executed.</p>
-        <div id="schedule-mailbox"></div>
-        <form id="schedule-mail-form"><input id="schedule-mail-parent" type="hidden" /><p id="schedule-mail-target" class="muted">New message</p><label for="schedule-mail-body">Message</label><textarea id="schedule-mail-body" rows="3" maxlength="8000" required></textarea><div class="settings-actions"><button type="submit">Save message</button><button id="schedule-mail-reset" type="button" class="subtle">New thread</button></div></form>
         <p id="schedule-result" role="status"></p>
       </section>
+      <!-- scheduling:end -->
       <section id="workspace-section">
         <h3>Workspace instructions</h3>
         <p class="muted">

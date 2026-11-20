@@ -17,6 +17,7 @@ from verification import Verification
 from ha_data import HomeAssistantData
 from server import data_mcp_args, verification_mcp_args
 from approvals import AppServerSession
+import tool_threads
 
 
 def data_receipts(request):
@@ -82,6 +83,36 @@ def assert_data_results(request):
                              "statistics": {"count": 5000, "sum": 12497500, "middle": 2500}}], text[:2000]
 
 
+def bind_reported_thread(event):
+    """Bind the thread that Codex reports to the fixture's task, as run_task does for a chat."""
+    if isinstance(event, dict) and event.get("type") == "thread.started":
+        tool_threads.CHATS.bind("task", event.get("thread_id"))
+
+
+def run_exec_binding_its_thread(args, workspace, environment):
+    """Run `codex exec --json`, bind its thread as soon as Codex reports it, and return the finished process."""
+    proc = subprocess.Popen(args, cwd=workspace, env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, bufsize=1)
+    timer = threading.Timer(90, proc.kill)
+    timer.start()
+    stderr = []
+    reader = threading.Thread(target=lambda: stderr.append(proc.stderr.read()), daemon=True)
+    reader.start()
+    lines = []
+    try:
+        for line in proc.stdout:
+            lines.append(line)
+            try:
+                bind_reported_thread(json.loads(line))
+            except ValueError:
+                pass
+        proc.wait()
+    finally:
+        timer.cancel()
+        reader.join(5)
+    return subprocess.CompletedProcess(args, proc.returncode, "".join(lines), "".join(stderr))
+
+
 def main():
     """Run both CLI transports: private MCP reads work while shell networking stays sandboxed."""
     binary = os.environ.get("HA_TEST_CODEX", "/usr/local/bin/codex")
@@ -106,12 +137,14 @@ def main():
             checks.extend(fields.get("verification", []))
         worker.update_task = update
         engine = Verification(worker)
-        engine.capabilities["task"] = "fixture-capability"
+        # The exchange ids stay in the worker; Codex's tool calls name the chat by its thread id, which the
+        # fixture binds when Codex reports it, as run_task does.
+        engine.capabilities["task"] = "fixture-exchange"
         engine.core = lambda *_args, **_kwargs: {"state": "on", "attributes": {}}
         path = str(root / "verification.sock")
         service = engine.serve(path)
         data = HomeAssistantData(worker, root / "exports")
-        data_capability = data.begin("task")
+        data.begin("task")
         start = datetime(2026, 1, 1, tzinfo=timezone.utc)
         data.history = lambda query: data.result("history", query, {
             "sensor.kitchen": {"points": [{"time": f"2026-01-01T00:{index // 60:02d}:{index % 60:02d}+00:00", "state": str(index)}
@@ -210,8 +243,7 @@ def main():
                 home = root / mode
                 home.mkdir()
                 environment = {key: os.environ[key] for key in ("PATH", "LD_LIBRARY_PATH") if key in os.environ}
-                environment.update(CODEX_HOME=str(home), HOME=str(home), HA_VERIFICATION_CAPABILITY="fixture-capability",
-                                   HA_DATA_CAPABILITY=data_capability)
+                environment.update(CODEX_HOME=str(home), HOME=str(home))
                 for private_path in (path, data_path):
                     probe = subprocess.run([binary, "sandbox", "-c", f'sandbox_mode="{mode}"', "--", sys.executable, "-c",
                         "import socket; print('socket-probe-started', flush=True); "
@@ -231,7 +263,7 @@ def main():
                         "-c", 'mcp_servers.home_assistant_data.env.HA_DATA_SOCKET=' + json.dumps(data_path)]
                 args = [binary, "exec", "--sandbox", mode, "--skip-git-repo-check", "--json", "--model", "gpt-5.1-codex",
                         "-c", 'approval_policy="never"', *config_args, "Check the kitchen light with the verification tool."]
-                result = subprocess.run(args, cwd=workspace, env=environment, capture_output=True, text=True, timeout=90)
+                result = run_exec_binding_its_thread(args, workspace, environment)
                 assert not fixture_errors, fixture_errors
                 assert result.returncode == 0, (result.stdout, result.stderr)
                 assert "Fresh entity state" in json.dumps(received[-1]["input"]), (result.stdout, result.stderr)
@@ -257,7 +289,7 @@ def main():
                         thread_params={"cwd": str(workspace), "sandbox": mode, "model": "gpt-5.1-codex",
                                        "approvalPolicy": "on-request", "approvalsReviewer": "user"},
                         turn_params={"input": [{"type": "text", "text": "Check the kitchen light with the verification tool."}]},
-                        on_event=lambda _: None, on_approvals=approvals.append, on_final=finals.append,
+                        on_event=bind_reported_thread, on_approvals=approvals.append, on_final=finals.append,
                         is_active=lambda: proc.poll() is None, redact=lambda text: text,
                     )
                     reader = threading.Thread(target=approval.read, args=(proc.stdout,), daemon=True)
@@ -280,6 +312,7 @@ def main():
                 assert "Fresh entity state" in json.dumps(received[-1]["input"]), received[-1]
                 assert_data_results(received[-1])
                 assert checks[-1]["status"] == "passed", checks
+            tool_threads.CHATS.release("task")
             assert len(received) == 20
             assert data.queries["task"] == 8
             assert "private-supervisor-token" not in json.dumps(received)

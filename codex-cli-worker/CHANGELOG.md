@@ -2,29 +2,133 @@
 
 ## 0.4.0 (unreleased)
 
-- Chat page: the plus on the attach button is now an icon centered in a round button, on a desktop and a phone.
-  The banner across the top of the page while Full access is on is gone; in a chat's Permissions menu, **Full
-  access** is now shown in bold while the setting is on, and the other choices are not bold.
-- Chat page: the plus on the **New chat** button is now a 20 px icon, in the same style as the attach plus, on a
-  desktop and a phone.
-- Files and photos you attach to a message are now stored in the app's own data folder (`/data/attachments`), not
-  under `task_root` in the Home Assistant configuration folder, and the folder is left out of backups. The app removes
-  attachments older than 7 days once a day; a chat that shows one then says "Attachment removed after 7 days". On the
-  first start of this version, uploads kept under `task_root` by earlier versions are moved into the new folder, with
-  one log line. Images that Codex generates stay with the chat. The move is recorded only when every file moved, so a
-  failed file is tried again at the next start. The cleanup keeps a folder changed in the last hour, so it cannot
-  remove the folder of an upload in progress.
-- Documentation only: the README, the integration README, `SECURITY.md`, `DOCS.md` and three option descriptions
-  now say what the code does. The README no longer promises a question before every change, or a saved copy and a
-  configuration check after every change; it says when each one happens. It says that an automation with no user
-  may call the `codex_cli.*` actions. `DOCS.md` has a new section, "Task time limits", for `task_timeout_seconds`.
-  The integration README's install steps match the app's own install of the integration. The usage sensors' two
-  sources are named. The **Full snapshot** and **Codex sandbox** option descriptions say what a snapshot leaves out
-  and where Full access is turned on.
-- Documentation only: the support page, the bug report form, the update and rollback document and the README speak
-  for the project, not for one person, and give versions of this project in their examples. The changelog now starts
-  at this project's first version. The root `SCREENSHOTS.md`, which said that no screenshot was published, is
-  removed; `screenshots/SCREENSHOTS.md` lists the screenshots.
+### What's new
+- **A warning when something needs you.** On the chat page, the Settings cog turns into a warning symbol while
+  something needs you. On a phone, the conversations button shows it too. Yellow means an approval or a schedule
+  proposal waits. Red means ChatGPT is signed out or unreadable, the GitHub sign-in expired or was revoked, or Remote
+  is on and lost its connection. Use **Dismiss the warning** to hide it until something new happens; the ChatGPT
+  warning cannot be dismissed.
+- **New Courtyard mark.** You see it in the app icon and logo, the integration's brand images, the chat page's tab icon
+  and header mark, and the README logo. The mark in the page header follows the page's theme (the Home Assistant theme
+  when the page runs inside Home Assistant), not the system's light or dark setting. The tab icon still follows the
+  system.
+- **No model pinned by default.** The **Model pin** option is now empty, and empty means your account's default
+  model. A value you set still pins the app. On the first start of this version, an install that still has the old
+  default value (`gpt-6.1-sol`) has it cleared once, with a line in the app log. If you chose that model on purpose,
+  set it again. A value you set later is kept.
+- **Steps stay closed while Codex works.** Under the "Working on your request…" line, the steps stay closed until you
+  tap it. Your choice holds until the turn ends. Then the steps close under "Worked for…" as before. A permission
+  request stays visible outside the closed list.
+- **Cleaner chat page buttons.** The plus on the attach button is now an icon centered in a round button, on a desktop
+  and a phone. The **New chat** plus is a 20 px icon in the same style. The extra plus button beside the chat title on
+  a phone is gone; **New chat** stays in the conversation list. The banner across the top of the page while Full
+  access is on is gone. In a chat's Permissions menu, **Full access** is shown in bold while the setting is on, and
+  the other choices are not.
+- **The lead agent channel and the local mailbox are removed.** The lead token, its Settings section, the `/lead/`
+  routes and the `/schedule-mailbox` routes are gone, and Codex no longer has the `read_mailbox` and `post_mailbox`
+  tools. Saved schedules are kept. Saved messages stay in the schedule file, unread, so an older version still finds
+  them after a rollback. The chat page also no longer shows the lead agent: an old chat that the lead channel started has
+  no "Started by lead" label, and the schedule editor no longer mentions lead runs.
+- **Starter `AGENTS.md` safeguards.** The starter file has a short section of safeguard defaults (secrets, protected
+  places, backups). It says they are defaults you can change or delete, not locks in the app.
+- **Clearer documentation.** The README, the integration README, `SECURITY.md`, `DOCS.md` and three option
+  descriptions now say what the code does. The README no longer promises a question before every change, or a saved
+  copy and a configuration check after every change; it says when each one happens. It says that an automation with
+  no user may call the `codex_cli.*` actions. `DOCS.md` has a new section, "Task time limits", for
+  `task_timeout_seconds`. The integration README's install steps match the app's own install of the integration. The
+  usage sensors' two sources are named. The **Full snapshot** and **Codex sandbox** option descriptions say what a
+  snapshot leaves out and where Full access is turned on. The support page, the bug report form and the update and
+  rollback document speak for the project, not for one person, and give versions of this project in their examples.
+  The changelog starts at this project's first version. `screenshots/SCREENSHOTS.md` lists the screenshots; the root
+  `SCREENSHOTS.md` is removed.
+- **Scheduled runs can change the house, with your OK.** A scheduled run now has the same tools as a chat on the
+  page, the `home_assistant_call` tool that changes the house included. Before, a scheduled run did not get that tool.
+  Codex asks before each call as it does in a chat. The question waits in the run's chat with the yellow warning until
+  an administrator chooses **Allow once** or **Deny**, and nothing is sent to Home Assistant before that. A schedule
+  still runs in Default or Read only.
+- **A richer command list.** The command list above the message box now shows an icon for each command and marks the
+  letters you typed, and a press outside the list closes it. New commands `/pin`, `/share`, `/archive` and `/delete`
+  do what the chat menu does, and `/connection` opens the remote connection and its status. `/help` and
+  **Settings** > **Commands** are gone: the list in the message box is the only one. When you close a dialog that a
+  command opened, the cursor stays in the message box.
+- **Changed: the workspace instructions file moved out of `/config`.** `AGENTS.md` now lives in the app's own
+  `addon_config` folder (`/addon_configs/<app folder>/AGENTS.md` on the host), not in the top level of `/config`.
+  Codex loads it as its global instructions, and **Settings** > **Workspace instructions** reads and writes it there.
+  On the first start of this version, a file an older version left in `/config` is moved, not copied, after a backup
+  copy at `/data/agents_before_move.md`. If both places hold a file, nothing moves and the app logs a line.
+
+### Changed
+- **Working files out of the configuration folder.** The chats (prompts, logs, per-turn backups, attachments) are now
+  in the app's private `/data/codex_tasks`, not in `/config/codex_tasks`: the file editor, Samba and a backup of the
+  configuration folder no longer hold them, and the app's own backup does. The first start of this version moves each
+  chat (never copies it) and removes the old folder. The **Task root** option is removed; from a folder saved in it,
+  only the chat folders and the sign-in log are moved, and the folder is removed only when it is then empty. Codex still keeps its copy
+  of each file before a change: the exchange's own backup folder is added to the sandbox's writable places.
+- **Uploads kept for 7 days, outside the backup.** Files and photos you attach to a message are now stored in
+  `/data/attachments`, which the app's backup leaves out, not with the chat in `/data/codex_tasks`. The app removes
+  uploads older than 7 days once a day. A chat that shows a removed upload then says "Attachment removed after 7
+  days". On the first start of this version, uploads that earlier versions kept with the chat are moved there, with
+  one log line; a file that fails to move is tried again at the next start. Images that Codex generates stay with the
+  chat. The cleanup keeps a folder changed in the last hour, so it cannot remove the folder of an upload in progress.
+- **No sign-in images under `/config/www`.** The sign-in notification has the link and the code but no QR image,
+  because Home Assistant serves `/config/www` to anyone who can reach it. The QR code stays on the app's own page.
+  The first start of this version deletes the old `codex_login_*.svg` images and their folder.
+- **No more checks after each answer.** The app no longer judges a turn after Codex answers: it takes no dashboard
+  screenshots of its own (they could catch a dashboard still loading), adds no "Verification needs review" note and
+  no "No previous version saved" lines. Those lines blamed the turn for files that something else, such as an
+  automation or another app, changed while it ran. Codex checks its own work during the turn, as its rules say. The
+  per-file copies of the files Codex changes are still made, and a change that fails the configuration check still
+  points to them. The `backups` field is gone from the task API, `codex_cli.get_task` and the
+  `codex_cli_task_result` event.
+
+### Fixed
+- **Pop-ups are smaller and close on an outside click.** The Permissions control now opens a small menu right
+  above its button instead of a full-width sheet. A click or tap outside any pop-up, menu or dialog closes it, like
+  Escape does. A dialog where you changed a field stays open, so nothing you typed is lost.
+- The "Codex" label with the command symbol no longer sits above each reply on the chat page. Screen readers still
+  announce each reply as "Codex reply"; the reply's time and status line stay.
+- The mark in the chat page header now follows the page's theme instead of the system's light or dark setting. Open
+  the chat page inside Home Assistant with a theme that differs from your system setting, and the mark matches the
+  theme.
+- The chat page's rules no longer tell Codex how to answer a question about Codex cloud tasks (the
+  `codex cloud list --json` line from 0.3.4). That line belonged to a feature that is not built; it returns with the
+  feature. Codex can still run those commands when you ask it to.
+- **Repairs go away with the integration.** The sign-in, Remote control and GitHub repairs are deleted when the
+  Codex integration is unloaded or removed. Before, an owner who removed the integration kept a "sign in" repair
+  that nothing would clear.
+- **The Codex device is shown as a service.** Home Assistant now marks the Codex device as a service (an app that
+  runs on the same machine), not as a piece of hardware.
+
+### Known issues
+- Remote control still uses its own keys. The tool requests of a chat no longer do (see "Under the hood").
+- `/status` reports the mailbox as not available, so the integration's unread-mail sensor shows unknown until a later
+  version of the integration removes it.
+- The new Codex host (see "Under the hood") is not connected. Every message still starts its own Codex process.
+
+### Under the hood
+- Tool requests no longer use a secret key for each message. Each request names its chat by the thread id that Codex
+  adds to every tool call, and the worker answers it only while that chat's exchange runs. A sub-agent that the chat
+  starts counts as the chat, and a thread that one chat holds is never given to another. The sandbox already stops a
+  command in Read only, Default and Auto-review from reaching the tool sockets.
+- A new module, `codex_host.py`, can keep one Codex process running and hold each chat as a thread in it, with at
+  most three chats loaded at a time. Nothing starts it in this version. A later change connects it, with an option to
+  turn it off.
+- The worker no longer contains the `codex exec` start path kept from upstream; every exchange already ran through
+  `codex app-server`. No behavior changes: the modes the protected policy refuses are still stopped before Codex
+  starts. A new test fails if any shipped module names the `exec` subcommand. The approval smoke test now runs in the
+  built image, against the Codex CLI that ships.
+- Two new checks run the packaged Codex CLI against a local stand-in model: one for the tool sockets in each mode, one
+  for how `codex app-server` handles several chats in one process.
+- Clean-up: five unused chat page styles are removed, and so are the unused `CORE_URL` and `ALLOW_MARK` constants and
+  three code comments that named an audit record the app does not keep. The three test files that prove a removed
+  part stays removed are now one, `tests/test_removed_surfaces.py`. `AGENTS.md` no longer describes the bundled house
+  rules file, which was removed in an earlier version. The schedule store lost the code paths only the lead channel
+  used: Codex can propose a new schedule but not edit a saved proposal, and a run is always reserved for one schedule.
+  A bare old lead token in Codex output is still redacted, because a rollback to 0.3 makes it valid again.
+- The permission bridge (`approvals.py`) can now run one turn on a Codex process that it does not own. In that mode it
+  sends only `turn/start` on a thread that is already loaded, with the chat's model in the turn, and it uses request
+  IDs that no other chat on the process uses. A cancel sends `turn/interrupt` and leaves the process input open for
+  the other chats. Nothing uses this mode yet. Each exchange still starts its own Codex process.
 
 ## 0.3.6 - 2026-11-18
 

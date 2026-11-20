@@ -48,15 +48,10 @@ WAYS_IN = {
         PAGE: ("codex_github.github_git",), APP: NONE, SERVICE: ("codex_github.github_git",)},
 }
 
-# Scheduled runs are off in this series (scheduling.SCHEDULED_RUNS): the row, the tools and the DOCS.md row are
-# there only when the switch is on.
-if scheduling.SCHEDULED_RUNS:
-    WAYS_IN["Propose a schedule or use the mailbox"] = {
-        PAGE: ("codex_scheduling.propose_schedule", "codex_scheduling.list_schedules",
-               "codex_scheduling.read_mailbox", "codex_scheduling.post_mailbox"),
-        APP: NONE,
-        SERVICE: ("codex_scheduling.propose_schedule", "codex_scheduling.list_schedules",
-                  "codex_scheduling.read_mailbox", "codex_scheduling.post_mailbox")}
+WAYS_IN["Propose a schedule"] = {
+    PAGE: ("codex_scheduling.propose_schedule", "codex_scheduling.list_schedules"),
+    APP: NONE,
+    SERVICE: ("codex_scheduling.propose_schedule", "codex_scheduling.list_schedules")}
 
 # The one tool that changes the house: Codex asks for it each time, so only a launch that can ask gets it.
 CALL_TOOL = "home_assistant_call.call"
@@ -103,16 +98,8 @@ def table_tools(way: str) -> set[str]:
 
 
 def page_args() -> list[str]:
-    """The arguments of a chat page turn; the run picks one of these two launches by the approval option."""
+    """The arguments of a chat page turn; a scheduled run starts with the same ones (tests/test_sched_parity.py)."""
     return server.build_app_server_args()
-
-
-def exec_args(task: dict | None = None) -> list[str]:
-    """The arguments of a `codex exec` turn for the given task, or for a new chat with default settings."""
-    task = task or {"task_id": "t", "turns": [], "chat_settings": server.DEFAULT_CHAT_SETTINGS}
-    task_id = task["task_id"]
-    with patch.object(server, "tasks", {task_id: task}), patch.object(server, "read_options", return_value={}):
-        return server.build_codex_args(task_id, Path("prompt"), Path("final"), None)
 
 
 def app_args() -> list[str]:
@@ -182,13 +169,6 @@ class WaysInTests(unittest.TestCase):
                     expected = "prompt" if f"{name}.{tool}" == CALL_TOOL else "approve"
                     self.assertEqual(settings.get(f"tools.{tool}.approval_mode"), expected)
 
-    def test_both_page_launches_register_the_same_tools(self):
-        """A turn runs through app-server or exec by an option, never by way in; both give the same read tools.
-
-        The exec launch has no live permission requests, so it never gets the call tool.
-        """
-        self.assertEqual(tools_of(exec_args()), self.page - {CALL_TOOL})
-
     def test_every_page_tool_is_preapproved_except_the_call_tool(self):
         """A read tool is approved ahead; the call tool asks each time ("prompt"), so the person is the gate."""
         for name, settings in registered_servers(page_args()).items():
@@ -198,13 +178,15 @@ class WaysInTests(unittest.TestCase):
                     self.assertEqual(settings.get(f"tools.{tool}.approval_mode"), expected)
 
     def test_a_task_from_the_service_action_launches_with_the_page_tools(self):
-        """The task that the service's request opens on /tasks gets the page's tools on either launch.
+        """The task that the service's request opens on /tasks is a page task, so it gets the page's tools.
 
-        run_task picks the launch by the approval option, not by the caller: build_app_server_args takes no task,
-        and build_codex_args is built here from the task that the request really opened.
+        Every task starts with the same launch. The request that the service sends opens a task that is not a
+        scheduled run, so it also runs in its own permission mode and notifies like a chat on the page.
         """
         task = task_started_by_service("Turn on a light")
-        self.assertEqual(tools_of(exec_args(task)), self.page - {CALL_TOOL})
+        self.assertNotIn(task.get("task_source"), {"schedule", "lead"})
+        with patch.object(server, "tasks", {task["task_id"]: task}):
+            self.assertFalse(server.background_task(task["task_id"]))
         self.assertEqual(tools_of(page_args()), self.page)
 
     def test_the_service_action_starts_the_same_task_as_the_page(self):

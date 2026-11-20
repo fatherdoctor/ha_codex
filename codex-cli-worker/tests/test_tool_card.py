@@ -153,7 +153,7 @@ class ToolCardTests(unittest.TestCase):
     def test_other_questions_are_still_declined_in_the_chat(self):
         cases = {
             "another server": {"serverName": "codex_scheduling",
-                               "message": 'Allow the codex_scheduling MCP server to run tool "post_mailbox"?'},
+                               "message": 'Allow the codex_scheduling MCP server to run tool "list_schedules"?'},
             "message names another server": {"message": 'Allow the github MCP server to run tool "call"?'},
             "another tool of the server": {"message": 'Allow the home_assistant_call MCP server to run tool "read"?'},
             "the server's own question": {"_meta": None, "message": "Pick a light"},

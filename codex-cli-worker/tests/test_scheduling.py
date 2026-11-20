@@ -3,7 +3,6 @@ import concurrent.futures
 import copy
 from datetime import datetime, timezone
 import io
-import json
 import os
 from pathlib import Path
 import tempfile
@@ -15,6 +14,7 @@ from test_server import server
 import scheduling
 import schedule_api
 import scheduling_mcp
+import tool_threads
 
 
 def setUpModule():
@@ -34,6 +34,18 @@ NOW = datetime(2027, 3, 1, tzinfo=timezone.utc).timestamp()
 def proposal(**changes):
     return {'name': 'Sample inspection', 'prompt': 'Inspect the sample configuration.', 'mode': 'default',
             'spec': {'kind': 'interval', 'seconds': 3600}, **changes}
+
+
+THREAD = '11111111-2222-4333-8444-555555555555'
+
+
+def open_exchange(test, task_id):
+    """Begin the task's running exchange and bind the chat's thread to it; return the thread id a request names."""
+    server.ha_data.begin(task_id)
+    tool_threads.CHATS.bind(task_id, THREAD)
+    test.addCleanup(tool_threads.CHATS.release, task_id)
+    test.addCleanup(server.ha_data.end, task_id)
+    return THREAD
 
 
 class FakeWorker:
@@ -97,16 +109,17 @@ class ScheduleStoreTests(unittest.TestCase):
             with self.subTest(expression=expression), self.assertRaises(ValueError):
                 self.save(spec={'kind': 'cron', 'expression': expression})
 
-    def test_agent_proposal_and_agent_edits_cannot_self_approve(self):
-        value = self.store.save(proposal(), owner=False, now=NOW)
+    def test_agent_proposal_cannot_self_approve_or_be_edited_by_the_agent(self):
+        value = self.store.save(proposal(), owner=False, author='codex', now=NOW)
         self.assertFalse(value['approved']); self.assertFalse(value['enabled'])
         self.engine.tick(NOW + 3601); self.assertEqual(self.worker.sent, [])
-        edited = self.store.save(proposal(prompt='Inspect another sample.'), owner=False, now=NOW, schedule_id=value['id'])
-        with self.assertRaises(ValueError):
-            self.store.action(value['id'], 'approve', NOW, value['revision'])
-        self.store.action(value['id'], 'approve', NOW, edited['revision'])
         with self.assertRaises(LookupError):
-            self.store.save(proposal(), owner=False, now=NOW, schedule_id=value['id'])
+            self.store.save(proposal(prompt='Inspect another sample.'), owner=False, author='codex', now=NOW, schedule_id=value['id'])
+        with self.assertRaises(ValueError):
+            self.store.action(value['id'], 'approve', NOW, 'stale-revision')
+        self.store.action(value['id'], 'approve', NOW, value['revision'])
+        with self.assertRaises(LookupError):
+            self.store.save(proposal(), owner=False, author='codex', now=NOW, schedule_id=value['id'])
         self.assertTrue(self.store.schedules()[0]['enabled'])
 
     def test_pause_resume_delete_and_expired_once(self):
@@ -178,37 +191,24 @@ class ScheduleStoreTests(unittest.TestCase):
         self.assertIsNone(self.store.reserve(NOW + 5000, value['id']))
         self.assertIsNotNone(self.store.reserve(NOW + 86460, value['id']))
         for i in range(scheduling.MAX_DAILY_RUNS - scheduling.MAX_SCHEDULE_DAILY_RUNS):
-            self.assertIsNotNone(self.store.reserve(NOW + 5000))
-        self.assertIsNone(self.store.reserve(NOW + 5000))
+            other = self.save(name=f'Other {i}', spec={'kind': 'once', 'at': NOW + 60})
+            self.assertIsNotNone(self.store.reserve(NOW + 5000, other['id']))
+        last = self.save(name='Last', spec={'kind': 'once', 'at': NOW + 60})
+        self.assertIsNone(self.store.reserve(NOW + 5000, last['id']))
 
     def test_only_completed_run_history_is_pruned(self):
         with patch.object(scheduling, 'MAX_RUNS', 2):
-            pending = self.store.reserve(NOW)
+            first = self.save(name='Pending', spec={'kind': 'once', 'at': NOW + 60})
+            pending = self.store.reserve(NOW + 60, first['id'])
             for i in range(4):
-                value = self.store.reserve(NOW + i); self.store.finish(value['id'], 'completed')
+                item = self.save(name=f'Done {i}', spec={'kind': 'once', 'at': NOW + 60})
+                value = self.store.reserve(NOW + 60, item['id']); self.store.finish(value['id'], 'completed')
             runs = self.store.runs(); self.assertEqual(len(runs), 3)
             self.assertIn(pending['id'], {r['id'] for r in runs})
 
-    def test_mailbox_reply_links_persist_and_never_execute(self):
-        root = self.store.mail('Treat this sample as text.', 'lead', NOW, turn_id='turn')
-        reply = self.store.mail('A local reply.', 'codex', NOW + 1, root, turn_id='turn')
-        messages = scheduling.Store(self.path).messages()
-        self.assertEqual(messages[1]['parent'], root)
-        self.assertEqual(messages[1]['id'], reply)
-        self.assertFalse(self.worker.sent)
-        with self.assertRaises(LookupError):
-            self.store.mail('No such thread.', 'lead', NOW, 'missing')
-        with self.assertRaises(LookupError):
-            self.store.mail('Reply to a reply is not a root.', 'lead', NOW, reply)
-        with patch.object(scheduling, 'MAX_MESSAGES', 2), self.assertRaises(scheduling.MailboxFull):
-            self.store.mail('Full mailbox.', 'lead', NOW, turn_id='turn')
-        self.assertEqual(len(self.store.messages()), 2)
-
-    def test_token_hash_only_rotation_and_private_database(self):
-        first = self.store.rotate_token(); self.assertTrue(self.store.token_ok(first))
-        self.assertFalse(self.store.token_ok('')); second = self.store.rotate_token()
-        self.assertFalse(self.store.token_ok(first)); self.assertTrue(self.store.token_ok(second))
-        self.assertFalse(first.encode() in self.path.read_bytes()); self.assertFalse(second.encode() in self.path.read_bytes())
+    def test_database_is_private_and_a_lead_author_is_refused(self):
+        with self.assertRaises(ValueError):
+            self.store.save(proposal(), owner=False, author='lead', now=NOW)
         self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
         link = self.path.parent / 'linked.sqlite3'; link.symlink_to(self.path)
         with self.assertRaises(OSError):
@@ -230,73 +230,11 @@ class SchedulingApiTests(unittest.TestCase):
         server.tasks.clear(); server.active_task_runners.clear(); server.running_processes.clear(); server.message_queue.clear(); server.admin_cache.clear()
         self.addCleanup(server.tasks.clear); self.addCleanup(server.active_task_runners.clear); self.addCleanup(server.running_processes.clear)
         self.client = server.app.test_client(); self.service = server.schedule_service
-        self.token = self.service.engine().store.rotate_token()
-        self.lead = {'Authorization': 'Bearer ' + self.token}
         self.owner = {'X-Ingress-Path': '/sample', 'X-Remote-User-Id': 'synthetic-admin'}
         self.owner_env = {'REMOTE_ADDR': server.INGRESS_PROXY_IP}
 
     def request_owner(self, method, path, data=None):
         return self.client.open(path, method=method, json=data, headers=self.owner, environ_overrides=self.owner_env)
-
-    def test_mail_unread_counts_are_per_reader_and_lead_filter_marks_only_its_page(self):
-        store = self.service.engine().store
-        first = store.mail('Synthetic message body', 'codex', NOW, turn_id='mail-test')
-        reply = store.mail('Synthetic reply', 'owner', NOW + 1, first)
-        status = store.mail_status()
-        self.assertEqual(status['unread'], {'lead': 2, 'owner': 1, 'codex': 1})
-        self.assertNotIn('body', str(status))
-        result = self.client.get('/lead/mailbox?unread_only=true', headers=self.lead)
-        self.assertEqual([row['id'] for row in result.json['mailbox']], [first, reply])
-        self.assertEqual(self.client.get('/lead/mailbox?unread_only=true', headers=self.lead).json['mailbox'], [])
-        self.assertEqual(store.mail_status()['unread'], {'lead': 0, 'owner': 1, 'codex': 1})
-        self.assertEqual(self.client.get('/lead/mailbox?unread_only=maybe', headers=self.lead).status_code, 400)
-
-    def test_status_mail_metadata_has_no_body_or_core_timezone_lookup(self):
-        self.service.engine().store.mail('UNTRUSTED_BODY', 'codex', NOW, turn_id='mail-test')
-        with patch.object(server, 'schedule_timezone', side_effect=AssertionError('No Core lookup')):
-            status = server.mailbox_status_payload()
-        self.assertEqual(status['unread']['lead'], 1)
-        self.assertNotIn('UNTRUSTED_BODY', str(status))
-        self.assertEqual(set(status['messages'][0]), {'message_id', 'thread_id', 'author', 'time'})
-
-    def test_owner_acknowledges_only_displayed_ids_and_requires_admin(self):
-        store = self.service.engine().store
-        first = store.mail('First synthetic message', 'codex', NOW, turn_id='mail-test')
-        self.request_owner('GET', '/schedules')
-        self.assertEqual(store.mail_status()['unread']['owner'], 1)
-        second = store.mail('Arrived after page snapshot', 'codex', NOW + 1, turn_id='mail-test')
-        response = self.request_owner('POST', '/schedule-mailbox/read', {'ids': [first]})
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(store.mail_status()['unread']['owner'], 1)
-        self.assertEqual(store.messages(reader='owner', unread_only=True)[0]['id'], second)
-        self.assertEqual(store.mail_status()['unread']['lead'], 2)
-        self.assertIn(self.client.post('/schedule-mailbox/read', json={'ids': [second]}, headers=self.lead).status_code, (401, 403))
-        self.assertEqual(self.request_owner('POST', '/schedule-mailbox/read', {'ids': 'all'}).status_code, 400)
-        fresh = scheduling.Store(store.path)
-        self.assertEqual(fresh.mail_status()['unread']['owner'], 1)
-        self.assertFalse(server.tasks)
-
-    def test_read_tracking_is_pruned_with_existing_mailbox_limits(self):
-        store = self.service.engine().store
-        first = store.mail('First', 'codex', NOW, turn_id='mail-test')
-        store.mark_mail_read('owner', [first]); store.mark_mail_read('lead', [first])
-        with patch.object(scheduling, 'MAX_MESSAGES', 1):
-            store.mail('Second', 'codex', NOW + 1, turn_id='mail-test')
-        self.assertEqual(len(store.messages()), 1)
-        with store.connect() as db:
-            self.assertEqual(db.execute('SELECT count(*) FROM mailbox_reads WHERE message_id=?', (first,)).fetchone()[0], 0)
-        self.assertEqual(store.mail_status()['unread']['lead'], 1)
-        store.clear_mail()
-        self.assertEqual(store.mail_status()['unread'], {'lead': 0, 'owner': 0, 'codex': 0})
-        self.assertEqual(store.mail_status()['messages'], [])
-
-    def test_lead_requires_separate_token_and_ingress_alone_is_not_a_token(self):
-        self.assertEqual(self.client.get('/lead/mailbox').status_code, 401)
-        self.assertEqual(self.client.get('/lead/mailbox', headers={'X-Codex-Worker-Token': 'synthetic-worker-credential'}).status_code, 401)
-        self.assertEqual(self.request_owner('GET', '/lead/mailbox').status_code, 401)
-        self.assertEqual(self.client.get('/lead/mailbox', headers=self.lead).status_code, 200)
-        self.assertEqual(self.client.get('/schedules', headers=self.lead).status_code, 401)
-        self.assertEqual(self.client.get('/schedules', headers={'X-Codex-Worker-Token': 'synthetic-worker-credential'}).status_code, 403)
 
     def test_management_requires_real_ingress_administrator(self):
         with patch.object(server, 'lookup_ha_users', return_value=[]):
@@ -307,21 +245,30 @@ class SchedulingApiTests(unittest.TestCase):
         self.assertTrue(result.json['schedule']['approved'])
         self.assertEqual(result.headers['Cache-Control'], 'no-store')
 
-    def test_lead_proposal_cannot_activate_and_edit_invalidates_owner_approval(self):
-        result = self.client.post('/lead/schedules', json=proposal(), headers=self.lead)
-        self.assertEqual(result.status_code, 201); schedule = result.json['schedule']
+    def agent(self):
+        """Open a running turn and return a function that sends one Codex socket request."""
+        task_id = 'synthetic-task'; server.tasks[task_id] = {'status': 'running', 'current_turn_id': 'synthetic-turn'}
+        thread = open_exchange(self, task_id)
+        return lambda op, args: self.service.dispatch({'operation': op, 'arguments': args, 'thread_id': thread})
+
+    def test_agent_proposal_cannot_activate_and_edit_invalidates_owner_approval(self):
+        call = self.agent()
+        result = call('propose_schedule', proposal())
+        schedule = self.service.engine().store.schedules()[0]
+        self.assertEqual(result['schedule_id'], schedule['id'])
         self.assertFalse(schedule['enabled']); self.assertFalse(schedule['approved'])
         endpoint = '/schedules/' + schedule['id'] + '/approve'
-        self.assertEqual(self.client.post(endpoint, json={'revision': schedule['revision']}, headers=self.lead).status_code, 401)
+        self.assertEqual(self.client.post(endpoint, json={'revision': schedule['revision']}).status_code, 401)
         self.assertEqual(self.request_owner('POST', endpoint, {'revision': schedule['revision']}).status_code, 200)
-        result = self.client.patch('/lead/schedules/' + schedule['id'], json=proposal(prompt='Changed sample.'), headers=self.lead)
-        self.assertEqual(result.status_code, 404)
+        with self.assertRaises(LookupError):
+            self.service.engine().store.save(proposal(prompt='Changed sample.'), owner=False, author='codex', now=NOW, schedule_id=schedule['id'])
         self.assertTrue(self.service.engine().store.schedules()[0]['approved'])
-        self.assertEqual(self.client.post('/lead/schedules', json=proposal(approved=True), headers=self.lead).status_code, 400)
+        with self.assertRaises(ValueError):
+            call('propose_schedule', proposal(approved=True))
 
     def test_redacted_agent_prompt_cannot_be_blindly_approved(self):
-        result = self.client.post('/lead/schedules', json=proposal(prompt='A sample that must be hidden.'), headers=self.lead)
-        value = result.json['schedule']
+        self.agent()('propose_schedule', proposal(prompt='A sample that must be hidden.'))
+        value = self.service.engine().store.schedules()[0]
         with patch.object(server, 'redact', side_effect=lambda text: '[redacted]' if 'must be hidden' in text else text):
             result = self.request_owner('POST', '/schedules/' + value['id'] + '/approve', {'revision': value['revision']})
         self.assertEqual(result.status_code, 400)
@@ -337,33 +284,15 @@ class SchedulingApiTests(unittest.TestCase):
         self.assertEqual(self.request_owner('POST', route + '/delete', {}).status_code, 200)
         self.assertEqual(self.request_owner('GET', '/schedules').json['schedules'], [])
 
-    def test_lead_task_uses_ordinary_worker_and_readonly_cannot_expand_policy(self):
-        response = self.client.post('/lead/tasks', json={'prompt': 'Inspect sample.', 'mode': 'read-only'}, headers=self.lead)
-        self.assertEqual(response.status_code, 202)
-        task_id = response.json['task_id']; task = server.tasks[task_id]
-        self.assertEqual(task['task_source'], 'lead'); self.assertEqual(task['background_mode'], 'read-only')
-        self.assertEqual(server.task_options(task_id)['codex_sandbox'], 'read-only')
-        self.assertEqual(server.read_options()['codex_sandbox'], 'workspace-write')
-        server.start_background_task.assert_called_once_with(task_id, 'Inspect sample.')
-        self.assertEqual(self.client.post('/lead/tasks', json={'prompt': 'One waiting slot.'}, headers=self.lead).status_code, 202)
-        self.assertEqual(self.client.post('/lead/tasks', json={'prompt': 'No second waiting slot.'}, headers=self.lead).status_code, 409)
-        server.tasks[task_id]['status'] = 'running'; server.tasks[task_id]['approvals'] = [{'status': 'pending'}]
-        result = self.client.get('/lead/tasks/' + task_id, headers=self.lead)
-        self.assertEqual(result.json['task']['run_status'], 'waiting_for_approval')
-        self.assertEqual(self.client.get('/lead/tasks/missing', headers=self.lead).status_code, 404)
-
-    def test_lead_result_route_cannot_read_unrelated_page_chats(self):
-        server.tasks['private-page-chat'] = {'task_id': 'private-page-chat', 'status': 'completed', 'summary': 'Synthetic page-only text.'}
-        response = self.client.get('/lead/tasks/private-page-chat', headers=self.lead)
-        self.assertEqual(response.status_code, 404)
-        self.assertNotIn('Synthetic page-only text.', response.get_data(as_text=True))
-        server.tasks['scheduled-chat'] = {'task_id': 'scheduled-chat', 'task_source': 'schedule', 'status': 'completed'}
-        self.assertEqual(self.client.get('/lead/tasks/scheduled-chat', headers=self.lead).status_code, 200)
-
-    def test_lead_cannot_answer_native_approval_or_create_bypass_fields(self):
-        self.assertEqual(self.client.post('/tasks/sample/approvals/sample', json={'decision': 'allow'}, headers=self.lead).status_code, 401)
-        for data in ({'prompt': 'Sample', 'mode': 'danger-full-access'}, {'prompt': 'Sample', 'approval_policy': 'never'}):
-            self.assertEqual(self.client.post('/lead/tasks', json=data, headers=self.lead).status_code, 400)
+    def test_agent_cannot_answer_native_approval_or_create_bypass_fields(self):
+        call = self.agent()
+        self.assertEqual(self.client.post('/tasks/sample/approvals/sample', json={'decision': 'allow'}).status_code, 401)
+        with self.assertRaises(ValueError):
+            call('answer_approval', {'decision': 'allow'})
+        for data in ({'mode': 'danger-full-access'}, {'approval_policy': 'never'}):
+            with self.assertRaises(ValueError):
+                call('propose_schedule', proposal(**data))
+        self.assertEqual(self.service.engine().store.schedules(), [])
         server.start_background_task.assert_not_called()
 
     def test_saved_readonly_task_still_refuses_an_invalid_global_policy(self):
@@ -375,39 +304,28 @@ class SchedulingApiTests(unittest.TestCase):
             server.run_task(task_id, 'Inspect the sample configuration.')
         refused.assert_called_once(); baseline.assert_not_called()
 
-    def test_policy_refusal_is_not_bypassed_by_lead_submission(self):
+    def test_policy_refusal_is_not_bypassed_by_a_due_schedule(self):
+        store = self.service.engine().store
+        store.save(proposal(), owner=True, now=NOW)
         with patch.object(server.protected_policy, 'policy_problem', return_value='Synthetic policy refusal.'):
-            result = self.client.post('/lead/tasks', json={'prompt': 'Inspect sample.'}, headers=self.lead)
-        self.assertEqual(result.status_code, 400); server.start_background_task.assert_not_called()
-        self.assertEqual(self.service.engine().store.runs()[0]['status'], 'failed')
+            with self.assertRaises(ValueError):
+                self.service.engine().tick(NOW + 3601)
+        server.start_background_task.assert_not_called()
+        self.assertEqual(store.runs()[0]['status'], 'failed')
 
     def test_oversized_or_malformed_json_do_not_launch(self):
-        self.assertEqual(self.client.post('/lead/tasks', data='not json', content_type='application/json', headers=self.lead).status_code, 400)
-        self.assertEqual(self.client.post('/lead/tasks', json={'prompt': 'x' * 70000}, headers=self.lead).status_code, 400)
+        self.assertEqual(self.client.post('/schedules', data='not json', content_type='application/json', headers=self.owner, environ_overrides=self.owner_env).status_code, 400)
+        self.assertEqual(self.request_owner('POST', '/schedules', proposal(prompt='x' * 70000)).status_code, 400)
+        self.assertEqual(self.service.engine().store.schedules(), [])
         server.start_background_task.assert_not_called()
-
-    def test_local_mailbox_roundtrip_and_token_rotation_never_launch_tasks(self):
-        result = self.client.post('/lead/mailbox', json={'turn_id': 'sample-turn', 'body': 'A sample request.'}, headers=self.lead)
-        message_id = result.json['message_id']
-        self.assertEqual(self.request_owner('POST', '/schedule-mailbox/' + message_id + '/reply', {'body': 'A local answer.'}).status_code, 201)
-        self.assertEqual(len(self.client.get('/lead/mailbox', headers=self.lead).json['mailbox']), 2)
-        result = self.request_owner('POST', '/lead-token', {'confirm': True})
-        self.assertEqual(result.status_code, 200); self.assertEqual(result.headers['Cache-Control'], 'no-store')
-        self.assertEqual(self.client.get('/lead/mailbox', headers=self.lead).status_code, 401)
-        self.assertTrue(self.service.engine().store.token_ok(result.json['token']))
-        server.start_background_task.assert_not_called()
-        self.assertEqual(server.redact(result.json['token']), '[redacted]')
 
     def test_proposal_tool_requires_active_turn_and_has_no_approval_operation(self):
-        task_id = 'synthetic-task'; server.tasks[task_id] = {'status': 'running', 'current_turn_id': 'synthetic-turn'}
-        cap = server.ha_data.begin(task_id); self.addCleanup(lambda: server.ha_data.end(task_id))
-        def call(op, args):
-            return self.service.dispatch({'operation': op, 'arguments': args, 'capability': cap})
+        task_id = 'synthetic-task'; call = self.agent()
         value = call('propose_schedule', proposal()); self.assertFalse(value['approved']); self.assertFalse(value['enabled'])
         self.assertEqual(len(call('list_schedules', {})['items']), 1)
-        first = call('post_mailbox', {'body': 'A sample tool message.'})
-        call('post_mailbox', {'body': 'A sample reply.', 'parent': first['message_id']})
-        self.assertEqual(len(call('read_mailbox', {})['items']), 2)
+        for operation in ('read_mailbox', 'post_mailbox'):   # removed; they are not operations any more
+            with self.assertRaises(ValueError):
+                call(operation, {})
         with self.assertRaises(ValueError):
             call('approve_schedule', {'id': value['schedule_id']})
         server.tasks[task_id]['current_turn_id'] = 'different-turn'
@@ -416,31 +334,30 @@ class SchedulingApiTests(unittest.TestCase):
         server.start_background_task.assert_not_called()
 
     def test_tool_pages_are_bounded_and_reject_invalid_limits(self):
-        task_id = 'synthetic-task'; server.tasks[task_id] = {'status': 'running', 'current_turn_id': 'synthetic-turn'}
-        cap = server.ha_data.begin(task_id); self.addCleanup(lambda: server.ha_data.end(task_id))
+        call = self.agent()
         for i in range(3):
-            self.service.engine().store.mail('Sample text ' + str(i), 'owner', NOW + i)
-        result = self.service.dispatch({'operation': 'read_mailbox', 'arguments': {'offset': 1, 'limit': 1}, 'capability': cap})
+            self.service.engine().store.save(proposal(name='Sample ' + str(i)), owner=False, author='codex', now=NOW + i)
+        result = call('list_schedules', {'offset': 1, 'limit': 1})
         self.assertEqual(len(result['items']), 1); self.assertEqual(result['next_offset'], 2)
         for limit in (True, '1'):   # 0 and 21 are clamped now (tests/test_schedule_limit.py)
             with self.assertRaises(ValueError):
-                self.service.dispatch({'operation': 'read_mailbox', 'arguments': {'limit': limit}, 'capability': cap})
+                call('list_schedules', {'limit': limit})
 
-    def test_tool_transport_roundtrip_and_expired_capability(self):
+    def test_tool_transport_roundtrip_and_ended_exchange(self):
         # The HA pytest harness blocks sockets; allow only this local Unix
         # transport, keeping all IP networking blocked for this test.
         if os.environ.get('PYTEST_CURRENT_TEST'):
             import pytest_socket
             pytest_socket.socket_allow_hosts([], allow_unix_socket=True)
         task_id = 'synthetic-task'; server.tasks[task_id] = {'status': 'running', 'current_turn_id': 'synthetic-turn'}
-        cap = server.ha_data.begin(task_id); self.addCleanup(lambda: server.ha_data.end(task_id))
+        thread = open_exchange(self, task_id)
         path = self.root / 'schedules.sock'; listener = self.service.serve(path)
         self.addCleanup(listener.server_close); self.addCleanup(listener.shutdown)
-        with patch.dict('os.environ', {'HA_DATA_CAPABILITY': cap, 'CODEX_SCHEDULE_SOCKET': str(path)}):
-            response = scheduling_mcp.fetch('propose_schedule', proposal())
+        with patch.dict('os.environ', {'CODEX_SCHEDULE_SOCKET': str(path)}):
+            response = scheduling_mcp.fetch('propose_schedule', proposal(), thread)
             self.assertTrue(response['ok']); self.assertFalse(response['enabled'])
             server.ha_data.end(task_id)
-            self.assertFalse(scheduling_mcp.fetch('read_mailbox', {})['ok'])
+            self.assertFalse(scheduling_mcp.fetch('list_schedules', {}, thread)['ok'])
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
     def test_native_session_gets_actual_readonly_sandbox_and_on_request_approvals(self):

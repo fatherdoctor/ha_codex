@@ -385,6 +385,256 @@ class ApprovalTests(unittest.TestCase):
             self.session.decide(approval_id, "allow")
 
 
+class SharedConnectionTests(unittest.TestCase):
+    """A session on a connection that it does not own: the process and the thread are already live."""
+
+    def make(self, *, thread_params=None, turn_params=None, active=True):
+        """Return a session that is attached to the loaded thread "live-thread" of a shared transport."""
+        session = AppServerSession(
+            self.writer, lock=threading.RLock(),
+            thread_params=thread_params if thread_params is not None else {
+                "threadId": "live-thread", "sandbox": "read-only", "approvalPolicy": "on-request",
+                "approvalsReviewer": "user", "model": "test-model"},
+            turn_params=turn_params if turn_params is not None else {
+                "input": [{"type": "text", "text": "Check a sensor"}], "approvalPolicy": "on-request"},
+            on_event=self.events.append, on_approvals=lambda records: setattr(self, "records", records),
+            on_final=self.finals.append, is_active=lambda: active,
+            redact=lambda text: text, owns_connection=False,
+        )
+        return session
+
+    def setUp(self):
+        """Capture what the sessions write to one shared input."""
+        self.writer = Transport()
+        self.writer.ended = False
+        self.events = []
+        self.finals = []
+        self.records = []
+
+    def test_start_sends_only_the_turn_with_the_model(self):
+        """No initialize and no thread request: the first message is turn/start on the live thread."""
+        session = self.make()
+        session.start()
+        messages = self.writer.messages()
+        self.assertEqual([item.get("method") for item in messages], ["turn/start"])
+        self.assertEqual(messages[0]["params"]["threadId"], "live-thread")
+        self.assertEqual(messages[0]["params"]["model"], "test-model")
+        self.assertEqual(messages[0]["params"]["input"], [{"type": "text", "text": "Check a sensor"}])
+        self.assertEqual(self.events[0], {"type": "thread.started", "thread_id": "live-thread"})
+        self.assertTrue(session.turn_running)
+
+    def test_a_model_in_the_turn_is_kept(self):
+        """A model that the caller put in the turn is not replaced by the thread's."""
+        session = self.make(turn_params={"input": [], "model": "turn-model"})
+        session.start()
+        self.assertEqual(self.writer.messages()[0]["params"]["model"], "turn-model")
+
+    def test_no_model_when_the_chat_has_none(self):
+        """The default model is not named, as on the start path."""
+        session = self.make(thread_params={"threadId": "live-thread"})
+        session.start()
+        self.assertNotIn("model", self.writer.messages()[0]["params"])
+
+    def test_a_shared_session_needs_a_thread_id(self):
+        """Without a loaded thread there is nothing to attach to; the caller uses the start path."""
+        for params in ({}, {"threadId": ""}, {"threadId": None}, {"threadId": ["live-thread"]}):
+            with self.subTest(params=params), self.assertRaises(ValueError):
+                self.make(thread_params=params)
+
+    def test_inactive_exchange_sends_nothing(self):
+        """A canceled exchange does not start a turn on the shared process."""
+        session = self.make(active=False)
+        session.start()
+        self.assertEqual(self.writer.getvalue(), "")
+        self.assertTrue(session.finished.is_set())
+        self.assertFalse(self.writer.ended)
+
+    def test_request_ids_are_unique_to_each_session(self):
+        """Two chats on one process never send the same request ID, so each reply finds its session."""
+        first, second = self.make(), self.make()
+        first.start()
+        second.start()
+        first_id, second_id = (item["id"] for item in self.writer.messages())
+        self.assertNotEqual(first_id, second_id)
+        self.assertTrue(first.owns_request(first_id))
+        self.assertFalse(first.owns_request(second_id))
+        self.assertFalse(second.owns_request(first_id))
+        self.assertFalse(first.owns_request("worker-1"))
+        self.assertFalse(first.owns_request(7))
+
+    def test_turn_completes_without_closing_the_input(self):
+        """The turn's answer is saved and the shared input stays open for the other chats."""
+        session = self.make()
+        session.start()
+        turn_request = self.writer.messages()[0]["id"]
+        session.receive({"id": turn_request, "result": {"turn": {"id": "turn-1"}}})
+        session.receive({"method": "item/completed", "params": {"threadId": "live-thread", "turnId": "turn-1", "item": {
+            "id": "message", "type": "agentMessage", "text": "The sensor reads 21."}}})
+        session.receive({"method": "turn/completed", "params": {"threadId": "live-thread", "turn": {
+            "id": "turn-1", "status": "completed"}}})
+        self.assertEqual(self.finals, ["The sensor reads 21."])
+        self.assertEqual(session.returncode, 0)
+        self.assertTrue(session.finished.is_set())
+        self.assertFalse(session.turn_running)
+        self.assertFalse(self.writer.ended)
+        self.assertEqual([item.get("method") for item in self.writer.messages()], ["turn/start"])
+
+    def test_close_interrupts_the_turn_and_keeps_the_input(self):
+        """A cancel stops this chat's turn only; the process input is not closed."""
+        session = self.make()
+        session.start()
+        session.receive({"id": self.writer.messages()[0]["id"], "result": {"turn": {"id": "turn-1"}}})
+        session.close()
+        interrupt = self.writer.messages()[-1]
+        self.assertEqual(interrupt["method"], "turn/interrupt")
+        self.assertEqual(interrupt["params"], {"threadId": "live-thread", "turnId": "turn-1"})
+        self.assertTrue(session.owns_request(interrupt["id"]))
+        self.assertFalse(self.writer.ended)
+        self.assertTrue(session.finished.is_set())
+        # turn/completed has not arrived yet: the turn can still run in the process.
+        self.assertTrue(session.turn_running)
+
+    def test_close_before_the_turn_id_reports_a_turn_left_running(self):
+        """Without a turn id nothing can interrupt the turn; turn_running tells the caller so."""
+        session = self.make()
+        session.start()
+        session.close()
+        self.assertEqual([item.get("method") for item in self.writer.messages()], ["turn/start"])
+        self.assertTrue(session.turn_running)
+        self.assertFalse(self.writer.ended)
+
+    def test_the_turn_ends_when_turn_completed_arrives_after_close(self):
+        """Case A, the normal cancel: the interrupt works, turn/completed follows, and the turn is no longer running."""
+        session = self.make()
+        session.start()
+        session.receive({"id": self.writer.messages()[0]["id"], "result": {"turn": {"id": "turn-1"}}})
+        session.close()
+        session.receive({"method": "item/completed", "params": {"threadId": "live-thread", "turnId": "turn-1", "item": {
+            "id": "message", "type": "agentMessage", "text": "Partial answer."}}})
+        # A completion of another chat's thread, or of another turn, does not end this turn.
+        session.receive({"method": "turn/completed", "params": {"threadId": "other-thread", "turn": {
+            "id": "turn-1", "status": "interrupted"}}})
+        session.receive({"method": "turn/completed", "params": {"threadId": "live-thread", "turn": {
+            "id": "turn-0", "status": "interrupted"}}})
+        self.assertTrue(session.turn_running)
+        session.receive({"method": "turn/completed", "params": {"threadId": "live-thread", "turn": {
+            "id": "turn-1", "status": "interrupted"}}})
+        self.assertFalse(session.turn_running)
+        self.assertEqual(self.finals, [])
+        self.assertNotIn({"type": "turn.started"}, self.events)
+        self.assertEqual([item.get("method") for item in self.writer.messages()], ["turn/start", "turn/interrupt"])
+        self.assertFalse(self.writer.ended)
+
+    def test_a_turn_id_that_arrives_after_close_gets_the_interrupt(self):
+        """Case B: close came before the reply to turn/start, so the session sends turn/interrupt when the id arrives."""
+        session = self.make()
+        session.start()
+        turn_request = self.writer.messages()[0]["id"]
+        session.close()
+        self.assertEqual([item.get("method") for item in self.writer.messages()], ["turn/start"])
+        session.receive({"id": turn_request, "result": {"turn": {"id": "turn-1"}}})
+        interrupt = self.writer.messages()[-1]
+        self.assertEqual(interrupt["method"], "turn/interrupt")
+        self.assertEqual(interrupt["params"], {"threadId": "live-thread", "turnId": "turn-1"})
+        self.assertTrue(session.owns_request(interrupt["id"]))
+        self.assertTrue(session.turn_running)
+        # A second copy of the reply sends nothing more.
+        session.receive({"id": turn_request, "result": {"turn": {"id": "turn-1"}}})
+        self.assertEqual(len(self.writer.messages()), 2)
+        session.receive({"method": "turn/completed", "params": {"threadId": "live-thread", "turn": {
+            "id": "turn-1", "status": "interrupted"}}})
+        self.assertFalse(session.turn_running)
+        self.assertEqual(self.finals, [])
+        self.assertFalse(self.writer.ended)
+
+    def test_a_refused_turn_start_is_not_running(self):
+        """Case C: Codex refuses turn/start, so no turn runs, whether the refusal comes before or after close."""
+        session = self.make()
+        session.start()
+        with self.assertRaises(ValueError):
+            session.receive({"id": self.writer.messages()[0]["id"], "error": {"message": "thread not loaded"}})
+        session.fail("turn/start failed")
+        self.assertFalse(session.turn_running)
+
+        late = self.make()
+        late.start()
+        late.close()
+        late.receive({"id": self.writer.messages()[-1]["id"], "error": {"message": "thread not loaded"}})
+        self.assertFalse(late.turn_running)
+        self.assertEqual(self.writer.messages()[-1]["method"], "turn/start")
+
+    def test_a_closed_session_answers_no_request(self):
+        """After close the session gives no decision: a request of Codex gets no reply and no card."""
+        session = self.make()
+        session.start()
+        session.receive({"id": self.writer.messages()[0]["id"], "result": {"turn": {"id": "turn-1"}}})
+        session.close()
+        sent = len(self.writer.messages())
+        session.receive({"id": 0, "method": COMMAND_APPROVAL, "params": {
+            "threadId": "live-thread", "turnId": "turn-1", "itemId": "item", "startedAtMs": 1,
+            "command": "ls /config", "cwd": "/config", "reason": "List files"}})
+        self.assertEqual(len(self.writer.messages()), sent)
+        self.assertEqual(self.records, [])
+
+    def test_a_pending_approval_expires_at_close(self):
+        """A permission request of the shared session cannot be answered after a cancel."""
+        session = self.make()
+        session.start()
+        session.receive({"id": self.writer.messages()[0]["id"], "result": {"turn": {"id": "turn-1"}}})
+        session.receive({"id": 0, "method": COMMAND_APPROVAL, "params": {
+            "threadId": "live-thread", "turnId": "turn-1", "itemId": "item", "startedAtMs": 1,
+            "command": "ls /config", "cwd": "/config", "reason": "List files"}})
+        approval_id = self.records[-1]["approval_id"]
+        session.close()
+        self.assertEqual(self.records[-1]["status"], "expired")
+        with self.assertRaises(LookupError):
+            session.decide(approval_id, "allow")
+        self.assertFalse(any("result" in item for item in self.writer.messages()))
+
+    def test_the_owned_session_keeps_its_ids_and_closes_its_input(self):
+        """The start path of today is unchanged: worker-N ids, worker-stop, and the input closes."""
+        writer = Transport()
+        writer.ended = False
+        session = AppServerSession(
+            writer, lock=threading.RLock(), thread_params={}, turn_params={"input": []},
+            on_event=lambda event: None, on_approvals=lambda records: None, on_final=lambda text: None,
+            is_active=lambda: True, redact=lambda text: text,
+        )
+        session.start()
+        session.receive({"id": "worker-1", "result": {}})
+        session.receive({"id": "worker-2", "result": {"thread": {"id": "thread"}}})
+        session.receive({"id": "worker-3", "result": {"turn": {"id": "turn"}}})
+        self.assertTrue(session.owns_request("worker-3"))
+        session.close()
+        messages = writer.messages()
+        self.assertEqual([item.get("method") for item in messages],
+                         ["initialize", "initialized", "thread/start", "turn/start", "turn/interrupt"])
+        self.assertEqual(messages[-1]["id"], "worker-stop")
+        self.assertTrue(writer.ended)
+
+
+    def test_a_closed_owned_session_ignores_every_message(self):
+        """On its own process a closed session reads nothing: a late turn id gets no interrupt, the state stays."""
+        writer = Transport()
+        writer.ended = False
+        session = AppServerSession(
+            writer, lock=threading.RLock(), thread_params={}, turn_params={"input": []},
+            on_event=lambda event: None, on_approvals=lambda records: None, on_final=lambda text: None,
+            is_active=lambda: True, redact=lambda text: text,
+        )
+        session.start()
+        session.receive({"id": "worker-1", "result": {}})
+        session.receive({"id": "worker-2", "result": {"thread": {"id": "thread"}}})
+        session.close()
+        session.receive({"id": "worker-3", "result": {"turn": {"id": "turn"}}})
+        session.receive({"method": "turn/completed", "params": {"threadId": "thread", "turn": {
+            "id": "turn", "status": "interrupted"}}})
+        self.assertEqual(session.turn_id, "")
+        self.assertTrue(session.turn_running)
+        self.assertEqual([item.get("method") for item in writer.messages()],
+                         ["initialize", "initialized", "thread/start", "turn/start"])
+
+
 class ApprovalApiTests(unittest.TestCase):
     """The authenticated worker endpoint binds decisions to the current task turn."""
 
@@ -567,10 +817,10 @@ class ApprovalApiTests(unittest.TestCase):
         self.assertNotIn("outputSchema", self.session.turn_params)
         self.assertEqual(self.session.turn_params["sandboxPolicy"], {
             "type": "workspaceWrite", "networkAccess": False, "writableRoots": ["/config", "/share"]})
-        self.assertTrue(server.uses_user_approvals({}))
-        self.assertTrue(server.uses_user_approvals({"codex_sandbox": "read-only"}))
-        # A refused mode never gets the approval-free exec path either: run_task stops it before launch.
-        self.assertFalse(server.uses_user_approvals({"codex_sandbox": "danger-full-access"}))
+        self.assertFalse(server.protected_policy.policy_problem({}))
+        self.assertFalse(server.protected_policy.policy_problem({"codex_sandbox": "read-only"}))
+        # A refused mode never reaches Codex: run_task stops it before launch.
+        self.assertTrue(server.protected_policy.policy_problem({"codex_sandbox": "danger-full-access"}))
 
     def test_a_task_can_write_under_share_but_never_the_github_folder(self):
         """Owner ruling 2026-11-16: /share is writable like /config; /data/github never is, and read-only stays read-only."""
@@ -818,7 +1068,7 @@ class ApprovalRunTests(unittest.TestCase):
         return Process()
 
     def assert_failed_edit_reviewed(self, failure, *, stale_answer=False):
-        """Check real change detection, backup hashes, HA checks, and recovery after failure."""
+        """Check real change detection, HA checks, and recovery from the saved copy after failure."""
         config_root = self.root / "config"
         config_root.mkdir()
         config_file = config_root / "configuration.yaml"
@@ -848,8 +1098,7 @@ class ApprovalRunTests(unittest.TestCase):
         self.assertEqual(task["status"], "failed")
         self.assertEqual(task["returncode"], 1)
         self.assertEqual(task["changes"], {"added": [], "changed": ["configuration.yaml"], "deleted": []})
-        self.assertEqual(task["backups"][0]["status"], "saved")
-        self.assertEqual(Path(task["backups"][0]["copy"]).read_text(encoding="utf-8"), original)
+        self.assertNotIn("backups", task)
         config_check.assert_called_once()
         self.assertEqual(task["config_check"]["result"], "invalid")
         self.assertTrue(task["validation_errors"])

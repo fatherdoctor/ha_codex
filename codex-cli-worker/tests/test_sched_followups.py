@@ -12,11 +12,11 @@ REAL_TIMEZONE = server.schedule_timezone
 class FollowupTests(unittest.TestCase):
     setUp = fixtures.SchedulingApiTests.setUp
 
-    def exchange(self):
+    def exchange(self, operation='list_schedules', arguments=None):
         task='timezone-fixture'
         server.tasks[task]={'status':'running','current_turn_id':'synthetic-turn'}
-        cap=server.ha_data.begin(task); self.addCleanup(lambda:server.ha_data.end(task))
-        return task, {'operation':'post_mailbox','arguments':{'body':'Synthetic mailbox message.'},'capability':cap}
+        thread=fixtures.open_exchange(self, task)
+        return task, {'operation':operation,'arguments':arguments or {},'thread_id':thread}
 
     def test_n1_slow_failed_ha_refresh_leaves_worker_lock_available_and_is_cached(self):
         task,payload=self.exchange(); entered=threading.Event(); release=threading.Event(); outcomes=[]
@@ -51,7 +51,7 @@ class FollowupTests(unittest.TestCase):
             self.assertIsNone(self.service.engine().store.timezone)
 
     def test_n1_expired_exchange_cannot_write_after_slow_timezone_refresh(self):
-        task,payload=self.exchange();entered=threading.Event();release=threading.Event();outcomes=[]
+        task,payload=self.exchange('propose_schedule',fixtures.proposal());entered=threading.Event();release=threading.Event();outcomes=[]
         def refresh():
             entered.set()
             if not release.wait(2):raise RuntimeError('Test release timed out')
@@ -67,4 +67,4 @@ class FollowupTests(unittest.TestCase):
             finally:release.set();thread.join(3)
         self.assertFalse(thread.is_alive())
         self.assertIsInstance(outcomes[0],ValueError)
-        self.assertEqual(self.service.engine().store.messages(),[])
+        self.assertEqual(self.service.engine().store.schedules(),[])

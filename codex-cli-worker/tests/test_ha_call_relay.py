@@ -168,8 +168,8 @@ class RelayLaunchTests(unittest.TestCase):
                 patch.object(server, "read_options", return_value={}):
             first = rc.remote_env(server.relay_env())
             second = rc.remote_env(server.relay_env())
-            self.assertIsNone(server.ha_call.task_for(first["HA_CALL_CAPABILITY"]))
-            self.assertEqual(server.ha_call.task_for(second["HA_CALL_CAPABILITY"]), RELAY_TASK)
+            self.assertIsNone(server.ha_call.task_for({"capability": first["HA_CALL_CAPABILITY"]}))
+            self.assertEqual(server.ha_call.task_for({"capability": second["HA_CALL_CAPABILITY"]}), RELAY_TASK)
         self.assertNotEqual(second["HA_CALL_CAPABILITY"], second["HA_RELAY_CAPABILITY"])
         self.assertNotIn("HA_CALL_SOCKET", second)
 
@@ -191,7 +191,7 @@ class RelayLaunchTests(unittest.TestCase):
                        (SimpleNamespace(poll=lambda: 1), False))
             for state in stopped:
                 with self.subTest(state=state), patch.object(server, "relay_process_state", return_value=state):
-                    self.assertIsNone(server.ha_call.task_for(key))
+                    self.assertIsNone(server.ha_call.task_for({"capability": key}))
 
 
 class ManagedConfigTests(unittest.TestCase):
@@ -375,7 +375,7 @@ class RepeatedStartTests(unittest.TestCase):
         self.wait_for_launch()
         launch = self.popen.call_args.kwargs["env"]
         self.end_relay()
-        self.assertIsNone(server.ha_call.task_for(launch["HA_CALL_CAPABILITY"]))
+        self.assertIsNone(server.ha_call.task_for({"capability": launch["HA_CALL_CAPABILITY"]}))
         self.assertFalse(server.relay_reads.active(launch["HA_RELAY_CAPABILITY"]))
         self.assertEqual(self.fake.requests, [])
 

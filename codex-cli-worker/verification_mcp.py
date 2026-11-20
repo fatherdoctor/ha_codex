@@ -6,6 +6,8 @@ import os
 import socket
 import sys
 
+import tool_threads
+
 TOOL = {
     "name": "verify",
     "description": (
@@ -35,13 +37,13 @@ TOOL = {
 }
 
 
-def verify(arguments):
-    """Forward only the supported fields and the process's temporary capability."""
+def verify(arguments, thread_id):
+    """Forward only the supported fields and the chat's thread id that Codex sent with the call."""
     if not isinstance(arguments, dict) or set(arguments) - set(TOOL["inputSchema"]["properties"]):
         raise ValueError("Unsupported verification arguments")
     if arguments.get("operation") not in TOOL["inputSchema"]["properties"]["operation"]["enum"]:
         raise ValueError("Unsupported verification operation")
-    payload = {**arguments, "capability": os.environ.get("HA_VERIFICATION_CAPABILITY", "")}
+    payload = {**arguments, "thread_id": thread_id}
     encoded = json.dumps(payload).encode() + b"\n"
     if len(encoded) > 16384:
         raise ValueError("Verification request is too large")
@@ -71,7 +73,7 @@ def respond(request):
         try:
             if params.get("name") != TOOL["name"]:
                 raise ValueError("Unknown verification tool")
-            result = verify(params.get("arguments", {}))
+            result = verify(params.get("arguments", {}), tool_threads.thread_id_from_call(params))
         except (OSError, ValueError, TypeError):
             result = {"status": "unavailable", "message": "Verification request failed or the task has ended"}
         return {"content": [{"type": "text", "text": json.dumps(result)}],

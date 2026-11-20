@@ -400,6 +400,78 @@ function setFootRow(id, dot, text) {
   $(id).dataset.state = dot;
   $(id.replace("-row", "-summary")).textContent = text;
 }
+/*
+ * The warning on the Settings icon. While something needs the owner, the cog
+ * becomes a warning symbol: yellow for an approval or a schedule proposal that
+ * waits, red for a sign-out. On a phone the menu buttons show the same symbol.
+ * Red wins over yellow.
+ *
+ * Each part of the page reports what it last read with noteAttention, from
+ * the polls it already runs; nothing here asks the worker for more. GitHub
+ * and Remote count only a sign-out the owner did not ask for: GitHub reports
+ * "disconnected" after Disconnect and "expired" or "revoked" when the stored
+ * sign-in stops working, and Remote reports "error" only while the owner's
+ * switch is on. ChatGPT not signed in, or its status unreadable, is the one
+ * red the owner cannot dismiss: no chat can run without it.
+ *
+ * Dismiss hides the warnings shown at that moment. A warning comes back when
+ * something new happens: a new approval or proposal, or a sign-out after the
+ * account was working again. Dismissed keys live in this page only.
+ */
+const attention = {
+  chatgpt: "",
+  github: "",
+  remote: false,
+  approvals: [],
+  proposals: [],
+  dismissed: new Set(),
+};
+/** Every warning in the reported state, each with a key that changes when something new happens. */
+function attentionWarnings(parts) {
+  const warnings = [];
+  if (parts.chatgpt === "signed-out")
+    warnings.push({ key: "chatgpt", level: "red", label: "ChatGPT signed out", dismissible: false });
+  if (parts.chatgpt === "unavailable")
+    warnings.push({ key: "chatgpt", level: "red", label: "ChatGPT unavailable", dismissible: false });
+  if (["expired", "revoked"].includes(parts.github))
+    warnings.push({ key: `github:${parts.github}`, level: "red", label: "GitHub signed out", dismissible: true });
+  if (parts.remote)
+    warnings.push({ key: "remote", level: "red", label: "Remote disconnected", dismissible: true });
+  for (const id of parts.approvals)
+    warnings.push({ key: `approval:${id}`, level: "yellow", label: "Approval waiting", dismissible: true });
+  for (const id of parts.proposals)
+    warnings.push({ key: `proposal:${id}`, level: "yellow", label: "Schedule proposal waiting", dismissible: true });
+  return warnings;
+}
+/** The warnings to show: those not dismissed, plus the red that cannot be dismissed. */
+function shownWarnings(warnings, dismissed) {
+  return warnings.filter((warning) => !warning.dismissible || !dismissed.has(warning.key));
+}
+/** Draw the warning from the state each part last reported. */
+function showAttention() {
+  const warnings = attentionWarnings(attention);
+  // A key that is gone is no longer dismissed, so the same thing coming back counts as new.
+  const current = new Set(warnings.map((warning) => warning.key));
+  for (const key of attention.dismissed) if (!current.has(key)) attention.dismissed.delete(key);
+  const shown = shownWarnings(warnings, attention.dismissed);
+  const level = shown.some((warning) => warning.level === "red") ? "red" : shown.length ? "yellow" : "";
+  const label = [...new Set(shown.map((warning) => warning.label))].join(", ");
+  if (level) document.body.dataset.attention = level;
+  else delete document.body.dataset.attention;
+  $("attention-label").textContent = label;
+  for (const id of ["settings-button", "menu", "phone-history"]) $(id).title = label;
+  $("attention-dismiss").hidden = !shown.some((warning) => warning.dismissible);
+}
+/** Record what one part of the page read (chatgpt, github, remote, approvals or proposals), then redraw. */
+function noteAttention(part, value) {
+  attention[part] = value;
+  showAttention();
+}
+$("attention-dismiss").onclick = () => {
+  for (const warning of shownWarnings(attentionWarnings(attention), attention.dismissed))
+    if (warning.dismissible) attention.dismissed.add(warning.key);
+  showAttention();
+};
 /** Open Settings at one part of Accounts and connections, as a foot row or a banner asks. */
 async function openAccountItem(sectionId) {
   await $("settings-button").onclick();
@@ -710,8 +782,8 @@ function controls() {
   else if (working && task?.browser_retry)
     notice = "Retrying the dashboard inspection. You can continue this chat when it finishes.";
   else if (working)
-    notice =
-      "Codex is working. Your response will appear here when it finishes.";
+    // A working chat shows no notice here; the in-chat "Working on your request" line says it.
+    notice = "";
   else if (task && !task.can_continue)
     notice =
       "This chat has no saved session to continue. Start a new chat and include the context you need.";
@@ -932,6 +1004,9 @@ async function loadList(older = false) {
   const activeChanged = state.active !== data.active_task_id;
   state.active = data.active_task_id;
   state.queue = Array.isArray(data.queue) ? data.queue : [];
+  // The archived view lists other chats, so it leaves the approvals of the main list as they were.
+  if (!state.archived)
+    noteAttention("approvals", state.chats.filter((chat) => chat.permission_required).map((chat) => chat.task_id));
   if (hadSelected && !merged.has(state.id)) await selectChat(null);
   renderList();
   // Approval panels in the open chat depend on whether any chat is working.
@@ -1068,57 +1143,6 @@ function renderConfigCheck(check) {
   if (check.warnings)
     node.append(textNode("pre", `Warnings: ${check.warnings}`, "check-detail"));
   return node;
-}
-/**
- * Say which changed files have a copy of their previous version and which have
- * none. Copies are deleted after the retention period set in the app options.
- */
-function renderBackups(turn) {
-  const entries = Array.isArray(turn.backups) ? turn.backups : [];
-  const saved = entries.filter((entry) => entry.status === "saved");
-  const unsaved = entries.filter((entry) =>
-    ["missing", "unverified"].includes(entry.status),
-  );
-  /** Word a number of files: "1 file" or "3 files". */
-  const count = (list) =>
-    list.length === 1 ? "1 file" : `${list.length} files`;
-  const nodes = [];
-  if (saved.length) {
-    const node = textNode("div", "", "check check-valid backups-saved");
-    const days = state.catalog?.backup_retention_days;
-    node.append(
-      textNode("span", "✓", "check-mark"),
-      textNode(
-        "span",
-        turn.backups_removed
-          ? `Previous version saved for ${count(saved)}; the copies have since been removed`
-          : `Previous version saved for ${count(saved)}${days ? `, kept for ${days === 1 ? "1 day" : `${days} days`}` : ""}`,
-      ),
-    );
-    if (!turn.backups_removed)
-      node.append(
-        textNode(
-          "pre",
-          saved.map((entry) => `${entry.path} → ${entry.copy}`).join("\n"),
-          "check-detail",
-        ),
-      );
-    nodes.push(node);
-  }
-  if (unsaved.length) {
-    const node = textNode("div", "", "check backups-missing");
-    node.append(
-      textNode("span", "!", "check-mark"),
-      textNode("span", `No previous version saved for ${count(unsaved)}`),
-      textNode(
-        "pre",
-        unsaved.map((entry) => entry.path).join("\n"),
-        "check-detail",
-      ),
-    );
-    nodes.push(node);
-  }
-  return nodes;
 }
 /** "12s", "1m 05s", or "1h 02m": how long the running exchange has taken so far. */
 function elapsedLabel(ms) {
@@ -1505,8 +1529,8 @@ function renderTask(force = false) {
     const latest = turn === turns[turns.length - 1];
     const exchange = textNode("section", "", "exchange");
     const source = turn.task_source || (turn === turns[0] ? task.task_source : null);
-    if (source === "schedule" || source === "lead")
-      exchange.append(textNode("p", source === "schedule" ? "Scheduled run" : "Started by lead", "muted task-source"));
+    // Chats the removed lead channel started keep their limits but show no lead label.
+    if (source === "schedule") exchange.append(textNode("p", "Scheduled run", "muted task-source"));
     const sent = messageAttachments(turn.prompt_attachments);
     if (sent.length)
       exchange.append(
@@ -1548,9 +1572,9 @@ function renderTask(force = false) {
         openChecks = () => worked?.openChecks?.();
       }
       const answer = textNode("div", "", "answer");
-      const heading = textNode("div", "", "answer-heading");
-      heading.append(textNode("span", "⌘", "mark"), textNode("span", "Codex"));
-      answer.append(heading);
+      // No visible "Codex" label above the reply; a screen reader still hears whose reply it is.
+      answer.setAttribute("role", "group");
+      answer.setAttribute("aria-label", "Codex reply");
       if (turn.summary) answer.append(renderMarkdown(turn.summary, "message"));
       if (turn.details && turn.details !== turn.summary)
         answer.append(renderMarkdown(turn.details, "message details"));
@@ -1565,7 +1589,6 @@ function renderTask(force = false) {
         answer.append(renderChoices(turn));
       const check = renderConfigCheck(turn.config_check);
       if (check) answer.append(check);
-      answer.append(...renderBackups(turn));
       const bad = badCheckCount(turn);
       if (bad) answer.append(failedChecksLine(bad, openChecks));
       if (attachments.length)
@@ -2024,9 +2047,10 @@ async function pollActivity() {
 }
 /**
  * Draw the latest exchange's step list. While Codex works, the heading counts
- * the steps and shows the running time, and the list stays open. When the
- * exchange is over, the heading becomes the closed "Worked for" line above the
- * answer, and the list holds the steps and then the answer's checks.
+ * the steps and shows the running time, and the list starts closed. A tap on
+ * the heading opens it and holds until the turn ends. When the exchange is
+ * over, the heading becomes the closed "Worked for" line above the answer, and
+ * the list holds the steps and then the answer's checks.
  */
 function renderActivity() {
   const block = $("activity");
@@ -2052,7 +2076,12 @@ function renderActivity() {
     return;
   }
   // A checks block that asks for the owner (a browser permission review, a retry result) opens the line.
-  const expanded = activity.expanded ?? (running || Boolean(checks?.open));
+  // While Codex works the steps start closed under the waiting line; a tap holds only until the turn ends.
+  if (!running && activity.tappedWhileRunning) {
+    activity.expanded = null;
+    activity.tappedWhileRunning = false;
+  }
+  const expanded = activity.expanded ?? Boolean(checks?.open);
   const area = $("messages");
   const nearBottom =
     area.scrollHeight - area.scrollTop - area.clientHeight < 100;
@@ -2071,6 +2100,7 @@ function renderActivity() {
   toggle.append(textNode("span", "", "activity-chevron"), label);
   toggle.onclick = () => {
     activity.expanded = !expanded;
+    activity.tappedWhileRunning = running;
     renderActivity();
   };
   const list = textNode("div", "", "activity-steps");
@@ -2570,12 +2600,15 @@ function openDelete(id) {
 $("delete-cancel").onclick = () => $("delete-dialog").close();
 for (const name of ["rename", "share", "delete"])
   $(name + "-dialog").addEventListener("close", () => {
-    // Return focus to the row's menu button, or to New chat when the row is gone.
-    const trigger = menu.returnId
-      ? $("chat-list").querySelector(
-          `[data-menu-for="${CSS.escape(menu.returnId)}"]`,
-        )
-      : null;
+    // A command in the message box opened the dialog: the browser has already
+    // put focus back in the box. This event comes later than the close, so a
+    // move of focus here takes it away while the person types.
+    if (!menu.returnId) return;
+    // The chat menu opened it: return focus to the row's menu button, or to
+    // New chat when the row is gone.
+    const trigger = $("chat-list").querySelector(
+      `[data-menu-for="${CSS.escape(menu.returnId)}"]`,
+    );
     menu.returnId = null;
     (trigger || $("new-chat")).focus();
   });
@@ -3000,7 +3033,7 @@ window.addEventListener("resize", () => {
   if (innerWidth > 700) setWidth($("divider").getAttribute("aria-valuenow"));
 });
 /**
- * Slash commands. Messages go to Codex as plain text through `codex exec`,
+ * Slash commands. Messages go to Codex as plain text through the app server,
  * which does not read the TUI's slash commands, so "/new" sent as a message
  * would only reach the model as words. The page runs these commands itself
  * instead: typing "/" at the start of the message box lists them, filtered as
@@ -3011,44 +3044,44 @@ window.addEventListener("resize", () => {
 const SLASH_COMMANDS = [
   {
     name: "new",
+    icon: "＋",
     description: "Start a new chat",
-    when: "always",
     available: () => !$("new-chat").disabled,
     run: () => selectChat(null),
   },
   {
     name: "stop",
+    icon: "■",
     description: "Stop the chat that is working",
-    when: "while a chat is working",
     available: () => !$("cancel").hidden && !$("cancel").disabled,
     run: () => $("cancel").click(),
   },
   {
     name: "model",
+    icon: "◇",
     description: "Choose the model for this chat",
-    when: "always",
     available: () => Boolean(state.catalog) && !$("model-button").disabled,
     run: () => openPicker("model"),
   },
   {
     name: "reasoning",
+    icon: "✦",
     description: "Choose how long Codex thinks before it answers",
-    when: "always",
     available: () => Boolean(state.catalog) && !$("effort-button").disabled,
     run: () => openPicker("effort"),
   },
   {
     name: "rename",
+    icon: "✎",
     description: "Rename this chat",
-    when: "with a chat open",
     available: () => Boolean(state.id && chatById(state.id)),
     run: () => openRename(state.id),
   },
   {
     name: "usage",
+    icon: "◔",
     aliases: ["status"],
     description: "Show how much of your ChatGPT plan is used",
-    when: "always",
     available: () => true,
     run: () => {
       loadUsage();
@@ -3058,24 +3091,58 @@ const SLASH_COMMANDS = [
   },
   {
     name: "size",
+    icon: "Aa",
     description: "Change the text size",
-    when: "always",
     available: () => true,
     run: () => openSettingsAt("text-size-section"),
   },
   {
+    name: "connection",
+    icon: "⇄",
+    description: "Open the remote connection and its status",
+    // Listed until Settings has shown that remote control cannot run here.
+    available: () => state.remoteAvailable !== false,
+    run: () => openConnection(),
+  },
+  {
     name: "settings",
+    icon: "⚙",
     description: "Open Settings",
-    when: "always",
     available: () => true,
     run: () => $("settings-button").click(),
   },
   {
-    name: "help",
-    description: "List these commands",
-    when: "always",
-    available: () => true,
-    run: () => openSettingsAt("settings-commands"),
+    name: "pin",
+    icon: "⚲",
+    description: "Pin or unpin this chat",
+    available: () => Boolean(state.id && chatById(state.id)),
+    run: () => togglePin(state.id),
+  },
+  {
+    name: "share",
+    icon: "↗",
+    description: "Download this chat as a file",
+    available: () => Boolean(state.id && chatById(state.id)),
+    run: () => openShare(state.id),
+  },
+  {
+    name: "archive",
+    icon: "▤",
+    description: "Archive this chat, or restore it",
+    available: () => chatIdle(),
+    run: () =>
+      document.dispatchEvent(
+        new CustomEvent("thread-action", {
+          detail: { action: "archive", id: state.id },
+        }),
+      ),
+  },
+  {
+    name: "delete",
+    icon: "⌫",
+    description: "Delete this chat and its history",
+    available: () => chatIdle(),
+    run: () => openDelete(state.id),
   },
 ];
 /** Open Settings with one section open and in view, as the GitHub banner does. */
@@ -3083,6 +3150,19 @@ async function openSettingsAt(sectionId) {
   await $("settings-button").onclick();
   openSettingsSection($(sectionId));
   $(sectionId).scrollIntoView({ block: "start" });
+}
+/**
+ * True when a saved chat is open and nothing is running or queued in it: the
+ * same rule the chat menu uses to enable Archive and Delete.
+ */
+function chatIdle() {
+  const chat = state.id && chatById(state.id);
+  return Boolean(
+    chat &&
+      !["queued", "running"].includes(chat.status) &&
+      state.active !== state.id &&
+      !state.task?.queued_message,
+  );
 }
 const slash = { matches: [], index: 0, dismissed: null };
 /**
@@ -3114,6 +3194,12 @@ function slashCommand(value) {
     ) || null
   );
 }
+/** Build a command's icon; screen readers skip it and read the name. */
+function slashIcon(glyph) {
+  const icon = textNode("span", glyph, "slash-icon");
+  icon.setAttribute("aria-hidden", "true");
+  return icon;
+}
 /** Show or hide the command list for the message box's current text. */
 function renderSlash() {
   const value = $("message").value;
@@ -3130,8 +3216,20 @@ function renderSlash() {
     option.id = `slash-${command.name}`;
     option.setAttribute("role", "option");
     option.setAttribute("aria-selected", String(index === slash.index));
+    const typed = /^\/(\S*)$/.exec(value)[1];
+    const name = textNode("span", "/", "slash-name");
+    // Mark the letters the person typed; an alias match, such as /stat for
+    // /usage, marks nothing.
+    const marked = command.name.startsWith(typed.toLowerCase())
+      ? typed.length
+      : 0;
+    name.append(
+      textNode("span", command.name.slice(0, marked), "slash-match"),
+      document.createTextNode(command.name.slice(marked)),
+    );
     option.append(
-      textNode("span", `/${command.name}`, "slash-name"),
+      slashIcon(command.icon),
+      name,
       textNode("span", command.description, "slash-description"),
     );
     // Keep the focus, and the phone keyboard, on the message box.
@@ -3153,6 +3251,9 @@ function renderSlash() {
 function runSlash(command) {
   $("message").value = "";
   slash.dismissed = null;
+  // A dialog this command opens returns focus to the message box, not to a
+  // row that the chat menu used earlier.
+  menu.returnId = null;
   resizeInput();
   renderSlash();
   controls();
@@ -3191,26 +3292,20 @@ $("message").addEventListener("blur", () => {
     renderSlash();
   }
 });
+// A press anywhere outside the message box and the list closes the list.
+document.addEventListener("pointerdown", (event) => {
+  if (
+    !$("slash-popover").hidden &&
+    !event.target.closest("#slash-popover, #message")
+  ) {
+    slash.dismissed = $("message").value;
+    renderSlash();
+  }
+});
 $("message").addEventListener("focus", () => {
   slash.dismissed = null;
   renderSlash();
 });
-/** Fill the Commands section of Settings from the same list. */
-function renderCommandList() {
-  const list = $("command-list");
-  list.replaceChildren();
-  for (const command of SLASH_COMMANDS) {
-    const names = [command.name, ...(command.aliases || [])]
-      .map((name) => `/${name}`)
-      .join(" or ");
-    const note = command.when === "always" ? "" : ` (${command.when})`;
-    list.append(
-      textNode("dt", names),
-      textNode("dd", command.description + note),
-    );
-  }
-}
-renderCommandList();
 /*
  * Settings sections start collapsed (add-on 0.3.2). Each section's first
  * heading becomes a button with the title and a one-line status; the rest of
@@ -3297,7 +3392,6 @@ function setAccountPart(sectionId, word, attention = false) {
 }
 collapseSettingsSections();
 setSectionStatus("workspace-section", "AGENTS.md");
-setSectionStatus("settings-commands", `${SLASH_COMMANDS.length} commands`);
 const TEXT_SIZES = ["normal", "larger", "largest"];
 const TEXT_SIZE_KEY = "codex-text-size";
 /**
@@ -3467,6 +3561,7 @@ async function loadLogin() {
     ({ auth } = await api("auth/status"));
   } catch (error) {
     setFootRow("codex-status-row", "error", "Unavailable");
+    noteAttention("chatgpt", "unavailable");
     throw error;
   } finally {
     loginTimer = setTimeout(
@@ -3508,6 +3603,7 @@ function renderLogin(auth) {
     : lapsed
       ? "The assistant's ChatGPT sign-in expired or was revoked. Sign in again."
       : "The assistant is not signed in to ChatGPT.";
+  noteAttention("chatgpt", signedIn ? "signed-in" : "signed-out");
   const sectionStatus = chatgptSectionStatus({ signedIn, pending, failed, lapsed });
   setSectionStatus("chatgpt-section", sectionStatus, !signedIn);
   setAccountPart("chatgpt-section", sectionStatus.toLowerCase(), !signedIn);
@@ -3672,6 +3768,7 @@ function githubFootRow({ waiting, connected, bad, retry }) {
 function renderGithub(github) {
   githubStatus = github;
   const state = String(github.state || "disconnected");
+  noteAttention("github", state);
   const flow = github.flow && typeof github.flow === "object" ? github.flow : { status: "idle" };
   const waiting = flow.status === "waiting_for_user";
   const connected = !["disconnected", "connecting"].includes(state);
@@ -3766,6 +3863,7 @@ function renderGithub(github) {
 /** Show that this worker has no GitHub sign-in (an add-on before 0.3). */
 function githubUnavailable() {
   githubStatus = null;
+  noteAttention("github", "");
   $("github-status").textContent = "Not available in this version of the add-on.";
   for (const id of ["github-connect", "github-cancel", "github-test", "github-check", "github-accept", "github-disconnect"])
     $(id).hidden = true;
@@ -3883,6 +3981,7 @@ async function loadRemoteControl() {
 }
 /** Draw one remote-control state; the buttons follow what can be done now. */
 function renderRemoteControl(rc) {
+  state.remoteAvailable = Boolean(rc.available);
   const name = rc.machine_name || rc.configured_name;
   let status = rc.message || rc.state || "Unknown";
   if (!rc.available) status = rc.blocked_reason;

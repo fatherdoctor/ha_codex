@@ -1,4 +1,4 @@
-"""Scheduling and mailbox tools run from a chat; a tool question the page cannot show is reported."""
+"""Scheduling tools run from a chat; a tool question the page cannot show is reported."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ def tearDownModule():
     scheduling.SCHEDULED_RUNS = _saved_switch
 
 
-TOOLS = ("propose_schedule", "list_schedules", "read_mailbox", "post_mailbox")
+TOOLS = ("propose_schedule", "list_schedules")
 
 
 def scheduling_settings(args: list[str]) -> dict[str, object]:
@@ -39,7 +39,7 @@ def scheduling_settings(args: list[str]) -> dict[str, object]:
 
 
 class SchedulingToolApprovalTests(unittest.TestCase):
-    """Each scheduling and mailbox tool is approved ahead, as the verify and data tools are."""
+    """Each scheduling tool is approved ahead, as the verify and data tools are."""
 
     def test_chat_page_turns_run_every_tool_without_a_request(self):
         settings = scheduling_settings(server.build_app_server_args())
@@ -47,7 +47,7 @@ class SchedulingToolApprovalTests(unittest.TestCase):
             with self.subTest(tool=tool):
                 self.assertEqual(settings.get(f"tools.{tool}.approval_mode"), "approve")
 
-    def test_only_the_four_documented_tools_are_approved(self):
+    def test_only_the_two_documented_tools_are_approved(self):
         settings = scheduling_settings(server.scheduling_mcp_args())
         approved = {
             name.split(".")[1] for name in settings if name.endswith(".approval_mode")
@@ -57,7 +57,7 @@ class SchedulingToolApprovalTests(unittest.TestCase):
     def test_the_list_matches_the_tools_the_server_offers(self):
         self.assertEqual({tool["name"] for tool in scheduling_mcp.TOOLS}, set(TOOLS))
 
-    def test_scheduled_and_lead_turns_get_the_same_tools(self):
+    def test_both_launchers_get_the_same_tools(self):
         """The other launcher registers the same server with the same settings."""
         self.assertEqual(
             scheduling_settings(server.scheduling_mcp_args()),
@@ -82,7 +82,7 @@ class ElicitationTests(unittest.TestCase):
                 "approvalPolicy": "on-request",
                 "approvalsReviewer": "user",
             },
-            turn_params={"input": [{"type": "text", "text": "Read the mailbox"}]},
+            turn_params={"input": [{"type": "text", "text": "Read the schedules"}]},
             on_event=self.events.append,
             on_approvals=lambda records: None,
             on_final=lambda text: None,

@@ -11,10 +11,8 @@ cards, failed resources, and browser errors.
 
 For example, ask: **"Inspect `/lovelace/home` on desktop and mobile, show me
 screenshots, and report any layout or card errors."** Replace the path with your
-dashboard view. Saved storage dashboards also get automatic captures of the first
-views that fit the task's remaining time. Request other views and YAML dashboards
-explicitly. Automatic captures after the answer are labeled separately from
-screenshots Codex inspected during the task.
+dashboard view. The app takes no screenshots of its own after the answer: Codex
+checks its work during the task, when it decides to or when you ask.
 
 Browser sign-in uses a temporary, local, read-only identity, without a Home
 Assistant password or manually created token. Tasks can also fetch fresh entity
@@ -233,7 +231,7 @@ API: `GET /status` has `integration` with `state` (`ok`, `starting`, `not_instal
 
 `codex_model` is a dropdown. The default value, `default`, lets the bundled Codex CLI choose a model for your account. Explicit choices are `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6.1-terra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. Availability depends on your account. The app bundles the packaged Codex CLI **0.166.0** (pinned by version and checksum; it never updates itself).
 
-`model_pin` (default `gpt-6.1-sol`) is the only model the app runs. With the pin set, a run on `default` names the pinned model to the CLI, the chat's model picker offers only that model, and a chat, saved conversation or `codex_model` choice that asks for another model is stopped with an error before Codex starts, never run on a different model. Set `model_pin` to `none` to turn the pin off and use `codex_model` as described here.
+`model_pin` (empty by default, which means no pin: runs use the account's default model) limits the app to one model when you set it. With the pin set, a run on `default` names the pinned model to the CLI, the chat's model picker offers only that model, and a chat, saved conversation or `codex_model` choice that asks for another model is stopped with an error before Codex starts, never run on a different model. Clear the option, or set it to `none`, to turn the pin off and use `codex_model` as described here. Versions before 0.4 shipped `gpt-6.1-sol` as the default; the first start of 0.4 clears that value once, and a value you set afterward is kept.
 
 The worker treats the legacy `gpt-5.3-codex` value as `default`. The retired `gpt-5.5` choice stays in the app's option list for existing installations and runs `gpt-5.6-sol`; it is not offered in the chat's model picker.
 
@@ -271,7 +269,7 @@ After every task the worker compares the `/config` tree with the list of files i
 1. **Syntax.** Added and changed YAML files are parsed with Home Assistant's YAML loader, and JSON and `.storage` files are parsed as JSON. Cookie jars that integrations keep under `.storage` in the LWP text format are checked as cookie jars instead, without rewriting them: Home Assistant's iCloud jars, which are the files under `.storage/icloud/` ending in `.cookiejar`, and any other `.storage` file that starts with the `#LWP-Cookies-` header, as the jars of custom integrations such as iCloud3 do. Malformed cookie jars are reported without including their contents in errors. Any parse error fails the task.
 2. **Home Assistant's configuration check.** From **0.1.56**, when YAML files outside `.storage` were added, changed, or deleted and the syntax pass succeeded, the worker calls `POST /api/config/core/check_config`, the same check as Tools. An `invalid` result fails the task with Home Assistant's error text. The check needs the Supervisor's Core API access the app already has, and can take some seconds on large configurations; the worker waits up to three minutes. If the check cannot run, because Core is restarting or the API is unreachable, the task still completes and its details say the change is applied but unverified. Set `config_check` to `false` to skip this pass.
 
-When validation fails, the task details list the saved previous version of each affected file under `<task_root>/<task_id>/turns/<turn_id>/backups/`, so a broken edit can be restored by copying the file back. Files the task created have no previous version and are listed separately, and so are affected files that have no saved copy. See [Backups](#backups) for where the copies come from and how long they are kept.
+When validation fails, the task details list the saved previous version of each affected file under `/data/codex_tasks/<task_id>/turns/<turn_id>/backups/`, so a broken edit can be restored by copying the file back. Files the task created have no previous version and are listed separately, and so are affected files that have no saved copy. See [Backups](#backups) for where the copies come from and how long they are kept.
 
 Dashboard auto-save skips storage files that failed validation and reports the skip in `lovelace_results`. A YAML failure does not block saving an unrelated, valid dashboard file.
 
@@ -287,24 +285,22 @@ A thread that this page did not start has no page rules: a thread started in the
 
 From 0.3.3 the page asks for no output format, so the thread stores Codex's answer as plain text, as the app shows it. The page's status, question and choices come from the `ask_owner` and `report_failure` tool calls (see [Human Input](#human-input)).
 
-In the ChatGPT app the `exchange_info` tool is not available. The rules tell Codex to make no backup copy there and to say so in its answer. The worker's protections do not depend on these rules: approvals, the sandbox, the policy and the backup check after a page message stay the same.
+In the ChatGPT app the `exchange_info` tool is not available. The rules tell Codex to make no backup copy there and to say so in its answer. The worker's protections do not depend on these rules: approvals, the sandbox and the policy stay the same.
 
 ## Backups
 
 From **0.1.63**, the worker no longer archives the whole configuration folder before every message. On a large configuration that archive took longer than Codex needed to start answering, and one archive was kept per message forever.
 
-**Per-file copies (default).** The `exchange_info` tool tells Codex to copy each existing file to `<task_root>/<task_id>/turns/<turn_id>/backups/<path under /config>` before it changes, moves, or deletes it. Only the files Codex is about to change are copied. When the run ends the worker reviews those copies:
+**Per-file copies (default).** The `exchange_info` tool tells Codex to copy each existing file to `/data/codex_tasks/<task_id>/turns/<turn_id>/backups/<path under /config>` before it changes, moves, or deletes it. Only the files Codex is about to change are copied. The copies are a safety net, not a check: the answer does not list them and gives no verdict on them, because other writers (an automation, another app, a person in the file editor) can change files under `/config` while a turn runs, and the app cannot tell their changes from Codex's.
 
-- A copy counts only when it is identical to the file as the worker saw it before the run started. A copy made after the first edit is reported as not saved.
-- The review covers the files that are Codex's doing: files it reported editing, files it copied, changed YAML files, and changed dashboard storage files. Home Assistant rewrites its own `.storage` files all the time, so other changed files are not reviewed.
-- The chat lists the files with a saved previous version, and the task details name any reviewed file without one. `GET /tasks/<task_id>`, `codex_cli.get_task`, and the `codex_cli_task_result` event carry `backups` with `path`, `status` (`saved`, `missing`, `unverified` for a copy that is not the earlier version, or `excluded`), and `copy`.
+- When a change fails validation (below), the task details point to the saved copy of each affected file, or say that it has none.
 - Credential files (`secrets.yaml`, the auth stores, and `.storage/core.config_entries`) are never copied. The worker deletes such a copy if Codex makes one.
 
-Codex needs to be able to write to the backup folder. In `workspace-write` mode that requires `task_root` to be inside `/config`, which is the default. In `read-only` mode Codex is given no backup folder; any explicitly approved writes still need a separate recovery plan. A per-file copy depends on Codex following the instruction; if a file was changed without one, restore it from a Home Assistant backup.
+Codex needs to be able to write to the backup folder. In `workspace-write` mode the app adds that one exchange's backup folder to the sandbox's writable places, beside `/config` and `/share`; the rest of `/data` stays read-only to Codex, and the private files the sandbox hides stay hidden. In `read-only` mode Codex is given no backup folder; any explicitly approved writes still need a separate recovery plan. A per-file copy depends on Codex following the instruction; if a file was changed without one, restore it from a Home Assistant backup.
 
-**Full snapshot (optional).** Turn on **Full snapshot before every message** (`full_snapshot`) to archive tracked files, excluding known credential files, to `snapshot-before.tar.gz` in the exchange's folder before Codex starts. The worker can then recover missing per-file copies from that archive when a matching file is available. The exclusions below still apply, so this is not a complete Home Assistant backup. Creating the archive adds a wait before every message that grows with the amount of tracked data.
+**Full snapshot (optional).** Turn on **Full snapshot before every message** (`full_snapshot`) to archive tracked files, excluding known credential files, to `snapshot-before.tar.gz` in the exchange's folder before Codex starts. When a change fails validation, the worker can then take a missing per-file copy from that archive when a matching file is available. The exclusions below still apply, so this is not a complete Home Assistant backup. Creating the archive adds a wait before every message that grows with the amount of tracked data.
 
-**Cleanup.** **Keep backups for (days)** (`backup_retention_days`, default 7, range 1 to 365) sets how long backups are kept after an exchange ends. This covers per-file copies, full snapshots, and recovery copies made by earlier versions. Cleanup runs when the app starts, after every exchange, and once an hour; it skips the exchange that is running and leaves messages and logs in place. Attachments you uploaded follow their own 7-day rule (see Attachments). Archives left by earlier versions are removed the same way once they are older than the setting. The chat notes when the saved copies of an exchange have been removed.
+**Cleanup.** **Keep backups for (days)** (`backup_retention_days`, default 7, range 1 to 365) sets how long backups are kept after an exchange ends. This covers per-file copies, full snapshots, and recovery copies made by earlier versions. Cleanup runs when the app starts, after every exchange, and once an hour; it skips the exchange that is running and leaves messages, logs, and generated images in place. Files you attach to a message follow their own 7-day rule (see Attachments). Archives left by earlier versions are removed the same way once they are older than the setting.
 
 **Change detection.** The list of tracked files recorded before a run holds each file's size, modification time, and SHA-256 hash. Hashes can be reused when the size and timestamps are unchanged and the file was already at rest before the previous scan. Recently changed files are read again. The exchange's baseline file is deleted when the exchange ends; detected changes stay recorded in `changes.json`.
 
@@ -317,7 +313,7 @@ Codex needs to be able to write to the backup folder. In `workspace-write` mode 
 
 The app's `codex_sandbox` option takes only these two values. An older setting that names `danger-full-access` stops the app at startup with a log line saying so. A chat can still run without the sandbox in the Full access permission mode, which the owner turns on in Settings (see "Permission modes" below).
 
-**Protected policy.** The sandbox modes the `codex_sandbox` option may name come from `/usr/share/ha_codex/policy.json` inside the app image, outside `/config` and sandbox writable roots. A value it does not list stops startup and each task. The app adds no command check of its own: Codex's approval mode and the sandbox, with its private-file masks, are the protection (0.3.6). No house rules are bundled or copied into Codex's home. Codex uses its defaults and the owner's `/config/AGENTS.md`, whose existing editor and reading path remain available. Updates remove only a byte-identical legacy bundled home copy; edited owner files and symlinks are preserved. Owners who want house practices can use the Whole Home Agent starter kit (published separately) and choose their own instructions. Native approval remains specific to the displayed request; read each action before allowing it.
+**Protected policy.** The sandbox modes the `codex_sandbox` option may name come from `/usr/share/ha_codex/policy.json` inside the app image, outside `/config` and sandbox writable roots. A value it does not list stops startup and each task. The app adds no command check of its own: Codex's approval mode and the sandbox, with its private-file masks, are the protection (0.3.6). No house rules are bundled or copied into Codex's home. Codex uses its defaults and the owner's `AGENTS.md` (in the app's own folder, see [AGENTS.md and HA_TOKEN](#agentsmd-and-ha_token)), whose existing editor and reading path remain available. Updates remove only a byte-identical legacy bundled home copy; edited owner files and symlinks are preserved. Owners who want house practices can use the Whole Home Agent starter kit (published separately) and choose their own instructions. Native approval remains specific to the displayed request; read each action before allowing it.
 
 **Who can answer.** Only a signed-in Home Assistant administrator can answer **Allow once** or **Deny**, on the Codex page. This holds in Default and Read only. In Auto-review, Codex's reviewer answers, and in Full access nobody is asked, whoever sent the message (see "Permission modes"). The worker checks the user Home Assistant names for the page against its user list and records who answered on the request. The integration's API token cannot answer permission requests, and the integration's actions refuse callers who are not administrators. An automation or script that runs on its own may call the actions; one that a user who is not an administrator starts carries that user, and its call is refused too.
 
@@ -352,7 +348,8 @@ Home Assistant action (a service call), for example `light.turn_off` with a targ
 `homeassistant.restart`. The app sets the tool's approval mode to `prompt`, so Codex asks you each time, with no
 remembered answer: the question has no "Allow for this session" and no "don't ask again". It shows the service,
 the target and the data.
-A task the lead agent starts does not get the tool, since nobody is there to answer.
+A scheduled run has the same tool. Its question waits in the run's chat until an administrator answers it
+([Scheduled runs](#scheduled-runs)).
 
 The ChatGPT app has the same tool while remote control is on. There, Codex asks in the app before each call; the
 worker does not see that answer. The tool's key in the app holds while the remote-control process runs, and each
@@ -390,21 +387,25 @@ the call of up to 5 of them, so Codex does not need a second step to read it bac
 that moves can still show its old state there. The answer names the entity that changed. If Home Assistant does
 not answer these reads, the answer can come up to 40 seconds late; the call itself is sent once.
 
-The keys of the app's tools (`HA_*_CAPABILITY`) are kept out of the commands that Codex runs, with Codex's
-`shell_environment_policy` setting. So a command cannot write to the socket and skip Codex's question. The page
-launch and the remote-control launch set it, and `/etc/codex/managed_config.toml` in the image sets it for every
-client. A thread that the ChatGPT app starts cannot change it, because the managed file outranks a thread's own
-settings. In a mode without a sandbox, a
-command can read the environment of the Codex process; that mode has no question to skip, and the checks above
-still hold.
+A chat holds no key for the app's tools (0.4). Each tool request carries the chat's thread id, which Codex adds
+to every tool call, and the worker answers it only while that chat's exchange runs. In Read only, Default and
+Auto-review a command cannot connect to the tool sockets at all: the sandbox has no network, and Codex denies the
+connection. A command that runs outside the sandbox - one you approve when Codex asks to run it with more access,
+one that Codex's reviewer approves in Auto-review, or any command in Full access - can reach the sockets, and can
+then do what the tools can do. That approval is the protection, as it is for the command itself.
+
+Remote control keeps its own keys (`HA_*_CAPABILITY`), kept out of the commands that its Codex runs with Codex's
+`shell_environment_policy` setting. The remote-control launch sets it, and `/etc/codex/managed_config.toml` in the
+image sets it for every client. A thread that the ChatGPT app starts cannot change it, because the managed file
+outranks a thread's own settings.
 
 These checks do not cover a command that uses the `HA_TOKEN` option (see "AGENTS.md and HA_TOKEN").
 
 ### Owner instructions and planted commands
 
-Codex follows its defaults and the owner's `/config/AGENTS.md`. The integration does not bundle a house-practice file prescribing device categories, API-deletion practices or a writing style. Owners can choose such practices through their own workspace instructions or the starter kit. The starter `/config/AGENTS.md` of a new install ([AGENTS.md and HA_TOKEN](#agentsmd-and-ha_token)) is an ordinary owner file, in plain view, that the owner can change or delete. Permission cards and the sandbox operate independently of prose instructions.
+Codex follows its defaults and the owner's `AGENTS.md`. The integration does not bundle a house-practice file prescribing device categories, API-deletion practices or a writing style. Owners can choose such practices through their own workspace instructions or the starter kit. The starter `AGENTS.md` of a new install ([AGENTS.md and HA_TOKEN](#agentsmd-and-ha_token)) is an ordinary owner file, in plain view, that the owner can change or delete. Permission cards and the sandbox operate independently of prose instructions.
 
-The app does not scan `/config` for planted commands. From 0.3.6 there is no command check (hook), no check after each exchange and no config watch: an edit that adds a `shell_command`, `rest_command`, `python_script` or a command-line platform stays as Codex wrote it. In `workspace-write` Codex can write such an edit without a request, and Home Assistant runs it on the next reload or call. Review what a chat changed (the chat lists every changed file, with its backup) before a reload or restart. The Supervisor token stays out of Codex's environment, and the sandbox still hides `secrets.yaml`, Home Assistant's sign-in store and the app's own data (AUDITING.md, layer 1).
+The app does not scan `/config` for planted commands. From 0.3.6 there is no command check (hook), no check after each exchange and no config watch: an edit that adds a `shell_command`, `rest_command`, `python_script` or a command-line platform stays as Codex wrote it. In `workspace-write` Codex can write such an edit without a request, and Home Assistant runs it on the next reload or call. Review what a chat changed (its steps show each file Codex edited) before a reload or restart. The Supervisor token stays out of Codex's environment, and the sandbox still hides `secrets.yaml`, Home Assistant's sign-in store and the app's own data (AUDITING.md, layer 1).
 
 
 ## Ways in
@@ -420,6 +421,7 @@ Codex can be reached three ways: the chat page, the ChatGPT app paired through r
 | Send a notification | `home_assistant_call.call` | `home_assistant_call.call` | `home_assistant_call.call` |
 | Ask the owner a question or report the turn's state | `home_assistant_data.ask_owner`, `home_assistant_data.report_failure`, `home_assistant_data.exchange_info` | not available | `home_assistant_data.ask_owner`, `home_assistant_data.report_failure`, `home_assistant_data.exchange_info` |
 | Work with a GitHub repository | `codex_github.github_git` | not available | `codex_github.github_git` |
+| Propose a schedule | `codex_scheduling.propose_schedule`, `codex_scheduling.list_schedules` | not available | `codex_scheduling.propose_schedule`, `codex_scheduling.list_schedules` |
 
 - `codex_cli.start_task` starts the same kind of task as the chat page, so it gets the same tools.
 - Codex asks you before each `call`, on the chat page or in the ChatGPT app
@@ -428,9 +430,9 @@ Codex can be reached three ways: the chat page, the ChatGPT app paired through r
   way in. On the chat page and for `codex_cli.start_task`, a request for more access shows on the chat page as a
   [permission request](#permission-requests). The ChatGPT app shows Codex's own requests in the app instead, as
   [Remote control from the ChatGPT app](#remote-control-from-the-chatgpt-app) describes.
-- A message on the lead agent channel also starts a task. It uses the same launcher as the chat
-  page and gets the page's tools, except the `call` tool: nobody is there to answer
-  ([The lead agent channel and mailbox](#the-lead-agent-channel-and-mailbox)).
+- A scheduled run also starts a task. It uses the same launcher as the chat page and gets the page's tools, the
+  `call` tool included; Codex asks before each `call`, and the question waits in the run's chat. A Read only
+  schedule narrows the sandbox, not the tools ([Scheduled runs](#scheduled-runs)).
 - "Not available" means the way in has no tool for that request.
 
 `tests/test_surface_matrix.py` starts each way in's tool servers and compares their tools with this table. A change
@@ -462,7 +464,7 @@ restrictive tool component while `NoNewPrivs=1`. An immutable guard verifies the
 before starting native Bubblewrap; the chat tool label is unchanged.
 This prevents the base abstraction's same-label ptrace-read rule from granting a sandbox access to
 the relay's `/proc/<pid>/root`, `cwd` or `environ` in the no-proc fallback. Loaded-label and proc-view
-isolation still require the lead's HAOS acceptance check described in
+isolation still require the maintainer's HAOS acceptance check described in
 [SANDBOX_TESTING.md](SANDBOX_TESTING.md#remote-control-profile-regression).
 
 **Relay execution.** The reproduced unified-exec failure was a `nodev` root bind, not
@@ -490,7 +492,7 @@ the image changed. The pinned
 loads enrollment from the state database, keyed by relay target, account and stable app-server client
 name. This is separate from a transient control socket and the replaceable image. An update preserves
 data; uninstalling, clearing data, changing account or revoking enrollment is a different operation.
-Actual reconnect without a new code remains a lead lab acceptance check.
+Actual reconnect without a new code remains a maintainer lab acceptance check.
 
 **First pairing (Codex 0.166).** Turn remote control on, wait for the connected state, then choose
 **New pairing code** and type the displayed code into the ChatGPT app. The button calls
@@ -545,11 +547,11 @@ For a managed workspace, an administrator may need to enable device-code login i
 
 The app never starts a sign-in by itself. When it starts and Codex is not signed in, it posts a Home Assistant notification that says to choose **Sign in** when you are ready. A one-time code works for 15 minutes only, so you get it at the moment you use it.
 
-After you choose **Sign in**, the app posts a Home Assistant persistent notification containing a QR code, link, and one-time device code. The QR code opens the OpenAI device page; type the code from the same notification into that page. The app refreshes the notification when the code appears and detects completion automatically. You do not need to run `docker exec`.
+After you choose **Sign in**, the app posts a Home Assistant persistent notification containing the sign-in link and the one-time device code. Open the link and type the code from the same notification into that page. The QR code of the sign-in page is on the app's own page only (below): the notification has no image, because an image there would have to be a file under `/config/www`, which Home Assistant serves to anyone who can reach it, without a sign-in. The app refreshes the notification when the code appears and detects completion automatically. You do not need to run `docker exec`.
 
 While the app is not signed in, a banner above the chat offers **Sign in**. During a sign-in, the banner and **Settings** show the one-time code in large letters, a QR code of the sign-in page served by the app itself, and the link. The code stays on screen, unchanged, until the sign-in completes or you press **Cancel**; pressing **Sign in** again keeps the running sign-in and its code. Under the code, a countdown shows how long it still works (Codex 0.166.0 gives codes 15 minutes); each status reply from the app sets it again, so it stays right after the phone sleeps. When it runs out, the page says so and offers **Get a new code**. If a sign-in stops without signing in, **Settings** says why when it can, and **Sign in** becomes **Get a new code**. The GitHub code in **Settings > Accounts and connections > GitHub** has the same countdown and button.
 
-Every section of **Settings** starts collapsed, and one top-level section is open at a time: opening one closes the others. The parts inside a section, such as **GitHub**, keep their own state. The window keeps one size; an open section scrolls inside it. Its header shows a one-line status, such as **Signed in**, **Connected as owner, 1 repository** or **Keeps 25**. A section that needs attention shows its status in red: a sign-in that waits or failed. Tap a header to open the section. When a saved sign-in expires or is revoked, the banner returns and the integration raises a Home Assistant repair; the integration's **Signed in** binary sensor turns off. **Accounts and connections** holds the three sign-ins and pairings: **ChatGPT account**, **GitHub** and **ChatGPT app pairing**, each under its own collapsed header. Its header joins their states, for example "ChatGPT signed in · GitHub connected · app off"; when one of them needs you, the header names only that one. The app pairing part shows the remote connection state, **Get a pairing code** while remote control is on, **Manage remote connection** and **Turn off**. Turn off stops the connection; it does not remove the pairing in the ChatGPT app. A pairing code shows no countdown, because the worker does not know how long Codex keeps it.
+Every section of **Settings** starts collapsed, and one top-level section is open at a time: opening one closes the others. The parts inside a section, such as **GitHub**, keep their own state. The window keeps one size; an open section scrolls inside it. Its header shows a one-line status, such as **Signed in**, **Connected as owner, 1 repository** or **Keeps 25**. A section that needs attention shows its status in red: a sign-in that waits or failed, a schedule that waits for your approval, or schedules paused because the Home Assistant time zone is unknown. Tap a header to open the section. When a saved sign-in expires or is revoked, the banner returns and the integration raises a Home Assistant repair; the integration's **Signed in** binary sensor turns off. **Accounts and connections** holds the three sign-ins and pairings: **ChatGPT account**, **GitHub** and **ChatGPT app pairing**, each under its own collapsed header. Its header joins their states, for example "ChatGPT signed in · GitHub connected · app off"; when one of them needs you, the header names only that one. The app pairing part shows the remote connection state, **Get a pairing code** while remote control is on, **Manage remote connection** and **Turn off**. Turn off stops the connection; it does not remove the pairing in the ChatGPT app. A pairing code shows no countdown, because the worker does not know how long Codex keeps it.
 
 The page reaches the app through a Home Assistant ingress session, which the Home Assistant tab renews. If a request finds that session expired (for example after a phone slept), the page asks Home Assistant for a new session once and sends the request again. If that fails, a banner says the session expired and offers **Reload**; the page never shows the bare HTTP error.
 
@@ -593,7 +595,7 @@ You can also ask the assistant in chat to clone or link a connected repository. 
 
 ### The `github_git` tool
 
-Codex can call `repos`, `fetch`, `pull`, `push`, `clone` and `link`, for connected repositories only and only during a chat. Every operation is available in every sandbox mode (0.3.6). A pull fetches only; the assistant then fast-forwards the work tree in its own shell (`git merge --ff-only`), so the app never checks files out into a folder a task can change. A push never forces, deletes or pushes tags.
+Codex can call `repos`, `fetch`, `pull`, `push`, `clone` and `link`, for connected repositories only and only during a chat or scheduled run. Every operation is available in every sandbox mode (0.3.6). A pull fetches only; the assistant then fast-forwards the work tree in its own shell (`git merge --ff-only`), so the app never checks files out into a folder a task can change. A push never forces, deletes or pushes tags.
 
 Limits of a push:
 
@@ -632,18 +634,24 @@ Open **Settings > Accounts and connections > GitHub** in the app page. The card 
 
 ## AGENTS.md and HA_TOKEN
 
-The app web UI includes an editor for `/config/AGENTS.md` under **Settings** > **Workspace instructions** > **Workspace rules**. This file remains the source of truth for shared Codex project instructions. When the file does not exist, the task prompt does not mention it, and the page shows a setup hint above the message box until you write the file or choose **Dismiss** (the choice is kept in that browser).
+The app web UI includes an editor for the app's `AGENTS.md` (in its own `addon_config` folder, not in `/config`) under **Settings** > **Workspace instructions** > **Workspace rules**. This file remains the source of truth for shared Codex project instructions. When the file does not exist, the task prompt does not mention it, and the page shows a setup hint above the message box until you write the file or choose **Dismiss** (the choice is kept in that browser).
 
-**Starter instructions.** On its first start, the app writes a short starter `/config/AGENTS.md` when the home has
+**Starter instructions.** On its first start, the app writes a short starter `AGENTS.md` in the app's own folder when the home has
 none. The text is `starter_agents.md` in the app's source. It tells Codex what `/config` is and gives seven general
 rules. Four of them matter most: change the home only on the owner's word, keep secrets secret, keep the old version
-of a changed file, and check the configuration before a restart. The app never replaces a file that is already there,
+of a changed file, and check the configuration before a restart. A short section after the rules lists three safeguard
+defaults (secrets, protected places, backups) and says that they are defaults the owner can change, not locks in
+the app. The app never replaces a file that is already there,
 a link included. It writes the starter once: when you delete the file, it stays deleted while the app keeps
 its data, and an update of an app that has started before writes nothing. The rules are instructions to Codex and not a safeguard; the sandbox, the
 command check and the approval cards work the same with or without them. To get the starter on an older install,
 copy the text from `starter_agents.md` into the editor.
 
-From **0.3.4**, Codex no longer looks for `/config/AGENTS.md` in every message. Codex loads the file when a chat
+**Where the file lives (0.4).** The file is `AGENTS.md` in the app's own `addon_config` folder: `/addon_configs/<app folder>/AGENTS.md` on the host and `/addon_config/AGENTS.md` inside the app. It is not in the top level of `/config`. Codex loads it as its global instructions through a link the app keeps at `$CODEX_HOME/AGENTS.md` (`/data/codex-home/AGENTS.md`), where Codex looks for global instructions ([Codex: AGENTS.md guide](https://developers.openai.com/codex/guides/agents-md)). On the first start of this version, an `AGENTS.md` that an older version left in `/config` is **moved** into the app's folder, after a backup copy at `/data/agents_before_move.md`. It is moved and not copied because Codex works in `/config` and would read both. If both places already hold a file, the app moves nothing, logs a line, and leaves the one in `/config` for you to merge or delete. The folder is part of the app's backup like its other data.
+
+The editor under **Settings** writes the file without a question. The folder is not one of the places Codex may write on its own, so when you ask a chat to change the file, Codex asks for your approval first.
+
+From **0.3.4**, Codex no longer looks for the file in every message. Codex loads the file when a chat
 starts. In each message the worker tells Codex whether the file exists and when it last changed, and Codex reads
 it again only after a change. A change you make to the file still reaches a chat that is already open, on its
 next message.
@@ -675,7 +683,7 @@ The image includes the OpenSSH client so Codex can use an existing SSH server, s
 
 Ask Codex, for example:
 
-> Set up a connection named `ha-terminal` to my SSH server at `ssh-host.example`, port `22`, username `hassio`. Generate a dedicated Ed25519 connection key under `/data/.ssh`. Keep the private key out of chat and logs, show me only its public key, and preserve any existing connections. Use `/data/.ssh/config` and `/data/.ssh/known_hosts` explicitly. Wait for me to verify the server fingerprint before trusting it. Save the connection name and invocation in `/config/AGENTS.md`, without credentials.
+> Set up a connection named `ha-terminal` to my SSH server at `ssh-host.example`, port `22`, username `hassio`. Generate a dedicated Ed25519 connection key under `/data/.ssh`. Keep the private key out of chat and logs, show me only its public key, and preserve any existing connections. Use `/data/.ssh/config` and `/data/.ssh/known_hosts` explicitly. Wait for me to verify the server fingerprint before trusting it. Save the connection name and invocation in the app's `AGENTS.md` (`/addon_config/AGENTS.md`), without credentials.
 
 Replace the example host, port, and username with those of the remote SSH server. For a Home Assistant SSH app, enable its SSH network port and use the Home Assistant host's address and that port. The web terminal's Ingress address is not an SSH endpoint.
 
@@ -775,14 +783,14 @@ The notification stays until you dismiss it; another block in the same task repl
 Detection uses `codexErrorInfo: "cyberPolicy"` from the pinned Codex 0.166.0 app-server.
 It accepts an `error` notification or a failed `turn/completed` notification for the current thread and turn.
 It does not guess from an assistant's answer, a screenshot, a generic error or an exit code.
-It covers tasks the worker launches.
+It covers tasks the worker launches, including scheduled tasks.
 The paired ChatGPT app's own remote threads are not observed through this transport.
 Other filter errors without this typed signal keep the normal error path.
 
 The source contract is Codex's [TurnError](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/app-server-protocol/src/protocol/v2/thread_data.rs#L439),
 [ErrorNotification](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/app-server-protocol/src/protocol/v2/notification.rs#L62),
 and [CyberPolicy translation](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/app-server-protocol/src/protocol/v2/shared.rs#L86).
-The older `codex exec` JSONL path drops the type and exposes only a message; it cannot prove this block.
+The worker reads this type from the app server notification. Earlier versions could also start `codex exec`, whose JSONL output drops the type and has only a message.
 No test sends a request to a model to cause a block. Tests simulate the source-defined notifications.
 
 The worker reads these calls from the exchange's events and decides the status in this order:
@@ -804,7 +812,7 @@ An answer goes to the question it was given for. `codex_cli.reply_task` accepts 
 
 If another chat is working when you pick a choice, the answer waits in the [queue](#queueing-messages-while-another-chat-works) and is sent when that chat finishes. Until then the chat takes no other message, and the answer is sent only if its question is still the one waiting.
 
-The choices are a convenience and not a safeguard. Codex decides when to ask, and nothing stops it from changing files without asking. Use `/config/AGENTS.md` to tell it when you want to be asked first.
+The choices are a convenience and not a safeguard. Codex decides when to ask, and nothing stops it from changing files without asking. Use the app's `AGENTS.md` to tell it when you want to be asked first.
 
 API: `POST /tasks/<task_id>/reply` and `POST /tasks/<task_id>/continue` accept `turn_id`, and `choice` in place of the text: the position of one of that turn's choices, counted from 0. `choice` needs `turn_id`, because a position means nothing without its question. A `turn_id` that is not the waiting turn returns HTTP 409. A `choice` without `turn_id`, or one the question does not offer, returns HTTP 400. Each turn in `GET /tasks/<task_id>` has `choices`, and `latest_task` in `GET /status` has `choices` and `current_turn_id`. The action of a notification button is `CODEX_CLI_CHOICE_<position>_<turn_id>_<task_id>`, which Home Assistant delivers in the `mobile_app_notification_action` event.
 
@@ -816,7 +824,7 @@ To make the text easier to read, open **Settings** > **Text size** and choose **
 
 ### Commands
 
-Type `/` at the start of the message box to see the commands, with a line on what each does. Keep typing to narrow the list, then tap one, or move with the arrow keys and press **Enter** or **Tab**. Typing a whole command, such as `/new`, and sending it does the same. **Settings** > **Commands** lists them all.
+Type `/` at the start of the message box to see the commands, with an icon and a line on what each does. Keep typing to narrow the list, then tap one, or move with the arrow keys and press **Enter** or **Tab**. The letters you typed are marked. **Escape**, or a press outside the list, closes it. Typing a whole command, such as `/new`, and sending it does the same.
 
 | Command | What it does |
 | --- | --- |
@@ -827,10 +835,14 @@ Type `/` at the start of the message box to see the commands, with a line on wha
 | `/rename` | Rename this chat (listed only with a chat open) |
 | `/usage` or `/status` | Show how much of your ChatGPT plan is used |
 | `/size` | Change the text size |
+| `/connection` | Open the remote connection and its status (not listed once Settings has shown that remote control is unavailable) |
 | `/settings` | Open Settings |
-| `/help` | List the commands |
+| `/pin` | Pin or unpin this chat (listed only with a chat open) |
+| `/share` | Download this chat as a file (listed only with a chat open) |
+| `/archive` | Archive this chat, or restore it (listed only with a chat open and idle) |
+| `/delete` | Delete this chat and its history, after a confirmation (listed only with a chat open and idle) |
 
-The page runs these commands itself. Messages reach Codex through `codex exec`, which does not read the slash commands of the Codex terminal app, so a command sent as a message would reach the model as plain words. Text that only starts with `/`, such as `/config/automations.yaml has an error`, is sent to Codex as usual.
+The page runs these commands itself. Messages reach Codex as plain text through the Codex app server, which does not read the slash commands of the Codex terminal app, so a command sent as a message would reach the model as plain words. Text that only starts with `/`, such as `/config/automations.yaml has an error`, is sent to Codex as usual.
 
 Below **Home Assistant workspace**, the sidebar shows how much of the account's 5-hour and 7-day quota is left. From **0.1.67**, each has a bar next to the percentage. The filled part is the quota left: green, and red when less than 5% is left. Hover over a bar to see when the quota resets. The worker checks the quota every few minutes, and not while a task is running. Until it has a value, the bar is an empty outline.
 
@@ -863,7 +875,7 @@ Messages are treated as untrusted text:
 - Images are never loaded from a message, because a remote image would tell its server that the message was read. They appear as links. Images that Codex generates or that you attach are shown as before.
 - A message longer than 50,000 characters, or one that takes unusually long to format, is shown as plain text.
 
-The Markdown parser, [marked](https://github.com/markedjs/marked) 18.0.14, is bundled with the app under `web/assets/vendor/` with its MIT license, so the chat does not load scripts from another server. The arrows are two Material Design Icons paths (`mdiChevronRight` and `mdiChevronDown` from [@mdi/js](https://github.com/Templarian/MaterialDesign-JS) 7.4.47, Apache-2.0, the icon set Home Assistant uses), inlined in `web/assets/chat.css` and `web/index.html`; `web/NOTICE` keeps the license note and goes into the image with the page. Codex decides how it writes its answers; to ask for Markdown, add an instruction to `/config/AGENTS.md` as described under [Task output](../custom_components/codex_cli/README.md#task-output).
+The Markdown parser, [marked](https://github.com/markedjs/marked) 18.0.14, is bundled with the app under `web/assets/vendor/` with its MIT license, so the chat does not load scripts from another server. The arrows are two Material Design Icons paths (`mdiChevronRight` and `mdiChevronDown` from [@mdi/js](https://github.com/Templarian/MaterialDesign-JS) 7.4.47, Apache-2.0, the icon set Home Assistant uses), inlined in `web/assets/chat.css` and `web/index.html`; `web/NOTICE` keeps the license note and goes into the image with the page. Codex decides how it writes its answers; to ask for Markdown, add an instruction to the app's `AGENTS.md` (**Settings** > **Workspace instructions**) as described under [Task output](../custom_components/codex_cli/README.md#task-output).
 
 ### Queueing messages while another chat works
 
@@ -883,7 +895,7 @@ From **0.1.48**, the pill below the message box opens a model menu and a reasoni
 
 A chat without a model of its own follows the app's model setting. From **0.1.67**, the pill names that model instead of showing **Default**: the model set in the app options or, when that option is `default`, the model Codex picks for the signed-in account. The worker reads the latter from Codex's own status report when it checks the quota, and shows GPT-6.1 Sol, the bundled CLI's default, until the first report. The menu marks that model, and choosing it makes the chat follow the app setting again. The reasoning reset button inherits the app's reasoning setting. These can be reset independently. New and older chats without saved overrides inherit both defaults. When an exchange starts, it records its resolved `execution_settings`; changing defaults later does not change that running exchange. Queued messages resolve inherited defaults when they start.
 
-With the default pin, the picker offers only the pinned model; set `model_pin` to `none` in the app configuration to use the other choices. With the pin off, model choices match the app model selector, without the retired `gpt-5.5`. Supported reasoning levels follow the bundled CLI 0.166.0 catalog: Low, Medium, High, Extra High, Max and Ultra for GPT-6 Astra, GPT-6.1 Sol, GPT-6.1 Terra, GPT-6 Sol, GPT-5.6 Sol and GPT-5.6 Terra; through Max for GPT-6 Luna and GPT-5.6 Luna. Ultra enables automatic task delegation. With the app model on `default`, the levels are those of the model Codex picks; a model the worker has no entry for gets the common Low through Extra High choices. If switching models makes a saved reasoning choice incompatible, the UI resets reasoning to the app default. An inherited reasoning level that the model does not support falls back to Medium. So does a level saved in a chat that follows the app model, when that model changes to one without the level; the saved level applies again once the model has it. A chat that had GPT-5.5 selected continues on GPT-5.6 Sol, the next model up, and keeps its reasoning level. Model availability still depends on the account; unavailable-model errors are reported by the CLI.
+With a pin set, the picker offers only the pinned model; clear `model_pin` in the app configuration to use the other choices. With no pin (the default), model choices match the app model selector, without the retired `gpt-5.5`. Supported reasoning levels follow the bundled CLI 0.166.0 catalog: Low, Medium, High, Extra High, Max and Ultra for GPT-6 Astra, GPT-6.1 Sol, GPT-6.1 Terra, GPT-6 Sol, GPT-5.6 Sol and GPT-5.6 Terra; through Max for GPT-6 Luna and GPT-5.6 Luna. Ultra enables automatic task delegation. With the app model on `default`, the levels are those of the model Codex picks; a model the worker has no entry for gets the common Low through Extra High choices. If switching models makes a saved reasoning choice incompatible, the UI resets reasoning to the app default. An inherited reasoning level that the model does not support falls back to Medium. So does a level saved in a chat that follows the app model, when that model changes to one without the level; the saved level applies again once the model has it. A chat that had GPT-5.5 selected continues on GPT-5.6 Sol, the next model up, and keeps its reasoning level. Model availability still depends on the account; unavailable-model errors are reported by the CLI.
 
 The authenticated worker API exposes `GET /chat-options` for choices and defaults, with `default_model` naming the model a chat without its own selection runs on, and `POST /tasks/<task_id>/settings` with `{"chat_settings": {"model": "gpt-6-astra", "reasoning_effort": "xhigh"}}` to save selections for an idle chat. Each value can be `null` to inherit the add-on default. `POST /tasks`, `/tasks/<task_id>/continue`, and `/tasks/<task_id>/reply` also accept the optional `chat_settings` object. Omitting the object preserves existing selections. Invalid models and reasoning levels, and a level the selected model lacks, return HTTP 400; changes to active chats return HTTP 409. `GET /tasks/<task_id>` includes the saved `chat_settings`. Home Assistant actions continue using their existing parameters and honor settings already saved for the conversation.
 
@@ -895,7 +907,7 @@ From **0.1.63**, the list starts as soon as a message is accepted. The worker re
 
 Command output is not shown by default because it can contain configuration secrets. Each command offers **Show output**, which reveals up to 2,048 characters after the same redaction as the task log and marks output that was cut. File edits list paths only. Reasoning summaries and other activity text are limited to 4,000 characters per field, and at most 500 steps are kept per exchange. The task's `codex.log` retains the underlying redacted event stream.
 
-The worker keeps the steps of the running exchange in memory and writes them to `<task_root>/<task_id>/turns/<turn_id>/activity.json` once when the run ends, so the latest exchange's steps survive a page reload and a worker restart. The authenticated worker API exposes `GET /tasks/<task_id>/activity?after=<seq>`, which returns `turn_id`, `running`, `seq`, `total`, the `steps` whose sequence number is above `after`, and `elapsed_ms` while the exchange runs. A step that changes, such as a command that finishes, is returned again with a new sequence number and the same `index`. The web UI polls this endpoint once a second while a chat is working and pauses when the tab is hidden. The Home Assistant integration does not use it.
+The worker keeps the steps of the running exchange in memory and writes them to `/data/codex_tasks/<task_id>/turns/<turn_id>/activity.json` once when the run ends, so the latest exchange's steps survive a page reload and a worker restart. The authenticated worker API exposes `GET /tasks/<task_id>/activity?after=<seq>`, which returns `turn_id`, `running`, `seq`, `total`, the `steps` whose sequence number is above `after`, and `elapsed_ms` while the exchange runs. A step that changes, such as a command that finishes, is returned again with a new sequence number and the same `index`. The web UI polls this endpoint once a second while a chat is working and pauses when the tab is hidden. The Home Assistant integration does not use it.
 
 ### Generated images
 
@@ -903,7 +915,7 @@ From **0.1.49**, images that Codex generates during a conversation appear in the
 
 Image generation uses Codex's built-in `image_gen` tool with the signed-in ChatGPT account. It needs no separate OpenAI API key. Tool availability and usage limits depend on the account. The app currently bundles Codex CLI 0.166.0.
 
-After each run, the worker reads the session's rollout file under `/data/codex-home/sessions` and looks for completed `image_gen.generation` items that were not already present before the exchange. This works for app-server turns, including images absent from the live event stream. Codex saves each result under `/data/codex-home/generated_images/<session_id>/`. The worker copies the file into `<task_root>/<task_id>/turns/<turn_id>/attachments/` and records metadata on that exchange. If the saved file is missing, the worker decodes the inline result from the rollout instead. The original stays where Codex saved it so follow-up edits in the same conversation keep working.
+After each run, the worker reads the session's rollout file under `/data/codex-home/sessions` and looks for completed `image_gen.generation` items that were not already present before the exchange. This works for app-server turns, including images absent from the live event stream. Codex saves each result under `/data/codex-home/generated_images/<session_id>/`. The worker copies the file into `/data/codex_tasks/<task_id>/turns/<turn_id>/attachments/` and records metadata on that exchange. If the saved file is missing, the worker decodes the inline result from the rollout instead. The original stays where Codex saved it so follow-up edits in the same conversation keep working.
 
 The page's rules tell Codex that generated images are attached automatically and that it should leave them at the default save location unless the user asks for a file at a specific path, for example under `/config/www` for use on a dashboard.
 
@@ -921,7 +933,7 @@ Codex receives each image with the message as a `localImage` input in sandboxed 
 
 In the Home Assistant Android app, the paperclip picks one image at a time; use it again to add more. The app's file chooser returns nothing when a multi-select picker is used, so the web UI asks Android WebViews for a single selection. Paste and drag-and-drop still accept several images at once.
 
-Limits: PNG, JPEG, GIF, and WebP only, checked by inspecting the bytes rather than the file name; at most 6 images per message and 10 MiB per image after resizing. The worker stores attached images under `<task_root>/<task_id>/turns/<turn_id>/attachments/`, serves them through its authenticated API, and removes them with the chat. It does not publish uploads under `/config/www`.
+Limits: PNG, JPEG, GIF, and WebP only, checked by inspecting the bytes rather than the file name; at most 6 images per message and 10 MiB per image after resizing. The worker stores attached images and files under `/data/attachments/<task_id>/<turn_id>/`, which the app's backup leaves out, serves them through its authenticated API, and removes them after 7 days or with the chat, whichever comes first. It does not publish uploads under `/config/www`.
 
 API: `POST /tasks`, `POST /tasks/<task_id>/continue`, and `POST /tasks/<task_id>/reply` accept an optional `attachments` list of `{"name": "shot.png", "data": "<base64>"}` objects; a `data:` URL prefix is tolerated. Invalid entries return HTTP 400 and no task or turn is created, and requests over roughly 81 MiB return HTTP 413. Each turn in `GET /tasks/<task_id>` and `codex_cli.get_task` lists its uploads under `prompt_attachments` with the same fields as generated images plus `origin: "user"`; generated images carry `origin: "codex"`. `GET /tasks/<task_id>/attachments/<attachment_id>` serves both kinds with the same checks. The `attachments` list on the task result and in the `codex_cli_task_result` event contains only images generated by Codex.
 
@@ -943,7 +955,13 @@ file before you give it to anyone. API: `GET /tasks/<task_id>/share` returns the
 
 **Pin chat** keeps the conversation at the top of the list under a **Pinned** heading, ahead of the recently active chats; **Unpin chat** returns it to the recent list. **Rename** opens a dialog for a new title, which appears in the sidebar and the conversation header. Neither action changes the chat's `updated_at` time or its saved messages. **Delete** asks for confirmation, then removes the conversation and its saved history. The delete action is unavailable while that chat is running; stop the task first.
 
-Deleting a chat removes `<task_root>/<task_id>/`, including prompts, output, backups, and attachments, and the entry from the task index. The worker also attempts to remove the Codex session rollout file under `/data/codex-home/sessions` and generated images under `/data/codex-home/generated_images/<session_id>/`. Failures to remove those session files are logged. Deletion cannot be undone in the chat UI and does not erase copies in separate Home Assistant backups.
+Deleting a chat removes `/data/codex_tasks/<task_id>/`, including prompts, output, backups, and generated images, and `/data/attachments/<task_id>/` with the files you attached, and the entry from the task index. The worker also attempts to remove the Codex session rollout file under `/data/codex-home/sessions` and generated images under `/data/codex-home/generated_images/<session_id>/`. Failures to remove those session files are logged. Deletion cannot be undone in the chat UI and does not erase copies in separate Home Assistant backups.
+
+### Where the app keeps its working files
+
+Every chat's files are in the app's private folder, `/data/codex_tasks/<task_id>/`: the prompts, `codex.log`, `task.json`, the per-turn backups and the generated images. The files you attach to a message are in `/data/attachments/<task_id>/`, which the app's backup leaves out, for 7 days. The folder `auth/` in it holds the log of the ChatGPT sign-in: the `codex login` output, which includes the sign-in link and the one-time code (a code works for 15 minutes only), with token-like values redacted. None of this is in Home Assistant's configuration folder, so the file editor, Samba and a backup of that folder do not hold it; the app's own backup does. The app writes nothing under `/config/www`. In `/config` it writes only the files Codex changes for you, the integration's folder `custom_components/codex_cli` with its work folder `.codex_cli_install` (which must be on the same file system for the swap to be atomic, and which Home Assistant never loads from), and `AGENTS.md` when you edit it on the page.
+
+Versions before 0.4 kept the chats in `/config/codex_tasks` (or the folder the removed `task_root` option named) and wrote the sign-in QR images to `/config/www/codex_cli_auth`. On the first start of 0.4 the app moves each chat from `/config/codex_tasks` to `/data/codex_tasks` and then removes the old folder. If the app still finds a saved **Task root** value in its options, it takes from that folder only the chat folders (each holds a `task.json`) and the sign-in log folder `auth`; every other file stays, and the folder is removed only when it is then empty. A folder the app cannot read is left as it is, with a line in the app log, and the app starts. It moves, never copies: a chat is renamed, or copied whole to a staging folder in `/data` and renamed into place, and only then deleted from the old place. A chat that cannot be moved stays where it was, with a line in the app log, and is tried again at the next start. The same start deletes the `codex_login_*.svg` images and their folder; a file in that folder that the app did not write stays.
 
 API: `POST /tasks/<task_id>/pin` with `{"pinned": true}` or `{"pinned": false}` returns the saved state. `POST /tasks/<task_id>/title` with `{"title": "Porch lights"}` trims and collapses whitespace, rejects empty titles and titles longer than 200 characters with HTTP 400, and returns the stored title. Both work on running chats and return HTTP 404 for unknown tasks and HTTP 500 if the metadata could not be written, in which case the previous values are kept. `DELETE /tasks/<task_id>` returns HTTP 409 for queued or running tasks, HTTP 404 for unknown tasks, and HTTP 500 if the task files could not be removed, in which case the chat stays listed. Summary entries from `GET /tasks?summary=true` include a `pinned` flag, and `order=pinned_first` lists pinned chats before the others while keeping the most recently updated first within each group. The `codex_cli.list_tasks` action keeps its existing `created_asc` and `updated_desc` orders.
 
@@ -953,72 +971,34 @@ API: `POST /tasks/<task_id>/pin` with `{"pinned": true}` or `{"pinned": false}` 
 
 `GET /tasks` and `codex_cli.list_tasks` accept optional `limit` (1–500), `offset`, `status`, `order` (`created_asc` or `updated_desc`; the worker API also accepts `pinned_first`), and `summary` parameters. `summary: true` returns compact entries for the sidebar. Without filters, all tasks are returned in their original creation order. `GET /tasks/<task_id>` includes `turns`, `history_incomplete`, and `can_continue`. The latter indicates an eligible task with a recorded session ID; availability of its session file is checked when continuing. `POST /tasks/<task_id>/continue` accepts a JSON `message`.
 
-Each new exchange stores its user message, timestamps, status, and response in the task's `turns` list. Prompts, final output, backups, and the list of changed files are stored separately under `<task_root>/<task_id>/turns/<turn_id>/`. The task-level result and existing result events continue to describe the latest exchange. Old tasks are adapted from their available prompt, replies, and last result, with a notice that earlier responses may be missing. When a chat's `task.json` is lost and the chat is rebuilt from the task index, its latest exchange keeps its turn id, so the steps saved for that exchange stay linked to it after you continue the chat. History is retained until its files are removed; there is no automatic expiry, except for [backups](#backups).
+Each new exchange stores its user message, timestamps, status, and response in the task's `turns` list. Prompts, final output, backups, and the list of changed files are stored separately under `/data/codex_tasks/<task_id>/turns/<turn_id>/`. The task-level result and existing result events continue to describe the latest exchange. Old tasks are adapted from their available prompt, replies, and last result, with a notice that earlier responses may be missing. When a chat's `task.json` is lost and the chat is rebuilt from the task index, its latest exchange keeps its turn id, so the steps saved for that exchange stay linked to it after you continue the chat. History is retained until its files are removed; there is no automatic expiry, except for [backups](#backups).
 
 For local browser checks, run `python codex-cli-worker/tests/web_fixture.py` from the repository root, then `node codex-cli-worker/tests/browser_smoke.cjs` with Playwright available. The fixture uses temporary storage and simulated responses, and never launches Codex or contacts Home Assistant. Set `CODEX_CHAT_BROWSER=msedge` to use installed Edge, and optionally `CODEX_CHAT_QA_DIR` to choose a screenshot directory outside the repository.
 
 
 ### ABI and relay fallback acceptance (N8/N9)
 
-The AppArmor ABI declaration enables domain/stack and network_v8 mediation on HAOS; ptrace was already mediated. Both tool labels keep their existing Unix/raw-netlink socket permissions, so sandboxed AF_INET/AF_INET6/packet socket creation is denied. Approved escalations keep the existing parent/relay policy. The lead must run an ordinary chat-page shell read and the history MCP tool after loading the updated HAOS profile; CI's Ubuntu kernel is not that acceptance.
+The AppArmor ABI declaration enables domain/stack and network_v8 mediation on HAOS; ptrace was already mediated. Both tool labels keep their existing Unix/raw-netlink socket permissions, so sandboxed AF_INET/AF_INET6/packet socket creation is denied. Approved escalations keep the existing parent/relay policy. The maintainer must run an ordinary chat-page shell read and the history MCP tool after loading the updated HAOS profile; CI's Ubuntu kernel is not that acceptance.
 
 The plain relay route still creates a user namespace and maps to the fixed non-root identity. It omits the private hostname, not the namespace requirement. If namespace creation is refused, it fails closed and retries with backoff. No working fallback is promised in that case. See [sandbox checks](SANDBOX_TESTING.md#abi-socket-family-change-and-namespace-fallback). The scratch-folder proposal is in [CX-HA-URL's design note](../docs/design/CX-HA-URL.md#scratch-folder-proposal-do-not-build); this change creates no notes folder or sandbox bind.
 
-## The lead agent channel and mailbox
+## Scheduled runs
 
-**Permission requests remain human decisions.** The run log shows **waiting for approval** while a native request is pending. Open its chat to review the command or diff and choose **Allow once** or **Deny** as an administrator. No scheduler, lead token or mailbox reply can answer it. The parked exchange keeps the worker's normal execution slot; other schedules do not bypass it. Existing task timeouts, cancellation and restart expiration still apply. A question instead shows **waiting for input**. Scheduled and lead tasks report completion, failure, cancellation and questions in the run log/chat without pushes. Only their existing permission-wait notification uses `notify_service` (or persistent Home Assistant notifications). The lead accepted Home Assistant phone notification and the responsive permission page; a ChatGPT approval mirror is not required or provided.
+To schedule a chat, open its menu in the chat list and choose **Schedule**. The schedule editor opens with the chat's title as the name and its first message as the prompt. Choose a **Model**, or leave **Add-on default**, and a **Trigger**: **Hourly**, **Daily** at a time, **Weekly** on a day and time, or **Custom**. Custom holds the other timings: every N minutes or hours, a cron line, or one date and time. **Advanced settings** holds the permissions, **Default** or **Read only**. Default follows the app's configured sandbox; Read only narrows that mode. **Create schedule** authorizes the exact prompt and timing you submitted. If the `model_pin` option later names a different model than the schedule, its runs fail and each one says so in the run list; edit the schedule and choose the pinned model or **Add-on default**.
 
-From **0.3.4**, the page's rules tell Codex to answer a question about Codex cloud tasks with `codex cloud list --json` and `codex cloud status <task id>` in the shell. In a sandboxed mode each command needs network access, so it shows the usual **Allow once** card. The list holds only Codex cloud tasks of the signed-in account; when it is empty, Codex says so.
+Each run starts a new chat; the chat you scheduled does not grow. **Schedule** in the menu of the chat you scheduled, or of any chat a run started, opens that schedule again. There, **Advanced settings** also shows its state, its recent runs, **Pause** or **Resume**, and **Delete schedule**. A chat's menu opens one schedule: the newest one made from that chat.
 
-### Connecting the other local agent
+**Settings → Scheduled runs** lists every schedule, also one whose chat was deleted and one saved by an earlier version, which belongs to no chat. **Edit** opens the same editor. Codex can propose a schedule; the proposal stays off until an administrator reviews and approves it there, with **Approve this proposal** or by saving it in the editor. Codex can edit or delete only its own unapproved proposals; an approved schedule is owner-only. If a proposal changes while you review it, refresh before approving it. Proposals whose prompt contains masked credentials cannot be approved or prefilled for editing; create a replacement with a complete prompt.
 
-An administrator creates or rotates a separate lead token in Settings. It is shown once, cleared when Settings closes, and never saved in browser storage. Copy it directly into the other agent's private configuration. The worker stores only its hash. Rotation immediately revokes the previous token. This token is separate from the integration's worker token and cannot replace a Home Assistant administrator. Never put it in a prompt, URL, mailbox message or repository.
+Intervals accept whole minutes or hours, with a minimum of one minute. Hourly is an interval of one hour, counted from the time you save. Daily and Weekly are cron lines at the time you chose. One-off entry and displayed dates use Home Assistant’s configured IANA time zone, named under the trigger. Cron follows that local wall time across daylight-saving changes: missing minutes are skipped and repeated minutes run once, at the first occurrence. One-off nonexistent local times are refused; repeated times use their first occurrence. Entry and scheduled dispatch pause if the Home Assistant time zone is unavailable. Explicit API timestamps with an offset remain absolute instants. Cron uses five numeric local fields: minute, hour, day of month, month and weekday. Lists, ranges and steps are supported. Sunday is 0 or 7. When neither day field starts with a wildcard, either can match. A leading wildcard, including a step such as `*/2`, keeps the other day field restrictive. The next occurrence must be within 366 days. A cron schedule disables after its last occurrence if no next occurrence lies within that horizon; edit it to enable it again. One-off schedules disable after their occurrence is reserved. Pause, resume, edit or delete schedules from the editor or the list; deleting a schedule stops future runs, not a task already in progress. Cancel a running task in its chat.
 
-The API is served by the same worker HTTP listener as the existing local API. The other agent uses its configured local worker address and sends `Authorization: Bearer <lead token>`; it must not rely on Ingress headers. Requests use JSON and are limited to 64 KiB. Prompts are limited to 16,000 characters, names to 80, and mailbox messages to 8,000. Responses are not cached and redact recognized credentials. The API does not configure network exposure; keep it on the existing local app network and protect the token as a credential.
+The worker checks due schedules every five seconds. It uses the ordinary task launcher, backups, validation and permission checks, and starts at most one scheduled task per check. Due work waits while the assistant is busy. A missed interval coalesces into one run, without a burst of catch-up tasks. Limits are 100 approved schedules plus 20 unapproved proposals, 24 runs per schedule per UTC day, and 64 scheduled runs total per UTC day. A run that reaches a limit waits until a later UTC day. Completed run history retains the latest 500 records; active records are kept separately. Schedules, occurrence reservations and run history live in `/data/schedules.sqlite3` and survive app restarts and updates. Reservation and launch share the normal chat-slot lock; a busy launch restores the due occurrence without overwriting a concurrent owner edit. A crash after reservation but before saving the ordinary task records an interrupted run and does not retry it automatically.
 
-| Method and path | Purpose and fields |
-|---|---|
-| `POST /lead/tasks` | `{"prompt":"Inspect the sample configuration.","mode":"read-only"}` starts an ordinary task and returns `task_id`. A busy worker durably holds one waiting task; a second waiting task returns 409 with a reason. The response includes `status: queued` or `waiting`; the waiting handle can be polled below. The daily unattended-run limit applies. |
-| `GET /lead/tasks/<task_id>` | Read a lead-submitted or scheduled task's saved result and pending-approval status. Unrelated human chats return not found. It cannot answer an approval. |
-| `GET /lead/schedules` | Read saved schedules and proposals. The chat and the model an owner gave a schedule are left out, and a proposal cannot set them. |
-| `POST /lead/schedules` | Propose `{"name":"Sample inspection","prompt":"Inspect the sample configuration.","mode":"read-only","spec":{"kind":"interval","seconds":3600}}`. The result has `approved:false` and `enabled:false`. |
-| `PATCH /lead/schedules/<id>` | Replace only a lead-authored, unapproved proposal with those same four fields. Approved schedules and proposals by other authors return 404. Every edit changes the review revision. Other specification shapes are `{"kind":"cron","expression":"0 9 * * 1-5"}` and `{"kind":"once","at":"2027-03-12T09:00:00Z"}`; choose a future time. |
-| `DELETE /lead/schedules/<id>` | Delete only a lead-authored, unapproved proposal. |
-| `GET /lead/mailbox` | Read and acknowledge only the returned page of local messages. Optional `offset` (0–500, including legacy unread mail), `limit` (clamped to 1–20, default 10), `unread_only=true`; follow `next_offset` until null. For consuming unread pages the next offset is 0 because acknowledged rows leave that view. |
-| `POST /lead/mailbox` | Save `{"message":"A local sample message.","to":"codex","turn_id":"unique-lead-turn"}` as a new thread. Optional `due` and `task:{"prompt":"Inspect the sample.","mode":"read-only"}`; an attached task atomically saves the note and accepts the task for immediate dispatch or the single durable waiting slot (202). Invalid/full/second-slot requests save neither. Start and final-result replies appear in this same thread. |
-| `POST /lead/mailbox/<message_id>/reply` | Save `{"message":"A local sample reply.","to":"codex","turn_id":"unique-lead-turn"}` on that root thread. Optional `due`; replies do not accept a task. |
+**Permission requests remain human decisions.** A scheduled run has the tools of a chat on the page, the `call` tool that changes the house included, and Codex asks before each `call` as it does in a chat. The run log shows **waiting for approval** while a request is pending, and the chat page shows its yellow warning. Open the run's chat to review the command, diff or Home Assistant action and choose **Allow once** or **Deny** as an administrator. Nothing that a chat on the page would ask about runs without that answer. The scheduler cannot answer it. The parked exchange keeps the worker's normal execution slot; other schedules do not bypass it. Existing task timeouts, cancellation and restart expiration still apply. A question instead shows **waiting for input**. Scheduled tasks report completion, failure, cancellation and questions in the run log and chat without pushes. Only their existing permission-wait notification uses `notify_service` (or persistent Home Assistant notifications).
 
-The lead-token holder may wake and direct the worker on its own initiative through these authenticated task routes. Codex on the worker may send mail to the lead, but cannot start work on the lead. Mail bodies remain untrusted text with no permission authority. An ordinary note does not execute; the optional `task` object is an explicit, authenticated lead task submission. No lead endpoint creates permanent permissions, changes sandbox policy, approves a schedule or answers a native permission request. The worker uses its ordinary launcher and human approval prompts. A waiting task survives restart, waits through a pause or daily unattended-run limit, and gets priority over due schedules when the ordinary slot is free. A task interrupted after reservation is reported, never automatically executed again.
+Codex on the worker receives the `codex_scheduling` tools `propose_schedule` and `list_schedules`. They use a running-turn capability that expires when the exchange ends. Proposal tools cannot approve schedules or grant native permissions. Schedule summaries are paginated in groups of 10 by default (`limit` can select 1–20; a larger number returns 20 with `next_offset` to read the rest, not an error); prompt excerpts are limited to 512 characters. A refused call says why in plain words, for example that `offset` is out of range or that the exchange has ended. Read the complete proposed prompt on the page before approving. They run without a permission card because these limits already bound them. If any other tool asks a question, the page cannot show it: the request is declined and the chat says so. Only the Home Assistant tool's own permission request gets a card (see [permission requests](#permission-requests)). These tools are for page tasks; native remote threads do not receive page-task capabilities.
 
-Each reader (owner, lead, Codex) has its own 128-message mailbox. A sender receives a read copy. `to` selects owner, lead, codex or all (the legacy default). Replies also reach the thread's existing participants.
-
-The oldest read copies leave first. Unread copies never expire or leave to make room. A recipient full of unread mail refuses delivery with HTTP 409 and a plain reason. `mailbox.full` on `/status` identifies the affected reader. Delivery to multiple readers and write counters share one transaction.
-
-Legacy mailboxes above 128 keep their unread copies. They refuse new delivery until enough mail is read or cleared. Read copies reduce to the new count limit only when a new message arrives. Reads and status checks do not trim copies by count, so a page walk can reach every legacy message. Settings shows unread owner copies first while its mailbox remains above the limit; acknowledging one page lets the next refresh show the remaining unread mail without deleting read history.
-
-Owner mail has no age cutoff. Lead and Codex copies expire 48 hours after their first read, on the next mailbox operation. A read therefore preserves the other pages of old mail in the same walk. Repeated reads do not restart that clock. Prior read marks without timestamps receive one 48-hour grace period at upgrade. When one reader clears mail or a copy expires, the other readers keep their copies and unread replies.
-
-**Upgrade note:** Legacy messages without a Codex read mark remain unread for Codex. A full Codex mailbox can refuse the default `all` destination. Read those messages through Codex, or clear its mailbox in Settings. Then send more mail to `all`.
-
-This preserves unread history. It does not assume that Codex saw older messages.
-
-The Settings mailbox selector lets an administrator inspect each mailbox without acknowledging another reader's mail. Only the owner mailbox acknowledges the IDs displayed on the page. The lead and Codex acknowledge their own reads. An administrator can clear any selected mailbox with an in-page confirmation. `DELETE /schedule-mailbox?mailbox=owner|lead|codex` requires `{"confirm":true}`. `DELETE /lead/mailbox` requires the same confirmation and clears only the lead's copy, regardless of sender; the lead cannot select another mailbox. The corresponding `/<root-id>` DELETE clears only that reader's thread copies. Clearing never executes a task or resets write limits. Owner management and token rotation require authenticated administrator Ingress, including a fresh administrator check under the existing cache rules.
-
-Responses put the consistent message fields in `envelope`, with delivery metadata (`id`, root `parent`, trusted `origin`) outside it:
-
-```json
-{"id":"message-id","parent":null,"origin":"","envelope":{"to":"codex","from":"lead","sent":"2027-03-01T00:00:00.000Z","last_modified":"2027-03-01T00:00:00.000Z","due":"2027-03-02T00:00:00.000Z","message":"Inspect the sample."}}
-```
-
-`due` is optional and sender-set; submit an ISO 8601 timestamp including a zone. Stored/API dates are normalized to UTC ISO 8601 with `Z`. Legacy mail initializes `last_modified` from `sent`. An edit updates that message. A reply updates the root thread message and retains the other replies' modification times. PATCH `/lead/mailbox/<id>` edits only the lead's own message (`message`, optional `due`); an administrator can edit via `/schedule-mailbox/<id>`. The page shows To, From, Sent, Last modified, Due when set, then Message in that order, using Core's configured time zone or explicitly labeled UTC when unavailable. The `text` plain view has those header labels, a blank line, then the body. `/status` includes unread due timestamps and overdue flags without bodies. Mailbox post labels come from the active turn, rather than its original task. Scheduled and lead-started turns carry their source; ordinary human continuations remain unlabeled.
-
-Lead and Codex ordinary writes remain limited to 20 per turn and 64 per actor per UTC day (HTTP 429 for lead writes). The lead supplies a stable `turn_id`; Codex's comes from its verified exchange. Counters survive clearing and restarts; owner writes are not rate limited. The two typed start/final replies for an accepted task use durable once-only flags and do not consume model write counters. They remain bounded by the 64 unattended tasks/day limit and mailbox capacity. If a recipient is full, the saved reply stage retries when space opens; this never reruns the task. Pending replies retain their run record beyond ordinary history pruning. The legacy `body` request field remains an alias for `message`, but responses use the envelope.
-
-The store removes completed task/thread links after every thread copy is gone. It keeps unfinished reply links for retry. An edit does not mark a message unread again. An accepted task keeps its stored prompt when its mail note changes.
-
-A task note without `to` goes to Codex and the lead. The owner can inspect that thread through the selector. A daily limit holds the single task slot until the next UTC day. Other lead tasks wait for that slot to clear.
-
-Schedule prompts containing recognized credentials are masked in responses and marked `prompt_redacted`; Edit is disabled, and the editor opened from a chat shows such a schedule read-only, so masked text cannot replace the saved prompt. Create a replacement with a complete prompt instead. All save routes reject the literal `[redacted]` marker. The private database and its journal/WAL/SHM paths are protected like the worker token from tool file access and native permission grants. A persistent SQLite journal is materialized before tasks or remote control start, so its mask remains present across transactions. Schema version 3 adds first-read retention timestamps. Version 2 added per-reader deliveries, UTC message envelopes and durable lead task/thread records; version 1 added proposal authorship; legacy proposals without an attributable author remain owner-owned.
+A build-time switch, `SCHEDULED_RUNS` in `scheduling.py`, can hide all of this again; saved schedules stay in the database while it is off.
 
 ## Interaction logs for a bug report
 
@@ -1071,7 +1051,7 @@ of diagnostic collection never decide whether an action runs or a queue advances
 **Remote ChatGPT thread events are not recorded in this first delivery.** Every
 export includes `remote ChatGPT threads: not recorded`. No diagnostic connection,
 subscription, resume, attachment or remote history read is added. Add-on page
-and lead-channel tasks are recorded by their worker lifecycle. Relay
+and scheduled tasks are recorded by their worker lifecycle. Relay
 read RPCs are grouped separately within one capability lifetime, with counts per
 operation/domain; they do not describe the remote conversation or its approvals.
 Only worker-visible launch-policy refusals and approval events are included. The export
@@ -1091,7 +1071,20 @@ or two such as Ready, Off or Not signed in; the 5-hour and weekly quota with a l
 times; and **Settings**. Select Codex, GitHub or Remote to open Settings at that part of Accounts and connections;
 **Manage remote connection** there opens the window that pairs the ChatGPT app. A row that needs you shows an amber
 dot, and a row whose state could not be read shows a red dot and Unavailable. The ChatGPT account part says whether
-a turn has confirmed Codex access with the current sign-in. The integration's state shows only when it needs you, as
+a turn has confirmed Codex access with the current sign-in.
+
+While something needs you, the Settings cog becomes a warning symbol, and on a phone the conversations button
+shows the same symbol. It is yellow while an approval or a schedule proposal waits. It is red when ChatGPT is not
+signed in or its status cannot be read, when the GitHub sign-in expired or was revoked, or when Remote is on and
+lost its connection. Red wins over yellow. A GitHub account that was never connected, or that you disconnected, and
+Remote turned off show nothing. **Dismiss the warning**, under Settings, hides the warnings shown at that moment
+until something new happens, such as another approval or a new sign-out; the waiting item itself stays. A
+reload of the page brings a dismissed warning back. The
+ChatGPT warning cannot be dismissed, because no chat runs without that sign-in. A screen reader reads the warning
+as the description of the Settings and conversations buttons. The page notices a ChatGPT or GitHub sign-out at its
+next status check, within five minutes, and a schedule proposal within a minute.
+
+The integration's state shows only when it needs you, as
 a line at the top of the chat. While a task
 runs, the send button is the stop button, even with a draft or a file in the message box. On a phone, a slim row holds the
 conversations button, the title, New chat and the thread menu; the foot rows are at the bottom of the
@@ -1135,6 +1128,7 @@ own to any of them.
   access is on, a ChatGPT app thread can also ask for it; the app never sees those threads, so such a thread can
   mix the settings (for example "never ask" with `workspace-write`). No mix reaches further than Full access itself.
   A turn that is running when the switch goes off finishes in Full access; the chat's next turn runs in Default.
+- Scheduled runs use Default or Read only only.
 - A queued message keeps the choice submitted with it. Camera and Plan mode are not offered in this build.
 
 A chat's menu holds Rename, Pin, Share, Archive and Delete ([Managing chats](#managing-chats)). The Status
@@ -1150,7 +1144,7 @@ URLs and QR images remain limited to verified Ingress administrators; API tokens
 or start pairing. No live account enrollment or device handoff is implied by local rendering tests.
 
 Settings → Workspace instructions → Workspace rules opens a separate editor. The file is read only when that editor
-opens, and Save remains an explicit action. Existing account, diagnostic and browser-permission
+opens, and Save remains an explicit action. Existing account, diagnostic, scheduling and browser-permission
 controls remain in Settings; **Browser permissions** is a part of **Advanced**, the last section, which starts
 collapsed and shows in its header how many permissions are remembered, or that they could not be read. The
 **Add-on configuration** row at the foot of Settings opens the app's Configuration tab in Home Assistant
@@ -1237,26 +1231,7 @@ or model task.
 
 ### Mailbox arrival signals
 
-The integration polls worker status every 30 seconds. Its **Mailbox unread for the lead** sensor counts
-retained posts from Codex and the owner that the lead has not read. A reader's own posts do not count as
-unread for that reader. The worker reports independent owner, lead and Codex counts in `mailbox.unread` on `/status`.
-The lead reads and acknowledges its snapshot with `GET /lead/mailbox`; `?unread_only=true` returns only its
-unread messages and marks those returned IDs read. Owner reads are acknowledged only after the Settings
-page renders those message IDs in the owner mailbox. Viewing the lead or Codex mailbox does not acknowledge that reader's copies. A message arriving after that snapshot remains unread. Reading never starts a task.
+From **0.4.0** the app has no mailbox and no lead agent channel. The worker's `/status` reports the mailbox as not
+available, so the integration's **Mailbox unread for the lead** sensor shows unknown and no
+`codex_cli_mailbox_message` event fires. A later version of the integration removes the sensor and the event.
 
-For each first-observed retained message or reply, the integration fires `codex_cli_mailbox_message` with
-only `message_id`, `thread_id`, `author` (`codex`, `lead` or `owner`) and `time` (Unix seconds). It never includes
-the body. Event IDs are written atomically and read back through a separate storage reader before emission.
-If the saved IDs cannot be verified, no event fires and the next poll retries without advancing the seen-ID set.
-A restart reads the saved set, preventing replay after a failed write. A crash between saving and firing
-can still lose that event. The first connection also reports retained messages not observed previously. Normal delay
-is up to one 30-second poll plus request time. Messages removed or evicted before a poll cannot produce an event;
-use the sensor and unread filter to recover retained unread mail. Per-reader 128-message retention protects unread mail; the 20-per-turn and
-64-per-actor-per-UTC-day model write limits still apply.
-
-Another local agent can watch the sensor's state, or an automation can listen for this event and tell it to
-read `GET /lead/mailbox?unread_only=true` with its existing lead credential. The lead-token holder may independently direct the worker through `/lead/tasks` or an explicit task attached
-to `/lead/mailbox`. A worker may send mail back but cannot start lead work. A plain arrival signal or body
-never executes a task, grants authority or answers a human permission prompt. This signal
-adds no task dispatch, notification send, permission bypass or new agent connection. An unavailable mailbox
-leaves the sensor unknown and does not create arrival events.

@@ -1,3 +1,5 @@
+<p align="center"><img src="brand/courtyard/logo.svg" alt="Codex for Home Assistant" width="320"></p>
+
 # Codex for Home Assistant
 
 [![License][license-badge]][license-url]
@@ -45,7 +47,7 @@ see [If a download is missing](#if-a-download-is-missing).
 - [Permission modes](#permission-modes)
 - [Safety](#safety)
 - [Sign-in](#sign-in)
-- [Mailbox](#mailbox)
+- [Scheduled runs](#scheduled-runs)
 - [Using it from Assist and automations](#using-it-from-assist-and-automations)
 - [Troubleshooting](#troubleshooting)
 - [Versions](#versions)
@@ -100,9 +102,9 @@ The app's own install of the integration (steps 2 to 4) needs nothing else.
 
 Every app option is in [codex-cli-worker/DOCS.md](codex-cli-worker/DOCS.md).
 
-Put rules for your house in `/config/AGENTS.md`. The chat has an editor for it under **Settings** > **Workspace instructions** >
+Put rules for your house in the app's `AGENTS.md`, kept in its own `addon_config` folder and not in `/config`. The chat has an editor for it under **Settings** > **Workspace instructions** >
 **Workspace rules**. Codex uses its defaults and your workspace instructions; the app bundles no house rules. A new
-install that has no `/config/AGENTS.md` gets a short starter file there once, which is yours to change or delete.
+install that has no `AGENTS.md` gets a short starter file there once, which is yours to change or delete.
 
 ## Updating
 
@@ -120,7 +122,7 @@ How releases are tested and how a bad release is undone: [docs/updates-and-rollb
 3. Uninstalling the app does not remove the integration. Delete `/config/custom_components/codex_cli` (or remove
    **Codex** in **Settings** > **Marketplace** if you installed it there), and restart Home Assistant.
 
-Task logs stay in `/config/codex_tasks` until you delete that folder.
+The chats and their logs are in the app's private folder (`/data/codex_tasks`), which uninstalling the app removes.
 
 ## An example, step by step
 
@@ -205,17 +207,18 @@ When the sign-in is missing, ended or rejected, a banner returns above the chat,
 Assistant repair, and the **Signed in** sensor turns off. A good sign-in clears all three. The Codex program does not
 report when a sign-in will end, so the app shows no countdown. Sign out any time with **Settings** > **Sign out**.
 
-## Mailbox
+## Scheduled runs
 
-**Mailbox.** You, Codex and one other local agent can leave plain-text messages for each other. The other agent is
-another app or agent that runs on the same Home Assistant host; it connects with a separate token that you create in
-Settings. The token shows once, and the app stores only a hash.
+Open a chat's menu and choose **Schedule**. You save a name, a prompt, a model and a trigger: hourly, daily, weekly,
+or a custom interval, cron rule or single time, in your Home Assistant time zone. Each run starts a new chat.
+**Settings** > **Scheduled runs** lists every schedule.
 
-- A message is only data. It never starts work, and it grants no permission.
-- A sensor counts unread messages for the other agent, and an event announces each new message without its text.
-- Limits: 500 messages, and 20 writes per turn and 64 per UTC day for each writer.
+- A schedule you save is approved when you save it. Codex can only propose one; it stays off until an administrator
+  reads the full prompt and approves it.
+- A scheduled run asks for permission like any other run and waits for you in its chat.
+- Limits: 100 approved schedules, 24 runs per schedule per UTC day, and 64 scheduled runs per UTC day.
 
-Details: [The lead agent channel and mailbox](codex-cli-worker/DOCS.md#the-lead-agent-channel-and-mailbox).
+Details: [Scheduled runs](codex-cli-worker/DOCS.md#scheduled-runs).
 
 ## Using it from Assist and automations
 
