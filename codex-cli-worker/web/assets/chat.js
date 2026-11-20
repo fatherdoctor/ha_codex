@@ -782,8 +782,8 @@ function controls() {
   else if (working && task?.browser_retry)
     notice = "Retrying the dashboard inspection. You can continue this chat when it finishes.";
   else if (working)
-    notice =
-      "Codex is working. Your response will appear here when it finishes.";
+    // A working chat shows no notice here; the in-chat "Working on your request" line says it.
+    notice = "";
   else if (task && !task.can_continue)
     notice =
       "This chat has no saved session to continue. Start a new chat and include the context you need.";
