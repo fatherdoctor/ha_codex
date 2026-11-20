@@ -3,6 +3,9 @@
 ## 0.4.0 (unreleased)
 
 ### What's new
+- **Old chats are deleted after 14 days.** A chat with no message for 14 days is deleted with all its files. Change the
+  time with **Delete chats after (days without a message)**. Pinned chats never expire, a scheduled run counts as a
+  message, and a chat shows a warning line for its last 3 days.
 - **A warning when something needs you.** On the chat page, the Settings cog turns into a warning symbol while
   something needs you. On a phone, the conversations button shows it too. Yellow means an approval or a schedule
   proposal waits. Red means ChatGPT is signed out or unreadable, the GitHub sign-in expired or was revoked, or Remote
@@ -65,6 +68,14 @@
   copy at `/data/agents_before_move.md`. If both places hold a file, nothing moves and the app logs a line.
 
 ### Changed
+- **No copies of secret files.** The app keeps no readable copy of `secrets.yaml` or of any file under `.storage`.
+  The full snapshot leaves them out, and a copy in a message's backup folder is deleted when the message ends, in
+  every permission mode, also when you stop the message; the backup cleanup removes a copy that a restart left
+  behind. After you answer a permission card for a change to one of these files, the chat's record keeps the path
+  but not the changed lines. This includes dashboards kept in storage: to undo a change to one, use a Home
+  Assistant backup.
+- **`.storage` is read-only in the sandbox.** In Default, a change to a file under `.storage` now asks you on a
+  permission card first. In Auto-review, Codex's reviewer decides; Full access still runs without asking.
 - **Working files out of the configuration folder.** The chats (prompts, logs, per-turn backups, attachments) are now
   in the app's private `/data/codex_tasks`, not in `/config/codex_tasks`: the file editor, Samba and a backup of the
   configuration folder no longer hold them, and the app's own backup does. The first start of this version moves each
@@ -82,6 +93,9 @@
   The first start of this version deletes the old `codex_login_*.svg` images and their folder.
 - **Cleaner chat page header.** The small text beside the Codex word in the side bar is now two short lines, "for"
   over "Home Assistant", centered on the word. The empty space to its right is gone.
+- **Every text message Codex writes shows in the chat.** The messages Codex writes while it works now show in order
+  above the answer, outside the closed "Worked for…" line, with Markdown links as links. Tool steps and thinking stay
+  inside that line, and the final answer is not shown twice.
 - **No more checks after each answer.** The app no longer judges a turn after Codex answers: it takes no dashboard
   screenshots of its own (they could catch a dashboard still loading), adds no "Verification needs review" note and
   no "No previous version saved" lines. Those lines blamed the turn for files that something else, such as an
@@ -96,6 +110,8 @@
   Escape does. A dialog where you changed a field stays open, so nothing you typed is lost.
 - In every Settings section, the description, buttons and fields now start at the same left edge as the section's
   title text, after the arrow, on a desktop and a phone.
+- The sidebar's 5h and 7d quota rows and the plan line now start at the left edge of the status dots, so the
+  left side lines up with the dots above and the Settings cog below.
 - The "Codex" label with the command symbol no longer sits above each reply on the chat page. Screen readers still
   announce each reply as "Codex reply"; the reply's time and status line stay.
 - The mark in the chat page header now follows the page's theme instead of the system's light or dark setting. Open

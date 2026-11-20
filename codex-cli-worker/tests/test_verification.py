@@ -265,21 +265,22 @@ class VerificationTests(unittest.TestCase):
             capture.assert_not_called()
 
     def test_snapshot_excludes_credentials_but_manifest_detects_changes(self):
-        """Credential files stay out of the archive but in change detection."""
-        for name in ("secrets.yaml", ".storage/auth", ".storage/auth_provider.homeassistant", ".storage/core.config_entries", ".storage/lovelace"):
+        """Secret files (secrets.yaml and all of .storage) stay out of the archive but in change detection."""
+        for name in ("secrets.yaml", ".storage/auth", ".storage/auth_provider.homeassistant", ".storage/core.config_entries", ".storage/lovelace",
+                     "automations.yaml"):
             path = self.config / name
             path.parent.mkdir(exist_ok=True)
             path.write_text('{"private": "value"}')
         server.get_run_dir("chat").mkdir(parents=True)
         snapshot = server.create_snapshot("chat")
         with tarfile.open(snapshot["path"]) as archive:
-            self.assertEqual(archive.getnames(), [".storage/lovelace"])
+            self.assertEqual(archive.getnames(), ["automations.yaml"])
         self.assertIn("secrets.yaml", server.build_manifest())
         self.assertEqual(snapshot["file_count"], 1)
         recovery = server.recovery_copies(server.get_run_dir("chat"),
             {"added": [], "changed": ["secrets.yaml"], "deleted": []}, ["secrets.yaml"], {})
         details = server.validation_details(["secrets.yaml: bad YAML"], {}, recovery)
-        self.assertIn("excluded from recovery", details)
+        self.assertIn("have no recovery copies", details)
         self.assertNotIn("New files", details)
 
     def test_supervisor_token_is_not_in_subprocess_environment(self):

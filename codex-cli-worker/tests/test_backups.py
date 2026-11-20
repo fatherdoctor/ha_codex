@@ -181,7 +181,7 @@ class SavedCopyTests(unittest.TestCase):
         self.assertIn(f"are kept for 3 days at: `{saved.resolve()}`", details)
         self.assertIn("New files that did not exist before: `packages/new.yaml`", details)
         self.assertIn("No copy of the previous version was saved for: `scripts.yaml`.", details)
-        self.assertIn("excluded from recovery copies", details)
+        self.assertIn("have no recovery copies", details)
 
 
 class BackupFolderTests(unittest.TestCase):
@@ -206,7 +206,7 @@ class BackupFolderTests(unittest.TestCase):
             folder = Path("/data/codex_tasks/t/turns/a/backups")
             backups = server.exchange_info("t", folder)["backups"]
             self.assertIn(f"copy it to {folder} under the same relative path", backups)
-            self.assertIn(f"{folder}/.storage/lovelace.kitchen", backups)
+            self.assertIn(f"{folder}/automations.yaml", backups)
             self.assertIn("Never copy secrets.yaml", backups)
             self.assertEqual(server.exchange_info("t", None)["backups"],
                              "This message has no backup folder. Make no backup copies.")
@@ -421,9 +421,10 @@ class RunTests(unittest.TestCase):
         task = server.tasks[self.task_id]
         self.assertNotIn("backups", task)
         self.assertEqual(task["details"], "Notes")
-        self.assertEqual(task["snapshot"]["file_count"], 3)
+        # Files under .storage hold secrets and stay out of the archive (test_secret_guard.py).
+        self.assertEqual(task["snapshot"]["file_count"], 2)
         with tarfile.open(self.run_dir / server.SNAPSHOT_FILE) as archive:
-            self.assertEqual(sorted(archive.getnames()), [".storage/core.restore_state", "automations.yaml", "scripts.yaml"])
+            self.assertEqual(sorted(archive.getnames()), ["automations.yaml", "scripts.yaml"])
         self.assertIn(("phase", "Saving a full snapshot of your configuration", "done"), self.steps())
 
     def test_read_only_runs_get_no_backup_folder(self):
