@@ -321,9 +321,67 @@ async function loadChatOptions(quiet = false) {
   controls();
 }
 const welcome = $("messages").innerHTML;
-let refreshTimer;
-let activityTimer = null;
-let usageTimer;
+/** Every repeating check of the page, by the name given to poll(). */
+const polls = {};
+/**
+ * Register a check that repeats. run() calls fn now, unless the page is
+ * hidden, and then waits delayFn(result) milliseconds before the next run;
+ * null from delayFn ends the repeats until the next run() or after(). result
+ * is what fn returned, or undefined when the page was hidden or fn failed.
+ * run() returns what fn returns, and a failure of fn reaches its caller; a
+ * failure in a run that the timer started goes to onError. whileHidden is for
+ * a check that must also run on a hidden page.
+ */
+function poll(name, fn, delayFn, { whileHidden = false, onError = () => {} } = {}) {
+  let timer = 0;
+  const entry = {
+    /** Whether a later run is scheduled. */
+    get waiting() {
+      return timer !== 0;
+    },
+    stop() {
+      clearTimeout(timer);
+      timer = 0;
+    },
+    /** Run after this many milliseconds, in place of any run that was scheduled. */
+    after(delay) {
+      entry.stop();
+      timer = setTimeout(() => {
+        timer = 0;
+        entry.run().catch(onError);
+      }, delay);
+    },
+    async run() {
+      entry.stop();
+      let result;
+      try {
+        if (whileHidden || !document.hidden) result = await fn();
+        return result;
+      } finally {
+        const delay = delayFn(result);
+        if (delay !== null) entry.after(delay);
+      }
+    },
+  };
+  polls[name] = entry;
+  return entry;
+}
+/**
+ * Run one button's action: the button is disabled while fn works and enabled
+ * again when it ends. A failure goes to onError; without onError it reaches
+ * the caller.
+ */
+async function busyAction(button, fn, onError) {
+  button.disabled = true;
+  try {
+    await fn();
+  } catch (error) {
+    if (!onError) throw error;
+    onError(error);
+  } finally {
+    button.disabled = false;
+  }
+}
 let usageLoading = false;
 /**
  * Show the quota left for the five-hour and weekly limits as a figure and a
@@ -529,33 +587,30 @@ function renderIntegration(integration) {
 }
 /**
  * Fetch the worker status, show its quota and the state of the Codex
- * integration, and reload the chat options, then schedule the next check in a
- * minute. Nothing is fetched while the page is hidden, and a failed check
- * shows the quota as unavailable and leaves the integration line as it is.
+ * integration, and reload the chat options. polls.usage runs it every minute
+ * while the page is shown. A failed check shows the quota as unavailable and
+ * leaves the integration line as it is.
  */
 async function loadUsage() {
   if (usageLoading) return;
   usageLoading = true;
-  clearTimeout(usageTimer);
   try {
-    if (!document.hidden) {
-      const data = await api("status");
-      document.dispatchEvent(new CustomEvent("worker-status", { detail: data }));
-      renderUsage(data.codex_usage, data.account_access?.plan_type);
-      renderIntegration(data.integration);
-      renderCodexAccess(data.account_access);
-      // The quota check also tells the worker which model Codex picks when the add-on names none.
-      // Not awaited: the quota shown must not depend on it.
-      if (state.catalog) loadChatOptions(true);
-    }
+    const data = await api("status");
+    document.dispatchEvent(new CustomEvent("worker-status", { detail: data }));
+    renderUsage(data.codex_usage, data.account_access?.plan_type);
+    renderIntegration(data.integration);
+    renderCodexAccess(data.account_access);
+    // The quota check also tells the worker which model Codex picks when the add-on names none.
+    // Not awaited: the quota shown must not depend on it.
+    if (state.catalog) loadChatOptions(true);
   } catch (_) {
     renderUsage();
     renderCodexAccess({ message: "Codex access could not be checked." });
   } finally {
     usageLoading = false;
-    usageTimer = setTimeout(loadUsage, 60000);
   }
 }
+poll("usage", loadUsage, () => 60000);
 /*
  * Home Assistant lets this page reach the worker through an ingress session,
  * a cookie that the Home Assistant tab renews. When the tab sleeps, the
@@ -1392,8 +1447,7 @@ function renderBrowserPermissions(check, turn, taskId) {
       });
       if (state.id === taskId && state.generation === generation) {
         await fetchSelected(true);
-        clearTimeout(refreshTimer);
-        refreshTimer = setTimeout(refresh, 1000);
+        polls.refresh.after(1000);
       }
     } catch (error) {
       if (!panel.isConnected) return;
@@ -1432,17 +1486,14 @@ async function loadBrowserPermissions() {
       const revoke = textNode("button", "Revoke", "subtle");
       revoke.type = "button";
       revoke.setAttribute("aria-label", `Revoke ${permission.label} for ${permission.path}`);
-      revoke.onclick = async () => {
-        revoke.disabled = true;
-        try {
-          await api(`browser-permissions/${encodeURIComponent(permission.id)}`, undefined, "DELETE");
-          await loadBrowserPermissions();
-          const next = area.querySelector("button");
-          if (next) next.focus();
-          else { area.tabIndex = -1; area.focus(); }
-          $("settings-result").textContent = "Browser permission revoked.";
-        } catch (error) { revoke.disabled = false; settingsError(error); }
-      };
+      revoke.onclick = () => busyAction(revoke, async () => {
+        await api(`browser-permissions/${encodeURIComponent(permission.id)}`, undefined, "DELETE");
+        await loadBrowserPermissions();
+        const next = area.querySelector("button");
+        if (next) next.focus();
+        else { area.tabIndex = -1; area.focus(); }
+        $("settings-result").textContent = "Browser permission revoked.";
+      }, settingsError);
       row.append(info, revoke);
       area.append(row);
     }
@@ -1456,16 +1507,13 @@ async function loadBrowserPermissions() {
     if (error.status === 503) {
       const clear = textNode("button", "Remove all saved permissions", "subtle");
       clear.type = "button";
-      clear.onclick = async () => {
-        clear.disabled = true;
-        try {
-          await api("browser-permissions", undefined, "DELETE");
-          await loadBrowserPermissions();
-          area.tabIndex = -1;
-          area.focus();
-          $("settings-result").textContent = "Saved browser permissions removed.";
-        } catch (failure) { clear.disabled = false; settingsError(failure); }
-      };
+      clear.onclick = () => busyAction(clear, async () => {
+        await api("browser-permissions", undefined, "DELETE");
+        await loadBrowserPermissions();
+        area.tabIndex = -1;
+        area.focus();
+        $("settings-result").textContent = "Saved browser permissions removed.";
+      }, settingsError);
       area.append(clear);
     }
   }
@@ -1964,8 +2012,7 @@ function taskActive() {
 }
 /** Forget the steps of the previous chat and stop polling for them. */
 function resetActivity(id) {
-  clearTimeout(activityTimer);
-  activityTimer = null;
+  polls.activity.stop();
   state.activity = id
     ? {
         id,
@@ -1991,71 +2038,89 @@ function activityBlock() {
 /** Load steps once for an idle chat, and keep loading them while Codex works. */
 function ensureActivity() {
   const activity = state.activity;
-  if (!activity || activity.id !== state.id || activityTimer || activity.loading)
+  if (!activity || activity.id !== state.id || polls.activity.waiting || activity.loading)
     return;
   // A chat that is still waiting in the queue has no steps to load yet.
   if (state.task?.status === "in_queue") return;
-  if (!activity.loaded || activity.running || taskActive()) pollActivity();
+  if (!activity.loaded || activity.running || taskActive()) polls.activity.run();
 }
-/** Fetch the steps added since the last poll and merge them by position. */
-async function pollActivity() {
-  clearTimeout(activityTimer);
-  activityTimer = null;
+/** Whether the open chat has a step list that no request is loading now. */
+function activityIdle() {
   const activity = state.activity;
-  const id = state.id;
-  if (!activity || !id || activity.id !== id || activity.loading) return;
-  if (document.hidden) {
-    activityTimer = setTimeout(pollActivity, 1000);
-    return;
-  }
-  activity.loading = true;
+  return Boolean(activity && state.id && activity.id === state.id && !activity.loading);
+}
+/**
+ * Fetch the steps added since the last poll. Returns the step list it read
+ * and whether to read again from the start; null when there was nothing to
+ * read.
+ */
+async function pollActivity() {
+  if (!activityIdle()) return null;
+  const activity = state.activity;
   const generation = state.generation;
   let restart = false;
+  activity.loading = true;
   try {
     const data = await api(
-      `tasks/${encodeURIComponent(id)}/activity?after=${activity.seq}`,
+      `tasks/${encodeURIComponent(state.id)}/activity?after=${activity.seq}`,
     );
-    if (generation !== state.generation || state.activity !== activity) return;
-    if (activity.turnId !== null && data.turn_id !== activity.turnId) {
-      // A new exchange started, so its steps count from the beginning again.
-      activity.steps.clear();
-      activity.open.clear();
-      activity.expanded = null;
-      activity.seq = 0;
-      activity.turnId = data.turn_id;
-      activity.startedAt = null;
-      restart = true;
-      return;
-    }
-    const wasRunning = activity.running;
-    activity.turnId = data.turn_id;
-    for (const step of data.steps) activity.steps.set(step.index, step);
-    activity.seq = data.seq;
-    activity.running = data.running;
-    activity.loaded = true;
-    if (data.running && typeof data.elapsed_ms === "number") {
-      const startedAt = Date.now() - data.elapsed_ms;
-      // Keep the first reading unless it is clearly off, so the seconds tick evenly.
-      if (
-        activity.startedAt === null ||
-        Math.abs(startedAt - activity.startedAt) > 1500
-      )
-        activity.startedAt = startedAt;
-    } else activity.startedAt = null;
-    if (data.steps.length || wasRunning !== data.running) renderActivity();
-    tickElapsed();
-    if (!data.running && taskActive()) fetchSelected().catch(showError);
+    if (generation === state.generation && state.activity === activity)
+      restart = mergeActivity(activity, data);
   } catch (error) {
     // The regular refresh reports worker problems; the steps just pause.
   } finally {
     activity.loading = false;
-    if (state.activity === activity) {
-      if (restart) pollActivity();
-      else if (activity.running || taskActive())
-        activityTimer = setTimeout(pollActivity, 1000);
-    }
   }
+  return { activity, restart };
 }
+/**
+ * Merge one reply into the step list by position and draw it. Returns true
+ * when the reply belongs to a new exchange: the list is then emptied and
+ * must be read again from the start.
+ */
+function mergeActivity(activity, data) {
+  if (activity.turnId !== null && data.turn_id !== activity.turnId) {
+    // A new exchange started, so its steps count from the beginning again.
+    activity.steps.clear();
+    activity.open.clear();
+    activity.expanded = null;
+    activity.seq = 0;
+    activity.turnId = data.turn_id;
+    activity.startedAt = null;
+    return true;
+  }
+  const wasRunning = activity.running;
+  activity.turnId = data.turn_id;
+  for (const step of data.steps) activity.steps.set(step.index, step);
+  activity.seq = data.seq;
+  activity.running = data.running;
+  activity.loaded = true;
+  if (data.running && typeof data.elapsed_ms === "number") {
+    const startedAt = Date.now() - data.elapsed_ms;
+    // Keep the first reading unless it is clearly off, so the seconds tick evenly.
+    if (
+      activity.startedAt === null ||
+      Math.abs(startedAt - activity.startedAt) > 1500
+    )
+      activity.startedAt = startedAt;
+  } else activity.startedAt = null;
+  if (data.steps.length || wasRunning !== data.running) renderActivity();
+  tickElapsed();
+  if (!data.running && taskActive()) fetchSelected().catch(showError);
+  return false;
+}
+/**
+ * When to read the steps next: a second after a read while Codex works, at
+ * once after a new exchange started, and a second later while the page is
+ * hidden (polled is then undefined). null when the chat changed or is idle.
+ */
+function activityDelay(polled) {
+  if (polled === undefined) return activityIdle() ? 1000 : null;
+  if (!polled || state.activity !== polled.activity) return null;
+  if (polled.restart) return 0;
+  return polled.activity.running || taskActive() ? 1000 : null;
+}
+poll("activity", pollActivity, activityDelay);
 /**
  * Draw the latest exchange's step list. While Codex works, the heading counts
  * the steps and shows the running time, and the list starts closed. A tap on
@@ -2539,8 +2604,7 @@ $("rename-form").addEventListener("submit", async (event) => {
     dialogError("rename", "Enter a title for this chat.");
     return;
   }
-  $("rename-save").disabled = true;
-  try {
+  await busyAction($("rename-save"), async () => {
     const data = await api(`tasks/${encodeURIComponent(id)}/title`, { title });
     const chat = chatById(id);
     if (chat) chat.title = data.title;
@@ -2548,11 +2612,7 @@ $("rename-form").addEventListener("submit", async (event) => {
     if (state.id === id) $("chat-title").textContent = data.title;
     renderList();
     $("rename-dialog").close();
-  } catch (error) {
-    dialogError("rename", error);
-  } finally {
-    $("rename-save").disabled = false;
-  }
+  }, (error) => dialogError("rename", error));
 });
 /** Open the Share dialog for a chat: the whole chat, or its last lines. */
 function openShare(id) {
@@ -2579,8 +2639,7 @@ $("share-form").addEventListener("submit", async (event) => {
     }
     query = `?lines=${lines}`;
   }
-  $("share-download").disabled = true;
-  try {
+  await busyAction($("share-download"), async () => {
     const response = await pageFetch(`tasks/${encodeURIComponent(id)}/share${query}`, { cache: "no-store" });
     if (!response.ok) throw new Error("The chat could not be downloaded. Try again.");
     const url = URL.createObjectURL(await response.blob());
@@ -2590,11 +2649,7 @@ $("share-form").addEventListener("submit", async (event) => {
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     $("share-dialog").close();
-  } catch (error) {
-    dialogError("share", error);
-  } finally {
-    $("share-download").disabled = false;
-  }
+  }, (error) => dialogError("share", error));
 });
 /** Open the delete confirmation dialog for a chat. */
 function openDelete(id) {
@@ -2623,10 +2678,9 @@ for (const name of ["rename", "share", "delete"])
     menu.returnId = null;
     (trigger || $("new-chat")).focus();
   });
-$("delete-confirm").onclick = async () => {
+$("delete-confirm").onclick = () => {
   const id = $("delete-dialog").dataset.chatId;
-  $("delete-confirm").disabled = true;
-  try {
+  return busyAction($("delete-confirm"), async () => {
     await api(`tasks/${encodeURIComponent(id)}`, undefined, "DELETE");
     state.chats = state.chats.filter((chat) => chat.task_id !== id);
     state.chatSettings.delete(id);
@@ -2636,11 +2690,7 @@ $("delete-confirm").onclick = async () => {
     state.draftFiles.delete(id);
     renderList();
     await loadList();
-  } catch (error) {
-    dialogError("delete", error);
-  } finally {
-    $("delete-confirm").disabled = false;
-  }
+  }, (error) => dialogError("delete", error));
 };
 $("composer").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -2957,7 +3007,7 @@ matchMedia("(max-width:700px)").addEventListener("change", () =>
   sidebar(false),
 );
 $("refresh").onclick = async () => {
-  loadUsage();
+  polls.usage.run();
   try {
     await loadList();
     await fetchSelected();
@@ -2966,16 +3016,7 @@ $("refresh").onclick = async () => {
     showError(error);
   }
 };
-$("load-more").onclick = async () => {
-  $("load-more").disabled = true;
-  try {
-    await loadList(true);
-  } catch (error) {
-    showError(error);
-  } finally {
-    $("load-more").disabled = false;
-  }
-};
+$("load-more").onclick = () => busyAction($("load-more"), () => loadList(true), showError);
 $("cancel").onclick = async () => {
   state.busy = true;
   controls();
@@ -3095,7 +3136,7 @@ const SLASH_COMMANDS = [
     description: "Show how much of your ChatGPT plan is used",
     available: () => true,
     run: () => {
-      loadUsage();
+      polls.usage.run();
       if (matchMedia("(max-width:700px)").matches) sidebar(true);
       $("usage").scrollIntoView({ block: "nearest" });
     },
@@ -3432,11 +3473,10 @@ for (const input of document.querySelectorAll("input[data-text-size-choice]"))
 /*
  * The time left on a sign-in code. The worker sends the seconds left, by its
  * own clock; the page counts down from when that reply arrived, so a phone
- * with a wrong clock still shows the right time. One timer serves every
- * countdown on the page.
+ * with a wrong clock still shows the right time. One poll, codeTimes, serves
+ * every countdown on the page and ends when the last card has left it.
  */
 const codeDeadlines = new Map();
-let codeCountdownTimer = 0;
 /**
  * Build the expiry line and the hidden "Get a new code" button for a card;
  * nothing when the time is unknown. kind ("chatgpt" or "github") lets a later
@@ -3448,18 +3488,11 @@ function codeExpiry(secondsLeft, getNewCode, kind) {
   const button = textNode("button", "Get a new code");
   button.type = "button";
   button.hidden = true;
-  button.onclick = async () => {
-    button.disabled = true;
-    try {
-      await getNewCode();
-    } finally {
-      button.disabled = false;
-    }
-  };
+  button.onclick = () => busyAction(button, getNewCode);
   const entry = { deadline: performance.now() + secondsLeft * 1000, button, kind };
   codeDeadlines.set(line, entry);
   showCodeTime(line, entry);
-  if (!codeCountdownTimer) codeCountdownTimer = setInterval(showCodeTimes, 1000);
+  if (!polls.codeTimes.waiting) polls.codeTimes.after(1000);
   return [line, button];
 }
 /**
@@ -3491,23 +3524,19 @@ function showCodeTimes() {
     if (line.isConnected) showCodeTime(line, entry);
     else codeDeadlines.delete(line);
   }
-  if (!codeDeadlines.size) {
-    clearInterval(codeCountdownTimer);
-    codeCountdownTimer = 0;
-  }
 }
+poll("codeTimes", showCodeTimes, () => (codeDeadlines.size ? 1000 : null), { whileHidden: true });
 /** Replace a waiting ChatGPT sign-in with a new one, for a code that expired. */
 async function newChatgptCode() {
   try {
     await api("auth/cancel", {});
     await api("auth/start", {});
-    await loadLogin();
+    await polls.login.run();
   } catch (error) {
     if ($("settings").open) settingsError(error);
     else showError(error);
   }
 }
-let loginTimer;
 // What the sign-in card shows now; the card is rebuilt only when this changes,
 // so a code being read or a QR being scanned never jumps under the user's thumb.
 let shownLogin = null;
@@ -3561,12 +3590,12 @@ function signInCard(auth) {
 }
 /**
  * Show the ChatGPT sign-in state in the settings dialog and, while the
- * assistant is not signed in, in the banner above the chat. Checks again
- * every three seconds while a sign-in waits, every 30 seconds while signed
- * out, and every five minutes while signed in, so an expired sign-in shows.
+ * assistant is not signed in, in the banner above the chat. polls.login
+ * checks again every three seconds while a sign-in waits, every 30 seconds
+ * while signed out, and every five minutes while signed in, so an expired
+ * sign-in shows.
  */
 async function loadLogin() {
-  clearTimeout(loginTimer);
   let auth;
   try {
     ({ auth } = await api("auth/status"));
@@ -3574,14 +3603,16 @@ async function loadLogin() {
     setFootRow("codex-status-row", "error", "Unavailable");
     noteAttention("chatgpt", "unavailable");
     throw error;
-  } finally {
-    loginTimer = setTimeout(
-      () => loadLogin().catch(() => {}),
-      auth?.pending ? 3000 : auth && !auth.codex_login?.status_ok ? 30000 : 300000,
-    );
   }
   renderLogin(auth);
+  return auth;
 }
+poll(
+  "login",
+  loadLogin,
+  (auth) => (auth?.pending ? 3000 : auth && !auth.codex_login?.status_ok ? 30000 : 300000),
+  { whileHidden: true },
+);
 /** The ChatGPT account header in a few words. */
 function chatgptSectionStatus({ signedIn, pending, failed, lapsed }) {
   if (signedIn) return "Signed in";
@@ -3653,7 +3684,6 @@ function renderLogin(auth) {
  * page while a sign-in waits and nowhere else: it is never logged, never kept
  * in browser storage, and the pasted token is cleared from its field at once.
  */
-let githubTimer;
 let githubStatus = null;
 let githubRevokeUrl = "";
 const GITHUB_BAD_STATES = ["expired", "revoked", "access_changed", "failed"];
@@ -3746,7 +3776,7 @@ async function newGithubCode() {
   } catch (error) {
     githubResult(String(error.message || error), true);
   } finally {
-    loadGithub().catch(() => {});
+    polls.github.run().catch(() => {});
   }
 }
 /** The GitHub header in a few words, for example "Connected as owner, 1 repository". */
@@ -3885,25 +3915,26 @@ function githubUnavailable() {
   setAccountPart("github-section", "not available");
   setFootRow("github-status-row", "off", "Not available");
 }
-/** Read the GitHub status. Every 5 seconds while a code waits, else every 5 minutes, so a lost sign-in shows. */
+/**
+ * Read the GitHub status and return whether a sign-in code waits. polls.github
+ * reads it every 5 seconds while a code waits, else every 5 minutes, so a lost
+ * sign-in shows.
+ */
 async function loadGithub() {
-  clearTimeout(githubTimer);
-  let waiting = false;
   try {
-    const response = await pageFetch("github");
-    if (response.status === 404) return githubUnavailable();
-    const data = await response.json().catch(() => null);
-    if (!data?.ok || !data.github) throw workerError(data?.error || `The worker returned HTTP ${response.status}.`, response.status);
+    const data = await api("github");
+    if (!data.github) throw workerError("The worker returned no GitHub status.");
     $("github-token").hidden = false;
     renderGithub(data.github);
-    waiting = data.github.flow?.status === "waiting_for_user";
+    return data.github.flow?.status === "waiting_for_user";
   } catch (error) {
+    // A worker without the GitHub feature answers 404.
+    if (error.status === 404) return githubUnavailable();
     setFootRow("github-status-row", "error", "Unavailable");
     throw error;
-  } finally {
-    githubTimer = setTimeout(() => loadGithub().catch(() => {}), waiting ? 5000 : 300000);
   }
 }
+poll("github", loadGithub, (waiting) => (waiting ? 5000 : 300000), { whileHidden: true });
 function githubResult(text, isError) {
   const result = $("github-result");
   result.textContent = text || "";
@@ -3911,17 +3942,12 @@ function githubResult(text, isError) {
 }
 /** Run one GitHub button: disable it while the worker works, then show the outcome on the card. */
 async function githubAction(button, path, body, done) {
-  button.disabled = true;
   githubResult("");
-  try {
+  await busyAction(button, async () => {
     const data = await githubApi(path, body);
     if (done) done(data);
-  } catch (error) {
-    githubResult(String(error.message || error), true);
-  } finally {
-    button.disabled = false;
-    loadGithub().catch(() => {});
-  }
+  }, (error) => githubResult(String(error.message || error), true));
+  polls.github.run().catch(() => {});
 }
 $("github-connect").onclick = () => githubAction($("github-connect"), "github/connect", {});
 $("github-cancel").onclick = () => githubAction($("github-cancel"), "github/cancel", {});
@@ -3973,23 +3999,25 @@ $("github-link-form").onsubmit = (event) => {
     (data) => githubResult(data.text || "Linked."));
 };
 $("github-banner-open").onclick = () => openAccountItem("github-section");
-let remoteTimer;
 let remoteCardKey = "";
 /**
  * Show the remote-control state in the settings dialog: on or off, the
  * machine name, the pairing code as large text and a QR code, and the recent
- * messages. Checks again every five seconds while the dialog is open.
+ * messages. polls.remote checks again while the dialog is open: every five
+ * seconds while remote control is on, else every 15 seconds. A failed check
+ * ends the repeats.
  */
 async function loadRemoteControl() {
-  clearTimeout(remoteTimer);
   const { remote_control: rc } = await api("remote-control");
   renderRemoteControl(rc);
-  if ($("settings").open)
-    remoteTimer = setTimeout(
-      () => loadRemoteControl().catch(settingsError),
-      rc.enabled ? 5000 : 15000,
-    );
+  return rc;
 }
+/** When to read the remote-control state next; null after a failed read or once the dialog is closed. */
+function remoteDelay(rc) {
+  if (!rc || !$("settings").open) return null;
+  return rc.enabled ? 5000 : 15000;
+}
+poll("remote", loadRemoteControl, remoteDelay, { whileHidden: true, onError: settingsError });
 /** Draw one remote-control state; the buttons follow what can be done now. */
 function renderRemoteControl(rc) {
   state.remoteAvailable = Boolean(rc.available);
@@ -4068,17 +4096,12 @@ for (const [id, action] of [
   ["remote-control-pair", "pair"],
 ]) {
   $(id).onclick = async () => {
-    $(id).disabled = true;
-    try {
+    await busyAction($(id), async () => {
       const data = await api(`remote-control/${action}`, {});
       renderRemoteControl(data.remote_control);
       $("settings-result").textContent = "";
-    } catch (error) {
-      settingsError(error);
-    } finally {
-      $(id).disabled = false;
-      loadRemoteControl().catch(settingsError);
-    }
+    }, settingsError);
+    polls.remote.run().catch(settingsError);
   };
 }
 /**
@@ -4155,9 +4178,9 @@ $("settings-button").onclick = async () => {
   $("agents").disabled = true;
   $("save-agents").disabled = true;
   const results = await Promise.allSettled([
-    loadLogin(),
-    loadGithub(),
-    loadRemoteControl(),
+    polls.login.run(),
+    polls.github.run(),
+    polls.remote.run(),
     loadBrowserPermissions(),
     loadAddonConfiguration(),
   ]);
@@ -4166,8 +4189,8 @@ $("settings-button").onclick = async () => {
 };
 $("close-settings").onclick = () => $("settings").close();
 $("settings").addEventListener("close", () => {
-  clearTimeout(loginTimer);
-  clearTimeout(remoteTimer);
+  polls.login.stop();
+  polls.remote.stop();
   $("github-result").textContent = "";
 });
 for (const [id, path] of [
@@ -4177,41 +4200,38 @@ for (const [id, path] of [
   ["banner-cancel", "auth/cancel"],
   ["logout", "auth/logout"],
 ]) {
-  $(id).onclick = async () => {
-    $(id).disabled = true;
-    try {
-      await api(path, {});
-      await loadLogin();
-      $("settings-result").textContent = "";
-    } catch (error) {
-      if ($("settings").open) settingsError(error);
-      else showError(error);
-    } finally {
-      $(id).disabled = false;
-    }
-  };
+  $(id).onclick = () => busyAction($(id), async () => {
+    await api(path, {});
+    await polls.login.run();
+    $("settings-result").textContent = "";
+  }, (error) => {
+    if ($("settings").open) settingsError(error);
+    else showError(error);
+  });
 }
 let restore = Promise.resolve();
-/** Poll the list and the open chat; the first pass waits for the restored chat. */
+/**
+ * Read the list and the open chat; the first pass waits for the restored
+ * chat. polls.refresh repeats it: every second while a browser check retries,
+ * every three seconds while a chat works, else every 12 seconds.
+ */
 async function refresh() {
-  clearTimeout(refreshTimer);
-  if (!document.hidden && !state.busy) {
-    try {
-      if (!state.catalog) await loadChatOptions();
-      await loadList();
-      await restore;
-      await fetchSelected();
-    } catch (error) {
-      showError(error);
-    }
+  if (state.busy) return;
+  try {
+    if (!state.catalog) await loadChatOptions();
+    await loadList();
+    await restore;
+    await fetchSelected();
+  } catch (error) {
+    showError(error);
   }
-  refreshTimer = setTimeout(refresh, state.task?.browser_retry ? 1000 : state.active ? 3000 : 12000);
 }
+poll("refresh", refresh, () => (state.task?.browser_retry ? 1000 : state.active ? 3000 : 12000));
 sidebar(false);
 controls();
 restore = reopenLastChat();
-refresh();
-loadUsage();
-loadLogin().catch(() => {});
-loadGithub().catch(() => {});
+polls.refresh.run();
+polls.usage.run();
+polls.login.run().catch(() => {});
+polls.github.run().catch(() => {});
 setInterval(tickElapsed, 1000);
