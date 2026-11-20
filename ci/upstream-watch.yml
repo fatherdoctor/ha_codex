@@ -111,8 +111,15 @@ jobs:
           # version (0.3.x), which sorts after every upstream 0.1.x release, so each run said "Up to date". Refuse a
           # base that is not an upstream release tag, and a base that sorts after upstream's latest release.
           [[ "$base" =~ ^[0-9]+(\.[0-9]+)*$ ]] || { say "UPSTREAM_BASE '$base' is not a version number: this watch cannot fire."; exit 1; }
-          git ls-remote --exit-code --tags "https://github.com/$UPSTREAM_REPO.git" "refs/tags/$TAG_PREFIX$base" >/dev/null \
-            || { say "UPSTREAM_BASE $base is not an upstream release tag ($TAG_PREFIX$base): this watch cannot fire."; exit 1; }
+          # git ls-remote --exit-code returns 2 only when the tag is missing; any other failure (network, GitHub) gets
+          # its own message, so the run does not blame the base for an outage.
+          rc=0
+          git ls-remote --exit-code --tags "https://github.com/$UPSTREAM_REPO.git" "refs/tags/$TAG_PREFIX$base" >/dev/null || rc=$?
+          if [ "$rc" = 2 ]; then
+            say "UPSTREAM_BASE $base is not an upstream release tag ($TAG_PREFIX$base): this watch cannot fire."; exit 1
+          elif [ "$rc" != 0 ]; then
+            say "Could not read upstream tags (git ls-remote exit $rc): this run cannot check UPSTREAM_BASE. Try again later."; exit 1
+          fi
           if [ -z "${INPUT_REF:-}" ]; then
             newest=$(printf '%s\n%s\n' "$base" "$up" | sort -V | tail -1)
             if [ "$up" = "$base" ]; then say "Up to date: nothing to do."; exit 0; fi
