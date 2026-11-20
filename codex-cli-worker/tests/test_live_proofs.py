@@ -38,6 +38,7 @@ import contextlib
 import json
 import os
 import queue
+import shutil
 import signal
 import subprocess
 import sys
@@ -690,8 +691,20 @@ class LiveProofs(unittest.TestCase):
                 return
             except OSError:
                 if attempt == 9:
-                    raise
+                    break
                 time.sleep(0.5)
+        # Codex can keep writing into its own scratch folder (codex-home/.tmp) after the proof has ended; on slow
+        # machines that outlasts the retries above. A leftover there is not a proof failure, so ignore errors under
+        # that folder only; any other leftover still fails the test.
+        scratch = (self.root / "codex-home" / ".tmp").resolve()
+
+        def ignore_scratch(function: Any, path: str, error: BaseException) -> None:
+            here = Path(path).resolve()
+            # The folders above the scratch folder cannot be removed while it still holds files, so they count too.
+            if here != scratch and scratch not in here.parents and here not in scratch.parents:
+                raise error
+
+        shutil.rmtree(self.root, onexc=ignore_scratch)
 
     def start(self, extra_args: list[str] | None = None, home: Path | None = None,
               tools: bool = True) -> AppServer:
