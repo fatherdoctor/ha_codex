@@ -2976,6 +2976,30 @@ def drop_credential_backups(run_dir: Path) -> None:
                 pass
 
 
+def secret_config_path(path: Any) -> bool:
+    """Whether a path Codex names (absolute, or relative to /config) is a secret file under /config."""
+    text = str(path or "")
+    if not text:
+        return False
+    full = os.path.normpath(os.path.join(CONFIG_ROOT.as_posix(), text))
+    prefix = CONFIG_ROOT.as_posix() + "/"
+    return full.startswith(prefix) and secret_file_path(full[len(prefix):])
+
+
+def forget_secret_diffs(records: list[dict[str, Any]]) -> None:
+    """Empty the diff of a change to a secret file once its permission request no longer waits.
+
+    The card shows the diff while the person decides; after the answer the app has no use
+    for it, and the chat's task.json must not keep the changed lines of a secret file.
+    """
+    for record in records:
+        if record.get("status") == "pending":
+            continue
+        for change in record.get("changes") or []:
+            if secret_config_path(change.get("path")) or secret_config_path(change.get("move_path")):
+                change["diff"] = ""
+
+
 def saved_copy(run_dir: Path, rel: str, before: dict[str, Any]) -> dict[str, str]:
     """Find the copy Codex made of a file before changing it.
 
@@ -4796,6 +4820,7 @@ def create_approval_session(
 
     def save_approvals(records: list[dict[str, Any]]) -> None:
         """Save display-only decisions on the matching exchange, including expiration, and announce a new request."""
+        forget_secret_diffs(records)
         record_diagnostic("approvals", task_id, records)
         # Before anything can fail: an answered or expired request must not be announced late.
         for item in records:
@@ -5840,6 +5865,8 @@ def cleanup_backups() -> None:
         for task_id, turn_id, old in finished:
             run_dir = root / task_id / "turns" / turn_id if turn_id else root / task_id
             remove_run_artifacts(run_dir, WORKING_FILES)
+            # A stopped exchange, or one a restart cut off, never reached the deletion in run_task.
+            drop_credential_backups(run_dir)
             if old:
                 remove_run_artifacts(run_dir, BACKUP_ARTIFACTS)
                 expired.setdefault(task_id, set()).add(turn_id)
@@ -6880,6 +6907,11 @@ def cancel_task(task_id: str) -> Response:
             reap_approval_process(proc)
         else:
             terminate_and_reap_process(proc)
+    # run_task returns early for a stopped exchange, so the copies of secret files go here, once Codex has stopped.
+    try:
+        drop_credential_backups(get_run_dir(task_id))
+    except OSError as exc:
+        write_task_log(task_id, "worker", f"Could not tidy the backup folder: {exc}")
     publish_cancelled_task_outcome(task_id, proc.returncode if proc is not None else None)
     start_next_queued()
     return jsonify({"ok": True, "task_id": task_id, "status": "cancelled"})

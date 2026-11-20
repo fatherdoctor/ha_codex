@@ -9,15 +9,18 @@ person approves the change on a permission card.
 """
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from app_server_fixture import StubAppServer
+import test_approvals
 import test_backups
 from test_server import server
 
@@ -127,6 +130,101 @@ class FullAccessTurnTests(unittest.TestCase):
         self.assertEqual(left, ["automations.yaml"])
         with tarfile.open(self.run_dir / server.SNAPSHOT_FILE) as archive:
             self.assertEqual(sorted(archive.getnames()), ["automations.yaml", "scripts.yaml"])
+
+
+class StoppedExchangeTests(unittest.TestCase):
+    """A message the person stops, or one a restart cuts off, keeps no copy of a secret file either."""
+
+    setUp = test_backups.RunTests.setUp
+
+    def copy_files(self):
+        # Codex copies the secret files before it edits them, against its instructions.
+        backups = self.run_dir / "backups"
+        for rel in ("secrets.yaml", ".storage/core.restore_state", "automations.yaml"):
+            target = backups / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes((self.config / rel).read_bytes())
+
+    def left_in_backups(self):
+        backups = self.run_dir / "backups"
+        return sorted(path.relative_to(backups).as_posix() for path in backups.rglob("*") if path.is_file())
+
+    def test_stopping_a_full_access_message_deletes_the_secret_copies(self):
+        (self.config / "secrets.yaml").write_text("api_key: invented\n", encoding="utf-8")
+        server.tasks[self.task_id]["permission_mode"] = server.protected_policy.FULL_ACCESS_MODE
+        process = StubAppServer("019fc242-910a-7c92-a17d-54c014e19fc4", on_turn=self.copy_files, hold=True)
+        with patch.object(server.full_access, "is_on", return_value=True), \
+             patch.object(server.subprocess, "Popen", return_value=process):
+            runner = threading.Thread(target=server.run_task, args=(self.task_id, "Change the key"))
+            runner.start()
+            try:
+                self.assertTrue(process.started.wait(5))
+                with patch.object(server, "api_token", return_value="test-token"):
+                    response = server.app.test_client().post(
+                        f"/tasks/{self.task_id}/cancel", headers={"Authorization": "Bearer test-token"})
+                self.assertEqual(response.status_code, 200)
+            finally:
+                process.close()
+                runner.join(timeout=10)
+        self.assertFalse(runner.is_alive())
+        self.assertEqual(server.tasks[self.task_id]["status"], "cancelled")
+        self.assertEqual(self.left_in_backups(), ["automations.yaml"])
+
+    def test_the_backup_cleanup_deletes_a_leftover_secret_copy(self):
+        # A message that ended without the deletion, as after a crash or a restart, inside the retention time.
+        server.tasks[self.task_id].update(status="failed")
+        server.tasks[self.task_id]["turns"][0].update(status="failed", completed_at=server.utc_now())
+        (self.config / "secrets.yaml").write_text("api_key: invented\n", encoding="utf-8")
+        self.copy_files()
+        server.cleanup_backups()
+        self.assertEqual(self.left_in_backups(), ["automations.yaml"])
+
+
+class ApprovalRecordTests(unittest.TestCase):
+    """The chat's record of a permission card keeps no changed lines of a secret file after the answer."""
+
+    def record(self, status, *paths):
+        changes = [{"kind": "update", "path": path, "move_path": "", "diff": "-a: 1\n+a: 2\n"} for path in paths]
+        return {"approval_id": "x", "status": status, "kind": "file_change", "changes": changes}
+
+    def test_an_answered_request_drops_the_diff_of_secret_files_only(self):
+        config = server.CONFIG_ROOT.as_posix()
+        for status in ("allowed", "denied", "expired"):
+            with self.subTest(status=status):
+                records = [self.record(status, f"{config}/secrets.yaml", f"{config}/.storage/lovelace.kitchen",
+                                       "packages/secrets.yaml", f"{config}/automations.yaml", "/share/secrets.yaml")]
+                server.forget_secret_diffs(records)
+                self.assertEqual([change["diff"] for change in records[0]["changes"]],
+                                 ["", "", "", "-a: 1\n+a: 2\n", "-a: 1\n+a: 2\n"])
+
+    def test_a_pending_request_keeps_the_diff_the_person_reads(self):
+        records = [self.record("pending", f"{server.CONFIG_ROOT.as_posix()}/secrets.yaml")]
+        server.forget_secret_diffs(records)
+        self.assertEqual(records[0]["changes"][0]["diff"], "-a: 1\n+a: 2\n")
+
+    def test_the_saved_chat_keeps_the_diff_only_while_the_card_waits(self):
+        api = test_approvals.ApprovalApiTests("test_prompts_are_counted_by_kind_for_the_conversation")
+        api.setUp()
+        self.addCleanup(api.doCleanups)
+        secret = f"{server.CONFIG_ROOT.as_posix()}/secrets.yaml"
+        api.session.receive({"method": "item/fileChange/patchUpdated", "params": {
+            "threadId": "thread", "turnId": "turn", "itemId": "edit", "changes": [
+                {"path": secret, "diff": "-api_key: invented\n+api_key: changed\n", "kind": {"type": "update"}}]}})
+        api.session.receive({"id": 11, "method": test_approvals.FILE_APPROVAL, "params": {
+            "threadId": "thread", "turnId": "turn", "itemId": "edit", "reason": "Change the key"}})
+        saved = Path(api.temp.name) / "task" / "task.json"
+        self.assertIn("api_key: changed", saved.read_text(encoding="utf-8"))
+        api.approval_id = server.tasks["task"]["approvals"][1]["approval_id"]
+        self.assertEqual(api.answer().status_code, 200)
+        self.assertEqual(server.tasks["task"]["approvals"][1]["status"], "allowed")
+        self.assertNotIn("api_key", saved.read_text(encoding="utf-8"))
+        self.assertNotIn("api_key", json.dumps(server.tasks["task"]))
+
+    def test_a_rename_into_a_secret_file_drops_the_diff(self):
+        record = self.record("allowed", f"{server.CONFIG_ROOT.as_posix()}/notes.yaml")
+        record["changes"][0]["move_path"] = f"{server.CONFIG_ROOT.as_posix()}/secrets.yaml"
+        server.forget_secret_diffs([record])
+        self.assertEqual(record["changes"][0]["diff"], "")
 
 
 class SandboxTests(unittest.TestCase):
