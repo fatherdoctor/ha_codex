@@ -78,13 +78,14 @@ verification = Verification(_ToolWorker())
 
 CONFIG_ROOT = Path("/config")
 DATA_ROOT = Path("/data")
-# Files a person attaches to a message live in the app's own data folder, not under
-# the task folder in /config, and the backup leaves them out (config.yaml, backup_exclude).
-ATTACHMENTS_ROOT = DATA_ROOT / "attachments"
+# Files a person attaches to a message live in their own folder in the app's data folder, and the
+# backup leaves them out (config.yaml, backup_exclude: "*/chat_uploads"). The Supervisor matches each
+# pattern from the right of the full path, so the folder name must be one no other folder has:
+# generated images live in /data/codex_tasks/<chat>/turns/<turn>/attachments and stay in the backup.
+ATTACHMENTS_ROOT = DATA_ROOT / "chat_uploads"
 ATTACHMENT_KEEP_DAYS = 7
 ATTACHMENT_CLEANUP_INTERVAL_SECONDS = 86400
 ATTACHMENT_FOLDER_GRACE_SECONDS = 3600
-ATTACHMENT_MIGRATION_MARK = DATA_ROOT / "attachments_migrated"
 ATTACHMENT_REMOVED_MESSAGE = "attachment removed after 7 days"
 # Rows an interrupted run left open are closed in main(), after the interactions_to_keep option is applied, so the
 # repair keeps as many rows as the option says and not the number saved before it.
@@ -6053,13 +6054,14 @@ def attachment_cleanup_loop() -> None:
 
 
 def migrate_attachments() -> int:
-    """Once, move uploads that earlier versions kept under the task folder into ATTACHMENTS_ROOT.
+    """Move uploads that earlier versions kept under the task folder into ATTACHMENTS_ROOT.
 
+    It runs at every start: a chat that moves out of /config at a later start (see
+    migrate_task_folders) still gets its old uploads moved. A record already marked
+    store "data" is skipped, so a start with nothing to move only reads the records.
     Each moved file keeps its modified time, so the daily cleanup removes the old
     ones on its first run. A record whose file is already gone is left as it is.
     """
-    if ATTACHMENT_MIGRATION_MARK.exists():
-        return 0
     moved = 0
     failed = 0
     with lock:
@@ -6094,15 +6096,9 @@ def migrate_attachments() -> int:
                 except OSError as exc:
                     print(f"Could not save task {task_id} after moving attachments: {exc}", flush=True)
     if failed:
-        # No mark, so the next start tries the files that did not move.
         print(f"{failed} attachment(s) did not move; the move runs again at the next start.", flush=True)
-    else:
-        try:
-            ATTACHMENT_MIGRATION_MARK.parent.mkdir(parents=True, exist_ok=True)
-            ATTACHMENT_MIGRATION_MARK.write_text(utc_now(), encoding="utf-8")
-        except OSError as exc:
-            print(f"Could not record the attachment move: {exc}", flush=True)
-    print(f"Moved {moved} attachment(s) out of the task folder into {ATTACHMENTS_ROOT}.", flush=True)
+    if moved:
+        print(f"Moved {moved} attachment(s) out of the task folder into {ATTACHMENTS_ROOT}.", flush=True)
     return moved
 
 

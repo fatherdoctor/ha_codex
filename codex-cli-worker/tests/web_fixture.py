@@ -49,8 +49,7 @@ def main():
         server.DATA_ROOT = root
         server.CONFIG_ROOT = root
         # These were fixed from /data when the module loaded, so point them at the temporary folder too.
-        server.ATTACHMENTS_ROOT = root / "attachments"
-        server.ATTACHMENT_MIGRATION_MARK = root / "attachments_migrated"
+        server.ATTACHMENTS_ROOT = root / "chat_uploads"
         # Full access keeps its setting and writes the requirements in the temporary folder, never in /data or /etc.
         server.full_access.SETTING_PATH = root / "full_access.json"
         server.full_access.REQUIREMENTS_PATH = root / "codex-etc" / "requirements.toml"
