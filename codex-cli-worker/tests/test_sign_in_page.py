@@ -56,7 +56,6 @@ class _Worker(unittest.TestCase):
         self.stack.enter_context(patch.object(server, "refresh_usage_status_async"))
         self.stack.enter_context(patch.object(server, "create_persistent_notification"))
         self.stack.enter_context(patch.object(server, "dismiss_persistent_notification"))
-        self.stack.enter_context(patch.object(server, "write_login_qr", return_value="/local/x.svg"))
         self.stack.enter_context(patch.object(server, "write_task_log"))
         self.stack.enter_context(patch.object(
             server, "codex_login_status", return_value={"status_ok": False, "has_auth_file": False, "message": ""}))

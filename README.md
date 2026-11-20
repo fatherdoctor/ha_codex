@@ -102,9 +102,9 @@ The app's own install of the integration (steps 2 to 4) needs nothing else.
 
 Every app option is in [codex-cli-worker/DOCS.md](codex-cli-worker/DOCS.md).
 
-Put rules for your house in `/config/AGENTS.md`. The chat has an editor for it under **Settings** > **Workspace instructions** >
+Put rules for your house in the app's `AGENTS.md`, kept in its own `addon_config` folder and not in `/config`. The chat has an editor for it under **Settings** > **Workspace instructions** >
 **Workspace rules**. Codex uses its defaults and your workspace instructions; the app bundles no house rules. A new
-install that has no `/config/AGENTS.md` gets a short starter file there once, which is yours to change or delete.
+install that has no `AGENTS.md` gets a short starter file there once, which is yours to change or delete.
 
 ## Updating
 
@@ -122,7 +122,7 @@ How releases are tested and how a bad release is undone: [docs/updates-and-rollb
 3. Uninstalling the app does not remove the integration. Delete `/config/custom_components/codex_cli` (or remove
    **Codex** in **Settings** > **Marketplace** if you installed it there), and restart Home Assistant.
 
-Task logs stay in `/config/codex_tasks` until you delete that folder.
+The chats and their logs are in the app's private folder (`/data/codex_tasks`), which uninstalling the app removes.
 
 ## An example, step by step
 
