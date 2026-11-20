@@ -52,7 +52,7 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
             with ExitStack() as stack:
                 for name, value in {'tasks': {'sample': task}, 'running_processes': {}, 'approval_sessions': {}}.items():
                     stack.enter_context(patch.object(server, name, value))
-                for name in ('finish_phase', 'append_activity_step', 'note_edited_files', 'finish_activity', 'remove_run_artifacts', 'start_next_queued', 'cleanup_backups'):
+                for name in ('finish_phase', 'append_activity_step', 'finish_activity', 'remove_run_artifacts', 'start_next_queued', 'cleanup_backups'):
                     stack.enter_context(patch.object(server, name))
                 stack.enter_context(patch.object(server.verification, 'end'))
                 stack.enter_context(patch.object(server.ha_data, 'end'))

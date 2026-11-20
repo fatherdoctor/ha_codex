@@ -1,7 +1,7 @@
 #!/usr/bin/with-contenv bashio
 set -euo pipefail
 
-mkdir -p /data/codex-home /config/codex_tasks
+mkdir -p /data/codex-home /data/codex_tasks
 export CODEX_HOME=/data/codex-home
 export HOME=/data
 export PYTHONDONTWRITEBYTECODE=1

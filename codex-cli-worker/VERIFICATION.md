@@ -167,8 +167,8 @@ physical WallPanel or reproduce its app transitions.
 
 Each turn retains `verification` and `verification_attachments` in the task API,
 `codex_cli.get_task`, and normal task-result events. The chat shows expandable
-results and private screenshots. Automatic captures after the final answer are
-labeled as captures, not images already inspected by the AI.
+results and private screenshots. Every check is one Codex ran during the turn;
+the app runs none of its own after the final answer.
 
 ## Task tools
 

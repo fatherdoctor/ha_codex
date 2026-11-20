@@ -1068,7 +1068,7 @@ class ApprovalRunTests(unittest.TestCase):
         return Process()
 
     def assert_failed_edit_reviewed(self, failure, *, stale_answer=False):
-        """Check real change detection, backup hashes, HA checks, and recovery after failure."""
+        """Check real change detection, HA checks, and recovery from the saved copy after failure."""
         config_root = self.root / "config"
         config_root.mkdir()
         config_file = config_root / "configuration.yaml"
@@ -1098,8 +1098,7 @@ class ApprovalRunTests(unittest.TestCase):
         self.assertEqual(task["status"], "failed")
         self.assertEqual(task["returncode"], 1)
         self.assertEqual(task["changes"], {"added": [], "changed": ["configuration.yaml"], "deleted": []})
-        self.assertEqual(task["backups"][0]["status"], "saved")
-        self.assertEqual(Path(task["backups"][0]["copy"]).read_text(encoding="utf-8"), original)
+        self.assertNotIn("backups", task)
         config_check.assert_called_once()
         self.assertEqual(task["config_check"]["result"], "invalid")
         self.assertTrue(task["validation_errors"])

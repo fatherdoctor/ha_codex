@@ -450,7 +450,6 @@ class BrowserPermissionTests(unittest.TestCase):
 
     def test_restored_task_metadata_cannot_grant_unselected_requests(self):
         """A model can edit task.json, but its restored grants have no authority after a restart."""
-        self.options["task_root"] = str(server.CONFIG_ROOT / "codex_tasks")
         self.check["permission_grants"] = self.rules[1:]
         server.update_task_evidence("chat", verification=[self.check])
         server.tasks.clear()

@@ -11,10 +11,8 @@ cards, failed resources, and browser errors.
 
 For example, ask: **"Inspect `/lovelace/home` on desktop and mobile, show me
 screenshots, and report any layout or card errors."** Replace the path with your
-dashboard view. Saved storage dashboards also get automatic captures of the first
-views that fit the task's remaining time. Request other views and YAML dashboards
-explicitly. Automatic captures after the answer are labeled separately from
-screenshots Codex inspected during the task.
+dashboard view. The app takes no screenshots of its own after the answer: Codex
+checks its work during the task, when it decides to or when you ask.
 
 Browser sign-in uses a temporary, local, read-only identity, without a Home
 Assistant password or manually created token. Tasks can also fetch fresh entity
@@ -271,7 +269,7 @@ After every task the worker compares the `/config` tree with the list of files i
 1. **Syntax.** Added and changed YAML files are parsed with Home Assistant's YAML loader, and JSON and `.storage` files are parsed as JSON. Cookie jars that integrations keep under `.storage` in the LWP text format are checked as cookie jars instead, without rewriting them: Home Assistant's iCloud jars, which are the files under `.storage/icloud/` ending in `.cookiejar`, and any other `.storage` file that starts with the `#LWP-Cookies-` header, as the jars of custom integrations such as iCloud3 do. Malformed cookie jars are reported without including their contents in errors. Any parse error fails the task.
 2. **Home Assistant's configuration check.** From **0.1.56**, when YAML files outside `.storage` were added, changed, or deleted and the syntax pass succeeded, the worker calls `POST /api/config/core/check_config`, the same check as Tools. An `invalid` result fails the task with Home Assistant's error text. The check needs the Supervisor's Core API access the app already has, and can take some seconds on large configurations; the worker waits up to three minutes. If the check cannot run, because Core is restarting or the API is unreachable, the task still completes and its details say the change is applied but unverified. Set `config_check` to `false` to skip this pass.
 
-When validation fails, the task details list the saved previous version of each affected file under `<task_root>/<task_id>/turns/<turn_id>/backups/`, so a broken edit can be restored by copying the file back. Files the task created have no previous version and are listed separately, and so are affected files that have no saved copy. See [Backups](#backups) for where the copies come from and how long they are kept.
+When validation fails, the task details list the saved previous version of each affected file under `/data/codex_tasks/<task_id>/turns/<turn_id>/backups/`, so a broken edit can be restored by copying the file back. Files the task created have no previous version and are listed separately, and so are affected files that have no saved copy. See [Backups](#backups) for where the copies come from and how long they are kept.
 
 Dashboard auto-save skips storage files that failed validation and reports the skip in `lovelace_results`. A YAML failure does not block saving an unrelated, valid dashboard file.
 
@@ -287,24 +285,22 @@ A thread that this page did not start has no page rules: a thread started in the
 
 From 0.3.3 the page asks for no output format, so the thread stores Codex's answer as plain text, as the app shows it. The page's status, question and choices come from the `ask_owner` and `report_failure` tool calls (see [Human Input](#human-input)).
 
-In the ChatGPT app the `exchange_info` tool is not available. The rules tell Codex to make no backup copy there and to say so in its answer. The worker's protections do not depend on these rules: approvals, the sandbox, the policy and the backup check after a page message stay the same.
+In the ChatGPT app the `exchange_info` tool is not available. The rules tell Codex to make no backup copy there and to say so in its answer. The worker's protections do not depend on these rules: approvals, the sandbox and the policy stay the same.
 
 ## Backups
 
 From **0.1.63**, the worker no longer archives the whole configuration folder before every message. On a large configuration that archive took longer than Codex needed to start answering, and one archive was kept per message forever.
 
-**Per-file copies (default).** The `exchange_info` tool tells Codex to copy each existing file to `<task_root>/<task_id>/turns/<turn_id>/backups/<path under /config>` before it changes, moves, or deletes it. Only the files Codex is about to change are copied. When the run ends the worker reviews those copies:
+**Per-file copies (default).** The `exchange_info` tool tells Codex to copy each existing file to `/data/codex_tasks/<task_id>/turns/<turn_id>/backups/<path under /config>` before it changes, moves, or deletes it. Only the files Codex is about to change are copied. The copies are a safety net, not a check: the answer does not list them and gives no verdict on them, because other writers (an automation, another app, a person in the file editor) can change files under `/config` while a turn runs, and the app cannot tell their changes from Codex's.
 
-- A copy counts only when it is identical to the file as the worker saw it before the run started. A copy made after the first edit is reported as not saved.
-- The review covers the files that are Codex's doing: files it reported editing, files it copied, changed YAML files, and changed dashboard storage files. Home Assistant rewrites its own `.storage` files all the time, so other changed files are not reviewed.
-- The chat lists the files with a saved previous version, and the task details name any reviewed file without one. `GET /tasks/<task_id>`, `codex_cli.get_task`, and the `codex_cli_task_result` event carry `backups` with `path`, `status` (`saved`, `missing`, `unverified` for a copy that is not the earlier version, or `excluded`), and `copy`.
+- When a change fails validation (below), the task details point to the saved copy of each affected file, or say that it has none.
 - Credential files (`secrets.yaml`, the auth stores, and `.storage/core.config_entries`) are never copied. The worker deletes such a copy if Codex makes one.
 
-Codex needs to be able to write to the backup folder. In `workspace-write` mode that requires `task_root` to be inside `/config`, which is the default. In `read-only` mode Codex is given no backup folder; any explicitly approved writes still need a separate recovery plan. A per-file copy depends on Codex following the instruction; if a file was changed without one, restore it from a Home Assistant backup.
+Codex needs to be able to write to the backup folder. In `workspace-write` mode the app adds that one exchange's backup folder to the sandbox's writable places, beside `/config` and `/share`; the rest of `/data` stays read-only to Codex, and the private files the sandbox hides stay hidden. In `read-only` mode Codex is given no backup folder; any explicitly approved writes still need a separate recovery plan. A per-file copy depends on Codex following the instruction; if a file was changed without one, restore it from a Home Assistant backup.
 
-**Full snapshot (optional).** Turn on **Full snapshot before every message** (`full_snapshot`) to archive tracked files, excluding known credential files, to `snapshot-before.tar.gz` in the exchange's folder before Codex starts. The worker can then recover missing per-file copies from that archive when a matching file is available. The exclusions below still apply, so this is not a complete Home Assistant backup. Creating the archive adds a wait before every message that grows with the amount of tracked data.
+**Full snapshot (optional).** Turn on **Full snapshot before every message** (`full_snapshot`) to archive tracked files, excluding known credential files, to `snapshot-before.tar.gz` in the exchange's folder before Codex starts. When a change fails validation, the worker can then take a missing per-file copy from that archive when a matching file is available. The exclusions below still apply, so this is not a complete Home Assistant backup. Creating the archive adds a wait before every message that grows with the amount of tracked data.
 
-**Cleanup.** **Keep backups for (days)** (`backup_retention_days`, default 7, range 1 to 365) sets how long backups are kept after an exchange ends. This covers per-file copies, full snapshots, and recovery copies made by earlier versions. Cleanup runs when the app starts, after every exchange, and once an hour; it skips the exchange that is running and leaves messages, logs, and attachments in place. Archives left by earlier versions are removed the same way once they are older than the setting. The chat notes when the saved copies of an exchange have been removed.
+**Cleanup.** **Keep backups for (days)** (`backup_retention_days`, default 7, range 1 to 365) sets how long backups are kept after an exchange ends. This covers per-file copies, full snapshots, and recovery copies made by earlier versions. Cleanup runs when the app starts, after every exchange, and once an hour; it skips the exchange that is running and leaves messages, logs, and generated images in place. Files you attach to a message follow their own 7-day rule (see Attachments). Archives left by earlier versions are removed the same way once they are older than the setting.
 
 **Change detection.** The list of tracked files recorded before a run holds each file's size, modification time, and SHA-256 hash. Hashes can be reused when the size and timestamps are unchanged and the file was already at rest before the previous scan. Recently changed files are read again. The exchange's baseline file is deleted when the exchange ends; detected changes stay recorded in `changes.json`.
 
@@ -317,7 +313,7 @@ Codex needs to be able to write to the backup folder. In `workspace-write` mode 
 
 The app's `codex_sandbox` option takes only these two values. An older setting that names `danger-full-access` stops the app at startup with a log line saying so. A chat can still run without the sandbox in the Full access permission mode, which the owner turns on in Settings (see "Permission modes" below).
 
-**Protected policy.** The sandbox modes the `codex_sandbox` option may name come from `/usr/share/ha_codex/policy.json` inside the app image, outside `/config` and sandbox writable roots. A value it does not list stops startup and each task. The app adds no command check of its own: Codex's approval mode and the sandbox, with its private-file masks, are the protection (0.3.6). No house rules are bundled or copied into Codex's home. Codex uses its defaults and the owner's `/config/AGENTS.md`, whose existing editor and reading path remain available. Updates remove only a byte-identical legacy bundled home copy; edited owner files and symlinks are preserved. Owners who want house practices can use the Whole Home Agent starter kit (published separately) and choose their own instructions. Native approval remains specific to the displayed request; read each action before allowing it.
+**Protected policy.** The sandbox modes the `codex_sandbox` option may name come from `/usr/share/ha_codex/policy.json` inside the app image, outside `/config` and sandbox writable roots. A value it does not list stops startup and each task. The app adds no command check of its own: Codex's approval mode and the sandbox, with its private-file masks, are the protection (0.3.6). No house rules are bundled or copied into Codex's home. Codex uses its defaults and the owner's `AGENTS.md` (in the app's own folder, see [AGENTS.md and HA_TOKEN](#agentsmd-and-ha_token)), whose existing editor and reading path remain available. Owners who want house practices can use the Whole Home Agent starter kit (published separately) and choose their own instructions. Native approval remains specific to the displayed request; read each action before allowing it.
 
 **Who can answer.** Only a signed-in Home Assistant administrator can answer **Allow once** or **Deny**, on the Codex page. This holds in Default and Read only. In Auto-review, Codex's reviewer answers, and in Full access nobody is asked, whoever sent the message (see "Permission modes"). The worker checks the user Home Assistant names for the page against its user list and records who answered on the request. The integration's API token cannot answer permission requests, and the integration's actions refuse callers who are not administrators. An automation or script that runs on its own may call the actions; one that a user who is not an administrator starts carries that user, and its call is refused too.
 
@@ -352,7 +348,8 @@ Home Assistant action (a service call), for example `light.turn_off` with a targ
 `homeassistant.restart`. The app sets the tool's approval mode to `prompt`, so Codex asks you each time, with no
 remembered answer: the question has no "Allow for this session" and no "don't ask again". It shows the service,
 the target and the data.
-A scheduled run does not get the tool, since nobody is there to answer.
+A scheduled run has the same tool. Its question waits in the run's chat until an administrator answers it
+([Scheduled runs](#scheduled-runs)).
 
 The ChatGPT app has the same tool while remote control is on. There, Codex asks in the app before each call; the
 worker does not see that answer. The tool's key in the app holds while the remote-control process runs, and each
@@ -406,9 +403,9 @@ These checks do not cover a command that uses the `HA_TOKEN` option (see "AGENTS
 
 ### Owner instructions and planted commands
 
-Codex follows its defaults and the owner's `/config/AGENTS.md`. The integration does not bundle a house-practice file prescribing device categories, API-deletion practices or a writing style. Owners can choose such practices through their own workspace instructions or the starter kit. The starter `/config/AGENTS.md` of a new install ([AGENTS.md and HA_TOKEN](#agentsmd-and-ha_token)) is an ordinary owner file, in plain view, that the owner can change or delete. Permission cards and the sandbox operate independently of prose instructions.
+Codex follows its defaults and the owner's `AGENTS.md`. The integration does not bundle a house-practice file prescribing device categories, API-deletion practices or a writing style. Owners can choose such practices through their own workspace instructions or the starter kit. The starter `AGENTS.md` of a new install ([AGENTS.md and HA_TOKEN](#agentsmd-and-ha_token)) is an ordinary owner file, in plain view, that the owner can change or delete. Permission cards and the sandbox operate independently of prose instructions.
 
-The app does not scan `/config` for planted commands. From 0.3.6 there is no command check (hook), no check after each exchange and no config watch: an edit that adds a `shell_command`, `rest_command`, `python_script` or a command-line platform stays as Codex wrote it. In `workspace-write` Codex can write such an edit without a request, and Home Assistant runs it on the next reload or call. Review what a chat changed (the chat lists every changed file, with its backup) before a reload or restart. The Supervisor token stays out of Codex's environment, and the sandbox still hides `secrets.yaml`, Home Assistant's sign-in store and the app's own data (AUDITING.md, layer 1).
+The app does not scan `/config` for planted commands. From 0.3.6 there is no command check (hook), no check after each exchange and no config watch: an edit that adds a `shell_command`, `rest_command`, `python_script` or a command-line platform stays as Codex wrote it. In `workspace-write` Codex can write such an edit without a request, and Home Assistant runs it on the next reload or call. Review what a chat changed (its steps show each file Codex edited) before a reload or restart. The Supervisor token stays out of Codex's environment, and the sandbox still hides `secrets.yaml`, Home Assistant's sign-in store and the app's own data (AUDITING.md, layer 1).
 
 
 ## Ways in
@@ -433,9 +430,9 @@ Codex can be reached three ways: the chat page, the ChatGPT app paired through r
   way in. On the chat page and for `codex_cli.start_task`, a request for more access shows on the chat page as a
   [permission request](#permission-requests). The ChatGPT app shows Codex's own requests in the app instead, as
   [Remote control from the ChatGPT app](#remote-control-from-the-chatgpt-app) describes.
-- A scheduled run also starts a task. It uses the same launcher as the chat page and gets the page's tools, except
-  the `call` tool: nobody is there to answer. A Read only schedule narrows the sandbox, not the tools
-  ([Scheduled runs](#scheduled-runs)).
+- A scheduled run also starts a task. It uses the same launcher as the chat page and gets the page's tools, the
+  `call` tool included; Codex asks before each `call`, and the question waits in the run's chat. A Read only
+  schedule narrows the sandbox, not the tools ([Scheduled runs](#scheduled-runs)).
 - "Not available" means the way in has no tool for that request.
 
 `tests/test_surface_matrix.py` starts each way in's tool servers and compares their tools with this table. A change
@@ -550,7 +547,7 @@ For a managed workspace, an administrator may need to enable device-code login i
 
 The app never starts a sign-in by itself. When it starts and Codex is not signed in, it posts a Home Assistant notification that says to choose **Sign in** when you are ready. A one-time code works for 15 minutes only, so you get it at the moment you use it.
 
-After you choose **Sign in**, the app posts a Home Assistant persistent notification containing a QR code, link, and one-time device code. The QR code opens the OpenAI device page; type the code from the same notification into that page. The app refreshes the notification when the code appears and detects completion automatically. You do not need to run `docker exec`.
+After you choose **Sign in**, the app posts a Home Assistant persistent notification containing the sign-in link and the one-time device code. Open the link and type the code from the same notification into that page. The QR code of the sign-in page is on the app's own page only (below): the notification has no image, because an image there would have to be a file under `/config/www`, which Home Assistant serves to anyone who can reach it, without a sign-in. The app refreshes the notification when the code appears and detects completion automatically. You do not need to run `docker exec`.
 
 While the app is not signed in, a banner above the chat offers **Sign in**. During a sign-in, the banner and **Settings** show the one-time code in large letters, a QR code of the sign-in page served by the app itself, and the link. The code stays on screen, unchanged, until the sign-in completes or you press **Cancel**; pressing **Sign in** again keeps the running sign-in and its code. Under the code, a countdown shows how long it still works (Codex 0.166.0 gives codes 15 minutes); each status reply from the app sets it again, so it stays right after the phone sleeps. When it runs out, the page says so and offers **Get a new code**. If a sign-in stops without signing in, **Settings** says why when it can, and **Sign in** becomes **Get a new code**. The GitHub code in **Settings > Accounts and connections > GitHub** has the same countdown and button.
 
@@ -637,9 +634,9 @@ Open **Settings > Accounts and connections > GitHub** in the app page. The card 
 
 ## AGENTS.md and HA_TOKEN
 
-The app web UI includes an editor for `/config/AGENTS.md` under **Settings** > **Workspace instructions** > **Workspace rules**. This file remains the source of truth for shared Codex project instructions. When the file does not exist, the task prompt does not mention it, and the page shows a setup hint above the message box until you write the file or choose **Dismiss** (the choice is kept in that browser).
+The app web UI includes an editor for the app's `AGENTS.md` (in its own `addon_config` folder, not in `/config`) under **Settings** > **Workspace instructions** > **Workspace rules**. This file remains the source of truth for shared Codex project instructions. When the file does not exist, the task prompt does not mention it, and the page shows a setup hint above the message box until you write the file or choose **Dismiss** (the choice is kept in that browser).
 
-**Starter instructions.** On its first start, the app writes a short starter `/config/AGENTS.md` when the home has
+**Starter instructions.** On its first start, the app writes a short starter `AGENTS.md` in the app's own folder when the home has
 none. The text is `starter_agents.md` in the app's source. It tells Codex what `/config` is and gives seven general
 rules. Four of them matter most: change the home only on the owner's word, keep secrets secret, keep the old version
 of a changed file, and check the configuration before a restart. A short section after the rules lists three safeguard
@@ -650,7 +647,11 @@ its data, and an update of an app that has started before writes nothing. The ru
 command check and the approval cards work the same with or without them. To get the starter on an older install,
 copy the text from `starter_agents.md` into the editor.
 
-From **0.3.4**, Codex no longer looks for `/config/AGENTS.md` in every message. Codex loads the file when a chat
+**Where the file lives (0.4).** The file is `AGENTS.md` in the app's own `addon_config` folder: `/addon_configs/<app folder>/AGENTS.md` on the host and `/addon_config/AGENTS.md` inside the app. It is not in the top level of `/config`. Codex loads it as its global instructions through a link the app keeps at `$CODEX_HOME/AGENTS.md` (`/data/codex-home/AGENTS.md`), where Codex looks for global instructions ([Codex: AGENTS.md guide](https://developers.openai.com/codex/guides/agents-md)). On the first start of this version, an `AGENTS.md` that an older version left in `/config` is **moved** into the app's folder, after a backup copy at `/data/agents_before_move.md`. It is moved and not copied because Codex works in `/config` and would read both. If both places already hold a file, the app moves nothing, logs a line, and leaves the one in `/config` for you to merge or delete. The folder is part of the app's backup like its other data.
+
+The editor under **Settings** writes the file without a question. The folder is not one of the places Codex may write on its own, so when you ask a chat to change the file, Codex asks for your approval first.
+
+From **0.3.4**, Codex no longer looks for the file in every message. Codex loads the file when a chat
 starts. In each message the worker tells Codex whether the file exists and when it last changed, and Codex reads
 it again only after a change. A change you make to the file still reaches a chat that is already open, on its
 next message.
@@ -682,7 +683,7 @@ The image includes the OpenSSH client so Codex can use an existing SSH server, s
 
 Ask Codex, for example:
 
-> Set up a connection named `ha-terminal` to my SSH server at `ssh-host.example`, port `22`, username `hassio`. Generate a dedicated Ed25519 connection key under `/data/.ssh`. Keep the private key out of chat and logs, show me only its public key, and preserve any existing connections. Use `/data/.ssh/config` and `/data/.ssh/known_hosts` explicitly. Wait for me to verify the server fingerprint before trusting it. Save the connection name and invocation in `/config/AGENTS.md`, without credentials.
+> Set up a connection named `ha-terminal` to my SSH server at `ssh-host.example`, port `22`, username `hassio`. Generate a dedicated Ed25519 connection key under `/data/.ssh`. Keep the private key out of chat and logs, show me only its public key, and preserve any existing connections. Use `/data/.ssh/config` and `/data/.ssh/known_hosts` explicitly. Wait for me to verify the server fingerprint before trusting it. Save the connection name and invocation in the app's `AGENTS.md` (`/addon_config/AGENTS.md`), without credentials.
 
 Replace the example host, port, and username with those of the remote SSH server. For a Home Assistant SSH app, enable its SSH network port and use the Home Assistant host's address and that port. The web terminal's Ingress address is not an SSH endpoint.
 
@@ -811,7 +812,7 @@ An answer goes to the question it was given for. `codex_cli.reply_task` accepts 
 
 If another chat is working when you pick a choice, the answer waits in the [queue](#queueing-messages-while-another-chat-works) and is sent when that chat finishes. Until then the chat takes no other message, and the answer is sent only if its question is still the one waiting.
 
-The choices are a convenience and not a safeguard. Codex decides when to ask, and nothing stops it from changing files without asking. Use `/config/AGENTS.md` to tell it when you want to be asked first.
+The choices are a convenience and not a safeguard. Codex decides when to ask, and nothing stops it from changing files without asking. Use the app's `AGENTS.md` to tell it when you want to be asked first.
 
 API: `POST /tasks/<task_id>/reply` and `POST /tasks/<task_id>/continue` accept `turn_id`, and `choice` in place of the text: the position of one of that turn's choices, counted from 0. `choice` needs `turn_id`, because a position means nothing without its question. A `turn_id` that is not the waiting turn returns HTTP 409. A `choice` without `turn_id`, or one the question does not offer, returns HTTP 400. Each turn in `GET /tasks/<task_id>` has `choices`, and `latest_task` in `GET /status` has `choices` and `current_turn_id`. The action of a notification button is `CODEX_CLI_CHOICE_<position>_<turn_id>_<task_id>`, which Home Assistant delivers in the `mobile_app_notification_action` event.
 
@@ -823,7 +824,7 @@ To make the text easier to read, open **Settings** > **Text size** and choose **
 
 ### Commands
 
-Type `/` at the start of the message box to see the commands, with a line on what each does. Keep typing to narrow the list, then tap one, or move with the arrow keys and press **Enter** or **Tab**. Typing a whole command, such as `/new`, and sending it does the same. **Settings** > **Commands** lists them all.
+Type `/` at the start of the message box to see the commands, with an icon and a line on what each does. Keep typing to narrow the list, then tap one, or move with the arrow keys and press **Enter** or **Tab**. The letters you typed are marked. **Escape**, or a press outside the list, closes it. Typing a whole command, such as `/new`, and sending it does the same.
 
 | Command | What it does |
 | --- | --- |
@@ -834,8 +835,12 @@ Type `/` at the start of the message box to see the commands, with a line on wha
 | `/rename` | Rename this chat (listed only with a chat open) |
 | `/usage` or `/status` | Show how much of your ChatGPT plan is used |
 | `/size` | Change the text size |
+| `/connection` | Open the remote connection and its status (not listed once Settings has shown that remote control is unavailable) |
 | `/settings` | Open Settings |
-| `/help` | List the commands |
+| `/pin` | Pin or unpin this chat (listed only with a chat open) |
+| `/share` | Download this chat as a file (listed only with a chat open) |
+| `/archive` | Archive this chat, or restore it (listed only with a chat open and idle) |
+| `/delete` | Delete this chat and its history, after a confirmation (listed only with a chat open and idle) |
 
 The page runs these commands itself. Messages reach Codex as plain text through the Codex app server, which does not read the slash commands of the Codex terminal app, so a command sent as a message would reach the model as plain words. Text that only starts with `/`, such as `/config/automations.yaml has an error`, is sent to Codex as usual.
 
@@ -870,7 +875,7 @@ Messages are treated as untrusted text:
 - Images are never loaded from a message, because a remote image would tell its server that the message was read. They appear as links. Images that Codex generates or that you attach are shown as before.
 - A message longer than 50,000 characters, or one that takes unusually long to format, is shown as plain text.
 
-The Markdown parser, [marked](https://github.com/markedjs/marked) 18.0.14, is bundled with the app under `web/assets/vendor/` with its MIT license, so the chat does not load scripts from another server. The arrows are two Material Design Icons paths (`mdiChevronRight` and `mdiChevronDown` from [@mdi/js](https://github.com/Templarian/MaterialDesign-JS) 7.4.47, Apache-2.0, the icon set Home Assistant uses), inlined in `web/assets/chat.css` and `web/index.html`; `web/NOTICE` keeps the license note and goes into the image with the page. Codex decides how it writes its answers; to ask for Markdown, add an instruction to `/config/AGENTS.md` as described under [Task output](../custom_components/codex_cli/README.md#task-output).
+The Markdown parser, [marked](https://github.com/markedjs/marked) 18.0.14, is bundled with the app under `web/assets/vendor/` with its MIT license, so the chat does not load scripts from another server. The arrows are two Material Design Icons paths (`mdiChevronRight` and `mdiChevronDown` from [@mdi/js](https://github.com/Templarian/MaterialDesign-JS) 7.4.47, Apache-2.0, the icon set Home Assistant uses), inlined in `web/assets/chat.css` and `web/index.html`; `web/NOTICE` keeps the license note and goes into the image with the page. Codex decides how it writes its answers; to ask for Markdown, add an instruction to the app's `AGENTS.md` (**Settings** > **Workspace instructions**) as described under [Task output](../custom_components/codex_cli/README.md#task-output).
 
 ### Queueing messages while another chat works
 
@@ -902,7 +907,7 @@ From **0.1.63**, the list starts as soon as a message is accepted. The worker re
 
 Command output is not shown by default because it can contain configuration secrets. Each command offers **Show output**, which reveals up to 2,048 characters after the same redaction as the task log and marks output that was cut. File edits list paths only. Reasoning summaries and other activity text are limited to 4,000 characters per field, and at most 500 steps are kept per exchange. The task's `codex.log` retains the underlying redacted event stream.
 
-The worker keeps the steps of the running exchange in memory and writes them to `<task_root>/<task_id>/turns/<turn_id>/activity.json` once when the run ends, so the latest exchange's steps survive a page reload and a worker restart. The authenticated worker API exposes `GET /tasks/<task_id>/activity?after=<seq>`, which returns `turn_id`, `running`, `seq`, `total`, the `steps` whose sequence number is above `after`, and `elapsed_ms` while the exchange runs. A step that changes, such as a command that finishes, is returned again with a new sequence number and the same `index`. The web UI polls this endpoint once a second while a chat is working and pauses when the tab is hidden. The Home Assistant integration does not use it.
+The worker keeps the steps of the running exchange in memory and writes them to `/data/codex_tasks/<task_id>/turns/<turn_id>/activity.json` once when the run ends, so the latest exchange's steps survive a page reload and a worker restart. The authenticated worker API exposes `GET /tasks/<task_id>/activity?after=<seq>`, which returns `turn_id`, `running`, `seq`, `total`, the `steps` whose sequence number is above `after`, and `elapsed_ms` while the exchange runs. A step that changes, such as a command that finishes, is returned again with a new sequence number and the same `index`. The web UI polls this endpoint once a second while a chat is working and pauses when the tab is hidden. The Home Assistant integration does not use it.
 
 ### Generated images
 
@@ -910,13 +915,13 @@ From **0.1.49**, images that Codex generates during a conversation appear in the
 
 Image generation uses Codex's built-in `image_gen` tool with the signed-in ChatGPT account. It needs no separate OpenAI API key. Tool availability and usage limits depend on the account. The app currently bundles Codex CLI 0.166.0.
 
-After each run, the worker reads the session's rollout file under `/data/codex-home/sessions` and looks for completed `image_gen.generation` items that were not already present before the exchange. This works for app-server turns, including images absent from the live event stream. Codex saves each result under `/data/codex-home/generated_images/<session_id>/`. The worker copies the file into `<task_root>/<task_id>/turns/<turn_id>/attachments/` and records metadata on that exchange. If the saved file is missing, the worker decodes the inline result from the rollout instead. The original stays where Codex saved it so follow-up edits in the same conversation keep working.
+After each run, the worker reads the session's rollout file under `/data/codex-home/sessions` and looks for completed `image_gen.generation` items that were not already present before the exchange. This works for app-server turns, including images absent from the live event stream. Codex saves each result under `/data/codex-home/generated_images/<session_id>/`. The worker copies the file into `/data/codex_tasks/<task_id>/turns/<turn_id>/attachments/` and records metadata on that exchange. If the saved file is missing, the worker decodes the inline result from the rollout instead. The original stays where Codex saved it so follow-up edits in the same conversation keep working.
 
 The page's rules tell Codex that generated images are attached automatically and that it should leave them at the default save location unless the user asks for a file at a specific path, for example under `/config/www` for use on a dashboard.
 
-Limits and retention: only PNG, JPEG, GIF, and WebP content is accepted, checked by inspecting the file rather than trusting its name. Files larger than 25 MiB and images beyond the first 12 per exchange are skipped and noted in the task log. Attachments are retained with the task history and are removed when the task directory is deleted; there is no automatic expiry for generated images. The worker serves them through its authenticated attachment API and does not publish them under `/config/www`; Codex can copy an image there if you request it.
+Limits and retention: only PNG, JPEG, GIF, and WebP content is accepted, checked by inspecting the file rather than trusting its name. Files larger than 25 MiB and images beyond the first 12 per exchange are skipped and noted in the task log. Generated images are retained with the task history and are removed when the task directory is deleted; there is no automatic expiry for them. Files and images that you attach to a message are kept in `/data/chat_uploads`, outside the backup, and removed after 7 days (the chat then shows "Attachment removed after 7 days"; the attachment API returns HTTP 410). The worker serves them through its authenticated attachment API and does not publish them under `/config/www`; Codex can copy an image there if you request it.
 
-API: `GET /tasks/<task_id>/attachments/<attachment_id>` returns the image with its recorded content type and `X-Content-Type-Options: nosniff`. Add `?download=1` for a download disposition. The endpoint requires the worker API token or an authenticated Home Assistant Ingress session. Before sending, it re-checks the stored file's size, SHA-256, and image signature against the recorded metadata, and returns HTTP 404 for unknown, missing, oversized, or altered files. `GET /tasks/<task_id>` and `codex_cli.get_task` include an `attachments` list on each turn and on the task-level result for the latest exchange. Each entry has `attachment_id`, `kind` (`image`), `name`, `mime_type`, `size`, `sha256`, `created_at`, `revised_prompt`, `generation_id`, `path` (relative to the task directory), and `url` (relative to the worker). The `codex_cli_task_result` event includes the same `attachments` list; it is empty for cancelled and failed launches.
+API: `GET /tasks/<task_id>/attachments/<attachment_id>` returns the image with its recorded content type and `X-Content-Type-Options: nosniff`. Add `?download=1` for a download disposition. The endpoint requires the worker API token or an authenticated Home Assistant Ingress session. Before sending, it re-checks the stored file's size, SHA-256, and image signature against the recorded metadata, and returns HTTP 404 for unknown, missing, oversized, or altered files. `GET /tasks/<task_id>` and `codex_cli.get_task` include an `attachments` list on each turn and on the task-level result for the latest exchange. Each entry has `attachment_id`, `kind` (`image`), `name`, `mime_type`, `size`, `sha256`, `created_at`, `revised_prompt`, `generation_id`, `path` (relative to the task directory, or to `/data/chat_uploads/<task_id>` when `store` is `data`), `store` (`data` for an upload kept in `/data/chat_uploads`; absent for files kept with the task), and `url` (relative to the worker). The `codex_cli_task_result` event includes the same `attachments` list; it is empty for cancelled and failed launches.
 
 If an image does not appear, open the task log and look for `Skipped image generation` or `Could not attach image generation` lines, which explain why the worker did not attach the file.
 
@@ -928,7 +933,7 @@ Codex receives each image with the message as a `localImage` input in sandboxed 
 
 In the Home Assistant Android app, the paperclip picks one image at a time; use it again to add more. The app's file chooser returns nothing when a multi-select picker is used, so the web UI asks Android WebViews for a single selection. Paste and drag-and-drop still accept several images at once.
 
-Limits: PNG, JPEG, GIF, and WebP only, checked by inspecting the bytes rather than the file name; at most 6 images per message and 10 MiB per image after resizing. The worker stores attached images under `<task_root>/<task_id>/turns/<turn_id>/attachments/`, serves them through its authenticated API, and removes them with the chat. It does not publish uploads under `/config/www`.
+Limits: PNG, JPEG, GIF, and WebP only, checked by inspecting the bytes rather than the file name; at most 6 images per message and 10 MiB per image after resizing. The worker stores attached images and files under `/data/chat_uploads/<task_id>/<turn_id>/`, which the app's backup leaves out, serves them through its authenticated API, and removes them after 7 days or with the chat, whichever comes first. It does not publish uploads under `/config/www`.
 
 API: `POST /tasks`, `POST /tasks/<task_id>/continue`, and `POST /tasks/<task_id>/reply` accept an optional `attachments` list of `{"name": "shot.png", "data": "<base64>"}` objects; a `data:` URL prefix is tolerated. Invalid entries return HTTP 400 and no task or turn is created, and requests over roughly 81 MiB return HTTP 413. Each turn in `GET /tasks/<task_id>` and `codex_cli.get_task` lists its uploads under `prompt_attachments` with the same fields as generated images plus `origin: "user"`; generated images carry `origin: "codex"`. `GET /tasks/<task_id>/attachments/<attachment_id>` serves both kinds with the same checks. The `attachments` list on the task result and in the `codex_cli_task_result` event contains only images generated by Codex.
 
@@ -950,7 +955,13 @@ file before you give it to anyone. API: `GET /tasks/<task_id>/share` returns the
 
 **Pin chat** keeps the conversation at the top of the list under a **Pinned** heading, ahead of the recently active chats; **Unpin chat** returns it to the recent list. **Rename** opens a dialog for a new title, which appears in the sidebar and the conversation header. Neither action changes the chat's `updated_at` time or its saved messages. **Delete** asks for confirmation, then removes the conversation and its saved history. The delete action is unavailable while that chat is running; stop the task first.
 
-Deleting a chat removes `<task_root>/<task_id>/`, including prompts, output, backups, and attachments, and the entry from the task index. The worker also attempts to remove the Codex session rollout file under `/data/codex-home/sessions` and generated images under `/data/codex-home/generated_images/<session_id>/`. Failures to remove those session files are logged. Deletion cannot be undone in the chat UI and does not erase copies in separate Home Assistant backups.
+Deleting a chat removes `/data/codex_tasks/<task_id>/`, including prompts, output, backups, and generated images, and `/data/chat_uploads/<task_id>/` with the files you attached, and the entry from the task index. The worker also attempts to remove the Codex session rollout file under `/data/codex-home/sessions` and generated images under `/data/codex-home/generated_images/<session_id>/`. Failures to remove those session files are logged. Deletion cannot be undone in the chat UI and does not erase copies in separate Home Assistant backups.
+
+### Where the app keeps its working files
+
+Every chat's files are in the app's private folder, `/data/codex_tasks/<task_id>/`: the prompts, `codex.log`, `task.json`, the per-turn backups and the generated images. The folder `auth/` in `/data/codex_tasks` holds the log of the ChatGPT sign-in: the `codex login` output, which includes the sign-in link and the one-time code (a code works for 15 minutes only), with token-like values redacted. The files you attach to a message are in `/data/chat_uploads/<task_id>/` for 7 days. None of this is in Home Assistant's configuration folder, so the file editor, Samba and a backup of that folder do not hold it. The app's own backup holds all of it except the files you attached: it leaves out `/data/chat_uploads`. The app writes nothing under `/config/www`. In `/config` it writes only the files Codex changes for you, the integration's folder `custom_components/codex_cli` with its work folder `.codex_cli_install` (which must be on the same file system for the swap to be atomic, and which Home Assistant never loads from), and `AGENTS.md` when you edit it on the page.
+
+Versions before 0.4 kept the chats in `/config/codex_tasks` (or the folder the removed `task_root` option named) and wrote the sign-in QR images to `/config/www/codex_cli_auth`. On the first start of 0.4 the app moves each chat from `/config/codex_tasks` to `/data/codex_tasks` and then removes the old folder. If the app still finds a saved **Task root** value in its options, it takes from that folder only the chat folders (each holds a `task.json`) and the sign-in log folder `auth`; every other file stays, and the folder is removed only when it is then empty. A folder the app cannot read is left as it is, with a line in the app log, and the app starts. It moves, never copies: a chat is renamed, or copied whole to a staging folder in `/data` and renamed into place, and only then deleted from the old place. A chat that cannot be moved stays where it was, with a line in the app log, and is tried again at the next start. The same start deletes the `codex_login_*.svg` images and their folder; a file in that folder that the app did not write stays.
 
 API: `POST /tasks/<task_id>/pin` with `{"pinned": true}` or `{"pinned": false}` returns the saved state. `POST /tasks/<task_id>/title` with `{"title": "Porch lights"}` trims and collapses whitespace, rejects empty titles and titles longer than 200 characters with HTTP 400, and returns the stored title. Both work on running chats and return HTTP 404 for unknown tasks and HTTP 500 if the metadata could not be written, in which case the previous values are kept. `DELETE /tasks/<task_id>` returns HTTP 409 for queued or running tasks, HTTP 404 for unknown tasks, and HTTP 500 if the task files could not be removed, in which case the chat stays listed. Summary entries from `GET /tasks?summary=true` include a `pinned` flag, and `order=pinned_first` lists pinned chats before the others while keeping the most recently updated first within each group. The `codex_cli.list_tasks` action keeps its existing `created_asc` and `updated_desc` orders.
 
@@ -960,7 +971,7 @@ API: `POST /tasks/<task_id>/pin` with `{"pinned": true}` or `{"pinned": false}` 
 
 `GET /tasks` and `codex_cli.list_tasks` accept optional `limit` (1–500), `offset`, `status`, `order` (`created_asc` or `updated_desc`; the worker API also accepts `pinned_first`), and `summary` parameters. `summary: true` returns compact entries for the sidebar. Without filters, all tasks are returned in their original creation order. `GET /tasks/<task_id>` includes `turns`, `history_incomplete`, and `can_continue`. The latter indicates an eligible task with a recorded session ID; availability of its session file is checked when continuing. `POST /tasks/<task_id>/continue` accepts a JSON `message`.
 
-Each new exchange stores its user message, timestamps, status, and response in the task's `turns` list. Prompts, final output, backups, and the list of changed files are stored separately under `<task_root>/<task_id>/turns/<turn_id>/`. The task-level result and existing result events continue to describe the latest exchange. Old tasks are adapted from their available prompt, replies, and last result, with a notice that earlier responses may be missing. When a chat's `task.json` is lost and the chat is rebuilt from the task index, its latest exchange keeps its turn id, so the steps saved for that exchange stay linked to it after you continue the chat. History is retained until its files are removed; there is no automatic expiry, except for [backups](#backups).
+Each new exchange stores its user message, timestamps, status, and response in the task's `turns` list. Prompts, final output, backups, and the list of changed files are stored separately under `/data/codex_tasks/<task_id>/turns/<turn_id>/`. The task-level result and existing result events continue to describe the latest exchange. Old tasks are adapted from their available prompt, replies, and last result, with a notice that earlier responses may be missing. When a chat's `task.json` is lost and the chat is rebuilt from the task index, its latest exchange keeps its turn id, so the steps saved for that exchange stay linked to it after you continue the chat. History is retained until its files are removed; there is no automatic expiry, except for [backups](#backups).
 
 For local browser checks, run `python codex-cli-worker/tests/web_fixture.py` from the repository root, then `node codex-cli-worker/tests/browser_smoke.cjs` with Playwright available. The fixture uses temporary storage and simulated responses, and never launches Codex or contacts Home Assistant. Set `CODEX_CHAT_BROWSER=msedge` to use installed Edge, and optionally `CODEX_CHAT_QA_DIR` to choose a screenshot directory outside the repository.
 
@@ -983,7 +994,7 @@ Intervals accept whole minutes or hours, with a minimum of one minute. Hourly is
 
 The worker checks due schedules every five seconds. It uses the ordinary task launcher, backups, validation and permission checks, and starts at most one scheduled task per check. Due work waits while the assistant is busy. A missed interval coalesces into one run, without a burst of catch-up tasks. Limits are 100 approved schedules plus 20 unapproved proposals, 24 runs per schedule per UTC day, and 64 scheduled runs total per UTC day. A run that reaches a limit waits until a later UTC day. Completed run history retains the latest 500 records; active records are kept separately. Schedules, occurrence reservations and run history live in `/data/schedules.sqlite3` and survive app restarts and updates. Reservation and launch share the normal chat-slot lock; a busy launch restores the due occurrence without overwriting a concurrent owner edit. A crash after reservation but before saving the ordinary task records an interrupted run and does not retry it automatically.
 
-**Permission requests remain human decisions.** The run log shows **waiting for approval** while a native request is pending. Open its chat to review the command or diff and choose **Allow once** or **Deny** as an administrator. The scheduler cannot answer it. The parked exchange keeps the worker's normal execution slot; other schedules do not bypass it. Existing task timeouts, cancellation and restart expiration still apply. A question instead shows **waiting for input**. Scheduled tasks report completion, failure, cancellation and questions in the run log and chat without pushes. Only their existing permission-wait notification uses `notify_service` (or persistent Home Assistant notifications).
+**Permission requests remain human decisions.** A scheduled run has the tools of a chat on the page, the `call` tool that changes the house included, and Codex asks before each `call` as it does in a chat. The run log shows **waiting for approval** while a request is pending, and the chat page shows its yellow warning. Open the run's chat to review the command, diff or Home Assistant action and choose **Allow once** or **Deny** as an administrator. Nothing that a chat on the page would ask about runs without that answer. The scheduler cannot answer it. The parked exchange keeps the worker's normal execution slot; other schedules do not bypass it. Existing task timeouts, cancellation and restart expiration still apply. A question instead shows **waiting for input**. Scheduled tasks report completion, failure, cancellation and questions in the run log and chat without pushes. Only their existing permission-wait notification uses `notify_service` (or persistent Home Assistant notifications).
 
 Codex on the worker receives the `codex_scheduling` tools `propose_schedule` and `list_schedules`. They use a running-turn capability that expires when the exchange ends. Proposal tools cannot approve schedules or grant native permissions. Schedule summaries are paginated in groups of 10 by default (`limit` can select 1–20; a larger number returns 20 with `next_offset` to read the rest, not an error); prompt excerpts are limited to 512 characters. A refused call says why in plain words, for example that `offset` is out of range or that the exchange has ended. Read the complete proposed prompt on the page before approving. They run without a permission card because these limits already bound them. If any other tool asks a question, the page cannot show it: the request is declined and the chat says so. Only the Home Assistant tool's own permission request gets a card (see [permission requests](#permission-requests)). These tools are for page tasks; native remote threads do not receive page-task capabilities.
 
@@ -1217,10 +1228,3 @@ sensor or guessed 72-hour, 24-hour or 6-hour warning tiers. It retains the exist
 explicitly rejected sign-in Repair described above, clearing after renewal is confirmed. The add-on
 sends no advance-expiry push. Expiry estimation adds no credential-file reader, token decoder
 or model task.
-
-### Mailbox arrival signals
-
-From **0.4.0** the app has no mailbox and no lead agent channel. The worker's `/status` reports the mailbox as not
-available, so the integration's **Mailbox unread for the lead** sensor shows unknown and no
-`codex_cli_mailbox_message` event fires. A later version of the integration removes the sensor and the event.
-

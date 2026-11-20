@@ -14,7 +14,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import sys
 import tempfile
 import tomllib
@@ -28,7 +27,6 @@ sys.path.insert(0, str(WORKER))
 import test_approvals as fixtures
 
 import approvals
-import policy
 import remote_control
 
 server = fixtures.server  # the worker module as the approval fixtures loaded it (test_server's copy)
@@ -57,7 +55,6 @@ class GrantLayerLaunchTests(unittest.TestCase):
         with patch.object(server, "tasks", {"t": task}), patch.object(server, "read_options", return_value={}):
             return {
                 "page": server.build_app_server_args(),
-                "schedule run": server.build_app_server_args(attended=False),
             }
 
     def test_no_page_or_schedule_launch_registers_the_act_tool(self):
@@ -205,37 +202,11 @@ class HouseRulesTests(unittest.TestCase):
             instructions = home / "AGENTS.md"
             instructions.write_text("Owner instructions, unchanged.")
             with patch.multiple(server, CODEX_HOME=home, CODEX_CONFIG_PATH=home / "config.toml", DATA_ROOT=root,
-                                AUTH_QR_DIR=root / "qr"), \
+                                OLD_AUTH_QR_DIR=root / "qr"), \
                  patch.object(server, "task_root", return_value=root / "tasks"), \
                  patch.object(server, "api_token", return_value="synthetic"):
                 server.ensure_runtime_files()
             self.assertEqual(instructions.read_text(), "Owner instructions, unchanged.")
-
-    def test_migration_removes_only_exact_legacy_copy(self):
-        with tempfile.TemporaryDirectory() as folder:
-            home = Path(folder)
-            target = home / "AGENTS.md"
-            old = b"synthetic old bundled copy"
-            with patch.object(policy, "LEGACY_INSTRUCTIONS_SHA256", frozenset({hashlib.sha256(old).hexdigest()})):
-                target.write_bytes(old)
-                target.chmod(0o444)
-                self.assertTrue(policy.remove_legacy_instructions(home))
-                self.assertFalse(target.exists())
-                self.assertFalse(policy.remove_legacy_instructions(home))
-                target.write_text("Edited by owner")
-                self.assertFalse(policy.remove_legacy_instructions(home))
-                self.assertEqual(target.read_text(), "Edited by owner")
-
-    def test_migration_never_follows_a_symlink(self):
-        with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
-            target = root / "owner.md"
-            target.write_text("synthetic owner text")
-            home = root / "home"
-            home.mkdir()
-            (home / "AGENTS.md").symlink_to(target)
-            self.assertFalse(policy.remove_legacy_instructions(home))
-            self.assertEqual(target.read_text(), "synthetic owner text")
 
     def test_config_agents_read_stays_unchanged(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -246,7 +217,7 @@ class HouseRulesTests(unittest.TestCase):
 
     def test_task_context_keeps_owner_pointer_and_original_upstream_guidance(self):
         text = server.PAGE_INSTRUCTIONS
-        self.assertIn("Owner workspace instructions: if /config/AGENTS.md exists, follow it.", text)
+        self.assertIn("Owner workspace instructions: if /addon_config/AGENTS.md exists, follow it.", text)
         self.assertIn("Treat this as a live Home Assistant config tree. Make focused edits, do not expose secrets, "
                       "and validate changed YAML/JSON when practical. After you finish, the worker asks Home "
                       "Assistant to check its configuration whenever YAML files changed; if that check fails, the "
@@ -255,7 +226,7 @@ class HouseRulesTests(unittest.TestCase):
 
     def test_page_rules_are_the_same_with_and_without_the_owner_file(self):
         # Codex reads the page's rules once for each thread, and the owner can add or remove
-        # /config/AGENTS.md between two messages, so the rules must not depend on the file.
+        # AGENTS.md between two messages, so the rules must not depend on the file.
         with tempfile.TemporaryDirectory() as folder, \
              patch.object(server, "AGENTS_PATH", Path(folder) / "AGENTS.md"), \
              patch.object(server, "attached_image_note", return_value=""), \

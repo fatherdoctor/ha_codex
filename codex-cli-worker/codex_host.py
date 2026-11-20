@@ -474,6 +474,11 @@ class CodexHost:
             result = self._call(method, params)
             thread_id = (result.get("thread") or {}).get("id")
             if not isinstance(thread_id, str) or not thread_id or (params.get("threadId") not in (None, thread_id)):
+                # Codex may now hold a thread that no chat owns; a fresh process frees it.
+                with self.lock:
+                    if self.process is not None:
+                        self.restart_due = True
+                self.log("Codex host: Codex gave another thread than the one asked for; restart due.")
                 raise HostError(f"{method}: Codex gave another thread")
             with self.lock:
                 chat.thread_id = thread_id
@@ -548,7 +553,12 @@ class CodexHost:
             self._pause_locked_out(chat_id)
 
     def _pause_locked_out(self, chat_id: str) -> None:
-        """Pause a chat; the caller holds the wake lock, not the worker lock."""
+        """Pause a chat; the caller holds the wake lock, not the worker lock.
+
+        The chat stops being live in the same step as the check that it does not work, before the unload lets go
+        of the lock. So an exchange that arrives during the unload finds the chat paused (attach refuses it) and
+        takes the queue or the start path; it never runs on a thread that Codex unloads.
+        """
         with self.lock:
             chat = self.chats.get(chat_id)
             if chat is None or not chat.live:
@@ -556,9 +566,17 @@ class CodexHost:
             if chat.working:
                 raise HostError("a working chat is never paused")
             thread_id = chat.thread_id
-        closed = self._unload(thread_id)
-        with self.lock:
+            generation = self._generation
             chat.live = False
+        try:
+            closed = self._unload(thread_id)
+        except HostError:
+            with self.lock:
+                # Codex did not take the unload: the thread is still loaded, so the chat is live again.
+                if self._generation == generation and self.process is not None:
+                    chat.live = True
+            raise
+        with self.lock:
             self._forget_sub_agents(chat_id, thread_id)
             if not closed:
                 # The thread may still hold memory; a fresh process frees it.

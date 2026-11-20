@@ -538,15 +538,8 @@ function pngBuffer(width = 8, height = 6) {
       await page.locator("#messages .check-invalid .check-detail").textContent(),
       /required key 'trigger'/,
     );
-    // The same exchange says which changed files have a saved previous version.
-    assert.match(
-      await page.locator("#messages .backups-saved").textContent(),
-      /^✓Previous version saved for 1 file, kept for 7 daysautomations\.yaml → \/config\/codex_tasks\/.*\/backups\/automations\.yaml$/,
-    );
-    assert.equal(
-      await page.locator("#messages .backups-missing").textContent(),
-      "!No previous version saved for 1 filescripts.yaml",
-    );
+    // The answer gives no verdict on saved copies (CX-04-NO-CHECKS).
+    assert.equal(await page.locator("#messages .backups-saved, #messages .backups-missing").count(), 0);
     await page.screenshot({
       path: path.join(output, "config-check-failed.png"),
       fullPage: true,
@@ -973,6 +966,31 @@ function pngBuffer(width = 8, height = 6) {
       }),
       [200, "image/png"],
     );
+    // Once the daily cleanup has removed the upload, the chat says so. A new
+    // browser context has no cached copy of the image.
+    const sentChat = await page.evaluate(
+      () => document.querySelector("#messages .user-attachments img").src,
+    );
+    const sentChatId = sentChat.match(/tasks\/([^/]+)\/attachments/)[1];
+    assert.equal(
+      await page.evaluate(
+        async () => (await fetch("fixture/remove-uploads", { method: "POST" })).status,
+      ),
+      200,
+    );
+    const fresh = await browser.newContext();
+    try {
+      const freshPage = await fresh.newPage();
+      await freshPage.goto("http://127.0.0.1:9137/preview/");
+      await freshPage.locator(`[data-task-id="${sentChatId}"]`).click();
+      await freshPage
+        .locator("#messages p.attachment-missing", {
+          hasText: "Attachment removed after 7 days.",
+        })
+        .waitFor();
+    } finally {
+      await fresh.close();
+    }
     // Timing regressions, made deterministic by gating image decoding: a
     // batch stays with the chat it was picked in, and Send waits for images
     // that are still being prepared.
