@@ -24,7 +24,8 @@ class StarterAgentsWrite(unittest.TestCase):
         self.agents.parent.mkdir()
         self.codex_config = self.root / "codex-home" / "config.toml"
         self.codex_config.parent.mkdir()
-        patches = patch.multiple(server, AGENTS_PATH=self.agents, CODEX_CONFIG_PATH=self.codex_config)
+        patches = patch.multiple(server, AGENTS_PATH=self.agents, CODEX_CONFIG_PATH=self.codex_config,
+                                 LEGACY_AGENTS_PATH=self.root / "config-none" / "AGENTS.md")
         patches.start()
         self.addCleanup(patches.stop)
 
@@ -97,7 +98,9 @@ class StarterAgentsWrite(unittest.TestCase):
         self.assertFalse(self.agents.exists())
 
     def test_a_config_folder_that_cannot_be_written_does_not_stop_the_start(self):
-        with patch.object(server, "AGENTS_PATH", self.root / "no-such-folder" / "AGENTS.md"):
+        blocker = self.root / "not-a-folder"
+        blocker.write_text("a file where the folder should be", encoding="utf-8")
+        with patch.object(server, "AGENTS_PATH", blocker / "sub" / "AGENTS.md"):
             self.assertFalse(self.write())
         self.assertIn("Could not write the starter", self.log.getvalue())
 
@@ -124,6 +127,7 @@ class StarterAgentsAtStartup(unittest.TestCase):
             patch.object(server, "read_options", return_value={}),
             patch.object(server.protected_policy, "policy_problem", return_value=""),
             patch.object(server, "make_worker_undumpable", return_value=True),
+            patch.object(server, "migrate_agents_file"),
             patch.object(server, "write_starter_agents_file", side_effect=lambda: calls.append("starter")),
             # Both work on the real /data and /config; this test only needs the order of the two steps above.
             patch.object(server, "migrate_task_folders"),

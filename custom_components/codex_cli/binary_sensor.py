@@ -6,6 +6,7 @@ from homeassistant.components.binary_sensor import BinarySensorDeviceClass, Bina
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceEntryType
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -39,6 +40,7 @@ class CodexRunningBinarySensor(CoordinatorEntity[CodexCliCoordinator], BinarySen
         self._attr_unique_id = f"{entry.entry_id}_task_running"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
+            "entry_type": DeviceEntryType.SERVICE,
             "name": "Codex",
             "manufacturer": "OpenAI",
             "model": "Codex for Home Assistant",
@@ -62,7 +64,7 @@ class CodexSignedInBinarySensor(CoordinatorEntity[CodexCliCoordinator], BinarySe
         """Set the unique ID and attach the sensor to the Codex device of the config entry."""
         super().__init__(coordinator)
         self._attr_unique_id = f"{entry.entry_id}_signed_in"
-        self._attr_device_info = {"identifiers": {(DOMAIN, entry.entry_id)}}
+        self._attr_device_info = {"identifiers": {(DOMAIN, entry.entry_id)}, "entry_type": DeviceEntryType.SERVICE}
 
     @property
     def is_on(self) -> bool:

@@ -6,8 +6,8 @@ every exchange. Nothing in /config, the app options or a chat message can
 loosen it: a setting the policy does not allow stops the worker at startup and
 refuses each task with a "needs support" state.
 
-Owner instructions remain in /config/AGENTS.md; no house rules ship with the app.
-The starter text a new install gets there (server.py: write_starter_agents_file)
+Owner instructions live in the app's own folder, /addon_config/AGENTS.md; no house
+rules ship with the app. The starter text a new install gets there (server.py: write_starter_agents_file)
 is an owner file from then on and is not part of this policy.
 """
 

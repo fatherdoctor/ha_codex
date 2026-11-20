@@ -102,9 +102,9 @@ The app's own install of the integration (steps 2 to 4) needs nothing else.
 
 Every app option is in [codex-cli-worker/DOCS.md](codex-cli-worker/DOCS.md).
 
-Put rules for your house in `/config/AGENTS.md`. The chat has an editor for it under **Settings** > **Workspace instructions** >
+Put rules for your house in the app's `AGENTS.md`, kept in its own `addon_config` folder and not in `/config`. The chat has an editor for it under **Settings** > **Workspace instructions** >
 **Workspace rules**. Codex uses its defaults and your workspace instructions; the app bundles no house rules. A new
-install that has no `/config/AGENTS.md` gets a short starter file there once, which is yours to change or delete.
+install that has no `AGENTS.md` gets a short starter file there once, which is yours to change or delete.
 
 ## Updating
 

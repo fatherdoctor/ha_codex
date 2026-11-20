@@ -46,6 +46,11 @@
   do what the chat menu does, and `/connection` opens the remote connection and its status. `/help` and
   **Settings** > **Commands** are gone: the list in the message box is the only one. When you close a dialog that a
   command opened, the cursor stays in the message box.
+- **Changed: the workspace instructions file moved out of `/config`.** `AGENTS.md` now lives in the app's own
+  `addon_config` folder (`/addon_configs/<app folder>/AGENTS.md` on the host), not in the top level of `/config`.
+  Codex loads it as its global instructions, and **Settings** > **Workspace instructions** reads and writes it there.
+  On the first start of this version, a file an older version left in `/config` is moved, not copied, after a backup
+  copy at `/data/agents_before_move.md`. If both places hold a file, nothing moves and the app logs a line.
 
 ### Changed
 - **Working files out of the configuration folder.** The chats (prompts, logs, per-turn backups, attachments) are now
@@ -74,6 +79,11 @@
 - The chat page's rules no longer tell Codex how to answer a question about Codex cloud tasks (the
   `codex cloud list --json` line from 0.3.4). That line belonged to a feature that is not built; it returns with the
   feature. Codex can still run those commands when you ask it to.
+- **Repairs go away with the integration.** The sign-in, Remote control and GitHub repairs are deleted when the
+  Codex integration is unloaded or removed. Before, an owner who removed the integration kept a "sign in" repair
+  that nothing would clear.
+- **The Codex device is shown as a service.** Home Assistant now marks the Codex device as a service (an app that
+  runs on the same machine), not as a piece of hardware.
 
 ### Known issues
 - Remote control still uses its own keys. The tool requests of a chat no longer do (see "Under the hood").
