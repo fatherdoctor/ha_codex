@@ -406,7 +406,7 @@ These checks do not cover a command that uses the `HA_TOKEN` option (see "AGENTS
 
 ### Owner instructions and planted commands
 
-Codex follows its defaults and the owner's `/config/AGENTS.md`. The integration does not bundle a house-practice file prescribing device categories, API-deletion practices or a writing style. Owners can choose such practices through their own workspace instructions or the starter kit. The starter `/config/AGENTS.md` of a new install ([AGENTS.md and HA_TOKEN](#agentsmd-and-ha_token)) is an ordinary owner file, in plain view, that the owner can change or delete. Permission cards and the sandbox operate independently of prose instructions.
+Codex follows its defaults and the owner's `AGENTS.md`. The integration does not bundle a house-practice file prescribing device categories, API-deletion practices or a writing style. Owners can choose such practices through their own workspace instructions or the starter kit. The starter `/config/AGENTS.md` of a new install ([AGENTS.md and HA_TOKEN](#agentsmd-and-ha_token)) is an ordinary owner file, in plain view, that the owner can change or delete. Permission cards and the sandbox operate independently of prose instructions.
 
 The app does not scan `/config` for planted commands. From 0.3.6 there is no command check (hook), no check after each exchange and no config watch: an edit that adds a `shell_command`, `rest_command`, `python_script` or a command-line platform stays as Codex wrote it. In `workspace-write` Codex can write such an edit without a request, and Home Assistant runs it on the next reload or call. Review what a chat changed (the chat lists every changed file, with its backup) before a reload or restart. The Supervisor token stays out of Codex's environment, and the sandbox still hides `secrets.yaml`, Home Assistant's sign-in store and the app's own data (AUDITING.md, layer 1).
 
@@ -637,9 +637,9 @@ Open **Settings > Accounts and connections > GitHub** in the app page. The card 
 
 ## AGENTS.md and HA_TOKEN
 
-The app web UI includes an editor for `/config/AGENTS.md` under **Settings** > **Workspace instructions** > **Workspace rules**. This file remains the source of truth for shared Codex project instructions. When the file does not exist, the task prompt does not mention it, and the page shows a setup hint above the message box until you write the file or choose **Dismiss** (the choice is kept in that browser).
+The app web UI includes an editor for the app's `AGENTS.md` (in its own `addon_config` folder, not in `/config`) under **Settings** > **Workspace instructions** > **Workspace rules**. This file remains the source of truth for shared Codex project instructions. When the file does not exist, the task prompt does not mention it, and the page shows a setup hint above the message box until you write the file or choose **Dismiss** (the choice is kept in that browser).
 
-**Starter instructions.** On its first start, the app writes a short starter `/config/AGENTS.md` when the home has
+**Starter instructions.** On its first start, the app writes a short starter `AGENTS.md` in the app's own folder when the home has
 none. The text is `starter_agents.md` in the app's source. It tells Codex what `/config` is and gives seven general
 rules. Four of them matter most: change the home only on the owner's word, keep secrets secret, keep the old version
 of a changed file, and check the configuration before a restart. A short section after the rules lists three safeguard
@@ -650,7 +650,9 @@ its data, and an update of an app that has started before writes nothing. The ru
 command check and the approval cards work the same with or without them. To get the starter on an older install,
 copy the text from `starter_agents.md` into the editor.
 
-From **0.3.4**, Codex no longer looks for `/config/AGENTS.md` in every message. Codex loads the file when a chat
+**Where the file lives (0.4).** The file is `AGENTS.md` in the app's own `addon_config` folder: `/addon_configs/<app folder>/AGENTS.md` on the host and `/addon_config/AGENTS.md` inside the app. It is not in the top level of `/config`. Codex loads it as its global instructions through a link the app keeps at `$CODEX_HOME/AGENTS.md` (`/data/codex-home/AGENTS.md`), where Codex looks for global instructions ([Codex: AGENTS.md guide](https://developers.openai.com/codex/guides/agents-md)). On the first start of this version, an `AGENTS.md` that an older version left in `/config` is **moved** into the app's folder, after a backup copy at `/data/agents_before_move.md`. It is moved and not copied because Codex works in `/config` and would read both. If both places already hold a file, the app moves nothing, logs a line, and leaves the one in `/config` for you to merge or delete. The folder is part of the app's backup like its other data.
+
+From **0.3.4**, Codex no longer looks for the file in every message. Codex loads the file when a chat
 starts. In each message the worker tells Codex whether the file exists and when it last changed, and Codex reads
 it again only after a change. A change you make to the file still reaches a chat that is already open, on its
 next message.
@@ -811,7 +813,7 @@ An answer goes to the question it was given for. `codex_cli.reply_task` accepts 
 
 If another chat is working when you pick a choice, the answer waits in the [queue](#queueing-messages-while-another-chat-works) and is sent when that chat finishes. Until then the chat takes no other message, and the answer is sent only if its question is still the one waiting.
 
-The choices are a convenience and not a safeguard. Codex decides when to ask, and nothing stops it from changing files without asking. Use `/config/AGENTS.md` to tell it when you want to be asked first.
+The choices are a convenience and not a safeguard. Codex decides when to ask, and nothing stops it from changing files without asking. Use the app's `AGENTS.md` to tell it when you want to be asked first.
 
 API: `POST /tasks/<task_id>/reply` and `POST /tasks/<task_id>/continue` accept `turn_id`, and `choice` in place of the text: the position of one of that turn's choices, counted from 0. `choice` needs `turn_id`, because a position means nothing without its question. A `turn_id` that is not the waiting turn returns HTTP 409. A `choice` without `turn_id`, or one the question does not offer, returns HTTP 400. Each turn in `GET /tasks/<task_id>` has `choices`, and `latest_task` in `GET /status` has `choices` and `current_turn_id`. The action of a notification button is `CODEX_CLI_CHOICE_<position>_<turn_id>_<task_id>`, which Home Assistant delivers in the `mobile_app_notification_action` event.
 
