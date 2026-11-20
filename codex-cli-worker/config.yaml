@@ -46,6 +46,7 @@ options:
   config_check: true
   full_snapshot: false
   backup_retention_days: 7
+  chat_retention_days: 14
   browser_verification: true
   browser_memory_limit_mib: 1536
   local_docs: true
@@ -66,6 +67,7 @@ schema:
   config_check: bool
   full_snapshot: bool
   backup_retention_days: int(1,365)
+  chat_retention_days: int(1,365)
   browser_verification: bool
   browser_memory_limit_mib: int(512,8192)
   local_docs: bool

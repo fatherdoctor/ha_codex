@@ -1477,6 +1477,16 @@ async function loadBrowserPermissions() {
 function showsQuestionApart(turn) {
   return Boolean(turn.question) && !(turn.summary || "").includes(turn.question);
 }
+/** Say when the open chat will be deleted, in its last days before that; hide the line otherwise. */
+function showRetentionWarning(warning) {
+  const line = $("retention-warning");
+  if (!line) return;
+  const when = warning ? dateLabel(warning.deletes_at, true) : "";
+  line.hidden = !when;
+  line.textContent = when
+    ? `This chat will be deleted on ${when} unless you send a message. Pin it to keep it.`
+    : "";
+}
 /** Draw the open chat: every exchange with its answer, checks, saved copies, and steps. */
 function renderTask(force = false) {
   const task = state.task;
@@ -1484,6 +1494,7 @@ function renderTask(force = false) {
   const queued = task.queued_message || null;
   if (state.edit && state.edit.id !== queued?.queue_id) state.edit = null;
   $("chat-title").textContent = task.title || "Untitled chat";
+  showRetentionWarning(task.deletion_warning);
   $("chat-status").textContent =
     task.status === "in_queue"
       ? "In queue · not sent yet"
