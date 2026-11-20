@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from app_folders import isolated_app_folders
 from test_server import server
 import policy
 
@@ -91,7 +92,10 @@ class ProtectedPolicyTests(unittest.TestCase):
 
     def test_startup_stops_on_a_refused_mode(self) -> None:
         """An older option naming full access stops the worker before it prepares or serves anything."""
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
         with (
+            isolated_app_folders(server, Path(temp.name)),
             patch.object(server, "read_options", return_value={"codex_sandbox": "danger-full-access"}),
             patch.object(server, "ensure_runtime_files") as prepare,
             patch.object(server.app, "run") as serve,

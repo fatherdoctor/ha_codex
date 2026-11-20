@@ -26,6 +26,7 @@ import test_approvals as approval_tests
 import test_attachments as attachments
 import test_cx_pair_f as admin
 import test_ha_call as ha_calls
+from app_folders import isolated_app_folders
 from test_server import server
 
 SHIPPED = ROOT / "gate" / "requirements.toml"
@@ -128,6 +129,7 @@ class LaunchTests(unittest.TestCase):
     def setUp(self):
         self.setUp_base()
         self.server = server
+        self.stack.enter_context(isolated_app_folders(server, self.root / "app"))  # the interaction log and others
         self.stack.enter_context(patch.object(full_access, "SETTING_PATH", self.root / "full_access.json"))
         (self.root / "etc").mkdir()
         self.stack.enter_context(patch.object(full_access, "REQUIREMENTS_PATH", self.root / "etc" / "requirements.toml"))

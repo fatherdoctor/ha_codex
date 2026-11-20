@@ -14,6 +14,7 @@ from pathlib import Path, PurePosixPath
 from unittest.mock import patch
 
 from app_server_fixture import StubAppServer
+from app_folders import isolated_app_folders
 from test_server import server
 
 
@@ -321,6 +322,7 @@ class RunTests(unittest.TestCase):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
+        self.stack.enter_context(isolated_app_folders(server, self.root / "app"))  # the interaction log and others
         self.config = self.root / "config"
         for name, value in (("tasks", {}), ("task_activity", {}), ("active_task_runners", set()), ("running_processes", {})):
             self.stack.enter_context(patch.object(server, name, value))

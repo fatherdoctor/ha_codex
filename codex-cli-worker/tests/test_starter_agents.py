@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from app_folders import isolated_app_folders
 from test_server import server
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -113,6 +114,12 @@ class StarterAgentsWrite(unittest.TestCase):
 class StarterAgentsAtStartup(unittest.TestCase):
     """Where main() calls the write, and what the image ships."""
 
+    def setUp(self):
+        # main() moves and deletes files under /data, /config and /addon_config; here it does so in a temporary copy.
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.addCleanup(isolated_app_folders(server, Path(folder.name)).close)
+
     def test_main_offers_the_starter_before_it_writes_the_codex_config(self):
         calls = []
 
@@ -129,9 +136,6 @@ class StarterAgentsAtStartup(unittest.TestCase):
             patch.object(server, "make_worker_undumpable", return_value=True),
             patch.object(server, "migrate_agents_file"),
             patch.object(server, "write_starter_agents_file", side_effect=lambda: calls.append("starter")),
-            # Both work on the real /data and /config; this test only needs the order of the two steps above.
-            patch.object(server, "migrate_task_folders"),
-            patch.object(server, "retire_public_sign_in_images"),
             patch.object(server, "ensure_runtime_files", side_effect=prepare),
             self.assertRaises(StopHere),
         ):

@@ -15,6 +15,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from app_folders import isolated_app_folders  # noqa: E402
 from test_server import server  # noqa: E402
 
 WORKER = Path(__file__).resolve().parents[1]
@@ -266,6 +267,10 @@ class StartOrder(unittest.TestCase):
                  # touches the real /config or /data.
                  "migrate_agents_file", "link_agents_file"]
         patchers = [patch.object(server, name, side_effect=record(name)) for name in steps if hasattr(server, name)]
+        # The steps above are replaced; the ones it does not name still run in a temporary copy of the folders.
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.addCleanup(isolated_app_folders(server, Path(temp.name)).close)
         patchers += [
             patch.object(server, "read_options", return_value={}),
             patch.object(server.protected_policy, "policy_problem", return_value=""),

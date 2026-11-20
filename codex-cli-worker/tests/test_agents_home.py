@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import yaml
 
+from app_folders import isolated_app_folders
 from test_server import server
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -173,7 +174,12 @@ class AgentsHomeDefaults(unittest.TestCase):
                     raise StopHere
             return call
 
+        # The steps this test does not replace (the chat move, the old sign-in images) run in a temporary copy
+        # of /data, /config and /addon_config.
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
         with (
+            isolated_app_folders(server, Path(folder.name)),
             patch.object(server, "read_options", return_value={}),
             patch.object(server.protected_policy, "policy_problem", return_value=""),
             patch.object(server, "make_worker_undumpable", return_value=True),
