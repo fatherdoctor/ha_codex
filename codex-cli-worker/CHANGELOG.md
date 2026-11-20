@@ -43,6 +43,9 @@
   `SCREENSHOTS.md` is removed.
 
 ### Fixed
+- **Pop-ups are smaller and close on an outside click.** The Permissions control now opens a small menu right
+  above its button instead of a full-width sheet. A click or tap outside any pop-up, menu or dialog closes it, like
+  Escape does. A dialog where you changed a field stays open, so nothing you typed is lost.
 - The mark in the chat page header now follows the page's theme instead of the system's light or dark setting. Open
   the chat page inside Home Assistant with a theme that differs from your system setting, and the mark matches the
   theme.

@@ -15,7 +15,7 @@ const base = 'http://127.0.0.1:9137/preview/';
    await page.locator('#permission-button').click();
    assert.equal(await page.locator('[data-mode="full-access"]').isDisabled(),true,'off: the choice is disabled');
    assert.equal(await page.locator('[data-mode="full-access"] strong').evaluate(e=>getComputedStyle(e).fontWeight),'400','off: Full access is not bold');
-   await page.locator('[data-close="permissions-dialog"]').click();
+   await page.keyboard.press('Escape');
 
    await page.evaluate(()=>document.getElementById('settings-button').click());
    await page.locator('#settings').waitFor();
