@@ -82,8 +82,8 @@ class FirstReplyPrompt(unittest.TestCase):
     def test_page_rules_follow_agents_file_only_when_it_exists(self):
         # The rules are read once for each thread, so they name the file with a condition, not a fact.
         text = server.PAGE_INSTRUCTIONS
-        self.assertIn("Owner workspace instructions: if /config/AGENTS.md exists, follow it.", text)
-        self.assertNotIn("Follow /config/AGENTS.md.", text)
+        self.assertIn("Owner workspace instructions: if /addon_config/AGENTS.md exists, follow it.", text)
+        self.assertNotIn("Follow /addon_config/AGENTS.md.", text)
 
     def test_answer_is_a_reply_not_a_worker_report(self):
         line = next(line for line in server.PAGE_INSTRUCTIONS.splitlines()
@@ -99,7 +99,7 @@ class FirstReplyPrompt(unittest.TestCase):
             with patch.object(server, "AGENTS_PATH", agents):
                 self.assertNotIn("AGENTS.md", server.remote_control_instructions({}))
                 agents.write_text("Synthetic owner rules")
-                self.assertIn("Owner workspace instructions: /config/AGENTS.md. ",
+                self.assertIn(f"Owner workspace instructions: {agents}. ",
                               server.remote_control_instructions({}))
 
 

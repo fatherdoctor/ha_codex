@@ -151,7 +151,7 @@
         <div class="compose-area">
           <!-- The hint sits above the composer, not above the chat: the integration notice stays next to the list. -->
           <section id="agents-hint" class="page-banner" role="status" hidden>
-            <p><strong>No workspace instructions yet.</strong> Codex works without /config/AGENTS.md. Write one to tell it the rules of your home.</p>
+            <p><strong>No workspace instructions yet.</strong> Codex works without an AGENTS.md file. Write one to tell it the rules of your home.</p>
             <div class="settings-actions"><button id="agents-hint-open">Write instructions</button
               ><button id="agents-hint-dismiss" class="subtle">Dismiss</button></div>
           </section>
@@ -559,7 +559,7 @@
           runs outside the sandbox. This app adds no check of its own. Codex's
           managed requirements refuse a full-access request while Full access
           is off in Settings, and the sandbox hides credential files. Put limits
-          specific to your installation in /config/AGENTS.md. Codex may downgrade
+          specific to your installation in the app's AGENTS.md (Settings > Workspace instructions). Codex may downgrade
           a disallowed full-access relay request to read-only. Not every relay
           thread warning reaches this page; a missing warning does not prove
           the requested permissions were granted.
