@@ -56,6 +56,8 @@ class AttachmentTests(unittest.TestCase):
         self.stack.enter_context(patch.object(server, "ATTACHMENTS_ROOT", self.root / "chat_uploads"))
         self.stack.enter_context(patch.object(server, "CODEX_HOME", self.root / "codex"))
         self.stack.enter_context(patch.object(server, "CONFIG_ROOT", self.root / "config"))
+        # Listing chats reads the schedule store under DATA_ROOT; keep it off the real /data.
+        self.stack.enter_context(patch.object(server, "DATA_ROOT", self.root / "data"))
         self.stack.enter_context(patch.object(server, "api_token", return_value="test-token"))
         self.stack.enter_context(patch.object(server, "start_background_task"))
         self.stack.enter_context(patch.object(server, "sandbox_readiness", return_value={"required": True, "ready": True}))

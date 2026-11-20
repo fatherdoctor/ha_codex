@@ -27,6 +27,8 @@ class ConversationTests(unittest.TestCase):
         self.stack.enter_context(patch.object(server, "task_root", return_value=self.root / "tasks"))
         self.stack.enter_context(patch.object(server, "TASK_STATE_FILE", self.root / "index.json"))
         self.stack.enter_context(patch.object(server, "CODEX_HOME", self.root / "codex"))
+        # Listing chats reads the schedule store under DATA_ROOT; keep it off the real /data.
+        self.stack.enter_context(patch.object(server, "DATA_ROOT", self.root / "data"))
         self.stack.enter_context(patch.object(server, "api_token", return_value="test-token"))
         self.runner = self.stack.enter_context(patch.object(server, "start_background_task"))
         self.client = server.app.test_client()

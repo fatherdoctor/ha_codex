@@ -6141,6 +6141,8 @@ def chat_retention_loop() -> None:
         except Exception as exc:
             print(f"Chat retention failed: {redact(str(exc))}", flush=True)
         time.sleep(CHAT_RETENTION_INTERVAL_SECONDS)
+
+
 def cleanup_attachments(now: float | None = None) -> int:
     """Delete attachments a person uploaded more than ATTACHMENT_KEEP_DAYS days ago; return how many.
 
