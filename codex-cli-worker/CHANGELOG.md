@@ -71,6 +71,9 @@
   `codex_cli_task_result` event.
 
 ### Fixed
+- **Pop-ups are smaller and close on an outside click.** The Permissions control now opens a small menu right
+  above its button instead of a full-width sheet. A click or tap outside any pop-up, menu or dialog closes it, like
+  Escape does. A dialog where you changed a field stays open, so nothing you typed is lost.
 - The "Codex" label with the command symbol no longer sits above each reply on the chat page. Screen readers still
   announce each reply as "Codex reply"; the reply's time and status line stay.
 - The mark in the chat page header now follows the page's theme instead of the system's light or dark setting. Open

@@ -111,3 +111,13 @@ body[data-full-access="on"] .permission-option[data-mode="full-access"] strong {
   .compose-tools #attach { width: 28px; height: 28px; }
   .studio-sheet, #settings { padding: 20px; width: calc(100vw - 20px); max-height: 90dvh; border-radius: 18px; }
 }
+
+/* The permissions control opens a small pop-up right above its button (placed by studio.js), not a sheet. */
+#permissions-dialog.studio-sheet {
+  position: fixed; margin: 0; inset: auto auto 0 0; padding: 6px; border-radius: 18px; max-height: min(420px, 70dvh);
+  overflow-y: auto; box-shadow: 0 5px 22px #00000026, 0 1px 4px #00000014; background: var(--bg); z-index: 20;
+}
+#permissions-dialog .dialog-header, #permissions-dialog > p.muted { display: none; }
+#permissions-dialog .permission-option { padding: 10px; border-radius: 12px; border-color: transparent; }
+#permissions-dialog .permission-option[aria-pressed="true"] { border-color: var(--accent); }
+#permissions-dialog #permission-result:empty { display: none; }
