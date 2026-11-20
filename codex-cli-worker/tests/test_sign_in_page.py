@@ -42,7 +42,8 @@ class _Worker(unittest.TestCase):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
-        for name, value in (("tasks", {}), ("active_task_runners", set()), ("running_processes", {}),
+        self.stack.enter_context(patch.dict(server.tasks, clear=True))
+        for name, value in (("active_task_runners", set()), ("running_processes", {}),
                             ("message_queue", []), ("auth_state", {})):
             self.stack.enter_context(patch.object(server, name, value))
         self.stack.enter_context(patch.object(server, "auth_process", None))
@@ -275,7 +276,7 @@ class ModelPinTests(_Worker):
     def test_default_resolves_to_the_pin_and_is_passed_to_codex(self):
         execution = server.resolve_chat_settings(server.DEFAULT_CHAT_SETTINGS, self.options)
         self.assertEqual(execution["model"], PIN)
-        with patch.object(server, "tasks", {"t": {"turns": [{"execution_settings": execution}]}}):
+        with patch.dict(server.tasks, {"t": {"turns": [{"execution_settings": execution}]}}, clear=True):
             session = server.create_approval_session("t", StubAppServer("thread"), "Prompt", Path("f"), None, {}, self.options)
         self.assertEqual(session.thread_params["model"], PIN)
 

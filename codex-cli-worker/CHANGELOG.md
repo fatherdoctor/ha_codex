@@ -173,6 +173,11 @@
   sends only `turn/start` on a thread that is already loaded, with the chat's model in the turn, and it uses request
   IDs that no other chat on the process uses. A cancel sends `turn/interrupt` and leaves the process input open for
   the other chats. Nothing uses this mode yet. Each exchange still starts its own Codex process.
+- The chats the worker keeps move from `server.py` to a new module, `task_store.py`. One `TaskStore` object holds the
+  chats in memory, the lock that guards them, the set of chats with a runner, and the code that writes `task.json` and
+  the task index and reads them at startup. No behavior changes, and the stored files keep the same form. New snapshot
+  tests keep the Home Assistant event, the API record and the saved files of a completed, a waiting, a continued, a
+  failed and a cancelled chat. Tests that replaced the chat list or the task file helpers now change the store instead.
 
 ## 0.3.6 - 2026-11-18
 

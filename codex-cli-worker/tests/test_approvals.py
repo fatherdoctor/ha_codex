@@ -642,12 +642,12 @@ class ApprovalApiTests(unittest.TestCase):
         """Create an isolated task with a real adapter and fake live process."""
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.patches = [patch.object(server, "tasks", {}), patch.object(server, "approval_sessions", {}),
-                        patch.object(server, "running_processes", {}), patch.object(server, "save_task_index"),
+        self.patches = [patch.dict(server.tasks, {}, clear=True), patch.object(server, "approval_sessions", {}),
+                        patch.object(server, "running_processes", {}), patch.object(server.store, "save_index"),
                         patch.object(server, "api_token", return_value="worker-secret"),
                         patch.object(server, "lookup_ha_users", return_value=HA_USERS),
                         patch.object(server, "admin_cache", {}),
-                        patch.object(server, "get_task_dir", return_value=Path(self.temp.name) / "task"),
+                        patch.object(server.store, "task_dir", return_value=Path(self.temp.name) / "task"),
                         patch.object(server, "task_root", return_value=Path(self.temp.name)),
                         patch.object(server, "TASK_STATE_FILE", Path(self.temp.name) / "index.json"),
                         patch.object(server, "write_task_log")]
@@ -964,17 +964,18 @@ class ApprovalRunTests(unittest.TestCase):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
-        for name in ["tasks", "running_processes", "approval_sessions", "task_activity", "admin_cache"]:
+        self.stack.enter_context(patch.dict(server.tasks, clear=True))
+        for name in ["running_processes", "approval_sessions", "task_activity", "admin_cache"]:
             self.stack.enter_context(patch.object(server, name, {}))
         self.stack.enter_context(patch.object(server, "lookup_ha_users", return_value=HA_USERS))
         self.options = {**server.DEFAULT_OPTIONS, "local_docs": False, "task_timeout_seconds": 30,
                         "config_check": False, "auto_save_lovelace": False}
         self.stack.enter_context(patch.object(server, "read_options", return_value=self.options))
-        self.stack.enter_context(patch.object(server, "get_task_dir", return_value=self.root / "tasks" / "task"))
+        self.stack.enter_context(patch.object(server.store, "task_dir", return_value=self.root / "tasks" / "task"))
         self.stack.enter_context(patch.object(server, "task_root", return_value=self.root / "tasks"))
         self.stack.enter_context(patch.object(server, "CODEX_HOME", self.root / "codex"))
         self.stack.enter_context(patch.object(server, "api_token", return_value="test-token"))
-        self.stack.enter_context(patch.object(server, "save_task_index"))
+        self.stack.enter_context(patch.object(server.store, "save_index"))
         self.real_build_manifest = server.build_manifest
         self.stack.enter_context(patch.object(server, "build_manifest", return_value={}))
         self.stack.enter_context(patch.object(server, "sandbox_readiness", return_value={"required": True, "ready": True}))
