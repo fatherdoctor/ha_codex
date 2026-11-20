@@ -27,7 +27,8 @@
 - **The lead agent channel and the local mailbox are removed.** The lead token, its Settings section, the `/lead/`
   routes and the `/schedule-mailbox` routes are gone, and Codex no longer has the `read_mailbox` and `post_mailbox`
   tools. Saved schedules are kept. Saved messages stay in the schedule file, unread, so an older version still finds
-  them after a rollback.
+  them after a rollback. The chat page also no longer shows the lead agent: an old chat that the lead channel started has
+  no "Started by lead" label, and the schedule editor no longer mentions lead runs.
 - **Starter `AGENTS.md` safeguards.** The starter file has a short section of safeguard defaults (secrets, protected
   places, backups). It says they are defaults you can change or delete, not locks in the app.
 - **Clearer documentation.** The README, the integration README, `SECURITY.md`, `DOCS.md` and three option
