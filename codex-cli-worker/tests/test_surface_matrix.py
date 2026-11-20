@@ -67,8 +67,6 @@ WAYS_IN["Propose a schedule"] = {
 
 # The one tool that changes the house: Codex asks for it each time, so only a launch that can ask gets it.
 CALL_TOOL = "home_assistant_call.call"
-# The Home Assistant MCP server holds the Supervisor token, so only an attended launch gets it (hass_mcp.py).
-MCP_TOOLS = {*MCP_FIND, *MCP_HISTORY, *MCP_SETUP}
 
 CONFIG = re.compile(r"mcp_servers\.([a-z_]+)\.(.+?)=(.*)", re.S)
 
@@ -204,10 +202,10 @@ class WaysInTests(unittest.TestCase):
     def test_both_page_launches_register_the_same_tools(self):
         """A turn is attended or not by its source, never by way in; both launches give the same read tools.
 
-        The unattended launch has nobody to answer a permission request, so it never gets the call tool, and it never
-        gets the Home Assistant MCP server, which holds the Supervisor token.
+        The unattended launch has nobody to answer a permission request, so it never gets the call tool. It gets the
+        Home Assistant MCP server like the page.
         """
-        self.assertEqual(tools_of(unattended_args()), self.page - {CALL_TOOL} - MCP_TOOLS)
+        self.assertEqual(tools_of(unattended_args()), self.page - {CALL_TOOL})
 
     def test_every_page_tool_is_preapproved_except_the_call_tool(self):
         """A read tool is approved ahead; the call tool asks each time ("prompt"), so the person is the gate."""

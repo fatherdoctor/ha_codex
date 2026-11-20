@@ -2,7 +2,7 @@
 
 The server reads Home Assistant with the Supervisor token, which has full rights. These tests check that
 Codex is offered only hass-mcp's read tools, each approved ahead; that a tool not sorted into a list is
-never offered; that a scheduled run gets nothing; that the option turns all of it off; and that the token
+never offered; that a scheduled run gets the same server as a page chat; that the option turns all of it off; and that the token
 reaches the server without a place a command Codex runs could read it. All data here is invented.
 """
 from __future__ import annotations
@@ -114,8 +114,9 @@ class LaunchTests(unittest.TestCase):
                 self.assertEqual(relay["env_vars"], [hass_mcp.KEY_ENV])
                 self.assertEqual(relay["enabled_tools"], list(hass_mcp.READ_TOOLS))
 
-    def test_a_scheduled_run_never_gets_the_server(self):
-        self.assertEqual(server_settings(self.launches({})["schedule"]), {})
+    def test_a_scheduled_run_gets_the_same_server_as_a_page_chat(self):
+        launches = self.launches({})
+        self.assertEqual(server_settings(launches["schedule"]), server_settings(launches["page"]))
 
     def test_off_removes_the_server_everywhere(self):
         for name, args in self.launches({"home_assistant_mcp": False}).items():

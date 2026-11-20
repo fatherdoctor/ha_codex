@@ -90,8 +90,8 @@ The option **Enable Home Assistant MCP** (`home_assistant_mcp`, on by default) g
 Home Assistant also bundles. With these tools Codex finds entities by name, area or domain, and reads automations,
 dashboards, history, statistics and the error log, without a search through files.
 
-- Codex gets the tools in a chat on the chat page, in a task from `codex_cli.start_task` and under remote control.
-  A scheduled run does not get them ([Ways in](#ways-in)).
+- Codex gets the tools in a chat on the chat page, in a task from `codex_cli.start_task`, in a scheduled run and
+  under remote control ([Ways in](#ways-in)).
 - Codex gets only the tools that read. They change nothing, so Codex uses them without asking, in every
   permission mode. hass-mcp's tools that change the house or a dashboard are not offered. Changes to the house
   go through the `call` tool, which asks you first
@@ -459,8 +459,7 @@ Codex can be reached three ways: the chat page, the ChatGPT app paired through r
   [permission request](#permission-requests). The ChatGPT app shows Codex's own requests in the app instead, as
   [Remote control from the ChatGPT app](#remote-control-from-the-chatgpt-app) describes.
 - A scheduled run also starts a task. It uses the same launcher as the chat page and gets the page's tools, except
-  the `call` tool, because nobody is there to answer, and the `home_assistant_mcp` tools
-  ([Home Assistant MCP](#home-assistant-mcp)). A Read only schedule narrows the sandbox, not the tools
+  the `call` tool: nobody is there to answer. A Read only schedule narrows the sandbox, not the tools
   ([Scheduled runs](#scheduled-runs)).
 - "Not available" means the way in has no tool for that request.
 

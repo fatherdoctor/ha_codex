@@ -4,8 +4,8 @@
 - New option **Enable Home Assistant MCP**, on by default. Codex gets the read tools of the bundled Home Assistant
   MCP server (hass-mcp 0.6.0, as in the Claude Code app): it can find entities by name, area or domain and read
   automations, dashboards, history, statistics and the error log. The tools only read, so Codex uses them without
-  asking. Changes to the house still go through the `call` tool, which asks first. Scheduled runs do not get the
-  tools. The image installs hass-mcp at a fixed version, checked by hash, and grows by about 60 MB.
+  asking. Changes to the house still go through the `call` tool, which asks first. Scheduled runs get the tools
+  too. The image installs hass-mcp at a fixed version, checked by hash, and grows by about 60 MB.
 - The chat page no longer shows the lead agent: an old chat that the removed lead channel started has no "Started by lead" label,
   and the schedule editor no longer mentions lead runs.
 - The mark in the chat page header now follows the page's theme (the Home Assistant theme when the page runs inside

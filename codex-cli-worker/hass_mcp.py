@@ -24,7 +24,8 @@ The server needs a Home Assistant token. It never reaches a command Codex runs:
   HA_*_CAPABILITY, so no shell command of the relay sees it (shell_exclude_args and
   /etc/codex/managed_config.toml).
 
-Only attended work gets the server: a page chat and the relay, never a scheduled run.
+Every chat gets the server: a page chat, a codex_cli.start_task task, a scheduled run (a normal chat that a
+schedule wakes up) and the relay.
 """
 from __future__ import annotations
 

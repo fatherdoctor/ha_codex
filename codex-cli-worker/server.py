@@ -4686,14 +4686,14 @@ def build_app_server_args(attended: bool = True) -> list[str]:
     The two approval flags are Default's values for the process. Each thread and
     turn then sends its own mode's sandbox, approval policy and reviewer
     (task_mode_settings), and those replace them, so a chat gets only its mode's
-    settings. Only a chat someone attends gets the call tool and the Home
-    Assistant MCP server (hass_mcp.py, when its option is on): a scheduled run
-    has nobody to answer Codex's question.
+    settings. Only a chat someone attends gets the call tool: a scheduled run
+    has nobody to answer Codex's question. Every chat, scheduled runs included,
+    gets the Home Assistant MCP server when its option is on (hass_mcp.py).
     """
-    attended_args = [*call_mcp_args(), *hass_mcp.mcp_args(read_options(), sys.executable)] if attended else []
     return [CODEX_BINARY, "app-server", "--config", 'approval_policy="on-request"',
             "--config", 'approvals_reviewer="user"', *verification_mcp_args(),
-            *data_mcp_args(), *scheduling_mcp_args(), *github_mcp_args(), *attended_args]
+            *data_mcp_args(), *scheduling_mcp_args(), *github_mcp_args(), *(call_mcp_args() if attended else []),
+            *hass_mcp.mcp_args(read_options(), sys.executable)]
 
 
 def bind_chat_thread(task_id: str, thread_id: Any) -> None:
