@@ -83,6 +83,30 @@ Each exchange has a separate temporary data credential, revoked on completion an
 
 API references: [Home Assistant REST history](https://developers.home-assistant.io/docs/api/rest/#get-apihistoryperiodtimestamp) and the [Core recorder WebSocket command definitions](https://github.com/home-assistant/core/blob/2026.9.4/homeassistant/components/recorder/websocket_api.py).
 
+## Home Assistant MCP
+
+The option **Enable Home Assistant MCP** (`home_assistant_mcp`, on by default) gives Codex the read tools of
+[hass-mcp](https://github.com/voska/hass-mcp) 0.6.0, the Home Assistant MCP server that the Claude Code app for
+Home Assistant also bundles. With these tools Codex finds entities by name, area or domain, and reads automations,
+dashboards, history, statistics and the error log, without a search through files.
+
+- Codex gets the tools in a chat on the chat page, in a task from `codex_cli.start_task` and under remote control.
+  A scheduled run does not get them ([Ways in](#ways-in)).
+- Codex gets only the tools that read. They change nothing, so Codex uses them without asking, in every
+  permission mode. hass-mcp's tools that change the house or a dashboard are not offered. Changes to the house
+  go through the `call` tool, which asks you first
+  ([Changes to the house: the `call` tool](#changes-to-the-house-the-call-tool)).
+- The tools show what Home Assistant returns. That includes attributes such as a camera's picture link, which
+  holds a short-lived access token. Your `AGENTS.md` can tell Codex how to treat such values.
+- The server uses the app's Supervisor token. Codex starts it outside the sandbox, and no command Codex runs can
+  read the token: on the chat page the server reads it from a folder the sandbox hides, and under remote control
+  it gets it in a variable that commands do not inherit.
+- If Home Assistant does not answer, the server fails to start and the chat starts without it.
+- The image installs hass-mcp and each package it needs at a fixed version, checked by hash
+  (`hass-mcp.requirements.txt`). It adds about 60 MB to the image.
+
+Turn the option off to remove the tools. The change takes effect when the app restarts.
+
 ## Local Home Assistant documentation
 
 From **0.1.70**, the worker keeps a copy of the official Home Assistant
@@ -418,8 +442,9 @@ Codex can be reached three ways: the chat page, the ChatGPT app paired through r
 
 | Request | Chat page | ChatGPT app | codex_cli.start_task |
 |---|---|---|---|
-| Read an entity's state or find an entity | `home_assistant.verify` | `home_assistant_relay.read` | `home_assistant.verify` |
-| Read history or long-term statistics | `home_assistant_data.history`, `home_assistant_data.statistics` | not available | `home_assistant_data.history`, `home_assistant_data.statistics` |
+| Read an entity's state or find an entity | `home_assistant.verify`, `home_assistant_mcp.get_entity`, `home_assistant_mcp.list_entities`, `home_assistant_mcp.get_entities_by_area`, `home_assistant_mcp.search_entities_tool`, `home_assistant_mcp.domain_summary_tool`, `home_assistant_mcp.system_overview`, `home_assistant_mcp.get_version` | `home_assistant_relay.read`, `home_assistant_mcp.get_entity`, `home_assistant_mcp.list_entities`, `home_assistant_mcp.get_entities_by_area`, `home_assistant_mcp.search_entities_tool`, `home_assistant_mcp.domain_summary_tool`, `home_assistant_mcp.system_overview`, `home_assistant_mcp.get_version` | `home_assistant.verify`, `home_assistant_mcp.get_entity`, `home_assistant_mcp.list_entities`, `home_assistant_mcp.get_entities_by_area`, `home_assistant_mcp.search_entities_tool`, `home_assistant_mcp.domain_summary_tool`, `home_assistant_mcp.system_overview`, `home_assistant_mcp.get_version` |
+| Read history or long-term statistics | `home_assistant_data.history`, `home_assistant_data.statistics`, `home_assistant_mcp.get_history`, `home_assistant_mcp.get_history_range`, `home_assistant_mcp.get_statistics`, `home_assistant_mcp.get_statistics_range` | `home_assistant_mcp.get_history`, `home_assistant_mcp.get_history_range`, `home_assistant_mcp.get_statistics`, `home_assistant_mcp.get_statistics_range` | `home_assistant_data.history`, `home_assistant_data.statistics`, `home_assistant_mcp.get_history`, `home_assistant_mcp.get_history_range`, `home_assistant_mcp.get_statistics`, `home_assistant_mcp.get_statistics_range` |
+| Read automations, dashboards or the error log | `home_assistant_mcp.list_automations`, `home_assistant_mcp.list_dashboards`, `home_assistant_mcp.get_dashboard_config`, `home_assistant_mcp.list_view_sections`, `home_assistant_mcp.list_dashboard_backups`, `home_assistant_mcp.get_error_log` | `home_assistant_mcp.list_automations`, `home_assistant_mcp.list_dashboards`, `home_assistant_mcp.get_dashboard_config`, `home_assistant_mcp.list_view_sections`, `home_assistant_mcp.list_dashboard_backups`, `home_assistant_mcp.get_error_log` | `home_assistant_mcp.list_automations`, `home_assistant_mcp.list_dashboards`, `home_assistant_mcp.get_dashboard_config`, `home_assistant_mcp.list_view_sections`, `home_assistant_mcp.list_dashboard_backups`, `home_assistant_mcp.get_error_log` |
 | Control a device or call a service | `home_assistant_call.call` | `home_assistant_call.call` | `home_assistant_call.call` |
 | Send a notification | `home_assistant_call.call` | `home_assistant_call.call` | `home_assistant_call.call` |
 | Ask the owner a question or report the turn's state | `home_assistant_data.ask_owner`, `home_assistant_data.report_failure`, `home_assistant_data.exchange_info` | not available | `home_assistant_data.ask_owner`, `home_assistant_data.report_failure`, `home_assistant_data.exchange_info` |
@@ -434,7 +459,8 @@ Codex can be reached three ways: the chat page, the ChatGPT app paired through r
   [permission request](#permission-requests). The ChatGPT app shows Codex's own requests in the app instead, as
   [Remote control from the ChatGPT app](#remote-control-from-the-chatgpt-app) describes.
 - A scheduled run also starts a task. It uses the same launcher as the chat page and gets the page's tools, except
-  the `call` tool: nobody is there to answer. A Read only schedule narrows the sandbox, not the tools
+  the `call` tool, because nobody is there to answer, and the `home_assistant_mcp` tools
+  ([Home Assistant MCP](#home-assistant-mcp)). A Read only schedule narrows the sandbox, not the tools
   ([Scheduled runs](#scheduled-runs)).
 - "Not available" means the way in has no tool for that request.
 

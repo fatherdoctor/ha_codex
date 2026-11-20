@@ -70,8 +70,9 @@ class GrantLayerLaunchTests(unittest.TestCase):
                 for module in REMOVED_MODULES:
                     self.assertFalse(any(module in arg for arg in args))
 
-    def test_the_app_launch_registers_the_read_tool_and_the_call_tool_only(self):
-        self.assertEqual(configured_servers(server.relay_tool_args()), {"home_assistant_relay", "home_assistant_call"})
+    def test_the_app_launch_registers_the_read_tool_the_call_tool_and_the_ha_mcp_reads_only(self):
+        self.assertEqual(configured_servers(server.relay_tool_args()), {"home_assistant_relay", "home_assistant_call",
+                                                                   "home_assistant_mcp"})
 
     def test_the_page_rules_no_longer_name_the_act_tool(self):
         self.assertNotIn(REMOVED_SERVER, server.PAGE_INSTRUCTIONS)

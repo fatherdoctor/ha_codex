@@ -29,13 +29,25 @@ API_PATH = ROOT / "custom_components" / "codex_cli" / "api.py"
 PAGE, APP, SERVICE = "Chat page", "ChatGPT app", "codex_cli.start_task"
 NONE = ()
 
+# The read tools of the bundled Home Assistant MCP server (option home_assistant_mcp, on by default), by kind.
+MCP = "home_assistant_mcp."
+MCP_FIND = tuple(MCP + tool for tool in (
+    "get_entity", "list_entities", "get_entities_by_area", "search_entities_tool", "domain_summary_tool",
+    "system_overview", "get_version"))
+MCP_HISTORY = tuple(MCP + tool for tool in ("get_history", "get_history_range", "get_statistics",
+                                            "get_statistics_range"))
+MCP_SETUP = tuple(MCP + tool for tool in ("list_automations", "list_dashboards", "get_dashboard_config",
+                                          "list_view_sections", "list_dashboard_backups", "get_error_log"))
+
 # Each request kind and the tools that serve it on each way in. An empty tuple means not available.
 WAYS_IN = {
     "Read an entity's state or find an entity": {
-        PAGE: ("home_assistant.verify",), APP: ("home_assistant_relay.read",), SERVICE: ("home_assistant.verify",)},
+        PAGE: ("home_assistant.verify", *MCP_FIND), APP: ("home_assistant_relay.read", *MCP_FIND),
+        SERVICE: ("home_assistant.verify", *MCP_FIND)},
     "Read history or long-term statistics": {
-        PAGE: ("home_assistant_data.history", "home_assistant_data.statistics"), APP: NONE,
-        SERVICE: ("home_assistant_data.history", "home_assistant_data.statistics")},
+        PAGE: ("home_assistant_data.history", "home_assistant_data.statistics", *MCP_HISTORY), APP: MCP_HISTORY,
+        SERVICE: ("home_assistant_data.history", "home_assistant_data.statistics", *MCP_HISTORY)},
+    "Read automations, dashboards or the error log": {PAGE: MCP_SETUP, APP: MCP_SETUP, SERVICE: MCP_SETUP},
     "Control a device or call a service": {
         PAGE: ("home_assistant_call.call",), APP: ("home_assistant_call.call",), SERVICE: ("home_assistant_call.call",)},
     "Send a notification": {
@@ -55,6 +67,8 @@ WAYS_IN["Propose a schedule"] = {
 
 # The one tool that changes the house: Codex asks for it each time, so only a launch that can ask gets it.
 CALL_TOOL = "home_assistant_call.call"
+# The Home Assistant MCP server holds the Supervisor token, so only an attended launch gets it (hass_mcp.py).
+MCP_TOOLS = {*MCP_FIND, *MCP_HISTORY, *MCP_SETUP}
 
 CONFIG = re.compile(r"mcp_servers\.([a-z_]+)\.(.+?)=(.*)", re.S)
 
@@ -84,12 +98,25 @@ def listed_tools(settings: dict) -> list[str]:
     return [tool["name"] for tool in listing["result"]["tools"]]
 
 
+def offered_tools(settings: dict) -> list[str]:
+    """The tools Codex offers from one server: its tools/list answer, cut to enabled_tools when the server has one.
+
+    hass-mcp runs only in the image (/opt/hass-mcp), so for it the enabled_tools list stands in for its answer;
+    test_ha_mcp_option.py checks that list against every tool of the pinned version.
+    """
+    if settings.get("args") == [server.hass_mcp.LAUNCHER]:
+        return list(settings["enabled_tools"])
+    tools = listed_tools(settings)
+    allowed = settings.get("enabled_tools")
+    return tools if allowed is None else [tool for tool in tools if tool in allowed]
+
+
 def tools_of(args: list[str]) -> set[str]:
     """Every tool a launch makes available: server.tool, for each enabled server, each tool it lists."""
     tools = set()
     for name, settings in registered_servers(args).items():
         if settings.get("enabled") is not False:
-            tools.update(f"{name}.{tool}" for tool in listed_tools(settings))
+            tools.update(f"{name}.{tool}" for tool in offered_tools(settings))
     return tools
 
 
@@ -169,7 +196,7 @@ class WaysInTests(unittest.TestCase):
     def test_the_app_asks_for_the_call_tool_each_time_and_approves_only_its_read_tool(self):
         """In the app as on the page, the call tool asks each time ("prompt") and the read tool is approved ahead."""
         for name, settings in registered_servers(app_args()).items():
-            for tool in listed_tools(settings):
+            for tool in offered_tools(settings):
                 with self.subTest(tool=f"{name}.{tool}"):
                     expected = "prompt" if f"{name}.{tool}" == CALL_TOOL else "approve"
                     self.assertEqual(settings.get(f"tools.{tool}.approval_mode"), expected)
@@ -177,14 +204,15 @@ class WaysInTests(unittest.TestCase):
     def test_both_page_launches_register_the_same_tools(self):
         """A turn is attended or not by its source, never by way in; both launches give the same read tools.
 
-        The unattended launch has nobody to answer a permission request, so it never gets the call tool.
+        The unattended launch has nobody to answer a permission request, so it never gets the call tool, and it never
+        gets the Home Assistant MCP server, which holds the Supervisor token.
         """
-        self.assertEqual(tools_of(unattended_args()), self.page - {CALL_TOOL})
+        self.assertEqual(tools_of(unattended_args()), self.page - {CALL_TOOL} - MCP_TOOLS)
 
     def test_every_page_tool_is_preapproved_except_the_call_tool(self):
         """A read tool is approved ahead; the call tool asks each time ("prompt"), so the person is the gate."""
         for name, settings in registered_servers(page_args()).items():
-            for tool in listed_tools(settings):
+            for tool in offered_tools(settings):
                 with self.subTest(tool=f"{name}.{tool}"):
                     expected = "prompt" if f"{name}.{tool}" == CALL_TOOL else "approve"
                     self.assertEqual(settings.get(f"tools.{tool}.approval_mode"), expected)

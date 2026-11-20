@@ -46,6 +46,7 @@ import policy as protected_policy
 from ha_data import HomeAssistantData
 from ha_call import RELAY_TASK as RELAY_CALL_TASK, HomeAssistantCall
 import ha_data_mcp
+import hass_mcp
 import remote_control
 import tool_threads
 from core_address import CoreAddress, probe_core
@@ -155,6 +156,7 @@ DEFAULT_OPTIONS = {
     "local_docs": True,
     "ha_url": "",
     "HA_TOKEN": "",
+    "home_assistant_mcp": True,
 }
 BACKUP_RETENTION_DAYS_RANGE = (1, 365)
 REASONING_EFFORTS = {"minimal", "low", "medium", "high", "xhigh"}
@@ -4256,7 +4258,7 @@ def codex_env() -> dict[str, str]:
     env = dict(os.environ)
     # The *_CAPABILITY names are no longer set for a chat; they are still removed in case a parent process has them.
     for key in ("SUPERVISOR_TOKEN", "HASSIO_TOKEN", "HA_TOKEN", "HA_URL", "HA_VERIFICATION_CAPABILITY", "HA_DATA_CAPABILITY", "HA_DATA_SOCKET", "HA_RELAY_CAPABILITY", "HA_RELAY_SOCKET", "CODEX_SCHEDULE_SOCKET",
-                "HA_CALL_CAPABILITY", "HA_CALL_SOCKET"):
+                "HA_CALL_CAPABILITY", "HA_CALL_SOCKET", "HA_MCP_CAPABILITY"):
         env.pop(key, None)
     env["CODEX_HOME"] = str(CODEX_HOME)
     env["HOME"] = str(DATA_ROOT)
@@ -4684,12 +4686,14 @@ def build_app_server_args(attended: bool = True) -> list[str]:
     The two approval flags are Default's values for the process. Each thread and
     turn then sends its own mode's sandbox, approval policy and reviewer
     (task_mode_settings), and those replace them, so a chat gets only its mode's
-    settings. Only a chat someone attends gets the call tool: a scheduled run
+    settings. Only a chat someone attends gets the call tool and the Home
+    Assistant MCP server (hass_mcp.py, when its option is on): a scheduled run
     has nobody to answer Codex's question.
     """
+    attended_args = [*call_mcp_args(), *hass_mcp.mcp_args(read_options(), sys.executable)] if attended else []
     return [CODEX_BINARY, "app-server", "--config", 'approval_policy="on-request"',
             "--config", 'approvals_reviewer="user"', *verification_mcp_args(),
-            *data_mcp_args(), *scheduling_mcp_args(), *github_mcp_args(), *(call_mcp_args() if attended else [])]
+            *data_mcp_args(), *scheduling_mcp_args(), *github_mcp_args(), *attended_args]
 
 
 def bind_chat_thread(task_id: str, thread_id: Any) -> None:
@@ -7016,7 +7020,13 @@ def relay_env() -> dict[str, str]:
     relay_probe_env.
     """
     refresh_core_address()
-    return {**relay_reads.environment(codex_env()), "HA_CALL_CAPABILITY": ha_call.begin(RELAY_CALL_TASK)}
+    env = {**relay_reads.environment(codex_env()), "HA_CALL_CAPABILITY": ha_call.begin(RELAY_CALL_TASK)}
+    # The relay cannot read s6's container environment, so the Home Assistant MCP server gets its token here,
+    # under a name the shell exclude HA_*_CAPABILITY keeps from every command (hass_mcp.py).
+    token = ha_token()
+    if token and hass_mcp.enabled(read_options()):
+        env[hass_mcp.KEY_ENV] = token
+    return env
 
 
 def relay_read_mcp_args() -> list[str]:
@@ -7031,12 +7041,14 @@ def relay_read_mcp_args() -> list[str]:
 
 
 def relay_tool_args() -> list[str]:
-    """The app's tools: the read tool, approved ahead, and the call tool, which Codex asks for each time.
+    """The app's tools: the read tool, approved ahead, the call tool, which Codex asks for each time, and the
+    Home Assistant MCP server's read tools when its option is on (hass_mcp.py).
 
-    The relay holds both keys for its whole run, so the shell exclude matters as much as on the page;
+    The relay holds its keys for its whole run, so the shell exclude matters as much as on the page;
     /etc/codex/managed_config.toml holds the same exclude for every client.
     """
-    return [*shell_exclude_args(), *relay_read_mcp_args(), *call_mcp_args(relay=True)]
+    return [*shell_exclude_args(), *relay_read_mcp_args(), *call_mcp_args(relay=True),
+            *hass_mcp.mcp_args(read_options(), sys.executable, relay=True)]
 
 
 remote_control_supervisor = remote_control.Supervisor(
