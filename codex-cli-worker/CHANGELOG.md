@@ -57,6 +57,8 @@
   `codex_cli_task_result` event.
 
 ### Fixed
+- The sidebar's 5h and 7d quota rows and the plan line now start at the left edge of the status dots, so the
+  left side lines up with the dots above and the Settings cog below.
 - The "Codex" label with the command symbol no longer sits above each reply on the chat page. Screen readers still
   announce each reply as "Codex reply"; the reply's time and status line stay.
 - The mark in the chat page header now follows the page's theme instead of the system's light or dark setting. Open
