@@ -72,7 +72,7 @@ class RelayExecutionTests(unittest.TestCase):
                               'synthetic-environment', 'First room', 1, 1))
             before = db.read_bytes()
             patches = {'CODEX_HOME': home, 'DATA_ROOT': data, 'CODEX_CONFIG_PATH': home / 'config.toml',
-                       'AUTH_QR_DIR': data / 'qr'}
+                       'OLD_AUTH_QR_DIR': data / 'qr'}
             keys = []
             for name, socket in [('First room', 'one.sock'), ('Other room', 'two.sock')]:
                 with patch.multiple(server, **patches), patch.object(server, 'api_token', return_value='synthetic'), \
