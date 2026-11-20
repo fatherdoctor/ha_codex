@@ -1001,43 +1001,73 @@ def load_task_index() -> None:
     tasks that have none.
     """
     root = task_root()
+    # A restart expires waiting permission cards, and an expired card keeps no changed lines of a secret file:
+    # the files that held them are written again, so no copy stays on disk.
+    secrets_forgotten = False
     if root.exists():
         for task_file in root.glob("*/task.json"):
             try:
                 task = json.loads(task_file.read_text(encoding="utf-8"))
                 task_id = str(task.get("task_id") or task_file.parent.name)
                 task["task_id"] = task_id
-                restore_saved_task(task_id, task)
+                if restore_saved_task(task_id, task):
+                    secrets_forgotten = True
+                    atomic_json_write(task_file, task)
                 tasks[task_id] = task
             except Exception as exc:
                 print(f"Could not load task metadata from {task_file}: {exc}", flush=True)
-    if not TASK_STATE_FILE.exists():
-        return
-    try:
-        loaded = json.loads(TASK_STATE_FILE.read_text(encoding="utf-8"))
-        if isinstance(loaded, dict):
-            for task_id, task in loaded.items():
-                if task_id not in tasks:
-                    restore_saved_task(task_id, task)
-                tasks.setdefault(task_id, task)
-    except Exception as exc:
-        print(f"Could not load task index: {exc}", flush=True)
+    if TASK_STATE_FILE.exists():
+        try:
+            loaded = json.loads(TASK_STATE_FILE.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                for task_id, task in loaded.items():
+                    if task_id not in tasks:
+                        secrets_forgotten = restore_saved_task(task_id, task) or secrets_forgotten
+                    tasks.setdefault(task_id, task)
+                # The index also holds each task's approvals; a diff it saved for a secret file goes too.
+                if any(stored_secret_diff(task) for task in loaded.values() if isinstance(task, dict)):
+                    secrets_forgotten = True
+        except Exception as exc:
+            print(f"Could not load task index: {exc}", flush=True)
+    if secrets_forgotten:
+        try:
+            save_task_index()
+        except OSError as exc:
+            print(f"Could not save the task index: {redact(str(exc))}", flush=True)
 
 
-def restore_saved_task(task_id: str, task: dict[str, Any]) -> None:
+def restore_saved_task(task_id: str, task: dict[str, Any]) -> bool:
     """Restore a saved task after a restart: its prompts expire and a task that was active has failed.
 
     A task that waited for a permission decision no longer waits, so its notice
     is dismissed. A question still waits for its answer and keeps its notice.
+    An expired card keeps no changed lines of a secret file. Returns whether such
+    a diff was emptied, so that the caller writes the saved record again.
     """
     waited = task_waits_on_owner(task)
     expire_saved_approvals(task)
+    secrets_forgotten = False
+    for record in [task, *(task.get("turns") or [])]:
+        approvals = record.get("approvals") or []
+        if stored_secret_diff(record):
+            forget_secret_diffs(approvals)
+            secrets_forgotten = True
     if task.get("status") in {"queued", "running"}:
         task["status"] = "failed"
         task["summary"] = task["error"] = "Worker restarted while this task was active."
         sync_current_turn(task)
     if waited and not task_waits_on_owner(task):
         dismiss_wait_notice_async(task_id)
+    return secrets_forgotten
+
+
+def stored_secret_diff(record: dict[str, Any]) -> bool:
+    """Whether a saved record's answered or expired permission cards still hold changed lines of a secret file."""
+    return any(
+        change.get("diff") and (secret_config_path(change.get("path")) or secret_config_path(change.get("move_path")))
+        for approval in record.get("approvals") or [] if approval.get("status") != "pending"
+        for change in approval.get("changes") or []
+    )
 
 
 def expire_saved_approvals(task: dict[str, Any]) -> None:

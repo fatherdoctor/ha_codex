@@ -220,6 +220,50 @@ class ApprovalRecordTests(unittest.TestCase):
         self.assertNotIn("api_key", saved.read_text(encoding="utf-8"))
         self.assertNotIn("api_key", json.dumps(server.tasks["task"]))
 
+    def test_a_restart_drops_the_diff_of_a_card_that_waited_from_the_saved_chat(self):
+        """A card for secrets.yaml that waited when the app stopped expires, and task.json loses its changed lines."""
+        api = test_approvals.ApprovalApiTests("test_prompts_are_counted_by_kind_for_the_conversation")
+        api.setUp()
+        self.addCleanup(api.doCleanups)
+        config = server.CONFIG_ROOT.as_posix()
+        api.session.receive({"method": "item/fileChange/patchUpdated", "params": {
+            "threadId": "thread", "turnId": "turn", "itemId": "edit", "changes": [
+                {"path": f"{config}/secrets.yaml", "diff": "-api_key: invented\n+api_key: changed\n", "kind": {"type": "update"}},
+                {"path": f"{config}/automations.yaml", "diff": "-alias: Old\n+alias: New\n", "kind": {"type": "update"}}]}})
+        api.session.receive({"id": 11, "method": test_approvals.FILE_APPROVAL, "params": {
+            "threadId": "thread", "turnId": "turn", "itemId": "edit", "reason": "Change the key"}})
+        saved = Path(api.temp.name) / "task" / "task.json"
+        self.assertIn("api_key: changed", saved.read_text(encoding="utf-8"))
+        self.assertEqual(server.tasks["task"]["approvals"][1]["status"], "pending")
+
+        server.tasks.clear()
+        server.approval_sessions.clear()
+        server.load_task_index()
+        restored = server.tasks["task"]
+        self.assertEqual(restored["approvals"][1]["status"], "expired")
+        self.assertNotIn("api_key", json.dumps(restored))
+        self.assertNotIn("api_key", saved.read_text(encoding="utf-8"))
+        # Only the secret file's lines go: the card still shows the change to an ordinary file.
+        self.assertIn("alias: New", saved.read_text(encoding="utf-8"))
+        self.assertIn("alias: New", json.dumps(restored))
+
+    def test_a_restart_drops_the_diff_of_a_secret_file_from_the_task_index(self):
+        """The task index holds each chat's approvals too; it is written again without the changed lines."""
+        with tempfile.TemporaryDirectory() as temp:
+            index = Path(temp) / "task_index.json"
+            config = server.CONFIG_ROOT.as_posix()
+            card = {"approval_id": "x", "status": "pending", "kind": "file_change", "changes": [
+                {"kind": "update", "path": f"{config}/.storage/core.config_entries", "move_path": "",
+                 "diff": "-token: invented\n+token: changed\n"}]}
+            index.write_text(json.dumps({"chat": {"task_id": "chat", "status": "completed", "approvals": [card]}}),
+                             encoding="utf-8")
+            with patch.object(server, "tasks", {}), patch.object(server, "task_root", return_value=Path(temp) / "tasks"), \
+                    patch.object(server, "TASK_STATE_FILE", index):
+                server.load_task_index()
+                self.assertEqual(server.tasks["chat"]["approvals"][0]["status"], "expired")
+                self.assertNotIn("token: changed", json.dumps(server.tasks["chat"]))
+            self.assertNotIn("token: changed", index.read_text(encoding="utf-8"))
+
     def test_a_rename_into_a_secret_file_drops_the_diff(self):
         record = self.record("allowed", f"{server.CONFIG_ROOT.as_posix()}/notes.yaml")
         record["changes"][0]["move_path"] = f"{server.CONFIG_ROOT.as_posix()}/secrets.yaml"
