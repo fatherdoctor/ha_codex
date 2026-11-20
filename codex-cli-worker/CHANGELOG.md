@@ -99,6 +99,8 @@
 - **No sign-in images under `/config/www`.** The sign-in notification has the link and the code but no QR image,
   because Home Assistant serves `/config/www` to anyone who can reach it. The QR code stays on the app's own page.
   The first start of this version deletes the old `codex_login_*.svg` images and their folder.
+- **Cleaner chat page header.** The small text beside the Codex word in the side bar is now two short lines, "for"
+  over "Home Assistant", centered on the word. The empty space to its right is gone.
 - **Every text message Codex writes shows in the chat.** The messages Codex writes while it works now show in order
   above the answer, outside the closed "Worked for…" line, with Markdown links as links. Tool steps and thinking stay
   inside that line, and the final answer is not shown twice.
@@ -118,6 +120,8 @@
 - **Pop-ups are smaller and close on an outside click.** The Permissions control now opens a small menu right
   above its button instead of a full-width sheet. A click or tap outside any pop-up, menu or dialog closes it, like
   Escape does. A dialog where you changed a field stays open, so nothing you typed is lost.
+- In every Settings section, the description, buttons and fields now start at the same left edge as the section's
+  title text, after the arrow, on a desktop and a phone.
 - The sidebar's 5h and 7d quota rows and the plan line now start at the left edge of the status dots, so the
   left side lines up with the dots above and the Settings cog below.
 - The "Codex" label with the command symbol no longer sits above each reply on the chat page. Screen readers still

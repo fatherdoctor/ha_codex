@@ -121,7 +121,6 @@ aside {
   align-items: center;
   gap: 8px;
   padding: 0 9px 25px;
-  flex-wrap: wrap;
 }
 .brand strong {
   font-size: calc(20px * var(--text-scale));
@@ -144,12 +143,13 @@ aside {
   display: block;
 }
 .tag {
-  width: 100%;
-  padding-left: 33px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   letter-spacing: 1.4px;
+  line-height: 1.25;
   font-size: calc(9px * var(--text-scale));
   color: var(--muted);
-  margin-top: -5px;
 }
 .new-chat {
   display: flex;
@@ -1667,15 +1667,16 @@ dialog :is(h3, h4):has(> .settings-toggle) {
 #settings > section:last-of-type {
   border-bottom: 1px solid var(--line);
 }
-/* The three parts of Accounts and connections sit inside it, indented. */
+/* The three parts of Accounts and connections sit inside it, indented to its title text (after the chevron). */
 #accounts-section section {
-  margin-left: 12px;
+  margin-left: 18px;
 }
 #accounts-section h4 .settings-toggle {
   font-size: calc(13px * var(--text-scale));
 }
 .settings-body {
-  padding: 2px 0 16px;
+  /* 18px = the chevron (16px) and its margin (2px): the body starts at the title text's left edge. */
+  padding: 2px 0 16px 18px;
 }
 .settings-body > :first-child {
   margin-top: 0;
