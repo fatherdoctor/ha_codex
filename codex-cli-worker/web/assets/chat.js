@@ -1569,7 +1569,7 @@ function renderTask(force = false) {
       let openChecks = null;
       if (latest) {
         state.latestChecks = evidence;
-        exchange.append(activityBlock());
+        exchange.append(activityBlock(), activityText());
         openChecks = () => {
           if (!state.activity || !evidence) return;
           state.activity.expanded = true;
@@ -1633,7 +1633,7 @@ function renderTask(force = false) {
         pending.append(textNode("span", "", "elapsed"));
       }
       exchange.append(pending);
-      if (latest) exchange.append(activityBlock());
+      if (latest) exchange.append(activityBlock(), activityText());
     }
     for (const approval of waiting) {
       exchange.append(renderApproval(approval, task.task_id, turn.turn_id, active));
@@ -1988,6 +1988,12 @@ function activityBlock() {
   block.hidden = true;
   return block;
 }
+/** Build the container for the interim text messages of the latest exchange, shown outside the step list. */
+function activityText() {
+  const box = textNode("div", "", "activity-text");
+  box.id = "activity-text";
+  return box;
+}
 /** Load steps once for an idle chat, and keep loading them while Codex works. */
 function ensureActivity() {
   const activity = state.activity;
@@ -2067,7 +2073,14 @@ function renderActivity() {
   const block = $("activity");
   const activity = state.activity;
   if (!block || !activity || activity.id !== state.id) return;
-  const steps = [...activity.steps.values()].sort((a, b) => a.index - b.index);
+  const all = [...activity.steps.values()].sort((a, b) => a.index - b.index);
+  // Each text message Codex wrote along the way shows in order outside the closed list; tool steps and
+  // thinking stay inside it. The final answer is never a step, so it is not shown twice.
+  const steps = all.filter(step => step.kind !== "message");
+  const texts = all.filter(step => step.kind === "message" && step.text);
+  const textBox = $("activity-text");
+  if (textBox)
+    textBox.replaceChildren(...texts.map(step => renderMarkdown(step.text, "message interim")));
   const running = activity.running || taskActive();
   const checks = state.latestChecks;
   const worked = running ? "" : workedLabel(state.task?.turns?.at(-1));

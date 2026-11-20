@@ -83,6 +83,9 @@
 - **No sign-in images under `/config/www`.** The sign-in notification has the link and the code but no QR image,
   because Home Assistant serves `/config/www` to anyone who can reach it. The QR code stays on the app's own page.
   The first start of this version deletes the old `codex_login_*.svg` images and their folder.
+- **Every text message Codex writes shows in the chat.** The messages Codex writes while it works now show in order
+  above the answer, outside the closed "Worked for…" line, with Markdown links as links. Tool steps and thinking stay
+  inside that line, and the final answer is not shown twice.
 - **No more checks after each answer.** The app no longer judges a turn after Codex answers: it takes no dashboard
   screenshots of its own (they could catch a dashboard still loading), adds no "Verification needs review" note and
   no "No previous version saved" lines. Those lines blamed the turn for files that something else, such as an
