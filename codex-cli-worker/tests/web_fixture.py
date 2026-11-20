@@ -136,6 +136,8 @@ def main():
                 {"type": "item.completed", "item": {"id": "item_2", "type": "command_execution", "command": command,
                                                     "aggregated_output": "- alias: Evening lights\n  trigger:\n    - platform: sun\n      event: sunset\n",
                                                     "exit_code": 0, "status": "completed"}},
+                {"type": "item.completed", "item": {"id": "item_2b", "type": "agent_message",
+                                                    "text": "The file reads fine. See the [Home Assistant docs](https://www.home-assistant.io/docs/automation/) next."}},
                 {"type": "item.completed", "item": {"id": "item_3", "type": "file_change", "status": "completed",
                                                     "changes": [{"path": "/config/automations.yaml", "kind": "update"}]}},
                 {"type": "item.completed", "item": {"id": "item_4", "type": "agent_message",

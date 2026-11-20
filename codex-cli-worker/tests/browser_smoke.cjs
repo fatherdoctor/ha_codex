@@ -473,10 +473,10 @@ function pngBuffer(width = 8, height = 6) {
     // so the line counts the steps instead of reading "Worked for" (CX-FB2-FLOW).
     const storedToggle = page.locator("#activity .activity-toggle");
     await storedToggle.waitFor();
-    assert.equal(await storedToggle.textContent(), "Activity (4 steps)");
+    assert.equal(await storedToggle.textContent(), "Activity (3 steps)");
     assert.equal(await page.locator("#activity-steps").isVisible(), false);
     await storedToggle.click();
-    assert.equal(await page.locator("#activity .step").count(), 4);
+    assert.equal(await page.locator("#activity .step").count(), 3);
     assert.equal(
       await page.locator("#activity .step-command .step-text").textContent(),
       "cat /config/automations.yaml",
@@ -638,7 +638,7 @@ function pngBuffer(width = 8, height = 6) {
         exact: true,
       })
       .waitFor();
-    // Four steps from Codex and four from the worker; the timer stops with the run,
+    // Three steps from Codex and four from the worker (its text messages show outside the list); the timer stops with the run,
     // and the closed line reads the exchange's total time (CX-FB2-FLOW).
     await page.waitForFunction(() =>
       /^Worked for \d+s$/.test(
@@ -649,7 +649,7 @@ function pngBuffer(width = 8, height = 6) {
     assert.equal(await page.locator("#activity .activity-toggle").getAttribute("aria-expanded"), "false");
     assert.equal(await page.locator("#activity-steps").isVisible(), false);
     await page.locator("#activity .activity-toggle").click();
-    assert.equal(await page.locator("#activity .step").count(), 8);
+    assert.equal(await page.locator("#activity .step").count(), 7);
     assert.equal(await page.locator(".elapsed").count(), 0);
     assert.equal(await page.locator("#activity").count(), 1);
     assert.equal(await page.locator("#activity .step.is-running").count(), 0);
@@ -865,7 +865,7 @@ function pngBuffer(width = 8, height = 6) {
     // The same text is in the sent message and in the echoed answer.
     assert.deepEqual(
       await page
-        .locator("#messages a")
+        .locator("#messages a:not(.activity-text a)")
         .evaluateAll((links) =>
           links.map((link) => [link.textContent, link.href, link.target, link.rel]),
         ),
