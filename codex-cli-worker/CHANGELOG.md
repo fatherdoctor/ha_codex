@@ -8,6 +8,11 @@
   the review of changes or at the final update, a timeout, a stall, and a run that the policy, the sandbox check or
   the model pin refuses. Each test checks the state, the log line, the result event and the notice that the run
   leaves. No behavior changes; the tests guard the next step, which splits the run function into smaller parts.
+- The chats the worker keeps move from `server.py` to a new module, `task_store.py`. One `TaskStore` object holds the
+  chats in memory, the lock that guards them, the set of chats with a runner, and the code that writes `task.json` and
+  the task index and reads them at startup. No behavior changes, and the stored files keep the same form. New snapshot
+  tests keep the Home Assistant event, the API record and the saved files of a completed, a waiting, a continued, a
+  failed and a cancelled chat. Tests that replaced the chat list or the task file helpers now change the store instead.
 
 ## 0.5.0 (draft)
 

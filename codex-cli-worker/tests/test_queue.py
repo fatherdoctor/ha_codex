@@ -25,7 +25,8 @@ class QueueTests(unittest.TestCase):
         self.addCleanup(self.stack.close)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
         self.stack.enter_context(isolated_app_folders(server, self.root / "app"))  # the interaction log and others
-        for name, value in (("tasks", {}), ("active_task_runners", set()), ("running_processes", {}), ("message_queue", [])):
+        self.stack.enter_context(patch.dict(server.tasks, clear=True))
+        for name, value in (("active_task_runners", set()), ("running_processes", {}), ("message_queue", [])):
             self.stack.enter_context(patch.object(server, name, value))
         self.stack.enter_context(patch.object(server, "task_root", return_value=self.root / "tasks"))
         self.stack.enter_context(patch.object(server, "TASK_STATE_FILE", self.root / "index.json"))
@@ -196,7 +197,7 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(json.loads(server.MESSAGE_QUEUE_FILE.read_text(encoding="utf-8"))[0]["message"], "First draft, corrected")
         named = self.queue_chat("Message", title="Chosen title")
         self.assertEqual(self.post(f"/queue/{named['queue_id']}", {"message": "Other"}).json["queued_message"]["title"], "Chosen title")
-        with patch.object(server, "atomic_json_write", side_effect=OSError("disk full")):
+        with patch.object(server.task_store, "atomic_json_write", side_effect=OSError("disk full")):
             self.assertEqual(self.post(path, {"message": "Lost"}).status_code, 500)
             self.assertEqual(self.client.delete(path, headers=self.headers).status_code, 500)
         self.assertEqual(server.message_queue[0]["message"], "First draft, corrected")
