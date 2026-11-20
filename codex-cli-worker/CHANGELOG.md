@@ -76,6 +76,10 @@
   rules file, which was removed in an earlier version. The schedule store lost the code paths only the lead channel
   used: Codex can propose a new schedule but not edit a saved proposal, and a run is always reserved for one schedule.
   A bare old lead token in Codex output is still redacted, because a rollback to 0.3 makes it valid again.
+- The permission bridge (`approvals.py`) can now run one turn on a Codex process that it does not own. In that mode it
+  sends only `turn/start` on a thread that is already loaded, with the chat's model in the turn, and it uses request
+  IDs that no other chat on the process uses. A cancel sends `turn/interrupt` and leaves the process input open for
+  the other chats. Nothing uses this mode yet. Each exchange still starts its own Codex process.
 
 ## 0.3.6 - 2026-11-18
 
