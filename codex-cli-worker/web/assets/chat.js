@@ -2642,12 +2642,15 @@ function openDelete(id) {
 $("delete-cancel").onclick = () => $("delete-dialog").close();
 for (const name of ["rename", "share", "delete"])
   $(name + "-dialog").addEventListener("close", () => {
-    // Return focus to the row's menu button, or to New chat when the row is gone.
-    const trigger = menu.returnId
-      ? $("chat-list").querySelector(
-          `[data-menu-for="${CSS.escape(menu.returnId)}"]`,
-        )
-      : null;
+    // A command in the message box opened the dialog: the browser has already
+    // put focus back in the box. This event comes later than the close, so a
+    // move of focus here takes it away while the person types.
+    if (!menu.returnId) return;
+    // The chat menu opened it: return focus to the row's menu button, or to
+    // New chat when the row is gone.
+    const trigger = $("chat-list").querySelector(
+      `[data-menu-for="${CSS.escape(menu.returnId)}"]`,
+    );
     menu.returnId = null;
     (trigger || $("new-chat")).focus();
   });
@@ -3083,44 +3086,44 @@ window.addEventListener("resize", () => {
 const SLASH_COMMANDS = [
   {
     name: "new",
+    icon: "＋",
     description: "Start a new chat",
-    when: "always",
     available: () => !$("new-chat").disabled,
     run: () => selectChat(null),
   },
   {
     name: "stop",
+    icon: "■",
     description: "Stop the chat that is working",
-    when: "while a chat is working",
     available: () => !$("cancel").hidden && !$("cancel").disabled,
     run: () => $("cancel").click(),
   },
   {
     name: "model",
+    icon: "◇",
     description: "Choose the model for this chat",
-    when: "always",
     available: () => Boolean(state.catalog) && !$("model-button").disabled,
     run: () => openPicker("model"),
   },
   {
     name: "reasoning",
+    icon: "✦",
     description: "Choose how long Codex thinks before it answers",
-    when: "always",
     available: () => Boolean(state.catalog) && !$("effort-button").disabled,
     run: () => openPicker("effort"),
   },
   {
     name: "rename",
+    icon: "✎",
     description: "Rename this chat",
-    when: "with a chat open",
     available: () => Boolean(state.id && chatById(state.id)),
     run: () => openRename(state.id),
   },
   {
     name: "usage",
+    icon: "◔",
     aliases: ["status"],
     description: "Show how much of your ChatGPT plan is used",
-    when: "always",
     available: () => true,
     run: () => {
       loadUsage();
@@ -3130,24 +3133,58 @@ const SLASH_COMMANDS = [
   },
   {
     name: "size",
+    icon: "Aa",
     description: "Change the text size",
-    when: "always",
     available: () => true,
     run: () => openSettingsAt("text-size-section"),
   },
   {
+    name: "connection",
+    icon: "⇄",
+    description: "Open the remote connection and its status",
+    // Listed until Settings has shown that remote control cannot run here.
+    available: () => state.remoteAvailable !== false,
+    run: () => openConnection(),
+  },
+  {
     name: "settings",
+    icon: "⚙",
     description: "Open Settings",
-    when: "always",
     available: () => true,
     run: () => $("settings-button").click(),
   },
   {
-    name: "help",
-    description: "List these commands",
-    when: "always",
-    available: () => true,
-    run: () => openSettingsAt("settings-commands"),
+    name: "pin",
+    icon: "⚲",
+    description: "Pin or unpin this chat",
+    available: () => Boolean(state.id && chatById(state.id)),
+    run: () => togglePin(state.id),
+  },
+  {
+    name: "share",
+    icon: "↗",
+    description: "Download this chat as a file",
+    available: () => Boolean(state.id && chatById(state.id)),
+    run: () => openShare(state.id),
+  },
+  {
+    name: "archive",
+    icon: "▤",
+    description: "Archive this chat, or restore it",
+    available: () => chatIdle(),
+    run: () =>
+      document.dispatchEvent(
+        new CustomEvent("thread-action", {
+          detail: { action: "archive", id: state.id },
+        }),
+      ),
+  },
+  {
+    name: "delete",
+    icon: "⌫",
+    description: "Delete this chat and its history",
+    available: () => chatIdle(),
+    run: () => openDelete(state.id),
   },
 ];
 /** Open Settings with one section open and in view, as the GitHub banner does. */
@@ -3155,6 +3192,19 @@ async function openSettingsAt(sectionId) {
   await $("settings-button").onclick();
   openSettingsSection($(sectionId));
   $(sectionId).scrollIntoView({ block: "start" });
+}
+/**
+ * True when a saved chat is open and nothing is running or queued in it: the
+ * same rule the chat menu uses to enable Archive and Delete.
+ */
+function chatIdle() {
+  const chat = state.id && chatById(state.id);
+  return Boolean(
+    chat &&
+      !["queued", "running"].includes(chat.status) &&
+      state.active !== state.id &&
+      !state.task?.queued_message,
+  );
 }
 const slash = { matches: [], index: 0, dismissed: null };
 /**
@@ -3186,6 +3236,12 @@ function slashCommand(value) {
     ) || null
   );
 }
+/** Build a command's icon; screen readers skip it and read the name. */
+function slashIcon(glyph) {
+  const icon = textNode("span", glyph, "slash-icon");
+  icon.setAttribute("aria-hidden", "true");
+  return icon;
+}
 /** Show or hide the command list for the message box's current text. */
 function renderSlash() {
   const value = $("message").value;
@@ -3202,8 +3258,20 @@ function renderSlash() {
     option.id = `slash-${command.name}`;
     option.setAttribute("role", "option");
     option.setAttribute("aria-selected", String(index === slash.index));
+    const typed = /^\/(\S*)$/.exec(value)[1];
+    const name = textNode("span", "/", "slash-name");
+    // Mark the letters the person typed; an alias match, such as /stat for
+    // /usage, marks nothing.
+    const marked = command.name.startsWith(typed.toLowerCase())
+      ? typed.length
+      : 0;
+    name.append(
+      textNode("span", command.name.slice(0, marked), "slash-match"),
+      document.createTextNode(command.name.slice(marked)),
+    );
     option.append(
-      textNode("span", `/${command.name}`, "slash-name"),
+      slashIcon(command.icon),
+      name,
       textNode("span", command.description, "slash-description"),
     );
     // Keep the focus, and the phone keyboard, on the message box.
@@ -3225,6 +3293,9 @@ function renderSlash() {
 function runSlash(command) {
   $("message").value = "";
   slash.dismissed = null;
+  // A dialog this command opens returns focus to the message box, not to a
+  // row that the chat menu used earlier.
+  menu.returnId = null;
   resizeInput();
   renderSlash();
   controls();
@@ -3263,26 +3334,20 @@ $("message").addEventListener("blur", () => {
     renderSlash();
   }
 });
+// A press anywhere outside the message box and the list closes the list.
+document.addEventListener("pointerdown", (event) => {
+  if (
+    !$("slash-popover").hidden &&
+    !event.target.closest("#slash-popover, #message")
+  ) {
+    slash.dismissed = $("message").value;
+    renderSlash();
+  }
+});
 $("message").addEventListener("focus", () => {
   slash.dismissed = null;
   renderSlash();
 });
-/** Fill the Commands section of Settings from the same list. */
-function renderCommandList() {
-  const list = $("command-list");
-  list.replaceChildren();
-  for (const command of SLASH_COMMANDS) {
-    const names = [command.name, ...(command.aliases || [])]
-      .map((name) => `/${name}`)
-      .join(" or ");
-    const note = command.when === "always" ? "" : ` (${command.when})`;
-    list.append(
-      textNode("dt", names),
-      textNode("dd", command.description + note),
-    );
-  }
-}
-renderCommandList();
 /*
  * Settings sections start collapsed (add-on 0.3.2). Each section's first
  * heading becomes a button with the title and a one-line status; the rest of
@@ -3369,7 +3434,6 @@ function setAccountPart(sectionId, word, attention = false) {
 }
 collapseSettingsSections();
 setSectionStatus("workspace-section", "AGENTS.md");
-setSectionStatus("settings-commands", `${SLASH_COMMANDS.length} commands`);
 const TEXT_SIZES = ["normal", "larger", "largest"];
 const TEXT_SIZE_KEY = "codex-text-size";
 /**
@@ -3959,6 +4023,7 @@ async function loadRemoteControl() {
 }
 /** Draw one remote-control state; the buttons follow what can be done now. */
 function renderRemoteControl(rc) {
+  state.remoteAvailable = Boolean(rc.available);
   const name = rc.machine_name || rc.configured_name;
   let status = rc.message || rc.state || "Unknown";
   if (!rc.available) status = rc.blocked_reason;

@@ -823,7 +823,7 @@ To make the text easier to read, open **Settings** > **Text size** and choose **
 
 ### Commands
 
-Type `/` at the start of the message box to see the commands, with a line on what each does. Keep typing to narrow the list, then tap one, or move with the arrow keys and press **Enter** or **Tab**. Typing a whole command, such as `/new`, and sending it does the same. **Settings** > **Commands** lists them all.
+Type `/` at the start of the message box to see the commands, with an icon and a line on what each does. Keep typing to narrow the list, then tap one, or move with the arrow keys and press **Enter** or **Tab**. The letters you typed are marked. **Escape**, or a press outside the list, closes it. Typing a whole command, such as `/new`, and sending it does the same.
 
 | Command | What it does |
 | --- | --- |
@@ -834,8 +834,12 @@ Type `/` at the start of the message box to see the commands, with a line on wha
 | `/rename` | Rename this chat (listed only with a chat open) |
 | `/usage` or `/status` | Show how much of your ChatGPT plan is used |
 | `/size` | Change the text size |
+| `/connection` | Open the remote connection and its status (not listed once Settings has shown that remote control is unavailable) |
 | `/settings` | Open Settings |
-| `/help` | List the commands |
+| `/pin` | Pin or unpin this chat (listed only with a chat open) |
+| `/share` | Download this chat as a file (listed only with a chat open) |
+| `/archive` | Archive this chat, or restore it (listed only with a chat open and idle) |
+| `/delete` | Delete this chat and its history, after a confirmation (listed only with a chat open and idle) |
 
 The page runs these commands itself. Messages reach Codex as plain text through the Codex app server, which does not read the slash commands of the Codex terminal app, so a command sent as a message would reach the model as plain words. Text that only starts with `/`, such as `/config/automations.yaml has an error`, is sent to Codex as usual.
 

@@ -41,6 +41,11 @@
   rollback document speak for the project, not for one person, and give versions of this project in their examples.
   The changelog starts at this project's first version. `screenshots/SCREENSHOTS.md` lists the screenshots; the root
   `SCREENSHOTS.md` is removed.
+- **A richer command list.** The command list above the message box now shows an icon for each command and marks the
+  letters you typed, and a press outside the list closes it. New commands `/pin`, `/share`, `/archive` and `/delete`
+  do what the chat menu does, and `/connection` opens the remote connection and its status. `/help` and
+  **Settings** > **Commands** are gone: the list in the message box is the only one. When you close a dialog that a
+  command opened, the cursor stays in the message box.
 
 ### Fixed
 - The mark in the chat page header now follows the page's theme instead of the system's light or dark setting. Open
