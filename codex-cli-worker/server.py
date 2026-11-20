@@ -52,6 +52,7 @@ import remote_control
 import tool_threads
 from core_address import CoreAddress, probe_core
 from relay_reads import RelayReads, ReadError as RelayReadError
+import retention
 import schedule_api
 import scheduling
 import github_access
@@ -168,6 +169,7 @@ DEFAULT_OPTIONS = {
     "config_check": True,
     "full_snapshot": False,
     "backup_retention_days": 7,
+    "chat_retention_days": retention.DEFAULT_DAYS,
     "browser_verification": True,
     "browser_memory_limit_mib": DEFAULT_BROWSER_MEMORY_LIMIT_MIB,
     "local_docs": True,
@@ -2554,7 +2556,18 @@ def find_attachment(task: dict[str, Any], attachment_id: str) -> dict[str, Any] 
     return None
 
 
-def task_payload(task: dict[str, Any], *, summary: bool = False, private: bool = True) -> dict[str, Any]:
+def retention_context() -> tuple[float, int, dict[str, float]] | None:
+    """What the deletion warning needs (now, days, schedule facts), read once per request; None if unreadable."""
+    scheduled = scheduled_chat_activity()
+    if scheduled is None:
+        return None
+    return time.time(), chat_retention_days(), scheduled
+
+
+def task_payload(
+    task: dict[str, Any], *, summary: bool = False, private: bool = True,
+    deletion: tuple[float, int, dict[str, float]] | None = None,
+) -> dict[str, Any]:
     """Return a task as the API sends it: a short summary for lists, or the full record with its turns.
 
     Exact blocked browser requests are part of the human Ingress review only;
@@ -2576,6 +2589,8 @@ def task_payload(task: dict[str, Any], *, summary: bool = False, private: bool =
             for record in [result, *result["turns"]]:
                 if isinstance(record.get("verification"), list):
                     record["verification"] = [public_check(check) for check in record["verification"]]
+    # Present only in the last days before the chat is deleted: {"deletes_at": ISO time in UTC, "days_left": n}.
+    result["deletion_warning"] = retention.deletion_warning(task, *deletion) if deletion else None
     result["can_continue"] = bool(task.get("session_id")) and task.get("status") in CONTINUABLE_STATUSES
     result["permission_required"] = task.get("status") == "running" and any(
         item.get("status") == "pending" for item in task.get("approvals") or []
@@ -5921,6 +5936,7 @@ TURN_ID_RE = re.compile(r"[0-9a-f]{32}")
 WORKING_FILES = (BASELINE_FILE, "manifest-after.json")
 BACKUP_ARTIFACTS = (SNAPSHOT_FILE, BACKUP_DIR, RECOVERY_DIR)
 BACKUP_CLEANUP_INTERVAL_SECONDS = 3600
+CHAT_RETENTION_INTERVAL_SECONDS = 3600
 backup_cleanup_lock = threading.Lock()
 
 
@@ -6008,6 +6024,59 @@ def cleanup_backups() -> None:
         backup_cleanup_lock.release()
 
 
+def chat_retention_days(options: dict[str, Any] | None = None) -> int:
+    """Return after how many days without a message a chat is deleted (the chat_retention_days option)."""
+    return retention.retention_days(read_options() if options is None else options)
+
+
+def scheduled_chat_activity() -> dict[str, float] | None:
+    """Return the chats that schedules keep in use (see retention.scheduled_activity), or None if unreadable.
+
+    The deletion pass skips its run on None: a chat a schedule still uses must never be deleted on a guess.
+    """
+    try:
+        store = schedule_service.engine().store
+        return retention.scheduled_activity(store.schedules(), store.runs())
+    except Exception as exc:
+        print(f"Chat retention could not read the schedules: {redact(str(exc))}", flush=True)
+        return None
+
+
+def delete_expired_chats(now: float | None = None) -> list[str]:
+    """Delete every chat that has had no message for the retention time; return the ids deleted."""
+    scheduled = scheduled_chat_activity()
+    if scheduled is None:
+        return []
+    now = time.time() if now is None else now
+    days = chat_retention_days()
+
+    def due_ids() -> list[str]:
+        # Called with the lock held. A message waiting in the queue counts as a message, so its chat stays.
+        busy = _active_task_ids_locked() | {entry["task_id"] for entry in message_queue}
+        return retention.expired_ids(tasks.values(), now, days, scheduled, busy)
+
+    with lock:
+        due = due_ids()
+    deleted = []
+    for task_id in due:
+        if TASK_ID_RE.fullmatch(task_id) is None:
+            continue
+        outcome, _error = delete_chat(task_id, lambda chat_id: chat_id in due_ids())
+        if outcome == "deleted":
+            deleted.append(task_id)
+    if deleted:
+        print(f"Deleted {len(deleted)} chat(s) with no message for {days} days.", flush=True)
+    return deleted
+
+
+def chat_retention_loop() -> None:
+    """Delete chats that ran out of time when the worker starts, and keep checking while it sits idle."""
+    while True:
+        try:
+            delete_expired_chats()
+        except Exception as exc:
+            print(f"Chat retention failed: {redact(str(exc))}", flush=True)
+        time.sleep(CHAT_RETENTION_INTERVAL_SECONDS)
 def cleanup_attachments(now: float | None = None) -> int:
     """Delete attachments a person uploaded more than ATTACHMENT_KEEP_DAYS days ago; return how many.
 
@@ -6639,6 +6708,7 @@ def list_tasks() -> Response:
         return jsonify({"ok": False, "error": "invalid task status"}), 400
     if order not in TASK_ORDERS:
         return jsonify({"ok": False, "error": "invalid task order"}), 400
+    deletion = retention_context()
     with lock:
         filtered = [task for task in tasks.values() if not status or task.get("status") == status]
         if request.args.get('archived') in {'true', 'false'}:
@@ -6653,7 +6723,7 @@ def list_tasks() -> Response:
         # Preserve the original unfiltered response shape for existing automations.
         summaries = request.args.get("summary") == "true"
         private = is_ingress_request()
-        result = [task_payload(task, summary=summaries, private=private) for task in page]
+        result = [task_payload(task, summary=summaries, private=private, deletion=deletion) for task in page]
         active = _active_task_id_locked()
         waiting = queue_payload_locked()
     next_offset = offset + len(page)
@@ -6780,16 +6850,20 @@ def rename_task(task_id: str) -> Response:
     return jsonify({"ok": True, "task_id": task_id, "title": task["title"]})
 
 
-@app.delete("/tasks/<task_id>")
-@require_auth
-def delete_task(task_id: str) -> Response:
-    """Delete a finished chat with its files, Codex session, and index entry."""
+def delete_chat(task_id: str, still_due: Callable[[str], bool] | None = None) -> tuple[str, str]:
+    """Delete a finished chat with its files, Codex session and index entry; return (outcome, error text).
+
+    The outcome is "deleted", "missing", "active" (stop it first) or "failed" (the chat stays listed).
+    The retention pass gives `still_due`, which is asked under the lock; a chat that is no longer due stays ("active").
+    """
     with lock:
         task = tasks.get(task_id)
         if task is None:
-            return jsonify({"ok": False, "error": "task not found"}), 404
+            return "missing", "task not found"
         if task.get("status") in {"queued", "running"} or task_id in _active_task_ids_locked():
-            return jsonify({"ok": False, "error": "Stop this task before deleting it."}), 409
+            return "active", "Stop this task before deleting it."
+        if still_due is not None and not still_due(task_id):
+            return "active", "The chat is no longer due for deletion."
         task_dir = get_task_dir(task_id)
         try:
             if task_dir.exists():
@@ -6797,7 +6871,7 @@ def delete_task(task_id: str) -> Response:
             shutil.rmtree(ATTACHMENTS_ROOT / task_id, ignore_errors=True)
         except OSError:
             # The chat stays listed so the user can retry instead of losing track of it.
-            return jsonify({"ok": False, "error": "Could not delete the conversation files. Try again."}), 500
+            return "failed", "Could not delete the conversation files. Try again."
         tasks.pop(task_id, None)
         task_activity.pop(task_id, None)
         save_task_index()
@@ -6809,6 +6883,19 @@ def delete_task(task_id: str) -> Response:
             sync_message_queue()
         session_id = str(task.get("session_id") or "")
     remove_session_files(session_id)
+    return "deleted", ""
+
+
+DELETE_STATUS_CODES = {"missing": 404, "active": 409, "failed": 500}
+
+
+@app.delete("/tasks/<task_id>")
+@require_auth
+def delete_task(task_id: str) -> Response:
+    """Delete a finished chat with its files, Codex session, and index entry."""
+    outcome, error = delete_chat(task_id)
+    if outcome != "deleted":
+        return jsonify({"ok": False, "error": error}), DELETE_STATUS_CODES[outcome]
     return jsonify({"ok": True, "task_id": task_id, "deleted": True})
 
 
@@ -6867,10 +6954,11 @@ def create_task() -> Response:
 @require_auth
 def get_task(task_id: str) -> Response:
     """Return one task in full, with its turns."""
+    deletion = retention_context()
     with lock:
         task = tasks.get(task_id)
         queued = next(iter(queue_payload_locked(task_id)), None)
-        result = task_payload(task, private=is_ingress_request()) if task else None
+        result = task_payload(task, private=is_ingress_request(), deletion=deletion) if task else None
         if result is not None:
             result["queued_message"] = queued
         elif queued and queued.get("new_chat"):
@@ -7840,6 +7928,7 @@ def main() -> None:
     verification.cleanup()
     ha_data.cleanup()
     threading.Thread(target=backup_cleanup_loop, daemon=True).start()
+    threading.Thread(target=chat_retention_loop, daemon=True).start()
     migrate_attachments()
     threading.Thread(target=attachment_cleanup_loop, daemon=True).start()
     verification.serve(DATA_ROOT / "verification.sock")

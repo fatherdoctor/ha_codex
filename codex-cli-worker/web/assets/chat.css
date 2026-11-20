@@ -486,6 +486,16 @@ h1 {
   background: var(--notice);
   border-bottom: 1px solid var(--line);
 }
+#retention-warning {
+  flex: none;
+  margin: 0;
+  padding: 9px 32px;
+  font-size: calc(12px * var(--text-scale));
+  line-height: 1.5;
+  color: var(--notice-text);
+  background: var(--notice);
+  border-bottom: 1px solid var(--line);
+}
 #integration-notice a {
   color: inherit;
   font-weight: 600;
@@ -1790,7 +1800,8 @@ dialog :is(h3, h4):has(> .settings-toggle) {
     padding: 0 14px 0 0;
     gap: 9px;
   }
-  #integration-notice {
+  #integration-notice,
+  #retention-warning {
     padding: 8px 14px;
   }
   .messages {

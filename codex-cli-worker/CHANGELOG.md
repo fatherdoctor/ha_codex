@@ -3,6 +3,9 @@
 ## 0.4.0 (unreleased)
 
 ### What's new
+- **Old chats are deleted after 14 days.** A chat with no message for 14 days is deleted with all its files. Change the
+  time with **Delete chats after (days without a message)**. Pinned chats never expire, a scheduled run counts as a
+  message, and a chat shows a warning line for its last 3 days.
 - **A warning when something needs you.** On the chat page, the Settings cog turns into a warning symbol while
   something needs you. On a phone, the conversations button shows it too. Yellow means an approval or a schedule
   proposal waits. Red means ChatGPT is signed out or unreadable, the GitHub sign-in expired or was revoked, or Remote
