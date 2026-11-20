@@ -678,30 +678,6 @@ class Verification:
             except Exception:
                 pass  # Core independently revokes the session after 180 seconds.
 
-    def after_changes(self, task_id, lovelace_results):
-        """Check each dashboard the worker saved for this turn: read its configuration back, then capture its views.
-
-        Captures stop at the turn's dashboard limit. If the saved dashboard file cannot be read, a dashboard
-        check with an empty path is run instead; it captures nothing and leaves an unavailable (or disabled)
-        result on the turn.
-        """
-        for ref in lovelace_results:
-            if not ref.get("success") or self.worker.task_cancellation_requested(task_id):
-                continue
-            try:
-                storage = json.loads((self.worker.CONFIG_ROOT / ref["storage_file"]).read_text())
-                config = storage["data"]["config"]
-                base = "/" + (ref.get("url_path") or "lovelace")
-                self.run(task_id, {"operation": "dashboard_readback", "path": base, "expected_config": config})
-                with self.worker.lock:
-                    checks = self.worker.tasks.get(task_id, {}).get("verification") or []
-                    remaining = max(0, MAX_BROWSERS - sum(check.get("operation") == "dashboard" for check in checks))
-                for index, view in enumerate(config.get("views", [])[:remaining]):
-                    path = base + "/" + str(view.get("path", index))
-                    self.run(task_id, {"operation": "dashboard", "path": path})
-            except (OSError, ValueError, KeyError):
-                self.run(task_id, {"operation": "dashboard", "path": ""})
-
     def require_dashboard_save_permission(self, task_id):
         """Worker writes obey the same narrowed mode as the current chat turn."""
         options = self.worker.task_options(task_id)

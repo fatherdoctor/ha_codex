@@ -135,22 +135,23 @@ class SessionIdParsingTests(unittest.TestCase):
 
         return result, events
 
-    def test_only_actionable_verification_results_add_a_review_warning(self) -> None:
-        """Only verification checks that failed, found issues or could not run add a review note to a completed task."""
+    def test_checks_during_the_turn_add_no_review_note(self) -> None:
+        """A check Codex ran during the turn, whatever its result, adds nothing to the answer's text."""
         for check_status in ("disabled", "captured", "passed", "failed", "issues", "unavailable"):
             with self.subTest(check_status=check_status):
-                def record_check(task_id, _results):
-                    """Record one verification check with the status under test."""
+                real_begin = server.verification.begin
+
+                def begin_with_check(task_id):
+                    """Start the turn's verification record with one check of the status under test."""
+                    real_begin(task_id)
                     server.update_task(task_id, verification=[{"status": check_status}])
 
-                with patch.object(server.verification, "after_changes", side_effect=record_check):
+                with patch.object(server.verification, "begin", side_effect=begin_with_check):
                     task, _ = self.run_resumed_task(
                         final_payload={"status": "completed", "summary": "Done", "details": "Original details"},
                     )
                 self.assertEqual(task["status"], "completed")
-                self.assertIn("Original details", task["details"])
-                self.assertEqual("Verification needs review" in task["details"],
-                                 check_status in {"failed", "issues", "unavailable"})
+                self.assertEqual(task["details"], "Original details")
 
     def test_resume_rejects_a_different_thread(self) -> None:
         """A resumed task fails, and keeps its own session id, when Codex answers from another conversation."""

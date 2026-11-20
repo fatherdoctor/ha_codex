@@ -1134,57 +1134,6 @@ function renderConfigCheck(check) {
     node.append(textNode("pre", `Warnings: ${check.warnings}`, "check-detail"));
   return node;
 }
-/**
- * Say which changed files have a copy of their previous version and which have
- * none. Copies are deleted after the retention period set in the app options.
- */
-function renderBackups(turn) {
-  const entries = Array.isArray(turn.backups) ? turn.backups : [];
-  const saved = entries.filter((entry) => entry.status === "saved");
-  const unsaved = entries.filter((entry) =>
-    ["missing", "unverified"].includes(entry.status),
-  );
-  /** Word a number of files: "1 file" or "3 files". */
-  const count = (list) =>
-    list.length === 1 ? "1 file" : `${list.length} files`;
-  const nodes = [];
-  if (saved.length) {
-    const node = textNode("div", "", "check check-valid backups-saved");
-    const days = state.catalog?.backup_retention_days;
-    node.append(
-      textNode("span", "✓", "check-mark"),
-      textNode(
-        "span",
-        turn.backups_removed
-          ? `Previous version saved for ${count(saved)}; the copies have since been removed`
-          : `Previous version saved for ${count(saved)}${days ? `, kept for ${days === 1 ? "1 day" : `${days} days`}` : ""}`,
-      ),
-    );
-    if (!turn.backups_removed)
-      node.append(
-        textNode(
-          "pre",
-          saved.map((entry) => `${entry.path} → ${entry.copy}`).join("\n"),
-          "check-detail",
-        ),
-      );
-    nodes.push(node);
-  }
-  if (unsaved.length) {
-    const node = textNode("div", "", "check backups-missing");
-    node.append(
-      textNode("span", "!", "check-mark"),
-      textNode("span", `No previous version saved for ${count(unsaved)}`),
-      textNode(
-        "pre",
-        unsaved.map((entry) => entry.path).join("\n"),
-        "check-detail",
-      ),
-    );
-    nodes.push(node);
-  }
-  return nodes;
-}
 /** "12s", "1m 05s", or "1h 02m": how long the running exchange has taken so far. */
 function elapsedLabel(ms) {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -1630,7 +1579,6 @@ function renderTask(force = false) {
         answer.append(renderChoices(turn));
       const check = renderConfigCheck(turn.config_check);
       if (check) answer.append(check);
-      answer.append(...renderBackups(turn));
       const bad = badCheckCount(turn);
       if (bad) answer.append(failedChecksLine(bad, openChecks));
       if (attachments.length)

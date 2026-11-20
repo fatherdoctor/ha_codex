@@ -11,10 +11,8 @@ cards, failed resources, and browser errors.
 
 For example, ask: **"Inspect `/lovelace/home` on desktop and mobile, show me
 screenshots, and report any layout or card errors."** Replace the path with your
-dashboard view. Saved storage dashboards also get automatic captures of the first
-views that fit the task's remaining time. Request other views and YAML dashboards
-explicitly. Automatic captures after the answer are labeled separately from
-screenshots Codex inspected during the task.
+dashboard view. The app takes no screenshots of its own after the answer: Codex
+checks its work during the task, when it decides to or when you ask.
 
 Browser sign-in uses a temporary, local, read-only identity, without a Home
 Assistant password or manually created token. Tasks can also fetch fresh entity
@@ -287,24 +285,22 @@ A thread that this page did not start has no page rules: a thread started in the
 
 From 0.3.3 the page asks for no output format, so the thread stores Codex's answer as plain text, as the app shows it. The page's status, question and choices come from the `ask_owner` and `report_failure` tool calls (see [Human Input](#human-input)).
 
-In the ChatGPT app the `exchange_info` tool is not available. The rules tell Codex to make no backup copy there and to say so in its answer. The worker's protections do not depend on these rules: approvals, the sandbox, the policy and the backup check after a page message stay the same.
+In the ChatGPT app the `exchange_info` tool is not available. The rules tell Codex to make no backup copy there and to say so in its answer. The worker's protections do not depend on these rules: approvals, the sandbox and the policy stay the same.
 
 ## Backups
 
 From **0.1.63**, the worker no longer archives the whole configuration folder before every message. On a large configuration that archive took longer than Codex needed to start answering, and one archive was kept per message forever.
 
-**Per-file copies (default).** The `exchange_info` tool tells Codex to copy each existing file to `<task_root>/<task_id>/turns/<turn_id>/backups/<path under /config>` before it changes, moves, or deletes it. Only the files Codex is about to change are copied. When the run ends the worker reviews those copies:
+**Per-file copies (default).** The `exchange_info` tool tells Codex to copy each existing file to `<task_root>/<task_id>/turns/<turn_id>/backups/<path under /config>` before it changes, moves, or deletes it. Only the files Codex is about to change are copied. The copies are a safety net, not a check: the answer does not list them and gives no verdict on them, because other writers (an automation, another app, a person in the file editor) can change files under `/config` while a turn runs, and the app cannot tell their changes from Codex's.
 
-- A copy counts only when it is identical to the file as the worker saw it before the run started. A copy made after the first edit is reported as not saved.
-- The review covers the files that are Codex's doing: files it reported editing, files it copied, changed YAML files, and changed dashboard storage files. Home Assistant rewrites its own `.storage` files all the time, so other changed files are not reviewed.
-- The chat lists the files with a saved previous version, and the task details name any reviewed file without one. `GET /tasks/<task_id>`, `codex_cli.get_task`, and the `codex_cli_task_result` event carry `backups` with `path`, `status` (`saved`, `missing`, `unverified` for a copy that is not the earlier version, or `excluded`), and `copy`.
+- When a change fails validation (below), the task details point to the saved copy of each affected file, or say that it has none.
 - Credential files (`secrets.yaml`, the auth stores, and `.storage/core.config_entries`) are never copied. The worker deletes such a copy if Codex makes one.
 
 Codex needs to be able to write to the backup folder. In `workspace-write` mode that requires `task_root` to be inside `/config`, which is the default. In `read-only` mode Codex is given no backup folder; any explicitly approved writes still need a separate recovery plan. A per-file copy depends on Codex following the instruction; if a file was changed without one, restore it from a Home Assistant backup.
 
-**Full snapshot (optional).** Turn on **Full snapshot before every message** (`full_snapshot`) to archive tracked files, excluding known credential files, to `snapshot-before.tar.gz` in the exchange's folder before Codex starts. The worker can then recover missing per-file copies from that archive when a matching file is available. The exclusions below still apply, so this is not a complete Home Assistant backup. Creating the archive adds a wait before every message that grows with the amount of tracked data.
+**Full snapshot (optional).** Turn on **Full snapshot before every message** (`full_snapshot`) to archive tracked files, excluding known credential files, to `snapshot-before.tar.gz` in the exchange's folder before Codex starts. When a change fails validation, the worker can then take a missing per-file copy from that archive when a matching file is available. The exclusions below still apply, so this is not a complete Home Assistant backup. Creating the archive adds a wait before every message that grows with the amount of tracked data.
 
-**Cleanup.** **Keep backups for (days)** (`backup_retention_days`, default 7, range 1 to 365) sets how long backups are kept after an exchange ends. This covers per-file copies, full snapshots, and recovery copies made by earlier versions. Cleanup runs when the app starts, after every exchange, and once an hour; it skips the exchange that is running and leaves messages, logs, and attachments in place. Archives left by earlier versions are removed the same way once they are older than the setting. The chat notes when the saved copies of an exchange have been removed.
+**Cleanup.** **Keep backups for (days)** (`backup_retention_days`, default 7, range 1 to 365) sets how long backups are kept after an exchange ends. This covers per-file copies, full snapshots, and recovery copies made by earlier versions. Cleanup runs when the app starts, after every exchange, and once an hour; it skips the exchange that is running and leaves messages, logs, and attachments in place. Archives left by earlier versions are removed the same way once they are older than the setting.
 
 **Change detection.** The list of tracked files recorded before a run holds each file's size, modification time, and SHA-256 hash. Hashes can be reused when the size and timestamps are unchanged and the file was already at rest before the previous scan. Recently changed files are read again. The exchange's baseline file is deleted when the exchange ends; detected changes stay recorded in `changes.json`.
 
@@ -408,7 +404,7 @@ These checks do not cover a command that uses the `HA_TOKEN` option (see "AGENTS
 
 Codex follows its defaults and the owner's `/config/AGENTS.md`. The integration does not bundle a house-practice file prescribing device categories, API-deletion practices or a writing style. Owners can choose such practices through their own workspace instructions or the starter kit. The starter `/config/AGENTS.md` of a new install ([AGENTS.md and HA_TOKEN](#agentsmd-and-ha_token)) is an ordinary owner file, in plain view, that the owner can change or delete. Permission cards and the sandbox operate independently of prose instructions.
 
-The app does not scan `/config` for planted commands. From 0.3.6 there is no command check (hook), no check after each exchange and no config watch: an edit that adds a `shell_command`, `rest_command`, `python_script` or a command-line platform stays as Codex wrote it. In `workspace-write` Codex can write such an edit without a request, and Home Assistant runs it on the next reload or call. Review what a chat changed (the chat lists every changed file, with its backup) before a reload or restart. The Supervisor token stays out of Codex's environment, and the sandbox still hides `secrets.yaml`, Home Assistant's sign-in store and the app's own data (AUDITING.md, layer 1).
+The app does not scan `/config` for planted commands. From 0.3.6 there is no command check (hook), no check after each exchange and no config watch: an edit that adds a `shell_command`, `rest_command`, `python_script` or a command-line platform stays as Codex wrote it. In `workspace-write` Codex can write such an edit without a request, and Home Assistant runs it on the next reload or call. Review what a chat changed (its steps show each file Codex edited) before a reload or restart. The Supervisor token stays out of Codex's environment, and the sandbox still hides `secrets.yaml`, Home Assistant's sign-in store and the app's own data (AUDITING.md, layer 1).
 
 
 ## Ways in

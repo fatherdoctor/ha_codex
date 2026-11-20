@@ -388,14 +388,12 @@ def main():
                     viewport="mobile", expires_at=time.time() + 3600)]
             if index == 3:
                 # A YAML edit that Home Assistant rejected. Codex saved the previous
-                # version of one file it changed, and none of the other.
+                # version of the file, and the failed check points to it.
                 saved_copy = "/config/codex_tasks/preview-03/turns/x/backups/automations.yaml"
                 extra.update(config_check={"result": "invalid", "warnings": "",
                                            "errors": "Invalid config for 'automation' at automations.yaml, line 12: required key 'trigger' not provided"},
                              validation_errors=["Home Assistant configuration check failed: required key 'trigger' not provided"],
-                             recovery_files=[{"path": "automations.yaml", "copy": saved_copy}],
-                             backups=[{"path": "automations.yaml", "status": "saved", "copy": saved_copy},
-                                      {"path": "scripts.yaml", "status": "missing", "copy": ""}])
+                             recovery_files=[{"path": "automations.yaml", "copy": saved_copy}])
             server.update_task(f"preview-{index:02}", title=title if index < 3 or index == 4 else f"Earlier chat {index}",
                                prompt=message, created_at=f"2026-09-{20 - index % 19:02}T10:00:00+00:00",
                                turns=[turn], current_turn_id=turn["turn_id"],
