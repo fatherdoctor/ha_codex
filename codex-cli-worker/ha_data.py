@@ -158,7 +158,7 @@ class HomeAssistantData:
                 return bool(current == capability and turn and task.get("current_turn_id") == turn
                             and task.get("status") == "running" and not task.get("cancellation_requested"))
 
-    def validate(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def validate(self, payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         """Validate every field before any network call and bound IDs, time range and output points."""
         operation = payload.get("operation")
         tool = next((tool for tool in TOOLS if tool["name"] == operation and operation in ("history", "statistics")), None)
@@ -330,7 +330,7 @@ class HomeAssistantData:
             raise DataError("Home Assistant authentication is unavailable")
         return token
 
-    def history(self, query: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    def history(self, query: dict[str, Any]) -> dict[str, Any]:
         """GET the fixed REST history route, retaining only timestamped state values for requested entities."""
         url = "http://supervisor/core/api/history/period/" + quote(query["start_time"], safe="")
         params = {"filter_entity_id": ",".join(query["entity_ids"]), "end_time": query["end_time"],
@@ -413,7 +413,7 @@ class HomeAssistantData:
                     raise DataError("Home Assistant did not return statistics")
             return results
 
-    def statistics(self, query: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    def statistics(self, query: dict[str, Any]) -> dict[str, Any]:
         """Read recorder metadata and statistics, preserving missing fields, units and bucket boundaries."""
         ids = query["statistic_ids"]
         metadata, raw = self.ws_read([
@@ -447,7 +447,7 @@ class HomeAssistantData:
                                     "has_sum": meta.get("has_sum") if meta else None}
         return self.result("statistics", query, series)
 
-    def result(self, operation: str, query: dict[str, Any], series: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    def result(self, operation: str, query: dict[str, Any], series: dict[str, dict[str, Any]]) -> dict[str, Any]:
         """Share the point budget fairly, reporting exact truncation and empty/missing series."""
         # Water-fill the shared budget: short/empty series release their unused
         # share, and integer remainders go to the remaining series in ID order.

@@ -9,7 +9,8 @@ import secrets
 import socketserver
 import threading
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from core_address import get_json, ResponseTooLarge
 
