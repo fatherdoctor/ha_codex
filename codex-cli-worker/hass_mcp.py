@@ -15,15 +15,19 @@ What Codex is offered:
 - A tool that a later hass-mcp adds is in neither list, so enabled_tools leaves it out, and the test of the
   pinned tool list fails until someone sorts it.
 
-The server needs a Home Assistant token. It never reaches a command Codex runs:
+The server needs a Home Assistant token. No command that Codex runs in the sandbox can read it:
 
 - A chat: the launcher (hass_mcp_launch.py) reads the Supervisor token from s6's container environment,
   /run/s6/container_environment, which codex-bwrap hides from every sandboxed command. Codex starts the
   launcher outside the sandbox, so the chat's own launch holds no key.
 - Remote control: the relay runs as another user in its own user namespace, so the worker hands the token
   to it as HA_MCP_CAPABILITY, which only this server gets (env_vars). The name matches the exclude
-  HA_*_CAPABILITY, so no shell command of the relay sees it (shell_exclude_args and
-  /etc/codex/managed_config.toml).
+  HA_*_CAPABILITY, so no shell command of the relay gets it in its own environment (shell_exclude_args
+  and /etc/codex/managed_config.toml), and a sandboxed command cannot read the relay's.
+
+A command that runs outside the sandbox (Full access, or an approved request for more access) can read the
+token: from /run/s6/container_environment in a chat, or from the relay's environment under remote control.
+AUDITING.md says the same.
 
 Every chat gets the server: a page chat, a codex_cli.start_task task, a scheduled run (a normal chat that a
 schedule wakes up) and the relay.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Start the bundled hass-mcp with a Home Assistant token that no command Codex runs can read.
+"""Start the bundled hass-mcp with a Home Assistant token that no sandboxed command can read.
 
 Codex starts this file as the command of the home_assistant_mcp server, outside its sandbox (see
 hass_mcp.py). It takes the token from HA_MCP_CAPABILITY (remote control) or from s6's container

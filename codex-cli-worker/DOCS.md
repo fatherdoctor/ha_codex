@@ -100,15 +100,16 @@ controls a device, calls a service, restarts Home Assistant or edits a dashboard
   as a card with the tool's arguments in full and what the call does, the same as for the `call` tool
   ([Changes to the house: the `call` tool](#changes-to-the-house-the-call-tool)). Allow once runs that one call;
   Codex asks again before the next one. Your permission mode decides who answers, as for the `call` tool.
-- A card can show **Allow once** only when it shows the whole call. A write longer than 32,000 characters,
-  such as a whole large dashboard, shows Allow turned off; Codex can still change the dashboard with the card and
-  view tools.
+- A card can show **Allow once** only when it shows the whole call. A write longer than 32,000 characters
+  shows Allow turned off. A whole dashboard of ordinary size can be that long: about 70 small cards reach
+  32,000 characters. Codex can still change the dashboard with the card and view tools.
 - In a scheduled run nobody watches the chat, so a request waits on the chat page until you answer it.
 - The tools show what Home Assistant returns. That includes attributes such as a camera's picture link, which
   holds a short-lived access token. Your `AGENTS.md` can tell Codex how to treat such values.
-- The server uses the app's Supervisor token. Codex starts it outside the sandbox, and no command Codex runs can
-  read the token: on the chat page the server reads it from a folder the sandbox hides, and under remote control
-  it gets it in a variable that commands do not inherit.
+- The server uses the app's Supervisor token. Codex starts it outside the sandbox, and no command that Codex
+  runs in the sandbox can read the token: on the chat page the server reads it from a folder the sandbox hides,
+  and under remote control it gets it in a variable that commands do not inherit. A command that runs outside
+  the sandbox (Full access, or an approved request for more access) can read the token.
 - If Home Assistant does not answer, the server fails to start and the chat starts without it.
 - The image installs hass-mcp and each package it needs at a fixed version, checked by hash
   (`hass-mcp.requirements.txt`). It adds about 60 MB to the image.
