@@ -2378,12 +2378,13 @@ main > .chat-header h1 {
   background: var(--error);
 }
 .sidebar-footer .usage {
-  padding: 6px 10px 0 28px;
+  /* 15px = the foot row's 10px padding + the status dot's 5px margin: the dots' left edge. */
+  padding: 6px 10px 0 15px;
   font-size: calc(11px * var(--text-scale));
 }
 .usage-plan,
 .sidebar-footer .usage-note {
-  margin: 4px 10px 4px 28px;
+  margin: 4px 10px 4px 15px;
   font-size: calc(11px * var(--text-scale));
   line-height: 1.4;
   color: var(--muted);
