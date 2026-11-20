@@ -1613,9 +1613,9 @@ function renderTask(force = false) {
         openChecks = () => worked?.openChecks?.();
       }
       const answer = textNode("div", "", "answer");
-      const heading = textNode("div", "", "answer-heading");
-      heading.append(textNode("span", "⌘", "mark"), textNode("span", "Codex"));
-      answer.append(heading);
+      // No visible "Codex" label above the reply; a screen reader still hears whose reply it is.
+      answer.setAttribute("role", "group");
+      answer.setAttribute("aria-label", "Codex reply");
       if (turn.summary) answer.append(renderMarkdown(turn.summary, "message"));
       if (turn.details && turn.details !== turn.summary)
         answer.append(renderMarkdown(turn.details, "message details"));
