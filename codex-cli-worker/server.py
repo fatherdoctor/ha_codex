@@ -178,8 +178,8 @@ CHAT_MODEL_EFFORTS = {model: efforts for model, _, efforts in CHAT_MODELS}
 CLI_DEFAULT_MODEL = "gpt-6.1-sol"
 # Models that are no longer offered, each with the next model up. An add-on option
 # or a chat that still has one selected runs on the first model in that chain
-# that is still offered. The option schema keeps accepting them: Home Assistant
-# does not start an app whose saved option is missing from the list.
+# that is still offered. The `codex_model` option is free text, so any saved value
+# keeps starting; a retired one is replaced when it is read.
 RETIRED_MODELS = {"gpt-5.5": "gpt-5.6-sol"}
 DEFAULT_CHAT_SETTINGS = {"model": None, "reasoning_effort": None}
 # The `model_pin` option is empty as shipped, and empty means no pin: runs use the
@@ -482,9 +482,14 @@ def current_model(model: Any) -> Any:
     return model
 
 
+def configured_model(options: dict[str, Any]) -> str:
+    """Return the model the codex_model option names; free text, so trim it, and empty means default."""
+    return current_model(str(options.get("codex_model") or "").strip() or "default")
+
+
 def default_model(options: dict[str, Any]) -> str:
     """Return the model a chat runs on when it has not selected one."""
-    model = current_model(str(options.get("codex_model") or "default"))
+    model = configured_model(options)
     if model in {"default", "gpt-5.3-codex"}:
         # The add-on leaves the choice to the CLI.
         with usage_lock:
@@ -533,7 +538,7 @@ def current_chat_settings(settings: dict[str, Any]) -> dict[str, Any]:
 def resolve_chat_settings(settings: dict[str, Any], options: dict[str, Any]) -> dict[str, Any]:
     """Resolve inheritance once per turn, without changing shared options."""
     settings = current_chat_settings(settings)
-    model = settings.get("model") or current_model(str(options.get("codex_model") or "default"))
+    model = settings.get("model") or configured_model(options)
     if model == "gpt-5.3-codex":
         model = "default"
     pin = model_pin(options)

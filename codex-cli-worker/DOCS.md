@@ -231,11 +231,11 @@ API: `GET /status` has `integration` with `state` (`ok`, `starting`, `not_instal
 
 ## Model
 
-`codex_model` is a dropdown. The default value, `default`, lets the bundled Codex CLI choose a model for your account. Explicit choices are `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6.1-terra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. Availability depends on your account. The app bundles the packaged Codex CLI **0.166.0** (pinned by version and checksum; it never updates itself).
+`codex_model` is free text, not a dropdown, so a new model works as soon as Codex offers it and there is no list to keep up to date. The default value, `default`, lets the bundled Codex CLI choose a model for your account. To pick one, type its name exactly, for example `gpt-6.1-sol`, `gpt-6-astra` or `gpt-5.6-terra`. Availability depends on your account, and a name Codex does not know is refused by Codex with its own error. Every value that earlier versions offered in the dropdown still works. The app bundles the packaged Codex CLI **0.166.0** (pinned by version and checksum; it never updates itself).
 
 `model_pin` (empty by default, which means no pin: runs use the account's default model) limits the app to one model when you set it. With the pin set, a run on `default` names the pinned model to the CLI, the chat's model picker offers only that model, and a chat, saved conversation or `codex_model` choice that asks for another model is stopped with an error before Codex starts, never run on a different model. Clear the option, or set it to `none`, to turn the pin off and use `codex_model` as described here. Versions before 0.4 shipped `gpt-6.1-sol` as the default; the first start of 0.4 clears that value once, and a value you set afterward is kept.
 
-The worker treats the legacy `gpt-5.3-codex` value as `default`. The retired `gpt-5.5` choice stays in the app's option list for existing installations and runs `gpt-5.6-sol`; it is not offered in the chat's model picker.
+The worker treats the legacy `gpt-5.3-codex` value as `default`. The retired `gpt-5.5` value still starts for existing installations and runs `gpt-5.6-sol`; it is not offered in the chat's model picker.
 
 `model_reasoning_effort` controls how much reasoning Codex asks supported models to use for each task. The app passes it for each exchange, through the app-server turn. Available values are:
 
