@@ -177,7 +177,12 @@ DEFAULT_OPTIONS = {
     "HA_TOKEN": "",
 }
 BACKUP_RETENTION_DAYS_RANGE = (1, 365)
-REASONING_EFFORTS = {"minimal", "low", "medium", "high", "xhigh"}
+# The levels the add-on's model_reasoning_effort option offered before it became free text. The pinned
+# CLI takes any level a model advertises (app-server-protocol ReasoningEffort is a string at rust-v0.166.0).
+REASONING_EFFORTS = {"minimal", "low", "medium", "high", "xhigh", "max", "ultra"}
+# A model id or a level that the worker passes on to Codex: plain characters only, never a flag or a path.
+MODEL_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,99}")
+EFFORT_RE = re.compile(r"[a-z][a-z0-9_-]{0,19}")
 # Codex only emits reasoning items when summaries are requested; "auto" produced none.
 REASONING_SUMMARIES = {"concise", "detailed", "none"}
 # Supported choices in the bundled CLI 0.165.0 model catalog. Availability still
@@ -193,13 +198,23 @@ CHAT_MODELS = (
     ("gpt-5.6-luna", "GPT-5.6 Luna", ("low", "medium", "high", "xhigh", "max")),
 )
 CHAT_MODEL_EFFORTS = {model: efforts for model, _, efforts in CHAT_MODELS}
+# The account's live model list from `codex app-server` (`model/list`), read again after this many seconds.
+# Until a read succeeds, and after a failed one, the chat page offers the built-in CHAT_MODELS.
+MODEL_LIST_TTL_SECONDS = 60 * 60
+MODEL_LIST_RETRY_SECONDS = 5 * 60
+MODEL_LIST_TIMEOUT_SECONDS = 20
+MODEL_LIST_MAX_PAGES = 5
+MODEL_LIST_MAX_MODELS = 100
+model_list_lock = threading.Lock()
+# The times are time.monotonic() values, or None before the first read; 0 would be a real time on a fresh boot.
+model_list_state: dict[str, Any] = {"models": None, "read_at": None, "tried_at": None, "reading": False}
 # The model the bundled CLI picks when none is named. The CLI refreshes its model
 # list per account, so the model its own /status names replaces this once seen.
 CLI_DEFAULT_MODEL = "gpt-6.1-sol"
 # Models that are no longer offered, each with the next model up. An add-on option
 # or a chat that still has one selected runs on the first model in that chain
-# that is still offered. The option schema keeps accepting them: Home Assistant
-# does not start an app whose saved option is missing from the list.
+# that is still offered. The `codex_model` option is free text, so any saved value
+# keeps starting; a retired one is replaced when it is read.
 RETIRED_MODELS = {"gpt-5.5": "gpt-5.6-sol"}
 DEFAULT_CHAT_SETTINGS = {"model": None, "reasoning_effort": None}
 # The `model_pin` option is empty as shipped, and empty means no pin: runs use the
@@ -623,9 +638,14 @@ def retire_public_sign_in_images() -> int:
 
 
 def model_reasoning_effort(options: dict[str, Any]) -> str:
-    """Return the add-on's reasoning effort, falling back to the default."""
-    effort = str(options.get("model_reasoning_effort") or DEFAULT_OPTIONS["model_reasoning_effort"]).strip()
-    if effort not in REASONING_EFFORTS:
+    """Return the add-on's reasoning effort, falling back to the default.
+
+    The option is free text, so a level a new model adds works with no release. A value that is not
+    a plain level name falls back to the default; a model that lacks the level runs on medium
+    (resolve_chat_settings).
+    """
+    effort = str(options.get("model_reasoning_effort") or DEFAULT_OPTIONS["model_reasoning_effort"]).strip().lower()
+    if not EFFORT_RE.fullmatch(effort):
         return DEFAULT_OPTIONS["model_reasoning_effort"]
     return effort
 
@@ -654,9 +674,14 @@ def current_model(model: Any) -> Any:
     return model
 
 
+def configured_model(options: dict[str, Any]) -> str:
+    """Return the model the codex_model option names; free text, so trim it, and empty means default."""
+    return current_model(str(options.get("codex_model") or "").strip() or "default")
+
+
 def default_model(options: dict[str, Any]) -> str:
     """Return the model a chat runs on when it has not selected one."""
-    model = current_model(str(options.get("codex_model") or "default"))
+    model = configured_model(options)
     if model in {"default", "gpt-5.3-codex"}:
         # The add-on leaves the choice to the CLI.
         with usage_lock:
@@ -697,7 +722,7 @@ def current_chat_settings(settings: dict[str, Any]) -> dict[str, Any]:
     if model != settings.get("model"):
         settings["model"] = model
         # The replacement may not support a level the retired model did.
-        if settings.get("reasoning_effort") not in CHAT_MODEL_EFFORTS.get(model, ()):
+        if settings.get("reasoning_effort") not in (model_efforts(model) or ()):
             settings["reasoning_effort"] = None
     return settings
 
@@ -705,7 +730,7 @@ def current_chat_settings(settings: dict[str, Any]) -> dict[str, Any]:
 def resolve_chat_settings(settings: dict[str, Any], options: dict[str, Any]) -> dict[str, Any]:
     """Resolve inheritance once per turn, without changing shared options."""
     settings = current_chat_settings(settings)
-    model = settings.get("model") or current_model(str(options.get("codex_model") or "default"))
+    model = settings.get("model") or configured_model(options)
     if model == "gpt-5.3-codex":
         model = "default"
     pin = model_pin(options)
@@ -716,9 +741,7 @@ def resolve_chat_settings(settings: dict[str, Any], options: dict[str, Any]) -> 
         elif model != pin:
             raise ValueError(model_pin_message(model, pin))
     # A run on default names no model; its levels are those of the model the CLI picks.
-    efforts = CHAT_MODEL_EFFORTS.get(
-        default_model(options) if model == "default" else model, ("low", "medium", "high", "xhigh")
-    )
+    efforts = model_efforts(default_model(options) if model == "default" else model) or ("low", "medium", "high", "xhigh")
     effort = settings.get("reasoning_effort")
     if effort is not None and effort not in efforts:
         if settings.get("model"):
@@ -746,9 +769,9 @@ def parse_chat_settings(payload: dict[str, Any], task: dict[str, Any] | None = N
         raise ValueError("chat_settings must contain only model and reasoning_effort.")
     settings = {**DEFAULT_CHAT_SETTINGS, **settings}
     model, effort = current_model(settings["model"]), settings["reasoning_effort"]
-    if model is not None and (not isinstance(model, str) or model not in CHAT_MODEL_EFFORTS):
+    if model is not None and (not isinstance(model, str) or model_efforts(model, wait=True) is None):
         raise ValueError("Select a supported model or use the add-on default.")
-    if effort is not None and (not isinstance(effort, str) or effort not in {"low", "medium", "high", "xhigh", "max", "ultra"}):
+    if effort is not None and (not isinstance(effort, str) or effort not in known_efforts()):
         raise ValueError("Select a supported reasoning level or use the add-on default.")
     # Only after the checks: replacing a retired model drops a level its replacement lacks.
     settings = current_chat_settings(settings)
@@ -1421,7 +1444,7 @@ def _parse_status_model(text: str) -> str:
     # Until its session is ready the CLI shows the word "loading" there.
     if name.casefold() == "loading":
         return ""
-    return name.casefold() if name.casefold() in CHAT_MODEL_EFFORTS else name
+    return name.casefold() if model_efforts(name.casefold()) is not None else name
 
 
 def forget_default_model() -> None:
@@ -1690,6 +1713,134 @@ def read_codex_rate_limits(codex: str) -> dict[str, Any]:
         return _read_app_server_reply(lines, 2, deadline)
     finally:
         terminate_and_reap_process(proc, terminate_timeout=3, kill_timeout=2)
+
+
+def read_codex_models(codex: str) -> list[dict[str, Any]]:
+    """Ask `codex app-server` for the account's model list (`model/list`, every page) and return its entries."""
+    proc = subprocess.Popen(
+        [codex, "app-server", "--config", "check_for_update_on_startup=false"],
+        cwd="/config", env=codex_env(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL, text=True, bufsize=1,
+    )
+    try:
+        assert proc.stdin is not None and proc.stdout is not None
+        deadline = time.monotonic() + MODEL_LIST_TIMEOUT_SECONDS
+        lines: queue.Queue[str | None] = queue.Queue()
+        threading.Thread(target=_queue_app_server_lines, args=(proc.stdout, lines), daemon=True).start()
+
+        def send(message: dict[str, Any]) -> None:
+            proc.stdin.write(json.dumps(message) + "\n")
+            proc.stdin.flush()
+
+        send({"id": 1, "method": "initialize", "params": {"clientInfo": {
+            "name": "home_assistant_worker", "title": "Home Assistant", "version": "1"}}})
+        _read_app_server_reply(lines, 1, deadline)
+        send({"method": "initialized"})
+        entries: list[dict[str, Any]] = []
+        cursor = None
+        for page in range(MODEL_LIST_MAX_PAGES):
+            send({"id": 2 + page, "method": "model/list", "params": {"cursor": cursor} if cursor else {}})
+            result = _read_app_server_reply(lines, 2 + page, deadline)
+            data = result.get("data")
+            if not isinstance(data, list):
+                raise RuntimeError("Codex sent a model list without entries")
+            entries.extend(entry for entry in data if isinstance(entry, dict))
+            cursor = result.get("nextCursor")
+            if not isinstance(cursor, str) or not cursor:
+                break
+        return entries
+    finally:
+        terminate_and_reap_process(proc, terminate_timeout=3, kill_timeout=2)
+
+
+def parse_codex_models(entries: list[dict[str, Any]]) -> tuple[tuple[str, str, tuple[str, ...]], ...]:
+    """Return (id, label, levels) for each model the picker shows: not hidden, with a plain id and levels.
+
+    An entry with a field of the wrong type is left out, not guessed at; so is a model with no level.
+    The account's default model comes first, as Codex orders its own picker.
+    """
+    models: list[tuple[str, str, tuple[str, ...]]] = []
+    seen: set[str] = set()
+    for entry in sorted(entries, key=lambda item: item.get("isDefault") is not True):
+        model, label, levels = entry.get("id"), entry.get("displayName"), entry.get("supportedReasoningEfforts")
+        if entry.get("hidden") is not False or not isinstance(model, str) or not MODEL_ID_RE.fullmatch(model):
+            continue
+        if model in seen or model in RETIRED_MODELS or not isinstance(levels, list):
+            continue
+        efforts = tuple(dict.fromkeys(
+            level.get("reasoningEffort") for level in levels if isinstance(level, dict)
+            and isinstance(level.get("reasoningEffort"), str) and EFFORT_RE.fullmatch(level["reasoningEffort"])))
+        if not efforts:
+            continue
+        label = label.strip() if isinstance(label, str) and label.strip() and label.isprintable() else model
+        models.append((model, label[:100], efforts))
+        seen.add(model)
+        if len(models) >= MODEL_LIST_MAX_MODELS:
+            break
+    return tuple(models)
+
+
+def refresh_models() -> None:
+    """Read the live model list once and keep it; on a failure keep the last good list (or none)."""
+    codex = codex_binary_path()
+    models = None
+    try:
+        if codex:
+            models = parse_codex_models(read_codex_models(codex)) or None
+    except Exception as exc:  # noqa: BLE001 - any failure leaves the built-in or last good list in use
+        print(f"Could not read the model list from Codex: {_diagnostic_error(exc)}", flush=True)
+    with model_list_lock:
+        model_list_state["reading"] = False
+        model_list_state["tried_at"] = time.monotonic()
+        if models:
+            model_list_state.update(models=models, read_at=time.monotonic())
+
+
+def live_models(wait: bool = False) -> tuple[tuple[str, str, tuple[str, ...]], ...] | None:
+    """Return the account's live model list, or None until a read succeeded.
+
+    A stale or missing list starts one read in the background, at most one at a time and not more
+    often than MODEL_LIST_RETRY_SECONDS after a failure. With wait=True and no list yet, the caller
+    reads it now (bounded by MODEL_LIST_TIMEOUT_SECONDS), as a check that refuses a model needs it.
+    """
+    now = time.monotonic()
+    with model_list_lock:
+        state = model_list_state
+        fresh = state["read_at"] is not None and now - state["read_at"] < MODEL_LIST_TTL_SECONDS
+        due = not fresh and not state["reading"] and (
+            state["tried_at"] is None or now - state["tried_at"] >= MODEL_LIST_RETRY_SECONDS)
+        if due:
+            state["reading"] = True
+        models = state["models"]
+    if due and wait and models is None:
+        refresh_models()
+        with model_list_lock:
+            return model_list_state["models"]
+    if due:
+        threading.Thread(target=refresh_models, name="model-list", daemon=True).start()
+    return models
+
+
+def chat_models() -> tuple[tuple[str, str, tuple[str, ...]], ...]:
+    """Return the models the chat page offers: the live list when Codex gave one, else the built-in list."""
+    return live_models() or CHAT_MODELS
+
+
+def model_efforts(model: Any, wait: bool = False) -> tuple[str, ...] | None:
+    """Return the levels a model offers, or None for a model neither list knows.
+
+    The live list wins; a model only the built-in list has keeps its levels, so a saved chat on it
+    still runs (Codex itself reports a model the account cannot use).
+    """
+    if not isinstance(model, str):
+        return None
+    live = {entry[0]: entry[2] for entry in live_models(wait=wait and model not in CHAT_MODEL_EFFORTS) or ()}
+    return live.get(model) or CHAT_MODEL_EFFORTS.get(model)
+
+
+def known_efforts() -> set[str]:
+    """Return every level that some offered model supports."""
+    return {effort for _, _, efforts in (*CHAT_MODELS, *(live_models() or ())) for effort in efforts}
 
 
 def _window_reset(resets_at: Any, weekly: bool, now: datetime) -> tuple[str, str]:
@@ -6812,7 +6963,7 @@ def chat_options() -> Response:
         default = {"model": pin, "reasoning_effort": "medium"}
         model_error = str(exc)
     default_id = pin or default_model(options)
-    models = [{"id": model, "label": label, "efforts": efforts} for model, label, efforts in CHAT_MODELS]
+    models = [{"id": model, "label": label, "efforts": efforts} for model, label, efforts in chat_models()]
     if pin:
         models = [entry for entry in models if entry["id"] == pin]
     return jsonify({
@@ -6823,7 +6974,9 @@ def chat_options() -> Response:
         # The defaults' model by name, also when the add-on leaves the choice to the CLI.
         "default_model": default_id,
         "models": models,
-        "default_efforts": CHAT_MODEL_EFFORTS.get(default_id, ("low", "medium", "high", "xhigh")),
+        "default_efforts": model_efforts(default_id) or ("low", "medium", "high", "xhigh"),
+        # "codex" when the list is the account's own from Codex, "built-in" while the worker uses its fallback.
+        "models_source": "codex" if live_models() is not None else "built-in",
         "backup_retention_days": backup_retention_days(options),
     })
 
