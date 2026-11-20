@@ -59,7 +59,16 @@
   async function load() {
     latest = await api("schedules");
     zone = latest.timezone || null;
+    // A proposal that waits turns the Settings icon yellow; an edit gives it a new revision, so it counts as new.
+    noteAttention("proposals", latest.schedules
+      .filter((schedule) => !schedule.approved)
+      .map((schedule) => `${schedule.id}:${schedule.revision}`));
     return latest;
+  }
+  /** Read the schedules once a minute, so a proposal shows on the Settings icon while Settings is closed. */
+  async function watchProposals() {
+    if (!dialog.open && !document.hidden) await load().catch(() => {});
+    setTimeout(watchProposals, 60000);
   }
   /** The schedule a chat belongs to: the one made from it, or else the one that started it. */
   function scheduleOfChat(id) {
@@ -290,4 +299,5 @@
   }).observe(dialog, {attributes: true, attributeFilter: ["open"]});
   dialog.addEventListener("close", () => clearInterval(timer));
   showTrigger();
+  watchProposals();
 })();

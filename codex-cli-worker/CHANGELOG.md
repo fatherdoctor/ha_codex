@@ -7,12 +7,18 @@
   and so on for other domains) may be left out. A name that holds the word, such as "Light Strip", matches as
   before. A name without the word is picked only when no entity holds every word of the request: "bedroom lamp"
   with lights "Bedroom", "Bedroom Lamp Left" and "Bedroom Lamp Right" lists all three and sends nothing.
-
+- The mark in the chat page header now follows the page's theme (the Home Assistant theme when the page runs inside
+  Home Assistant) instead of the system's light or dark setting. The tab icon still follows the system.
 - The app's tools no longer use a secret key for each message. Each tool request names its chat by the thread id
   that Codex adds to every tool call, and the worker answers it only while that chat's exchange runs; a sub-agent
   that the chat starts counts as the chat, and a thread that one chat holds is never given to another. The sandbox already stops a command in Read only, Default and Auto-review from
   reaching the tool sockets. Remote control keeps its keys for now.
 
+- Chat page: while something needs you, the Settings cog becomes a warning symbol, and on a phone the
+  conversations button shows it too. Yellow means an approval or a schedule proposal waits; red means ChatGPT is
+  signed out or unreadable, the GitHub sign-in expired or was revoked, or Remote is on and lost its connection.
+  **Dismiss the warning** hides it until something new happens; the ChatGPT warning cannot be dismissed. The page
+  reads this from the status checks it already makes, plus one read of the schedules a minute.
 - Not used yet: a new module, `codex_host.py`, can keep one Codex process running and hold each chat as a thread
   in it, with at most three chats loaded at a time. Nothing in the app starts it in this version, so every message
   still starts its own Codex process. A later change connects it, with an option to turn it off.

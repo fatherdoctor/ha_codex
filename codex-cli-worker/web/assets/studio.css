@@ -30,7 +30,6 @@
 button, a { -webkit-tap-highlight-color: transparent; }
 button, input, textarea, select { border-radius: 10px; }
 .brand { padding-bottom: 24px; }
-.brand-icon { color: var(--accent); }
 .new-chat { background: transparent; box-shadow: none; }
 .new-chat:hover { background: var(--hover); }
 main { min-width: 0; background: var(--bg); }

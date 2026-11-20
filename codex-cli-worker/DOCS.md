@@ -1066,7 +1066,20 @@ or two such as Ready, Off or Not signed in; the 5-hour and weekly quota with a l
 times; and **Settings**. Select Codex, GitHub or Remote to open Settings at that part of Accounts and connections;
 **Manage remote connection** there opens the window that pairs the ChatGPT app. A row that needs you shows an amber
 dot, and a row whose state could not be read shows a red dot and Unavailable. The ChatGPT account part says whether
-a turn has confirmed Codex access with the current sign-in. The integration's state shows only when it needs you, as
+a turn has confirmed Codex access with the current sign-in.
+
+While something needs you, the Settings cog becomes a warning symbol, and on a phone the conversations button
+shows the same symbol. It is yellow while an approval or a schedule proposal waits. It is red when ChatGPT is not
+signed in or its status cannot be read, when the GitHub sign-in expired or was revoked, or when Remote is on and
+lost its connection. Red wins over yellow. A GitHub account that was never connected, or that you disconnected, and
+Remote turned off show nothing. **Dismiss the warning**, under Settings, hides the warnings shown at that moment
+until something new happens, such as another approval or a new sign-out; the waiting item itself stays. A
+reload of the page brings a dismissed warning back. The
+ChatGPT warning cannot be dismissed, because no chat runs without that sign-in. A screen reader reads the warning
+as the description of the Settings and conversations buttons. The page notices a ChatGPT or GitHub sign-out at its
+next status check, within five minutes, and a schedule proposal within a minute.
+
+The integration's state shows only when it needs you, as
 a line at the top of the chat. While a task
 runs, the send button is the stop button, even with a draft or a file in the message box. On a phone, a slim row holds the
 conversations button, the title, New chat and the thread menu; the foot rows are at the bottom of the
