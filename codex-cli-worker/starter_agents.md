@@ -40,6 +40,13 @@ mode of each chat.
   `/share/HomeAssistant` (the app's GitHub clone and link also leave the three folders alone).
 - Backups: keep the old version of each file as rule 3 says, in the folder that the app names. Make no other copy.
 
+## Git and GitHub
+
+- Before every commit, look at what is staged. Remove anything that does not belong.
+- Never stage `secrets.yaml`, `.storage`, databases, log files, backups, or personal or location data.
+- Keep a `.gitignore` that lists these. Add it before the first commit.
+- Ask the owner before the first push to any new or public repository. A new repository is private by default.
+
 ## About this home
 
 Add what Codex cannot know by itself. For example: the names people use for rooms and devices, devices that must

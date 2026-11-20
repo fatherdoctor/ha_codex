@@ -192,7 +192,8 @@ class Store:
                 CREATE TABLE IF NOT EXISTS schedules (
                     id TEXT PRIMARY KEY, name TEXT NOT NULL, prompt TEXT NOT NULL,
                     mode TEXT NOT NULL, spec TEXT NOT NULL, approved INTEGER NOT NULL,
-                    enabled INTEGER NOT NULL, next_due REAL, updated REAL NOT NULL, revision TEXT NOT NULL);
+                    enabled INTEGER NOT NULL, next_due REAL, updated REAL NOT NULL, revision TEXT NOT NULL,
+                    author TEXT NOT NULL DEFAULT 'owner', chat_id TEXT NOT NULL DEFAULT '', model TEXT);
                 CREATE TABLE IF NOT EXISTS runs (
                     id TEXT PRIMARY KEY, schedule_id TEXT, task_id TEXT UNIQUE NOT NULL,
                     due REAL NOT NULL, created REAL NOT NULL, status TEXT NOT NULL,
@@ -202,14 +203,8 @@ class Store:
             for statement in schema.split(';'):
                 if statement.strip():
                     db.execute(statement)
-            columns = {row['name'] for row in db.execute('PRAGMA table_info(schedules)')}
-            if 'author' not in columns:
-                db.execute("ALTER TABLE schedules ADD COLUMN author TEXT NOT NULL DEFAULT 'owner'")
-            # Older schedules belong to no chat and follow the add-on's model.
-            if 'chat_id' not in columns:
-                db.execute("ALTER TABLE schedules ADD COLUMN chat_id TEXT NOT NULL DEFAULT ''")
-            if 'model' not in columns:
-                db.execute('ALTER TABLE schedules ADD COLUMN model TEXT')
+            # The author, chat_id and model columns are in the table from the start. A schedules table made
+            # before 0.3.6 without them is not upgraded here (only test installs ever held one).
             # A file from version 0.3 or earlier also holds the tables of the lead agent channel and the
             # mailbox (mailbox, mailbox_reads, mailbox_deliveries, mailbox_threads, mail_usage, lead_pending,
             # lead_threads) and the lead token's hash in settings. Nothing reads them any more. They are

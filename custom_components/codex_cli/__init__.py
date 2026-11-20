@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 from contextlib import ExitStack
 from dataclasses import dataclass
@@ -14,6 +15,7 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady, HomeAssistantError, ServiceValidationError, Unauthorized
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
 
@@ -42,6 +44,8 @@ from .notification_actions import async_listen_for_choices
 from .browser_auth import STORAGE_KEY, BrowserSessions, BrowserSessionView, DiagnosticView, loaded_runtime_data
 from .kiosk import KioskScreenshotsView
 
+_LOGGER = logging.getLogger(__name__)
+
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
@@ -63,6 +67,8 @@ LIST_TASKS_SCHEMA = vol.Schema({
     vol.Optional("summary"): bool,
 })
 START_LOGIN_SCHEMA = vol.Schema({vol.Optional(ATTR_FORCE, default=False): bool})
+# The key of the mailbox sensor that version 0.4 removed; installs before 0.4 have this entity.
+REMOVED_MAILBOX_SENSOR_KEY = "mailbox_unread_lead"
 
 
 @dataclass(slots=True)
@@ -94,8 +100,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raise ConfigEntryNotReady(str(exc)) from exc
 
     _async_update_discovered_entry(hass, entry, worker.base_url)
+    await _async_remove_mailbox_leftovers(hass, entry)
     client = CodexCliApiClient(session, worker.base_url, worker.api_token)
-    coordinator = CodexCliCoordinator(hass, client, entry.entry_id)
+    coordinator = CodexCliCoordinator(hass, client)
     await coordinator.async_config_entry_first_refresh()
 
     broker = BrowserSessions(hass, worker.api_token)
@@ -153,6 +160,24 @@ def _async_update_discovered_entry(hass: HomeAssistant, entry: ConfigEntry, base
     data = {CONF_BASE_URL: base_url}
     if dict(entry.data) != data or dict(entry.options):
         hass.config_entries.async_update_entry(entry, data=data, options={})
+
+
+async def _async_remove_mailbox_leftovers(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Remove the mailbox sensor entity and the saved message IDs that an install before 0.4 kept.
+
+    Without this step, the removed sensor stays in the entity registry as an orphan.
+    """
+    registry = er.async_get(hass)
+    unique_id = f"{entry.entry_id}_{REMOVED_MAILBOX_SENSOR_KEY}"
+    if entity_id := registry.async_get_entity_id(Platform.SENSOR, DOMAIN, unique_id):
+        registry.async_remove(entity_id)
+    store = Store(hass, 1, f"{DOMAIN}_mailbox_seen_{entry.entry_id}")
+    try:
+        await store.async_remove()
+    except OSError as err:
+        # A file left behind is harmless, since nothing reads it any more.
+        # Do not let it stop the setup.
+        _LOGGER.warning("Could not remove the old mailbox file %s: %s", store.path, err)
 
 
 def _first_runtime(hass: HomeAssistant) -> CodexCliRuntimeData:

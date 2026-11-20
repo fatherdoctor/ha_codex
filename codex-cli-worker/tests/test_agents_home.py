@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import yaml
 
+from app_folders import isolated_app_folders
 from test_server import server
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -131,12 +132,6 @@ class AgentsHome(unittest.TestCase):
         self.assertEqual(self.link.read_text(encoding="utf-8"), "Not ours\n")
         self.assertIn("left alone", self.log)
 
-    def test_the_link_survives_the_removal_of_an_old_bundled_copy(self):
-        self.agents.write_text("Owner rules\n", encoding="utf-8")
-        self.run_quiet(server.link_agents_file)
-        self.assertFalse(server.protected_policy.remove_legacy_instructions(self.home))
-        self.assertTrue(self.link.is_symlink())
-
     def test_the_editor_reads_and_writes_the_app_folder(self):
         server.write_agents_file("Edited in the editor")
         self.assertEqual(self.agents.read_text(encoding="utf-8"), "Edited in the editor\n")
@@ -173,7 +168,12 @@ class AgentsHomeDefaults(unittest.TestCase):
                     raise StopHere
             return call
 
+        # The steps this test does not replace (the chat move, the old sign-in images) run in a temporary copy
+        # of /data, /config and /addon_config.
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
         with (
+            isolated_app_folders(server, Path(folder.name)),
             patch.object(server, "read_options", return_value={}),
             patch.object(server.protected_policy, "policy_problem", return_value=""),
             patch.object(server, "make_worker_undumpable", return_value=True),

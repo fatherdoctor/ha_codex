@@ -14,9 +14,6 @@ configuration:
   codex_sandbox:
     name: Codex sandbox
     description: workspace-write is the default and allows edits in /config; read-only allows inspection. Commands or file changes needing extra access ask a Home Assistant administrator for Allow once or Deny in the chat. This option has no full-access value. A chat can run without the sandbox only in the Full access permission mode, which is off until an administrator turns it on in the app's Settings page.
-  task_root:
-    name: Task root
-    description: Folder where prompts, logs, backups, status files, and change lists are saved. Keep it inside /config so Codex can save a copy of each file before changing it.
   notify_service:
     name: Notification service
     description: Optional Home Assistant notify service for questions, permission requests and failures. Leave unset or blank to use persistent notifications. The app configuration page does not support Home Assistant service autocomplete, so this is a plain text field.
