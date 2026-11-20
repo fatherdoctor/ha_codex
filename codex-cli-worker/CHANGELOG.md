@@ -48,6 +48,8 @@
   command opened, the cursor stays in the message box.
 
 ### Changed
+- **Cleaner chat page header.** The small text beside the Codex word in the side bar is now two short lines, "for"
+  over "Home Assistant", centered on the word. The empty space to its right is gone.
 - **No more checks after each answer.** The app no longer judges a turn after Codex answers: it takes no dashboard
   screenshots of its own (they could catch a dashboard still loading), adds no "Verification needs review" note and
   no "No previous version saved" lines. Those lines blamed the turn for files that something else, such as an
@@ -57,6 +59,8 @@
   `codex_cli_task_result` event.
 
 ### Fixed
+- In every Settings section, the description, buttons and fields now start at the same left edge as the section's
+  title text, after the arrow, on a desktop and a phone.
 - The "Codex" label with the command symbol no longer sits above each reply on the chat page. Screen readers still
   announce each reply as "Codex reply"; the reply's time and status line stay.
 - The mark in the chat page header now follows the page's theme instead of the system's light or dark setting. Open
