@@ -9,9 +9,13 @@ Corpus families (CASES below; add a case there when a review finds a new shape):
 - comments: the pattern inside a comment or a string is not code and is allowed.
 - nesting: the lookup inside parentheses, a subscript, a lambda, a nested function or a class.
 - wrappers: vars(), locals(), builtins.globals(), .get(), .setdefault(), sys.modules[__name__] with getattr
-  or __dict__, and a variable that holds globals().
+  or __dict__.
+- aliases: a name, a parameter default, a tuple item, an attribute or a walrus that holds globals() or a module;
+  `from sys import modules`; importlib.import_module(); the scope rules (a name bound in one function is not the
+  same name in another; a class body does not reach its methods).
 - line ends and size: CRLF, no final newline, an empty file, exactly the limit, one line over.
-- invisible characters: a byte-order mark at the start of a Python file still parses.
+- invisible characters: a byte-order mark at the start of a Python file still parses; a non-breaking space does
+  not parse and fails closed.
 - syntax: a Python file that does not parse fails closed.
 - case and form: an upper-case suffix (`.PY`) is still a source file.
 - n/a: separators, heredocs, git shapes, time of check and template readers (the input is a file tree that the
@@ -65,6 +69,43 @@ CASES = [
     ("W15", "wrappers", "x = getattr(obj, name)\n", "allow"),
     ("W16", "wrappers", "x = settings[name]\n", "allow"),
     ("W17", "wrappers", "globals().update(values)\n", "refuse"),
+    # Reviewer cases R1 to R24 (CX-STD review; there is no R20). R1 to R7, R9 and R17 had the wrong answer
+    # before; the review gives their exact inputs. The others are written from the review's one-line notes.
+    ("R1", "aliases", "import sys\nmod = sys.modules[__name__]\nx = getattr(mod, name)\n", "refuse"),
+    ("R2", "aliases", "from sys import modules\nx = getattr(modules[__name__], name)\n", "refuse"),
+    ("R3", "aliases", "import sys\nx = vars(sys.modules[__name__])[name]\n", "refuse"),
+    ("R4", "aliases", "def f(n, g=globals()):\n    return g[n]\n", "refuse"),
+    ("R5", "aliases", "g, h = globals(), 1\nx = g[name]\n", "refuse"),
+    ("R6", "aliases", "class A:\n    def __init__(self):\n        self.g = globals()\n"
+     "    def f(self, n):\n        return self.g[n]\n", "refuse"),
+    ("R7", "aliases", "import importlib\nx = getattr(importlib.import_module(__name__), name)\n", "refuse"),
+    ("R8", "wrappers", "x = globals().__getitem__(name)\n", "refuse"),
+    ("R9", "aliases", "x = (g := globals())[name]\n", "refuse"),
+    ("R10", "comments", "x = globals()[  # the name\n    name]\n", "refuse"),
+    ("R11", "quotes", 'x = globals()["CONFIG" "_ROOT"]\n', "allow"),
+    ("R12", "wrappers", "import sys\nm = sys.modules[name]\n", "allow"),
+    ("R13", "wrappers", "import sys\nm = sys.modules.get(name)\n", "allow"),
+    ("R14", "wrappers", "x = self.__dict__[n]\n", "allow"),
+    ("R15", "wrappers", "for k, v in globals().items():\n    pass\n", "allow"),
+    ("R16", "wrappers", "import os\nx = os.environ.get(name)\n", "allow"),
+    ("R17", "aliases", "def a():\n    g = globals()\n    return g['X']\ndef b(n):\n    g = {}\n    return g[n]\n",
+     "allow"),
+    ("R18", "invisible", "x\u00a0= globals()[name]\n", "refuse"),
+    ("R19", "wrappers", "import sys\nx = getattr(sys.modules[__name__], name, None)\n", "refuse"),
+    ("R21", "quotes", 'KEY = "CONFIG_ROOT"\nx = globals()[KEY]\n', "refuse"),
+    ("R22", "wrappers", "import sys\nx = sys.modules[__name__].__dict__.get(name)\n", "refuse"),
+    ("R23", "wrappers", "x = globals().get(name, None)\n", "refuse"),
+    ("R24", "wrappers", "x = name in globals()\n", "allow"),
+    # Builder cases for the scope rules behind R4, R6 and R17.
+    ("A1", "aliases", "g = globals()\ndef f(n):\n    return g[n]\n", "refuse"),
+    ("A2", "aliases", "def f(n):\n    return g[n]\ng = globals()\n", "refuse"),
+    ("A3", "aliases", "g = globals()\ndef f(n, g):\n    return g[n]\n", "allow"),
+    ("A4", "aliases", "import sys as s\nm = s.modules[__name__]\nn2 = m\nx = getattr(n2, name)\n", "refuse"),
+    ("A5", "aliases", "from importlib import import_module\nsetattr(import_module(__name__), name, 1)\n",
+     "refuse"),
+    ("A6", "aliases", "class A:\n    g = globals()\n    def f(self, n):\n        return g[n]\n", "allow"),
+    ("A7", "aliases", "import json\nx = getattr(json, name)\n", "allow"),
+    ("A8", "aliases", "x = eval(name)\n", "allow"),
 ]
 
 
@@ -72,7 +113,10 @@ class GlobalsCorpusTests(unittest.TestCase):
     def test_corpus(self):
         wrong = []
         for case_id, _family, source, expected in CASES:
-            got = "refuse" if code_checks.globals_by_name(source) else "allow"
+            try:
+                got = "refuse" if code_checks.globals_by_name(source) else "allow"
+            except SyntaxError:
+                got = "refuse"  # check_globals fails a file it cannot parse
             if got != expected:
                 wrong.append(f"{case_id}: expected {expected}, got {got}")
         self.assertEqual(wrong, [], "corpus cases with the wrong answer")
@@ -81,7 +125,7 @@ class GlobalsCorpusTests(unittest.TestCase):
         families = {}
         for _id, family, _source, expected in CASES:
             families.setdefault(family, set()).add(expected)
-        for family in ("quotes", "comments", "nesting", "wrappers"):
+        for family in ("quotes", "comments", "nesting", "wrappers", "aliases"):
             self.assertGreaterEqual(sum(1 for c in CASES if c[1] == family), 2, family)
         self.assertIn("allow", families["wrappers"])
 
@@ -174,6 +218,7 @@ class TreeTests(unittest.TestCase):
                    'patch("server.DATA_ROOT", x)\npatch.object(server, "run", y)\n'
                    'monkeypatch.setattr(server, "X", 1)\npatch("other.X")\n')
         self.write("elsewhere/test_b.py", 'patch("server.DATA_ROOT", x)\n')
+        self.write("codex-cli-worker/tests/test_code_checks.py", 'patch("server.DATA_ROOT", x)\n')
         self.assertEqual(code_checks.count_server_patches(self.root), {"codex-cli-worker/tests/test_a.py": 3})
         out = io.StringIO()
         with redirect_stdout(out):
