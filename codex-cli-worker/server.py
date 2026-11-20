@@ -2696,7 +2696,7 @@ def create_snapshot(task_id: str, manifest: dict[str, dict[str, Any]] | None = N
     file_count = 0
     with tarfile.open(snapshot_path, "w:gz") as tar:
         for rel in sorted(manifest):
-            if snapshot_secret_path(rel):
+            if secret_file_path(rel):
                 continue
             path = CONFIG_ROOT / rel
             if path.exists():
@@ -2706,12 +2706,19 @@ def create_snapshot(task_id: str, manifest: dict[str, dict[str, Any]] | None = N
     return {"path": str(snapshot_path), "file_count": file_count, "created_at": utc_now()}
 
 
-def snapshot_secret_path(relative: str) -> bool:
-    """Keep credential files in change detection, but out of recovery archives."""
+def secret_file_path(relative: str) -> bool:
+    """Whether a path under /config is a secret file, of which the add-on never keeps a readable copy.
+
+    These are every secrets.yaml (or secrets.yml), in any folder, and every file
+    under .storage, where Home Assistant keeps sign-ins, tokens and integration
+    credentials beside dashboards and other state. They stay in change detection,
+    but the full snapshot leaves them out and a copy in the backup folder is
+    deleted when the exchange ends, whoever made it.
+    """
     path = Path(relative)
-    return path.name in {"secrets.yaml", "secrets.yml"} or relative in {
-        ".storage/auth", ".storage/http.auth", ".storage/core.config_entries",
-    } or relative.startswith(".storage/auth_provider.")
+    if path.name in {"secrets.yaml", "secrets.yml"}:
+        return True
+    return bool(path.parts) and path.parts[0] == ".storage"
 
 
 # The first bytes of every cookie jar that the standard library saves in the LWP format.
@@ -2883,9 +2890,9 @@ def copied_files(run_dir: Path) -> dict[str, Path]:
 
 
 def drop_credential_backups(run_dir: Path) -> None:
-    """Delete copies of credential files, which Codex is told not to make."""
+    """Delete copies of secret files (secret_file_path), which Codex is told not to make."""
     for rel, path in copied_files(run_dir).items():
-        if snapshot_secret_path(rel):
+        if secret_file_path(rel):
             try:
                 path.unlink()
             except OSError:
@@ -2904,7 +2911,7 @@ def saved_copy(run_dir: Path, rel: str, before: dict[str, Any]) -> dict[str, str
     # Codex can write in this folder, so never follow a link it may have left there.
     if not safe_relative_path(rel) or (run_dir / BACKUP_DIR).is_symlink():
         return entry
-    if snapshot_secret_path(rel):
+    if secret_file_path(rel):
         return {**entry, "status": "excluded"}
     root = (run_dir / BACKUP_DIR).resolve()
     target = root / rel
@@ -3070,7 +3077,7 @@ def validation_details(validation_errors: list[str], config_check: dict[str, str
     if added:
         lines.append("New files that did not exist before: " + code_spans(added))
     if excluded:
-        lines.append("Credential files excluded from recovery copies; use a Home Assistant backup: " + code_spans(excluded))
+        lines.append("Secret files (secrets.yaml and .storage) have no recovery copies; use a Home Assistant backup: " + code_spans(excluded))
     if unsaved:
         lines.append(unsaved_note(unsaved))
     if config_check.get("warnings"):
@@ -4282,10 +4289,10 @@ def backup_instructions(backup_dir: Path | None) -> str:
         return ""
     return (
         f"Before you change, move, or delete a file that already exists under /config, copy it to {backup_dir} under "
-        f"the same relative path, creating folders as needed: /config/automations.yaml goes to {backup_dir}/automations.yaml "
-        f"and /config/.storage/lovelace.kitchen goes to {backup_dir}/.storage/lovelace.kitchen. Copy each file once, before "
+        f"the same relative path, creating folders as needed: /config/automations.yaml goes to {backup_dir}/automations.yaml. "
+        "Copy each file once, before "
         "your first change to it for this message, and only the files you are about to change. Files you create need no copy. "
-        "Never copy secrets.yaml, .storage/auth, .storage/auth_provider.*, .storage/http.auth, or .storage/core.config_entries. "
+        "Never copy secrets.yaml or any file under .storage: they hold secrets, and the worker deletes such copies. "
         "Do not leave other backup copies in /config. The worker checks these copies when you finish and tells the user "
         "which changed files have none.\n\n"
     )
