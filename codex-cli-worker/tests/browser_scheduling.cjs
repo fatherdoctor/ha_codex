@@ -43,7 +43,11 @@ const assert = require('node:assert/strict');
           {turn_id:'second',message:'Human continuation'},
           {turn_id:'third',message:'Scheduled request',task_source:'schedule'}]}; renderTask(true);
       });
-      assert.deepEqual(await page.locator('.task-source').allTextContents(), ['Started by lead', 'Scheduled run']);
+      // A chat the removed lead channel started shows no lead label; the scheduled run keeps its label.
+      assert.deepEqual(await page.locator('.task-source').allTextContents(), ['Scheduled run']);
+      // The schedule editor names no lead runs, and nothing on the page names the lead agent.
+      assert.doesNotMatch(await page.locator('#schedule-advanced').textContent(), /lead/i);
+      assert.doesNotMatch(await page.locator('body').innerText(), /started by lead|lead agent/i);
       // Schedule in a chat's menu opens the editor on a new schedule that starts from the chat.
       const chatId=await page.locator('.chat-row [data-menu-for]').first().getAttribute('data-menu-for');
       async function openFromMenu() {

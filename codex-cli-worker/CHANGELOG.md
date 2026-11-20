@@ -1,6 +1,8 @@
 # Changelog
 
 ## 0.4.0 (unreleased)
+- The chat page no longer shows the lead agent: an old chat that the removed lead channel started has no "Started by lead" label,
+  and the schedule editor no longer mentions lead runs.
 - The mark in the chat page header now follows the page's theme (the Home Assistant theme when the page runs inside
   Home Assistant) instead of the system's light or dark setting. The tab icon still follows the system.
 - The app's tools no longer use a secret key for each message. Each tool request names its chat by the thread id
