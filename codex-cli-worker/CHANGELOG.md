@@ -71,6 +71,12 @@
   keep; the unused `CORE_URL` and `ALLOW_MARK` constants are gone; the three test files that prove a removed part
   stays removed are now one, `tests/test_removed_surfaces.py`, with the same tests; `AGENTS.md` no longer
   describes the bundled house rules file, which was removed in an earlier version.
+- Internal, no change in behavior: the permission bridge (`approvals.py`) can now run one turn on a Codex process
+  that it does not own. In that mode it sends only `turn/start` on a thread that is already loaded, with the chat's
+  model in the turn; it uses request IDs that no other chat on the process uses; and a cancel sends `turn/interrupt`
+  but leaves the process input open for the other chats. After a cancel the bridge still reads the end of its own
+  turn, so it can tell when the turn stopped; it sends no event or answer then. Nothing uses this mode yet. A later change keeps one Codex
+  process alive for many chats and uses it. Each exchange still starts its own process, as before.
 - Chat page code only: five styles that no part of the page used are removed: `eyebrow`, `footnote`, `suggestions`
   and `welcome-icon` from `chat.css`, and `text-button` from `studio.css`. The page looks and works the same. Two new
   tests fail if a stylesheet or a page file names one of them again.
