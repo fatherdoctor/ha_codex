@@ -1,8 +1,8 @@
 """The option home_assistant_mcp: the bundled hass-mcp server, which tools Codex gets, and where its token goes.
 
 The server reads Home Assistant with the Supervisor token, which has full rights. These tests check that
-Codex is offered only hass-mcp's read tools, each approved ahead; that a tool not sorted into a list is
-never offered; that a scheduled run gets the same server as a page chat; that the option turns all of it off; and that the token
+Codex is offered hass-mcp's read tools approved ahead and its write tools on prompt, each write with a page
+card; that a tool not sorted into a list is never offered; that a scheduled run gets the same server as a page chat; that the option turns all of it off; and that the token
 reaches the server without a place a command Codex runs could read it. All data here is invented.
 """
 from __future__ import annotations
@@ -24,6 +24,7 @@ import yaml
 from test_server import server  # First: it puts the worker's folder on sys.path.
 
 # isort: split
+import approvals
 import hass_mcp
 import hass_mcp_launch
 import remote_control as rc
@@ -56,7 +57,7 @@ def server_settings(args):
 
 
 class ToolListTests(unittest.TestCase):
-    """Each tool of the pinned version is sorted, and only the read tools are offered."""
+    """Each tool of the pinned version is sorted: reads approved ahead, writes asked about before each call."""
 
     def test_every_pinned_tool_is_sorted_into_one_list(self):
         reads, writes = set(hass_mcp.READ_TOOLS), set(hass_mcp.WRITE_TOOLS)
@@ -69,27 +70,37 @@ class ToolListTests(unittest.TestCase):
         requirements = (WORKER / "hass-mcp.requirements.txt").read_text(encoding="utf-8")
         self.assertIn(f"\nhass-mcp=={hass_mcp.VERSION} \\\n", requirements)
 
-    def test_every_offered_tool_is_a_read_tool_approved_ahead(self):
+    def test_reads_are_approved_ahead_and_writes_are_asked_about_each_time(self):
         settings = hass_mcp.settings("/usr/bin/python3")
-        self.assertEqual(settings["enabled_tools"], list(hass_mcp.READ_TOOLS))
+        self.assertEqual(settings["enabled_tools"], [*hass_mcp.READ_TOOLS, *hass_mcp.WRITE_TOOLS])
         modes = {key[len("tools."):-len(".approval_mode")]: value for key, value in settings.items()
                  if key.startswith("tools.")}
-        self.assertEqual(modes, {tool: "approve" for tool in hass_mcp.READ_TOOLS})
+        self.assertEqual(modes, {**{tool: "approve" for tool in hass_mcp.READ_TOOLS},
+                                 **{tool: "prompt" for tool in hass_mcp.WRITE_TOOLS}})
         self.assertNotIn("default_tools_approval_mode", settings)
 
     def test_a_tool_outside_the_lists_is_never_offered(self):
         # enabled_tools is an allow list: a tool a later hass-mcp adds stays hidden until it is sorted.
         offered = set(hass_mcp.settings("/usr/bin/python3")["enabled_tools"])
         self.assertNotIn("a_tool_from_a_later_version", offered)
-        self.assertFalse(offered & set(hass_mcp.WRITE_TOOLS))
+        self.assertEqual(offered, PINNED_TOOLS)
 
-    def test_no_write_tool_appears_on_any_launch(self):
+    def test_every_write_tool_is_on_prompt_on_every_launch(self):
+        # A write tool with no mode would be "auto", whose question offers "Allow for this session".
         with patch.object(server, "read_options", return_value={}):
-            for args in (server.build_app_server_args(), server.relay_tool_args()):
-                for value in configured(args):
-                    for tool in hass_mcp.WRITE_TOOLS:
-                        self.assertNotIn(f'"{tool}"', value)
-                        self.assertNotIn(f".{tool}.", value)
+            launches = {"page": server.build_app_server_args(),
+                        "schedule": server.build_app_server_args(attended=False),
+                        "relay": server.relay_tool_args()}
+        for name, args in launches.items():
+            settings = server_settings(args)
+            for tool in hass_mcp.WRITE_TOOLS:
+                with self.subTest(launch=name, tool=tool):
+                    self.assertIn(tool, settings["enabled_tools"])
+                    self.assertEqual(settings[f"tools.{tool}.approval_mode"], "prompt")
+
+    def test_every_write_tool_has_a_page_card_and_no_read_tool_does(self):
+        cards = {tool for server_name, tool in approvals.TOOL_CARDS if server_name == hass_mcp.SERVER_NAME}
+        self.assertEqual(cards, set(hass_mcp.WRITE_TOOLS))
 
 
 class LaunchTests(unittest.TestCase):
@@ -112,7 +123,7 @@ class LaunchTests(unittest.TestCase):
                 self.assertNotIn("env_vars", page)
                 relay = server_settings(launches["relay"])
                 self.assertEqual(relay["env_vars"], [hass_mcp.KEY_ENV])
-                self.assertEqual(relay["enabled_tools"], list(hass_mcp.READ_TOOLS))
+                self.assertEqual(relay["enabled_tools"], [*hass_mcp.READ_TOOLS, *hass_mcp.WRITE_TOOLS])
 
     def test_a_scheduled_run_gets_the_same_server_as_a_page_chat(self):
         launches = self.launches({})

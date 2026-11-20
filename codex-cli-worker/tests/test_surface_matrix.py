@@ -39,6 +39,12 @@ MCP_HISTORY = tuple(MCP + tool for tool in ("get_history", "get_history_range", 
 MCP_SETUP = tuple(MCP + tool for tool in ("list_automations", "list_dashboards", "get_dashboard_config",
                                           "list_view_sections", "list_dashboard_backups", "get_error_log"))
 
+# The tools of the same server that change something: Codex asks before each call ("prompt").
+MCP_CONTROL = tuple(MCP + tool for tool in ("entity_action", "call_service_tool", "restart_ha"))
+MCP_DASHBOARD = tuple(MCP + tool for tool in (
+    "set_dashboard_config", "add_card", "update_card", "remove_card", "move_card", "add_view", "remove_view",
+    "update_view", "restore_dashboard"))
+
 # Each request kind and the tools that serve it on each way in. An empty tuple means not available.
 WAYS_IN = {
     "Read an entity's state or find an entity": {
@@ -49,7 +55,9 @@ WAYS_IN = {
         SERVICE: ("home_assistant_data.history", "home_assistant_data.statistics", *MCP_HISTORY)},
     "Read automations, dashboards or the error log": {PAGE: MCP_SETUP, APP: MCP_SETUP, SERVICE: MCP_SETUP},
     "Control a device or call a service": {
-        PAGE: ("home_assistant_call.call",), APP: ("home_assistant_call.call",), SERVICE: ("home_assistant_call.call",)},
+        PAGE: ("home_assistant_call.call", *MCP_CONTROL), APP: ("home_assistant_call.call", *MCP_CONTROL),
+        SERVICE: ("home_assistant_call.call", *MCP_CONTROL)},
+    "Change a dashboard": {PAGE: MCP_DASHBOARD, APP: MCP_DASHBOARD, SERVICE: MCP_DASHBOARD},
     "Send a notification": {
         PAGE: ("home_assistant_call.call",), APP: ("home_assistant_call.call",), SERVICE: ("home_assistant_call.call",)},
     "Ask the owner a question or report the turn's state": {
@@ -65,8 +73,10 @@ WAYS_IN["Propose a schedule"] = {
     APP: NONE,
     SERVICE: ("codex_scheduling.propose_schedule", "codex_scheduling.list_schedules")}
 
-# The one tool that changes the house: Codex asks for it each time, so only a launch that can ask gets it.
+# The app's own tool that changes the house: Codex asks for it each time, so only a launch that can ask gets it.
 CALL_TOOL = "home_assistant_call.call"
+# Every tool Codex asks about before each call ("prompt"); every other tool is approved ahead.
+ASKING_TOOLS = {CALL_TOOL, *MCP_CONTROL, *MCP_DASHBOARD}
 
 CONFIG = re.compile(r"mcp_servers\.([a-z_]+)\.(.+?)=(.*)", re.S)
 
@@ -191,12 +201,12 @@ class WaysInTests(unittest.TestCase):
     def test_the_chatgpt_app_gets_exactly_the_tools_in_the_table(self):
         self.assertEqual(self.app, table_tools(APP))
 
-    def test_the_app_asks_for_the_call_tool_each_time_and_approves_only_its_read_tool(self):
-        """In the app as on the page, the call tool asks each time ("prompt") and the read tool is approved ahead."""
+    def test_the_app_asks_for_each_change_and_approves_only_the_read_tools(self):
+        """In the app as on the page, every tool that changes something asks each time ("prompt"); reads are approved ahead."""
         for name, settings in registered_servers(app_args()).items():
             for tool in offered_tools(settings):
                 with self.subTest(tool=f"{name}.{tool}"):
-                    expected = "prompt" if f"{name}.{tool}" == CALL_TOOL else "approve"
+                    expected = "prompt" if f"{name}.{tool}" in ASKING_TOOLS else "approve"
                     self.assertEqual(settings.get(f"tools.{tool}.approval_mode"), expected)
 
     def test_both_page_launches_register_the_same_tools(self):
@@ -207,12 +217,12 @@ class WaysInTests(unittest.TestCase):
         """
         self.assertEqual(tools_of(unattended_args()), self.page - {CALL_TOOL})
 
-    def test_every_page_tool_is_preapproved_except_the_call_tool(self):
-        """A read tool is approved ahead; the call tool asks each time ("prompt"), so the person is the gate."""
+    def test_every_page_tool_is_preapproved_except_the_tools_that_change_something(self):
+        """A read tool is approved ahead; a tool that changes something asks each time ("prompt"), so the person is the gate."""
         for name, settings in registered_servers(page_args()).items():
             for tool in offered_tools(settings):
                 with self.subTest(tool=f"{name}.{tool}"):
-                    expected = "prompt" if f"{name}.{tool}" == CALL_TOOL else "approve"
+                    expected = "prompt" if f"{name}.{tool}" in ASKING_TOOLS else "approve"
                     self.assertEqual(settings.get(f"tools.{tool}.approval_mode"), expected)
 
     def test_a_task_from_the_service_action_launches_with_the_page_tools(self):

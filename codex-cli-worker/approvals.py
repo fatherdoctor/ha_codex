@@ -15,6 +15,8 @@ import time
 import uuid
 from typing import Any, Callable, TextIO
 
+import hass_mcp
+
 
 APPROVAL_GONE = "This permission request is no longer waiting for an answer."
 DISPLAY_LIMIT = 32000
@@ -26,8 +28,10 @@ FILE_APPROVAL = "item/fileChange/requestApproval"
 TOOL_APPROVAL = "mcpServer/elicitation/request"
 
 # The (server, tool) pairs whose action requests get a page card: the plain Home Assistant tool that server.py
-# registers as home_assistant_call. A question from any other server or tool is still declined (_elicitation_refusal).
-TOOL_CARDS = frozenset({("home_assistant_call", "call")})
+# registers as home_assistant_call, and the write tools of the bundled Home Assistant MCP server (hass_mcp.py), which
+# Codex asks about before each call. A question from any other server or tool is still declined (_elicitation_refusal).
+TOOL_CARDS = frozenset({("home_assistant_call", "call"),
+                        *((hass_mcp.SERVER_NAME, tool) for tool in hass_mcp.WRITE_TOOLS)})
 
 # Codex 0.166.0 asks before a tool call with a form whose _meta has codex_approval_kind "mcp_tool_call" and the full
 # arguments in tool_params. The tool name is only in its message, which for a tool outside the ChatGPT apps is always
@@ -146,12 +150,76 @@ def _target_names(domain: str, target: Any) -> list[str]:
             names += [f"every {domain} {_TARGET_WORDS[key]} {item}" for item in ids]
     return names
 
+# The target fields a Home Assistant action's data can hold at its top level.
+_TARGET_FIELDS = ("entity_id", *_TARGET_WORDS)
+
+def _data_targets(domain: str, data: dict[str, Any]) -> list[str]:
+    """Name what an action reaches from the target fields at the top level of its data (the REST API's form)."""
+    return _target_names(domain, {key: data[key] for key in _TARGET_FIELDS if key in data})
+
+_SERVICE_NAME_PART = re.compile(r"[a-z0-9_]+")
+
+_ENTITY_ACTIONS = {"on": "turn_on", "off": "turn_off", "toggle": "toggle"}
+
+# What each dashboard tool of hass-mcp does, in the card's words.
+_DASHBOARD_WORDS = {
+    "set_dashboard_config": "Replace the whole configuration of a dashboard.",
+    "add_card": "Add a card to a dashboard.",
+    "update_card": "Replace a card on a dashboard.",
+    "remove_card": "Remove a card from a dashboard.",
+    "move_card": "Move a card on a dashboard.",
+    "add_view": "Add a view to a dashboard.",
+    "remove_view": "Remove a view from a dashboard.",
+    "update_view": "Change a view of a dashboard.",
+    "restore_dashboard": "Restore a dashboard from one of its backups.",
+}
+
+def _hass_mcp_confirmation(tool: str, parsed: Any) -> dict[str, str] | None:
+    """Plain words for a write tool of the Home Assistant MCP server, or None when the arguments do not fit its form.
+
+    entity_action and call_service_tool are Home Assistant actions and get the same words as home_assistant_call.
+    entity_action sends {"entity_id": entity_id, **params} (hass-mcp 0.6.0, app/server.py), so a target inside
+    params replaces the entity id, and the card names what params holds.
+    """
+    arguments = parsed if isinstance(parsed, dict) else {}
+    if tool == "restart_ha":
+        return _service_confirmation("homeassistant", "restart", [])
+    if tool == "entity_action":
+        entity_id, params = arguments.get("entity_id"), arguments.get("params") or {}
+        service = _ENTITY_ACTIONS.get(arguments.get("action"))
+        if not isinstance(entity_id, str) or not _ENTITY_ID.fullmatch(entity_id) or not service or not isinstance(params, dict):
+            return None
+        domain = entity_id.split(".")[0]
+        return _service_confirmation(domain, service, _data_targets(domain, {"entity_id": entity_id, **params}))
+    if tool == "call_service_tool":
+        domain, service, data = arguments.get("domain"), arguments.get("service"), arguments.get("data") or {}
+        if not all(isinstance(name, str) and _SERVICE_NAME_PART.fullmatch(name) for name in (domain, service)):
+            return None
+        if not isinstance(data, dict):
+            return None
+        return _service_confirmation(domain, service, _data_targets(domain, data))
+    if tool in _DASHBOARD_WORDS:
+        url_path = arguments.get("url_path")
+        where = f"The dashboard {url_path}." if isinstance(url_path, str) and url_path else "The default dashboard."
+        if arguments.get("dry_run") is True:
+            effect = "Nothing changes: this is a dry run that only shows what the change would be."
+        else:
+            effect = "The dashboard changes at once; open it to see the change."
+        return {"what": _DASHBOARD_WORDS[tool], "where": where, "effect": effect}
+    return None
+
+
 def _tool_confirmation(tool: str, arguments: str) -> dict[str, str]:
     """Plain words for a tool request: the Home Assistant action it names, else the tool and its arguments."""
     try:
         parsed = json.loads(arguments)
     except ValueError:
         parsed = None
+    server, _, name = tool.partition(".")
+    if server == hass_mcp.SERVER_NAME:
+        words = _hass_mcp_confirmation(name, parsed)
+        if words:
+            return words
     service = parsed.get("service") if isinstance(parsed, dict) else None
     call = _SERVICE_NAME.fullmatch(service) if isinstance(service, str) else None
     if call:

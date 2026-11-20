@@ -6,13 +6,14 @@ hass-mcp.requirements.txt (every package pinned with its SHA-256 for amd64 and a
 
 What Codex is offered:
 
-- Only the tools in READ_TOOLS. They read states, history, statistics, the error log, automations and
+- The tools in READ_TOOLS. They read states, history, statistics, the error log, automations and
   dashboards, and change nothing, so each is approved ahead ("approve"), like the app's own read tools.
-- No tool in WRITE_TOOLS. Codex's enabled_tools list leaves them out, so Codex never sees them; house
-  changes stay on home_assistant_call, which asks before each call. A later release can offer them with
-  the approval mode "prompt" and a card on the chat page.
-- A tool that a later hass-mcp adds is in neither list, so enabled_tools leaves it out too, and the test
-  of the pinned tool list fails until someone sorts it.
+- The tools in WRITE_TOOLS, each with the approval mode "prompt": Codex asks before every call and keeps no
+  remembered answer, the same as home_assistant_call. The question becomes a card on the chat page with the
+  tool's arguments in full and plain words for what the call does (approvals.py, TOOL_CARDS). The permission
+  mode of the chat decides who answers it, as for home_assistant_call.
+- A tool that a later hass-mcp adds is in neither list, so enabled_tools leaves it out, and the test of the
+  pinned tool list fails until someone sorts it.
 
 The server needs a Home Assistant token. It never reaches a command Codex runs:
 
@@ -83,7 +84,7 @@ def enabled(options: dict[str, Any]) -> bool:
 
 
 def settings(python: str, relay: bool = False) -> dict[str, Any]:
-    """Return the server's Codex settings: the launcher, the read tools approved ahead, nothing else offered."""
+    """Return the server's Codex settings: the launcher, the read tools approved ahead, the write tools on prompt."""
     result: dict[str, Any] = {
         "command": python,
         "args": [LAUNCHER],
@@ -93,10 +94,14 @@ def settings(python: str, relay: bool = False) -> dict[str, Any]:
         "required": False,
         "startup_timeout_sec": 20,
         "tool_timeout_sec": 90,
-        "enabled_tools": list(READ_TOOLS),
+        # An allow list: a tool in neither list is never offered.
+        "enabled_tools": [*READ_TOOLS, *WRITE_TOOLS],
     }
     for tool in READ_TOOLS:
         result[f"tools.{tool}.approval_mode"] = "approve"
+    # "prompt", never "auto": with "auto" Codex's question offers "Allow for this session" (server.call_mcp_args).
+    for tool in WRITE_TOOLS:
+        result[f"tools.{tool}.approval_mode"] = "prompt"
     return result
 
 
