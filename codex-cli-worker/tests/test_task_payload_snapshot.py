@@ -1,9 +1,11 @@
 """Snapshots of what a chat's record looks like to everyone who reads it, for each way an exchange can end.
 
 For a completed answer, a question with choices, a reply that continues the chat, a failed start and a cancel, this
-test keeps four things: the codex_cli_task_result event Home Assistant gets, the task as the API sends it (full and as
-a list summary), the chat's task.json, and its line in the task index. Times, ids and the temporary folder are
-replaced by placeholders, so the snapshot holds only the shape and the values the worker chose.
+test keeps four things: the codex_cli_task_result event Home Assistant gets (its name and its data), the task as the
+API sends it (full and as a list summary), the chat's task.json, and its line in the task index. Times, ids and the
+temporary folder are replaced by placeholders, so the snapshot holds only the shape and the values the worker chose.
+Turn ids become <turn-1>, <turn-2> and so on in the order they first appear, so a record whose turns share one id, or
+swap ids, does not match.
 
 The snapshot is tests/fixtures/task_payload_snapshot.json. A change that moves code must leave it equal. A change that
 means to alter one of these records writes it again with CODEX_UPDATE_SNAPSHOTS=1 and shows the difference in its
@@ -59,7 +61,8 @@ class TaskPayloadSnapshotTests(unittest.TestCase):
         self.stack.enter_context(patch.object(server, "start_background_task"))
         self.events: list[dict] = []
         self.stack.enter_context(patch.object(
-            server, "fire_ha_event", side_effect=lambda _type, data: (self.events.append(data), (True, ""))[1]))
+            server, "fire_ha_event",
+            side_effect=lambda event_type, data: (self.events.append({"event": event_type, "data": data}), (True, ""))[1]))
         self.client = server.app.test_client()
         self.headers = {"Authorization": "Bearer test-token"}
         session_dir = self.root / "codex" / "sessions" / "2026" / "09" / "20"
@@ -101,19 +104,23 @@ class TaskPayloadSnapshotTests(unittest.TestCase):
             "summary": server.task_payload(task, summary=True),
             "task_json": saved,
             "index": index[task_id],
-        }, task_id)
+        }, task_id, {})
 
-    def placeholders(self, value, task_id: str):
-        """Replace the chat's id, turn ids, times and the temporary folder with fixed words."""
+    def placeholders(self, value, task_id: str, turns: dict[str, str]):
+        """Replace the chat's id, turn ids, times and the temporary folder with fixed words.
+
+        `turns` maps each turn id to its numbered placeholder, in the order the ids first appear in the record.
+        Every 32-hex-digit id in these records is a turn id (the chat's own id is replaced first).
+        """
         if isinstance(value, dict):
-            return {key: self.placeholders(item, task_id) for key, item in value.items()}
+            return {key: self.placeholders(item, task_id, turns) for key, item in value.items()}
         if isinstance(value, list):
-            return [self.placeholders(item, task_id) for item in value]
+            return [self.placeholders(item, task_id, turns) for item in value]
         if isinstance(value, str):
             if TIME_RE.match(value):
                 return "<time>"
             value = value.replace(str(self.root), "<root>").replace(task_id, "<task>")
-            return HEX_ID_RE.sub("<id>", value)
+            return HEX_ID_RE.sub(lambda m: turns.setdefault(m.group(0), f"<turn-{len(turns) + 1}>"), value)
         return value
 
     def check(self, name: str, record: dict) -> None:
@@ -125,6 +132,19 @@ class TaskPayloadSnapshotTests(unittest.TestCase):
             return
         self.assertIn(name, stored, "no snapshot yet: run once with CODEX_UPDATE_SNAPSHOTS=1")
         self.assertEqual(json.loads(json.dumps(record)), stored[name])
+
+    def test_placeholders_keep_turns_apart(self):
+        """Two turn ids get two placeholders, numbered in order, and the same id gets the same one each time."""
+        first, second = "a" * 32, "b" * 32
+        self.assertEqual(self.placeholders([first, second, first], "task", {}), ["<turn-1>", "<turn-2>", "<turn-1>"])
+
+    def test_check_compares_the_event_name(self):
+        """A record whose event has another name does not match the snapshot."""
+        stored = json.loads(SNAPSHOT.read_text(encoding="utf-8"))["completed"]
+        renamed = json.loads(json.dumps(stored))
+        renamed["events"][0]["event"] = "codex_cli_task_renamed"
+        with patch.dict(os.environ, {"CODEX_UPDATE_SNAPSHOTS": ""}), self.assertRaises(AssertionError):
+            self.check("completed", renamed)
 
     def test_completed_answer(self):
         """A completed exchange: its event, payload and saved files."""
