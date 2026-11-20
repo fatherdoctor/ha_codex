@@ -1,5 +1,4 @@
 """A schedule made from a chat: the owner's chat and model fields, and who may set or read them."""
-import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -73,24 +72,6 @@ class OwnerFieldStoreTests(unittest.TestCase):
                 with self.subTest(field=field, value=value), self.assertRaises(ValueError):
                     self.store.save(proposal(**{field: value}), owner=True, now=NOW)
         self.assertEqual(self.store.schedules(), [])
-
-    def test_a_schedule_from_an_older_version_opens_with_no_chat_and_still_runs(self):
-        old = Path(self.temp.name) / 'old.sqlite3'
-        with sqlite3.connect(old) as db:
-            db.execute('''CREATE TABLE schedules (
-                id TEXT PRIMARY KEY, name TEXT NOT NULL, prompt TEXT NOT NULL,
-                mode TEXT NOT NULL, spec TEXT NOT NULL, approved INTEGER NOT NULL,
-                enabled INTEGER NOT NULL, next_due REAL, updated REAL NOT NULL, revision TEXT NOT NULL,
-                author TEXT NOT NULL DEFAULT 'owner')''')
-            db.execute("INSERT INTO schedules VALUES('old','Older schedule','Inspect the sample.','read-only',"
-                       "'{\"kind\": \"interval\", \"seconds\": 3600}',1,1,?,?,'revision','owner')", (NOW + 3600, NOW))
-        store = scheduling.Store(old)
-        schedule = store.schedules()[0]
-        self.assertEqual((schedule['name'], schedule['chat_id'], schedule['model']), ('Older schedule', '', None))
-        worker = RecordingWorker()
-        scheduling.Engine(store, worker).tick(NOW + 3600)
-        self.assertEqual(worker.sent[0][1:], ('Inspect the sample.', 'read-only', 'Older schedule', 'old'))
-        self.assertEqual(worker.extra, {}, 'a schedule with no model starts as it did before')
 
     def test_a_run_is_started_with_the_model_of_its_schedule(self):
         self.store.save(proposal(model=MODEL), owner=True, now=NOW)

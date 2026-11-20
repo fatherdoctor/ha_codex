@@ -1133,11 +1133,6 @@ def ensure_runtime_files() -> None:
         ),
         encoding="utf-8",
     )
-    # Retire only a byte-identical copy of the formerly bundled instructions.
-    try:
-        protected_policy.remove_legacy_instructions(CODEX_HOME)
-    except OSError:
-        print("Could not retire legacy bundled instructions.", flush=True)
 
 
 def save_task_index() -> None:

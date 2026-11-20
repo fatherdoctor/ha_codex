@@ -64,14 +64,6 @@ class ProtectedPolicyTests(unittest.TestCase):
             with self.subTest(path=path.name):
                 self.assertTrue(policy.policy_problem({}, path))
 
-    def test_owner_home_instructions_are_not_replaced(self) -> None:
-        home = self.root / "codex-home"
-        home.mkdir()
-        target = home / "AGENTS.md"
-        target.write_text("Owner instructions.", encoding="utf-8")
-        self.assertFalse(policy.remove_legacy_instructions(home))
-        self.assertEqual(target.read_text(), "Owner instructions.")
-
     def test_runtime_config_never_says_never(self) -> None:
         """The Codex configuration the worker writes asks on request and has no approval-free profile."""
         home = self.root / "codex-home"
