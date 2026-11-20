@@ -12,6 +12,9 @@ turn. This module, not the bridge, holds the checks:
 After a call whose target is only entity ids, the worker reads up to MAX_READBACK of them back,
 so Codex needs no second tool call.
 
+The same socket answers the bridge's read-only find tool (a request with "tool": "find"), under the same chat or
+key check; ha_find.py holds that search, and it sends no service call.
+
 It refuses no service by name: the person's answer to Codex's request is the gate.
 """
 from __future__ import annotations
@@ -27,6 +30,7 @@ from pathlib import Path
 
 import requests
 
+import ha_find
 import name_match
 import tool_threads
 from relay_reads import ATTRIBUTES, PRIVATE, fetch_states, password_state
@@ -176,6 +180,14 @@ class HomeAssistantCall:
         if task_id is None:
             return {"status": "unavailable", "message": "No running exchange that a person attends: nothing was sent"}
         arguments = payload.get("arguments")
+        tool = payload.get("tool", "call")
+        if tool == "find":
+            try:
+                return ha_find.find(arguments, self.worker.ha_token())
+            except ha_find.FindRefused as refusal:
+                return {"status": "refused", "message": str(refusal)}
+        if tool != "call":
+            return {"status": "refused", "message": "Unknown tool: nothing was sent"}
         try:
             if isinstance(arguments, dict) and "name" in arguments:
                 arguments = self.target_by_name(arguments)

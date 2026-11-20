@@ -150,7 +150,9 @@ class RelayLaunchTests(unittest.TestCase):
         values = [value for value in configured(self.command()) if value.startswith(CALL_PREFIX)]
         self.assertTrue(values)
         for value in values:
-            self.assertNotIn('"approve"', value)
+            if ".tools.find." not in value:  # find only reads (CX-05-FIND); call must ask each time.
+                self.assertNotIn('"approve"', value)
+        self.assertIn(CALL_PREFIX + 'tools.call.approval_mode="prompt"', values)
         self.assertEqual([value for value in configured(self.command()) if "default_tools_approval_mode" in value], [])
 
     def test_the_read_tool_keeps_its_own_key(self):
@@ -267,7 +269,7 @@ class RelayToolEndToEndTests(unittest.TestCase):
                               env=self.bridge_env, capture_output=True, text=True, timeout=30, check=False)
         self.assertEqual(done.returncode, 0, done.stderr)
         answers = [json.loads(line) for line in done.stdout.splitlines()]
-        self.assertEqual([tool["name"] for tool in answers[1]["result"]["tools"]], ["call"])
+        self.assertEqual([tool["name"] for tool in answers[1]["result"]["tools"]], ["call", "find"])
         return [json.loads(answer["result"]["content"][0]["text"]) for answer in answers[2:]]
 
     def test_light_turn_off_sends_that_entity_and_nothing_else(self):

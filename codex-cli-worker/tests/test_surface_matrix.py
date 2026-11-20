@@ -33,6 +33,8 @@ NONE = ()
 WAYS_IN = {
     "Read an entity's state or find an entity": {
         PAGE: ("home_assistant.verify",), APP: ("home_assistant_relay.read",), SERVICE: ("home_assistant.verify",)},
+    "Find a device by name, area or domain": {
+        PAGE: ("home_assistant_call.find",), APP: ("home_assistant_call.find",), SERVICE: ("home_assistant_call.find",)},
     "Read history or long-term statistics": {
         PAGE: ("home_assistant_data.history", "home_assistant_data.statistics"), APP: NONE,
         SERVICE: ("home_assistant_data.history", "home_assistant_data.statistics")},
@@ -55,6 +57,8 @@ WAYS_IN["Propose a schedule"] = {
 
 # The one tool that changes the house: Codex asks for it each time, so only a launch that can ask gets it.
 CALL_TOOL = "home_assistant_call.call"
+# Its read-only find tool comes with it on the same server: approved ahead, and only where the call tool is.
+FIND_TOOL = "home_assistant_call.find"
 
 CONFIG = re.compile(r"mcp_servers\.([a-z_]+)\.(.+?)=(.*)", re.S)
 
@@ -177,9 +181,10 @@ class WaysInTests(unittest.TestCase):
     def test_both_page_launches_register_the_same_tools(self):
         """A turn is attended or not by its source, never by way in; both launches give the same read tools.
 
-        The unattended launch has nobody to answer a permission request, so it never gets the call tool.
+        The unattended launch has nobody to answer a permission request, so it never gets the call tool, nor the
+        find tool on the call tool's server.
         """
-        self.assertEqual(tools_of(unattended_args()), self.page - {CALL_TOOL})
+        self.assertEqual(tools_of(unattended_args()), self.page - {CALL_TOOL, FIND_TOOL})
 
     def test_every_page_tool_is_preapproved_except_the_call_tool(self):
         """A read tool is approved ahead; the call tool asks each time ("prompt"), so the person is the gate."""

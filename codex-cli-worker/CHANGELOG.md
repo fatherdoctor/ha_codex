@@ -1,6 +1,10 @@
 # Changelog
 
 ## 0.4.0 (unreleased)
+- Codex finds your devices the way you name them. A new read-only tool, `find`, searches by name, room or kind of
+  device ("the overhead lamp in the media room") and gives Codex the exact entity to use. Codex uses it without
+  asking you. Codex still asks you before each change. When a search finds nothing, Codex keeps looking on its own
+  before it asks you which device you mean.
 - The chat page no longer shows the lead agent: an old chat that the removed lead channel started has no "Started by lead" label,
   and the schedule editor no longer mentions lead runs.
 - The mark in the chat page header now follows the page's theme (the Home Assistant theme when the page runs inside

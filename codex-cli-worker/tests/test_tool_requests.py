@@ -141,7 +141,9 @@ class BridgesSendTheThreadId(unittest.TestCase):
         self.assertEqual(self.call(ha_data_mcp, "fetch", "history")[-1], CHAT)
         with patch.dict("os.environ", {}, clear=False) as environment:
             environment.pop("HA_CALL_CAPABILITY", None)
-            self.assertEqual(self.call(ha_call_mcp, "call", "call")[-1], CHAT)
+            # The call bridge's arguments are (arguments, thread id, tool): find goes the same way as call.
+            self.assertEqual(self.call(ha_call_mcp, "call", "call")[1:], (CHAT, "call"))
+            self.assertEqual(self.call(ha_call_mcp, "call", "find")[1:], (CHAT, "find"))
 
     def test_the_call_bridge_sends_the_key_only_under_remote_control(self):
         sent = []

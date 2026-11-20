@@ -390,6 +390,26 @@ the call of up to 5 of them, so Codex does not need a second step to read it bac
 that moves can still show its old state there. The answer names the entity that changed. If Home Assistant does
 not answer these reads, the answer can come up to 40 seconds late; the call itself is sent once.
 
+### Finding a device: the `find` tool
+
+From **0.4.0**, the same server has a second tool, `home_assistant_call` `find`. It only reads, so Codex uses it
+without a question. It searches your entities by the words you use, by area or by domain, and answers with up to
+25 rows: the entity id, the name, the area and the state, the closest first. Codex then puts the exact entity id in
+the call's target. The search is loose on purpose, because it changes nothing:
+
+- Small words such as "the" and "in" are dropped. Each other word can fit the entity's name, entity id, area or
+  domain, also as the start of a longer word or without a trailing "s".
+- A device word fits the whole domain: "lamp" or "light" fits every light, "TV" every media player.
+- `area` alone lists an area's entities, and `domain` alone lists a domain's entities.
+- When no entity holds every word, the answer holds the entities that hold the most words, and says so.
+- Credential-like and password-mode entities never show.
+
+`find` makes two reads with the worker's access: the state list and one fixed template that gives each entity's
+area. It sends no service call. It works only where the `call` tool works, for the same running chat.
+
+If `find` and the name both miss, Codex keeps looking on its own before it asks you. It tries other words, lists
+the room or the domain, and reads the registries and configuration files that it can read.
+
 A chat holds no key for the app's tools (0.4). Each tool request carries the chat's thread id, which Codex adds
 to every tool call, and the worker answers it only while that chat's exchange runs. In Read only, Default and
 Auto-review a command cannot connect to the tool sockets at all: the sandbox has no network, and Codex denies the
@@ -419,6 +439,7 @@ Codex can be reached three ways: the chat page, the ChatGPT app paired through r
 | Request | Chat page | ChatGPT app | codex_cli.start_task |
 |---|---|---|---|
 | Read an entity's state or find an entity | `home_assistant.verify` | `home_assistant_relay.read` | `home_assistant.verify` |
+| Find a device by name, area or domain | `home_assistant_call.find` | `home_assistant_call.find` | `home_assistant_call.find` |
 | Read history or long-term statistics | `home_assistant_data.history`, `home_assistant_data.statistics` | not available | `home_assistant_data.history`, `home_assistant_data.statistics` |
 | Control a device or call a service | `home_assistant_call.call` | `home_assistant_call.call` | `home_assistant_call.call` |
 | Send a notification | `home_assistant_call.call` | `home_assistant_call.call` | `home_assistant_call.call` |

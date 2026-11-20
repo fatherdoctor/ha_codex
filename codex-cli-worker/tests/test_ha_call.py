@@ -276,9 +276,12 @@ class BridgeTests(CallTestCase):
 
     def test_the_tool_is_marked_as_one_that_changes_things(self):
         tools = ha_call_mcp.respond({"method": "tools/list"})["tools"]
-        self.assertEqual([tool["name"] for tool in tools], ["call"])
+        self.assertEqual([tool["name"] for tool in tools], ["call", "find"])
         self.assertFalse(tools[0]["annotations"]["readOnlyHint"])
         self.assertTrue(tools[0]["annotations"]["destructiveHint"])
+        # find only reads (CX-05-FIND).
+        self.assertTrue(tools[1]["annotations"]["readOnlyHint"])
+        self.assertFalse(tools[1]["annotations"]["destructiveHint"])
 
 
 class ByNameTests(CallTestCase):
@@ -426,8 +429,11 @@ class LaunchTests(unittest.TestCase):
                 for value in configured(args):
                     if value.startswith("mcp_servers.home_assistant_call."):
                         self.assertNotIn("default_tools_approval_mode", value)
-                        if "approval_mode" in value:
+                        if "tools.call.approval_mode" in value:
                             self.assertEqual(value, 'mcp_servers.home_assistant_call.tools.call.approval_mode="prompt"')
+                        elif "approval_mode" in value:
+                            # Only the read-only find tool is approved ahead (CX-05-FIND).
+                            self.assertEqual(value, 'mcp_servers.home_assistant_call.tools.find.approval_mode="approve"')
 
     def test_no_read_tool_holds_the_call_key(self):
         for value in configured(self.launches()["page"]):

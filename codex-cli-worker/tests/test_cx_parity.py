@@ -50,15 +50,32 @@ class DeviceCommandSpeedTests(unittest.TestCase):
     def test_rules_send_a_device_command_to_the_home_assistant_tools(self):
         rules = server.PAGE_INSTRUCTIONS
         line = next(line for line in rules.splitlines() if line.startswith('For a device command'))
-        # One call by name that acts and reads back (CX-SPEED cut 1); find only when no entity fits.
-        self.assertIn('make one home_assistant_call call with the service, the name the user gave', line)
-        self.assertIn('"name":"kitchen ceiling"', line)
-        self.assertIn('ask the owner which one and call again with that target.entity_id', line)
-        self.assertLess(line.index('home_assistant_call call'), line.index('home_assistant.verify find'))
+        # find first, then one call with the exact entity id that acts and reads back (CX-05-FIND).
+        self.assertIn('first find the device with the home_assistant_call find tool', line)
+        self.assertIn('{"query":"kitchen ceiling"}', line)
+        self.assertIn('"target":{"entity_id":"light.kitchen_ceiling"}', line)
+        self.assertLess(line.index('home_assistant_call find'), line.index('make one home_assistant_call call'))
+        # The call by name stays as the fallback.
+        self.assertIn('A call with name (the user\'s words) in place of target still works as a fallback', line)
         self.assertNotIn('home_assistant.verify entity', line)
         self.assertNotIn('home_assistant_actions', rules)
-        self.assertIn('Do not search files under /config or .storage or run shell commands to find an entity', line)
         self.assertIn('{"operation":"find","name":"kitchen ceiling","domain":"light"}', rules)
+
+    def test_when_both_searches_miss_codex_keeps_looking_before_it_asks(self):
+        """David 2026-11-19: when find and the name match both miss, Codex searches on its own, then asks."""
+        rules = server.PAGE_INSTRUCTIONS
+        line = next(line for line in rules.splitlines() if line.startswith('For a device command'))
+        keep_looking = line.index('If find and the name both miss, keep looking on your own before you ask the owner')
+        self.assertIn('list the room\'s or the domain\'s entities with find', line)
+        self.assertIn('read the entity, device and area registries and the configuration files you can read', line)
+        self.assertLess(keep_looking, line.index('Ask the owner only when all of that finds no device'))
+        # The old text that sent Codex to the owner after one search, or kept it out of the files, is gone.
+        self.assertNotIn('once, then ask', line)
+        self.assertNotIn('Do not search files under /config or .storage', line)
+        relay = server.remote_control_instructions({})
+        self.assertIn('home_assistant_call find tool', relay)
+        self.assertIn('keep looking on your own', relay)
+        self.assertLess(relay.index('keep looking on your own'), relay.index('before you ask the owner'))
 
     def test_rules_no_longer_ask_for_the_owner_file_in_each_message(self):
         rules = server.PAGE_INSTRUCTIONS
