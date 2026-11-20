@@ -107,9 +107,19 @@ jobs:
           up="${tag#"$TAG_PREFIX"}"
           say "Our patches ($PATCHES_BRANCH) are version $ours, built on upstream $base. Upstream: $tag."
 
+          # A watch that cannot fire must fail, not stay green. Before UPSTREAM_BASE, the base was cut from our own
+          # version (0.3.x), which sorts after every upstream 0.1.x release, so each run said "Up to date". Refuse a
+          # base that is not an upstream release tag, and a base that sorts after upstream's latest release.
+          [[ "$base" =~ ^[0-9]+(\.[0-9]+)*$ ]] || { say "UPSTREAM_BASE '$base' is not a version number: this watch cannot fire."; exit 1; }
+          git ls-remote --exit-code --tags "https://github.com/$UPSTREAM_REPO.git" "refs/tags/$TAG_PREFIX$base" >/dev/null \
+            || { say "UPSTREAM_BASE $base is not an upstream release tag ($TAG_PREFIX$base): this watch cannot fire."; exit 1; }
           if [ -z "${INPUT_REF:-}" ]; then
             newest=$(printf '%s\n%s\n' "$base" "$up" | sort -V | tail -1)
-            if [ "$up" = "$base" ] || [ "$newest" = "$base" ]; then say "Up to date: nothing to do."; exit 0; fi
+            if [ "$up" = "$base" ]; then say "Up to date: nothing to do."; exit 0; fi
+            if [ "$newest" = "$base" ]; then
+              say "UPSTREAM_BASE $base sorts after upstream's latest release $tag: this watch cannot fire. Set UPSTREAM_BASE to the upstream release this fork is built on."
+              exit 1
+            fi
           fi
           title="Upstream $tag released - rebase patches"
 
