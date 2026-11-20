@@ -25,6 +25,16 @@ _LOGGER = logging.getLogger(__name__)
 
 ISSUE_NOT_SIGNED_IN = "codex_not_signed_in"
 ISSUE_REMOTE_CONTROL_CHANGE = "remote_control_config_change"
+# Every repair issue the coordinator raises. They are not tied to the config entry, so unload and removal delete
+# them: an owner who removes the integration must not keep a "sign in" repair.
+REPAIR_ISSUES = (ISSUE_NOT_SIGNED_IN, ISSUE_REMOTE_CONTROL_CHANGE, ISSUE_GITHUB_ACCESS_LOST)
+
+
+def async_delete_repair_issues(hass: HomeAssistant) -> None:
+    """Delete every repair issue this integration raises."""
+    for issue_id in REPAIR_ISSUES:
+        ir.async_delete_issue(hass, DOMAIN, issue_id)
+
 GITHUB_STATE_WORDS = {
     "near_expiry": "expires within 7 days",
     "expired": "expired",

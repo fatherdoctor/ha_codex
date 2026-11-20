@@ -4,7 +4,9 @@
 
 ha_codex is a public fork (MIT) of moryoav/home-assistant-codex: a Home Assistant app (add-on) that runs the Codex
 CLI against a configuration folder, and a custom integration (`codex_cli`) that exposes it to Home Assistant.
-Pre-release: nothing is tagged or published from this fork yet, and no change here reaches any install by itself.
+Pre-release: the app image is published for each version and tag `v0.3.6` exists, but no version is called stable
+and no GitHub release holds `codex_cli.zip` yet. An install is offered an update only when a merge to `main` changes
+the version.
 
 ## Commands
 
@@ -31,14 +33,14 @@ Pre-release: nothing is tagged or published from this fork yet, and no change he
 | Path | What is there |
 |---|---|
 | `codex-cli-worker/` | the app: `server.py` (API and chat page), `policy.py`, `approvals.py`, `run.sh`, `Dockerfile`, `config.yaml` (options and the app's version) |
-| `codex-cli-worker/policy/` | the permission policy and house rules built into the image |
+| `codex-cli-worker/policy/` | the permission policy built into the image (`policy.json`) |
 | `codex-cli-worker/web/` | the chat page (plain JavaScript and CSS, no build step) |
 | `codex-cli-worker/tests/` | every test: `test_*.py`, the Home Assistant tests in `ha/`, browser checks `browser_*.cjs` |
 | `custom_components/codex_cli/` | the integration; `manifest.json` holds its version |
 | `scripts/` | `build_hacs_release.py`, `fork_release.py` (tag after a lab pass, rollback) |
 | `docs/` | `updates-and-rollback.md`, design notes under `design/` and `designs/` |
 | `ci/` | workflow files staged for the maintainer to copy into `.github/workflows/` |
-| `examples/`, `screenshots/` | the example script; the README screenshots that `SCREENSHOTS.md` says how to retake |
+| `examples/`, `screenshots/` | the example script; the screenshots, which `screenshots/SCREENSHOTS.md` says how to retake |
 
 ## Rules
 
@@ -61,19 +63,20 @@ Pre-release: nothing is tagged or published from this fork yet, and no change he
   under the `## <version> (unreleased)` entry in `codex-cli-worker/CHANGELOG.md` and leaves both version lines alone
   (`scripts/check_version_bump.py` fails it otherwise).
 - Update the documentation a behavior change touches, in the same pull request (the list is in CONTRIBUTING.md).
-- Screenshots are never faked or mocked up; a missing one is listed in `screenshots/NEEDED.md`.
+- Screenshots are never faked or mocked up; a missing one is listed under "Not taken yet" in
+  `screenshots/SCREENSHOTS.md`.
 - Tests and fixtures use invented data only: no real tokens, device codes, logs or Home Assistant configuration.
 - Keep the fork's differences from upstream small and separate, so an upstream release can still be merged.
 
 ## Release
 
-Not released yet: nothing is tagged or published, and the release and image workflows stay disabled until the
-first release is planned. When one is:
+No stable release yet. The image build workflow publishes the app image for each version, and tag `v0.3.6` exists.
+No GitHub release holds `codex_cli.zip` yet: the release workflow stays disabled until the first release is planned.
+When one is:
 
 1. In a pull request titled `Release <version>`, set the same version in `codex-cli-worker/config.yaml` and
-   `custom_components/codex_cli/manifest.json`; a fork version is upstream's version plus one more number, counted
-   from 1 for each upstream release. A beta is `<three numbers>-beta.<n>`, made on the `beta` branch for the test
-   machine only
+   `custom_components/codex_cli/manifest.json`; a version has three numbers. A beta is `<three numbers>-beta.<n>`,
+   made on the `beta` branch for the test machine only
    ([Versions](docs/updates-and-rollback.md#versions)).
 2. The version passes on a Home Assistant OS test machine, and its lab-pass record is committed.
 3. The commit that removes `(unreleased)` from the changelog heading is the one tagged, by the maintainer, with
@@ -87,9 +90,8 @@ first release is planned. When one is:
 - `main`, tags and GitHub releases - the maintainer's, after review and a lab pass.
 - `.github/workflows/` - an agent's token usually cannot push there; put the changed file in `ci/` and say so in
   the pull request. Never enable the release, image build or Pullfrog workflows.
-- `codex-cli-worker/policy/` - what the packaged Codex is allowed to do on an install (`house-rules.md` becomes
-  that Codex's own `AGENTS.md`). It is product code, not guidance for working here; change it only when the task
-  is a policy change, with the review above.
+- `codex-cli-worker/policy/` - what the packaged Codex is allowed to do on an install. It is product code, not
+  guidance for working here; change it only when the task is a policy change, with the review above.
 - `LICENSE`, `codex-cli-worker/web/assets/vendor/` - upstream's and third parties' text.
 - Any real Home Assistant install: nothing in this repository is to be tested against a home that people live in.
 

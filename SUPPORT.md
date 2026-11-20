@@ -1,6 +1,6 @@
 # Support
 
-Thank you for using Codex for Home Assistant. I maintain this project with help from community reports and contributions.
+Thank you for using Codex for Home Assistant. The Backshop maintains this project with help from community reports and contributions.
 
 ## Getting Help
 
@@ -39,4 +39,4 @@ If you believe you found a security vulnerability, do not open a public issue wi
 
 ## Scope of Support
 
-I cannot guarantee an immediate reply. Please keep backups of your Home Assistant configuration and review changes Codex makes before relying on them.
+A reply can take some days. Please keep backups of your Home Assistant configuration and review changes Codex makes before relying on them.

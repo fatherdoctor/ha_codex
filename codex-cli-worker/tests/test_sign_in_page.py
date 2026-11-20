@@ -3,15 +3,19 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import json
 import sys
 import tempfile
 import types
 import unittest
+import unittest.mock
 from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
 
 import yaml
+
+from app_server_fixture import StubAppServer
 
 SERVER_PATH = Path(__file__).resolve().parents[1] / "server.py"
 CONFIG_PATH = Path(__file__).resolve().parents[1] / "config.yaml"
@@ -52,7 +56,6 @@ class _Worker(unittest.TestCase):
         self.stack.enter_context(patch.object(server, "refresh_usage_status_async"))
         self.stack.enter_context(patch.object(server, "create_persistent_notification"))
         self.stack.enter_context(patch.object(server, "dismiss_persistent_notification"))
-        self.stack.enter_context(patch.object(server, "write_login_qr", return_value="/local/x.svg"))
         self.stack.enter_context(patch.object(server, "write_task_log"))
         self.stack.enter_context(patch.object(
             server, "codex_login_status", return_value={"status_ok": False, "has_auth_file": False, "message": ""}))
@@ -258,18 +261,23 @@ class NoPauseTests(_Worker):
 class ModelPinTests(_Worker):
     """With the pin set, every run names the pinned model and nothing else runs."""
 
-    def test_shipped_default_is_the_pinned_model(self):
+    def test_a_fresh_install_pins_nothing(self):
         config = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(config["options"]["model_pin"], server.DEFAULT_MODEL_PIN)
-        self.assertEqual(server.DEFAULT_MODEL_PIN, PIN)
+        self.assertNotIn("model_pin", config["options"])
         self.assertEqual(config["schema"]["model_pin"], "str?")
+        self.assertEqual(server.model_pin(config["options"]), "")
+        execution = server.resolve_chat_settings(server.DEFAULT_CHAT_SETTINGS, config["options"])
+        self.assertEqual(execution["model"], "default")
+
+    def test_an_owner_value_still_pins(self):
+        self.assertEqual(server.model_pin({"model_pin": "gpt-6-astra"}), "gpt-6-astra")
 
     def test_default_resolves_to_the_pin_and_is_passed_to_codex(self):
         execution = server.resolve_chat_settings(server.DEFAULT_CHAT_SETTINGS, self.options)
         self.assertEqual(execution["model"], PIN)
         with patch.object(server, "tasks", {"t": {"turns": [{"execution_settings": execution}]}}):
-            args = server.build_codex_args("t", Path("p"), Path("f"), None)
-        self.assertEqual(args[args.index("--model") + 1], PIN)
+            session = server.create_approval_session("t", StubAppServer("thread"), "Prompt", Path("f"), None, {}, self.options)
+        self.assertEqual(session.thread_params["model"], PIN)
 
     def test_another_model_is_refused_before_anything_runs(self):
         response = self.client.post("/tasks", json={"prompt": "hi", "chat_settings": {"model": "gpt-6-astra"}},
@@ -301,3 +309,28 @@ class ModelPinTests(_Worker):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OldModelPinMigrationTests(unittest.TestCase):
+    """run.sh clears the pin that versions before 0.4 shipped as the default, once; a chosen value stays."""
+
+    RUN_SH = (Path(__file__).resolve().parents[1] / "run.sh").read_text(encoding="utf-8")
+
+    def test_the_old_default_is_dropped_only_while_run_sh_says_it_cleared_it(self):
+        options = {"model_pin": PIN}
+        with patch.object(server, "OPTIONS_PATH", Path(tempfile.mkdtemp()) / "options.json"):
+            server.OPTIONS_PATH.write_text(json.dumps(options), encoding="utf-8")
+            self.assertEqual(server.model_pin(server.read_options()), PIN)
+            with patch.dict(server.os.environ, {"MODEL_PIN_CLEARED": "1"}):
+                self.assertEqual(server.model_pin(server.read_options()), "")
+            server.OPTIONS_PATH.write_text(json.dumps({"model_pin": "gpt-6-astra"}), encoding="utf-8")
+            with patch.dict(server.os.environ, {"MODEL_PIN_CLEARED": "1"}):
+                self.assertEqual(server.model_pin(server.read_options()), "gpt-6-astra")
+
+    def test_run_sh_clears_the_old_default_once_and_logs_it(self):
+        self.assertIn('[ ! -e "${pin_marker}" ]', self.RUN_SH)
+        self.assertIn('= "gpt-6.1-sol" ]', self.RUN_SH)
+        self.assertIn("bashio::addon.option 'model_pin'", self.RUN_SH)
+        self.assertIn("bashio::log.info \"Cleared the old default model pin", self.RUN_SH)
+        # The marker is written before the call, so a failure is not retried on every start.
+        self.assertLess(self.RUN_SH.index(': > "${pin_marker}"'), self.RUN_SH.index("bashio::addon.option 'model_pin'"))

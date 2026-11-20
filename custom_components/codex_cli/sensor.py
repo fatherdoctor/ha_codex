@@ -9,6 +9,7 @@ from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, Sen
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory, PERCENTAGE
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceEntryType
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -55,6 +56,7 @@ class _CodexSensor(CoordinatorEntity[CodexCliCoordinator], SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_{key}"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
+            "entry_type": DeviceEntryType.SERVICE,
             "name": "Codex",
             "manufacturer": "OpenAI",
             "model": "Codex for Home Assistant",

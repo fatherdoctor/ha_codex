@@ -10,6 +10,7 @@ from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
 
+from app_folders import isolated_app_folders
 from test_server import server
 
 PNG = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32).decode()
@@ -23,6 +24,7 @@ class QueueTests(unittest.TestCase):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
+        self.stack.enter_context(isolated_app_folders(server, self.root / "app"))  # the interaction log and others
         for name, value in (("tasks", {}), ("active_task_runners", set()), ("running_processes", {}), ("message_queue", [])):
             self.stack.enter_context(patch.object(server, name, value))
         self.stack.enter_context(patch.object(server, "task_root", return_value=self.root / "tasks"))

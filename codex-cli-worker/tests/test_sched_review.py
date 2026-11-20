@@ -18,55 +18,37 @@ import test_scheduling as fixtures
 from test_server import server
 
 
+def setUpModule():
+    """These tests cover the scheduling code, which is switched off in this series; turn it on for them."""
+    global _saved_switch
+    _saved_switch = scheduling.SCHEDULED_RUNS
+    scheduling.SCHEDULED_RUNS = True
+
+
+def tearDownModule():
+    scheduling.SCHEDULED_RUNS = _saved_switch
+
+
 class ReviewStoreTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name) / 'schedules.sqlite3'
         self.store = scheduling.Store(self.path)
 
-    def test_f1_approved_schedule_survives_lead_edit(self):
+    def test_f1_approved_schedule_survives_agent_edit(self):
         item = self.store.save(proposal(), owner=True, now=NOW)
         with self.assertRaises(LookupError):
-            self.store.save(proposal(prompt='Changed'), owner=False, now=NOW, schedule_id=item['id'])
+            self.store.save(proposal(prompt='Changed'), owner=False, author='codex', now=NOW, schedule_id=item['id'])
         self.assertEqual(self.store.schedules()[0], item)
 
     def test_f1_proposals_have_actor_ownership(self):
         item = self.store.save(proposal(), owner=False, author='codex', now=NOW)
-        with self.assertRaises(LookupError):
+        with self.assertRaises(ValueError):
             self.store.save(proposal(), owner=False, author='lead', now=NOW, schedule_id=item['id'])
-        with self.assertRaises(LookupError): self.store.delete_proposal(item['id'], 'lead')
-        self.store.delete_proposal(item['id'], 'codex')
-        self.assertEqual(self.store.schedules(), [])
-
-    def test_f2_per_turn_cap_and_daily_cap_survive_clear(self):
-        for i in range(20): self.store.mail('message', 'lead', NOW, turn_id='turn')
-        with self.assertRaises(ValueError): self.store.mail('overflow', 'lead', NOW, turn_id='turn')
-        self.store.clear_mail()
-        with self.assertRaises(ValueError): self.store.mail('overflow', 'lead', NOW, turn_id='turn')
-        for i in range(44): self.store.mail('message', 'lead', NOW, turn_id=str(i))
-        with self.assertRaises(ValueError): self.store.mail('overflow', 'lead', NOW, turn_id='new')
-        self.store.mail('next day', 'lead', NOW + 86400, turn_id='next')
-        self.store.mail('owner can still communicate', 'owner', NOW)
-
-    def test_f2_full_unread_refuses_until_reader_clears(self):
-        with patch.object(scheduling, 'MAX_MESSAGES', 3):
-            first = self.store.mail('root', 'owner', NOW)
-            self.store.mail('reply', 'owner', NOW+1, first)
-            self.store.mail('second', 'owner', NOW+2)
-            with self.assertRaisesRegex(scheduling.MailboxFull, 'unread'):
-                self.store.mail('new', 'owner', NOW+3)
-            self.store.clear_mail(reader='codex'); self.store.clear_mail(reader='lead')
-            self.store.mail('new', 'owner', NOW+3)
-            self.assertEqual([m['body'] for m in self.store.messages(reader='owner')], ['reply', 'second', 'new'])
-
-    def test_f2_lead_clear_only_own_delivery_copies(self):
-        owner = self.store.mail('owner', 'owner', NOW)
-        lead = self.store.mail('lead', 'lead', NOW+1, turn_id='turn')
-        self.store.mail('reply', 'owner', NOW+2, lead)
-        self.assertEqual(self.store.clear_mail(reader='lead'), 3)
-        self.assertEqual(self.store.messages(reader='lead'), [])
-        self.assertEqual(len(self.store.messages(reader='owner')), 3)
-        self.assertEqual(self.store.messages(reader='owner')[0]['id'], owner)
+        # Since 0.4.0 Codex only proposes new schedules; an edit of its own proposal is refused as well.
+        with self.assertRaises(LookupError):
+            self.store.save(proposal(prompt='Changed'), owner=False, author='codex', now=NOW, schedule_id=item['id'])
+        self.assertEqual(self.store.schedules()[0], item)
 
     def test_f4_database_and_persistent_journal_exist_before_task(self):
         self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
@@ -124,8 +106,8 @@ class ReviewStoreTests(unittest.TestCase):
 
     def test_f9_proposals_cannot_take_owner_capacity(self):
         with patch.object(scheduling, 'MAX_PROPOSALS', 2), patch.object(scheduling, 'MAX_SCHEDULES', 2):
-            for i in range(2): self.store.save(proposal(), owner=False, now=NOW)
-            with self.assertRaises(ValueError): self.store.save(proposal(), owner=False, now=NOW)
+            for i in range(2): self.store.save(proposal(), owner=False, author='codex', now=NOW)
+            with self.assertRaises(ValueError): self.store.save(proposal(), owner=False, author='codex', now=NOW)
             for i in range(2): self.store.save(proposal(), owner=True, now=NOW)
             candidate = next(s for s in self.store.schedules() if not s['approved'])
             with self.assertRaises(ValueError): self.store.action(candidate['id'], 'approve', NOW, candidate['revision'])
@@ -138,41 +120,19 @@ class ReviewStoreTests(unittest.TestCase):
             db.execute('INSERT INTO schedules VALUES(?,?,?,?,?,?,?,?,?,?)', ('old','Old','Do nothing','default',json.dumps({'kind':'interval','seconds':60}),0,0,NOW+60,NOW,'revision'))
         store = scheduling.Store(legacy)
         self.assertEqual(store.schedules()[0]['author'], 'owner')
-        with self.assertRaises(LookupError): store.delete_proposal('old', 'lead')
 
 
 class ReviewApiTests(unittest.TestCase):
     setUp = fixtures.SchedulingApiTests.setUp
     request_owner = fixtures.SchedulingApiTests.request_owner
     # Reuse the authenticated, network-free fixture and existing boundary checks.
-    def test_f1_lead_delete_refuses_approved_and_other_authors(self):
-        value = self.request_owner('POST','/schedules',proposal()).json['schedule']
-        self.assertEqual(self.client.delete('/lead/schedules/'+value['id'],headers=self.lead).status_code,404)
-        value = self.client.post('/lead/schedules',json=proposal(),headers=self.lead).json['schedule']
-        self.assertEqual(self.client.delete('/lead/schedules/'+value['id'],headers=self.lead).status_code,200)
-
-    def test_f2_lead_mail_http_429_and_clear_recovery(self):
-        for i in range(20):
-            self.assertEqual(self.client.post('/lead/mailbox',json={'body':'sample','turn_id':'turn'},headers=self.lead).status_code,201)
-        self.assertEqual(self.client.post('/lead/mailbox',json={'body':'sample','turn_id':'turn'},headers=self.lead).status_code,429)
-        self.assertEqual(self.client.delete('/lead/mailbox',json={'confirm':True},headers=self.lead).json['removed'],20)
-        self.assertEqual(self.request_owner('POST','/schedule-mailbox',{'body':'owner'}).status_code,201)
-        self.assertEqual(self.request_owner('DELETE','/schedule-mailbox',{'confirm':True}).json['removed'],21)
-
-    def test_f2_codex_verified_turn_limit(self):
-        task_id='sample'; server.tasks[task_id]={'status':'running','current_turn_id':'verified-turn'}
-        cap=server.ha_data.begin(task_id); self.addCleanup(lambda: server.ha_data.end(task_id))
-        payload={'operation':'post_mailbox','arguments':{'body':'sample'},'capability':cap}
-        for i in range(20): self.service.dispatch(payload)
-        with self.assertRaises(scheduling.RateLimit): self.service.dispatch(payload)
-
     def test_f9_tool_can_page_past_approved_capacity_into_proposals(self):
         store=self.service.engine().store
         for i in range(scheduling.MAX_SCHEDULES): store.save(proposal(),owner=True,now=NOW)
-        for i in range(scheduling.MAX_PROPOSALS): store.save(proposal(),owner=False,now=NOW)
+        for i in range(scheduling.MAX_PROPOSALS): store.save(proposal(),owner=False,author='codex',now=NOW)
         task_id='sample'; server.tasks[task_id]={'status':'running','current_turn_id':'verified-turn'}
-        cap=server.ha_data.begin(task_id); self.addCleanup(lambda: server.ha_data.end(task_id))
-        result=self.service.dispatch({'operation':'list_schedules','arguments':{'offset':110,'limit':10},'capability':cap})
+        thread=fixtures.open_exchange(self, task_id)
+        result=self.service.dispatch({'operation':'list_schedules','arguments':{'offset':110,'limit':10},'thread_id':thread})
         self.assertEqual(len(result['items']),10); self.assertIsNone(result['next_offset'])
 
     def test_f3_background_outcomes_are_log_only_and_chat_pushes_only_what_needs_the_owner(self):

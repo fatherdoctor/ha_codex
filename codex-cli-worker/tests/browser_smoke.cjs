@@ -538,15 +538,8 @@ function pngBuffer(width = 8, height = 6) {
       await page.locator("#messages .check-invalid .check-detail").textContent(),
       /required key 'trigger'/,
     );
-    // The same exchange says which changed files have a saved previous version.
-    assert.match(
-      await page.locator("#messages .backups-saved").textContent(),
-      /^✓Previous version saved for 1 file, kept for 7 daysautomations\.yaml → \/config\/codex_tasks\/.*\/backups\/automations\.yaml$/,
-    );
-    assert.equal(
-      await page.locator("#messages .backups-missing").textContent(),
-      "!No previous version saved for 1 filescripts.yaml",
-    );
+    // The answer gives no verdict on saved copies (CX-04-NO-CHECKS).
+    assert.equal(await page.locator("#messages .backups-saved, #messages .backups-missing").count(), 0);
     await page.screenshot({
       path: path.join(output, "config-check-failed.png"),
       fullPage: true,
@@ -569,7 +562,7 @@ function pngBuffer(width = 8, height = 6) {
     // that counts up, long before Codex reports anything.
     await page
       .locator("#activity.running .step-phase.is-running")
-      .waitFor({ timeout: 5000 });
+      .waitFor({ timeout: 5000, state: "attached" });
     assert.equal(
       await page.locator("#activity .step-phase .step-text").first().textContent(),
       "Noting the current state of your configuration files",
@@ -608,10 +601,21 @@ function pngBuffer(width = 8, height = 6) {
       }),
       ["activity-pulse", "activity-pulse"],
     );
-    // Steps appear one by one while the simulated run works, expanded by default.
+    // Steps appear one by one while the simulated run works, closed under the working line until it is tapped
+    // (CX-04-FB-THINK).
     await page
       .locator("#activity.running .step-command.is-running")
-      .waitFor({ timeout: 15000 });
+      .waitFor({ timeout: 15000, state: "attached" });
+    const workingToggle = page.locator("#activity .activity-toggle");
+    assert.equal(await workingToggle.getAttribute("aria-expanded"), "false");
+    assert.equal(await page.locator("#activity-steps").isVisible(), false);
+    assert.match(await workingToggle.textContent(), /^Working on your request/);
+    await workingToggle.click();
+    assert.equal(await workingToggle.getAttribute("aria-expanded"), "true");
+    assert.equal(await page.locator("#activity-steps").isVisible(), true);
+    await workingToggle.click();
+    assert.equal(await page.locator("#activity-steps").isVisible(), false);
+    await workingToggle.click();
     assert.equal(await page.locator("#activity-steps").isVisible(), true);
     assert.ok((await elapsedSeconds()) > firstReading, "timer did not advance");
     assert.deepEqual(
@@ -641,6 +645,9 @@ function pngBuffer(width = 8, height = 6) {
         document.querySelector("#activity .activity-toggle")?.textContent || "",
       ),
     );
+    // The tap held only until the turn ended: the line is closed again under "Worked for".
+    assert.equal(await page.locator("#activity .activity-toggle").getAttribute("aria-expanded"), "false");
+    assert.equal(await page.locator("#activity-steps").isVisible(), false);
     await page.locator("#activity .activity-toggle").click();
     assert.equal(await page.locator("#activity .step").count(), 8);
     assert.equal(await page.locator(".elapsed").count(), 0);

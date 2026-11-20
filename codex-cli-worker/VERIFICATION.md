@@ -73,8 +73,7 @@ explains the account restriction; an extra browser approval cannot resolve it.
 
 ## Fully Kiosk screenshots
 
-With the worker app and Codex integration at **0.1.79** or newer, dashboard
-inspections also request fresh images from Home Assistant's
+Dashboard inspections also request fresh images from Home Assistant's
 [Fully Kiosk Browser integration](https://www.home-assistant.io/integrations/fully_kiosk/).
 Enable the device's **Current page** sensor and **Screenshot** image entity.
 The reported URL must belong to this Home Assistant installation and match the
@@ -168,8 +167,8 @@ physical WallPanel or reproduce its app transitions.
 
 Each turn retains `verification` and `verification_attachments` in the task API,
 `codex_cli.get_task`, and normal task-result events. The chat shows expandable
-results and private screenshots. Automatic captures after the final answer are
-labeled as captures, not images already inspected by the AI.
+results and private screenshots. Every check is one Codex ran during the turn;
+the app runs none of its own after the final answer.
 
 ## Task tools
 
@@ -230,10 +229,7 @@ for that operation; it does not allow other installed apps' logs.
 ## Dashboard resources
 
 Update the worker and integration together, then restart Home Assistant, to use
-the current resource and permission support. Static-route discovery, including
-individual files on Core 2026.9.4, requires integration **0.1.62** or newer.
-Older integration versions support the original built-in paths but cannot
-supply the registered route list.
+the current resource and permission support.
 
 Core supplies registered static file and directory URLs, never filesystem paths.
 This allows assets such as Browser Mod, custom icons, navigation modules, and
@@ -346,9 +342,7 @@ as complete credential isolation or a hardened browser sandbox.
 
 ## Validation
 
-Live browser verification has been confirmed working by the maintainer on their
-Home Assistant installation. Custom-card compatibility remains subject to the
-resource and permission limits above.
+Custom-card compatibility is subject to the resource and permission limits above.
 
 Run commands from the repository root. The full `pytest` suite needs Linux
 (or WSL on Windows), Python 3.14, and the Home Assistant test dependencies; see
@@ -359,6 +353,18 @@ endpoint to check MCP discovery and real entity-tool calls in both sandbox modes
 while confirming that shell socket connections remain denied. Set `HA_TEST_CODEX`
 to the pinned CLI binary when it is not at `/usr/local/bin/codex`. No model account
 or paid request is involved.
+`codex-cli-worker/tests/test_live_proofs.py` runs the pinned CLI's `app-server` with the worker's own launch
+arguments and tool programs, and a local stand-in model, to check what one long-lived process with several
+chats would rely on: tool programs start with each thread and report ready, `thread/unsubscribe` unloads a
+thread and stops its tools, a resumed thread keeps its history, a turn may change the permission mode without
+starting the tools again, `turn/interrupt` ends one turn and leaves the thread usable, two threads run turns at
+the same time, and every tool call carries the thread id in `_meta.threadId` (a sub-agent's call carries its own
+thread's id). It also prints three start-up times and what Codex does when a second process resumes a thread
+that is live. Each tool program runs behind a small relay that logs what Codex sends it; the tool sockets do not
+exist in the test, so tool calls fail after Codex has sent them. Set `HA_TEST_CODEX` as above; without the pinned
+CLI the tests are skipped, unless `HA_TEST_REQUIRE_CODEX=1` (set in the container job) makes that a failure. The
+socket check of the same kind is in
+[SANDBOX_TESTING.md](SANDBOX_TESTING.md#the-workers-sockets-and-the-sandbox-live-proof).
 `node codex-cli-worker/tests/browser_verification.cjs` uses real Chromium and a protocol fixture to
 check viewports, external auth, registered local resources, blocked writes, broken resources/cards, rejected
 authentication, and cleanup. Provide `playwright-core` and `ws` on `NODE_PATH` and

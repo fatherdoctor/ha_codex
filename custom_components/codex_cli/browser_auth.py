@@ -5,6 +5,7 @@ import asyncio
 import hmac
 import json
 import os
+from collections.abc import Iterator
 from datetime import timedelta
 from functools import partial
 from typing import Any
@@ -146,6 +147,13 @@ class BrowserSessions:
             self.revoke(session_id)
 
 
+def loaded_runtime_data(hass: HomeAssistant) -> Iterator[Any]:
+    """Yield the runtime data of each loaded Codex config entry, in entry order: the one place that picks an entry."""
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        if entry.state is ConfigEntryState.LOADED:
+            yield getattr(entry, "runtime_data", None)
+
+
 class BrowserSessionView(HomeAssistantView):
     """Require both HA administrator authentication and the paired worker secret."""
 
@@ -163,13 +171,11 @@ class BrowserSessionView(HomeAssistantView):
         Raises HTTPServiceUnavailable when no broker is open, and HTTPForbidden for any other caller.
         """
         broker = None
-        for entry in self.hass.config_entries.async_entries(DOMAIN):
-            if entry.state is ConfigEntryState.LOADED:
-                runtime = getattr(entry, "runtime_data", None)
-                candidate = getattr(runtime, "browser_sessions", None)
-                if isinstance(candidate, BrowserSessions) and not candidate.closed:
-                    broker = candidate
-                    break
+        for runtime in loaded_runtime_data(self.hass):
+            candidate = getattr(runtime, "browser_sessions", None)
+            if isinstance(candidate, BrowserSessions) and not candidate.closed:
+                broker = candidate
+                break
         if broker is None:
             raise web.HTTPServiceUnavailable()
         supplied = data.get("worker_token", "")
