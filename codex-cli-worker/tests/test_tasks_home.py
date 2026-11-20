@@ -335,7 +335,6 @@ class NothingInTheConfigurationFolder(Sandbox):
                 patch.object(server, "CODEX_CONFIG_PATH", home / "config.toml"), \
                 patch.object(server, "api_token", return_value="synthetic"), \
                 patch.object(server, "read_options", return_value={}), \
-                patch.object(server.protected_policy, "remove_legacy_instructions"), \
                 patch.object(server, "create_persistent_notification"):
             server.migrate_task_folders({})
             server.retire_public_sign_in_images()
