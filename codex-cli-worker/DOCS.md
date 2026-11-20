@@ -100,6 +100,9 @@ controls a device, calls a service, restarts Home Assistant or edits a dashboard
   as a card with the tool's arguments in full and what the call does, the same as for the `call` tool
   ([Changes to the house: the `call` tool](#changes-to-the-house-the-call-tool)). Allow once runs that one call;
   Codex asks again before the next one. Your permission mode decides who answers, as for the `call` tool.
+- A card can show **Allow once** only when it shows the whole call. A write longer than 32,000 characters,
+  such as a whole large dashboard, shows Allow turned off; Codex can still change the dashboard with the card and
+  view tools.
 - In a scheduled run nobody watches the chat, so a request waits on the chat page until you answer it.
 - The tools show what Home Assistant returns. That includes attributes such as a camera's picture link, which
   holds a short-lived access token. Your `AGENTS.md` can tell Codex how to treat such values.

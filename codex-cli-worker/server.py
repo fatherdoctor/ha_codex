@@ -7042,7 +7042,8 @@ def relay_read_mcp_args() -> list[str]:
 
 def relay_tool_args() -> list[str]:
     """The app's tools: the read tool, approved ahead, the call tool, which Codex asks for each time, and the
-    Home Assistant MCP server's read tools when its option is on (hass_mcp.py).
+    Home Assistant MCP server when its option is on (hass_mcp.py): its read tools approved ahead, its write tools
+    asked about before each call.
 
     The relay holds its keys for its whole run, so the shell exclude matters as much as on the page;
     /etc/codex/managed_config.toml holds the same exclude for every client.

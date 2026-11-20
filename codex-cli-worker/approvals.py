@@ -187,7 +187,9 @@ def _hass_mcp_confirmation(tool: str, parsed: Any) -> dict[str, str] | None:
     if tool == "entity_action":
         entity_id, params = arguments.get("entity_id"), arguments.get("params") or {}
         service = _ENTITY_ACTIONS.get(arguments.get("action"))
-        if not isinstance(entity_id, str) or not _ENTITY_ID.fullmatch(entity_id) or not service or not isinstance(params, dict):
+        if not isinstance(entity_id, str) or not _ENTITY_ID.fullmatch(entity_id):
+            return None
+        if not service or not isinstance(params, dict):
             return None
         domain = entity_id.split(".")[0]
         return _service_confirmation(domain, service, _data_targets(domain, {"entity_id": entity_id, **params}))
