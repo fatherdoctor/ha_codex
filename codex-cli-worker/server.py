@@ -6038,13 +6038,19 @@ def delete_expired_chats(now: float | None = None) -> list[str]:
         return []
     now = time.time() if now is None else now
     days = chat_retention_days()
+
+    def due_ids() -> list[str]:
+        # Called with the lock held. A message waiting in the queue counts as a message, so its chat stays.
+        busy = _active_task_ids_locked() | {entry["task_id"] for entry in message_queue}
+        return retention.expired_ids(tasks.values(), now, days, scheduled, busy)
+
     with lock:
-        due = retention.expired_ids(tasks.values(), now, days, scheduled, _active_task_ids_locked())
+        due = due_ids()
     deleted = []
     for task_id in due:
         if TASK_ID_RE.fullmatch(task_id) is None:
             continue
-        outcome, _error = delete_chat(task_id)
+        outcome, _error = delete_chat(task_id, lambda chat_id: chat_id in due_ids())
         if outcome == "deleted":
             deleted.append(task_id)
     if deleted:
@@ -6745,10 +6751,11 @@ def rename_task(task_id: str) -> Response:
     return jsonify({"ok": True, "task_id": task_id, "title": task["title"]})
 
 
-def delete_chat(task_id: str) -> tuple[str, str]:
+def delete_chat(task_id: str, still_due: Callable[[str], bool] | None = None) -> tuple[str, str]:
     """Delete a finished chat with its files, Codex session and index entry; return (outcome, error text).
 
     The outcome is "deleted", "missing", "active" (stop it first) or "failed" (the chat stays listed).
+    The retention pass gives `still_due`, which is asked under the lock; a chat that is no longer due stays ("active").
     """
     with lock:
         task = tasks.get(task_id)
@@ -6756,6 +6763,8 @@ def delete_chat(task_id: str) -> tuple[str, str]:
             return "missing", "task not found"
         if task.get("status") in {"queued", "running"} or task_id in _active_task_ids_locked():
             return "active", "Stop this task before deleting it."
+        if still_due is not None and not still_due(task_id):
+            return "active", "The chat is no longer due for deletion."
         task_dir = get_task_dir(task_id)
         try:
             if task_dir.exists():

@@ -141,6 +141,33 @@ class ServerTests(unittest.TestCase):
         for kept in self.ids[1:]:
             self.assertTrue((self.root / kept / "prompt.txt").exists())
 
+    def test_a_chat_with_a_message_waiting_in_the_queue_is_kept(self):
+        entry = {"task_id": self.ids[0], "queue_id": "q1", "turn_id": "t1"}
+        self.server.message_queue.append(entry)
+        self.assertEqual(self.server.delete_expired_chats(NOW.timestamp()), [])
+        self.assertIn(self.ids[0], self.server.tasks)
+        self.assertEqual(self.server.message_queue, [entry])
+
+    def test_a_chat_that_is_no_longer_due_is_kept_when_the_lock_is_taken(self):
+        self.server.tasks[self.ids[0]]["pinned"] = True
+        self.assertEqual(self.server.delete_chat(self.ids[0], lambda _id: False)[0], "active")
+        self.assertTrue((self.root / self.ids[0] / "prompt.txt").exists())
+
+    def test_a_pin_after_the_first_look_stops_the_deletion(self):
+        real = self.server.retention.expired_ids
+        calls = []
+
+        def pin_after_first_look(*args, **kwargs):
+            result = real(*args, **kwargs)
+            if not calls:
+                self.server.tasks[self.ids[0]]["pinned"] = True
+            calls.append(1)
+            return result
+
+        with patch.object(self.server.retention, "expired_ids", side_effect=pin_after_first_look):
+            self.assertEqual(self.server.delete_expired_chats(NOW.timestamp()), [])
+        self.assertIn(self.ids[0], self.server.tasks)
+
     def test_nothing_is_deleted_when_the_schedules_cannot_be_read(self):
         with patch.object(self.server, "scheduled_chat_activity", return_value=None):
             self.assertEqual(self.server.delete_expired_chats(NOW.timestamp()), [])
