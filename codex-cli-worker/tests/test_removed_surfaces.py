@@ -205,7 +205,7 @@ class HouseRulesTests(unittest.TestCase):
             instructions = home / "AGENTS.md"
             instructions.write_text("Owner instructions, unchanged.")
             with patch.multiple(server, CODEX_HOME=home, CODEX_CONFIG_PATH=home / "config.toml", DATA_ROOT=root,
-                                AUTH_QR_DIR=root / "qr"), \
+                                OLD_AUTH_QR_DIR=root / "qr"), \
                  patch.object(server, "task_root", return_value=root / "tasks"), \
                  patch.object(server, "api_token", return_value="synthetic"):
                 server.ensure_runtime_files()

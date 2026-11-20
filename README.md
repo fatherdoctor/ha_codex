@@ -122,7 +122,7 @@ How releases are tested and how a bad release is undone: [docs/updates-and-rollb
 3. Uninstalling the app does not remove the integration. Delete `/config/custom_components/codex_cli` (or remove
    **Codex** in **Settings** > **Marketplace** if you installed it there), and restart Home Assistant.
 
-Task logs stay in `/config/codex_tasks` until you delete that folder.
+The chats and their logs are in the app's private folder (`/data/codex_tasks`), which uninstalling the app removes.
 
 ## An example, step by step
 

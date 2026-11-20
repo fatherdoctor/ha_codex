@@ -48,6 +48,14 @@
   command opened, the cursor stays in the message box.
 
 ### Changed
+- **Working files out of the configuration folder.** The chats (prompts, logs, per-turn backups, attachments) are now
+  in the app's private `/data/codex_tasks`, not in `/config/codex_tasks`: the file editor, Samba and a backup of the
+  configuration folder no longer hold them, and the app's own backup does. The first start of this version moves each
+  chat (never copies it) and removes the old folder. The **Task root** option is removed. Codex still keeps its copy
+  of each file before a change: the exchange's own backup folder is added to the sandbox's writable places.
+- **No sign-in images under `/config/www`.** The sign-in notification has the link and the code but no QR image,
+  because Home Assistant serves `/config/www` to anyone who can reach it. The QR code stays on the app's own page.
+  The first start of this version deletes the old `codex_login_*.svg` images and their folder.
 - **No more checks after each answer.** The app no longer judges a turn after Codex answers: it takes no dashboard
   screenshots of its own (they could catch a dashboard still loading), adds no "Verification needs review" note and
   no "No previous version saved" lines. Those lines blamed the turn for files that something else, such as an

@@ -6,6 +6,7 @@ from __future__ import annotations
 import base64
 import binascii
 import copy
+import errno
 import hashlib
 import hmac
 import json
@@ -142,7 +143,6 @@ DEFAULT_OPTIONS = {
     "model_reasoning_effort": "medium",
     "reasoning_summary": "concise",
     "codex_sandbox": "workspace-write",
-    "task_root": "/config/codex_tasks",
     "notify_service": "",
     "task_timeout_seconds": 3600,
     "task_stall_seconds": 600,
@@ -196,7 +196,10 @@ LOG_TAIL_BYTES = 300_000
 AUTH_NOTIFY_ID = "codex_cli_login"
 # Left by app versions before 0.3.2, which started one sign-in by themselves; removed at start.
 AUTO_SIGN_IN_MARK = DATA_ROOT / "auto_sign_in_started"
-AUTH_QR_DIR = CONFIG_ROOT / "www" / "codex_cli_auth"
+# Where versions before 0.4 wrote the sign-in QR codes. Home Assistant serves www/ at /local/ without a sign-in,
+# so the worker no longer writes there; the first start of 0.4 removes the images it left (retire_public_sign_in_images).
+OLD_AUTH_QR_DIR = CONFIG_ROOT / "www" / "codex_cli_auth"
+OLD_AUTH_QR_GLOB = "codex_login_*.svg"
 INGRESS_PROXY_IP = "172.30.32.2"
 # Where Home Assistant keeps the Codex integration once it is installed.
 INTEGRATION_MANIFEST_PATH = CONFIG_ROOT / "custom_components" / "codex_cli" / "manifest.json"
@@ -445,9 +448,135 @@ def read_options() -> dict[str, Any]:
     return options
 
 
+# Every chat's files: prompts, logs, per-turn backups, attachments. They live in the app's private /data, out of
+# Home Assistant's configuration folder (not in the file editor, Samba or a backup of that folder). The app's own
+# backup still holds them. Versions before 0.4 kept them in /config/codex_tasks or the folder the removed
+# task_root option named; migrate_task_folders() moves them here at start.
+TASK_FOLDER_NAME = "codex_tasks"
+# A task folder is copied to this folder in /data first and renamed into the task root only when the copy is whole.
+TASK_MOVE_STAGING_NAME = "codex_tasks.moving"
+
+
 def task_root() -> Path:
-    """Return the folder under which every task keeps its files, as set in the add-on options."""
-    return Path(str(read_options().get("task_root") or DEFAULT_OPTIONS["task_root"]))
+    """Return the folder under which every task keeps its files: DATA_ROOT/codex_tasks."""
+    return DATA_ROOT / TASK_FOLDER_NAME
+
+
+def old_task_roots(options: dict[str, Any]) -> list[Path]:
+    """The folders that versions before 0.4 kept task files in, which the first start of 0.4 empties."""
+    new_root = task_root()
+    roots = [CONFIG_ROOT / TASK_FOLDER_NAME]
+    saved = str(options.get("task_root") or "").strip()
+    if saved.startswith("/") and ".." not in Path(saved).parts:
+        roots.append(Path(saved))
+    found: list[Path] = []
+    for root in roots:
+        # Never the new root, a folder that holds it (such as /data), or one inside it.
+        if root in found or root == new_root or new_root.is_relative_to(root) or root.is_relative_to(new_root):
+            continue
+        found.append(root)
+    return found
+
+
+def _move_tree(source: Path, target: Path) -> None:
+    """Move one task folder or file to target: rename on the same file system, else copy whole, then delete.
+
+    The copy goes to a staging name first and is renamed into place only when complete, so an interrupted
+    start leaves either the old folder or the moved one, never a half copy under task_root(). The source is
+    deleted only after that rename: no copy is kept on either side.
+    """
+    try:
+        os.rename(source, target)
+        return
+    except OSError as exc:
+        if exc.errno != errno.EXDEV:
+            raise
+    staging = DATA_ROOT / TASK_MOVE_STAGING_NAME
+    staging.mkdir(parents=True, exist_ok=True)
+    staged = staging / target.name
+    if staged.is_dir() and not staged.is_symlink():
+        shutil.rmtree(staged)
+    elif staged.exists() or staged.is_symlink():
+        staged.unlink()
+    if source.is_dir() and not source.is_symlink():
+        shutil.copytree(source, staged, symlinks=True)
+    else:
+        shutil.copy2(source, staged, follow_symlinks=False)
+    os.rename(staged, target)
+    if source.is_dir() and not source.is_symlink():
+        shutil.rmtree(source)
+    else:
+        source.unlink()
+
+
+def migrate_task_folders(options: dict[str, Any] | None = None) -> dict[str, int]:
+    """Move every chat's files from the folders older versions used into task_root(), then remove those folders.
+
+    Moves, never copies: each entry is renamed, or copied whole and its source deleted. An entry whose name
+    is already taken under task_root() is a chat moved by an earlier, interrupted start: the moved one is kept
+    and the old one deleted. Returns the counts of moved entries and of folders removed.
+    """
+    options = read_options() if options is None else options
+    result = {"moved": 0, "kept": 0, "removed_folders": 0, "failed": 0}
+    new_root = task_root()
+    new_root.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(new_root, 0o700)
+    except OSError:
+        pass
+    for root in old_task_roots(options):
+        if root.is_symlink() or not root.is_dir():
+            continue
+        for entry in sorted(root.iterdir()):
+            target = new_root / entry.name
+            try:
+                if target.exists() or target.is_symlink():
+                    if entry.is_dir() and not entry.is_symlink():
+                        shutil.rmtree(entry)
+                    else:
+                        entry.unlink()
+                    result["kept"] += 1
+                else:
+                    _move_tree(entry, target)
+                    result["moved"] += 1
+            except OSError as exc:
+                result["failed"] += 1
+                print(f"Could not move {entry.name} out of {root}: {exc.strerror or exc}", flush=True)
+        try:
+            root.rmdir()
+            result["removed_folders"] += 1
+        except OSError as exc:
+            print(f"Could not remove {root} after moving the chats out of it: {exc.strerror or exc}", flush=True)
+    shutil.rmtree(DATA_ROOT / TASK_MOVE_STAGING_NAME, ignore_errors=True)
+    if result["moved"] or result["kept"] or result["removed_folders"]:
+        print(f"Moved {result['moved']} chat folders to {new_root}; removed {result['removed_folders']} old folders.",
+              flush=True)
+    return result
+
+
+def retire_public_sign_in_images() -> int:
+    """Delete the sign-in QR images versions before 0.4 left under www/, then the folder if nothing else is in it.
+
+    Home Assistant serves www/ at /local/ to anyone who can reach it, with no sign-in. Only files this app named
+    codex_login_*.svg are deleted; a file someone else put in the folder stays, and so does the folder then.
+    Returns how many images were deleted.
+    """
+    folder = OLD_AUTH_QR_DIR
+    if folder.is_symlink() or not folder.is_dir():
+        return 0
+    deleted = 0
+    for path in folder.glob(OLD_AUTH_QR_GLOB):
+        try:
+            if path.is_file() or path.is_symlink():
+                path.unlink()
+                deleted += 1
+        except OSError as exc:
+            print(f"Could not delete an old sign-in image: {exc.strerror or exc}", flush=True)
+    try:
+        folder.rmdir()
+    except OSError:
+        print(f"Left {folder}: it holds files this app did not write.", flush=True)
+    return deleted
 
 
 def model_reasoning_effort(options: dict[str, Any]) -> str:
@@ -873,7 +1002,6 @@ def ensure_runtime_files() -> None:
     DATA_ROOT.mkdir(parents=True, exist_ok=True)
     remote_control.prepare_control_parent(DATA_ROOT)
     task_root().mkdir(parents=True, exist_ok=True)
-    AUTH_QR_DIR.mkdir(parents=True, exist_ok=True)
     # The GitHub sign-in's private folder: 0700, masked in every sandbox (codex-bwrap).
     github_service.store.ensure()
     if not api_token():
@@ -2857,10 +2985,23 @@ def codex_backup_dir(run_dir: Path, options: dict[str, Any]) -> Path | None:
     if mode == "read-only":
         return None
     folder = run_dir / BACKUP_DIR
-    # The backup folder stays inside /config, a root the workspace-write sandbox lets Codex write.
-    if mode != "danger-full-access" and not folder.resolve().is_relative_to(CONFIG_ROOT.resolve()):
+    # In workspace-write, the exchange's own backup folder is added to the writable roots
+    # (backup_writable_root); a folder outside the task folder is never one.
+    if mode != "danger-full-access" and not folder.resolve().is_relative_to(task_root().resolve()):
         return None
     return folder
+
+
+def backup_writable_root(run_dir: Path) -> list[str]:
+    """The exchange's backup folder as an extra writable root for workspace-write, when the worker made one.
+
+    Only that one folder under the app's private /data is opened for writing; the rest of /data stays read-only
+    and its hidden files stay hidden (codex-bwrap masks them after Codex's binds).
+    """
+    folder = run_dir / BACKUP_DIR
+    if folder.is_symlink() or not folder.is_dir() or not folder.resolve().is_relative_to(task_root().resolve()):
+        return []
+    return [str(folder)]
 
 
 def safe_relative_path(rel: str) -> bool:
@@ -3692,31 +3833,6 @@ def sign_in_failure_reason(returncode: int) -> str:
     return f"Codex stopped the sign-in (exit code {returncode}) without saying why. Get a new code to try again."
 
 
-def write_login_qr(login_id: str, url: str) -> str:
-    """Write a QR code for the sign-in URL as an SVG on a white background under /config/www and return its /local URL."""
-    from qrcode import QRCode
-    from qrcode.image.svg import SvgImage
-
-    AUTH_QR_DIR.mkdir(parents=True, exist_ok=True)
-    qr = QRCode(border=2)
-    qr.add_data(url)
-    qr.make(fit=True)
-    image = qr.make_image(image_factory=SvgImage)
-    filename = f"codex_login_{login_id}.svg"
-    path = AUTH_QR_DIR / filename
-    image.save(str(path))
-    try:
-        tree = ET.parse(path)
-        root = tree.getroot()
-        namespace = root.tag.removesuffix("svg")
-        rect = ET.Element(f"{namespace}rect", {"width": "100%", "height": "100%", "fill": "#fff"})
-        root.insert(0, rect)
-        tree.write(path, encoding="utf-8", xml_declaration=True)
-    except Exception as exc:
-        print(f"Could not add QR background: {exc}", flush=True)
-    return f"/local/codex_cli_auth/{filename}"
-
-
 def update_auth_state(**updates: Any) -> None:
     """Store new values in the sign-in flow's state and note when it was updated."""
     with auth_lock:
@@ -3725,24 +3841,27 @@ def update_auth_state(**updates: Any) -> None:
 
 
 def notify_codex_login_ready(login_id: str, url: str, code: str) -> str:
-    """Show a persistent notification with the sign-in link, its QR code, and the code if known; return the QR URL."""
-    qr_url = write_login_qr(login_id, url)
+    """Show a persistent notification with the sign-in link and the code if known; return the QR URL ("").
+
+    The QR code is shown only on the app's own page (auth/qr.svg, behind the Home Assistant sign-in). The
+    notification has no image: an image there would need a file under www/, which Home Assistant serves to
+    anyone who can reach it. The empty return keeps the qr_url field that older integrations read.
+    """
     code_line = (
         f"\n\nOpenAI will ask for this code:\n\n**`{code}`**"
         if code
         else "\n\nWaiting for Codex CLI to print the one-time code. This notification will update automatically."
     )
     message = (
-        "Scan the QR code below, or open the sign-in link, to authorize Codex CLI "
-        "for the Home Assistant worker. The QR code opens the device page; type the code from this notification into that page.\n\n"
-        f"![Codex login QR]({qr_url})\n\n"
+        "Open the sign-in link to authorize Codex CLI for the Home Assistant worker, or scan the QR code on "
+        "the app's page in Home Assistant. Type the code from this notification into the sign-in page.\n\n"
         f"[Open sign-in page]({url})"
         f"{code_line}\n\n"
         "After you approve it, the worker will detect completion automatically."
     )
     title = "Codex CLI sign-in code" if code else "Codex CLI sign-in"
     create_persistent_notification(title, message, AUTH_NOTIFY_ID)
-    return qr_url
+    return ""
 
 
 def auth_reader_thread(handle, login_id: str | None = None) -> None:
@@ -4777,7 +4896,7 @@ def create_approval_session(
     else:
         policy = {"type": "readOnly" if mode == "read-only" else "workspaceWrite", "networkAccess": False}
     if mode == "workspace-write":
-        policy["writableRoots"] = list(TASK_WRITABLE_ROOTS)
+        policy["writableRoots"] = [*TASK_WRITABLE_ROOTS, *backup_writable_root(final_file.parent)]
     return AppServerSession(
         proc.stdin, lock=lock, thread_params=thread_params,
         turn_params={"input": [{"type": "text", "text": prompt},
@@ -7493,6 +7612,8 @@ def main() -> None:
     if not make_worker_undumpable():
         print("Could not mark the worker process not dumpable; its environment stays readable to root.", flush=True)
     write_starter_agents_file()  # Before ensure_runtime_files(), whose config file marks every later start.
+    migrate_task_folders()  # Before the folders are made and the saved chats are read.
+    retire_public_sign_in_images()
     ensure_runtime_files()
     write_full_access_requirements_at_start()
     apply_interaction_limit(read_options())

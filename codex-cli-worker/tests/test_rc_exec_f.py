@@ -63,7 +63,7 @@ class RelayFixTests(unittest.TestCase):
             data = Path(folder)
             home = data / 'home'
             with patch.multiple(server, CODEX_HOME=home, DATA_ROOT=data, CODEX_CONFIG_PATH=home / 'config.toml',
-                                AUTH_QR_DIR=data / 'qr'), \
+                                OLD_AUTH_QR_DIR=data / 'qr'), \
                     patch.object(server, 'api_token', return_value='synthetic'), \
                     patch.object(server, 'task_root', return_value=data / 'tasks'), \
                     patch.object(server.protected_policy, 'remove_legacy_instructions'):

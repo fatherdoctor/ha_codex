@@ -613,7 +613,7 @@ class RuntimeConfigTests(unittest.TestCase):
             with (
                 patch.object(server, "CODEX_HOME", root / "codex-home"),
                 patch.object(server, "DATA_ROOT", root),
-                patch.object(server, "AUTH_QR_DIR", root / "auth-qr"),
+                patch.object(server, "OLD_AUTH_QR_DIR", root / "auth-qr"),
                 patch.object(server, "CODEX_CONFIG_PATH", root / "codex-home" / "config.toml"),
                 patch.object(server, "task_root", return_value=root / "tasks"),
                 patch.object(server, "api_token", return_value="configured"),

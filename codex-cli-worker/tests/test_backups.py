@@ -189,10 +189,10 @@ class BackupFolderTests(unittest.TestCase):
     def test_folder_depends_on_the_sandbox_and_the_task_folder(self):
         """Codex gets a backup folder only where its sandbox lets it write."""
         with tempfile.TemporaryDirectory() as temp:
-            config = Path(temp) / "config"
-            inside = config / "codex_tasks" / "t" / "turns" / "a"
-            outside = Path(temp) / "data" / "t"
-            with patch.object(server, "CONFIG_ROOT", config):
+            data = Path(temp) / "data"
+            inside = data / "codex_tasks" / "t" / "turns" / "a"
+            outside = Path(temp) / "config" / "codex_tasks" / "t"
+            with patch.object(server, "DATA_ROOT", data):
                 self.assertEqual(server.codex_backup_dir(inside, {"codex_sandbox": "workspace-write"}), inside / "backups")
                 self.assertEqual(server.codex_backup_dir(inside, {}), inside / "backups")
                 self.assertIsNone(server.codex_backup_dir(inside, {"codex_sandbox": "read-only"}))
@@ -202,7 +202,7 @@ class BackupFolderTests(unittest.TestCase):
     def test_exchange_info_carries_the_backup_folder_only_when_there_is_one(self):
         """exchange_info gives the backup instruction when a folder is given, and says to make no copies without one."""
         with patch.object(server, "tasks", {}):
-            folder = Path("/config/codex_tasks/t/turns/a/backups")
+            folder = Path("/data/codex_tasks/t/turns/a/backups")
             backups = server.exchange_info("t", folder)["backups"]
             self.assertIn(f"copy it to {folder} under the same relative path", backups)
             self.assertIn(f"{folder}/.storage/lovelace.kitchen", backups)
