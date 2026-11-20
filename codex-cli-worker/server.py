@@ -509,12 +509,24 @@ def _move_tree(source: Path, target: Path) -> None:
         source.unlink()
 
 
+def _is_task_entry(entry: Path) -> bool:
+    """True for what this app kept in a task folder: the auth folder, or a chat folder that holds a task.json."""
+    if entry.is_symlink() or not entry.is_dir():
+        return False
+    if entry.name == "auth":
+        return True
+    task_file = entry / "task.json"
+    return task_file.is_file() and not task_file.is_symlink()
+
+
 def migrate_task_folders(options: dict[str, Any] | None = None) -> dict[str, int]:
     """Move every chat's files from the folders older versions used into task_root(), then remove those folders.
 
     Moves, never copies: each entry is renamed, or copied whole and its source deleted. An entry whose name
     is already taken under task_root() is a chat moved by an earlier, interrupted start: the moved one is kept
-    and the old one deleted. Returns the counts of moved entries and of folders removed.
+    and the old one deleted. From a folder saved in the removed task_root option only the auth folder and chat
+    folders (those with a task.json) are taken. A folder is removed only when it is then empty, and a folder that
+    cannot be read is logged and counted as failed; the start goes on. Returns the counts.
     """
     options = read_options() if options is None else options
     result = {"moved": 0, "kept": 0, "removed_folders": 0, "failed": 0}
@@ -524,10 +536,21 @@ def migrate_task_folders(options: dict[str, Any] | None = None) -> dict[str, int
         os.chmod(new_root, 0o700)
     except OSError:
         pass
+    default_root = CONFIG_ROOT / TASK_FOLDER_NAME
     for root in old_task_roots(options):
         if root.is_symlink() or not root.is_dir():
             continue
-        for entry in sorted(root.iterdir()):
+        try:
+            entries = sorted(root.iterdir())
+        except OSError as exc:
+            result["failed"] += 1
+            print(f"Could not list {root} to move the chats out of it: {exc.strerror or exc}", flush=True)
+            continue
+        for entry in entries:
+            # A folder a person saved in the removed task_root option may be shared with other files (even the
+            # configuration folder itself): from it take only the sign-in folder and real chat folders.
+            if root != default_root and not _is_task_entry(entry):
+                continue
             target = new_root / entry.name
             try:
                 if target.exists() or target.is_symlink():

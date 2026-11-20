@@ -171,6 +171,118 @@ class Migration(Sandbox):
             self.assertIn("chat-a", server.tasks)
 
 
+class SavedFolder(Sandbox):
+    """A folder saved in the removed task_root option may hold other files: only the chats leave it."""
+
+    def test_the_configuration_folder_as_the_saved_value_keeps_its_files(self):
+        (self.config / ".storage").mkdir()
+        (self.config / ".storage" / "core.config_entries").write_text("{}", encoding="utf-8")
+        (self.config / "configuration.yaml").write_text("homeassistant:\n", encoding="utf-8")
+        (self.config / "packages").mkdir()
+        self.old_chat(self.config, "chat-in-config")
+        (self.config / "auth").mkdir()
+        (self.config / "auth" / "codex.log").write_text("invented sign-in line\n", encoding="utf-8")
+        result = server.migrate_task_folders({"task_root": str(self.config)})
+        self.assertEqual(result["moved"], 2)
+        self.assertTrue((self.config / "configuration.yaml").is_file())
+        self.assertTrue((self.config / ".storage" / "core.config_entries").is_file())
+        self.assertTrue((self.config / "packages").is_dir())
+        self.assertFalse((self.config / "chat-in-config").exists())
+        self.assertFalse((self.config / "auth").exists())
+        self.assertTrue((self.data / "codex_tasks" / "chat-in-config" / "task.json").is_file())
+        self.assertTrue((self.data / "codex_tasks" / "auth" / "codex.log").is_file())
+        self.assertFalse((self.data / "codex_tasks" / "configuration.yaml").exists())
+        self.assertFalse((self.data / "codex_tasks" / ".storage").exists())
+
+    def test_a_shared_folder_is_removed_only_when_it_is_then_empty(self):
+        shared = self.root / "share"
+        self.old_chat(shared, "chat-b")
+        (shared / "photo.jpg").write_text("invented", encoding="utf-8")
+        (shared / "notes").mkdir()
+        (shared / "notes" / "task.json.bak").write_text("{}", encoding="utf-8")
+        server.migrate_task_folders({"task_root": str(shared)})
+        self.assertTrue((shared / "photo.jpg").is_file())
+        self.assertTrue((shared / "notes" / "task.json.bak").is_file())
+        self.assertFalse((shared / "chat-b").exists())
+
+    def test_a_linked_task_json_does_not_make_a_chat(self):
+        shared = self.root / "share"
+        (shared / "other").mkdir(parents=True)
+        (self.root / "real.json").write_text("{}", encoding="utf-8")
+        (shared / "other" / "task.json").symlink_to(self.root / "real.json")
+        server.migrate_task_folders({"task_root": str(shared)})
+        self.assertTrue((shared / "other" / "task.json").is_symlink())
+
+    def test_the_old_default_folder_still_moves_everything(self):
+        old = self.config / "codex_tasks"
+        old.mkdir()
+        (old / "loose.txt").write_text("invented", encoding="utf-8")
+        self.old_chat(old, "chat-a")
+        server.migrate_task_folders({})
+        self.assertFalse(old.exists())
+        self.assertTrue((self.data / "codex_tasks" / "loose.txt").is_file())
+
+
+class UnreadableFolder(Sandbox):
+
+    def test_a_folder_that_cannot_be_listed_is_logged_and_counted_and_the_start_goes_on(self):
+        self.old_chat(self.config / "codex_tasks", "chat-a")
+        real_iterdir = Path.iterdir
+
+        def refuse(path):
+            if path == self.config / "codex_tasks":
+                raise PermissionError(errno.EACCES, "Permission denied")
+            return real_iterdir(path)
+
+        with patch.object(Path, "iterdir", refuse), patch("builtins.print") as printed:
+            result = server.migrate_task_folders({})
+        self.assertEqual(result["failed"], 1)
+        self.assertEqual(result["moved"], 0)
+        self.assertTrue((self.config / "codex_tasks" / "chat-a" / "task.json").is_file())
+        self.assertTrue(any("Could not list" in str(call) for call in printed.call_args_list))
+
+
+class StartOrder(unittest.TestCase):
+    """main() moves the old chats before it makes the folders and before it reads the saved chats."""
+
+    def test_the_migration_runs_before_the_folders_are_made_and_the_chats_are_read(self):
+        calls = []
+
+        class StopHere(Exception):
+            """Ends main() once the saved chats would be read."""
+
+        def record(name, stop=False):
+            def step(*args, **kwargs):
+                calls.append(name)
+                if stop:
+                    raise StopHere
+                return {"version": "", "error": "", "message": ""}
+            return step
+
+        steps = ["write_starter_agents_file", "migrate_task_folders", "retire_public_sign_in_images",
+                 "ensure_runtime_files", "write_full_access_requirements_at_start", "apply_interaction_limit",
+                 "refresh_core_address", "codex_version_status", "sandbox_readiness",
+                 # Steps a later version of main() adds around these; replaced when present so the test never
+                 # touches the real /config or /data.
+                 "migrate_agents_file", "link_agents_file"]
+        patchers = [patch.object(server, name, side_effect=record(name)) for name in steps if hasattr(server, name)]
+        patchers += [
+            patch.object(server, "read_options", return_value={}),
+            patch.object(server.protected_policy, "policy_problem", return_value=""),
+            patch.object(server, "make_worker_undumpable", return_value=True),
+            patch.object(server.interaction_logs, "close_abandoned"),
+            patch.object(server, "load_task_index", side_effect=record("load_task_index", stop=True)),
+            patch("builtins.print"),
+        ]
+        for patcher in patchers:
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        with self.assertRaises(StopHere):
+            server.main()
+        self.assertLess(calls.index("migrate_task_folders"), calls.index("ensure_runtime_files"))
+        self.assertLess(calls.index("migrate_task_folders"), calls.index("load_task_index"))
+
+
 class SignInImages(Sandbox):
 
     def test_old_images_are_deleted_with_their_folder(self):

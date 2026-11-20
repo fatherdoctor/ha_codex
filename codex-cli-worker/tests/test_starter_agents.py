@@ -125,6 +125,9 @@ class StarterAgentsAtStartup(unittest.TestCase):
             patch.object(server.protected_policy, "policy_problem", return_value=""),
             patch.object(server, "make_worker_undumpable", return_value=True),
             patch.object(server, "write_starter_agents_file", side_effect=lambda: calls.append("starter")),
+            # Both work on the real /data and /config; this test only needs the order of the two steps above.
+            patch.object(server, "migrate_task_folders"),
+            patch.object(server, "retire_public_sign_in_images"),
             patch.object(server, "ensure_runtime_files", side_effect=prepare),
             self.assertRaises(StopHere),
         ):

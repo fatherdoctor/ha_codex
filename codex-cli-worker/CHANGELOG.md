@@ -51,7 +51,8 @@
 - **Working files out of the configuration folder.** The chats (prompts, logs, per-turn backups, attachments) are now
   in the app's private `/data/codex_tasks`, not in `/config/codex_tasks`: the file editor, Samba and a backup of the
   configuration folder no longer hold them, and the app's own backup does. The first start of this version moves each
-  chat (never copies it) and removes the old folder. The **Task root** option is removed. Codex still keeps its copy
+  chat (never copies it) and removes the old folder. The **Task root** option is removed; from a folder saved in it,
+  only the chat folders and the sign-in log are moved, and the folder is removed only when it is then empty. Codex still keeps its copy
   of each file before a change: the exchange's own backup folder is added to the sandbox's writable places.
 - **No sign-in images under `/config/www`.** The sign-in notification has the link and the code but no QR image,
   because Home Assistant serves `/config/www` to anyone who can reach it. The QR code stays on the app's own page.
