@@ -199,7 +199,7 @@ $("save-agents").onclick = async () => {
   finally { $("save-agents").disabled = false; }
 };
 
-// A missing /config/AGENTS.md is a setup hint above the chat, shown until it is dismissed in this browser.
+// A missing AGENTS.md is a setup hint above the chat, shown until it is dismissed in this browser.
 const AGENTS_HINT_KEY = "codex-agents-hint-dismissed";
 function agentsHintDismissed() {
   try { return Boolean(localStorage.getItem(AGENTS_HINT_KEY)); } catch (_error) { return false; }

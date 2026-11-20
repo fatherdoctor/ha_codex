@@ -246,7 +246,7 @@ class HouseRulesTests(unittest.TestCase):
 
     def test_task_context_keeps_owner_pointer_and_original_upstream_guidance(self):
         text = server.PAGE_INSTRUCTIONS
-        self.assertIn("Owner workspace instructions: if /config/AGENTS.md exists, follow it.", text)
+        self.assertIn("Owner workspace instructions: if /addon_config/AGENTS.md exists, follow it.", text)
         self.assertIn("Treat this as a live Home Assistant config tree. Make focused edits, do not expose secrets, "
                       "and validate changed YAML/JSON when practical. After you finish, the worker asks Home "
                       "Assistant to check its configuration whenever YAML files changed; if that check fails, the "
@@ -255,7 +255,7 @@ class HouseRulesTests(unittest.TestCase):
 
     def test_page_rules_are_the_same_with_and_without_the_owner_file(self):
         # Codex reads the page's rules once for each thread, and the owner can add or remove
-        # /config/AGENTS.md between two messages, so the rules must not depend on the file.
+        # AGENTS.md between two messages, so the rules must not depend on the file.
         with tempfile.TemporaryDirectory() as folder, \
              patch.object(server, "AGENTS_PATH", Path(folder) / "AGENTS.md"), \
              patch.object(server, "attached_image_note", return_value=""), \

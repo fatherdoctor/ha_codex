@@ -104,7 +104,9 @@ the mode, and `approvals.py` answers Codex's questions, as on the start path.
 |---|---|---|
 | After every exchange, changed files are found by comparing `/config` with the manifest taken before it | `server.py: run_task`, `build_manifest`, `diff_manifests` | `tests/test_backups.py`, `tests/test_server.py` |
 | Changed YAML is validated and Home Assistant's own config check is run | `server.py: validate_changed_files`, `check_home_assistant_config` | `tests/test_config_check.py` |
-| The starter `/config/AGENTS.md` is written only on the app's first start and only when nothing has that name; an existing file, link or folder is never replaced | `server.py: write_starter_agents_file`, called from `main` before `ensure_runtime_files` | `tests/test_starter_agents.py` |
+| The starter `AGENTS.md` (in the app's own folder, `/addon_config/AGENTS.md`) is written only on the app's first start, only when nothing has that name and only when no older file still waits in `/config`; an existing file, link or folder is never replaced | `server.py: write_starter_agents_file`, called from `main` before `ensure_runtime_files` | `tests/test_starter_agents.py`, `tests/test_agents_home.py` |
+| An older `/config/AGENTS.md` is moved to `/addon_config/AGENTS.md` after a backup copy in `/data`, never copied, because Codex works in `/config` and would read both; a link or folder there is not moved, and nothing moves when both places hold a file | `server.py: migrate_agents_file`, called first in `main` | `tests/test_agents_home.py` |
+| Codex loads the owner's file as its global instructions through a link at `$CODEX_HOME/AGENTS.md`; a regular file there is never replaced, and the retirement of the old bundled copy never follows a link | `server.py: link_agents_file`, called in `main` after `ensure_runtime_files`; `policy.py: remove_legacy_instructions` | `tests/test_agents_home.py` |
 | A copy of each changed file is kept, without credentials | `server.py: create_snapshot`, `saved_copy`, `drop_credential_backups` | `tests/test_backups.py` |
 
 ### The browser that inspects dashboards
