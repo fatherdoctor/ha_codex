@@ -12,8 +12,9 @@ import subprocess
 import tempfile
 import threading
 import time
-from contextlib import closing
+from contextlib import AbstractContextManager, closing
 from pathlib import Path
+from typing import Any, Protocol
 from urllib.parse import urlparse
 
 import requests
@@ -37,7 +38,51 @@ PATH_RE = PATH
 INTEGRATION_UPDATE_NOTE = "Update the Codex integration in Home Assistant to approve blocked browser requests."
 
 
-def public_check(entry):
+class VerificationWorker(Protocol):
+    """What this module uses of the worker: the tasks, the options, and the worker's access to Home Assistant.
+
+    server.py passes an object that returns its own module globals by name, and the tests pass the server module.
+    Each name that the code below reads from `self.worker` is listed here, with the type that server.py gives it,
+    so that a reader and a type checker see the whole dependency. tests/test_verification.py fails when the code
+    reads a name that is not in this list, or when server.py does not have a listed name.
+    """
+
+    CONFIG_ROOT: Path
+    # threading.RLock; the worker's one lock for `tasks` and `active_task_runners`.
+    lock: AbstractContextManager[Any]
+    tasks: dict[str, dict[str, Any]]
+    active_task_runners: set[str]
+
+    def _active_task_ids_locked(self) -> set[str]: ...
+    def _write_attachment_file(self, task_id: str, source: Path | bytes,
+                               turn_id: str | None = None) -> tuple[str, Path, str] | None: ...
+    def api_token(self) -> str: ...
+    def atomic_json_write(self, path: Path, value: Any) -> None: ...
+    def attachment_record(self, task_id: str, attachment_id: str, target: Path, mime_type: str, *,
+                          name: str, origin: str, **extra: Any) -> dict[str, Any]: ...
+    def build_manifest(self) -> dict[str, dict[str, Any]]: ...
+    def check_home_assistant_config(self) -> dict[str, str]: ...
+    def diff_manifests(self, before: dict[str, Any], after: dict[str, Any]) -> dict[str, list[str]]: ...
+    def find_lovelace_dashboard_refs(self, changes: dict[str, list[str]]) -> list[dict[str, str]]: ...
+    def get_run_dir(self, task_id: str) -> Path: ...
+    def get_task_dir(self, task_id: str) -> Path: ...
+    def ha_token(self) -> str: ...
+    def read_options(self) -> dict[str, Any]: ...
+    def redact(self, text: str) -> str: ...
+    def save_lovelace_dashboard(self, ref: dict[str, str]) -> tuple[bool, str]: ...
+    def save_task_index(self) -> None: ...
+    def start_next_queued(self, release: str | None = None) -> None: ...
+    def task_cancellation_requested(self, task_id: str) -> bool: ...
+    def task_options(self, task_id: str) -> dict[str, Any]: ...
+    def task_turns(self, task: dict[str, Any]) -> list[dict[str, Any]]: ...
+    def update_task(self, task_id: str, **updates: Any) -> bool: ...
+    def update_task_evidence(self, task_id: str, **updates: Any) -> bool: ...
+    def upload_name(self, value: Any, suffix: str) -> str: ...
+    def utc_now(self) -> str: ...
+    def validate_changed_files(self, changes: dict[str, list[str]]) -> list[str]: ...
+
+
+def public_check(entry: Any) -> Any:
     """Return a check without exact blocked-request details, saved scopes or grants.
 
     Request parameters can carry values the denylists don't recognize, so only
@@ -48,7 +93,7 @@ def public_check(entry):
         return entry
     result = {key: value for key, value in entry.items() if key not in {"permission_scope", "permission_grants"}}
 
-    def labels(items):
+    def labels(items: Any) -> list[dict[str, Any]]:
         """Keep only the readable label of each described request."""
         return [{"label": item.get("label", "")} for item in items if isinstance(item, dict)] if isinstance(items, list) else []
 
@@ -61,7 +106,7 @@ def public_check(entry):
     return result
 
 
-def find_row(row, words, domain):
+def find_row(row: dict[str, Any], words: list[str], domain: str | None) -> tuple[int, dict[str, str]] | None:
     """Return (other words, answer row) for one item of Core's state list, or None when it does not match or is hidden.
 
     A match holds every word in its friendly name or entity id. The answer row carries only the entity id,
@@ -90,22 +135,23 @@ def find_row(row, words, domain):
 class Verification:
     """Run the bounded checks a running task may request with its capability, and record them on its current turn."""
 
-    def __init__(self, worker):
+    def __init__(self, worker: VerificationWorker) -> None:
         """Keep the worker that provides tasks, options and Home Assistant access; no capability is issued yet."""
         self.worker = worker
         # One private exchange id per running task; the manual check from the page still sends one. A chat's tool
         # request names its thread instead (tool_threads.py); the name and the "capability expired" answer are
         # kept from earlier versions.
-        self.capabilities = {}
+        self.capabilities: dict[str, str] = {}
         self.lock = threading.RLock()
         self.execution_lock = threading.Lock()
         self.permissions = BrowserPermissionStore(worker)
-        self.ui_captures = {}
+        self.ui_captures: dict[str, dict[str, Any]] = {}
         # Authority stays in worker memory, never in agent-writable task.json.
         # Restarting the worker expires one-off grants.
-        self.retry_grants = {}
+        # Key: the task, the turn and the check that the grants came from.
+        self.retry_grants: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
 
-    def begin(self, task_id):
+    def begin(self, task_id: str) -> str:
         """Start the exchange's checks: a new exchange id, no recorded checks, and no expired screenshots.
 
         The exchange id stays in the worker. A request names its chat by thread id (tool_threads).
@@ -117,12 +163,12 @@ class Verification:
         self.worker.update_task(task_id, verification=[], verification_attachments=[])
         return capability
 
-    def end(self, task_id):
+    def end(self, task_id: str) -> None:
         """End the exchange's checks, so later requests for its chat are refused."""
         with self.lock:
             self.capabilities.pop(task_id, None)
 
-    def dispatch(self, payload):
+    def dispatch(self, payload: Any) -> dict[str, Any]:
         """Run a request's check for the chat that its thread id names; raise ValueError if no exchange runs there."""
         if not isinstance(payload, dict):
             raise ValueError("Expected a verification object")
@@ -136,7 +182,7 @@ class Verification:
                 raise ValueError("No running exchange for this chat")
         return self.run(task_id, {k: v for k, v in payload.items() if k != "thread_id"}, supplied)
 
-    def active(self, task_id, turn_id, capability):
+    def active(self, task_id: str, turn_id: str | None, capability: str | None) -> bool:
         """Reject checks that outlive cancellation, completion, or a replaced turn."""
         with self.lock:
             current = self.capabilities.get(task_id)
@@ -149,13 +195,13 @@ class Verification:
             return bool(capability and task and authorized and task.get("current_turn_id") == turn_id
                         and not self.worker.task_cancellation_requested(task_id))
 
-    def retry_status(self, task_id):
+    def retry_status(self, task_id: str) -> dict[str, str] | None:
         """Expose progress to the UI without exposing its private capture capability."""
         with self.lock:
             item = self.ui_captures.get(task_id)
             return {"source_check_id": item["source_check_id"], "turn_id": item["turn_id"]} if item else None
 
-    def request_retry(self, task_id, payload):
+    def request_retry(self, task_id: str, payload: Any) -> dict[str, bool]:
         """Accept an Ingress user's selected batch, then run a fresh observational capture.
 
         This entry point is never exposed by the model's MCP tool. Only candidate
@@ -247,7 +293,7 @@ class Verification:
             if not handed_off:
                 self.execution_lock.release()
 
-    def _retry_capture(self, task_id, capture, launch_failed=False):
+    def _retry_capture(self, task_id: str, capture: dict[str, Any], launch_failed: bool = False) -> None:
         """Capture without rerunning the agent or changing its completed task status."""
         entry = {"operation": "dashboard", "check_id": secrets.token_hex(16),
                  "checked_at": self.worker.utc_now(), "path": capture["path"],
@@ -282,7 +328,7 @@ class Verification:
             except Exception as exc:
                 print(f"Could not start queued messages after a browser retry: {type(exc).__name__}", flush=True)
 
-    def core(self, method, path, **kwargs):
+    def core(self, method: str, path: str, **kwargs: Any) -> Any:
         """Call a Core API path through the Supervisor proxy and return the JSON of its answer.
 
         Requests to the integration's own codex_cli/ paths also carry the worker token in their JSON body.
@@ -307,7 +353,7 @@ class Verification:
                     raise ValueError("Home Assistant response exceeds the diagnostic limit")
         return json.loads(content)
 
-    def ws_read(self, message):
+    def ws_read(self, message: dict[str, Any]) -> Any:
         """Send one command over the Core WebSocket and return its result.
 
         Raises ValueError when authentication fails, a reply exceeds 1 MiB, or no successful result arrives.
@@ -332,7 +378,7 @@ class Verification:
                     return result["result"]
         raise ValueError("Home Assistant did not return a result")
 
-    def run(self, task_id, payload, capability=None):
+    def run(self, task_id: str, payload: dict[str, Any], capability: str | None = None) -> dict[str, Any]:
         """Run one check for the task's current turn and add its redacted result to the turn's verification list.
 
         Returns an "unavailable" result instead of raising when another check is running, the capability
@@ -393,7 +439,7 @@ class Verification:
         finally:
             self.execution_lock.release()
 
-    def entity(self, payload):
+    def entity(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Read an entity's state from Core, compare it with any expected_state, and keep only the named attributes."""
         entity_id = payload.get("entity_id", "")
         if not isinstance(entity_id, str) or not ENTITY_RE.fullmatch(entity_id):
@@ -414,7 +460,7 @@ class Verification:
                 "attributes": attributes, "last_updated": state.get("last_updated"),
                 "message": "Fresh entity state readback. This does not verify automation triggers, conditions, or actions."}
 
-    def find(self, payload):
+    def find(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Find entities by the name a person uses for them, so a device command needs no search of the registry files.
 
         An entity matches when its friendly name or entity id holds every word of the name. The answer is at
@@ -449,7 +495,7 @@ class Verification:
         return {"status": "observed", "name": name, "domain": domain, "matches": shown,
                 "total_matches": len(matches), "truncated": len(matches) > len(shown), "message": message}
 
-    def dashboard_readback(self, payload):
+    def dashboard_readback(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Read a dashboard's configuration from Core and compare it with expected_config when one is given."""
         path = payload.get("path", "/lovelace/0")
         if not isinstance(path, str) or not PATH_RE.fullmatch(path):
@@ -466,7 +512,7 @@ class Verification:
                  " differs from the saved configuration." if expected is not None else "."),
                 "view_count": len(actual.get("views", []))}
 
-    def _confirm_saved(self, installation, path, saved_ids):
+    def _confirm_saved(self, installation: str | None, path: str, saved_ids: set[str]) -> int | None:
         """Stop a capture once a saved permission it loaded is revoked; other changes don't matter."""
         try:
             with self.permissions.lock:
@@ -478,7 +524,8 @@ class Verification:
             raise ValueError("Browser permissions changed: a saved permission this inspection used was revoked. Run a new inspection.")
         return revision
 
-    def kiosk_images(self, task_id, path, turn_id, capability):
+    def kiosk_images(self, task_id: str, path: str, turn_id: str | None,
+                     capability: str | None) -> list[dict[str, Any]]:
         """Retain screenshots of Fully Kiosk devices displaying this view; no matches are silent."""
         try:
             targets = self.core("POST", "codex_cli/kiosk_screenshots", json={"path": path}).get("screenshots", [])
@@ -520,7 +567,8 @@ class Verification:
                     expires_at=time.time() + RETENTION_SECONDS))
         return images
 
-    def browser(self, task_id, payload, turn_id=None, capability=None, *, retry=None):
+    def browser(self, task_id: str, payload: dict[str, Any], turn_id: str | None = None,
+                capability: str | None = None, *, retry: dict[str, Any] | None = None) -> dict[str, Any]:
         """Capture a dashboard and matching Fully Kiosk screens, retaining turn evidence.
 
         `retry` is the capture an Ingress user approved: its one-off grants
@@ -576,7 +624,7 @@ class Verification:
                     process.stdin.close()
                     # A temporary output file avoids a pipe deadlock on verbose diagnostics.
                     deadline = time.monotonic() + 110
-                    tracked = {}
+                    tracked: dict[int, str] = {}
                     peak_memory = 0
                     while process.poll() is None:
                         if not self.active(task_id, turn_id, capability) or time.monotonic() >= deadline:
@@ -678,7 +726,7 @@ class Verification:
             except Exception:
                 pass  # Core independently revokes the session after 180 seconds.
 
-    def require_dashboard_save_permission(self, task_id):
+    def require_dashboard_save_permission(self, task_id: str) -> None:
         """Worker writes obey the same narrowed mode as the current chat turn."""
         options = self.worker.task_options(task_id)
         if options.get("codex_sandbox") == "read-only":
@@ -686,7 +734,7 @@ class Verification:
         if not options.get("auto_save_lovelace", True):
             raise ValueError("Dashboard auto-save is disabled; inspect the loaded dashboard without save_pending")
 
-    def save_pending_dashboard(self, task_id, path):
+    def save_pending_dashboard(self, task_id: str, path: str) -> None:
         """Save only a dashboard edited in this turn, before the AI views it."""
         self.require_dashboard_save_permission(task_id)
         manifest = self.worker.get_run_dir(task_id) / "manifest-before.json"
@@ -711,7 +759,7 @@ class Verification:
             if check["status"] != "passed":
                 raise ValueError("The pending dashboard was accepted but API readback differs")
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         """Delete only expired verification images from known conversation metadata."""
         with self.worker.lock:
             tasks = list(self.worker.tasks.values())
@@ -725,7 +773,7 @@ class Verification:
                     if path.is_relative_to(root) and path.is_file():
                         path.unlink(missing_ok=True)
 
-    def serve(self, path):
+    def serve(self, path: str | Path) -> socketserver.ThreadingUnixStreamServer:
         """Start a Unix socket server at path that answers verification requests in background threads, and return it.
 
         Any existing socket file is replaced, and the new one is accessible to its owner only.
@@ -735,7 +783,7 @@ class Verification:
         class Handler(socketserver.StreamRequestHandler):
             """Answer one newline-terminated JSON request per connection."""
 
-            def handle(self):
+            def handle(self) -> None:
                 """Read one request of at most 16384 bytes, dispatch it and write the result as a JSON line.
 
                 A request that is invalid, too large or refused gets a generic "unavailable" result.
@@ -761,13 +809,13 @@ class Verification:
         return server
 
 
-def browser_memory_limit(options):
+def browser_memory_limit(options: dict[str, Any]) -> int:
     """Keep old or malformed options bounded even outside Supervisor validation."""
     value = options.get("browser_memory_limit_mib", DEFAULT_BROWSER_MEMORY_LIMIT_MIB)
     return value if type(value) is int and 512 <= value <= 8192 else DEFAULT_BROWSER_MEMORY_LIMIT_MIB
 
 
-def track_browser_processes(root_pid, tracked):
+def track_browser_processes(root_pid: int, tracked: dict[int, str]) -> int:
     """Track descendants and charge shared pages proportionally, not per process."""
     if os.name == "nt":
         return 0
@@ -792,7 +840,7 @@ def track_browser_processes(root_pid, tracked):
     return sum(browser_process_memory(pid, processes[pid][2]) for pid in known if pid in processes)
 
 
-def browser_process_memory(pid, rss_pages):
+def browser_process_memory(pid: int, rss_pages: int) -> int:
     """Use Linux PSS plus proportional swap; retain RSS as a conservative fallback."""
     try:
         fields = {}
@@ -810,7 +858,7 @@ def browser_process_memory(pid, rss_pages):
     return rss_pages * os.sysconf("SC_PAGE_SIZE")
 
 
-def kill_tracked_processes(tracked):
+def kill_tracked_processes(tracked: dict[int, str]) -> None:
     """Kill each tracked process whose start time still matches, so a reused PID is never signalled."""
     for pid, start in tracked.items():
         try:
