@@ -608,18 +608,6 @@ h1 {
 .answer {
   padding: 0 3px;
 }
-.answer-heading {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  margin-bottom: 12px;
-  font-size: calc(12px * var(--text-scale));
-  font-weight: 600;
-}
-.answer-heading .mark {
-  color: var(--accent);
-  font-size: calc(20px * var(--text-scale));
-}
 .answer .details {
   margin-top: 12px;
 }

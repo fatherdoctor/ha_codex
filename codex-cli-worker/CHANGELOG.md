@@ -43,6 +43,8 @@
   `SCREENSHOTS.md` is removed.
 
 ### Fixed
+- The "Codex" label with the command symbol no longer sits above each reply on the chat page. Screen readers still
+  announce each reply as "Codex reply"; the reply's time and status line stay.
 - The mark in the chat page header now follows the page's theme instead of the system's light or dark setting. Open
   the chat page inside Home Assistant with a theme that differs from your system setting, and the mark matches the
   theme.
