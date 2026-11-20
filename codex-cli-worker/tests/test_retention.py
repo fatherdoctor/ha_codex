@@ -168,6 +168,34 @@ class ServerTests(unittest.TestCase):
             self.assertEqual(self.server.delete_expired_chats(NOW.timestamp()), [])
         self.assertIn(self.ids[0], self.server.tasks)
 
+    def test_a_message_queued_after_the_first_look_stops_the_deletion(self):
+        real = self.server.retention.expired_ids
+        calls = []
+        entry = {"task_id": self.ids[0], "queue_id": "q1", "turn_id": "t1"}
+
+        def queue_after_first_look(*args, **kwargs):
+            result = real(*args, **kwargs)
+            if not calls:
+                self.server.message_queue.append(entry)
+            calls.append(1)
+            return result
+
+        with patch.object(self.server.retention, "expired_ids", side_effect=queue_after_first_look):
+            self.assertEqual(self.server.delete_expired_chats(NOW.timestamp()), [])
+        self.assertIn(self.ids[0], self.server.tasks)
+        self.assertEqual(self.server.message_queue, [entry])
+
+    def test_the_chats_attachments_go_with_it(self):
+        uploads = self.server.ATTACHMENTS_ROOT / self.ids[0] / "turn-1"
+        uploads.mkdir(parents=True)
+        (uploads / "photo.png").write_bytes(b"x")
+        kept = self.server.ATTACHMENTS_ROOT / self.ids[2] / "turn-1"
+        kept.mkdir(parents=True)
+        (kept / "photo.png").write_bytes(b"x")
+        self.assertEqual(self.server.delete_expired_chats(NOW.timestamp()), [self.ids[0]])
+        self.assertFalse((self.server.ATTACHMENTS_ROOT / self.ids[0]).exists())
+        self.assertTrue((kept / "photo.png").exists())
+
     def test_nothing_is_deleted_when_the_schedules_cannot_be_read(self):
         with patch.object(self.server, "scheduled_chat_activity", return_value=None):
             self.assertEqual(self.server.delete_expired_chats(NOW.timestamp()), [])
