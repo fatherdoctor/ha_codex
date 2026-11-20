@@ -16,6 +16,7 @@ import sys
 import tempfile
 import threading
 import time
+from typing import Any
 from urllib.parse import quote
 
 import requests
@@ -36,7 +37,7 @@ class DataError(ValueError):
     """Carry a controlled, credential-free explanation suitable for a tool response."""
 
 
-def timestamp(value):
+def timestamp(value: Any) -> datetime:
     """Parse an explicit ISO timestamp and normalize its timezone to UTC."""
     if not isinstance(value, str) or not TIMESTAMP_RE.fullmatch(value):
         raise DataError("Use ISO timestamps with seconds and a timezone, such as 2026-10-01T00:00:00+03:00")
@@ -46,7 +47,7 @@ def timestamp(value):
         raise DataError("Invalid timestamp") from exc
 
 
-def iso_milliseconds(value):
+def iso_milliseconds(value: Any) -> str:
     """Convert a recorder WebSocket millisecond timestamp to explicit UTC."""
     if type(value) not in (int, float) or not math.isfinite(value):
         raise DataError("Home Assistant returned an invalid statistics timestamp")
@@ -56,7 +57,7 @@ def iso_milliseconds(value):
 class HomeAssistantData:
     """Read only history/statistics for an active turn, without exposing Supervisor credentials."""
 
-    def __init__(self, worker, export_root):
+    def __init__(self, worker: Any, export_root: str | Path) -> None:
         """Bind worker services to an explicit private storage root outside the configuration workspace."""
         self.worker = worker
         self.lock = threading.RLock()
@@ -72,7 +73,7 @@ class HomeAssistantData:
         self.exchange_notes = {}
         self.diagnostic_failures = 0
 
-    def begin(self, task_id):
+    def begin(self, task_id: str) -> str:
         """Start the exchange's tool state: a new exchange id, the turn, and a fresh data-query budget.
 
         The exchange id stays in the worker. A request names its chat by thread id (tool_threads).
@@ -88,7 +89,7 @@ class HomeAssistantData:
                 self.export_bytes[task_id] = 0
         return capability
 
-    def end(self, task_id):
+    def end(self, task_id: str) -> None:
         """Revoke access and remove the exchange's temporary files, including on cancellation."""
         with self.lock:
             for records in (self.capabilities, self.turns, self.queries, self.export_bytes, self.exchange_notes):
@@ -97,12 +98,12 @@ class HomeAssistantData:
             if directory is not None:
                 self.remove_exports(directory)
 
-    def set_exchange_info(self, task_id, info):
+    def set_exchange_info(self, task_id: str, info: dict[str, Any]) -> None:
         """Keep what exchange_info returns for the task's running exchange; end() removes it."""
         with self.lock:
             self.exchange_notes[task_id] = dict(info)
 
-    def remove_exports(self, directory):
+    def remove_exports(self, directory: Path) -> None:
         """Delete only a direct export directory; never follow a replacement symlink."""
         if directory.parent != self.export_root or not directory.name.startswith("turn-"):
             raise ValueError("Invalid data export directory")
@@ -120,7 +121,7 @@ class HomeAssistantData:
             # preventing the worker from finishing the task or starting the next one.
             print("Could not remove temporary historical data files", file=sys.stderr, flush=True)
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         """Remove orphan exports, preserving active files and skipping unsafe storage at startup."""
         with self.lock:
             if self.export_root.is_symlink():
@@ -133,7 +134,7 @@ class HomeAssistantData:
                 if directory not in self.export_dirs.values() and (directory.is_dir() or directory.is_symlink()):
                     self.remove_exports(directory)
 
-    def exchange_for(self, thread_id):
+    def exchange_for(self, thread_id: str) -> tuple[str | None, str | None]:
         """Return (task, exchange id) for the chat that the thread belongs to, or (None, None).
 
         The chat must have a running exchange that is not canceled. The exchange id never leaves the worker:
@@ -148,7 +149,7 @@ class HomeAssistantData:
             return None, None
         return task_id, exchange
 
-    def active(self, task_id, capability):
+    def active(self, task_id: str, capability: str | None) -> bool:
         """Require the original running turn and refuse cancellation or a replaced credential."""
         with self.worker.lock:
             with self.lock:
@@ -157,7 +158,7 @@ class HomeAssistantData:
                 return bool(current == capability and turn and task.get("current_turn_id") == turn
                             and task.get("status") == "running" and not task.get("cancellation_requested"))
 
-    def validate(self, payload):
+    def validate(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Validate every field before any network call and bound IDs, time range and output points."""
         operation = payload.get("operation")
         tool = next((tool for tool in TOOLS if tool["name"] == operation and operation in ("history", "statistics")), None)
@@ -197,7 +198,7 @@ class HomeAssistantData:
             query.update(period=period, types=list(types))
         return operation, query
 
-    def dispatch(self, payload):
+    def dispatch(self, payload: Any) -> dict[str, Any]:
         """Authenticate, run one bounded query, redact its result and discard data from expired turns."""
         if not isinstance(payload, dict):
             raise DataError("Expected a data request")
@@ -252,7 +253,7 @@ class HomeAssistantData:
         finally:
             self.execution_lock.release()
 
-    def read_exchange_info(self, task_id, payload):
+    def read_exchange_info(self, task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Return the running exchange's notes. It reads no Home Assistant data and has no query budget."""
         if set(payload) - {"operation", "thread_id"}:
             raise DataError("exchange_info takes no arguments")
@@ -262,7 +263,8 @@ class HomeAssistantData:
             return {"status": "unavailable", "message": "No details are recorded for this exchange"}
         return {"status": "observed", "operation": "exchange_info", **info}
 
-    def save_result(self, task_id, capability, operation, query, result, encoded):
+    def save_result(self, task_id: str, capability: str, operation: str, query: dict[str, Any],
+                    result: dict[str, Any], encoded: bytes) -> dict[str, Any]:
         """Atomically save redacted data for this turn and return a small model-visible receipt.
 
         The CLI truncates large tool outputs, including file reads. Keep the data
@@ -321,14 +323,14 @@ class HomeAssistantData:
                 self.export_bytes[task_id] += len(encoded)
                 return summary
 
-    def token(self):
+    def token(self) -> str:
         """Get the worker-only Supervisor credential, failing before network access when unavailable."""
         token = self.worker.ha_token()
         if not token:
             raise DataError("Home Assistant authentication is unavailable")
         return token
 
-    def history(self, query):
+    def history(self, query: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
         """GET the fixed REST history route, retaining only timestamped state values for requested entities."""
         url = "http://supervisor/core/api/history/period/" + quote(query["start_time"], safe="")
         params = {"filter_entity_id": ",".join(query["entity_ids"]), "end_time": query["end_time"],
@@ -369,7 +371,7 @@ class HomeAssistantData:
                 series[entity_id]["points"].append(point)
         return self.result("history", query, series)
 
-    def ws_read(self, messages):
+    def ws_read(self, messages: list[dict[str, Any]]) -> list[Any]:
         """Authenticate once and send only the two fixed recorder read commands with bounded replies."""
         token = self.token()
         if any(message.get("type") not in {"recorder/get_statistics_metadata", "recorder/statistics_during_period"}
@@ -411,7 +413,7 @@ class HomeAssistantData:
                     raise DataError("Home Assistant did not return statistics")
             return results
 
-    def statistics(self, query):
+    def statistics(self, query: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
         """Read recorder metadata and statistics, preserving missing fields, units and bucket boundaries."""
         ids = query["statistic_ids"]
         metadata, raw = self.ws_read([
@@ -445,7 +447,7 @@ class HomeAssistantData:
                                     "has_sum": meta.get("has_sum") if meta else None}
         return self.result("statistics", query, series)
 
-    def result(self, operation, query, series):
+    def result(self, operation: str, query: dict[str, Any], series: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
         """Share the point budget fairly, reporting exact truncation and empty/missing series."""
         # Water-fill the shared budget: short/empty series release their unused
         # share, and integer remainders go to the remaining series in ID order.
@@ -478,7 +480,7 @@ class HomeAssistantData:
                 "message": "Truncated series are incomplete. Narrow the window, use fewer IDs or coarser statistics. "
                            "Empty history can mean no recording, no access or purged data; it does not prove a constant state."}
 
-    def serve(self, path):
+    def serve(self, path: str | Path) -> socketserver.BaseServer:
         """Start an owner-only Unix socket serving one bounded query per connection for a running exchange."""
         engine = self
 

@@ -9,6 +9,7 @@ import secrets
 import socketserver
 import threading
 import time
+from typing import Any, Callable
 
 from core_address import get_json, ResponseTooLarge
 
@@ -31,7 +32,7 @@ class ReadError(ValueError):
 READ_FIELDS = frozenset(('operation', 'entity_id', 'attributes', 'domain', 'offset', 'limit'))
 
 
-def operation_arguments(args, allowed, reason):
+def operation_arguments(args: dict[str, Any], allowed: set[str], reason: str) -> dict[str, Any]:
     """Ignore only known, inapplicable fields whose values carry no request."""
     for key, value in args.items():
         if key in allowed:
@@ -42,7 +43,8 @@ def operation_arguments(args, allowed, reason):
     return {key: value for key, value in args.items() if key in allowed}
 
 
-def fetch_states(path, token):
+def fetch_states(path: str, token: str) -> Any:
+    """Read /states or one /states/<entity> from Core with a 16 MiB cap; any other path is refused."""
     if path != '/states' and not (path.startswith('/states/') and ENTITY.fullmatch(path[8:])):
         raise ReadError('Unsupported Core read path.')
     try:
@@ -52,24 +54,29 @@ def fetch_states(path, token):
 
 
 class StateResponseTooLarge(ReadError):
-    pass
+    """Core's state list passed the 16 MiB cap; ask for one entity instead."""
 
 
-def password_state(row):
+def password_state(row: dict[str, Any]) -> bool:
+    """True for a text entity that is, or may be, password mode; its state is never returned."""
     attrs = row.get('attributes')
     return str(row.get('entity_id', '')).startswith(('input_text.', 'text.')) and (
         not isinstance(attrs, dict) or str(attrs.get('mode', '')).lower() == 'password')
 
 
 class RelayReads:
-    def __init__(self, state, token, redact, fetch=fetch_states, observer=None):
+    """Serve bounded, read-only Core state reads to the active relay, gated by a rotating capability."""
+
+    def __init__(self, state: Callable[[], tuple[Any, bool]], token: Callable[[], str | None],
+                 redact: Callable[[str], str], fetch: Callable[[str, str], Any] = fetch_states,
+                 observer: Callable[..., None] | None = None) -> None:
         self.state = state; self.token = token; self.redact = redact; self.fetch = fetch
         self.lock = threading.Lock(); self.capability = ''
         self.inflight = threading.Lock()
         self.observer = observer
         self.observation_session = None
 
-    def environment(self, base):
+    def environment(self, base: dict[str, str]) -> dict[str, str]:
         """Called only by relay launch/probe paths; every new launch rotates it."""
         self.end_observation()
         with self.lock:
@@ -77,7 +84,8 @@ class RelayReads:
             self.capability = 'harc_' + secrets.token_urlsafe(32)
             return {**base, 'HA_RELAY_CAPABILITY': self.capability}
 
-    def end_observation(self):
+    def end_observation(self) -> None:
+        """Tell the observer that the current relay session ended, once."""
         session = self.observation_session
         self.observation_session = None
         if session is not None and self.observer is not None:
@@ -86,12 +94,14 @@ class RelayReads:
             except Exception:
                 pass
 
-    def finish_observation_if_stopped(self):
+    def finish_observation_if_stopped(self) -> None:
+        """End the observation when the relay process is gone or stopping."""
         proc, stopping = self.state()
         if proc is None or stopping or proc.poll() is not None:
             self.end_observation()
 
-    def active(self, supplied):
+    def active(self, supplied: Any) -> bool:
+        """True when supplied is the current capability and the relay process is running."""
         if not isinstance(supplied, str) or not supplied:
             return False
         with self.lock:
@@ -105,12 +115,14 @@ class RelayReads:
             return hmac.compare_digest(supplied, self.capability)
 
     @staticmethod
-    def entity_id(value):
+    def entity_id(value: Any) -> str:
+        """Return value when it is a well-formed entity id with no credential-like name; else ValueError."""
         if not isinstance(value, str) or len(value) > 255 or not ENTITY.fullmatch(value) or PRIVATE.search(value.split('.', 1)[1]):
             raise ValueError('Use a noncredential entity id.')
         return value
 
-    def clean(self, value):
+    def clean(self, value: Any) -> Any:
+        """Redact every string inside a nested result."""
         if isinstance(value, str):
             return self.redact(value)
         if isinstance(value, list):
@@ -119,7 +131,7 @@ class RelayReads:
             return {key: self.clean(item) for key, item in value.items()}
         return value
 
-    def dispatch(self, request):
+    def dispatch(self, request: Any) -> dict[str, Any]:
         """Keep observations separate from authorization and readback behavior."""
         observation = {}
         started = time.time()
@@ -141,7 +153,8 @@ class RelayReads:
                 except Exception:
                     pass  # Diagnostic failures must not change the read result.
 
-    def _dispatch(self, request, observation):
+    def _dispatch(self, request: Any, observation: dict[str, Any]) -> dict[str, Any]:
+        """Validate one read request, fetch from Core, filter and bound the result; raise ReadError on refusal."""
         if not isinstance(request, dict) or set(request) != {'capability', 'arguments'} or not self.active(request['capability']):
             raise ReadError('Inactive relay capability.')
         observation['authorized'] = True
@@ -240,7 +253,8 @@ class RelayReads:
         finally:
             self.inflight.release()
 
-    def serve(self, path):
+    def serve(self, path: str | Path) -> socketserver.BaseServer:
+        """Serve one read per connection on an owner-only Unix socket; the caller keeps the returned server."""
         broker = self
         class Handler(socketserver.StreamRequestHandler):
             def handle(self):
