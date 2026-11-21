@@ -14,7 +14,6 @@ OPTIONS = {
     "model_reasoning_effort": ("default reasoning effort", "server.py", "test_conversations.py"),
     "reasoning_summary": ("reasoning headlines in the activity list", "server.py", "test_activity.py"),
     "codex_sandbox": ("sandbox mode for a run", "server.py", "test_approvals.py"),
-    "task_root": ("folder for prompts, logs and backups", "server.py", "test_backups.py"),
     "notify_service": ("questions and failures sent to a notify service", "server.py", "test_choices.py"),
     "github_client_id": ("GitHub sign-in", "server.py", "test_github_routes.py"),
     "task_timeout_seconds": ("run time limit for a task", "server.py", "test_server.py"),
@@ -23,20 +22,25 @@ OPTIONS = {
     "config_check": ("Home Assistant configuration check after a task", "server.py", "test_config_check.py"),
     "full_snapshot": ("archive of the config folder before a message", "server.py", "test_backups.py"),
     "backup_retention_days": ("how long backups are kept", "server.py", "test_backups.py"),
+    "chat_retention_days": ("delete chats after days without a message", "retention.py", "test_retention.py"),
     "browser_verification": ("built-in browser for dashboard checks", "verification.py", "test_verification.py"),
     "browser_memory_limit_mib": ("memory budget of the built-in browser", "verification.py", "test_verification.py"),
     "local_docs": ("local copy of the Home Assistant documentation", "server.py", "test_local_docs.py"),
+    "warm_start": ("keep Codex running between messages", "server.py", "test_live_exchange.py"),
     "ha_url": ("address for Codex's own Home Assistant API calls", "server.py", "test_ha_url_review.py"),
     "HA_TOKEN": ("token for Codex's own Home Assistant API calls", "server.py", "test_ha_data.py"),
     "remote_control_name": ("machine name in the ChatGPT app", "server.py", "test_remote_name_and_first_reply.py"),
     "interactions_to_keep": ("records kept for Download diagnostics", "server.py", "test_interaction_diagnostics_fix.py"),
     "install_integration": ("install the integration on each start", "integration_sync.py", "test_integration_sync.py"),
+    "home_assistant_mcp": ("tools of the bundled Home Assistant MCP server", "hass_mcp.py", "test_ha_mcp_option.py"),
 }
 
 
-def read_form(key: str) -> re.Pattern:
-    """The option is read, as .get("key") or ["key"], not only listed in a table of defaults."""
-    return re.compile(r"""(\.get\(\s*|\[\s*)["']%s["']""" % re.escape(key))
+def read_form(key: str, text: str) -> re.Pattern:
+    """The option is read, as .get("key") or ["key"], or through a name set to "key", not only listed in a table of defaults."""
+    names = re.findall(r"""^(\w+)\s*=\s*["']%s["']\s*$""" % re.escape(key), text, re.M)
+    keys = "|".join([r"""["']%s["']""" % re.escape(key)] + [r"\b%s\b" % re.escape(n) for n in names])
+    return re.compile(r"""(\.get\(\s*|\[\s*)(%s)""" % keys)
 
 
 MAX_DESCRIPTION_WORDS = 25
@@ -60,7 +64,7 @@ class ConfigurationOptionsTests(unittest.TestCase):
         for key, (_feature, source, _test) in OPTIONS.items():
             with self.subTest(option=key):
                 text = (WORKER / source).read_text(encoding="utf-8")
-                self.assertRegex(text, read_form(key), f"{source} never reads {key} with .get or [ ]")
+                self.assertRegex(text, read_form(key, text), f"{source} never reads {key} with .get or [ ]")
 
     def test_each_option_is_covered_by_a_test(self):
         for key, (_feature, _source, test) in OPTIONS.items():

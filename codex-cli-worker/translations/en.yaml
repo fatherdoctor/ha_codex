@@ -1,13 +1,13 @@
 configuration:
   codex_model:
     name: Model
-    description: The model that new chats use. Leave it on default to let Codex pick. The retired gpt-5.5 now runs GPT-5.6 Sol.
+    description: The model for new chats, as free text. Use default to let Codex pick, or type a name from the chat page's model list.
   model_pin:
-    name: Lock to one model
-    description: Chats may run only on this model. A chat that asks for another model stops with an error. Enter none to turn the lock off.
+    name: Model pin
+    description: Empty means your account's default model. Set one to run chats only on it. Clear the field to turn the pin off.
   model_reasoning_effort:
     name: Reasoning effort
-    description: How much the model thinks before it answers. Low is fast, high is slower and more careful. Models that lack a level use medium.
+    description: How much the model thinks. Free text, such as low, medium, high, xhigh, max or ultra. Models that lack a level use medium.
   reasoning_summary:
     name: Show reasoning summaries
     description: How much of its thinking Codex shows in the chat while it works. Choose concise, detailed or none.
@@ -40,7 +40,7 @@ configuration:
     description: How many days the app keeps backups after a chat, from 1 to 365. The default is 7.
   chat_retention_days:
     name: Delete chats after (days without a message)
-    description: A chat with no message for this many days is deleted with all its files, from 1 to 365. Pinned chats are never deleted, and a chat with an approved, enabled schedule counts as in use. The chat shows a warning for its last 3 days. Default is 14 days.
+    description: Delete a chat and its files after this many days without a message, from 1 to 365. Pinned chats stay. The default is 14.
   ha_url:
     name: Home Assistant API URL
     description: The address Codex gets as HA_URL to call Home Assistant. Set it only if the automatic address does not work.
@@ -55,13 +55,13 @@ configuration:
     description: Download the official documentation, about 25 MB, so Codex can search it without the web. Turn it off to stop the download.
   warm_start:
     name: Keep Codex running
-    description: Keep one Codex process running between messages, with each recent chat loaded in it, so a message starts faster. At most 3 chats stay loaded; the app unloads the chat used longest ago when it needs room. The process uses memory while it waits. Turn this off to start Codex again for each message, as earlier versions did.
+    description: Keep Codex running between messages, with up to 3 recent chats loaded, so replies start faster. It uses memory while it waits.
   HA_TOKEN:
     name: Home Assistant access token
     description: An optional token for Codex to call Home Assistant, with the rights of the token's user. Codex keeps its read and call tools without it.
   remote_control_name:
-    name: Remote control name
-    description: The name this Home Assistant shows in the ChatGPT app. The default is Home Assistant. A new name applies after a restart.
+    name: Remote control machine name
+    description: The name this Home Assistant shows in the ChatGPT app. It applies after a restart. Settings can also set it while remote control is off.
   interactions_to_keep:
     name: Interactions to keep
     description: How many recent interactions the app keeps for downloaded diagnostics, from 10 to 100. Leave it empty to keep your current number.
@@ -70,4 +70,4 @@ configuration:
     description: On each start, install or update the Codex integration from the copy in this app. An integration you installed another way is never changed.
   home_assistant_mcp:
     name: Enable Home Assistant MCP
-    description: Give Codex the tools of the bundled Home Assistant MCP server (hass-mcp 0.6.0), in chats, scheduled runs and under remote control. Codex can then find entities, areas, automations, dashboards, history, statistics and the error log without a search through files, and uses these read tools without asking. They show what Home Assistant returns, including attributes such as camera picture links, which hold a short-lived access token. A tool call that changes the house or a dashboard is answered as your chat's permission mode says. In Default and Read only, Codex asks you before each one; in Auto-review, Codex's reviewer can allow it without asking you; in Full access, it runs without a question. Turn this off to remove the tools.
+    description: Codex gets the tools of the bundled Home Assistant MCP server. It reads without asking; a change to the house follows the chat's permission mode.
