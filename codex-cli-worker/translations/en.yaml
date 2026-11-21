@@ -43,7 +43,7 @@ configuration:
     description: How many days the app keeps backups after a chat, from 1 to 365. The default is 7.
   ha_url:
     name: Home Assistant API URL
-    description: The address Codex uses to call Home Assistant. Set it only if the automatic address does not work.
+    description: The address Codex gets as HA_URL to call Home Assistant. Set it only if the automatic address does not work.
   browser_verification:
     name: Built-in browser
     description: Let Codex open dashboards and take screenshots. The browser uses memory while it runs. Turn it off if memory is short.
