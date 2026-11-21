@@ -899,27 +899,7 @@ The web UI lists recent chats in a resizable sidebar and opens their messages on
 
 To make the text easier to read, open **Settings** > **Text size** and choose **Normal**, **Larger** or **Largest**. The choice applies to the whole page and is saved in that browser only, so a phone and a tablet can each keep their own size.
 
-### Commands
-
-Type `/` at the start of the message box to see the commands, with an icon and a line on what each does. Keep typing to narrow the list, then tap one, or move with the arrow keys and press **Enter** or **Tab**. The letters you typed are marked. **Escape**, or a press outside the list, closes it. Typing a whole command, such as `/new`, and sending it does the same.
-
-| Command | What it does |
-| --- | --- |
-| `/new` | Start a new chat |
-| `/stop` | Stop the chat that is working (listed only while one is) |
-| `/model` | Choose the model for this chat |
-| `/reasoning` | Choose how long Codex thinks before it answers |
-| `/rename` | Rename this chat (listed only with a chat open) |
-| `/usage` or `/status` | Show how much of your ChatGPT plan is used |
-| `/size` | Change the text size |
-| `/connection` | Open the remote connection and its status (not listed once Settings has shown that remote control is unavailable) |
-| `/settings` | Open Settings |
-| `/pin` | Pin or unpin this chat (listed only with a chat open) |
-| `/share` | Download this chat as a file (listed only with a chat open) |
-| `/archive` | Archive this chat, or restore it (listed only with a chat open and idle) |
-| `/delete` | Delete this chat and its history, after a confirmation (listed only with a chat open and idle) |
-
-The page runs these commands itself. Messages reach Codex as plain text through the Codex app server, which does not read the slash commands of the Codex terminal app, so a command sent as a message would reach the model as plain words. Text that only starts with `/`, such as `/config/automations.yaml has an error`, is sent to Codex as usual.
+In 0.5, the message box sends text starting with `/` to Codex as an ordinary message. For example, sending `/new` sends those four characters. Use **New chat** to start a conversation, the model chip to choose a model or reasoning level, and the chat menu for actions on a saved chat.
 
 Below **Home Assistant workspace**, the sidebar shows how much of the account's 5-hour and 7-day quota is left. From **0.1.67**, each has a bar next to the percentage. The filled part is the quota left: green, and red when less than 5% is left. Hover over a bar to see when the quota resets. The worker checks the quota every few minutes, and not while a task is running. Until it has a value, the bar is an empty outline.
 
