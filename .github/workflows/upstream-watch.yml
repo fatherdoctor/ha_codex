@@ -39,9 +39,9 @@ env:
   # ---- the only part a new fork edits ----
   UPSTREAM_REPO: moryoav/home-assistant-codex                    # owner/repo of the upstream
   TAG_PREFIX: "v"                                                # upstream tags look like v0.1.81
-  PATCHES_BRANCH: main                                           # a full fork: main carries our changes; its version file names our base
-  VERSION_FILE: custom_components/codex_cli/manifest.json        # JSON file with a "version" field on PATCHES_BRANCH
-  BASE_PARTS: "3"                                                # our version is upstream's + one more number: 0.1.81.1 -> 0.1.81
+  PATCHES_BRANCH: main                                           # a full fork: main carries our changes
+  VERSION_FILE: custom_components/codex_cli/manifest.json        # JSON file with a "version" field on PATCHES_BRANCH (shown in the report only)
+  UPSTREAM_BASE: "0.1.81"                                        # the upstream release this fork started from (README); raise it when upstream's changes are taken
   PATCH_BRANCHES: ""                                             # no separate patch branches: only the merge of the tag into main is tried
   TEST_CMD: "uv run --no-project --python 3.12 --with aiohttp --with flask --with pyyaml --with requests --with websocket-client python -m unittest discover -s codex-cli-worker/tests"
   LABEL: upstream-release
@@ -83,10 +83,11 @@ jobs:
             [ -n "$ok" ] || { say "test_branch '$INPUT_BRANCH' is not one of: $PATCH_BRANCHES"; exit 1; }
           fi
 
-          # 1. Our base version: the patches branch's version minus the fork's own trailing number.
+          # 1. Our version (for the report) and the upstream release it started from. The fork has its own version line
+          #    (0.3.x), so the base is not read from it: UPSTREAM_BASE names it.
           git fetch -q origin "$PATCHES_BRANCH" $PATCH_BRANCHES || { say "Cannot fetch our branches"; exit 1; }
           ours=$(git show "origin/$PATCHES_BRANCH:$VERSION_FILE" | jq -r .version) || { say "No version in $VERSION_FILE"; exit 1; }
-          base=$(echo "$ours" | cut -d. -f1-"$BASE_PARTS")
+          base="$UPSTREAM_BASE"
 
           # 2. Upstream's latest release (or the ref asked for by hand).
           if [ -n "${INPUT_REF:-}" ]; then
@@ -106,9 +107,26 @@ jobs:
           up="${tag#"$TAG_PREFIX"}"
           say "Our patches ($PATCHES_BRANCH) are version $ours, built on upstream $base. Upstream: $tag."
 
+          # A watch that cannot fire must fail, not stay green. Before UPSTREAM_BASE, the base was cut from our own
+          # version (0.3.x), which sorts after every upstream 0.1.x release, so each run said "Up to date". Refuse a
+          # base that is not an upstream release tag, and a base that sorts after upstream's latest release.
+          [[ "$base" =~ ^[0-9]+(\.[0-9]+)*$ ]] || { say "UPSTREAM_BASE '$base' is not a version number: this watch cannot fire."; exit 1; }
+          # git ls-remote --exit-code returns 2 only when the tag is missing; any other failure (network, GitHub) gets
+          # its own message, so the run does not blame the base for an outage.
+          rc=0
+          git ls-remote --exit-code --tags "https://github.com/$UPSTREAM_REPO.git" "refs/tags/$TAG_PREFIX$base" >/dev/null || rc=$?
+          if [ "$rc" = 2 ]; then
+            say "UPSTREAM_BASE $base is not an upstream release tag ($TAG_PREFIX$base): this watch cannot fire."; exit 1
+          elif [ "$rc" != 0 ]; then
+            say "Could not read upstream tags (git ls-remote exit $rc): this run cannot check UPSTREAM_BASE. Try again later."; exit 1
+          fi
           if [ -z "${INPUT_REF:-}" ]; then
             newest=$(printf '%s\n%s\n' "$base" "$up" | sort -V | tail -1)
-            if [ "$up" = "$base" ] || [ "$newest" = "$base" ]; then say "Up to date: nothing to do."; exit 0; fi
+            if [ "$up" = "$base" ]; then say "Up to date: nothing to do."; exit 0; fi
+            if [ "$newest" = "$base" ]; then
+              say "UPSTREAM_BASE $base sorts after upstream's latest release $tag: this watch cannot fire. Set UPSTREAM_BASE to the upstream release this fork is built on."
+              exit 1
+            fi
           fi
           title="Upstream $tag released - rebase patches"
 
@@ -197,7 +215,7 @@ jobs:
             echo "</details>"
             echo
             echo "---"
-            echo "Opened by the upstream-watch workflow ([run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)). It pushed nothing, tagged nothing and opened no PR. Next: rebase the patch branches onto \`$tag\`, merge \`$tag\` into \`$PATCHES_BRANCH\`, bump \`$VERSION_FILE\` to \`$up.1\`, re-run the tests, review."
+            echo "Opened by the upstream-watch workflow ([run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)). It pushed nothing, tagged nothing and opened no PR. Next: take the fixes you want from \`$tag\` by hand, re-run the tests, review, then raise UPSTREAM_BASE in this workflow."
           } > "$out"
           cat "$out" >> "$GITHUB_STEP_SUMMARY"
           # The report also goes to the log (readable through the API: `gh run view --log`) and is uploaded as the
