@@ -1020,8 +1020,8 @@ When you ask for a file, such as a spreadsheet, a report or an export, Codex sav
 folder, `/data/codex_tasks/<task_id>/files/`, and links to it in its answer. The chat page shows that link as a card
 with the file's name and size; select it to download the file. The page and the worker offer only files in that
 folder: a link to any other path, to a hidden file (a name that starts with a dot) or to a symbolic link stays plain
-text. Codex can write in this folder in the **Default** mode as well as in **Full access**; in **Read only** it cannot
-save a file there. The folder is not under `/config`, so its files are not part of the change review, the
+text. Codex can write in this folder in the **Default**, **Auto-review** and **Full access** modes; in **Read only**
+it asks you first, and the file is saved only after your **Allow once**. The folder is not under `/config`, so its files are not part of the change review, the
 configuration check or the backups of `/config`. It is deleted with the chat. Up to 200 files are listed for the page.
 
 The remote connection in the ChatGPT app runs in OpenAI's app and cannot reach files on your Home Assistant system,

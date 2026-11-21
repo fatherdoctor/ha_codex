@@ -1193,7 +1193,8 @@ function chatFileLinks(task) {
   return (href) => {
     let path = String(href || "").replace(/^file:\/\//, "");
     try {
-      path = decodeURI(path);
+      // Per part, so that %23 and %3F in a file name become # and ? (decodeURI keeps them encoded).
+      path = path.split("/").map(decodeURIComponent).join("/");
     } catch {
       return null;
     }

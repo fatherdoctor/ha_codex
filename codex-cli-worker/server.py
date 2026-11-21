@@ -3350,6 +3350,7 @@ def private_writable_root(folder: Path) -> list[str]:
 # page turns a link to a file in it into a download; the worker serves no other file this way. The folder is deleted
 # with the chat, and nothing in it is part of the /config change review.
 CHAT_FILES_DIR = "files"
+# The page polls GET /tasks/<id> while a chat is open, and the listing rides on that answer, so it stays bounded.
 CHAT_FILES_LIST_MAX = 200
 
 
@@ -3410,7 +3411,8 @@ def open_chat_file(task_id: str, relative: str) -> tuple[BinaryIO, str] | None:
         return None
     try:
         base = folder.resolve(strict=True)
-        descriptor = os.open(folder / relative, os.O_RDONLY | os.O_NOFOLLOW)
+        # O_NONBLOCK: a named pipe would otherwise block this thread until a writer appears; fstat refuses it below.
+        descriptor = os.open(folder / relative, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except OSError:
         return None
     try:

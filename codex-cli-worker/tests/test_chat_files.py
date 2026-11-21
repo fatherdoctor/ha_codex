@@ -4,6 +4,7 @@ from __future__ import annotations
 import io
 import os
 import tempfile
+import threading
 import unittest
 from contextlib import ExitStack
 from pathlib import Path
@@ -115,6 +116,19 @@ class ChatFilesTests(unittest.TestCase):
         (folder / "2025").rename(folder / "old")
         (folder / "2025").symlink_to(self.task_dir, target_is_directory=True)
         self.assertIsNone(server.open_chat_file(TASK_ID, "2025/task.json"))
+
+    def test_a_named_pipe_is_refused_without_waiting(self):
+        """A named pipe in the folder is refused at once instead of blocking the request until a writer appears."""
+        folder = self.make_folder()
+        os.mkfifo(folder / "pipe")
+        done = threading.Event()
+        result = []
+        thread = threading.Thread(target=lambda: (result.append(server.open_chat_file(TASK_ID, "pipe")), done.set()),
+                                  daemon=True)
+        thread.start()
+        self.assertTrue(done.wait(3), "open_chat_file blocked on a named pipe")
+        self.assertEqual(result, [None])
+        self.assertEqual(self.get("pipe").status_code, 404)
 
     def test_workspace_write_can_write_in_the_folder_only(self):
         """workspace-write gets the chat's files folder as one more writable root; read-only gets none."""

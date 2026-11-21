@@ -374,10 +374,9 @@ class BackupFolder(Sandbox):
         self.assertEqual(server.private_writable_root(run_dir / "backups"), [],
                          "a link out of the task folder is never a root")
 
-    def test_the_turn_policy_adds_only_that_folder(self):
-        source = (WORKER / "server.py").read_text(encoding="utf-8")
-        self.assertIn('policy["writableRoots"] = [*TASK_WRITABLE_ROOTS, *private_writable_root(final_file.parent / BACKUP_DIR),\n'
-                      '                                   *private_writable_root(chat_files_dir(task_id))]', source)
+    def test_the_task_roots_stay_config_and_share(self):
+        # The turn's exact writableRoots in each mode are checked by behavior in test_chat_files.py
+        # (test_workspace_write_can_write_in_the_folder_only), not by comparing source lines here.
         self.assertEqual(server.TASK_WRITABLE_ROOTS, ("/config", "/share"))
 
 
