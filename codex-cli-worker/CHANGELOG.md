@@ -136,6 +136,7 @@
   per-file copies of the files Codex changes are still made, and a change that fails the configuration check still
   points to them. The `backups` field is gone from the task API, `codex_cli.get_task` and the
   `codex_cli_task_result` event.
+- The add-on Configuration page now uses plain option names and one short description for each option (25 words or fewer). A test keeps names free of code words and descriptions short.
 
 ### Fixed
 - **A chat set back to the default model goes back to it.** Before, a chat kept the last model it ran on when you

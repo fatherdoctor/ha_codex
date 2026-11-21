@@ -1,73 +1,73 @@
 configuration:
   codex_model:
-    name: Codex model
-    description: Model passed to Codex CLI, as free text. Use default to let Codex CLI choose its recommended model for your account, or type a model name exactly as Codex lists it (for example gpt-6.1-sol). To see the names your account offers, open the chat page and look at the model list, or run codex debug models in the app's terminal. No list to update here, so a new model works as soon as Codex offers it. Names that are retired, such as gpt-5.5, run the next model up, and legacy GPT-5.3-Codex selections are treated as default. A mistyped name is refused by Codex with its own error.
+    name: Model
+    description: The model for new chats, as free text. Use default to let Codex pick, or type a name from the chat page's model list.
   model_pin:
     name: Model pin
-    description: Leave empty to use your account's default model. Set it to make this the only model the assistant runs on. A chat or a saved conversation that asks for another model is stopped with an error instead of running on it, and the Codex model option must be default or this model. Clear it to turn the pin off.
+    description: Empty means your account's default model. Set one to run chats only on it. Clear the field to turn the pin off.
   model_reasoning_effort:
-    name: Model reasoning effort
-    description: Reasoning effort passed to Codex CLI, as free text. low is lighter; medium is balanced; high, xhigh, max and ultra use more reasoning. A model that does not support the level runs medium.
+    name: Reasoning effort
+    description: How much the model thinks. Free text, such as low, medium, high, xhigh, max or ultra. Models that lack a level use medium.
   reasoning_summary:
-    name: Reasoning summaries
-    description: How much of its thinking Codex reports while it works. concise shows short headlines in the chat activity list, detailed asks for fuller summaries, and none hides reasoning from the list. Commands, file edits, searches, and progress notes are shown regardless.
+    name: Show reasoning summaries
+    description: How much of its thinking Codex shows in the chat while it works. Choose concise, detailed or none.
   codex_sandbox:
-    name: Codex sandbox
-    description: workspace-write is the default and allows edits in /config; read-only allows inspection. Commands or file changes needing extra access ask a Home Assistant administrator for Allow once or Deny in the chat. This option has no full-access value. A chat can run without the sandbox only in the Full access permission mode, which is off until an administrator turns it on in the app's Settings page.
+    name: Sandbox mode
+    description: What Codex may do without asking. Workspace-write lets it edit files in /config. Read-only lets it look but not change.
   notify_service:
     name: Notification service
-    description: Optional Home Assistant notify service for questions, permission requests and failures. Leave unset or blank to use persistent notifications. The app configuration page does not support Home Assistant service autocomplete, so this is a plain text field.
+    description: A notify service for questions and failures. Leave it empty to use Home Assistant persistent notifications.
   github_client_id:
-    name: GitHub App client ID
-    description: Public client ID used for GitHub sign-in. The default uses The Backshop GitHub App. Change this only if you use your own GitHub App. The client ID is not a secret.
+    name: GitHub sign-in app ID
+    description: The public ID of the GitHub app used to sign in. Change it only if you use your own GitHub app.
   task_timeout_seconds:
-    name: Task timeout
-    description: The longest one message may run, in seconds, before the worker stops it. The default is 3600, one hour. Time spent waiting for your answer to a permission request counts.
+    name: Time limit for a task
+    description: How many seconds one task may run before the app stops it.
   task_stall_seconds:
-    name: Stall limit
-    description: Stop a task when Codex sends nothing for this many seconds while no permission request is waiting, for example after a network drop. A command that prints nothing for this long counts too. 0 turns the check off.
+    name: Stop a silent task after
+    description: Stop a task that sends nothing for this many seconds. Use 0 to turn the check off.
   auto_save_lovelace:
-    name: Auto-save Lovelace dashboards
-    description: After Codex edits storage-mode Lovelace files, save changed dashboards through the Home Assistant WebSocket API so the UI updates in memory.
+    name: Save dashboards after edits
+    description: After Codex edits dashboard files, save the changed dashboards so the Home Assistant screen shows them at once.
   config_check:
-    name: Home Assistant configuration check
-    description: After a task changes YAML files, ask Home Assistant to check its configuration, as Developer Tools does. A failing check marks the task as failed and points to the saved previous version of the affected files. Turn off to skip the check on slow systems.
+    name: Check configuration after edits
+    description: After a task changes YAML files, ask Home Assistant to check the configuration. A failed check marks the task as failed.
   full_snapshot:
-    name: Full snapshot before every message
-    description: Also archive the tracked files of the configuration folder before every message. Codex is still told to save a copy of each file before changing it, and the archive can supply the previous version of a tracked file that it did not copy. It is not a complete backup - secrets.yaml, every file under .storage, files larger than 8 MiB, databases, logs and media folders are left out. Off by default. On a large configuration this adds a wait before every message and uses a lot of disk space.
+    name: Full backup before every message
+    description: Archive the whole configuration folder before each message. This is off by default because it is slow and uses disk space.
   backup_retention_days:
-    name: Keep backups for (days)
-    description: How many days after an exchange its backups are kept, from 1 to 365. Applies to the copies Codex saves before changing a file and to full snapshots. Default is 7 days.
+    name: Keep backups for days
+    description: How many days the app keeps backups after a chat, from 1 to 365. The default is 7.
   chat_retention_days:
     name: Delete chats after (days without a message)
-    description: A chat with no message for this many days is deleted with all its files, from 1 to 365. Pinned chats are never deleted, and a chat with an approved, enabled schedule counts as in use. The chat shows a warning for its last 3 days. Default is 14 days.
+    description: Delete a chat and its files after this many idle days, 1 to 365, default 14. Pinned chats and chats with approved, enabled schedules stay.
   ha_url:
     name: Home Assistant API URL
-    description: Address that Codex uses for its own Home Assistant API calls when HA_TOKEN is set. It is passed to Codex as the HA_URL environment variable. The default, http://homeassistant:8123, is Home Assistant's own address inside the app network; change it only if your Home Assistant uses HTTPS or another port. The earlier default, http://supervisor/core, does not accept a Home Assistant token and is treated as the default. The app's own calls do not use this address. From 0.1.81.2, leave the override empty to discover Core's actual port and SSL setting on each launch. Saved legacy defaults are treated as unset; an explicit HTTP(S) override wins. With SSL, use the certificate hostname and keep TLS verification enabled.
+    description: The address Codex gets as HA_URL to call Home Assistant. Set it only if the automatic address does not work.
   browser_verification:
-    name: Enable built-in browser
-    description: Allow dashboard inspection and desktop/mobile screenshots. The browser uses RAM while it runs; set its budget with Browser memory limit below. Turn this off to completely disable browser launches and screenshots if you do not need them or your system has limited RAM. State and configuration checks remain available. No Home Assistant password or manually created token is needed.
+    name: Built-in browser
+    description: Let Codex open dashboards and take screenshots. The browser uses memory while it runs. Turn it off if memory is short.
   browser_memory_limit_mib:
     name: Browser memory limit (MiB)
-    description: Memory budget for dashboard screenshots, from 512 to 8192 MiB. Default is 1536 MiB (1.5 GiB). Increase it for larger dashboards if your system has enough free memory for Home Assistant and other apps. This sets a limit for browser captures; it does not reserve RAM or limit the whole app.
+    description: The most memory the browser may use for screenshots, from 512 to 8192. The default is 1536.
   local_docs:
     name: Local Home Assistant documentation
-    description: Download the official Home Assistant documentation from GitHub into private app storage, about 25 MB, so Codex can search it directly instead of searching the web for documentation. The copy is fetched in the background when the app first starts and again after each Home Assistant update. Turn this off to stop the downloads; Codex then uses web search as before.
+    description: Download the official documentation, about 25 MB, so Codex can search it without the web. Turn it off to stop the download.
   warm_start:
     name: Keep Codex running
-    description: Keep one Codex process running between messages, with each recent chat loaded in it, so a message starts faster. At most 3 chats stay loaded; the app unloads the chat used longest ago when it needs room. The process uses memory while it waits. Turn this off to start Codex again for each message, as earlier versions did.
+    description: Keep Codex running between messages, with up to 3 recent chats loaded, so replies start faster. It uses memory while it waits.
   HA_TOKEN:
-    name: HA_TOKEN
-    description: Optional Home Assistant token exposed to Codex subprocesses as the HA_TOKEN environment variable, together with HA_URL, the address above. Codex can then call Home Assistant's API with the rights of the token's user, for example to reload automations or restart Home Assistant.
+    name: Home Assistant access token
+    description: An optional token for Codex to call Home Assistant, with the rights of the token's user. Codex keeps its read and call tools without it.
   remote_control_name:
     name: Remote control machine name
-    description: The name this Home Assistant shows in the ChatGPT app when remote control is on. The default is Home Assistant. Letters, digits, spaces, dots, dashes and underscores are kept, up to 63 characters; if the name cannot be used as written, Home-Assistant is used instead. Remote control itself is turned on and off in the app's Settings page, not here. It can also be changed in Settings > Remote connection while remote control is off. A new name set here takes effect when the app restarts, one set in Settings the next time remote control is turned on; if the ChatGPT app still shows the old name, choose New pairing code in Settings.
+    description: The name this Home Assistant shows in the ChatGPT app. It applies after a restart. Settings can also set it while remote control is off.
   interactions_to_keep:
     name: Interactions to keep
-    description: How many recent interactions the app keeps for the integration's Download diagnostics, from 10 to 100. Leave it empty to keep the number you have, 25 on a new install. Lower numbers remove the oldest records first.
+    description: How many recent interactions the app keeps for downloaded diagnostics, from 10 to 100. Leave it empty to keep your current number.
   install_integration:
-    name: Install the Codex integration
-    description: On each start, install or update the Codex integration in /config/custom_components/codex_cli from the copy in this app, so the two always have the same version. After the app writes the folder, a notification asks you to restart Home Assistant. A folder installed another way (Marketplace, HACS or by hand), or changed after the app wrote it, is never changed. Turn this off to install and update the integration yourself. Uninstalling the app does not remove the integration.
+    name: Install the integration
+    description: On each start, install or update the Codex integration from the copy in this app. An integration you installed another way is never changed.
   home_assistant_mcp:
     name: Enable Home Assistant MCP
-    description: Give Codex the tools of the bundled Home Assistant MCP server (hass-mcp 0.6.0), in chats, scheduled runs and under remote control. Codex can then find entities, areas, automations, dashboards, history, statistics and the error log without a search through files, and uses these read tools without asking. They show what Home Assistant returns, including attributes such as camera picture links, which hold a short-lived access token. A tool call that changes the house or a dashboard is answered as your chat's permission mode says. In Default and Read only, Codex asks you before each one; in Auto-review, Codex's reviewer can allow it without asking you; in Full access, it runs without a question. Turn this off to remove the tools.
+    description: Reads need no approval. For writes, Default and Read only ask you. Auto-review can approve for you. Full access runs without asking.
