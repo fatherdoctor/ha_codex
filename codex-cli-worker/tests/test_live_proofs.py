@@ -645,9 +645,11 @@ class SandboxGitIdentity(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             data, checkout = root / "data", root / "checkout"
-            data.mkdir()
+            home = data / "codex-home"
+            home.mkdir(parents=True)
             checkout.mkdir()
-            with patch.object(server, "DATA_ROOT", data), patch.object(server, "read_options", return_value={}):
+            with (patch.multiple(server, DATA_ROOT=data, CODEX_HOME=home),
+                  patch.object(server, "read_options", return_value={})):
                 server.write_git_identity_defaults({})
                 env = server.codex_env()
             command = """set -eu
