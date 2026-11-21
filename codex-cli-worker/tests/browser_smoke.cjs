@@ -551,8 +551,20 @@ async function effortSaved(page, label) {
       await page.locator("#picker-model").textContent(),
     );
     assert.equal(await page.locator("#effort-model svg.effort-model-chevron").count(), 1);
-    // No lightning (fast mode) icon: the Codex CLI has no setting for it.
-    assert.equal(await page.locator("#effort-popover svg.effort-bolt").count(), 0);
+    // No lightning (fast mode) toggle anywhere on the page, in the composer or the panel, until it
+    // works: the Codex CLI has no setting for it (returns in 0.6, CX-04-FB-MODEL).
+    assert.equal(
+      await page.evaluate(() =>
+        [...document.querySelectorAll(".effort-bolt, [class*='bolt'], [id*='bolt'], [id*='fast'], .mdi-lightning-bolt, .mdi-flash, path")]
+          .filter((node) =>
+            node.tagName.toLowerCase() !== "path" ||
+            /^m13 3-8 10h6l-1 8 9-11h-6l1-7z$/i.test(node.getAttribute("d") || ""),
+          )
+          .filter((node) => node.getClientRects().length > 0 || node.closest("#effort-popover")).length,
+      ),
+      0,
+    );
+    assert.equal(await page.getByRole("button", { name: /fast|lightning/i }).count(), 0);
     assert.equal(
       await page.locator("#effort-dots span").count(),
       Number(await page.locator("#effort-slider").getAttribute("max")) + 1,

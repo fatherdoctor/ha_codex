@@ -77,6 +77,16 @@ async function testSlash(browser, output, errors) {
       "/connection",
       "/settings",
     ]);
+    // No fast mode command until it works (returns in 0.6, CX-04-FB-MODEL).
+    assert.ok(!all.includes("/fast"), "typing / lists no /fast command");
+    await typeMessage(page, "/fast");
+    assert.equal(
+      (await page.locator("#slash-popover").isHidden()) ||
+        !(await listed(page)).includes("/fast"),
+      true,
+      "typing /fast offers no fast command",
+    );
+    await typeMessage(page, "/");
     assert.equal(
       await page.locator("#message").getAttribute("aria-expanded"),
       "true",

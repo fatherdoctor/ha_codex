@@ -3148,6 +3148,9 @@ window.addEventListener("resize", () => {
  * you type, and a tap, or Enter or Tab on the highlighted one, runs it.
  * A command is listed only while the page can run it (Stop only while a
  * chat is working, Rename only with a chat open).
+ * There is no /fast command, and the picker has no lightning (fast mode)
+ * toggle: the Codex CLI has no setting for fast mode yet. Both return in 0.6
+ * with a working toggle (CX-04-FB-MODEL).
  */
 const SLASH_COMMANDS = [
   {

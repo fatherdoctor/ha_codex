@@ -1403,7 +1403,7 @@ textarea::placeholder {
   font-size: calc(13px * var(--text-scale));
   font-weight: 600;
 }
-/* Keeps the effort name centered now that the lightning icon is left out (no CLI option for fast mode). */
+/* Keeps the effort name centered while the lightning (fast mode) toggle is hidden; it returns in 0.6 with a working toggle (CX-04-FB-MODEL). */
 .effort-heading-spacer {
   width: 24px;
   flex-shrink: 0;
