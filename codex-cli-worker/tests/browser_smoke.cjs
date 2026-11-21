@@ -502,7 +502,7 @@ async function effortSaved(page, label) {
       ["message", 0, 48000, "message", 0],
     );
     // CX-REPLY-ALIGN: at phone and desktop widths a finished reply (its "Worked for" line, its text and its
-    // "Completed" line) starts at the left edge of the message column and no part of it is cut off.
+    // "Completed" line) starts at the left edge of the message column, with no indent, and no part of it is cut off.
     await page.locator('[data-task-id="preview-01"]').click();
     await page.locator("#activity.worked .activity-toggle").waitFor();
     await page.locator("#messages .answer .turn-meta").waitFor();
@@ -529,7 +529,20 @@ async function effortSaved(page, label) {
           parts: Object.fromEntries(
             Object.entries(parts).map(([name, node]) => {
               const rect = node.getBoundingClientRect();
-              return [name, { left: rect.left, right: rect.right, cut: node.scrollWidth > node.clientWidth + 1 }];
+              // The reply text and the Completed line are measured at their first character, so an indent counts.
+              let left = rect.left;
+              if (name !== "worked") {
+                const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, {
+                  acceptNode: (text) => (text.data.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP),
+                });
+                const text = walker.nextNode();
+                const range = document.createRange();
+                const start = text.data.search(/\S/);
+                range.setStart(text, start);
+                range.setEnd(text, start + 1);
+                left = range.getBoundingClientRect().left;
+              }
+              return [name, { left, right: rect.right, cut: node.scrollWidth > node.clientWidth + 1 }];
             }),
           ),
         };
@@ -538,7 +551,7 @@ async function effortSaved(page, label) {
       assert.equal(reply.wider, false, `the messages are wider than their column at ${width} px`);
       for (const [name, part] of Object.entries(reply.parts)) {
         assert.ok(
-          part.left >= reply.left - 0.5 && part.left <= reply.left + 4,
+          Math.abs(part.left - reply.left) <= 1,
           `${name} starts at ${part.left} px, the column at ${reply.left} px (${width} px window)`,
         );
         assert.ok(
@@ -921,6 +934,36 @@ async function effortSaved(page, label) {
     assert.equal(await page.locator("#activity .step.is-running").count(), 0);
     assert.equal(await page.locator(".message.user").count(), 2);
     assert.equal(await page.locator(".answer").count(), 2);
+    // CX-REPLY-ALIGN: the text messages Codex wrote along the way ("I'll look for …", "I found …") are blocks of
+    // their own above the answer, spaced apart from each other and from the answer, and start where it starts.
+    const narration = await page.evaluate(() => {
+      const exchange = [...document.querySelectorAll("#messages .exchange")].at(-1);
+      const blocks = [...exchange.querySelectorAll("#activity-text > .message"), exchange.querySelector(".answer > .message")];
+      const firstCharacter = (node) => {
+        const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, {
+          acceptNode: (text) => (text.data.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP),
+        });
+        const text = walker.nextNode();
+        const range = document.createRange();
+        const start = text.data.search(/\S/);
+        range.setStart(text, start);
+        range.setEnd(text, start + 1);
+        return range.getBoundingClientRect().left;
+      };
+      return blocks.map((node) => {
+        const rect = node.getBoundingClientRect();
+        return { top: rect.top, bottom: rect.bottom, left: firstCharacter(node) };
+      });
+    });
+    assert.ok(narration.length >= 3, `${narration.length - 1} narration blocks above the answer`);
+    for (let n = 1; n < narration.length; n++) {
+      const gap = narration[n].top - narration[n - 1].bottom;
+      assert.ok(gap >= 8, `block ${n} is ${gap} px below the one above it`);
+      assert.ok(
+        Math.abs(narration[n].left - narration[0].left) <= 1,
+        `block ${n} starts at ${narration[n].left} px, the first at ${narration[0].left} px`,
+      );
+    }
     const saved = await page.evaluate(
       async () => (await (await fetch("tasks/preview-00")).json()).task,
     );
