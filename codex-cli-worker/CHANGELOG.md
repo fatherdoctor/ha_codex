@@ -3,6 +3,12 @@
 ## 0.4.0 (unreleased)
 
 ### What's new
+- **New chats start on the account's default model and level.** With the model option on `default`, a chat runs on
+  the model Codex's model list marks as the account's default, at the reasoning level Codex gives it, instead of a
+  fixed GPT-6.1 Sol at Medium. Without that list it uses the model Codex's status report names, then the newest Sol
+  model the account offers, then GPT-6.2 Sol, now first in the built-in list. A `model_reasoning_effort` other than
+  the shipped `medium` still applies. The reset button in the model and reasoning panel now also sets the model back
+  to the default, not only the level.
 - **Model and reasoning picker like the desktop app.** The model and reasoning controls below the message box are now
   one chip: the model name, then the reasoning level in grey. Select it, or press Ctrl+Shift+M, to open a panel with the
   reasoning level, the model name and a slider with one stop per level the model offers. Select the model name to pick
