@@ -3539,18 +3539,19 @@ let shownLogin = null;
  */
 function signInCard(auth) {
   const card = document.createElement("div");
-  const requirement = textNode("p", "A ChatGPT account with Codex access is required. As of November 13, 2026, this includes Free and Go. ", "muted");
-  const availability = textNode("a", "Check OpenAI’s current availability");
-  availability.href = "https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan";
-  availability.target = "_blank";
-  availability.rel = "noopener noreferrer";
-  requirement.append(availability);
-  card.append(requirement);
   card.className = "signin-card";
+  // The sign-in link comes first, as the main button; then the code, its timer and the folded QR code.
+  if (auth.verification_url) {
+    const url = new URL(auth.verification_url, location.href);
+    if (url.protocol === "https:") {
+      const link = textNode("a", "Open the ChatGPT sign-in page", "signin-link");
+      link.href = url.href;
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      card.append(link);
+    }
+  }
   if (auth.user_code) {
-    card.append(
-      textNode("p", "Enter this code on the ChatGPT sign-in page:", "muted"),
-    );
     const code = textNode("p", auth.user_code, "signin-code");
     code.setAttribute(
       "aria-label",
@@ -3559,16 +3560,6 @@ function signInCard(auth) {
     card.append(code, ...codeExpiry(auth.expires_in, newChatgptCode, "chatgpt"));
   } else {
     card.append(textNode("p", "Waiting for the sign-in code…", "muted"));
-  }
-  if (auth.verification_url) {
-    const url = new URL(auth.verification_url, location.href);
-    if (url.protocol === "https:") {
-      const link = textNode("a", "Open the ChatGPT sign-in page");
-      link.href = url.href;
-      link.target = "_blank";
-      link.rel = "noreferrer";
-      card.append(link);
-    }
   }
   if (auth.qr_path) {
     const img = document.createElement("img");
@@ -3627,9 +3618,7 @@ function renderLogin(auth) {
   const failure = `The last sign-in did not finish. ${auth.error || "Get a new code to try again."}`;
   $("login-status").textContent = signedIn
     ? auth.codex_login.message || "Signed in to ChatGPT."
-    : pending
-      ? "Signing in. Enter the code below on the ChatGPT sign-in page."
-      : failed
+    : failed
         ? failure
         : lapsed
           ? "The ChatGPT sign-in expired or was revoked. Sign in again."
@@ -3667,8 +3656,8 @@ function renderLogin(auth) {
     followCodeTime("chatgpt", auth.expires_in);
   }
   for (const id of ["login", "banner-login"]) $(id).hidden = pending;
-  // The sign-in card repeats the account requirement, so the section shows it once.
-  $("login-requirement").hidden = pending;
+  // While a sign-in waits, the section shows only the card and Cancel (CSS hides the rest).
+  $("chatgpt-section").classList.toggle("signing-in", pending);
   for (const id of ["login-cancel", "banner-cancel"]) $(id).hidden = !pending;
   $("signin-banner").hidden = signedIn;
 }
@@ -3749,16 +3738,19 @@ function githubExpiry(github) {
 function githubFlowCard(flow) {
   const card = document.createElement("div");
   card.className = "signin-card github-flow-card";
+  // The same order as the ChatGPT card: the link as the main button, then the code and its timer.
+  const link = githubLink(flow.verification_uri || "https://github.com/login/device", "Open github.com/login/device");
+  if (link) {
+    link.className = "signin-link";
+    card.append(link);
+  }
   if (flow.user_code) {
-    card.append(textNode("p", "Enter this code on GitHub's device sign-in page, then approve Codex for Home Assistant:", "muted"));
     const code = textNode("p", flow.user_code, "signin-code");
     code.setAttribute("aria-label", `GitHub code ${flow.user_code.split("").join(" ")}`);
     card.append(code);
   } else {
     card.append(textNode("p", "Waiting for the GitHub code…", "muted"));
   }
-  const link = githubLink(flow.verification_uri || "https://github.com/login/device", "Open github.com/login/device");
-  if (link) card.append(link);
   if (flow.user_code) card.append(...codeExpiry(flow.expires_in, newGithubCode, "github"));
   return card;
 }
@@ -3866,6 +3858,8 @@ function renderGithub(github) {
   const retry = !connected && ["expired", "failed"].includes(flow.status);
   $("github-connect").textContent = connected ? "Connect again" : retry ? "Get a new code" : "Connect GitHub";
   $("github-connect").hidden = waiting;
+  // While a sign-in waits, the section shows only the card and Cancel (CSS hides the rest).
+  $("github-section").classList.toggle("signing-in", waiting);
   $("github-cancel").hidden = !waiting;
   for (const id of ["github-test", "github-check", "github-disconnect"]) $(id).hidden = !connected;
   $("github-accept").hidden = !(state === "access_changed" && !github.permission_problem);
