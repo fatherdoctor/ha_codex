@@ -147,6 +147,9 @@
 - The new Codex host (see "Under the hood") is not connected. Every message still starts its own Codex process.
 
 ### Under the hood
+- The chat page's repeating checks (the chat list, the steps of a working chat, the quota, the two sign-ins, remote
+  control and the code countdowns) now run through one scheduler, `poll()`, and the buttons that wait for the worker
+  share one helper, `busyAction()`. Each check keeps its timing, and nothing looks different.
 - Upgrade code for data that only test installs held is removed. The schedule file no longer adds the `author`,
   `chat_id` and `model` columns to an old table: a new file has them from the start, in the same order. Startup no
   longer looks for an exact copy of the house rules that versions before 0.3.0 bundled in Codex's home folder. An
