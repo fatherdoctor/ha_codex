@@ -3,6 +3,11 @@
 ## 0.4.0 (unreleased)
 
 ### What's new
+- **Model and reasoning picker like the desktop app.** The model and reasoning controls below the message box are now
+  one chip: the model name, then the reasoning level in grey. Select it, or press Ctrl+Shift+M, to open a panel with the
+  reasoning level, the model name and a slider with one stop per level the model offers. Select the model name to pick
+  another model from **Select model**; you return to the panel. Esc or a press outside closes it. It works on a phone
+  and on a desktop. The desktop app's fast mode switch is left out: the Codex CLI has no setting for it.
 - **Home Assistant MCP, on by default.** The new option **Enable Home Assistant MCP** gives Codex the tools of the
   bundled Home Assistant MCP server (hass-mcp 0.6.0, as in the Claude Code app). Codex can find entities by name, area
   or domain and read automations, dashboards, history, statistics and the error log without asking. It can also
