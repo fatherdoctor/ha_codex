@@ -2,6 +2,7 @@
   /* Material Design Icons (Apache-2.0, @mdi/js 7.4.47): mdiChevronRight and mdiChevronDown, the arrows Home Assistant uses; mdiClose and mdiCheck. */
   --mdi-chevron-right: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z'/%3E%3C/svg%3E");
   --mdi-chevron-down: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z'/%3E%3C/svg%3E");
+  --mdi-arrow-left: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z'/%3E%3C/svg%3E");
   --mdi-close: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z'/%3E%3C/svg%3E");
   --mdi-check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z'/%3E%3C/svg%3E");
   color-scheme: light;
@@ -1211,7 +1212,7 @@ textarea::placeholder {
   margin-top: 7px;
 }
 .compose-tools {
-  position: relative; /* Anchors the picker popovers, so they open from the left edge on phones. */
+  position: relative; /* Anchors the pop-ups; placePicker (chat.js) puts the picker panel right above the chip. */
   display: flex;
   align-items: center;
   gap: 2px;
@@ -1302,28 +1303,32 @@ textarea::placeholder {
   background: var(--bg);
   color: var(--text);
 }
+/* One chip, as in the ChatGPT desktop app: the model name, then the reasoning level in grey. */
 .picker-pill {
   display: flex;
   align-items: center;
+  gap: 6px;
   background: var(--surface);
+  color: var(--text);
   border-radius: 20px;
   max-width: 100%;
-}
-.picker-pill button {
-  background: transparent;
-  color: var(--text);
-  padding: 7px 4px 7px 12px;
-  font-size: calc(12px * var(--text-scale));
-  border-radius: 20px;
-  white-space: nowrap;
+  min-width: 0;
   min-height: 34px;
+  padding: 7px 10px 7px 12px;
+  font-size: calc(12px * var(--text-scale));
+  white-space: nowrap;
 }
-.picker-pill #effort-button {
+#picker-model {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#effort-label {
   color: var(--muted);
-  padding: 7px 10px 7px 3px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-shrink: 0;
+}
+.picker-pill .picker-chevron {
+  color: var(--muted);
 }
 .picker-chevron {
   width: 14px;
@@ -1388,25 +1393,50 @@ textarea::placeholder {
 }
 .effort-heading > div {
   flex: 1;
+  min-width: 0;
   text-align: center;
   padding-top: 2px;
 }
 .effort-heading label {
+  display: block;
   color: #467ced;
   font-size: calc(13px * var(--text-scale));
   font-weight: 600;
 }
-#effort-model {
-  display: block;
-  font-size: calc(11px * var(--text-scale));
-  color: var(--muted);
-  margin-top: 3px;
+/* Keeps the effort name centered while the lightning (fast mode) toggle is hidden; it returns in 0.6 with a working toggle (CX-04-FB-MODEL). */
+.effort-heading-spacer {
+  width: 24px;
+  flex-shrink: 0;
 }
-.effort-bolt {
+/* The model name under the effort name; it opens the model list. */
+#effort-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  min-height: 28px;
+  margin-top: 1px;
+  padding: 3px 4px 3px 8px;
+  border-radius: 10px;
+  background: transparent;
   color: var(--muted);
-  width: 20px;
-  height: 20px;
-  margin: 3px 2px;
+  font-size: calc(11px * var(--text-scale));
+}
+#effort-model:hover:not(:disabled),
+#effort-model:focus-visible {
+  background: var(--surface);
+  color: var(--text);
+}
+#effort-model-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.effort-model-chevron {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
 }
 #effort-reset {
   background: transparent;
@@ -1414,6 +1444,7 @@ textarea::placeholder {
   padding: 1px 3px;
   font-size: calc(20px * var(--text-scale));
   width: 24px;
+  flex-shrink: 0;
 }
 .effort-track {
   position: relative;
@@ -1499,13 +1530,11 @@ textarea::placeholder {
   }
 }
 @media (max-width: 400px) {
-  .picker-pill button {
+  .picker-pill {
     font-size: calc(11px * var(--text-scale));
     padding-left: 9px;
-  }
-  .picker-pill #effort-button {
-    gap: 5px;
     padding-right: 8px;
+    gap: 5px;
   }
 }
 /* The arrow is an icon centered in the circle, not a text glyph that sits on the font's baseline. */
@@ -1734,9 +1763,6 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   max-width: 220px;
   background: #fff;
   padding: 10px;
-}
-#login-card a {
-  color: var(--accent);
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -2017,6 +2043,23 @@ dialog :is(h3, h4):has(> .settings-toggle) {
 .signin-card a {
   overflow-wrap: anywhere;
 }
+/* The sign-in link is the main button of the card, drawn like the filled buttons of Settings. */
+.signin-card a.signin-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--ha-color-fill-primary-loud-resting, var(--accent));
+  color: var(--ha-color-on-primary-loud, #fff);
+  font-weight: 500;
+  text-decoration: none;
+}
+/* While a sign-in waits, a section shows only its card and Cancel. */
+.signing-in .signin-hide {
+  display: none;
+}
 
 /*
  * Settings and its dialogs (Status, Remote connection, Permissions, Workspace rules) look like Home Assistant's
@@ -2128,7 +2171,17 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   -webkit-mask: var(--mdi-close) center / 24px no-repeat;
   mask: var(--mdi-close) center / 24px no-repeat;
 }
-.icon.icon-close {
+.icon-back::before {
+  content: "";
+  display: block;
+  width: 24px;
+  height: 24px;
+  background: currentColor;
+  -webkit-mask: var(--mdi-arrow-left) center / 24px no-repeat;
+  mask: var(--mdi-arrow-left) center / 24px no-repeat;
+}
+.icon.icon-close,
+.icon.icon-back {
   padding: 8px;
   border-radius: 50%;
   line-height: 0;
@@ -2778,4 +2831,32 @@ a.ha-nav-row:focus-visible {
 /* Interim text messages of the latest exchange, shown outside the closed step list (CX-04-SHOW-TEXT). */
 .activity-text:empty {
   display: none;
+}
+/* CX-04-PHONE-LIST: at phone width the rows are 48 px (--fb2-row-height) and the menu button 44 px, and the selected chat shows its menu button in place of its date. */
+@media (max-width: 700px) {
+  .chats-card .chat-row .row-menu {
+    min-width: 44px;
+    min-height: 44px;
+    right: 0;
+    padding: 0;
+  }
+  .chats-card .chat-row.current .row-menu {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .chats-card .chat-row.current:has(.row-menu) .row-meta > span:last-child {
+    visibility: hidden;
+  }
+}
+
+/* CX-04-REMOTE-WIN: the Back control sits left of the title; the title takes the space between it and the X. */
+#connection-dialog .dialog-header h2 {
+  flex: 1;
+  min-width: 0;
+  margin-left: 4px;
+}
+#remote-control-name {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
 }

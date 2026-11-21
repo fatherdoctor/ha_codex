@@ -200,3 +200,89 @@ class ToolCardTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+class HassMcpWriteCardTests(unittest.TestCase):
+    """The write tools of the bundled Home Assistant MCP server get the same card as home_assistant_call (CX-05-MCP)."""
+
+    setUp = ToolCardTests.setUp
+    record = ToolCardTests.record
+
+    def ask(self, tool, arguments, request_id=7):
+        """Send Codex's question before a call of one hass-mcp tool; return what the session wrote back."""
+        params = {
+            "threadId": "thread", "turnId": "turn", "serverName": "home_assistant_mcp", "mode": "form",
+            "message": f'Allow the home_assistant_mcp MCP server to run tool "{tool}"?',
+            "requestedSchema": {"type": "object", "properties": {}},
+            "_meta": {"codex_approval_kind": "mcp_tool_call", "tool_params": arguments},
+        }
+        before = len(self.writer.messages())
+        self.session.receive({"id": request_id, "method": "mcpServer/elicitation/request", "params": params})
+        return self.writer.messages()[before:]
+
+    def test_each_write_tool_waits_for_the_owner_with_its_arguments_in_full(self):
+        arguments = {"url_path": "dashboard-test", "view": 0, "card": {"type": "markdown", "content": "Hello"}}
+        for number, tool in enumerate(approvals.hass_mcp.WRITE_TOOLS, start=20):
+            with self.subTest(tool=tool):
+                self.assertEqual(self.ask(tool, arguments, request_id=number), [])
+                record = self.record()
+                self.assertEqual((record["status"], record["tool"]), ("pending", f"home_assistant_mcp.{tool}"))
+                self.assertTrue(record["can_allow"])
+                self.assertEqual(json.loads(record["arguments"]), arguments)
+
+    def test_allow_once_accepts_this_call_only_and_deny_declines(self):
+        self.ask("restart_ha", {})
+        self.session.decide(self.record()["approval_id"], "allow")
+        self.assertEqual(self.writer.messages()[-1],
+                         {"id": 7, "result": {"action": "accept", "content": None, "_meta": None}})
+        self.ask("entity_action", {"entity_id": "light.desk_lamp", "action": "off"}, request_id=8)
+        self.session.decide(self.record()["approval_id"], "deny")
+        self.assertEqual(self.writer.messages()[-1],
+                         {"id": 8, "result": {"action": "decline", "content": None, "_meta": None}})
+
+    def test_a_read_tool_question_is_declined(self):
+        # Reads are approved ahead, so Codex never asks; a question about one is not a card.
+        reply = self.ask("get_entity", {"entity_id": "light.desk_lamp"})
+        self.assertEqual(reply, [{"id": 7, "result": {"action": "decline"}}])
+        self.assertEqual(self.saved, [])
+
+    def words(self, tool, arguments):
+        """Ask about one call, each with its own request id, and return the card's plain words."""
+        self.asked = getattr(self, "asked", 100) + 1
+        self.ask(tool, arguments, request_id=self.asked)
+        return self.record()["confirmation"]
+
+    def test_entity_action_names_the_action_and_every_target_params_add(self):
+        plain = self.words("entity_action", {"entity_id": "light.desk_lamp", "action": "on", "params": {"brightness": 90}})
+        self.assertEqual(plain["what"], "Run the Home Assistant action light.turn_on.")
+        self.assertEqual(plain["where"], "light.desk_lamp.")
+        # hass-mcp sends {"entity_id": entity_id, **params}: an entity_id in params replaces the first one.
+        plain = self.words("entity_action", {"entity_id": "light.desk_lamp", "action": "off",
+                                             "params": {"entity_id": "all", "area_id": "hall"}})
+        self.assertEqual(plain["where"], "Every light, every light in area hall.")
+
+    def test_call_service_tool_names_the_targets_in_its_data_only(self):
+        plain = self.words("call_service_tool", {"domain": "lock", "service": "unlock",
+                                                 "data": {"entity_id": "lock.side_gate", "code_note": "not lock.porch"}})
+        self.assertEqual(plain["what"], "Run the Home Assistant action lock.unlock.")
+        self.assertEqual(plain["where"], "lock.side_gate.")
+        plain = self.words("call_service_tool", {"domain": "light", "service": "turn_off"})
+        self.assertEqual(plain["where"], "Every light the action reaches.")
+
+    def test_restart_and_reload_read_as_the_call_tool_reads_them(self):
+        self.assertEqual(self.words("restart_ha", {})["what"], "Restart Home Assistant.")
+        self.assertEqual(self.words("call_service_tool", {"domain": "automation", "service": "reload"})["what"],
+                         "Reload the automations.")
+
+    def test_dashboard_tools_say_which_dashboard_and_whether_it_is_a_dry_run(self):
+        plain = self.words("remove_view", {"url_path": "dashboard-test", "view": 1})
+        self.assertEqual((plain["what"], plain["where"]), ("Remove a view from a dashboard.", "The dashboard dashboard-test."))
+        self.assertIn("changes at once", plain["effect"])
+        plain = self.words("set_dashboard_config", {"config": {"views": []}, "dry_run": True})
+        self.assertEqual(plain["where"], "The default dashboard.")
+        self.assertIn("Nothing changes", plain["effect"])
+
+    def test_arguments_out_of_form_fall_back_to_the_tool_and_its_arguments(self):
+        plain = self.words("call_service_tool", {"domain": "Light Domain", "service": "turn_on"})
+        self.assertEqual(plain["what"], "Run the tool home_assistant_mcp.call_service_tool, with the arguments shown below.")

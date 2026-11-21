@@ -110,27 +110,33 @@ function effectiveEffort(settings = selectedSettings()) {
     ? "medium"
     : effort;
 }
-/**
- * Close the model and reasoning popovers. With focus, the button of the one
- * that was open gets the focus back.
- */
-function closePicker(focus = false) {
-  for (const name of ["model", "effort"]) {
-    if (focus && !$(name + "-popover").hidden) $(name + "-button").focus();
-    $(name + "-popover").hidden = true;
-    $(name + "-button").setAttribute("aria-expanded", "false");
-  }
+/** True while the picker panel or its model list is open. */
+function pickerOpen() {
+  return !$("effort-popover").hidden || !$("model-popover").hidden;
 }
 /**
- * Fill the reasoning popover for a level, by default the one that applies to
+ * Close the picker: the reasoning panel and the model list behind it. With
+ * focus, the chip gets the focus back when the picker was open.
+ */
+function closePicker(focus = false) {
+  const wasOpen = pickerOpen();
+  $("effort-popover").hidden = true;
+  $("model-popover").hidden = true;
+  $("picker-button").setAttribute("aria-expanded", "false");
+  $("effort-model").setAttribute("aria-expanded", "false");
+  renderChip();
+  if (focus && wasOpen) $("picker-button").focus();
+}
+/**
+ * Fill the reasoning panel for a level, by default the one that applies to
  * the open chat: its name and description, the model name, and the slider
- * with one dot per level.
+ * with one stop per level the model offers.
  */
 function renderEffort(effort = effectiveEffort()) {
   const efforts = selectedEfforts();
   const index = Math.max(0, efforts.indexOf(effort));
   $("effort-title").textContent = effortLabels[effort] || effort;
-  $("effort-model").textContent = modelLabel();
+  $("effort-model-name").textContent = modelLabel();
   $("effort-slider").max = Math.max(0, efforts.length - 1);
   $("effort-slider").value = index;
   $("effort-slider").setAttribute(
@@ -150,19 +156,30 @@ function modelLabel(settings = selectedSettings()) {
   return selectedModel(settings)?.label || settings.model || "Model";
 }
 /**
- * Show the open chat's model and reasoning level on the picker buttons. The
- * picker is disabled and closed until the chat options are loaded, while the
- * chat loads or its task is queued or running, and while a message, a stop
- * request, or a selection is being sent.
+ * Show the chip: the model name and the reasoning level in grey, or
+ * "Select effort" while the picker is open, as in the ChatGPT desktop app.
  */
-function renderPicker() {
+function renderChip() {
   const settings = selectedSettings();
   const effort = effectiveEffort(settings);
-  $("model-button").textContent = modelLabel(settings);
+  const open = pickerOpen();
+  $("picker-model").textContent = modelLabel(settings);
   $("effort-label").textContent = effortLabels[effort] || effort;
-  $("effort-button").title = settings.reasoning_effort
-    ? "Select reasoning level"
-    : "Using add-on default reasoning";
+  $("picker-model").hidden = open;
+  $("effort-label").hidden = open;
+  $("picker-open-label").hidden = !open;
+  $("picker-button").title = settings.reasoning_effort
+    ? "Model and reasoning (Ctrl+Shift+M)"
+    : "Model and add-on default reasoning (Ctrl+Shift+M)";
+}
+/**
+ * Show the open chat's model and reasoning level on the chip. The picker is
+ * disabled and closed until the chat options are loaded, while the chat loads
+ * or its task is queued or running, and while a message or a stop request is
+ * being sent. While a selection is being saved the controls are disabled but
+ * the picker stays open, so the owner sees the result in place.
+ */
+function renderPicker() {
   const disabled =
     !state.catalog ||
     state.loading ||
@@ -172,22 +189,29 @@ function renderPicker() {
     // A waiting message keeps the settings it was sent with.
     Boolean(state.task?.queued_message);
   for (const id of [
-    "model-button",
-    "effort-button",
+    "picker-button",
+    "effort-model",
     "effort-slider",
     "effort-reset",
   ])
     $(id).disabled = disabled;
-  if (disabled) closePicker();
+  for (const option of $("model-options").children) option.disabled = disabled;
+  if (disabled && !state.settingsBusy) closePicker();
+  renderChip();
   if (!$("effort-popover").hidden) renderEffort();
+  if (!$("model-popover").hidden) renderModels();
 }
 /**
  * Store a model and reasoning selection for the open chat. A saved chat sends
  * it to the worker and keeps what the worker returns; a new chat only holds it
- * in state until its first message is sent. Errors show above the composer.
+ * in state until its first message is sent. The open picker shows the choice
+ * while it is sent, and the earlier one again if sending fails. Errors show
+ * above the composer.
  */
 async function saveSelection(settings) {
   const id = state.id;
+  const previous = state.chatSettings.get(id);
+  state.chatSettings.set(id, settings);
   state.settingsBusy = true;
   controls();
   showError(null);
@@ -201,6 +225,8 @@ async function saveSelection(settings) {
     }
     state.chatSettings.set(id, settings);
   } catch (error) {
+    if (previous) state.chatSettings.set(id, previous);
+    else state.chatSettings.delete(id);
     showError(error);
   } finally {
     state.settingsBusy = false;
@@ -208,79 +234,173 @@ async function saveSelection(settings) {
   }
 }
 /**
- * Open the model or reasoning popover, or close it when it is already open.
- * The model popover gets one button per model that saves the choice; the
- * reasoning popover is filled and its slider focused.
+ * Put the open panel or model list right above the chip with its right edge
+ * on the chip's right edge, as in the desktop app, moved in when that would
+ * leave the window (on a phone the chip sits near the right edge).
  */
-function openPicker(name) {
-  const wasOpen = !$(name + "-popover").hidden;
-  closePicker();
-  if (wasOpen) return;
-  $(name + "-popover").hidden = false;
-  $(name + "-button").setAttribute("aria-expanded", "true");
-  if (name === "model") {
-    const options = $("model-options");
-    options.replaceChildren();
-    for (const model of chatModels()) {
-      const button = textNode("button", "", "model-option");
-      button.type = "button";
-      const selected = model.id === selectedModel()?.id;
-      button.setAttribute("aria-pressed", String(selected));
-      const title = textNode("span", "", "model-option-title");
-      title.append(
-        textNode("span", model.label),
-        textNode("span", selected ? "✓" : "", "model-check"),
-      );
-      button.append(title);
-      button.onclick = async () => {
-        // The add-on's own model is saved as no selection, so the chat keeps following the add-on setting.
-        const settings = {
-          ...selectedSettings(),
-          model: model.id === state.catalog.default_model ? null : model.id,
-        };
-        if (
-          settings.reasoning_effort &&
-          !selectedEfforts(settings).includes(settings.reasoning_effort)
-        )
-          settings.reasoning_effort = null;
-        closePicker(true);
-        await saveSelection(settings);
-        $("model-button").focus();
-      };
-      options.append(button);
-    }
-    // A chat can hold a model that is no longer in the list; then none is marked.
-    (
-      options.querySelector('[aria-pressed="true"]') ||
-      options.firstElementChild
-    )?.focus();
-  } else {
-    renderEffort();
-    $("effort-slider").focus();
+function placePicker() {
+  const margin = 8;
+  const chip = $("picker-button").getBoundingClientRect();
+  for (const id of ["effort-popover", "model-popover"]) {
+    const popover = $(id);
+    if (popover.hidden || !popover.offsetParent) continue;
+    const width = popover.offsetWidth;
+    const left = Math.max(
+      margin,
+      Math.min(chip.right - width, innerWidth - width - margin),
+    );
+    popover.style.right = "auto";
+    popover.style.left = `${left - popover.offsetParent.getBoundingClientRect().left}px`;
   }
 }
-$("model-button").onclick = () => openPicker("model");
-$("effort-button").onclick = () => openPicker("effort");
+window.addEventListener("resize", () => {
+  if (pickerOpen()) placePicker();
+});
+/**
+ * Close the other menus of the message box, so only the picker is open: the
+ * add menu, the slash command list, the permissions pop-up and a chat's
+ * actions menu.
+ */
+function closeOtherMenus() {
+  $("plus-menu").hidden = true;
+  $("attach").setAttribute("aria-expanded", "false");
+  if (!$("slash-popover").hidden) {
+    slash.dismissed = $("message").value;
+    renderSlash();
+  }
+  if ($("permissions-dialog").open) $("permissions-dialog").close();
+  closeChatMenu();
+}
+/**
+ * Show the reasoning panel above the chip, filled for the open chat, with
+ * the focus on its slider. The model list behind it is closed.
+ */
+function showEffortPanel() {
+  closeOtherMenus();
+  $("model-popover").hidden = true;
+  $("effort-model").setAttribute("aria-expanded", "false");
+  $("effort-popover").hidden = false;
+  $("picker-button").setAttribute("aria-expanded", "true");
+  renderEffort();
+  renderChip();
+  placePicker();
+  if (!$("effort-slider").disabled) $("effort-slider").focus();
+}
+/**
+ * Fill the model list with one button per model; the chat's model is checked.
+ * A button saves the choice and goes back to the reasoning panel.
+ */
+function renderModels() {
+  const options = $("model-options");
+  const focused = options.contains(document.activeElement)
+    ? document.activeElement.dataset.model
+    : null;
+  options.replaceChildren();
+  for (const model of chatModels()) {
+    const button = textNode("button", "", "model-option");
+    button.type = "button";
+    button.dataset.model = model.id;
+    button.disabled = $("picker-button").disabled;
+    const selected = model.id === selectedModel()?.id;
+    button.setAttribute("aria-pressed", String(selected));
+    const title = textNode("span", "", "model-option-title");
+    title.append(
+      textNode("span", model.label),
+      textNode("span", selected ? "✓" : "", "model-check"),
+    );
+    button.append(title);
+    button.onclick = async () => {
+      // The add-on's own model is saved as no selection, so the chat keeps following the add-on setting.
+      const settings = {
+        ...selectedSettings(),
+        model: model.id === state.catalog.default_model ? null : model.id,
+      };
+      if (
+        settings.reasoning_effort &&
+        !selectedEfforts(settings).includes(settings.reasoning_effort)
+      )
+        settings.reasoning_effort = null;
+      // The panel comes back at once, showing the new model while it is saved.
+      const saving = saveSelection(settings);
+      showEffortPanel();
+      await saving;
+      if (!$("effort-popover").hidden) $("effort-slider").focus();
+    };
+    options.append(button);
+  }
+  if (focused)
+    options.querySelector(`[data-model="${CSS.escape(focused)}"]`)?.focus();
+}
+/**
+ * Show the model list ("Select model") in place of the reasoning panel, with
+ * the focus on the checked model, or on the first one when the chat holds a
+ * model that is no longer in the list.
+ */
+function showModelList() {
+  closeOtherMenus();
+  $("effort-popover").hidden = true;
+  $("model-popover").hidden = false;
+  $("picker-button").setAttribute("aria-expanded", "true");
+  $("effort-model").setAttribute("aria-expanded", "true");
+  renderModels();
+  renderChip();
+  placePicker();
+  const options = $("model-options");
+  (
+    options.querySelector('[aria-pressed="true"]') || options.firstElementChild
+  )?.focus();
+}
+/**
+ * Open the picker, or close it when it is already open. "model" opens it on
+ * the model list; anything else opens the reasoning panel.
+ */
+function openPicker(view = "effort") {
+  if (pickerOpen()) {
+    closePicker(true);
+    return;
+  }
+  if ($("picker-button").disabled) return;
+  if (view === "model") showModelList();
+  else showEffortPanel();
+}
+$("picker-button").onclick = () => openPicker("effort");
+$("effort-model").onclick = () => showModelList();
 $("effort-slider").addEventListener("input", () =>
   renderEffort(selectedEfforts()[Number($("effort-slider").value)]),
 );
 $("effort-slider").addEventListener("change", async () => {
   const effort = selectedEfforts()[Number($("effort-slider").value)];
-  closePicker(true);
   await saveSelection({ ...selectedSettings(), reasoning_effort: effort });
-  $("effort-button").focus();
+  if (!$("effort-popover").hidden) $("effort-slider").focus();
 });
 $("effort-reset").onclick = async () => {
-  closePicker(true);
   await saveSelection({ ...selectedSettings(), reasoning_effort: null });
-  $("effort-button").focus();
+  if (!$("effort-popover").hidden) $("effort-reset").focus();
 };
 document.addEventListener("pointerdown", (event) => {
-  if (!$("chat-picker").contains(event.target)) closePicker();
+  // A tap on a model swaps the list for the panel, so the target can leave the page before this runs.
+  if (event.target.isConnected && !$("chat-picker").contains(event.target))
+    closePicker();
 });
 $("chat-picker").addEventListener("focusout", (event) => {
   if (event.relatedTarget && !$("chat-picker").contains(event.relatedTarget))
     closePicker();
+});
+// Ctrl+Shift+M opens and closes the picker from anywhere on the page, as in the desktop app.
+document.addEventListener("keydown", (event) => {
+  if (
+    event.ctrlKey &&
+    event.shiftKey &&
+    !event.altKey &&
+    !event.metaKey &&
+    event.key.toLowerCase() === "m" &&
+    (pickerOpen() || !$("picker-button").disabled) &&
+    // A modal dialog keeps the keys; the permissions pop-up is not modal and closes instead.
+    !document.querySelector("dialog:modal")
+  ) {
+    event.preventDefault();
+    openPicker("effort");
+  }
 });
 $("chat-picker").addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
@@ -899,7 +1019,8 @@ function renderRow(chat, queued = null) {
   main.append(meta);
   // One line for each chat: the last answer is the tooltip instead of a second line.
   main.title = `${title} - ${main.querySelector(".row-preview").textContent}`;
-  main.onclick = () => selectChat(chat.task_id);
+  // On a phone the side bar stays open, so the owner can look at several chats; its scrim or the close button shuts it.
+  main.onclick = () => selectChat(chat.task_id, false, true);
   row.append(main);
   // A chat that is still waiting for its first message has nothing to pin or rename yet.
   if (!chatById(chat.task_id)) return row;
@@ -2074,16 +2195,22 @@ function renderActivity() {
   const activity = state.activity;
   if (!block || !activity || activity.id !== state.id) return;
   const all = [...activity.steps.values()].sort((a, b) => a.index - b.index);
-  // Each text message Codex wrote along the way shows in order outside the closed list; tool steps and
-  // thinking stay inside it. The final answer is never a step, so it is not shown twice.
+  // Text messages show outside the closed list; tool steps and thinking stay inside it.
   const steps = all.filter(step => step.kind !== "message");
   const texts = all.filter(step => step.kind === "message" && step.text);
+  const running = activity.running || taskActive();
+  const turn = state.task?.turns?.at(-1);
+  const lastText = texts.at(-1);
+  // Saved steps can still contain the final answer. Keep earlier messages and explicit commentary.
+  if (!running && turn && activity.turnId === turn.turn_id && lastText && !lastText.phase &&
+      lastText.text.trim() === turn.summary?.trim()) {
+    texts.pop();
+  }
   const textBox = $("activity-text");
   if (textBox)
     textBox.replaceChildren(...texts.map(step => renderMarkdown(step.text, "message interim")));
-  const running = activity.running || taskActive();
   const checks = state.latestChecks;
-  const worked = running ? "" : workedLabel(state.task?.turns?.at(-1));
+  const worked = running ? "" : workedLabel(turn);
   block.hidden = !steps.length && !checks && !worked;
   block.classList.toggle("running", running);
   block.classList.toggle("worked", !running);
@@ -2246,7 +2373,7 @@ function reopenLastChat() {
  * left. When restoring a remembered chat, a 404 means it was deleted from
  * another tab or device: forget it and start fresh without an error.
  */
-async function selectChat(id, restoring = false) {
+async function selectChat(id, restoring = false, keepSidebar = false) {
   if (state.busy || state.settingsBusy) return;
   closePicker();
   state.drafts.set(state.id, $("message").value);
@@ -2264,7 +2391,7 @@ async function selectChat(id, restoring = false) {
   $("message").value = state.drafts.get(id) || "";
   resizeInput();
   showError(null);
-  sidebar(false);
+  if (!keepSidebar) sidebar(false);
   renderList();
   controls();
   if (!id) {
@@ -2886,6 +3013,7 @@ if (
 )
   for (const id of ["file-input", "document-input"]) $(id).removeAttribute("multiple");
 $("attach").onclick = () => {
+  closePicker();
   const panel = $('plus-menu'); panel.hidden = !panel.hidden;
   $('attach').setAttribute('aria-expanded', String(!panel.hidden));
 };
@@ -3064,6 +3192,9 @@ window.addEventListener("resize", () => {
  * you type, and a tap, or Enter or Tab on the highlighted one, runs it.
  * A command is listed only while the page can run it (Stop only while a
  * chat is working, Rename only with a chat open).
+ * There is no /fast command, and the picker has no lightning (fast mode)
+ * toggle: the Codex CLI has no setting for fast mode yet. Both return in 0.6
+ * with a working toggle (CX-04-FB-MODEL).
  */
 const SLASH_COMMANDS = [
   {
@@ -3084,14 +3215,14 @@ const SLASH_COMMANDS = [
     name: "model",
     icon: "◇",
     description: "Choose the model for this chat",
-    available: () => Boolean(state.catalog) && !$("model-button").disabled,
+    available: () => Boolean(state.catalog) && !$("picker-button").disabled,
     run: () => openPicker("model"),
   },
   {
     name: "reasoning",
     icon: "✦",
     description: "Choose how long Codex thinks before it answers",
-    available: () => Boolean(state.catalog) && !$("effort-button").disabled,
+    available: () => Boolean(state.catalog) && !$("picker-button").disabled,
     run: () => openPicker("effort"),
   },
   {
@@ -3262,6 +3393,8 @@ function renderSlash() {
     list.append(option);
   });
   const open = slash.matches.length > 0;
+  // The command list and the model and reasoning picker are never open together.
+  if (open) closePicker();
   list.hidden = !open;
   $("message").setAttribute("aria-expanded", String(open));
   if (open)
@@ -3533,18 +3666,19 @@ let shownLogin = null;
  */
 function signInCard(auth) {
   const card = document.createElement("div");
-  const requirement = textNode("p", "A ChatGPT account with Codex access is required. As of November 13, 2026, this includes Free and Go. ", "muted");
-  const availability = textNode("a", "Check OpenAI’s current availability");
-  availability.href = "https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan";
-  availability.target = "_blank";
-  availability.rel = "noopener noreferrer";
-  requirement.append(availability);
-  card.append(requirement);
   card.className = "signin-card";
+  // The sign-in link comes first, as the main button; then the code, its timer and the folded QR code.
+  if (auth.verification_url) {
+    const url = new URL(auth.verification_url, location.href);
+    if (url.protocol === "https:") {
+      const link = textNode("a", "Open the ChatGPT sign-in page", "signin-link");
+      link.href = url.href;
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      card.append(link);
+    }
+  }
   if (auth.user_code) {
-    card.append(
-      textNode("p", "Enter this code on the ChatGPT sign-in page:", "muted"),
-    );
     const code = textNode("p", auth.user_code, "signin-code");
     code.setAttribute(
       "aria-label",
@@ -3553,16 +3687,6 @@ function signInCard(auth) {
     card.append(code, ...codeExpiry(auth.expires_in, newChatgptCode, "chatgpt"));
   } else {
     card.append(textNode("p", "Waiting for the sign-in code…", "muted"));
-  }
-  if (auth.verification_url) {
-    const url = new URL(auth.verification_url, location.href);
-    if (url.protocol === "https:") {
-      const link = textNode("a", "Open the ChatGPT sign-in page");
-      link.href = url.href;
-      link.target = "_blank";
-      link.rel = "noreferrer";
-      card.append(link);
-    }
   }
   if (auth.qr_path) {
     const img = document.createElement("img");
@@ -3621,9 +3745,7 @@ function renderLogin(auth) {
   const failure = `The last sign-in did not finish. ${auth.error || "Get a new code to try again."}`;
   $("login-status").textContent = signedIn
     ? auth.codex_login.message || "Signed in to ChatGPT."
-    : pending
-      ? "Signing in. Enter the code below on the ChatGPT sign-in page."
-      : failed
+    : failed
         ? failure
         : lapsed
           ? "The ChatGPT sign-in expired or was revoked. Sign in again."
@@ -3661,8 +3783,8 @@ function renderLogin(auth) {
     followCodeTime("chatgpt", auth.expires_in);
   }
   for (const id of ["login", "banner-login"]) $(id).hidden = pending;
-  // The sign-in card repeats the account requirement, so the section shows it once.
-  $("login-requirement").hidden = pending;
+  // While a sign-in waits, the section shows only the card and Cancel (CSS hides the rest).
+  $("chatgpt-section").classList.toggle("signing-in", pending);
   for (const id of ["login-cancel", "banner-cancel"]) $(id).hidden = !pending;
   $("signin-banner").hidden = signedIn;
 }
@@ -3743,16 +3865,19 @@ function githubExpiry(github) {
 function githubFlowCard(flow) {
   const card = document.createElement("div");
   card.className = "signin-card github-flow-card";
+  // The same order as the ChatGPT card: the link as the main button, then the code and its timer.
+  const link = githubLink(flow.verification_uri || "https://github.com/login/device", "Open github.com/login/device");
+  if (link) {
+    link.className = "signin-link";
+    card.append(link);
+  }
   if (flow.user_code) {
-    card.append(textNode("p", "Enter this code on GitHub's device sign-in page, then approve Codex for Home Assistant:", "muted"));
     const code = textNode("p", flow.user_code, "signin-code");
     code.setAttribute("aria-label", `GitHub code ${flow.user_code.split("").join(" ")}`);
     card.append(code);
   } else {
     card.append(textNode("p", "Waiting for the GitHub code…", "muted"));
   }
-  const link = githubLink(flow.verification_uri || "https://github.com/login/device", "Open github.com/login/device");
-  if (link) card.append(link);
   if (flow.user_code) card.append(...codeExpiry(flow.expires_in, newGithubCode, "github"));
   return card;
 }
@@ -3860,6 +3985,8 @@ function renderGithub(github) {
   const retry = !connected && ["expired", "failed"].includes(flow.status);
   $("github-connect").textContent = connected ? "Connect again" : retry ? "Get a new code" : "Connect GitHub";
   $("github-connect").hidden = waiting;
+  // While a sign-in waits, the section shows only the card and Cancel (CSS hides the rest).
+  $("github-section").classList.toggle("signing-in", waiting);
   $("github-cancel").hidden = !waiting;
   for (const id of ["github-test", "github-check", "github-disconnect"]) $(id).hidden = !connected;
   $("github-accept").hidden = !(state === "access_changed" && !github.permission_problem);
@@ -4058,9 +4185,52 @@ function renderRemoteControl(rc) {
   $("remote-control-log-box").hidden = !(rc.log || []).length;
   document.dispatchEvent(new CustomEvent("remote-view", {detail: rc}));
 }
-/** Show the machine name the ChatGPT app lists; it is set on the Configuration tab (0.3.5). */
+const REMOTE_NAME_LOCKED = "Turn remote control off to change the name.";
+/**
+ * Show the configured machine name in its field. Codex reads the name when remote control starts, so the field
+ * is locked while it is on and then shows the name in use. Polling never replaces a name the person is still
+ * typing while it is off. The locked note goes when remote control is off; the result of a save stays.
+ */
 function renderRemoteControlName(rc) {
-  $("remote-control-name").textContent = rc.configured_name || "";
+  const input = $("remote-control-name");
+  const note = $("remote-control-name-note");
+  if (rc.enabled) delete input.dataset.edited;
+  if (!input.dataset.edited) input.value = rc.configured_name || "";
+  input.disabled = Boolean(rc.enabled);
+  $("remote-control-name-save").disabled = Boolean(rc.enabled);
+  if (rc.enabled) note.textContent = REMOTE_NAME_LOCKED;
+  else if (note.textContent === REMOTE_NAME_LOCKED) note.textContent = "";
+}
+$("remote-control-name").oninput = () => {
+  $("remote-control-name").dataset.edited = "1";
+};
+/**
+ * Save the name in the field to the one add-on option (Remote control machine name) the Configuration tab also
+ * sets. True when it is saved; a failed save shows its error under the field.
+ */
+async function saveRemoteControlName() {
+  const input = $("remote-control-name");
+  $("remote-control-name-save").disabled = true;
+  try {
+    const data = await api("remote-control/name", { name: input.value });
+    delete input.dataset.edited;
+    renderRemoteControl(data.remote_control);
+    $("remote-control-name-note").textContent = data.notice
+      || `Saved. The ChatGPT app will show “${data.remote_control.configured_name}”.`;
+    return true;
+  } catch (error) {
+    $("remote-control-name-note").textContent = error.message;
+    $("remote-control-name-save").disabled = false;
+    return false;
+  }
+}
+$("remote-control-name-form").onsubmit = (event) => {
+  event.preventDefault();
+  saveRemoteControlName();
+};
+/** Turn on saves a typed name first, since Codex reads the name when it starts; a failed save keeps it off. */
+async function remoteNameReadyForStart() {
+  return !$("remote-control-name").dataset.edited || saveRemoteControlName();
 }
 const ADDON_CONFIGURATION_UNKNOWN =
   "Home Assistant did not give this app's address. Open the app's Configuration tab from the Home Assistant settings.";
@@ -4081,14 +4251,15 @@ async function loadAddonConfiguration() {
     description.textContent = ADDON_CONFIGURATION_UNKNOWN;
   }
 }
-for (const [id, action] of [
-  ["remote-control-start", "start"],
+for (const [id, action, prepare] of [
+  ["remote-control-start", "start", remoteNameReadyForStart],
   ["remote-control-stop", "stop"],
   ["remote-control-pair", "pair"],
 ]) {
   $(id).onclick = async () => {
     $(id).disabled = true;
     try {
+      if (prepare && !(await prepare())) return;
       const data = await api(`remote-control/${action}`, {});
       renderRemoteControl(data.remote_control);
       $("settings-result").textContent = "";

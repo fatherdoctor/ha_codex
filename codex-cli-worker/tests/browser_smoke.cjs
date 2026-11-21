@@ -43,6 +43,45 @@ function pngBuffer(width = 8, height = 6) {
   ]);
 }
 
+/** Open the model and reasoning panel from the chip (CX-PICKER-PARITY). */
+async function openPicker(page) {
+  await page.locator("#picker-button").click();
+  await page.locator("#effort-popover").waitFor();
+}
+/** The model row in the picker's model list whose name is label. */
+function modelRow(page, label) {
+  return page
+    .locator("#model-options .model-option")
+    .filter({ has: page.getByText(label, { exact: true }) });
+}
+/**
+ * Choose a model the way the desktop app does: the chip opens the panel, the
+ * model name in the panel opens the list, and a model returns to the panel.
+ * Returns once the choice is saved.
+ */
+async function chooseModel(page, label) {
+  if (await page.locator("#effort-popover").isHidden()) await openPicker(page);
+  await page.locator("#effort-model").click();
+  await page.locator("#model-popover").waitFor();
+  await modelRow(page, label).click();
+  await page.locator("#effort-popover").waitFor();
+  await page.waitForFunction(
+    (label) =>
+      document.querySelector("#picker-model").textContent === label &&
+      !document.querySelector("#picker-button").disabled,
+    label,
+  );
+}
+/** Wait until the chip shows the reasoning level label and the picker is ready again. */
+async function effortSaved(page, label) {
+  await page.waitForFunction(
+    (label) =>
+      document.querySelector("#effort-label").textContent === label &&
+      !document.querySelector("#picker-button").disabled,
+    label,
+  );
+}
+
 (async () => {
   const output =
     process.env.CODEX_CHAT_QA_DIR || path.join(os.tmpdir(), "codex-chat-qa");
@@ -489,39 +528,154 @@ function pngBuffer(width = 8, height = 6) {
     });
     await storedToggle.click();
     assert.equal(await page.locator("#activity-steps").isVisible(), false);
-    await page.locator("#model-button").click();
-    await page
-      .getByRole("button", { name: "GPT-6 Astra", exact: false })
-      .click();
-    await page.waitForFunction(
-      () =>
-        document.querySelector("#model-button").textContent === "GPT-6 Astra" &&
-        !document.querySelector("#model-button").disabled,
+    // CX-PICKER-PARITY: one chip, the model name and then the level. It opens one panel above it:
+    // the level in bold, the model name with a ">" under it, and a slider with one stop per level.
+    assert.equal(await page.locator("#model-button, #effort-button").count(), 0);
+    assert.equal(await page.locator("#chat-picker button.picker-pill").count(), 1);
+    assert.equal(await page.locator("#picker-model").isVisible(), true);
+    assert.equal(await page.locator("#effort-label").isVisible(), true);
+    assert.equal(await page.locator("#picker-open-label").isVisible(), false);
+    await openPicker(page);
+    assert.equal(await page.locator("#picker-button").getAttribute("aria-expanded"), "true");
+    // While the panel is open the chip reads "Select effort".
+    assert.equal(await page.locator("#picker-open-label").isVisible(), true);
+    assert.equal(await page.locator("#picker-model").isVisible(), false);
+    assert.equal(await page.locator("#effort-label").isVisible(), false);
+    assert.equal(await page.locator("#model-popover").isHidden(), true);
+    assert.equal(
+      await page.locator("#effort-title").evaluate((node) => Number(getComputedStyle(node).fontWeight) >= 600),
+      true,
     );
-    await page.locator("#effort-button").click();
+    assert.equal(
+      await page.locator("#effort-model-name").textContent(),
+      await page.locator("#picker-model").textContent(),
+    );
+    assert.equal(await page.locator("#effort-model svg.effort-model-chevron").count(), 1);
+    // No lightning (fast mode) toggle anywhere on the page, in the composer or the panel, until it
+    // works: the Codex CLI has no setting for it (returns in 0.6, CX-04-FB-MODEL).
+    assert.equal(
+      await page.evaluate(() =>
+        [...document.querySelectorAll(".effort-bolt, [class*='bolt'], [id*='bolt'], [id*='fast'], .mdi-lightning-bolt, .mdi-flash, path")]
+          .filter((node) =>
+            node.tagName.toLowerCase() !== "path" ||
+            /^m13 3-8 10h6l-1 8 9-11h-6l1-7z$/i.test(node.getAttribute("d") || ""),
+          )
+          .filter((node) => node.getClientRects().length > 0 || node.closest("#effort-popover")).length,
+      ),
+      0,
+    );
+    assert.equal(await page.getByRole("button", { name: /fast|lightning/i }).count(), 0);
+    assert.equal(
+      await page.locator("#effort-dots span").count(),
+      Number(await page.locator("#effort-slider").getAttribute("max")) + 1,
+    );
+    // The model name opens the model list; a model returns to the panel.
+    await chooseModel(page, "GPT-6 Astra");
+    assert.equal(await page.locator("#model-popover").isHidden(), true);
+    assert.equal(await page.locator("#effort-model-name").textContent(), "GPT-6 Astra");
     assert.equal(await page.locator("#effort-slider").getAttribute("max"), "5");
+    assert.equal(await page.locator("#effort-dots span").count(), 6);
     await page.locator("#effort-slider").fill("3");
-    await page.waitForFunction(
-      () =>
-        document.querySelector("#effort-label").textContent === "Extra High" &&
-        !document.querySelector("#effort-button").disabled,
+    await effortSaved(page, "Extra High");
+    // Changing the level keeps the panel open, as in the desktop app.
+    assert.equal(await page.locator("#effort-popover").isVisible(), true);
+    assert.equal(await page.locator("#effort-title").textContent(), "Extra High");
+    await page.locator("#effort-model").click();
+    await page.locator("#model-popover").waitFor();
+    assert.equal(await page.locator("#effort-popover").isHidden(), true);
+    assert.equal(await page.locator("#picker-open-label").isVisible(), true);
+    assert.equal(await page.locator("#model-popover .picker-heading").textContent(), "Select model");
+    assert.deepEqual(
+      await page
+        .locator('#model-options .model-option[aria-pressed="true"]')
+        .evaluateAll((options) => options.map((option) => option.textContent)),
+      ["GPT-6 Astra✓"],
     );
-    await page.locator("#model-button").click();
     await page.screenshot({
       path: path.join(output, "model-picker.png"),
       fullPage: true,
     });
     await page.keyboard.press("Escape");
+    assert.equal(await page.locator("#model-popover").isHidden(), true);
+    assert.equal(await page.locator("#effort-popover").isHidden(), true);
     assert.equal(
-      await page.locator("#model-button").getAttribute("aria-expanded"),
+      await page.locator("#picker-button").getAttribute("aria-expanded"),
       "false",
     );
-    await page.locator("#effort-button").click();
+    assert.equal(await page.locator("#picker-model").textContent(), "GPT-6 Astra");
+    assert.equal(await page.locator("#picker-model").isVisible(), true);
+    assert.equal(await page.locator("#effort-label").textContent(), "Extra High");
+    // On a desktop (1280 px) the panel and the model list open right above the chip, with their right
+    // edges on the chip's right edge, as in the desktop app, and inside the window.
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await openPicker(page);
+    for (const id of ["#effort-popover", "#model-popover"]) {
+      if (id === "#model-popover") {
+        await page.locator("#effort-model").click();
+        await page.locator(id).waitFor();
+      }
+      const chip = await page.locator("#picker-button").boundingBox();
+      const box = await page.locator(id).boundingBox();
+      assert.ok(
+        Math.abs(box.x + box.width - (chip.x + chip.width)) <= 4,
+        `${id} right edge ${box.x + box.width} is on the chip's right edge ${chip.x + chip.width}`,
+      );
+      assert.ok(
+        box.y + box.height <= chip.y && chip.y - (box.y + box.height) <= 30,
+        `${id} sits right above the chip (${box.y + box.height} vs ${chip.y})`,
+      );
+      assert.ok(box.x >= 0 && box.x + box.width <= 1280, `${id} is inside the window`);
+    }
+    await page.keyboard.press("Escape");
+    await page.setViewportSize({ width: 1440, height: 950 });
+    // Ctrl+Shift+M opens the panel too; a press outside closes it.
+    await page.locator("#message").focus();
+    await page.keyboard.press("Control+Shift+M");
+    await page.locator("#effort-popover").waitFor();
     await page.screenshot({
       path: path.join(output, "reasoning-picker.png"),
       fullPage: true,
     });
+    const outside = await page.locator("#messages").boundingBox();
+    await page.mouse.click(outside.x + 4, outside.y + outside.height / 2);
+    assert.equal(await page.locator("#effort-popover").isHidden(), true);
+    assert.equal(await page.locator("#picker-open-label").isVisible(), false);
+    // One menu at a time: opening the picker, by any route, closes the add menu, the command list
+    // and the permissions pop-up, and opening one of those closes the picker.
+    await page.locator("#attach").click();
+    assert.equal(await page.locator("#plus-menu").isVisible(), true);
+    await page.keyboard.press("Control+Shift+M");
+    await page.locator("#effort-popover").waitFor();
+    assert.equal(await page.locator("#plus-menu").isHidden(), true, "Ctrl+Shift+M closes the add menu");
+    await page.locator("#attach").click();
+    assert.equal(await page.locator("#plus-menu").isVisible(), true);
+    assert.equal(await page.locator("#effort-popover").isHidden(), true, "the add menu closes the picker");
+    await page.locator("#picker-button").click();
+    await page.locator("#effort-popover").waitFor();
+    assert.equal(await page.locator("#plus-menu").isHidden(), true, "the chip closes the add menu");
     await page.keyboard.press("Escape");
+    await page.locator("#message").fill("");
+    await page.locator("#message").pressSequentially("/");
+    await page.locator("#slash-popover").waitFor();
+    await page.keyboard.press("Control+Shift+M");
+    await page.locator("#effort-popover").waitFor();
+    assert.equal(await page.locator("#slash-popover").isHidden(), true, "Ctrl+Shift+M closes the command list");
+    await page.keyboard.press("Escape");
+    await page.locator("#message").fill("");
+    await page.locator("#permission-button").click();
+    assert.equal(await page.locator("#permissions-dialog").evaluate((node) => node.open), true);
+    await page.keyboard.press("Control+Shift+M");
+    await page.locator("#effort-popover").waitFor();
+    assert.equal(
+      await page.locator("#permissions-dialog").evaluate((node) => node.open),
+      false,
+      "Ctrl+Shift+M closes the permissions pop-up",
+    );
+    await page.locator("#permission-button").click();
+    assert.equal(await page.locator("#permissions-dialog").evaluate((node) => node.open), true);
+    assert.equal(await page.locator("#effort-popover").isHidden(), true, "the permissions pop-up closes the picker");
+    await page.keyboard.press("Escape");
+    assert.equal(await page.locator("#permissions-dialog").evaluate((node) => node.open), false);
     await page.locator("#message").fill("Draft that should stay in this chat");
     await page.locator('[data-task-id="preview-01"]').click();
     await page
@@ -666,22 +820,10 @@ function pngBuffer(width = 8, height = 6) {
       saved.turns.at(-1).execution_settings,
       saved.chat_settings,
     );
-    await page.locator("#effort-button").click();
+    await openPicker(page);
     await page.locator("#effort-slider").press("End");
-    await page.waitForFunction(
-      () =>
-        document.querySelector("#effort-label").textContent === "Ultra" &&
-        !document.querySelector("#effort-button").disabled,
-    );
-    await page.locator("#model-button").click();
-    await page
-      .getByRole("button", { name: "GPT-6.1 Terra", exact: true })
-      .click();
-    await page.waitForFunction(
-      () =>
-        document.querySelector("#model-button").textContent === "GPT-6.1 Terra" &&
-        !document.querySelector("#model-button").disabled,
-    );
+    await effortSaved(page, "Ultra");
+    await chooseModel(page, "GPT-6.1 Terra");
     assert.equal(await page.locator("#effort-label").textContent(), "Ultra");
     assert.deepEqual(
       await page.evaluate(
@@ -691,15 +833,7 @@ function pngBuffer(width = 8, height = 6) {
       { model: "gpt-6.1-terra", reasoning_effort: "ultra" },
     );
     // Choosing the model the add-on runs anyway clears the chat's own selection.
-    await page.locator("#model-button").click();
-    await page
-      .getByRole("button", { name: "GPT-6.1 Sol", exact: true })
-      .click();
-    await page.waitForFunction(
-      () =>
-        document.querySelector("#model-button").textContent === "GPT-6.1 Sol" &&
-        !document.querySelector("#model-button").disabled,
-    );
+    await chooseModel(page, "GPT-6.1 Sol");
     assert.deepEqual(
       await page.evaluate(
         async () =>
@@ -707,34 +841,22 @@ function pngBuffer(width = 8, height = 6) {
       ),
       { model: null, reasoning_effort: "ultra" },
     );
-    await page.locator("#model-button").click();
-    await page.getByRole("button", { name: "GPT-6 Luna", exact: true }).click();
-    await page.waitForFunction(
-      () =>
-        document.querySelector("#model-button").textContent === "GPT-6 Luna" &&
-        !document.querySelector("#model-button").disabled,
-    );
+    await chooseModel(page, "GPT-6 Luna");
     assert.equal(await page.locator("#effort-label").textContent(), "Medium");
-    await page.locator("#effort-button").click();
+    // The slider follows the model: GPT-6 Luna has five levels, so five stops.
     assert.equal(await page.locator("#effort-slider").getAttribute("max"), "4");
+    assert.equal(await page.locator("#effort-dots span").count(), 5);
     await page.locator("#effort-slider").fill("2");
-    await page.waitForFunction(
-      () =>
-        document.querySelector("#effort-label").textContent === "High" &&
-        !document.querySelector("#effort-button").disabled,
-    );
-    await page.locator("#effort-button").click();
+    await effortSaved(page, "High");
     await page
       .getByRole("button", {
         name: "Use add-on default reasoning",
         exact: true,
       })
       .click();
-    await page.waitForFunction(
-      () =>
-        document.querySelector("#effort-label").textContent === "Medium" &&
-        !document.querySelector("#effort-button").disabled,
-    );
+    await effortSaved(page, "Medium");
+    await page.keyboard.press("Escape");
+    assert.equal(await page.locator("#effort-popover").isHidden(), true);
     const divider = await page.locator("#divider").boundingBox();
     await page.mouse.move(divider.x + 2, 300);
     await page.mouse.down();
@@ -764,8 +886,9 @@ function pngBuffer(width = 8, height = 6) {
       state.chatSettings.set(null, { model: "gone", reasoning_effort: null });
       controls();
     });
-    assert.equal(await page.locator("#model-button").textContent(), "gone");
-    await page.locator("#model-button").click();
+    assert.equal(await page.locator("#picker-model").textContent(), "gone");
+    await openPicker(page);
+    await page.locator("#effort-model").click();
     assert.equal(
       await page.locator('#model-options [aria-pressed="true"]').count(),
       0,
@@ -781,10 +904,11 @@ function pngBuffer(width = 8, height = 6) {
     });
     // A new chat names the model it runs on, and the menu marks that model.
     assert.equal(
-      await page.locator("#model-button").textContent(),
+      await page.locator("#picker-model").textContent(),
       "GPT-6.1 Sol",
     );
-    await page.locator("#model-button").click();
+    await openPicker(page);
+    await page.locator("#effort-model").click();
     assert.deepEqual(
       await page
         .locator("#model-options .model-option")
@@ -796,12 +920,14 @@ function pngBuffer(width = 8, height = 6) {
       ["GPT-6.1 Sol✓"],
     );
     assert.equal(await page.locator("#model-options .model-option").count(), 8);
-    await page
-      .getByRole("button", { name: "GPT-5.6 Luna", exact: true })
-      .click();
-    await page.locator("#effort-button").click();
+    await modelRow(page, "GPT-5.6 Luna").click();
+    await page.locator("#effort-popover").waitFor();
+    await page.waitForFunction(
+      () => document.querySelector("#picker-model").textContent === "GPT-5.6 Luna",
+    );
     await page.locator("#effort-slider").fill("4");
-    assert.equal(await page.locator("#effort-label").textContent(), "Max");
+    await effortSaved(page, "Max");
+    await page.keyboard.press("Escape");
     const hostile = '<img src=x onerror="window.untrustedRan=true">';
     await page.locator("#message").fill(hostile);
     await page
@@ -814,12 +940,12 @@ function pngBuffer(width = 8, height = 6) {
     assert.equal(await page.locator("#messages img").count(), 0);
     assert.equal(await page.evaluate(() => window.untrustedRan), undefined);
     assert.equal(
-      await page.locator("#model-button").textContent(),
+      await page.locator("#picker-model").textContent(),
       "GPT-5.6 Luna",
     );
-    // The reasoning chip uses an icon chevron, not a text glyph.
+    // The chip uses an icon chevron, not a text glyph.
     assert.equal(
-      await page.locator("#effort-button svg.picker-chevron").count(),
+      await page.locator("#picker-button svg.picker-chevron").count(),
       1,
     );
     // Markdown typed into a message is formatted, but cannot add markup, load
@@ -1137,7 +1263,7 @@ function pngBuffer(width = 8, height = 6) {
       /waiting in the queue and has not been sent yet/,
     );
     assert.equal(await page.locator("#send").isDisabled(), true);
-    assert.equal(await page.locator("#model-button").isDisabled(), true);
+    assert.equal(await page.locator("#picker-button").isDisabled(), true);
     await page.locator(".chat-row.queued").waitFor();
     assert.equal(
       await page.locator("#chat-list .list-group").first().textContent(),
@@ -1441,8 +1567,11 @@ function pngBuffer(width = 8, height = 6) {
         exact: true,
       })
       .waitFor();
-    assert.equal(await page.locator("#model-button").textContent(), "GPT-6 Luna");
+    assert.equal(await page.locator("#picker-model").textContent(), "GPT-6 Luna");
     assert.equal(await page.locator("#effort-label").textContent(), "Medium");
+    // A tap on a chat keeps the side bar open (CX-04-PHONE-LIST); the scrim closes it.
+    assert.equal(await page.locator("#scrim").isHidden(), false);
+    await page.locator("#scrim").click({ position: { x: 380, y: 600 } });
     assert.equal(await page.locator("#scrim").isHidden(), true);
     assert.equal(
       await page.evaluate(
@@ -1472,14 +1601,17 @@ function pngBuffer(width = 8, height = 6) {
     await page.emulateMedia({ colorScheme: "light" });
     await page.setViewportSize({ width: 390, height: 844 });
     await integrationLine(page, "ok", "");
-    await page.locator("#effort-button").click();
+    await openPicker(page);
     await page.screenshot({
       path: path.join(output, "mobile-reasoning.png"),
       fullPage: true,
     });
     await page.keyboard.press("Escape");
     await page.setViewportSize({ width: 320, height: 568 });
-    await page.locator("#model-button").click();
+    await openPicker(page);
+    const panel = await page.locator("#effort-popover").boundingBox();
+    assert(panel.x >= 0 && panel.y >= 0 && panel.x + panel.width <= 320);
+    await page.locator("#effort-model").click();
     const popover = await page.locator("#model-popover").boundingBox();
     assert(
       popover.x >= 0 && popover.y >= 0 && popover.x + popover.width <= 320,
@@ -1505,7 +1637,7 @@ function pngBuffer(width = 8, height = 6) {
       .last()
       .click();
     await page.emulateMedia({ colorScheme: "dark" });
-    await page.locator("#effort-button").click();
+    await openPicker(page);
     await page.screenshot({
       path: path.join(output, "mobile-dark.png"),
       fullPage: true,
@@ -1544,6 +1676,45 @@ function pngBuffer(width = 8, height = 6) {
     phone.on("pageerror", (error) => errors.push(error.message));
     await phone.goto("http://127.0.0.1:9137/preview/");
     await phone.locator(".chat-row").first().waitFor({ state: "attached" });
+    // CX-PICKER-PARITY on a phone, by touch only: the chip opens the panel, the model name opens the
+    // list, a model returns to the panel, the slider sets the level, and a tap outside closes it.
+    // This page opened on a new chat, so the choices stay in the page and the fixture's chats keep theirs.
+    await phone.waitForFunction(
+      () => !document.querySelector("#picker-button").disabled,
+    );
+    await phone.locator("#picker-button").tap();
+    await phone.locator("#effort-popover").waitFor();
+    assert.equal(await phone.locator("#picker-open-label").isVisible(), true);
+    const phonePanel = await phone.locator("#effort-popover").boundingBox();
+    assert.ok(
+      phonePanel.x >= 0 && phonePanel.y >= 0 && phonePanel.x + phonePanel.width <= 390,
+      `phone picker panel is inside the screen (${JSON.stringify(phonePanel)})`,
+    );
+    await phone.locator("#effort-model").tap();
+    await phone.locator("#model-popover").waitFor();
+    const phoneList = await phone.locator("#model-popover").boundingBox();
+    assert.ok(
+      phoneList.x >= 0 && phoneList.y >= 0 && phoneList.x + phoneList.width <= 390,
+      `phone model list is inside the screen (${JSON.stringify(phoneList)})`,
+    );
+    await modelRow(phone, "GPT-6 Luna").tap();
+    await phone.locator("#effort-popover").waitFor();
+    await phone.waitForFunction(
+      () =>
+        document.querySelector("#effort-model-name").textContent === "GPT-6 Luna" &&
+        !document.querySelector("#effort-slider").disabled,
+    );
+    assert.equal(await phone.locator("#effort-slider").getAttribute("max"), "4");
+    await phone.locator("#effort-slider").fill("2");
+    await effortSaved(phone, "High");
+    assert.equal(
+      await phone.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+      true,
+    );
+    await phone.locator("#greeting").tap();
+    assert.equal(await phone.locator("#effort-popover").isHidden(), true);
+    assert.equal(await phone.locator("#picker-model").textContent(), "GPT-6 Luna");
+    assert.equal(await phone.locator("#effort-label").textContent(), "High");
     await phone
       .getByRole("button", { name: "Open conversations", exact: true })
       .click();
@@ -1581,6 +1752,8 @@ function pngBuffer(width = 8, height = 6) {
       .locator("#messages")
       .getByText("The dashboard configuration is valid.", { exact: true })
       .waitFor();
+    // The tap kept the side bar open (CX-04-PHONE-LIST); close it to reach the chat area.
+    await phone.locator("#scrim").click({ position: { x: 380, y: 600 } });
     // The screenshot the user attached shows with their message.
     // No bold Verification box under the answer: the checks sit in one closed block, readback and note inside.
     // CX-FB2-FLOW: that block is inside the answer's closed "Worked for" line, and a failed check keeps one

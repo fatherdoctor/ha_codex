@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import atexit
 import base64
 import binascii
 import copy
@@ -30,7 +31,7 @@ from functools import wraps
 from http.cookiejar import LWPCookieJar, LoadError
 from zoneinfo import ZoneInfo
 from pathlib import Path
-from typing import Any, Callable, TextIO
+from typing import Any, Callable, NamedTuple, TextIO
 from urllib.parse import urlparse, urlunparse
 
 import requests
@@ -43,11 +44,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from verification import DEFAULT_BROWSER_MEMORY_LIMIT_MIB, Verification, public_check
 from approvals import APPROVAL_GONE
 from safety_block import SafetyBlockSession as AppServerSession
+import codex_host
 import full_access
 import policy as protected_policy
 from ha_data import HomeAssistantData
-from ha_call import RELAY_TASK as RELAY_CALL_TASK, HomeAssistantCall
+from ha_call import HomeAssistantCall, RelayCall
 import ha_data_mcp
+import hass_mcp
 import remote_control
 import tool_threads
 from core_address import CoreAddress, probe_core
@@ -107,8 +110,11 @@ def record_diagnostic(method, *args, **kwargs):
 
 ha_data = HomeAssistantData(_ToolWorker(), DATA_ROOT / "ha-data")
 # The one tool that changes the house; the worker sends each call with its own access and keeps no log of it.
-# The app's relay has one key per launch, good while that process runs (relay_running is defined below).
-ha_call = HomeAssistantCall(_ToolWorker(), relay_running=lambda: relay_running())
+# A chat's calls and the ChatGPT app's calls come in on two sockets; the app's hold while its relay process runs
+# (relay_running is defined below).
+ha_call = HomeAssistantCall(_ToolWorker())
+relay_call = RelayCall(_ToolWorker(), relay_running=lambda: relay_running())
+RELAY_CALL_SOCKET = DATA_ROOT / "ha-call-relay.sock"
 CODEX_HOME = DATA_ROOT / "codex-home"
 OPTIONS_PATH = DATA_ROOT / "options.json"
 WORKER_TOKEN_PATH = DATA_ROOT / "worker_api_token"
@@ -173,8 +179,10 @@ DEFAULT_OPTIONS = {
     "browser_verification": True,
     "browser_memory_limit_mib": DEFAULT_BROWSER_MEMORY_LIMIT_MIB,
     "local_docs": True,
+    "warm_start": True,
     "ha_url": "",
     "HA_TOKEN": "",
+    "home_assistant_mcp": True,
 }
 BACKUP_RETENTION_DAYS_RANGE = (1, 365)
 # The levels the add-on's model_reasoning_effort option offered before it became free text. The pinned
@@ -684,9 +692,14 @@ def default_model(options: dict[str, Any]) -> str:
     model = configured_model(options)
     if model in {"default", "gpt-5.3-codex"}:
         # The add-on leaves the choice to the CLI.
-        with usage_lock:
-            return str(usage_state.get("_default_model") or CLI_DEFAULT_MODEL)
+        return seen_default_model() or CLI_DEFAULT_MODEL
     return model
+
+
+def seen_default_model() -> str:
+    """Return the model the CLI named as its own pick in /status, or an empty string before it was seen."""
+    with usage_lock:
+        return str(usage_state.get("_default_model") or "")
 
 
 def model_pin(options: dict[str, Any]) -> str:
@@ -740,7 +753,7 @@ def resolve_chat_settings(settings: dict[str, Any], options: dict[str, Any]) -> 
             model = pin
         elif model != pin:
             raise ValueError(model_pin_message(model, pin))
-    # A run on default names no model; its levels are those of the model the CLI picks.
+    # A run on default names the CLI's pick only when the worker knows it (turn_model); its levels are those of that pick.
     efforts = model_efforts(default_model(options) if model == "default" else model) or ("low", "medium", "high", "xhigh")
     effort = settings.get("reasoning_effort")
     if effort is not None and effort not in efforts:
@@ -1260,6 +1273,8 @@ def expire_saved_approvals(task: dict[str, Any]) -> None:
 
 def redact(text: str) -> str:
     """Replace Supervisor tokens, tool capabilities, and values that look like keys or tokens with [redacted]."""
+    # No code makes a remote control key (harc_) since 0.4.0, but chat history and logs saved by an earlier version
+    # can hold one. Such a key no longer works; it is still hidden, because a shared file should not show key shapes.
     redacted = re.sub(r"harc_[A-Za-z0-9_-]{43}", "[redacted]", text)
     # 0.4.0 removed the lead channel, but its token hash stays in the settings table so that a rollback to 0.3 works,
     # and a rollback makes an old lead token valid again. Keep hiding it until a later version deletes the hash.
@@ -2078,10 +2093,13 @@ def activity_step_from_item(item: dict[str, Any]) -> dict[str, Any] | None:
         step["status"] = "failed"
     if kind == "agent_message":
         text = str(item.get("text") or "")
-        if not text.strip() or is_final_answer(text):
+        phase = item.get("phase")
+        if not text.strip() or phase == "final_answer" or is_final_answer(text):
             return None
         step["kind"] = "message"
         step["text"], _ = clip_activity_text(text.strip(), ACTIVITY_TEXT_MAX)
+        if phase == "commentary":
+            step["phase"] = phase
     elif kind == "reasoning":
         text = MARKDOWN_BOLD_RE.sub(r"\1", str(item.get("text") or "")).strip()
         if not text:
@@ -4683,7 +4701,7 @@ def codex_env() -> dict[str, str]:
     env = dict(os.environ)
     # The *_CAPABILITY names are no longer set for a chat; they are still removed in case a parent process has them.
     for key in ("SUPERVISOR_TOKEN", "HASSIO_TOKEN", "HA_TOKEN", "HA_URL", "HA_VERIFICATION_CAPABILITY", "HA_DATA_CAPABILITY", "HA_DATA_SOCKET", "HA_RELAY_CAPABILITY", "HA_RELAY_SOCKET", "CODEX_SCHEDULE_SOCKET",
-                "HA_CALL_CAPABILITY", "HA_CALL_SOCKET"):
+                "HA_CALL_CAPABILITY", "HA_CALL_SOCKET", "HA_MCP_CAPABILITY"):
         env.pop(key, None)
     env["CODEX_HOME"] = str(CODEX_HOME)
     env["HOME"] = str(DATA_ROOT)
@@ -4808,11 +4826,11 @@ _PAGE_INSTRUCTIONS_TEMPLATE = """You are Codex running as a Home Assistant add-o
 
 Workspace: /config
 
-Owner workspace instructions: if /addon_config/AGENTS.md exists, follow it. Codex loads that file into a chat when the chat starts, and the owner can create, change or remove it at any time. exchange_info says in each message whether the file exists and when it last changed: read the file again only when its owner_instructions text says to, and do not look for the file otherwise. If exchange_info is not available, check for the file yourself.
+Owner workspace instructions: if /addon_config/AGENTS.md exists, follow it. Codex has already loaded that file into this chat when the chat started, so never run a command to look for it or to read it. The owner can create, change or remove it at any time. When you call exchange_info, it says whether the file exists and when it last changed: read the file again only when its owner_instructions text says to.
 
 Treat this as a live Home Assistant config tree. Make focused edits, do not expose secrets, and validate changed YAML/JSON when practical. After you finish, the worker asks Home Assistant to check its configuration whenever YAML files changed; if that check fails, the task is reported as failed, so prefer a change you are confident is valid over a speculative one.
 
-At the start of each message, call the home_assistant_data exchange_info tool once. It gives this message's backup folder, the state of the owner's instruction file, the documents and images the user attached, and notes on direct Home Assistant API calls, the local documentation and GitHub. These change between messages, so never reuse an earlier answer. Follow its backups text before you change, move, or delete a file under /config. If exchange_info is not available, make no backup copy, and say in your answer that this change has no backup.
+A message that you can answer from what you know and from this chat, for example a greeting, a number or a short question, needs no tool call and no command: answer it directly. Any other message needs this message's details first: before your first command, file change or tool call in a message (ask_owner and report_failure excepted), and when the message can refer to a file, a document or something that you cannot see in this chat (only exchange_info names the documents the user attached), call the home_assistant_data exchange_info tool once. It gives this message's backup folder, the state of the owner's instruction file, the documents and images the user attached, and notes on direct Home Assistant API calls, the local documentation and GitHub. These change between messages, so never reuse an earlier answer. Follow its backups text before you change, move, or delete a file under /config. If exchange_info is not available, make no backup copy, and say in your answer that this change has no backup.
 
 Do not wait for terminal input. In sandboxed modes, request a native command or file-change approval when an authorized task requires access outside the sandbox. The worker shows the action to the user and delivers their Allow once or Deny decision to the pending request. Never bypass a denial or request permanent permission rules.
 
@@ -4943,14 +4961,14 @@ def call_mcp_args(relay: bool = False) -> list[str]:
     normalize_approval_decision_for_mode, at rust-v0.166.0).
 
     In a chat the bridge sends the thread id that Codex puts in each call, and the worker checks that a
-    person attends that chat's running exchange. Under remote control (relay=True) the bridge gets the
-    relay's key, HA_CALL_CAPABILITY, in its place; shell_exclude_args keeps that key out of shell commands.
-    The worker behind the socket checks the chat or the key, and the form of the request (ha_call.py).
+    person attends that chat's running exchange. Under remote control (relay=True) the bridge gets
+    HA_CALL_SOCKET, the path of the app's own socket (relay_env), so the socket says the call is the app's.
+    The worker behind the socket checks the chat or the relay, and the form of the request (ha_call.py).
     """
     settings = {
         "command": sys.executable,
         "args": [str(Path(__file__).with_name("ha_call_mcp.py"))],
-        **({"env_vars": ["HA_CALL_CAPABILITY"]} if relay else {}),
+        **({"env_vars": ["HA_CALL_SOCKET"]} if relay else {}),
         "enabled": True,
         "required": True,
         "startup_timeout_sec": 10,
@@ -4967,7 +4985,11 @@ SHELL_EXCLUDED_ENV = (remote_control.TOOL_KEY_EXCLUDE,)
 
 
 def shell_exclude_args() -> list[str]:
-    """Keep every HA_*_CAPABILITY key out of the environment of the commands the relay's Codex runs."""
+    """Keep every HA_*_CAPABILITY name out of the environment of the commands the relay's Codex runs.
+
+    The tools hold no key since D-CX-KEYS; the one such name left is HA_MCP_CAPABILITY, the Supervisor token
+    that relay_env gives the bundled hass-mcp server.
+    """
     return ["--config", "shell_environment_policy.exclude=" + json.dumps(list(SHELL_EXCLUDED_ENV))]
 
 
@@ -5104,11 +5126,13 @@ def build_app_server_args() -> list[str]:
     (task_mode_settings), and those replace them, so a chat gets only its mode's
     settings. A scheduled run starts with the same tools as a chat on the page,
     the call tool included: Codex's question before a call waits in the run's
-    chat until a person answers it.
+    chat until a person answers it. Every chat, scheduled runs included, gets
+    the Home Assistant MCP server when its option is on (hass_mcp.py).
     """
     return [CODEX_BINARY, "app-server", "--config", 'approval_policy="on-request"',
             "--config", 'approvals_reviewer="user"', *verification_mcp_args(),
-            *data_mcp_args(), *scheduling_mcp_args(), *github_mcp_args(), *call_mcp_args()]
+            *data_mcp_args(), *scheduling_mcp_args(), *github_mcp_args(), *call_mcp_args(),
+            *hass_mcp.mcp_args(read_options(), sys.executable)]
 
 
 def bind_chat_thread(task_id: str, thread_id: Any) -> None:
@@ -5122,13 +5146,18 @@ def bind_chat_thread(task_id: str, thread_id: Any) -> None:
 
 
 def create_approval_session(
-    task_id: str, proc: subprocess.Popen, prompt: str, final_file: Path,
+    task_id: str, proc: subprocess.Popen | None, prompt: str, final_file: Path,
     session_id: str | None, session_holder: dict[str, str], options: dict[str, Any],
     status_calls: list[dict[str, Any]] | None = None,
+    open_thread: Callable[[dict[str, Any]], tuple[str, subprocess.Popen]] | None = None,
 ) -> AppServerSession:
     """Bind one app-server exchange to its task and live activity, with secret values redacted.
 
     Each usable ask_owner or report_failure call of the turn is added to status_calls.
+
+    Without open_thread the session owns proc, a process for this one exchange. With it, proc is None:
+    open_thread(thread_params) loads the chat's thread in the live process of codex_host and returns the thread id
+    and that process (it raises codex_host.HostError when it cannot), and the session sends only the turn.
     """
     with lock:
         task = tasks.get(task_id, {})
@@ -5162,9 +5191,11 @@ def create_approval_session(
     def active() -> bool:
         """Refuse stale requests, ended processes, and cancelled exchanges under the lock."""
         task = tasks.get(task_id, {})
+        # The live process is never in running_processes: a cancel there would end it for every chat.
+        holder = live_codex.process if open_thread else running_processes.get(task_id)
         return (task.get("status") == "running" and not task.get("cancellation_requested")
                 and str(task.get("current_turn_id") or "") == turn_id
-                and running_processes.get(task_id) is proc and proc.poll() is None)
+                and holder is proc and proc.poll() is None)
 
     # For each announced request: set once it no longer waits, which withdraws its notification.
     alerts: dict[str, threading.Event] = {}
@@ -5238,20 +5269,38 @@ def create_approval_session(
         policy = {"type": "readOnly" if mode == "read-only" else "workspaceWrite", "networkAccess": False}
     if mode == "workspace-write":
         policy["writableRoots"] = [*TASK_WRITABLE_ROOTS, *backup_writable_root(final_file.parent)]
+    if open_thread:
+        thread_params["threadId"], proc = open_thread(thread_params)
+    assert proc is not None
     return AppServerSession(
         proc.stdin, lock=lock, thread_params=thread_params,
         turn_params={"input": [{"type": "text", "text": prompt},
                                *({"type": "localImage", "path": str(path)} for path in prompt_attachment_paths(task_id, latest_turn))],
                      # No outputSchema: the thread stores the answer as plain text, and the status comes from
                      # the ask_owner and report_failure calls (apply_status_calls).
+                     **turn_model(model),
                      "effort": execution["reasoning_effort"], "summary": reasoning_summary(options),
                      "sandboxPolicy": policy,
                      "approvalPolicy": settings["approval_policy"],
                      "approvalsReviewer": settings["approvals_reviewer"]},
         on_event=event, on_approvals=save_approvals,
         on_final=lambda text: final_file.write_text(text, encoding="utf-8"),
-        is_active=active, redact=approval_redact,
+        is_active=active, redact=approval_redact, owns_connection=open_thread is None,
     )
+
+
+def turn_model(model: str) -> dict[str, str]:
+    """Return the model field of turn/start: the chat's model, or the CLI's own pick by name for the default.
+
+    A thread that is already loaded (the live process) ignores the model of thread/resume, and a resume without one
+    keeps the thread's last model, so each turn names its model; a chat set back to the default gets the CLI's pick
+    by name. The pick is named only when it is a model the worker knows: for any other model /status gives its
+    display text, which is not a model id. Before /status named a known pick, the turn names none, as before.
+    """
+    if model not in {"default", "gpt-5.3-codex"}:
+        return {"model": model}
+    seen = seen_default_model()
+    return {"model": seen} if model_efforts(seen) is not None else {}
 
 
 # The longest plain-text answer the page keeps.
@@ -5723,6 +5772,171 @@ def launch_policy_diagnostic_rule(problem):
     return 'other'
 
 
+# The live Codex process (design CX-SPEED cut 3, step 5): one `codex app-server` stays up between messages and each
+# chat is a thread in it, so a follow-up message is one turn/start instead of a new process. codex_host.py holds the
+# process, the live and paused chats and the restart rules. The worker still runs one exchange at a time
+# (start_background_task), so here the cap of live chats only pauses idle chats. The owner's warm_start option turns
+# it off; every failure before turn/start falls back to the start path in run_task, so a chat is never refused.
+
+
+def live_tool_programs() -> list[str]:
+    """Name the tool programs that must be ready before a chat is live: the required ones of build_app_server_args.
+
+    The GitHub program is not required (github_mcp_args), so a chat never waits for it.
+    """
+    names = ["home_assistant", "home_assistant_data", "home_assistant_call"]
+    if scheduling.SCHEDULED_RUNS:
+        names.append("codex_scheduling")
+    return names
+
+
+def _rule_file_text(path: Path) -> str | None:
+    """Return a rule file's text for the fingerprint, or None when it cannot be read."""
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+
+def live_fingerprint_rows() -> dict[str, Any]:
+    """Return what reaches the live process or a new thread at its start; codex_host hashes each row.
+
+    A change in any row makes a restart due before the next message (design section 4.1). AGENTS.md is a row
+    because it is the owner's tool for rules, so an edit reaches the next message.
+    """
+    return {
+        "environment": codex_env(),
+        "arguments": build_app_server_args(),
+        "sign_in": _auth_signature(),
+        "versions": [os.environ.get("ADDON_VERSION", ""), os.environ.get("CODEX_VERSION", "")],
+        "rules": [_rule_file_text(path)
+                  for path in (full_access.REQUIREMENTS_PATH, CODEX_AGENTS_LINK, LEGACY_AGENTS_PATH)],
+        "page_instructions": build_page_instructions(),
+    }
+
+
+def spawn_live_process(args: list[str], env: dict[str, str]) -> subprocess.Popen[str]:
+    """Start the live process in the way run_task starts a process for one exchange."""
+    return subprocess.Popen(args, cwd="/config", env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True, bufsize=1)
+
+
+def make_live_codex(**limits: float) -> codex_host.CodexHost:
+    """Return the host of the live process, wired to this worker; limits are codex_host's time limits (tests).
+
+    The callables look each name up when they run, so a test can patch the module function.
+    """
+    return codex_host.CodexHost(
+        spawn=lambda args, env: spawn_live_process(args, env),
+        reap=lambda process: terminate_and_reap_process(process),
+        args=lambda: build_app_server_args(),
+        env=lambda: codex_env(),
+        fingerprint_rows=lambda: live_fingerprint_rows(),
+        enabled=lambda: bool(read_options().get("warm_start")),
+        session_file=lambda thread_id: session_rollout_path(thread_id),
+        redact=lambda text: redact(text),
+        log=lambda line: print(line, flush=True),
+        lock=lock,
+        **limits,
+    )
+
+
+live_codex = make_live_codex()
+
+
+class LiveExchange(NamedTuple):
+    """How an exchange on the live process ended, in the names that run_task uses after its launch."""
+
+    session: AppServerSession
+    returncode: int
+    timed_out: bool
+    stalled: bool
+    error: Exception | None
+
+
+def run_live_exchange(
+    task_id: str, prompt: str, final_file: Path, session_id: str | None, session_holder: dict[str, str],
+    options: dict[str, Any], status_calls: list[dict[str, Any]], timeout: float, stall_seconds: float,
+) -> LiveExchange | None:
+    """Run one exchange as a turn of the chat's thread in the live process.
+
+    Return None when the live process cannot take the exchange before turn/start is sent (switched off, signed out,
+    a failed start or wake); run_task then starts a process for this exchange, as before. The chat stays live after
+    the exchange; a timeout, a stall or a cancel interrupts only this chat's turn.
+    """
+    if not live_codex.ready_for_message():
+        return None
+    try:
+        # After a failed wake, or a cancel while a new chat loaded, the host may hold a thread that is not this
+        # chat's conversation: it lets that thread go, so this message resumes the chat's own.
+        live_codex.follow(task_id, session_id)
+        session = create_approval_session(
+            task_id, None, prompt, final_file, session_id, session_holder, options, status_calls,
+            open_thread=lambda params: live_thread(task_id, params))
+        live_codex.attach(task_id, session)
+    except codex_host.HostError as exc:
+        write_task_log(task_id, "worker", f"The live Codex process could not take this message ({exc}); "
+                                          "starting Codex for it.")
+        return None
+    with lock:
+        approval_sessions[task_id] = session
+    write_task_log(task_id, "worker", "Codex runs this message in its live process.")
+    errors_mark = live_codex.stderr_mark()
+    try:
+        try:
+            session.start()
+        except (OSError, ValueError) as exc:
+            # turn/start did not reach Codex, so nothing ran: the start path takes the message.
+            write_task_log(task_id, "worker", f"The live Codex process could not start the turn ({exc}); "
+                                              "starting Codex for it.")
+            session.close()
+            return None
+        outcome = wait_for_exchange(session, timeout, stall_seconds)
+        end_live_turn(task_id, session, outcome, stall_seconds)
+        error = RuntimeError(session.error) if session.error else None
+        if outcome != "finished" or error is not None or session.returncode:
+            for line in live_codex.stderr_since(errors_mark):
+                write_task_log(task_id, "stderr", line)
+        return LiveExchange(session, session.returncode, outcome == "timeout", outcome == "stalled", error)
+    finally:
+        live_codex.detach(task_id)
+        with lock:
+            if approval_sessions.get(task_id) is session:
+                approval_sessions.pop(task_id, None)
+
+
+def live_thread(task_id: str, thread_params: dict[str, Any]) -> tuple[str, subprocess.Popen[str]]:
+    """Wake the chat in the live process; return its thread and the process it lives in, read after the wake.
+
+    A crash and a restart during the wake give a new process: the session must write to that one.
+    """
+    thread_id = live_codex.wake(task_id, thread_params, live_tool_programs())
+    with lock:
+        process = live_codex.process
+    if process is None:
+        raise codex_host.HostError("no Codex process")
+    return thread_id, process
+
+
+def end_live_turn(task_id: str, session: AppServerSession, outcome: str, stall_seconds: float) -> None:
+    """End this chat's turn on the live process, then tidy what a cancelled turn leaves.
+
+    A timeout, a stall or a cancel interrupts the turn and waits for its end (codex_host.cancel); the process and
+    the other chats go on. The cancel route does not wait for the turn on the live process, so the copies of secret
+    files of a cancelled exchange are removed here, once the turn has ended.
+    """
+    if outcome == "stalled":
+        write_task_log(task_id, "worker", f"No activity from Codex for {stall_seconds} seconds; stopping the task.")
+    if outcome != "finished" or session.turn_running:
+        live_codex.cancel(task_id)
+    session.close()
+    if task_cancellation_requested(task_id):
+        try:
+            drop_credential_backups(get_run_dir(task_id))
+        except OSError as exc:
+            write_task_log(task_id, "worker", f"Could not tidy the backup folder: {exc}")
+
+
 def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: str | None = None) -> None:
     """Run one exchange: record the configuration, launch Codex, then check and report what it changed."""
     if task_cancellation_requested(task_id):
@@ -5835,7 +6049,6 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     # top of run_task has already refused the modes that this transport must never be given.
     args = build_app_server_args()
     ha_call.begin(task_id)
-    write_task_log(task_id, "worker", "Starting Codex: " + " ".join(args))
 
     start_phase(task_id, "launch", "Starting Codex")
     readiness = sandbox_readiness()
@@ -5858,91 +6071,97 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     status_calls: list[dict[str, Any]] = []
     # Images recorded before this run belong to earlier exchanges of the session.
     known_image_ids = {item["id"] for item in image_generation_items(session_id or "")}
-    try:
-        proc = subprocess.Popen(
-            args,
-            cwd="/config",
-            env=codex_env(),
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-        )
-    except OSError as exc:
-        fail_task_launch(task_id, exc, session_id=session_id)
-        return
-    cancel_after_launch = False
-    with lock:
-        if tasks.get(task_id, {}).get("cancellation_requested"):
-            cancel_after_launch = True
-        else:
-            running_processes[task_id] = proc
-    if cancel_after_launch:
-        if not terminate_and_reap_process(proc):
-            with lock:
-                running_processes[task_id] = proc
-        return
-    assert proc.stdin is not None
-    assert proc.stdout is not None
-    assert proc.stderr is not None
-    approval_session = create_approval_session(
-        task_id, proc, prompt_file.read_text(encoding="utf-8"), final_file, session_id, session_holder, options,
-        status_calls)
-    with lock:
-        approval_sessions[task_id] = approval_session
-    stdout_thread = threading.Thread(target=approval_session.read, args=(proc.stdout,), daemon=True)
-    stderr_thread = threading.Thread(target=reader_thread, args=(task_id, "stderr", proc.stderr), daemon=True)
-    stdout_thread.start()
-    stderr_thread.start()
-
-    timed_out = False
-    stalled = False
-    lifecycle_error: Exception | None = None
-    returncode = -1
-    process_exit_confirmed = False
-    try:
+    live = run_live_exchange(task_id, prompt_file.read_text(encoding="utf-8"), final_file, session_id,
+                             session_holder, options, status_calls, timeout, stall_seconds)
+    if live is not None:
+        approval_session, returncode, timed_out, stalled, lifecycle_error = live
+    else:
+        write_task_log(task_id, "worker", "Starting Codex: " + " ".join(args))
         try:
-            approval_session.start()
-        except (OSError, ValueError) as exc:
-            lifecycle_error = exc
-            process_exit_confirmed = terminate_and_reap_process(proc)
-        if lifecycle_error is None:
+            proc = subprocess.Popen(
+                args,
+                cwd="/config",
+                env=codex_env(),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+            )
+        except OSError as exc:
+            fail_task_launch(task_id, exc, session_id=session_id)
+            return
+        cancel_after_launch = False
+        with lock:
+            if tasks.get(task_id, {}).get("cancellation_requested"):
+                cancel_after_launch = True
+            else:
+                running_processes[task_id] = proc
+        if cancel_after_launch:
+            if not terminate_and_reap_process(proc):
+                with lock:
+                    running_processes[task_id] = proc
+            return
+        assert proc.stdin is not None
+        assert proc.stdout is not None
+        assert proc.stderr is not None
+        approval_session = create_approval_session(
+            task_id, proc, prompt_file.read_text(encoding="utf-8"), final_file, session_id, session_holder, options,
+            status_calls)
+        with lock:
+            approval_sessions[task_id] = approval_session
+        stdout_thread = threading.Thread(target=approval_session.read, args=(proc.stdout,), daemon=True)
+        stderr_thread = threading.Thread(target=reader_thread, args=(task_id, "stderr", proc.stderr), daemon=True)
+        stdout_thread.start()
+        stderr_thread.start()
+
+        timed_out = False
+        stalled = False
+        lifecycle_error: Exception | None = None
+        returncode = -1
+        process_exit_confirmed = False
+        try:
             try:
-                outcome = wait_for_exchange(approval_session, timeout, stall_seconds)
-                timed_out = outcome == "timeout"
-                stalled = outcome == "stalled"
-                if stalled:
-                    write_task_log(task_id, "worker", f"No activity from Codex for {stall_seconds} seconds; stopping the task.")
-                approval_session.close()
-                returncode = approval_session.returncode
-                if approval_session.error:
-                    lifecycle_error = RuntimeError(approval_session.error)
-                # The app-server is long-lived; one worker process owns one
-                # exchange, and must be reaped before the queue advances.
-                process_exit_confirmed = reap_approval_process(proc)
-            except subprocess.TimeoutExpired:
-                timed_out = True
-                process_exit_confirmed = terminate_and_reap_process(proc)
-                returncode = proc.returncode if proc.returncode is not None else -1
-            except OSError as exc:
+                approval_session.start()
+            except (OSError, ValueError) as exc:
                 lifecycle_error = exc
                 process_exit_confirmed = terminate_and_reap_process(proc)
-    finally:
-        approval_session.close()
-        with lock:
-            if approval_sessions.get(task_id) is approval_session:
-                approval_sessions.pop(task_id, None)
-        try:
-            proc.stdin.close()
-        except (OSError, ValueError):
-            pass
-        if process_exit_confirmed:
+            if lifecycle_error is None:
+                try:
+                    outcome = wait_for_exchange(approval_session, timeout, stall_seconds)
+                    timed_out = outcome == "timeout"
+                    stalled = outcome == "stalled"
+                    if stalled:
+                        write_task_log(task_id, "worker", f"No activity from Codex for {stall_seconds} seconds; stopping the task.")
+                    approval_session.close()
+                    returncode = approval_session.returncode
+                    if approval_session.error:
+                        lifecycle_error = RuntimeError(approval_session.error)
+                    # The app-server is long-lived; one worker process owns one
+                    # exchange, and must be reaped before the queue advances.
+                    process_exit_confirmed = reap_approval_process(proc)
+                except subprocess.TimeoutExpired:
+                    timed_out = True
+                    process_exit_confirmed = terminate_and_reap_process(proc)
+                    returncode = proc.returncode if proc.returncode is not None else -1
+                except OSError as exc:
+                    lifecycle_error = exc
+                    process_exit_confirmed = terminate_and_reap_process(proc)
+        finally:
+            approval_session.close()
             with lock:
-                if running_processes.get(task_id) is proc:
-                    running_processes.pop(task_id, None)
-        stdout_thread.join(timeout=5)
-        stderr_thread.join(timeout=5)
+                if approval_sessions.get(task_id) is approval_session:
+                    approval_sessions.pop(task_id, None)
+            try:
+                proc.stdin.close()
+            except (OSError, ValueError):
+                pass
+            if process_exit_confirmed:
+                with lock:
+                    if running_processes.get(task_id) is proc:
+                        running_processes.pop(task_id, None)
+            stdout_thread.join(timeout=5)
+            stderr_thread.join(timeout=5)
 
     if task_cancellation_requested(task_id):
         return
@@ -7433,18 +7652,21 @@ def cancel_task(task_id: str) -> Response:
     if not accepted:
         status_code = 404 if error == "task not found" else 409
         return jsonify({"ok": False, "error": error}), status_code
+    with lock:
+        session = approval_sessions.get(task_id)
+    on_live_process = session is not None and not session.owns_connection
     if proc is not None:
-        with lock:
-            has_approval_session = task_id in approval_sessions
-        if has_approval_session:
+        if session is not None:
             reap_approval_process(proc)
         else:
             terminate_and_reap_process(proc)
-    # run_task returns early for a stopped exchange, so the copies of secret files go here, once Codex has stopped.
-    try:
-        drop_credential_backups(get_run_dir(task_id))
-    except OSError as exc:
-        write_task_log(task_id, "worker", f"Could not tidy the backup folder: {exc}")
+    if not on_live_process:
+        # run_task returns early for a stopped exchange, so the copies of secret files go here, once Codex has
+        # stopped. On the live process the turn can run on after the interrupt: end_live_turn removes them then.
+        try:
+            drop_credential_backups(get_run_dir(task_id))
+        except OSError as exc:
+            write_task_log(task_id, "worker", f"Could not tidy the backup folder: {exc}")
     publish_cancelled_task_outcome(task_id, proc.returncode if proc is not None else None)
     start_next_queued()
     return jsonify({"ok": True, "task_id": task_id, "status": "cancelled"})
@@ -7596,30 +7818,37 @@ relay_reads = RelayReads(relay_process_state, ha_token, relay_read_redact, obser
 
 
 def relay_running() -> bool:
-    """Return whether the remote-control process runs now and is not stopping; the relay's call key holds only then."""
+    """Return whether the remote-control process runs now and is not stopping; the app's calls hold only then."""
     proc, stopping = relay_process_state()
     return proc is not None and not stopping and proc.poll() is None
 
 
 def relay_probe_env() -> dict[str, str]:
-    """Return the environment of a relay probe: no tool key, so a probe never ends the keys of a running relay."""
+    """Return the environment of a relay probe: it starts no read session, so a probe never ends a running relay's."""
     return codex_env()
 
 
 def relay_env() -> dict[str, str]:
-    """Return the environment of one relay launch with fresh keys; the keys of the earlier launch stop working.
+    """Return the environment of one relay launch; a read of the earlier launch can no longer finish.
 
     Only Supervisor._loop calls it, just before the process starts (launch_env_factory); the probes use
-    relay_probe_env.
+    relay_probe_env. The call bridge gets the app's own socket here; no tool gets a key (D-CX-KEYS).
     """
     refresh_core_address()
-    return {**relay_reads.environment(codex_env()), "HA_CALL_CAPABILITY": ha_call.begin(RELAY_CALL_TASK)}
+    relay_reads.new_launch()
+    env = {**codex_env(), "HA_CALL_SOCKET": str(RELAY_CALL_SOCKET)}
+    # The relay cannot read s6's container environment, so the Home Assistant MCP server gets its token here,
+    # under a name the shell exclude HA_*_CAPABILITY keeps from every command (hass_mcp.py).
+    token = ha_token()
+    if token and hass_mcp.enabled(read_options()):
+        env[hass_mcp.KEY_ENV] = token
+    return env
 
 
 def relay_read_mcp_args() -> list[str]:
     settings = {
         'command': sys.executable, 'args': [str(Path(__file__).with_name('relay_reads_mcp.py'))],
-        'env_vars': ['HA_RELAY_CAPABILITY'], 'enabled': True, 'required': True,
+        'enabled': True, 'required': True,
         'startup_timeout_sec': 10, 'tool_timeout_sec': 20,
         'tools.read.approval_mode': 'approve',
     }
@@ -7628,12 +7857,15 @@ def relay_read_mcp_args() -> list[str]:
 
 
 def relay_tool_args() -> list[str]:
-    """The app's tools: the read tool, approved ahead, and the call tool, which Codex asks for each time.
+    """The app's tools: the read tool, approved ahead, the call tool, which Codex asks for each time, and the
+    Home Assistant MCP server when its option is on (hass_mcp.py): its read tools approved ahead, its write tools
+    asked about before each call.
 
-    The relay holds both keys for its whole run, so the shell exclude matters as much as on the page;
+    The shell exclude keeps HA_MCP_CAPABILITY, the token relay_env gives hass-mcp, out of every command;
     /etc/codex/managed_config.toml holds the same exclude for every client.
     """
-    return [*shell_exclude_args(), *relay_read_mcp_args(), *call_mcp_args(relay=True)]
+    return [*shell_exclude_args(), *relay_read_mcp_args(), *call_mcp_args(relay=True),
+            *hass_mcp.mcp_args(read_options(), sys.executable, relay=True)]
 
 
 remote_control_supervisor = remote_control.Supervisor(
@@ -7668,6 +7900,70 @@ def get_remote_control() -> Response:
 
 
 SUPERVISOR_SELF_URL = "http://supervisor/addons/self"
+
+
+def save_remote_control_name(value: Any) -> bool:
+    """Save the remote_control_name option, as the app's Configuration tab would; True when the worker's own copy has it too.
+
+    Supervisor replaces every option on a save, so the saved options are read from Supervisor first and only the
+    name changes. Those are the options as written, with any !secret reference kept; options.json holds resolved
+    values and must not be sent back. Supervisor rewrites options.json only when the app starts, so the worker's
+    copy gets the new name as well. Raises ValueError for a value that is not a name and RuntimeError when
+    Supervisor cannot be reached or refuses. Returns False when Supervisor saved the name but the worker's copy could
+    not be updated; the name then shows after the app restarts.
+
+    One limit: the name the app shows is cut to remote_control.MAX_NAME_BYTES, so a longer value is refused rather
+    than cut without a word. Other characters are not refused; machine_name turns them into spaces.
+    """
+    if not isinstance(value, str) or len(value.strip()) > remote_control.MAX_NAME_BYTES:
+        raise ValueError(f"Enter a name of up to {remote_control.MAX_NAME_BYTES} characters.")
+    name = value.strip()
+    headers = {"Authorization": f"Bearer {ha_token()}"}
+    try:
+        info = requests.get(f"{SUPERVISOR_SELF_URL}/info", headers=headers, timeout=15)
+        info.raise_for_status()
+        options = dict(info.json()["data"]["options"])
+        options["remote_control_name"] = name
+        saved = requests.post(f"{SUPERVISOR_SELF_URL}/options", headers=headers, json={"options": options}, timeout=15)
+        saved.raise_for_status()
+    except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
+        raise RuntimeError("Home Assistant did not save the name. Try again, or change it in the app's "
+                           "Configuration tab.") from exc
+    try:
+        write_local_option("remote_control_name", name)
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def write_local_option(key: str, value: Any) -> None:
+    """Change one value in the worker's options.json, keeping the file's permissions; it can hold a token."""
+    current = json.loads(OPTIONS_PATH.read_text(encoding="utf-8")) if OPTIONS_PATH.exists() else {}
+    current[key] = value
+    temporary = OPTIONS_PATH.with_suffix(".tmp")
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        json.dump(current, handle)
+    temporary.replace(OPTIONS_PATH)
+
+
+def rename_remote_control() -> Response | tuple[Response, int]:
+    """Save a new machine name from the app page; refused while remote control is on, since Codex reads it at start."""
+    if remote_control_supervisor.enabled():
+        return jsonify({"ok": False, "error": "Turn remote control off before you rename it."}), 409
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or set(payload) != {"name"}:
+        return jsonify({"ok": False, "error": "Enter a name."}), 400
+    try:
+        applied = save_remote_control_name(payload["name"])
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except RuntimeError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 502
+    reply = {"ok": True, "remote_control": remote_control_supervisor.snapshot()}
+    if not applied:
+        reply["notice"] = "The name is saved. It shows here after the app restarts."
+    return jsonify(reply)
 
 
 # A Supervisor slug: the repository's prefix, an underscore, then the app's own slug.
@@ -7712,13 +8008,15 @@ def addon_configuration() -> Response:
 @require_auth
 @require_ingress
 def change_remote_control(action: str) -> Response | tuple[Response, int]:
-    """Turn remote control on or off, or ask for a new pairing code.
+    """Turn remote control on or off, ask for a new pairing code, or save its machine name.
 
     Only from an administrator on the app page, never with the API token.
     """
     admin, refusal = ingress_admin()
     if admin is None:
         return jsonify({"ok": False, "error": refusal}), 403
+    if action == "name":
+        return rename_remote_control()
     if action == "start":
         state = remote_control_supervisor.start()
     elif action == "stop":
@@ -8171,6 +8469,7 @@ def main() -> None:
     verification.serve(DATA_ROOT / "verification.sock")
     ha_data.serve(DATA_ROOT / "ha-data.sock")
     ha_call.serve(DATA_ROOT / "ha-call.sock")
+    relay_call.serve(RELAY_CALL_SOCKET)
     relay_reads.serve(DATA_ROOT / "relay-read.sock")
     schedule_service.serve(DATA_ROOT / "schedules.sock")
     github_service.serve(DATA_ROOT / "github.sock")
@@ -8186,6 +8485,11 @@ def main() -> None:
     # Remote control runs again only if the owner left it on.
     remote_control_supervisor.resume()
     threading.Thread(target=stdin_reader, daemon=True).start()
+    # The live Codex process starts now when the owner left warm_start on and a sign-in exists, so the first
+    # message does not wait for it. A message that comes first takes the start path; nothing waits on this.
+    threading.Thread(target=live_codex.ready_for_message, daemon=True, name="codex-host-start").start()
+    # atexit runs on a normal exit only; on SIGTERM the container's stop ends the Codex process.
+    atexit.register(live_codex.close)
     # Messages that were waiting when the worker stopped carry on in order.
     start_next_queued()
     schedule_service.start()

@@ -38,6 +38,8 @@ $("permission-button").onclick = () => {
     return;
   }
   $("permission-result").textContent = "";
+  // One menu at a time: the model and reasoning picker closes (chat.js).
+  closePicker();
   updateStudio();
   placePermissions();
   $("permissions-dialog").show();
@@ -223,6 +225,11 @@ function openConnection() {
 }
 // The ChatGPT app pairing part of Accounts and connections in Settings opens the same window.
 $("remote-connection-open").onclick = openConnection;
+// Back returns to Settings, where the window was opened from; the X closes the window alone.
+$("connection-back").onclick = () => {
+  $("connection-dialog").close();
+  $("settings-button").click();
+};
 $("app-pairing-new").onclick = () => {
   openConnection();
   $("remote-control-pair").click();

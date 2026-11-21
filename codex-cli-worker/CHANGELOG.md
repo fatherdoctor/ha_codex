@@ -3,6 +3,28 @@
 ## 0.4.0 (unreleased)
 
 ### What's new
+- **Model and reasoning picker like the desktop app.** The model and reasoning controls below the message box are now
+  one chip: the model name, then the reasoning level in grey. Select it, or press Ctrl+Shift+M, to open a panel with the
+  reasoning level, the model name and a slider with one stop per level the model offers. Select the model name to pick
+  another model from **Select model**; you return to the panel. Esc or a press outside closes it. It works on a phone
+  and on a desktop. The desktop app's fast mode switch is left out: the Codex CLI has no setting for it.
+- **Fast mode is hidden until it works.** The chat page shows no lightning (fast mode) toggle and no `/fast` command;
+  both return in 0.6 with a working toggle.
+- **Home Assistant MCP, on by default.** The new option **Enable Home Assistant MCP** gives Codex the tools of the
+  bundled Home Assistant MCP server (hass-mcp 0.6.0, as in the Claude Code app). Codex can find entities by name, area
+  or domain and read automations, dashboards, history, statistics and the error log without asking. It can also
+  control a device, call a service, restart Home Assistant or edit a dashboard; each such call is answered as the
+  chat's permission mode says (in Default and Read only, Codex asks you with a card on the chat page). Scheduled
+  runs get the tools too. The image installs hass-mcp at a fixed version, checked by hash, and grows by about 60 MB.
+- **Codex stays running between messages.** A follow-up message no longer starts a new Codex process: one process
+  stays up, and each of the 3 chats used most recently stays loaded in it. Turn this off with **Keep Codex running**
+  (`warm_start`) to start Codex for each message, as before. The process starts again before a message when the
+  options, the sign-in, the Home Assistant address or token, `AGENTS.md` or a version changed. Any failure of the
+  running process falls back to a new process for that message. See "Keep Codex running" in the documentation.
+- **Name your remote connection in its window.** **Settings** > **Remote connection** has a name field again. It
+  saves the same **Remote control machine name** option as the Configuration tab and is read-only while remote
+  control is on. **Turn on** saves a name you typed first, and stays off if the save fails. The window's text is
+  shorter (the longer notes sit under **More about remote control**), and a **Back** button returns to Settings.
 - **Old chats are deleted after 14 days.** A chat with no message for 14 days is deleted with all its files. Change the
   time with **Delete chats after (days without a message)**. Pinned chats never expire, a scheduled run counts as a
   message, and a chat shows a warning line for its last 3 days.
@@ -76,6 +98,16 @@
   copy at `/data/agents_before_move.md`. If both places hold a file, nothing moves and the app logs a line.
 
 ### Changed
+- **The phone chat list is easier to use.** A tap on a chat keeps the side bar open; a tap on the page to its right
+  closes it. The selected chat shows its three-dot menu button where its date was, and the button is 44 pixels or
+  larger. A long press still opens the menu. A desktop window does not change.
+- **A simple question gets a faster answer.** A message that Codex can answer from what it knows and from the
+  chat, such as a greeting or a one-number reply, now gets its answer with no tool call. Before, the page's rules
+  made Codex call `exchange_info` at the start of every message and check for `/addon_config/AGENTS.md` with a shell
+  command, so a one-number reply took three model steps. Codex now calls `exchange_info` only before its first
+  command, file change or tool call in a message, or when your message can refer to a file or a document it cannot
+  see, such as "Summarize this" with a document attached, and never runs a command to look for `AGENTS.md`, which
+  Codex loads when the chat starts. The `exchange_info` tool description says the same.
 - **No copies of secret files.** The app keeps no readable copy of `secrets.yaml` or of any file under `.storage`.
   The full snapshot leaves them out, and a copy in a message's backup folder is deleted when the message ends, in
   every permission mode, also when you stop the message; the backup cleanup removes a copy that a restart left
@@ -111,11 +143,21 @@
   per-file copies of the files Codex changes are still made, and a change that fails the configuration check still
   points to them. The `backups` field is gone from the task API, `codex_cli.get_task` and the
   `codex_cli_task_result` event.
+- The add-on Configuration page now uses plain option names and one short description for each option (25 words or fewer). A test keeps names free of code words and descriptions short.
 
 ### Fixed
+- **A chat set back to the default model goes back to it.** Before, a chat kept the last model it ran on when you
+  chose the default again, because Codex keeps a thread's model unless a message names another one. Each message now
+  names its model. A message on the default names the default model that Codex shows in its status, when the app
+  knows that model. Until then, for example in the first moments after a start, the chat keeps its last model.
+- The chat shows the final answer once. Interim messages still appear in order above it.
 - **Share masks three more shapes.** A password value whose first word another rule already masked (an `sk-` key, a
   token) no longer keeps the rest of its line, and a quoted password that runs on to the next line is masked whole.
   A very long run of the secret word itself (`password-password-...`) is masked about three times faster.
+- **Signing in shows only what you need.** While a ChatGPT or GitHub sign-in waits, its part of Settings and the
+  sign-in banner above the chat show the sign-in link as the main button (44 px tall or more), then the code with its timer, then (ChatGPT) the folded **Show QR code**, then one
+  quiet **Cancel**. It no longer shows Sign out, the Codex availability text or the "confirmed Codex access" line
+  until the sign-in ends. The signed-out and signed-in states keep them.
 - **Sign-in works on a phone.** On a small screen, the sign-in banner above the chat now scrolls, so the link to the
   sign-in page and the whole code are always in reach. The link now comes before the QR code. A phone cannot scan its
   own screen, so on a phone-sized window the QR code starts folded under **Show QR code**; a larger window shows it
@@ -142,10 +184,14 @@
   runs on the same machine), not as a piece of hardware.
 
 ### Known issues
-- Remote control still uses its own keys. The tool requests of a chat no longer do (see "Under the hood").
 - The new Codex host (see "Under the hood") is not connected. Every message still starts its own Codex process.
 
 ### Under the hood
+- A new browser check, `browser_owner_view.cjs`, opens the page at 390 and 1280 px wide. It checks that Settings
+  shows its sections in order and fits the window. It checks the main controls of the ChatGPT and GitHub panels
+  signed out, while signing in and signed in, and the Remote connection window off and on. It also checks that a
+  chat shows its final answer once. It checks structure, not pixels. Every pull request runs it once the staged
+  workflow `ci/verification.yaml` is copied into `.github/workflows/`.
 - Upgrade code for data that only test installs held is removed. The schedule file no longer adds the `author`,
   `chat_id` and `model` columns to an old table: a new file has them from the start, in the same order. Startup no
   longer looks for an exact copy of the house rules that versions before 0.3.0 bundled in Codex's home folder. An
@@ -154,6 +200,10 @@
   adds to every tool call, and the worker answers it only while that chat's exchange runs. A sub-agent that the chat
   starts counts as the chat, and a thread that one chat holds is never given to another. The sandbox already stops a
   command in Read only, Default and Auto-review from reaching the tool sockets.
+- Remote control no longer uses secret keys for its tools either. Its call tool has a socket of its own, so the socket
+  tells the worker that a request comes from the ChatGPT app, and the call and read tools answer only while the
+  remote-control process runs. A test runs the sandbox check on the pinned Codex inside the remote-control sandbox
+  too: in Read only, Default and Auto-review no command reaches any of the worker's sockets.
 - A new module, `codex_host.py`, can keep one Codex process running and hold each chat as a thread in it, with at
   most three chats loaded at a time. Nothing starts it in this version. A later change connects it, with an option to
   turn it off.

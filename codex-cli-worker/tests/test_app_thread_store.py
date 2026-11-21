@@ -90,6 +90,49 @@ class FixedTextTests(unittest.TestCase):
         self.assertIn("If exchange_info is not available, make no backup copy, and say in your answer that this "
                       "change has no backup.", text)
 
+    def test_a_plain_message_needs_no_tool_call(self):
+        """A greeting or a one-number reply is answered directly: no forced exchange_info call, no file check.
+
+        Codex loads the owner's AGENTS.md through the CODEX_HOME link when a chat starts, so the rules never send
+        the model to the shell to look for it.
+        """
+        text = server.PAGE_INSTRUCTIONS
+        self.assertNotIn("At the start of each message", text)
+        self.assertNotIn("check for the file yourself", text)
+        self.assertIn("needs no tool call and no command: answer it directly", text)
+        self.assertIn("Codex has already loaded that file into this chat when the chat started, so never run a "
+                      "command to look for it or to read it.", text)
+
+    def test_any_command_file_change_or_tool_call_still_gets_this_message_details_first(self):
+        """A message that acts (a Home Assistant call, a file edit, a command) still calls exchange_info first.
+
+        Only the two status tools are exempt.
+        """
+        text = server.PAGE_INSTRUCTIONS
+        self.assertIn("before your first command, file change or tool call in a message (ask_owner and "
+                      "report_failure excepted), and when the message can refer to a file", text)
+        self.assertIn("call the home_assistant_data exchange_info tool once.", text)
+        self.assertIn("Follow its backups text before you change, move, or delete a file under /config.", text)
+
+    def test_a_message_about_a_document_calls_exchange_info_without_the_word_attached(self):
+        """Only exchange_info names an attached document (images go in the turn input), so "Summarize this" with a
+        document must call it: the rule follows what the message can refer to, not the word "attached"."""
+        text = server.PAGE_INSTRUCTIONS
+        self.assertNotIn("when the user says they attached or uploaded a file", text)
+        self.assertIn("when the message can refer to a file, a document or something that you cannot see in this "
+                      "chat (only exchange_info names the documents the user attached), call the home_assistant_data "
+                      "exchange_info tool once.", text)
+
+    def test_the_exchange_info_tool_description_agrees_with_the_page_rules(self):
+        """Codex reads the tool description with the page rules on every message, so both give the same order."""
+        tool = next(tool for tool in ha_data_mcp.TOOLS if tool["name"] == "exchange_info")
+        description = tool["description"]
+        self.assertNotIn("at the start of each message", description.lower())
+        self.assertIn("Call it once in a message before your first command, file change or other tool call", description)
+        self.assertIn("when the message can refer to a file, a document or something you cannot see in this chat",
+                      description)
+        self.assertIn("A message you can answer from what you know and from the chat needs no call.", description)
+
     def test_the_tool_needs_no_approval_and_the_app_thread_rules_point_to_it(self):
         """exchange_info is approved like history; the remote-control rules tell an app thread to call it on the page."""
         args = server.data_mcp_args()
@@ -453,14 +496,14 @@ class StatusRunTests(unittest.TestCase):
 
         return Process()
 
-    def run_exchange(self, items, final_text, *, validation_errors=()):
+    def run_exchange(self, items, final_text, *, validation_errors=(), message="Tidy up my automations"):
         """Run one page exchange and return the stored task."""
         proc = self.process(items, final_text)
         self.stack.enter_context(patch.object(server.subprocess, "Popen", return_value=proc))
         self.stack.enter_context(patch.object(server, "assess_changes", return_value={
             "validation_errors": list(validation_errors), "recovery_files": [], "lovelace_results": [],
             "config_check": {"result": "invalid" if validation_errors else "skipped", "errors": "", "warnings": ""}}))
-        server.run_task("task", "Tidy up my automations")
+        server.run_task("task", message)
         return server.tasks["task"]
 
     def mcp_item(self, call):
@@ -475,6 +518,21 @@ class StatusRunTests(unittest.TestCase):
         self.assertEqual((task["question"], task["choices"], task["details"], task["error"]), ("", [], "", ""))
         turn_start = next(message for message in self.sent if message.get("method") == "turn/start")
         self.assertNotIn("outputSchema", turn_start["params"])
+
+    def test_a_plain_message_with_no_tool_call_still_has_its_details_ready_and_its_own_words_as_input(self):
+        """A plain question answered with no tool call: the worker set this message's details once, before the turn,
+        so a call would get them, and the turn input is the user's words only."""
+        recorded = []
+        keep = server.ha_data.set_exchange_info
+        self.stack.enter_context(patch.object(server.ha_data, "set_exchange_info",
+                                              side_effect=lambda *a: (recorded.append(a), keep(*a))))
+        task = self.run_exchange([], "4", message="How many lights are on in the kitchen?")
+        self.assertEqual((task["status"], task["summary"], task["error"]), ("completed", "4", ""))
+        self.assertEqual([item[0] for item in recorded], ["task"])
+        self.assertIn("backups", recorded[0][1])
+        turn_start = next(message for message in self.sent if message.get("method") == "turn/start")
+        self.assertEqual(turn_start["params"]["input"][0],
+                         {"type": "text", "text": "How many lights are on in the kitchen?"})
 
     def test_needs_input_comes_from_ask_owner_with_its_choices(self):
         """ask_owner sets the question and the choices; the answer text stays the summary."""

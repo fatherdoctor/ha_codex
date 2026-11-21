@@ -62,9 +62,9 @@ class LaunchParityTests(unittest.TestCase):
         self.assertIn(CALL_PREFIX + 'tools.call.approval_mode="prompt"', values)
         self.assertFalse([value for value in values if "default_tools_approval_mode" in value])
 
-    def test_a_scheduled_run_holds_its_key_in_the_worker_only(self):
+    def test_a_scheduled_run_is_begun_and_holds_no_key(self):
         started = self.launch("schedule")
-        self.assertTrue(started["key_held"])
+        self.assertTrue(started["begun"])
         self.assertNotIn("HA_CALL_CAPABILITY", started["env"])
         self.assertNotIn("CAPABILITY", " ".join(started["args"]))
 
