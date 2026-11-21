@@ -164,6 +164,7 @@ HA_DOCS_GIT_TIMEOUT_SECONDS = 300
 HA_DOCS_GIT_STALL_SECONDS = 60
 
 DEFAULT_OPTIONS = {
+    "model_choice": "account_default",
     "codex_model": "default",
     "model_reasoning_effort": "medium",
     "reasoning_summary": "concise",
@@ -232,8 +233,8 @@ SOL_MODEL_RE = re.compile(r"gpt-(\d+(?:\.\d+)*)-sol")
 RETIRED_MODELS = {"gpt-5.5": "gpt-5.6-sol"}
 DEFAULT_CHAT_SETTINGS = {"model": None, "reasoning_effort": None}
 # The `model_pin` option is empty as shipped, and empty means no pin: runs use the
-# account's default model. When the owner sets it, a chat, a saved turn or the
-# `codex_model` option naming any other model is refused instead of running on it.
+# configured model. When the owner sets it, an explicit chat choice or saved turn
+# naming any other model is refused instead of running on it.
 # Versions before 0.4 shipped this value as the default; run.sh clears it once, on the
 # first start of 0.4, and sets MODEL_PIN_CLEARED so that start does not read the stale
 # copy in options.json. A value set after that is kept.
@@ -689,8 +690,22 @@ def current_model(model: Any) -> Any:
 
 
 def configured_model(options: dict[str, Any]) -> str:
-    """Return the model the codex_model option names; free text, so trim it, and empty means default."""
-    return current_model(str(options.get("codex_model") or "").strip() or "default")
+    """Return the inherited model, preserving custom names saved before the drop-down existed."""
+    pin = model_pin(options)
+    if pin:
+        return pin
+    choice = options.get("model_choice", "account_default")
+    if choice in {"account_default", "custom"}:
+        choice = str(options.get("codex_model") or "").strip() or "default"
+    return current_model(choice)
+
+
+def log_legacy_model_choice(options: dict[str, Any]) -> None:
+    """Explain the retained free-text setting once at worker startup."""
+    if (options.get("model_choice", "account_default") == "account_default"
+            and str(options.get("codex_model") or "").strip() not in {"", "default"}):
+        print("Your saved custom model is still configured. Choose a model in the Model drop-down "
+              "or clear Custom model to use your account default.", flush=True)
 
 
 def default_model(options: dict[str, Any]) -> str:
@@ -7245,14 +7260,8 @@ def chat_options() -> Response:
     """Return the models, defaults, and settings the web UI needs."""
     options = read_options()
     pin = model_pin(options)
-    try:
-        default = resolve_chat_settings(DEFAULT_CHAT_SETTINGS, options)
-        model_error = ""
-    except ValueError as exc:
-        # The add-on's codex_model option names another model than the pin; say so on the page.
-        default = {"model": pin, "reasoning_effort": "medium"}
-        model_error = str(exc)
-    default_id = pin or default_model(options)
+    default = resolve_chat_settings(DEFAULT_CHAT_SETTINGS, options)
+    default_id = default_model(options)
     # default_effort is the level a chat on that model runs at while it chose none (resolve_chat_settings).
     models = [{"id": model, "label": label, "efforts": efforts,
                "default_effort": default_effort(options, model, efforts)} for model, label, efforts in chat_models()]
@@ -7261,7 +7270,7 @@ def chat_options() -> Response:
     return jsonify({
         "ok": True,
         "model_pin": pin,
-        "model_error": model_error,
+        "model_error": "",
         "defaults": default,
         # The defaults' model by name, also when the add-on leaves the choice to the CLI.
         "default_model": default_id,
@@ -8506,7 +8515,9 @@ def main() -> None:
     protected policy (for example a full-access mode carried over from an
     older version, or approvals that would never ask).
     """
-    problem = protected_policy.policy_problem(read_options())
+    options = read_options()
+    log_legacy_model_choice(options)
+    problem = protected_policy.policy_problem(options)
     if problem:
         print(f"Codex CLI Worker will not start: {problem}", flush=True)
         sys.exit(1)

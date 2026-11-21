@@ -9,6 +9,7 @@
   model the account offers, then GPT-6.2 Sol, now first in the built-in list. A `model_reasoning_effort` other than
   the shipped `medium` still applies. The reset button in the model and reasoning panel now also sets the model back
   to the default, not only the level.
+- **Choose the default model on the Configuration page.** Pick a built-in model, follow your account default, or enter a custom name. Existing installations keep their saved model.
 - **Model and reasoning picker like the desktop app.** The model and reasoning controls below the message box are now
   one chip: the model name, then the reasoning level in grey. Select it, or press Ctrl+Shift+M, to open a panel with the
   reasoning level, the model name and a slider with one stop per level the model offers. Select the model name to pick
