@@ -153,6 +153,16 @@ def main():
 
         release = threading.Event()
 
+        def spreadsheet_answer(task_id):
+            """Save an invented workbook and a hidden file in the chat's files folder; answer with links (CX-FILE-LINK)."""
+            folder = server.chat_files_dir(task_id)
+            (folder / "2025").mkdir(parents=True, exist_ok=True)
+            (folder / "2025" / "park visits.xlsx").write_bytes(b"PK\x03\x04 invented workbook")
+            (folder / ".notes.txt").write_text("hidden")
+            return (f"**Done.** [Download the workbook]({folder}/2025/park%20visits.xlsx)\n\n"
+                    f"Not offered: [secrets](/config/secrets.yaml), [hidden]({folder}/.notes.txt), "
+                    f"[missing]({folder}/missing.xlsx) and [outside]({folder}/../task.json).")
+
         def finish(task_id, prompt, session_id=session_id, reply=None):
             """Simulate a run with recorded steps instead of launching Codex.
 
@@ -160,7 +170,10 @@ def main():
             live. A message that starts with "Take your time" keeps its chat
             working until POST fixture/release, so the browser can queue
             messages behind it. A message that starts with "Ask me" is answered
-            with a question and two choices. Every other chat completes at once.
+            with a question and two choices. A message that starts with "Make a
+            spreadsheet" saves an invented workbook in the chat's files folder and
+            links it, beside links the page must not offer. Every other chat
+            completes at once.
             """
             summary = "Preview response: " + (reply or prompt)
             live = task_id == "preview-00"
@@ -280,7 +293,9 @@ def main():
                         question="Remove the duplicate automation?",
                         choices=["Go ahead", "Don't change anything"])
                 else:
-                    server.update_task(task_id, status="completed", session_id=session_id, summary=summary,
+                    spreadsheet = (reply or prompt).startswith("Make a spreadsheet")
+                    server.update_task(task_id, status="completed", session_id=session_id,
+                                       summary=spreadsheet_answer(task_id) if spreadsheet else summary,
                                        details="", question="", completed_at=server.utc_now())
                     if (reply or prompt).startswith("Inspect with blocked browser requests"):
                         server.update_task(task_id, verification=[permission_check()])

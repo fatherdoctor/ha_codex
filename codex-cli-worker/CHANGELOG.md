@@ -3,6 +3,12 @@
 ## 0.4.0 (unreleased)
 
 ### What's new
+- **Files Codex makes can be downloaded.** When you ask for a file such as a spreadsheet, Codex saves it in the
+  chat's own files folder and links to it, and the chat page shows the link as a card with the file's name and size
+  that downloads it, on a phone and on a desktop. Before, the link showed as plain text and nothing downloaded. Only
+  files in that folder are offered. The folder is under the app's private `/data`, not `/config`, and is deleted with
+  the chat. A file link read in the ChatGPT app's remote connection still does not download: that app cannot reach
+  files on your system. See "Files Codex makes for you" in the documentation.
 - **Model and reasoning picker like the desktop app.** The model and reasoning controls below the message box are now
   one chip: the model name, then the reasoning level in grey. Select it, or press Ctrl+Shift+M, to open a panel with the
   reasoning level, the model name and a slider with one stop per level the model offers. Select the model name to pick

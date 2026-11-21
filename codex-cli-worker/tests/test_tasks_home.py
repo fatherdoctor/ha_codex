@@ -353,29 +353,31 @@ class NothingInTheConfigurationFolder(Sandbox):
 
 
 class BackupFolder(Sandbox):
-    """Codex still keeps its per-turn copies: the exchange's own backup folder is its one writable root in /data."""
+    """Codex still keeps its per-turn copies. Its writable roots in /data are the exchange's own backup folder and the
+    chat's files folder (CX-FILE-LINK), nothing else."""
 
     def test_the_backup_folder_is_offered_in_workspace_write(self):
         run_dir = self.data / "codex_tasks" / "chat" / "turns" / "t1"
         folder = server.codex_backup_dir(run_dir, {"codex_sandbox": "workspace-write"})
         self.assertEqual(folder, run_dir / "backups")
-        self.assertEqual(server.backup_writable_root(run_dir), [])  # Not made yet.
+        self.assertEqual(server.private_writable_root(folder), [])  # Not made yet.
         folder.mkdir(parents=True)
-        self.assertEqual(server.backup_writable_root(run_dir), [str(folder)])
+        self.assertEqual(server.private_writable_root(folder), [str(folder)])
 
     def test_nothing_else_in_data_becomes_writable(self):
         outside = self.data / "codex-home"
         (outside / "backups").mkdir(parents=True)
-        self.assertEqual(server.backup_writable_root(outside), [])
+        self.assertEqual(server.private_writable_root(outside / "backups"), [])
         run_dir = self.data / "codex_tasks" / "chat" / "turns" / "t1"
         run_dir.mkdir(parents=True)
         (run_dir / "backups").symlink_to(self.data)
-        self.assertEqual(server.backup_writable_root(run_dir), [], "a link out of the task folder is never a root")
+        self.assertEqual(server.private_writable_root(run_dir / "backups"), [],
+                         "a link out of the task folder is never a root")
 
     def test_the_turn_policy_adds_only_that_folder(self):
         source = (WORKER / "server.py").read_text(encoding="utf-8")
-        self.assertIn('policy["writableRoots"] = [*TASK_WRITABLE_ROOTS, *backup_writable_root(final_file.parent)]',
-                      source)
+        self.assertIn('policy["writableRoots"] = [*TASK_WRITABLE_ROOTS, *private_writable_root(final_file.parent / BACKUP_DIR),\n'
+                      '                                   *private_writable_root(chat_files_dir(task_id))]', source)
         self.assertEqual(server.TASK_WRITABLE_ROOTS, ("/config", "/share"))
 
 
