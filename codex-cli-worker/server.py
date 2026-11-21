@@ -164,7 +164,7 @@ HA_DOCS_GIT_TIMEOUT_SECONDS = 300
 HA_DOCS_GIT_STALL_SECONDS = 60
 
 DEFAULT_OPTIONS = {
-    "model_choice": "account_default",
+    "model_choice": "Account default",
     "codex_model": "default",
     "model_reasoning_effort": "medium",
     "reasoning_summary": "concise",
@@ -694,15 +694,15 @@ def configured_model(options: dict[str, Any]) -> str:
     pin = model_pin(options)
     if pin:
         return pin
-    choice = options.get("model_choice", "account_default")
-    if choice in {"account_default", "custom"}:
+    choice = options.get("model_choice", "Account default")
+    if choice in {"Account default", "custom"}:
         choice = str(options.get("codex_model") or "").strip() or "default"
     return current_model(choice)
 
 
 def log_legacy_model_choice(options: dict[str, Any]) -> None:
     """Explain the retained free-text setting once at worker startup."""
-    if (options.get("model_choice", "account_default") == "account_default"
+    if (options.get("model_choice", "Account default") == "Account default"
             and str(options.get("codex_model") or "").strip() not in {"", "default"}):
         print("Your saved custom model is still configured. Choose a model in the Model drop-down "
               "or clear Custom model to use your account default.", flush=True)

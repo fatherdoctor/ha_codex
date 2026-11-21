@@ -36,7 +36,7 @@ backup_exclude:
 discovery:
   - codex_cli
 options:
-  model_choice: account_default
+  model_choice: Account default
   codex_model: default
   model_reasoning_effort: medium
   reasoning_summary: concise
@@ -57,7 +57,7 @@ options:
   install_integration: true
   home_assistant_mcp: true
 schema:
-  model_choice: list(account_default|gpt-6.2-sol|gpt-6-astra|gpt-6.1-sol|gpt-6.1-terra|gpt-6-sol|gpt-6-luna|gpt-5.6-sol|gpt-5.6-terra|gpt-5.6-luna|custom)
+  model_choice: list(Account default|gpt-6.2-sol|gpt-6-astra|gpt-6.1-sol|gpt-6.1-terra|gpt-6-sol|gpt-6-luna|gpt-5.6-sol|gpt-5.6-terra|gpt-5.6-luna|custom)
   codex_model: str?
   model_pin: str?
   model_reasoning_effort: str

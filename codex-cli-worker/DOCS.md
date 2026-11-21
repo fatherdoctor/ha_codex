@@ -265,9 +265,9 @@ API: `GET /status` has `integration` with `state` (`ok`, `starting`, `not_instal
 
 ## Model
 
-On the app's **Configuration** page, choose **Model** for new chats. **Account default** (`account_default`) lets Codex choose the model for your signed-in account. Select a listed model to use it by default, or select `custom` and enter the exact name in **Custom model (when Model is Custom)**. The list is refreshed with releases. Use Custom for a newly available model between releases. Availability depends on your account. The bundled Codex CLI is **0.166.0**, pinned by version and checksum.
+On the app's **Configuration** page, choose **Model** for new chats. **Account default** lets Codex choose the model for your signed-in account. Select a listed model to use it by default, or select `custom` and enter the exact name in **Custom model (when Model is Custom)**. The list is refreshed with releases. Use Custom for a newly available model between releases. Availability depends on your account. The bundled Codex CLI is **0.166.0**, pinned by version and checksum.
 
-After an upgrade, the app keeps your saved `codex_model`, even if it is missing from the list. While **Model** is `account_default`, that saved name still applies and the startup log explains how to switch. To follow your account again, clear **Custom model** and select `account_default`.
+After an upgrade, the app keeps your saved `codex_model`, even if it is missing from the list. While **Model** is **Account default**, that saved name still applies and the startup log explains how to switch. To follow your account again, clear **Custom model** and select **Account default**.
 
 **Model pin** overrides the configuration choice and limits every run to one model. A chat that explicitly requests a different model or resumes a turn on one gets an error before Codex runs. Clear the pin or set it to `none` to use **Model** again. Versions before 0.4 shipped `gpt-6.1-sol` as the default pin. The first start of 0.4 clears that value once and keeps any value you set afterward.
 
