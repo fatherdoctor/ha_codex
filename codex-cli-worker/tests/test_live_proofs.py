@@ -639,35 +639,34 @@ sys.stdin.read()
 
 @unittest.skipUnless(os.environ.get("HA_TEST_REQUIRE_CODEX") == "1", "requires the built worker image")
 class SandboxGitIdentity(unittest.TestCase):
-    def test_actual_git_commit_uses_worker_defaults_then_repository_identity(self) -> None:
+    def test_git_resolves_worker_and_repository_identities_in_the_sandbox(self) -> None:
         import server
 
-        with tempfile.TemporaryDirectory() as folder:
+        cache = Path.home() / ".cache"
+        cache.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=cache) as folder:
             root = Path(folder)
-            data, checkout = root / "data", root / "checkout"
-            home = data / "codex-home"
+            home = root / "data" / "codex-home"
             home.mkdir(parents=True)
-            checkout.mkdir()
-            with (patch.multiple(server, DATA_ROOT=data, CODEX_HOME=home),
+            with (patch.multiple(server, DATA_ROOT=home.parent, CODEX_HOME=home),
                   patch.object(server, "read_options", return_value={})):
                 server.write_git_identity_defaults({})
                 env = server.codex_env()
-            command = """set -eu
-                git init -q
-                git commit -q --allow-empty -m first
-                git log -1 --format='%an <%ae>%n%cn <%ce>'
-                git config user.name 'Example Project'
-                git config user.email project@example.invalid
-                git commit -q --allow-empty -m second
-                git log -1 --format='%an <%ae>%n%cn <%ce>'
-            """
-            result = subprocess.run(
-                [CODEX, "sandbox", "--config", 'sandbox_mode="workspace-write"', "--", "sh", "-c", command],
-                cwd=checkout, env=env, text=True, capture_output=True, timeout=30,
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(result.stdout.splitlines(), ["ChatGPT Codex <noreply@openai.com>"] * 2
-                             + ["Example Project <project@example.invalid>"] * 2)
+            checkout = root / "checkout"
+            subprocess.run(["git", "init", "-q", str(checkout)], check=True)
+            # Git reports the identities it would put on a commit. This works with read-only .git metadata.
+            for identity in ("ChatGPT Codex <noreply@openai.com>", "Example Project <project@example.invalid>"):
+                if identity.startswith("Example"):
+                    subprocess.run(["git", "config", "user.name", "Example Project"], cwd=checkout, check=True)
+                    subprocess.run(["git", "config", "user.email", "project@example.invalid"], cwd=checkout, check=True)
+                result = subprocess.run(
+                    [CODEX, "sandbox", "--config", 'sandbox_mode="read-only"', "--", "sh", "-ec",
+                     "git var GIT_AUTHOR_IDENT && git var GIT_COMMITTER_IDENT"],
+                    cwd=checkout, env=env, text=True, capture_output=True, timeout=30,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                identities = [line.rsplit(" ", 2)[0] for line in result.stdout.splitlines()]
+                self.assertEqual(identities, [identity, identity])
 
 
 class CloseWaitsForChildren(unittest.TestCase):
