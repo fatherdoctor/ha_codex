@@ -90,6 +90,31 @@ class FixedTextTests(unittest.TestCase):
         self.assertIn("If exchange_info is not available, make no backup copy, and say in your answer that this "
                       "change has no backup.", text)
 
+    def test_a_plain_message_needs_no_tool_call(self):
+        """A greeting or a one-number reply is answered directly: no forced exchange_info call, no file check.
+
+        Codex loads the owner's AGENTS.md through the CODEX_HOME link when a chat starts, so the rules never send
+        the model to the shell to look for it.
+        """
+        text = server.PAGE_INSTRUCTIONS
+        self.assertNotIn("At the start of each message", text)
+        self.assertNotIn("check for the file yourself", text)
+        self.assertIn("needs no tool call and no command: answer it directly", text)
+        self.assertIn("Codex has already loaded that file into this chat when the chat started, so never run a "
+                      "command to look for it or to read it.", text)
+
+    def test_any_command_file_change_or_tool_call_still_gets_this_message_details_first(self):
+        """A message that acts (a Home Assistant call, a file edit, a command) still calls exchange_info first.
+
+        Only the two status tools are exempt; an uploaded document is named only by exchange_info, so a message
+        that mentions one calls it too.
+        """
+        text = server.PAGE_INSTRUCTIONS
+        self.assertIn("before your first command, file change or tool call in a message (ask_owner and "
+                      "report_failure excepted), and when the user says they attached or uploaded a file, call the "
+                      "home_assistant_data exchange_info tool once.", text)
+        self.assertIn("Follow its backups text before you change, move, or delete a file under /config.", text)
+
     def test_the_tool_needs_no_approval_and_the_app_thread_rules_point_to_it(self):
         """exchange_info is approved like history; the remote-control rules tell an app thread to call it on the page."""
         args = server.data_mcp_args()
@@ -475,6 +500,23 @@ class StatusRunTests(unittest.TestCase):
         self.assertEqual((task["question"], task["choices"], task["details"], task["error"]), ("", [], "", ""))
         turn_start = next(message for message in self.sent if message.get("method") == "turn/start")
         self.assertNotIn("outputSchema", turn_start["params"])
+
+    def test_a_plain_message_completes_with_zero_tool_calls_and_its_details_stay_ready(self):
+        """A one-number answer with no tool call in the stream completes; nothing in the worker waits for a call.
+
+        exchange_info still holds this message's details, so a message that does call a tool gets them, and the
+        turn input stays the user's words only.
+        """
+        recorded = []
+        keep = server.ha_data.set_exchange_info
+        self.stack.enter_context(patch.object(server.ha_data, "set_exchange_info",
+                                              side_effect=lambda *a: (recorded.append(a), keep(*a))))
+        task = self.run_exchange([], "4")
+        self.assertEqual((task["status"], task["summary"], task["error"]), ("completed", "4", ""))
+        self.assertEqual([item[0] for item in recorded], ["task"])
+        self.assertIn("backups", recorded[0][1])
+        turn_start = next(message for message in self.sent if message.get("method") == "turn/start")
+        self.assertEqual(turn_start["params"]["input"][0], {"type": "text", "text": "Tidy up my automations"})
 
     def test_needs_input_comes_from_ask_owner_with_its_choices(self):
         """ask_owner sets the question and the choices; the answer text stays the summary."""
