@@ -2793,3 +2793,19 @@ a.ha-nav-row:focus-visible {
 .activity-text:empty {
   display: none;
 }
+/* CX-04-PHONE-LIST: at phone width the rows are 48 px (--fb2-row-height) and the menu button 44 px, and the selected chat shows its menu button in place of its date. */
+@media (max-width: 700px) {
+  .chats-card .chat-row .row-menu {
+    min-width: 44px;
+    min-height: 44px;
+    right: 0;
+    padding: 0;
+  }
+  .chats-card .chat-row.current .row-menu {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .chats-card .chat-row.current:has(.row-menu) .row-meta > span:last-child {
+    visibility: hidden;
+  }
+}
