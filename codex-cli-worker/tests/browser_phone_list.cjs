@@ -20,6 +20,8 @@ const assert = require('node:assert/strict');
     assert.equal(await open(), true, 'a tap on a chat keeps the side bar open');
     // The clicked row holds the focus, which shows its date; move the focus away so the rule alone decides.
     await phone.evaluate(() => document.activeElement.blur());
+    // A hovered row hides its date too, so move the pointer off it (onto the scrim).
+    await phone.mouse.move(380, 600);
     const state = await phone.evaluate(() => {
       const visible = el => getComputedStyle(el).visibility !== 'hidden';
       const rows = [...document.querySelectorAll('.chats-card .chat-row')];
