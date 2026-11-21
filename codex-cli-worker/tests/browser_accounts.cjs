@@ -2,6 +2,7 @@
 // Run with tests/web_fixture.py serving the page. Every name, code and session here is synthetic.
 const {chromium} = require('playwright');
 const assert = require('node:assert/strict');
+const {unpauseRemote} = require('./remote_unpaused.cjs');
 
 const base = 'http://127.0.0.1:9137/preview/';
 const signedIn = {status: 'idle', pending: false, codex_login: {status_ok: true, message: 'Signed in to ChatGPT.'}};
@@ -56,7 +57,7 @@ function hostPage(sessionReply, page = base) {
         rc = {...remote, enabled: false, state: 'off'};
         return route.fulfill({json: {ok: true, remote_control: rc}});
       });
-      await page.goto(base);
+      await unpauseRemote(page); await page.goto(base);
       await openSettings(page);
       await page.waitForFunction(() => document.querySelector('#accounts-section > h3 .settings-status').textContent.includes('app on'));
       assert.equal(await accountsStatus(page), 'ChatGPT signed in · GitHub connected · app on');
@@ -131,7 +132,7 @@ function hostPage(sessionReply, page = base) {
       });
       await page.route(`http://127.0.0.1:9137/${hostPath}`, route => route.fulfill({contentType: 'text/html', body: hostPage(
         "return request.type === 'supervisor/ingress/session' || request.type === 'supervisor/api' ? {session: 'synthetic-session'} : null;")}));
-      await page.goto(`http://127.0.0.1:9137/${hostPath}`);
+      await unpauseRemote(page); await page.goto(`http://127.0.0.1:9137/${hostPath}`);
       const frame = await (await page.waitForSelector('iframe')).contentFrame();
       await frame.waitForFunction(() => typeof api === 'function');
       armed = true;
@@ -153,7 +154,7 @@ function hostPage(sessionReply, page = base) {
       await page.route('**/preview/browser-permissions', route => route.fulfill({status: 401, contentType: 'text/plain', body: '401: Unauthorized'}));
       await page.route('http://127.0.0.1:9137/app/local_codex_cli', route => route.fulfill({contentType: 'text/html', body: hostPage(
         "throw new Error('Unauthorized');")}));
-      await page.goto('http://127.0.0.1:9137/app/local_codex_cli');
+      await unpauseRemote(page); await page.goto('http://127.0.0.1:9137/app/local_codex_cli');
       const frame = await (await page.waitForSelector('iframe')).contentFrame();
       await frame.waitForFunction(() => typeof api === 'function');
       const message = await frame.evaluate(() => api('browser-permissions').then(() => 'no error', e => e.message));
@@ -169,7 +170,7 @@ function hostPage(sessionReply, page = base) {
     {
       const page = await browser.newPage();
       await page.route('**/preview/browser-permissions', route => route.fulfill({status: 401, contentType: 'text/plain', body: '401: Unauthorized'}));
-      await page.goto(base);
+      await unpauseRemote(page); await page.goto(base);
       await page.waitForFunction(() => typeof api === 'function');
       const message = await page.evaluate(() => api('browser-permissions').then(() => 'no error', e => e.message));
       assert.equal(message, 'Your Home Assistant session expired. Reload the page to continue.');
@@ -191,7 +192,7 @@ function hostPage(sessionReply, page = base) {
       // The same server under its other local name: the parent and the page are on different origins.
       await page.route('http://127.0.0.1:9137/ingress-host', route => route.fulfill({contentType: 'text/html', body: hostPage(
         "return {session: 'synthetic-session'};", 'http://localhost:9137/preview/')}));
-      await page.goto('http://127.0.0.1:9137/ingress-host');
+      await unpauseRemote(page); await page.goto('http://127.0.0.1:9137/ingress-host');
       const frame = await (await page.waitForSelector('iframe')).contentFrame();
       await frame.waitForFunction(() => typeof api === 'function');
       const message = await frame.evaluate(() => api('browser-permissions').then(() => 'no error', e => e.message));

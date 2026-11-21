@@ -2,6 +2,7 @@
 // text, after the chevron, on a desktop and a phone. Run with tests/web_fixture.py serving the page.
 const {chromium} = require('playwright');
 const assert = require('node:assert/strict');
+const {unpauseRemote} = require('./remote_unpaused.cjs');
 
 (async () => {
   const browser = await chromium.launch({headless: true});
@@ -11,7 +12,7 @@ const assert = require('node:assert/strict');
       const context = await browser.newContext({viewport});
       const page = await context.newPage();
       const errors = []; page.on('pageerror', e => errors.push(e.message));
-      await page.goto('http://127.0.0.1:9137/preview/');
+      await unpauseRemote(page); await page.goto('http://127.0.0.1:9137/preview/');
       await page.locator('.chat-row').first().waitFor({state: 'attached'});
       const conversations = page.getByRole('button', {name: 'Open conversations', exact: true});
       if (await conversations.isVisible()) await conversations.click();

@@ -481,7 +481,7 @@ The app does not scan `/config` for planted commands. From 0.3.6 there is no com
 
 ## Ways in
 
-Codex can be reached three ways: the chat page, the ChatGPT app paired through remote control (paused in this
+Codex can be reached three ways: the chat page, the ChatGPT app paired through remote control (hidden in this
 version, see [Remote control from the ChatGPT app](#remote-control-from-the-chatgpt-app)), and the
 `codex_cli.start_task` action. Each way in gets its own set of Home Assistant tools. The table lists them.
 
@@ -517,12 +517,11 @@ that adds, removes or moves a tool updates this table and the test in the same p
 
 ## Remote control from the ChatGPT app
 
-**Paused in this version.** Remote Control is turned off until a problem is fixed: the ChatGPT app could read a
-chat but not reply while this app kept that chat loaded between messages. **Settings** shows "Remote Control is paused while we fix it. It will
-come back in a later version." in the **ChatGPT app pairing** part and the **Remote connection** window, with no
-buttons, and the side bar's **Remote** row says **Paused**. The remote-control process does not start, the page
-does not poll its state, and `GET /remote-control` answers `{"paused": true}`; every change (`start`, `stop`,
-`pair`, `name`) is refused. The **Remote control machine name** option stays in the schema and is ignored, and the
+**Hidden in this version.** Remote Control is turned off and hidden until a problem is fixed: the ChatGPT app could
+read a chat but not reply while this app kept that chat loaded between messages. The page has no **Remote** row in
+the side bar, no **ChatGPT app pairing** part in **Settings**, no **Remote connection** window and no `connection`
+slash command, and it sends no request for the remote state. The remote-control process does not start;
+`GET /remote-control` answers `{"paused": true}` and every change (`start`, `stop`, `pair`, `name`) is refused. The **Remote control machine name** option stays in the schema and is ignored, and the
 saved on or off choice is not changed: if it was on, the app logs "Remote Control is paused in this version; your
 setting is kept for when it returns." at start. The rest of this section describes Remote Control as it works when
 it returns.
@@ -638,7 +637,7 @@ After you choose **Sign in**, the app posts a Home Assistant persistent notifica
 
 While the app is not signed in, a banner above the chat offers **Sign in**. During a sign-in, the banner and **Settings** show the link first, as a button, then the one-time code in large letters, and a QR code of the sign-in page served by the app itself. While a sign-in waits, **Settings** hides its other text and buttons, and shows only this card and **Cancel**. On a phone-sized window the QR code starts folded under **Show QR code**, because a phone cannot scan its own screen; a tall banner scrolls inside itself. The code stays on screen, unchanged, until the sign-in completes or you press **Cancel**; pressing **Sign in** again keeps the running sign-in and its code. Under the code, a countdown shows how long it still works (Codex 0.166.0 gives codes 15 minutes); each status reply from the app sets it again, so it stays right after the phone sleeps. When it runs out, the page says so and offers **Get a new code**. If a sign-in stops without signing in, **Settings** says why when it can, and **Sign in** becomes **Get a new code**. The GitHub code in **Settings > Accounts and connections > GitHub** has the same countdown and button.
 
-Every section of **Settings** starts collapsed, and one top-level section is open at a time: opening one closes the others. The parts inside a section, such as **GitHub**, keep their own state. The window keeps one size; an open section scrolls inside it. Its header shows a one-line status, such as **Signed in**, **Connected as owner, 1 repository** or **Keeps 25**. A section that needs attention shows its status in red: a sign-in that waits or failed, a schedule that waits for your approval, or schedules paused because the Home Assistant time zone is unknown. Tap a header to open the section. When a saved sign-in expires or is revoked, the banner returns and the integration raises a Home Assistant repair; the integration's **Signed in** binary sensor turns off. **Accounts and connections** holds the three sign-ins and pairings: **ChatGPT account**, **GitHub** and **ChatGPT app pairing**, each under its own collapsed header. Its header joins their states, for example "ChatGPT signed in · GitHub connected · app off"; when one of them needs you, the header names only that one. The app pairing part shows the remote connection state, **Get a pairing code** while remote control is on, **Manage remote connection** and **Turn off**; while Remote Control is paused it shows only the pause line. Turn off stops the connection; it does not remove the pairing in the ChatGPT app. A pairing code shows no countdown, because the worker does not know how long Codex keeps it.
+Every section of **Settings** starts collapsed, and one top-level section is open at a time: opening one closes the others. The parts inside a section, such as **GitHub**, keep their own state. The window keeps one size; an open section scrolls inside it. Its header shows a one-line status, such as **Signed in**, **Connected as owner, 1 repository** or **Keeps 25**. A section that needs attention shows its status in red: a sign-in that waits or failed, a schedule that waits for your approval, or schedules paused because the Home Assistant time zone is unknown. Tap a header to open the section. When a saved sign-in expires or is revoked, the banner returns and the integration raises a Home Assistant repair; the integration's **Signed in** binary sensor turns off. **Accounts and connections** holds the three sign-ins and pairings: **ChatGPT account**, **GitHub** and **ChatGPT app pairing**, each under its own collapsed header (in this version **ChatGPT app pairing** is hidden with Remote Control). Its header joins their states, for example "ChatGPT signed in · GitHub connected · app off"; when one of them needs you, the header names only that one. The app pairing part shows the remote connection state, **Get a pairing code** while remote control is on, **Manage remote connection** and **Turn off**. Turn off stops the connection; it does not remove the pairing in the ChatGPT app. A pairing code shows no countdown, because the worker does not know how long Codex keeps it.
 
 The page reaches the app through a Home Assistant ingress session, which the Home Assistant tab renews. If a request finds that session expired (for example after a phone slept), the page asks Home Assistant for a new session once and sends the request again. If that fails, a banner says the session expired and offers **Reload**; the page never shows the bare HTTP error.
 

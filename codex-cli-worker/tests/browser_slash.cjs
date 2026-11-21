@@ -74,7 +74,6 @@ async function testSlash(browser, output, errors) {
       "/reasoning",
       "/usage",
       "/size",
-      "/connection",
       "/settings",
     ]);
     // No fast mode command until it works (returns in 0.6, CX-04-FB-MODEL).
@@ -98,12 +97,9 @@ async function testSlash(browser, output, errors) {
     assert.deepEqual(await listed(page), ["/size"]);
     await typeMessage(page, "/stat");
     assert.deepEqual(await listed(page), ["/usage"]);
-    // /connection opens the Remote connection dialog.
+    // No /connection while Remote Control is hidden in this version (browser_remote_paused.cjs).
     await typeMessage(page, "/conn");
-    assert.deepEqual(await listed(page), ["/connection"]);
-    await page.locator("#message").press("Enter");
-    await page.locator("#connection-dialog[open]").waitFor();
-    await page.keyboard.press("Escape");
+    assert.equal(await page.locator("#slash-popover").isHidden(), true, "typing /conn offers no command");
     // No match, or a space after the word, closes the list.
     await typeMessage(page, "/zz");
     assert.equal(await page.locator("#slash-popover").isHidden(), true);
@@ -236,7 +232,6 @@ async function testSlash(browser, output, errors) {
       "/rename",
       "/usage",
       "/size",
-      "/connection",
       "/settings",
       "/pin",
       "/share",

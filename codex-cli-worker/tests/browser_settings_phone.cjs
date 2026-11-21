@@ -167,10 +167,13 @@ async function openThemedSections(target) {
       await page.goto('http://127.0.0.1:9137/preview/');
       await openSettings();
       // Each section fills its header status when its data arrives.
-      await page.waitForFunction(() => [...document.querySelectorAll('#settings .settings-status')].every(s => s.textContent !== ''));
+      // Remote Control is hidden in this version (browser_remote_paused.cjs): its part has no status and is left out.
+      await page.waitForFunction(() => [...document.querySelectorAll('#settings .settings-status')]
+        .filter(s => !s.closest('[data-remote]')).every(s => s.textContent !== ''));
 
       // Every section starts collapsed, with its title and status in the header.
-      const headers = await page.evaluate(() => [...document.querySelectorAll('#settings .settings-toggle')].map(t => ({
+      const headers = await page.evaluate(() => [...document.querySelectorAll('#settings .settings-toggle')]
+        .filter(t => !t.closest('[data-remote]')).map(t => ({
         title: t.querySelector('.settings-title').textContent, status: t.querySelector('.settings-status').textContent,
         open: t.getAttribute('aria-expanded'), attention: t.closest('section').classList.contains('needs-attention')})));
       assert.ok(headers.every(h => h.open === 'false'), 'every section starts collapsed');
@@ -180,7 +183,6 @@ async function openThemedSections(target) {
         {title: 'Accounts and connections', status: 'ChatGPT signing in: enter the code', attention: true},
         {title: 'ChatGPT account', status: 'Signing in: enter the code', attention: true},
         {title: 'GitHub', status: 'Connected as synthetic-owner, 1 repository', attention: false},
-        {title: 'ChatGPT app pairing', status: 'Paused', attention: false},  // Remote Control is paused in this version
         {title: 'Full access', status: 'Off', attention: false},
         {title: 'Text size', status: 'Normal', attention: false},
         {title: 'Scheduled runs', status: 'Paused: time zone unavailable', attention: true},
@@ -194,13 +196,12 @@ async function openThemedSections(target) {
       const collapsedSize = await windowSize(page);
       await checkLayout(page);
 
-      // Open Accounts and connections, then its three parts: the code shows its countdown, and the button rows
-      // fit the phone. The app pairing part has its own collapsed header, like the other two.
+      // Open Accounts and connections, then its two visible parts: the code shows its countdown, and the button rows
+      // fit the phone. The app pairing part is hidden with Remote Control in this version.
       await page.locator('#accounts-section > h3 .settings-toggle').click();
       assert.equal(await page.getByRole('button', {name: 'Manage remote connection', exact: true}).isVisible(), false);
-      for (const id of ['chatgpt-section', 'github-section', 'app-pairing-section'])
+      for (const id of ['chatgpt-section', 'github-section'])
         await page.locator(`#${id} .settings-toggle`).click();
-      // Remote Control is paused in this version: the pairing part shows one line and no buttons (browser_remote_paused.cjs).
       assert.equal(await page.getByRole('button', {name: 'Manage remote connection', exact: true}).isVisible(), false);
       // The window keeps its size and scrolls inside.
       assert.deepEqual(await windowSize(page), collapsedSize);
@@ -244,11 +245,13 @@ async function openThemedSections(target) {
       await page.route('**/github', route => route.fulfill({json: {ok: true, github}}));
       await page.goto('http://127.0.0.1:9137/preview/');
       await page.getByRole('button', {name: 'Open settings', exact: true}).click();
-      await page.waitForFunction(() => [...document.querySelectorAll('#settings .settings-status')].every(s => s.textContent !== ''));
+      // Remote Control is hidden in this version (browser_remote_paused.cjs): its part has no status and is left out.
+      await page.waitForFunction(() => [...document.querySelectorAll('#settings .settings-status')]
+        .filter(s => !s.closest('[data-remote]')).every(s => s.textContent !== ''));
       const size = await windowSize(page);
       await checkLayout(page);
       await page.screenshot({path: path.join(SHOTS, `settings-collapsed-${colorScheme}-1280.png`)});
-      for (const id of ['accounts-section', 'app-pairing-section', 'workspace-section']) {
+      for (const id of ['accounts-section', 'github-section', 'workspace-section']) {
         await page.locator(`#${id} > :is(h3, h4) .settings-toggle`).click();
         assert.deepEqual(await windowSize(page), size, `the window keeps its size after ${id} opens`);
       }

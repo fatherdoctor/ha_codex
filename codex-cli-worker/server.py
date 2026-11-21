@@ -6928,10 +6928,20 @@ SCHEDULING_MARKUP = re.compile(r"[ \t]*<!-- scheduling:begin -->.*?<!-- scheduli
 
 def render_index() -> str:
     """Return the chat page; while scheduled runs are off, without the markup that belongs to them."""
-    page = (WEB_ROOT / "index.html").read_text(encoding="utf-8")
+    page = mark_remote_paused((WEB_ROOT / "index.html").read_text(encoding="utf-8"))
     if scheduling.SCHEDULED_RUNS:
         return page.replace("<!-- scheduling:begin -->", "").replace("<!-- scheduling:end -->", "")
     return SCHEDULING_MARKUP.sub("", page)
+
+
+def mark_remote_paused(page: str) -> str:
+    """While Remote Control is paused, mark the page root so the page hides every part of it and never asks for it.
+
+    The page's scripts look up the remote elements at load, so they stay in the markup and the mark hides them.
+    """
+    if not remote_control.PAUSED:
+        return page
+    return page.replace('<html lang="en">', '<html lang="en" data-remote-paused>', 1)
 
 
 @app.get("/")

@@ -145,8 +145,6 @@ $("connection-content").append(retryConnection);
 let connectionTimer;
 let lastRemoteState = null;
 function connectionLabel(rc) {
-  // Paused is this version's choice, not a fault: a gray dot, no warning.
-  if (rc.paused) return {state: "off", text: "Paused"};
   if (!rc.available) return {state: "error", text: rc.blocked_reason || "Unavailable"};
   if (!rc.enabled) return {state: "off", text: "Off"};
   if (rc.state === "starting") return {state: "starting", text: "Starting"};
@@ -213,16 +211,16 @@ function renderStudioRemote(rc) {
 document.addEventListener("remote-view", event => renderStudioRemote(event.detail));
 async function pollConnection() {
   clearTimeout(connectionTimer);
+  if (REMOTE_PAUSED) return;
   try { await loadRemoteControl(); $("connection-result").textContent = ""; }
   catch (error) {
     $("connection-result").textContent = error.message;
     setFootRow("remote-status-row", "error", "Unavailable");
   }
-  // A paused version stays paused until the app is updated, so the page stops asking.
-  if (lastRemoteState?.paused) return;
   connectionTimer = setTimeout(pollConnection, $("connection-dialog").open ? 5000 : 15000);
 }
 function openConnection() {
+  if (REMOTE_PAUSED) return;
   if ($("settings").open) $("settings").close();
   if (!$("connection-dialog").open) $("connection-dialog").showModal();
   pollConnection();

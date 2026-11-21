@@ -98,14 +98,13 @@
   copy at `/data/agents_before_move.md`. If both places hold a file, nothing moves and the app logs a line.
 
 ### Changed
-- **Remote Control is paused.** In this version the ChatGPT app could read a chat but not reply while the app kept
-  that chat loaded between messages, so Remote Control is turned off until that is fixed. **Settings** (the **ChatGPT app pairing** part and
-  the **Remote connection** window) shows one line, "Remote Control is paused while we fix it. It will come back in
-  a later version.", with no buttons, and the side bar's **Remote** row says **Paused**. The remote-control process
-  does not start, and the page stops asking for its state. Your settings are kept: the **Remote control machine
-  name** option stays on the Configuration tab and is ignored, and if you had Remote Control on, the app logs one
-  line at start and keeps that choice for when it returns. The name field from "Name your remote connection in its
-  window" above is part of what is paused.
+- **Remote Control is hidden in this version.** The ChatGPT app could read a chat but not reply while the app kept
+  that chat loaded between messages, so Remote Control is turned off and hidden until that is fixed. The side bar's
+  **Remote** row, the **ChatGPT app pairing** part of **Settings**, the **Remote connection** window and the
+  `connection` slash command are gone, and the page does not ask for the remote state. The remote-control process
+  does not start. Your settings are kept: the **Remote control machine name** option stays on the Configuration tab
+  and is ignored, and if you had Remote Control on, the app logs one line at start and keeps that choice for when it
+  returns. The name field from "Name your remote connection in its window" above is part of what is hidden.
 - **The phone chat list is easier to use.** A tap on a chat keeps the side bar open; a tap on the page to its right
   closes it. The selected chat shows its three-dot menu button where its date was, and the button is 44 pixels or
   larger. A long press still opens the menu. A desktop window does not change.

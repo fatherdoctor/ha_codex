@@ -83,6 +83,10 @@ textarea:focus-visible,
 [hidden] {
   display: none !important;
 }
+/* Remote Control is paused in this version: the worker marks the page root and every part of it is hidden. */
+[data-remote-paused] [data-remote] {
+  display: none !important;
+}
 .icon {
   background: transparent;
   color: var(--muted);

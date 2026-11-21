@@ -61,7 +61,7 @@ configuration:
     description: An optional token for Codex to call Home Assistant, with the rights of the token's user. Codex keeps its read and call tools without it.
   remote_control_name:
     name: Remote control machine name
-    description: The name this Home Assistant shows in the ChatGPT app. Remote Control is paused in this version; the name is kept for when it returns.
+    description: The name this Home Assistant shows in the ChatGPT app. Remote Control is off and hidden in this version; the name is kept for when it returns.
   interactions_to_keep:
     name: Interactions to keep
     description: How many recent interactions the app keeps for downloaded diagnostics, from 10 to 100. Leave it empty to keep your current number.

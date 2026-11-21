@@ -145,17 +145,26 @@ class PausedRouteTests(unittest.TestCase):
 
 
 class PausedPageTests(unittest.TestCase):
-    """The page stops asking once it reads the pause, and draws it as Paused, not as a fault."""
+    """The worker marks the page while paused; every remote part carries the mark the stylesheet hides.
 
-    def test_chat_page_schedules_no_new_read_when_paused(self) -> None:
-        chat = (ROOT / "web/assets/chat.js").read_text(encoding="utf-8")
-        self.assertIn('if ($("settings").open && !rc.paused)', chat)
-        self.assertIn("if (rc.paused) return renderRemoteControlPaused(rc);", chat)
+    browser_remote_paused.cjs checks in a browser that the parts are hidden and that no request goes out.
+    """
 
-    def test_studio_poll_stops_and_label_is_paused(self) -> None:
-        studio = (ROOT / "web/assets/studio.js").read_text(encoding="utf-8")
-        self.assertIn("if (lastRemoteState?.paused) return;", studio)
-        self.assertIn('if (rc.paused) return {state: "off", text: "Paused"};', studio)
+    def test_page_is_marked_only_while_paused(self) -> None:
+        with patch.object(rc, "PAUSED", True):
+            self.assertIn('<html lang="en" data-remote-paused>', server.render_index())
+        with patch.object(rc, "PAUSED", False):
+            self.assertNotIn("data-remote-paused", server.render_index())
+
+    def test_every_remote_part_is_marked(self) -> None:
+        page = server.render_index()
+        for element in ('id="remote-status-row" data-remote', 'id="app-pairing-section" data-remote',
+                        'id="connection-dialog" data-remote', 'id="remote-control-section" data-remote',
+                        '<span data-remote>, the remote control name</span>'):
+            with self.subTest(element=element):
+                self.assertIn(element, page)
+        css = (ROOT / "web/assets/chat.css").read_text(encoding="utf-8")
+        self.assertIn("[data-remote-paused] [data-remote] {\n  display: none !important;", css)
 
 
 if __name__ == "__main__":
