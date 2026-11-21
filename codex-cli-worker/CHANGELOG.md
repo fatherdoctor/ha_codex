@@ -104,6 +104,10 @@
   copy at `/data/agents_before_move.md`. If both places hold a file, nothing moves and the app logs a line.
 
 ### Changed
+- **Earlier answers open their steps.** Every answer's **Worked for** line now opens the steps of that exchange, not
+  only the latest answer's. The line starts closed; its steps load from the worker the first time it opens, and then
+  the answer's checks follow. The worker already saved each exchange's steps; `GET /tasks/<task_id>/activity` takes
+  `turn=<turn_id>` to read an earlier one.
 - **The phone chat list is easier to use.** A tap on a chat keeps the side bar open; a tap on the page to its right
   closes it. The selected chat shows its three-dot menu button where its date was, and the button is 44 pixels or
   larger. A long press still opens the menu. A desktop window does not change.

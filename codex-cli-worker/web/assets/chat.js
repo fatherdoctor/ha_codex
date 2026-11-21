@@ -41,6 +41,8 @@ const state = {
   retriedChecks: new Set(),
   // Earlier answers whose "Worked for" line the owner opened. The latest answer keeps this in state.activity.
   workedOpen: new Set(),
+  // The saved steps of earlier answers, by "<chat id>/<turn id>", loaded the first time their line opens.
+  earlierSteps: new Map(),
   // The checks block of the latest answer. renderActivity puts it inside that answer's "Worked for" line.
   latestChecks: null,
 };
@@ -1389,32 +1391,89 @@ function workedLabel(turn) {
 function badCheckCount(turn) {
   return (turn.verification || []).filter(check => BAD_CHECK_STATUSES.has(check.status)).length;
 }
+// Only an exchange with a turn id of this form can have saved steps (see TURN_ID_RE in server.py).
+const SAVED_TURN_ID = /^[0-9a-f]{32}$/;
+/** Return the cache entry for an earlier answer's saved steps, made empty the first time. */
+function earlierSteps(taskId, turnId) {
+  const key = `${taskId}/${turnId}`;
+  let entry = state.earlierSteps.get(key);
+  if (!entry) {
+    entry = {steps: null, loading: false, failed: false, open: new Set(), redraws: new Set()};
+    state.earlierSteps.set(key, entry);
+  }
+  return entry;
+}
 /**
- * Build the "Worked for" line of an earlier answer. Only the latest exchange
- * has its steps on the page, so here the line opens the checks block alone.
- * With no checks it is plain text, and with no times either it is left out.
- * The line opens by itself when the checks block wants attention (a browser
- * permission review or a retry result).
+ * Fetch an earlier answer's saved steps once, then redraw its list. A chat
+ * redrawn while the fetch runs adds its own list to the ones redrawn after it.
+ * A failed fetch leaves the steps unknown, so the next opening tries again.
  */
-function renderWorked(turn, checks) {
+async function loadEarlierSteps(taskId, turnId, entry, redraw) {
+  if (entry.steps) return;
+  entry.redraws.add(redraw);
+  if (entry.loading) return;
+  entry.loading = true;
+  try {
+    const data = await api(
+      `tasks/${encodeURIComponent(taskId)}/activity?turn=${encodeURIComponent(turnId)}`,
+    );
+    // As in the latest answer's list, text messages are not steps; the answer itself shows below.
+    entry.steps = data.steps
+      .filter(step => step.kind !== "message")
+      .sort((a, b) => a.index - b.index);
+    entry.failed = false;
+  } catch (error) {
+    entry.failed = true;
+  } finally {
+    entry.loading = false;
+  }
+  const redraws = [...entry.redraws];
+  entry.redraws.clear();
+  for (const draw of redraws) draw();
+}
+/** Build the step rows of an earlier answer, or one line that says why there are none. */
+function earlierStepRows(entry, hasChecks, redraw) {
+  if (entry.steps === null)
+    return [textNode("p", entry.failed ? "Could not load the steps. Close and open this line to try again." : "Loading steps…", "muted")];
+  if (!entry.steps.length)
+    return hasChecks ? [] : [textNode("p", "No steps were saved for this answer.", "muted")];
+  return entry.steps.map(step => renderStep(step, entry.open, redraw));
+}
+/**
+ * Build the "Worked for" line of an earlier answer: closed, like the latest
+ * answer's line, and opening the same list of steps and then the checks. The
+ * steps load from the worker the first time the line opens. An answer with no
+ * saved steps possible (an old chat) and no checks keeps the plain line, and
+ * with no times either it is left out. The line opens by itself when the
+ * checks block wants attention (a browser permission review or a retry result).
+ */
+function renderWorked(turn, checks, taskId) {
   const label = workedLabel(turn);
-  if (!checks) return label ? textNode("p", label, "worked-line") : null;
+  const saved = SAVED_TURN_ID.test(turn.turn_id || "");
+  if (!checks && !(saved && label)) return label ? textNode("p", label, "worked-line") : null;
   const block = textNode("div", "", "activity worked");
   const toggle = textNode("button", "", "activity-toggle");
   toggle.type = "button";
   toggle.append(textNode("span", "", "activity-chevron"), textNode("span", label || "Checks and readback"));
   const list = textNode("div", "", "activity-steps");
-  list.append(checks);
+  const entry = saved ? earlierSteps(taskId, turn.turn_id) : null;
+  const fill = () => {
+    const rows = entry ? earlierStepRows(entry, Boolean(checks), fill) : [];
+    list.replaceChildren(...rows, ...(checks ? [checks] : []));
+  };
   const show = open => {
     if (open) state.workedOpen.add(turn.turn_id);
     else state.workedOpen.delete(turn.turn_id);
     toggle.setAttribute("aria-expanded", String(open));
     list.hidden = !open;
+    if (open && entry) loadEarlierSteps(taskId, turn.turn_id, entry, fill);
   };
-  show(checks.open || state.workedOpen.has(turn.turn_id));
+  fill();
+  show(Boolean(checks?.open) || state.workedOpen.has(turn.turn_id));
   toggle.onclick = () => show(list.hidden);
   block.append(toggle, list);
   block.openChecks = () => {
+    if (!checks) return;
     show(true);
     checks.open = true;
     checks.scrollIntoView({block: "nearest"});
@@ -1702,7 +1761,7 @@ function renderTask(force = false) {
           evidence.scrollIntoView({block: "nearest"});
         };
       } else {
-        const worked = renderWorked(turn, evidence);
+        const worked = renderWorked(turn, evidence, task.task_id);
         if (worked) exchange.append(worked);
         openChecks = () => worked?.openChecks?.();
       }
@@ -2260,7 +2319,7 @@ function renderActivity() {
   const list = textNode("div", "", "activity-steps");
   list.id = "activity-steps";
   list.hidden = !expanded;
-  for (const step of steps) list.append(renderStep(step, activity));
+  for (const step of steps) list.append(renderStep(step, activity.open, renderActivity));
   if (checks) list.append(checks);
   block.replaceChildren(toggle, list);
   tickElapsed();
@@ -2269,9 +2328,10 @@ function renderActivity() {
 /**
  * Build one row of the step list: icon, text, and a line with a failed
  * command's exit code, the duration, and the running state. A step with
- * output gets a button that shows or hides it.
+ * output gets a button that shows or hides it; `open` holds the indexes of
+ * the steps whose output shows, and `redraw` draws the list again after a tap.
  */
-function renderStep(step, activity) {
+function renderStep(step, open, redraw) {
   const row = textNode("div", "", `step step-${step.kind} is-${step.status}`);
   row.append(textNode("span", stepIcons[step.kind] || "•", "step-icon"));
   const body = textNode("div", "", "step-body");
@@ -2287,10 +2347,10 @@ function renderStep(step, activity) {
   const footer = textNode("div", "", "step-meta");
   if (meta.length) footer.append(textNode("span", meta.join(" · ")));
   if (step.output) {
-    const open = activity.open.has(step.index);
+    const shown = open.has(step.index);
     const button = textNode(
       "button",
-      open
+      shown
         ? "Hide output"
         : step.output_truncated
           ? "Show output (first part)"
@@ -2299,12 +2359,12 @@ function renderStep(step, activity) {
     );
     button.type = "button";
     button.onclick = () => {
-      if (open) activity.open.delete(step.index);
-      else activity.open.add(step.index);
-      renderActivity();
+      if (shown) open.delete(step.index);
+      else open.add(step.index);
+      redraw();
     };
     footer.append(button);
-    if (open) body.append(textNode("pre", step.output, "step-output"));
+    if (shown) body.append(textNode("pre", step.output, "step-output"));
   }
   if (footer.childElementCount) body.insertBefore(footer, body.children[1] || null);
   row.append(body);
