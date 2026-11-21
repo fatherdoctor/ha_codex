@@ -687,9 +687,14 @@ def default_model(options: dict[str, Any]) -> str:
     model = configured_model(options)
     if model in {"default", "gpt-5.3-codex"}:
         # The add-on leaves the choice to the CLI.
-        with usage_lock:
-            return str(usage_state.get("_default_model") or CLI_DEFAULT_MODEL)
+        return seen_default_model() or CLI_DEFAULT_MODEL
     return model
+
+
+def seen_default_model() -> str:
+    """Return the model the CLI named as its own pick in /status, or an empty string before it was seen."""
+    with usage_lock:
+        return str(usage_state.get("_default_model") or "")
 
 
 def model_pin(options: dict[str, Any]) -> str:
@@ -5257,6 +5262,7 @@ def create_approval_session(
                                *({"type": "localImage", "path": str(path)} for path in prompt_attachment_paths(task_id, latest_turn))],
                      # No outputSchema: the thread stores the answer as plain text, and the status comes from
                      # the ask_owner and report_failure calls (apply_status_calls).
+                     **turn_model(model),
                      "effort": execution["reasoning_effort"], "summary": reasoning_summary(options),
                      "sandboxPolicy": policy,
                      "approvalPolicy": settings["approval_policy"],
@@ -5265,6 +5271,19 @@ def create_approval_session(
         on_final=lambda text: final_file.write_text(text, encoding="utf-8"),
         is_active=active, redact=approval_redact, owns_connection=open_thread is None,
     )
+
+
+def turn_model(model: str) -> dict[str, str]:
+    """Return the model field of turn/start: the chat's model, or the CLI's own pick by name for the default.
+
+    A thread that is already loaded (the live process) ignores the model of thread/resume, and a resume without one
+    keeps the thread's last model, so each turn names its model; a chat set back to the default gets the CLI's pick
+    by name. Before /status named that pick, the turn names none, as before.
+    """
+    if model not in {"default", "gpt-5.3-codex"}:
+        return {"model": model}
+    seen = seen_default_model()
+    return {"model": seen} if seen else {}
 
 
 # The longest plain-text answer the page keeps.

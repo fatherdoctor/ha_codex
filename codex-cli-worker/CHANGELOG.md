@@ -118,6 +118,9 @@
   `codex_cli_task_result` event.
 
 ### Fixed
+- **A chat set back to the default model goes back to it.** Before, a chat kept the last model it ran on when you
+  chose the default again, because Codex keeps a thread's model unless a message names another one. Each message now
+  names its model, and the default by the name Codex gives it in its status.
 - **Share masks three more shapes.** A password value whose first word another rule already masked (an `sk-` key, a
   token) no longer keeps the rest of its line, and a quoted password that runs on to the next line is masked whole.
   A very long run of the secret word itself (`password-password-...`) is masked about three times faster.

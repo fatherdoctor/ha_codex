@@ -210,13 +210,16 @@ class LiveExchangeTests(unittest.TestCase):
         self.started_alone.append(process)
         return process
 
-    def message(self, session_id=None) -> dict:
-        """Queue one message in the chat and run it, as start_background_task does."""
+    def message(self, session_id=None, model=None) -> dict:
+        """Queue one message in the chat and run it, as start_background_task does; model as the turn resolved it."""
         self.turn += 1
         turn_id = f"worker-turn-{self.turn}"
         task = server.tasks.setdefault("task", {"task_id": "task", "turns": []})
         task.update(status="queued", current_turn_id=turn_id, cancellation_requested=False)
-        task["turns"].append({"turn_id": turn_id, "message": f"Message {self.turn}"})
+        turn = {"turn_id": turn_id, "message": f"Message {self.turn}"}
+        if model:
+            turn["execution_settings"] = {"model": model, "reasoning_effort": "medium"}
+        task["turns"].append(turn)
         server.run_task("task", f"Message {self.turn}", session_id)
         return dict(server.tasks["task"])
 
@@ -386,6 +389,27 @@ class LiveExchangeTests(unittest.TestCase):
         self.assertEqual(live.methods("thread/resume")[-1]["params"]["threadId"], other)
         self.assertEqual(self.started_alone, [])
 
+    def test_a_model_change_reaches_a_chat_that_is_live(self):
+        session_id = self.message(model="invented-model-a")["session_id"]
+        second = self.message(session_id, model="invented-model-b")
+        self.assertEqual(second["status"], "completed", second.get("error"))
+        live = self.spawned[0]
+        self.assertEqual([turn["params"]["model"] for turn in live.methods("turn/start")],
+                         ["invented-model-a", "invented-model-b"])
+        self.assertEqual(live.methods("thread/resume"), [], "the chat stays loaded")
+        self.assertEqual(self.started_alone, [])
+
+    def test_a_chat_set_back_to_the_default_model_names_it(self):
+        session_id = self.message(model="invented-model-a")["session_id"]
+        with patch.dict(server.usage_state, {"_default_model": "invented-default-model"}):
+            self.assertEqual(self.message(session_id, model="default")["status"], "completed")
+        turns = self.spawned[0].methods("turn/start")
+        self.assertEqual([turn["params"]["model"] for turn in turns], ["invented-model-a", "invented-default-model"])
+
+    def test_the_default_names_no_model_before_the_cli_named_its_pick(self):
+        with patch.dict(server.usage_state, {"_default_model": ""}):
+            self.assertEqual(self.message(model="default")["status"], "completed")
+        self.assertNotIn("model", self.spawned[0].methods("turn/start")[0]["params"])
 
 if __name__ == "__main__":
     unittest.main()
