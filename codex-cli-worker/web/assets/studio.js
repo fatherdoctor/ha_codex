@@ -38,6 +38,8 @@ $("permission-button").onclick = () => {
     return;
   }
   $("permission-result").textContent = "";
+  // One menu at a time: the model and reasoning picker closes (chat.js).
+  closePicker();
   updateStudio();
   placePermissions();
   $("permissions-dialog").show();

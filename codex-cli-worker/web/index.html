@@ -204,49 +204,28 @@
                 </div>
                 <input id="document-input" type="file" accept=".txt,.md,.yaml,.yml,.json,.csv,.log,.py,.js,.html,.css,.xml,.pdf" multiple hidden>
               <div id="chat-picker" class="chat-picker">
-                <div class="picker-pill">
-                  <button
-                    id="model-button"
-                    type="button"
-                    aria-label="Select model"
-                    title="Select model"
-                    aria-expanded="false"
-                    aria-controls="model-popover"
-                  >
-                    Model
-                  </button>
-                  <button
-                    id="effort-button"
-                    type="button"
-                    aria-label="Select reasoning level"
-                    aria-expanded="false"
-                    aria-controls="effort-popover"
-                  >
-                    <span id="effort-label">Medium</span
-                    ><svg
-                      class="picker-chevron"
-                      aria-hidden="true"
-                      viewBox="0 0 24 24"
-                      fill="currentColor"
-                    >
-                      <path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z" />
-                    </svg>
-                  </button>
-                </div>
-                <div
-                  id="model-popover"
-                  class="picker-popover model-popover"
-                  role="dialog"
-                  aria-label="Select model"
-                  hidden
+                <button
+                  id="picker-button"
+                  class="picker-pill"
+                  type="button"
+                  aria-haspopup="dialog"
+                  aria-expanded="false"
+                  aria-controls="effort-popover"
+                  aria-keyshortcuts="Control+Shift+M"
+                  title="Model and reasoning (Ctrl+Shift+M)"
                 >
-                  <p class="picker-heading">Select model</p>
-                  <div
-                    id="model-options"
-                    role="group"
-                    aria-label="Models"
-                  ></div>
-                </div>
+                  <span id="picker-model">Model</span
+                  ><span id="effort-label">Medium</span
+                  ><span id="picker-open-label" hidden>Select effort</span
+                  ><svg
+                    class="picker-chevron"
+                    aria-hidden="true"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                  >
+                    <path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z" />
+                  </svg>
+                </button>
                 <div
                   id="effort-popover"
                   class="picker-popover effort-popover"
@@ -255,20 +234,26 @@
                   hidden
                 >
                   <div class="effort-heading">
-                    <svg
-                      class="effort-bolt"
-                      aria-hidden="true"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="1.4"
-                      stroke-linejoin="round"
-                    >
-                      <path d="m13 3-8 10h6l-1 8 9-11h-6l1-7Z" />
-                    </svg>
+                    <span class="effort-heading-spacer" aria-hidden="true"></span>
                     <div>
-                      <label id="effort-title" for="effort-slider">Medium</label
-                      ><span id="effort-model"></span>
+                      <label id="effort-title" for="effort-slider">Medium</label>
+                      <button
+                        id="effort-model"
+                        type="button"
+                        aria-haspopup="dialog"
+                        aria-controls="model-popover"
+                        title="Select model"
+                      >
+                        <span id="effort-model-name">Model</span
+                        ><svg
+                          class="effort-model-chevron"
+                          aria-hidden="true"
+                          viewBox="0 0 24 24"
+                          fill="currentColor"
+                        >
+                          <path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z" />
+                        </svg>
+                      </button>
                     </div>
                     <button
                       id="effort-reset"
@@ -294,6 +279,20 @@
                   <p id="effort-description">
                     Balances speed and reasoning depth.
                   </p>
+                </div>
+                <div
+                  id="model-popover"
+                  class="picker-popover model-popover"
+                  role="dialog"
+                  aria-label="Select model"
+                  hidden
+                >
+                  <p class="picker-heading">Select model</p>
+                  <div
+                    id="model-options"
+                    role="group"
+                    aria-label="Models"
+                  ></div>
                 </div>
               </div>
               </div>

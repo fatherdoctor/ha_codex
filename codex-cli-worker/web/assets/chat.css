@@ -1212,7 +1212,7 @@ textarea::placeholder {
   margin-top: 7px;
 }
 .compose-tools {
-  position: relative; /* Anchors the picker popovers, so they open from the left edge on phones. */
+  position: relative; /* Anchors the pop-ups; placePicker (chat.js) puts the picker panel right above the chip. */
   display: flex;
   align-items: center;
   gap: 2px;
@@ -1303,28 +1303,32 @@ textarea::placeholder {
   background: var(--bg);
   color: var(--text);
 }
+/* One chip, as in the ChatGPT desktop app: the model name, then the reasoning level in grey. */
 .picker-pill {
   display: flex;
   align-items: center;
+  gap: 6px;
   background: var(--surface);
+  color: var(--text);
   border-radius: 20px;
   max-width: 100%;
-}
-.picker-pill button {
-  background: transparent;
-  color: var(--text);
-  padding: 7px 4px 7px 12px;
-  font-size: calc(12px * var(--text-scale));
-  border-radius: 20px;
-  white-space: nowrap;
+  min-width: 0;
   min-height: 34px;
+  padding: 7px 10px 7px 12px;
+  font-size: calc(12px * var(--text-scale));
+  white-space: nowrap;
 }
-.picker-pill #effort-button {
+#picker-model {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#effort-label {
   color: var(--muted);
-  padding: 7px 10px 7px 3px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-shrink: 0;
+}
+.picker-pill .picker-chevron {
+  color: var(--muted);
 }
 .picker-chevron {
   width: 14px;
@@ -1389,25 +1393,50 @@ textarea::placeholder {
 }
 .effort-heading > div {
   flex: 1;
+  min-width: 0;
   text-align: center;
   padding-top: 2px;
 }
 .effort-heading label {
+  display: block;
   color: #467ced;
   font-size: calc(13px * var(--text-scale));
   font-weight: 600;
 }
-#effort-model {
-  display: block;
-  font-size: calc(11px * var(--text-scale));
-  color: var(--muted);
-  margin-top: 3px;
+/* Keeps the effort name centered while the lightning (fast mode) toggle is hidden; it returns in 0.6 with a working toggle (CX-04-FB-MODEL). */
+.effort-heading-spacer {
+  width: 24px;
+  flex-shrink: 0;
 }
-.effort-bolt {
+/* The model name under the effort name; it opens the model list. */
+#effort-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  min-height: 28px;
+  margin-top: 1px;
+  padding: 3px 4px 3px 8px;
+  border-radius: 10px;
+  background: transparent;
   color: var(--muted);
-  width: 20px;
-  height: 20px;
-  margin: 3px 2px;
+  font-size: calc(11px * var(--text-scale));
+}
+#effort-model:hover:not(:disabled),
+#effort-model:focus-visible {
+  background: var(--surface);
+  color: var(--text);
+}
+#effort-model-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.effort-model-chevron {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
 }
 #effort-reset {
   background: transparent;
@@ -1415,6 +1444,7 @@ textarea::placeholder {
   padding: 1px 3px;
   font-size: calc(20px * var(--text-scale));
   width: 24px;
+  flex-shrink: 0;
 }
 .effort-track {
   position: relative;
@@ -1500,13 +1530,11 @@ textarea::placeholder {
   }
 }
 @media (max-width: 400px) {
-  .picker-pill button {
+  .picker-pill {
     font-size: calc(11px * var(--text-scale));
     padding-left: 9px;
-  }
-  .picker-pill #effort-button {
-    gap: 5px;
     padding-right: 8px;
+    gap: 5px;
   }
 }
 /* The arrow is an icon centered in the circle, not a text glyph that sits on the font's baseline. */
