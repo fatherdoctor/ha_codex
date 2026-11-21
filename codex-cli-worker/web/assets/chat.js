@@ -2259,7 +2259,14 @@ function renderActivity() {
   list.hidden = !expanded;
   for (const step of steps) list.append(renderStep(step, activity));
   if (checks) list.append(checks);
-  block.replaceChildren(toggle, list);
+  const latestReasoning = running
+    ? [...steps].reverse().find(step => step.kind === "reasoning" &&
+        typeof step.text === "string" && step.text.trim())
+    : null;
+  const thinking = latestReasoning
+    ? textNode("div", `Thinking: ${latestReasoning.text.replace(/\s+/g, " ").trim()}`, "activity-thinking")
+    : null;
+  block.replaceChildren(...[toggle, thinking, list].filter(Boolean));
   tickElapsed();
   if (nearBottom) area.scrollTop = area.scrollHeight;
 }
