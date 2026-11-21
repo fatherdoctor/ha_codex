@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import re
 import shlex
 import socketserver
@@ -33,9 +34,12 @@ import threading
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import test_live_proofs
 from test_live_proofs import (
+    CODEX,
     THREAD,
     WORKER,
     AppServer,
@@ -286,6 +290,64 @@ class SandboxSockets(unittest.TestCase):
         result, reached = self.escalated_auto_review("deny")
         self.assertIsNone(result, "a denied escalated command ran")
         self.assertEqual(reached, 0)
+
+
+def relay_bwrap() -> str | None:
+    """Return the Bubblewrap that starts the relay: the image's relay-bwrap, else the one in the Codex package."""
+    packaged = Path(CODEX).resolve().parents[1] / "codex-resources" / "bwrap"
+    for candidate in ("/opt/codex-sandbox/relay-bwrap", str(packaged)):
+        if os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
+@unittest.skipIf(relay_bwrap() is None and not os.environ.get("HA_TEST_REQUIRE_CODEX"), "no Bubblewrap for the relay")
+class RelaySandboxSockets(SandboxSockets):
+    """P8 for remote control: the same probes, with Codex started the way the relay starts it.
+
+    The relay runs `codex app-server --remote-control` inside its own Bubblewrap: a new user namespace with uid
+    and gid 1000, its own host name, and every capability dropped (remote_control.build_command). Codex then
+    starts each command in its own sandbox inside that namespace. This class proves that the nested sandbox
+    still refuses every socket, so the relay's keys can go on the same terms as the chat's (D-CX-KEYS).
+
+    The relay launcher in front of Bubblewrap is left out: it enters the relay's AppArmor label and drops
+    capabilities, and both only take abilities away, so they cannot turn a refused connect into an accepted one.
+    The modes are the ones the managed requirements allow the ChatGPT app: Read only, Default and Auto-review,
+    and Full access only while the owner's switch is on.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        import remote_control
+
+        super().setUpClass()
+        bwrap = relay_bwrap()
+        assert bwrap is not None, "the container job needs /opt/codex-sandbox/relay-bwrap"
+        command = remote_control.build_command(CODEX, "Home Assistant")
+        assert command[:2] == [remote_control.RELAY_LAUNCHER, remote_control.RELAY_BWRAP], command
+        assert command[-2:] == ["--", CODEX], command
+        cls.relay_run = cls.root / "relay-run"
+        cls.relay_run.write_text("#!/bin/sh\nexec " + " ".join(shlex.quote(part) for part in [bwrap, *command[2:-1]])
+                                 + ' "$@"\n', encoding="utf-8")
+        launcher = cls.root / "relay-codex"
+        launcher.write_text(f'#!/bin/sh\nexec {shlex.quote(str(cls.relay_run))} {shlex.quote(CODEX)} "$@"\n',
+                            encoding="utf-8")
+        for script in (cls.relay_run, launcher):
+            script.chmod(0o755)
+        # AppServer reads the binary from test_live_proofs.CODEX when it starts a process.
+        cls.relay_codex = mock.patch.object(test_live_proofs, "CODEX", str(launcher))
+        cls.relay_codex.start()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.relay_codex.stop()
+        super().tearDownClass()
+
+    def test_control_the_relay_start_enters_its_namespace(self) -> None:
+        """A control: the relay's start runs a program as uid 1000 under the relay's host name."""
+        output = subprocess.run([str(self.relay_run), "sh", "-c", "id -u; hostname"], capture_output=True,
+                                text=True, timeout=30, check=True).stdout
+        self.assertEqual(output.splitlines(), ["1000", "Home Assistant"])
 
 
 if __name__ == "__main__":

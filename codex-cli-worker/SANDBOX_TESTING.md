@@ -56,6 +56,13 @@ seccomp filter denies `connect` on a Unix socket too. The two escalated rows are
 outside the sandbox can reach; the test keeps them visible, so a reader of the permission model finds them
 here and not only in the code.
 
+The class `RelaySandboxSockets` runs every row again with Codex started the way Remote Control starts it: inside
+the relay's Bubblewrap (`remote_control.build_command`: a new user namespace as uid and gid 1000, the relay's host
+name, every capability dropped), so each command runs in Codex's sandbox nested in that namespace. The answers are
+the same as for a chat. A control checks that the start really enters the namespace. The relay launcher in front of
+Bubblewrap is left out: it enters an AppArmor label and drops capabilities, and both only take abilities away. The
+test uses the image's `/opt/codex-sandbox/relay-bwrap`, else the `bwrap` in the Codex package.
+
 It runs in the Verification checks container job. By hand, with the pinned package unpacked anywhere:
 
 ```sh
