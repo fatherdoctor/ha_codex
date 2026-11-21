@@ -95,9 +95,8 @@ class AddressTests(unittest.TestCase):
             for name in ('SUPERVISOR_TOKEN', 'HA_TOKEN', 'HA_RELAY_CAPABILITY'):
                 self.assertNotIn(name, env)
             relay_env = server.relay_env()
-            self.assertIn('HA_RELAY_CAPABILITY', relay_env); self.assertNotIn('SUPERVISOR_TOKEN', relay_env)
+            self.assertNotIn('HA_RELAY_CAPABILITY', relay_env); self.assertNotIn('SUPERVISOR_TOKEN', relay_env)
             self.assertEqual(relay_env['HA_URL'], 'http://homeassistant:80')
-            self.assertEqual(server.redact(relay_env['HA_RELAY_CAPABILITY']), '[redacted]')
 
     def test_task_launch_refreshes_before_baseline_and_process_start(self):
         class Boundary(BaseException):
@@ -134,7 +133,7 @@ class AddressTests(unittest.TestCase):
             self.assertTrue(any('relay_reads_mcp.py' in value for value in args[0]))
             self.assertEqual(kwargs['env']['HA_URL'], 'http://homeassistant:80')
             self.assertNotIn('HA_TOKEN', kwargs['env']); self.assertNotIn('SUPERVISOR_TOKEN', kwargs['env'])
-            self.assertIn('HA_RELAY_CAPABILITY', kwargs['env']); self.assertGreaterEqual(metadata.call_count, 1)
+            self.assertNotIn('HA_RELAY_CAPABILITY', kwargs['env']); self.assertGreaterEqual(metadata.call_count, 1)
 
     def test_redaction_uses_the_effective_trimmed_core_credential(self):
         with patch.object(server, 'ha_token', return_value='synthetic-supervisor'), \
@@ -157,10 +156,10 @@ class RelayReadTests(unittest.TestCase):
         self.fetch = Mock(return_value=[{'entity_id': 'light.sample', 'state': 'off', 'attributes': {'friendly_name': 'Sample light'}}])
         self.broker = relay_reads.RelayReads(lambda: (self.proc, self.stopping), lambda: 'synthetic-supervisor',
             lambda value: value.replace('synthetic-supervisor', '[redacted]'), self.fetch)
-        self.cap = self.broker.environment({})['HA_RELAY_CAPABILITY']
+        self.broker.new_launch()
 
     def call(self, **args):
-        return self.broker.dispatch({'capability': self.cap, 'arguments': args})
+        return self.broker.dispatch({'arguments': args})
 
     def test_first_run_lists_entities_without_a_user_core_token(self):
         result = self.call(operation='states', domain='light')
@@ -182,7 +181,7 @@ class RelayReadTests(unittest.TestCase):
                  {'operation': 'state', 'entity_id': '../auth'}, {'operation': 'states', 'limit': True})
         for args in cases:
             with self.subTest(operation=args['operation']), self.assertRaises(ValueError):
-                self.broker.dispatch({'capability': self.cap, 'arguments': args})
+                self.broker.dispatch({'arguments': args})
         self.fetch.assert_not_called()
 
     def test_paging_excludes_credential_like_ids_and_marks_truncation(self):
@@ -194,11 +193,14 @@ class RelayReadTests(unittest.TestCase):
         result = self.call(operation='states', domain='light', offset=1, limit=1)
         self.assertTrue(result['entities'][0]['state_truncated']); self.assertIsNone(result['next_offset'])
 
-    def test_rotation_stop_exit_and_wrong_capability_are_refused(self):
-        old = self.cap; self.cap = self.broker.environment({})['HA_RELAY_CAPABILITY']
-        for cap in (old, '', 'unrelated'):
+    def test_no_launch_a_key_stop_and_exit_are_refused(self):
+        # D-CX-KEYS: the socket takes no key; a request with one, or before any launch, is refused.
+        for request in ({'capability': 'invented', 'arguments': {'operation': 'states'}}, {'operation': 'states'}):
             with self.assertRaises(ValueError):
-                self.broker.dispatch({'capability': cap, 'arguments': {'operation': 'states'}})
+                self.broker.dispatch(request)
+        unlaunched = relay_reads.RelayReads(lambda: (self.proc, False), lambda: 'synthetic-supervisor', str, self.fetch)
+        with self.assertRaises(ValueError):
+            unlaunched.dispatch({'arguments': {'operation': 'states'}})
         self.stopping = True
         with self.assertRaises(ValueError):
             self.call(operation='states')
@@ -207,9 +209,9 @@ class RelayReadTests(unittest.TestCase):
             self.call(operation='states')
         self.fetch.assert_not_called()
 
-    def test_inflight_result_is_discarded_after_capability_replacement(self):
+    def test_inflight_result_is_discarded_after_a_new_launch(self):
         def expire(*args):
-            self.broker.environment({}); return []
+            self.broker.new_launch(); return []
         self.fetch.side_effect = expire
         with self.assertRaises(ValueError):
             self.call(operation='states')
@@ -238,14 +240,14 @@ class RelayReadTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.call(operation='states')
 
-    def test_native_unix_bridge_and_expired_capability(self):
+    def test_native_unix_bridge_and_a_stopping_relay(self):
         if os.environ.get('PYTEST_CURRENT_TEST'):
             import pytest_socket
             pytest_socket.socket_allow_hosts([], allow_unix_socket=True)
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder)/'read.sock'; listener = self.broker.serve(path)
             try:
-                with patch.dict(os.environ, {'HA_RELAY_SOCKET': str(path), 'HA_RELAY_CAPABILITY': self.cap}):
+                with patch.dict(os.environ, {'HA_RELAY_SOCKET': str(path)}):
                     self.assertTrue(relay_reads_mcp.read({'operation': 'states'})['ok'])
                     self.stopping = True
                     self.assertFalse(relay_reads_mcp.read({'operation': 'states'})['ok'])

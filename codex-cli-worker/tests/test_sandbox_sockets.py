@@ -55,7 +55,10 @@ def worker_socket_names() -> list[str]:
     """Return the file name of every socket the worker serves, read from server.py's start-up lines."""
     source = (WORKER / "server.py").read_text(encoding="utf-8")
     names = re.findall(r'\.serve\(DATA_ROOT / "([^"]+\.sock)"\)', source)
-    assert len(names) >= 6, names
+    # The ChatGPT app's call socket is a named constant, because relay_env hands its path to the call bridge.
+    assert "relay_call.serve(RELAY_CALL_SOCKET)" in source
+    names += re.findall(r'^RELAY_CALL_SOCKET = DATA_ROOT / "([^"]+\.sock)"$', source, re.MULTILINE)
+    assert len(names) >= 7, names
     return names
 
 

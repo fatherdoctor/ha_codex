@@ -48,7 +48,7 @@ import codex_host
 import full_access
 import policy as protected_policy
 from ha_data import HomeAssistantData
-from ha_call import RELAY_TASK as RELAY_CALL_TASK, HomeAssistantCall
+from ha_call import HomeAssistantCall, RelayCall
 import ha_data_mcp
 import hass_mcp
 import remote_control
@@ -110,8 +110,11 @@ def record_diagnostic(method, *args, **kwargs):
 
 ha_data = HomeAssistantData(_ToolWorker(), DATA_ROOT / "ha-data")
 # The one tool that changes the house; the worker sends each call with its own access and keeps no log of it.
-# The app's relay has one key per launch, good while that process runs (relay_running is defined below).
-ha_call = HomeAssistantCall(_ToolWorker(), relay_running=lambda: relay_running())
+# A chat's calls and the ChatGPT app's calls come in on two sockets; the app's hold while its relay process runs
+# (relay_running is defined below).
+ha_call = HomeAssistantCall(_ToolWorker())
+relay_call = RelayCall(_ToolWorker(), relay_running=lambda: relay_running())
+RELAY_CALL_SOCKET = DATA_ROOT / "ha-call-relay.sock"
 CODEX_HOME = DATA_ROOT / "codex-home"
 OPTIONS_PATH = DATA_ROOT / "options.json"
 WORKER_TOKEN_PATH = DATA_ROOT / "worker_api_token"
@@ -4956,14 +4959,14 @@ def call_mcp_args(relay: bool = False) -> list[str]:
     normalize_approval_decision_for_mode, at rust-v0.166.0).
 
     In a chat the bridge sends the thread id that Codex puts in each call, and the worker checks that a
-    person attends that chat's running exchange. Under remote control (relay=True) the bridge gets the
-    relay's key, HA_CALL_CAPABILITY, in its place; shell_exclude_args keeps that key out of shell commands.
-    The worker behind the socket checks the chat or the key, and the form of the request (ha_call.py).
+    person attends that chat's running exchange. Under remote control (relay=True) the bridge gets
+    HA_CALL_SOCKET, the path of the app's own socket (relay_env), so the socket says the call is the app's.
+    The worker behind the socket checks the chat or the relay, and the form of the request (ha_call.py).
     """
     settings = {
         "command": sys.executable,
         "args": [str(Path(__file__).with_name("ha_call_mcp.py"))],
-        **({"env_vars": ["HA_CALL_CAPABILITY"]} if relay else {}),
+        **({"env_vars": ["HA_CALL_SOCKET"]} if relay else {}),
         "enabled": True,
         "required": True,
         "startup_timeout_sec": 10,
@@ -4980,7 +4983,11 @@ SHELL_EXCLUDED_ENV = (remote_control.TOOL_KEY_EXCLUDE,)
 
 
 def shell_exclude_args() -> list[str]:
-    """Keep every HA_*_CAPABILITY key out of the environment of the commands the relay's Codex runs."""
+    """Keep every HA_*_CAPABILITY name out of the environment of the commands the relay's Codex runs.
+
+    The tools hold no key since D-CX-KEYS; the one such name left is HA_MCP_CAPABILITY, the Supervisor token
+    that relay_env gives the bundled hass-mcp server.
+    """
     return ["--config", "shell_environment_policy.exclude=" + json.dumps(list(SHELL_EXCLUDED_ENV))]
 
 
@@ -7809,24 +7816,25 @@ relay_reads = RelayReads(relay_process_state, ha_token, relay_read_redact, obser
 
 
 def relay_running() -> bool:
-    """Return whether the remote-control process runs now and is not stopping; the relay's call key holds only then."""
+    """Return whether the remote-control process runs now and is not stopping; the app's calls hold only then."""
     proc, stopping = relay_process_state()
     return proc is not None and not stopping and proc.poll() is None
 
 
 def relay_probe_env() -> dict[str, str]:
-    """Return the environment of a relay probe: no tool key, so a probe never ends the keys of a running relay."""
+    """Return the environment of a relay probe: it starts no read session, so a probe never ends a running relay's."""
     return codex_env()
 
 
 def relay_env() -> dict[str, str]:
-    """Return the environment of one relay launch with fresh keys; the keys of the earlier launch stop working.
+    """Return the environment of one relay launch; a read of the earlier launch can no longer finish.
 
     Only Supervisor._loop calls it, just before the process starts (launch_env_factory); the probes use
-    relay_probe_env.
+    relay_probe_env. The call bridge gets the app's own socket here; no tool gets a key (D-CX-KEYS).
     """
     refresh_core_address()
-    env = {**relay_reads.environment(codex_env()), "HA_CALL_CAPABILITY": ha_call.begin(RELAY_CALL_TASK)}
+    relay_reads.new_launch()
+    env = {**codex_env(), "HA_CALL_SOCKET": str(RELAY_CALL_SOCKET)}
     # The relay cannot read s6's container environment, so the Home Assistant MCP server gets its token here,
     # under a name the shell exclude HA_*_CAPABILITY keeps from every command (hass_mcp.py).
     token = ha_token()
@@ -7838,7 +7846,7 @@ def relay_env() -> dict[str, str]:
 def relay_read_mcp_args() -> list[str]:
     settings = {
         'command': sys.executable, 'args': [str(Path(__file__).with_name('relay_reads_mcp.py'))],
-        'env_vars': ['HA_RELAY_CAPABILITY'], 'enabled': True, 'required': True,
+        'enabled': True, 'required': True,
         'startup_timeout_sec': 10, 'tool_timeout_sec': 20,
         'tools.read.approval_mode': 'approve',
     }
@@ -7851,7 +7859,7 @@ def relay_tool_args() -> list[str]:
     Home Assistant MCP server when its option is on (hass_mcp.py): its read tools approved ahead, its write tools
     asked about before each call.
 
-    The relay holds its keys for its whole run, so the shell exclude matters as much as on the page;
+    The shell exclude keeps HA_MCP_CAPABILITY, the token relay_env gives hass-mcp, out of every command;
     /etc/codex/managed_config.toml holds the same exclude for every client.
     """
     return [*shell_exclude_args(), *relay_read_mcp_args(), *call_mcp_args(relay=True),
@@ -8459,6 +8467,7 @@ def main() -> None:
     verification.serve(DATA_ROOT / "verification.sock")
     ha_data.serve(DATA_ROOT / "ha-data.sock")
     ha_call.serve(DATA_ROOT / "ha-call.sock")
+    relay_call.serve(RELAY_CALL_SOCKET)
     relay_reads.serve(DATA_ROOT / "relay-read.sock")
     schedule_service.serve(DATA_ROOT / "schedules.sock")
     github_service.serve(DATA_ROOT / "github.sock")

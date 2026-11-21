@@ -1,6 +1,11 @@
-"""Bounded Core state reads for the active relay; credentials stay in the worker."""
+"""Bounded Core state reads for the active relay; credentials stay in the worker.
+
+The read socket serves only the ChatGPT app's remote control, and holds no key (D-CX-KEYS): a command in a
+Codex sandbox cannot connect to it (tests/test_sandbox_sockets.py), and a request answers only while the relay
+that started the read runs. Each launch starts a new session, so a read that began under one launch never
+finishes under the next.
+"""
 from __future__ import annotations
-import hmac
 import json
 import os
 from pathlib import Path
@@ -64,18 +69,19 @@ def password_state(row):
 class RelayReads:
     def __init__(self, state, token, redact, fetch=fetch_states, observer=None):
         self.state = state; self.token = token; self.redact = redact; self.fetch = fetch
-        self.lock = threading.Lock(); self.capability = ''
+        self.lock = threading.Lock()
         self.inflight = threading.Lock()
         self.observer = observer
         self.observation_session = None
 
-    def environment(self, base):
-        """Called only by relay launch/probe paths; every new launch rotates it."""
+    def new_launch(self):
+        """Start the session of a new relay launch; a read of the earlier launch can no longer finish.
+
+        Only server.relay_env calls it, just before the process starts; a probe never does.
+        """
         self.end_observation()
         with self.lock:
             self.observation_session = secrets.token_hex(16)
-            self.capability = 'harc_' + secrets.token_urlsafe(32)
-            return {**base, 'HA_RELAY_CAPABILITY': self.capability}
 
     def end_observation(self):
         session = self.observation_session
@@ -91,18 +97,19 @@ class RelayReads:
         if proc is None or stopping or proc.poll() is not None:
             self.end_observation()
 
-    def active(self, supplied):
-        if not isinstance(supplied, str) or not supplied:
+    def active(self, session):
+        """Return whether the launch of session is the current one, and its relay runs and is not stopping."""
+        if session is None:
             return False
         with self.lock:
-            if not hmac.compare_digest(supplied, self.capability):
+            if session != self.observation_session:
                 return False
-        # Do not hold the capability lock while taking the supervisor's lock.
+        # Do not hold this lock while taking the supervisor's lock.
         proc, stopping = self.state()
         if proc is None or stopping or proc.poll() is not None:
             return False
         with self.lock:
-            return hmac.compare_digest(supplied, self.capability)
+            return session == self.observation_session
 
     @staticmethod
     def entity_id(value):
@@ -142,10 +149,11 @@ class RelayReads:
                     pass  # Diagnostic failures must not change the read result.
 
     def _dispatch(self, request, observation):
-        if not isinstance(request, dict) or set(request) != {'capability', 'arguments'} or not self.active(request['capability']):
-            raise ReadError('Inactive relay capability.')
+        session = self.observation_session
+        if not isinstance(request, dict) or set(request) != {'arguments'} or not self.active(session):
+            raise ReadError('Remote control is not running.')
         observation['authorized'] = True
-        observation['session'] = self.observation_session
+        observation['session'] = session
         args = request['arguments']
         if not isinstance(args, dict):
             raise ReadError('Read arguments must be an object.')
@@ -184,8 +192,8 @@ class RelayReads:
         if not self.inflight.acquire(blocking=False):
             raise ReadError('A relay read is already running. Try again later.')
         try:
-            if not self.active(request['capability']):
-                raise ReadError('Relay capability expired.')
+            if not self.active(session):
+                raise ReadError('Remote control stopped or restarted.')
             token = self.token()
             if not token:
                 raise ReadError('Worker Core access is unavailable.')
@@ -234,8 +242,8 @@ class RelayReads:
             result = self.clean(result)
             if len(json.dumps(result).encode()) + 1 > MAX_RESPONSE:
                 raise ReadError('Read response is too large. Request fewer attributes or a smaller page.')
-            if not self.active(request['capability']):
-                raise ReadError('Relay capability expired before readback finished.')
+            if not self.active(session):
+                raise ReadError('Remote control stopped or restarted before the read finished.')
             return result
         finally:
             self.inflight.release()
