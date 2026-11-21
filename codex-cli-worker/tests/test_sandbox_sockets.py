@@ -192,6 +192,8 @@ class SandboxSockets(unittest.TestCase):
             outputs = [item for item in self.model.requests_for(name)[-1]["input"]
                        if str(item.get("type", "")).endswith("_output")]
             text = json.dumps(outputs)
+            # Kept for the failure message: when the probe printed nothing, Codex's own output says why.
+            self.probe_output = text
             match = re.search(r"PROBE (\{.*?\})", text.replace('\\"', '"'))
             return (json.loads(match.group(1)) if match else None), [method for method, _ in app.requests_seen]
         finally:
@@ -204,7 +206,8 @@ class SandboxSockets(unittest.TestCase):
         """
         before = self.accepted()
         result, _requests = self.run_probe(label, thread, turn)
-        self.assertIsNotNone(result, f"{label}: the probe printed nothing, so it did not run in the sandbox")
+        self.assertIsNotNone(result, f"{label}: the probe printed nothing, so it did not run in the sandbox. "
+                                     f"Codex returned: {self.probe_output[:2000]}")
         self.assertEqual(set(result), set(self.paths), (label, result))
         self.assertEqual(set(result.values()), {"EPERM"}, (label, result))
         self.assertEqual(self.accepted(), before, f"{label}: a socket accepted a connection")
