@@ -25,20 +25,23 @@ server.dismiss_wait_notice_async = lambda task_id: None
 LEVELS = ("low", "medium", "high", "xhigh", "max", "ultra")
 
 
-def entry(model: str, label: str | None = None, levels=LEVELS, hidden=False, default=False) -> dict:
+def entry(model: str, label: str | None = None, levels=LEVELS, hidden=False, default=False,
+          tiers=(), default_tier=None) -> dict:
     """Return one `model/list` entry in the shape of app-server-protocol rust-v0.166.0 (invented models)."""
     return {
         "id": model, "model": model, "displayName": label or model.upper(), "description": "",
         "hidden": hidden, "isDefault": default, "defaultReasoningEffort": "medium",
         "supportedReasoningEfforts": [{"reasoningEffort": level, "description": ""} for level in levels],
+        "serviceTiers": [{"id": tier, "name": tier.title(), "description": ""} for tier in tiers],
+        "defaultServiceTier": default_tier,
     }
 
 
 # An invented model the built-in list does not have, as a new release of Codex would add.
 NEW_MODEL = "gpt-9.9-nova"
 LIVE = (
-    (NEW_MODEL, "GPT-9.9 Nova", ("low", "medium", "high", "turbo")),
-    ("gpt-6-astra", "GPT-6 Astra", LEVELS),
+    server.ChatModel(NEW_MODEL, "GPT-9.9 Nova", ("low", "medium", "high", "turbo")),
+    server.ChatModel("gpt-6-astra", "GPT-6 Astra", LEVELS),
 )
 
 FAKE_APP_SERVER = textwrap.dedent('''\
@@ -89,10 +92,25 @@ class ParseCodexModelsTests(unittest.TestCase):
             entry("gpt-6-luna", "GPT-6-Luna", LEVELS[:5]),
         ])
         self.assertEqual(models, (
-            (NEW_MODEL, "GPT-9.9 Nova", ("low", "medium", "turbo")),
-            ("gpt-6-astra", "GPT-6-Astra", LEVELS),
-            ("gpt-6-luna", "GPT-6-Luna", LEVELS[:5]),
+            server.ChatModel(NEW_MODEL, "GPT-9.9 Nova", ("low", "medium", "turbo")),
+            server.ChatModel("gpt-6-astra", "GPT-6-Astra", LEVELS),
+            server.ChatModel("gpt-6-luna", "GPT-6-Luna", LEVELS[:5]),
         ))
+
+    def test_fast_comes_from_the_service_tiers(self):
+        odd_tiers = entry("gpt-odd-tiers")
+        odd_tiers["serviceTiers"] = "priority"
+        models = server.parse_codex_models([
+            entry("gpt-fast-offered", tiers=("priority",)),
+            entry("gpt-fast-default", tiers=("priority",), default_tier="priority"),
+            entry("gpt-other-tier", tiers=("flex",), default_tier="flex"),
+            entry("gpt-tier-not-listed", default_tier="priority"),
+            odd_tiers,
+        ])
+        self.assertEqual({model.id: model.fast for model in models}, {
+            "gpt-fast-offered": False, "gpt-fast-default": True, "gpt-other-tier": None,
+            "gpt-tier-not-listed": None, "gpt-odd-tiers": None,
+        })
 
     def test_leaves_out_hidden_retired_unsafe_and_malformed_entries(self):
         bad_levels = entry("gpt-bad-levels")
@@ -113,12 +131,12 @@ class ParseCodexModelsTests(unittest.TestCase):
             entry("gpt-6-astra"),
             entry("gpt-6-astra", "Second copy"),
         ])
-        self.assertEqual([model for model, _, _ in models], ["gpt-6-astra"])
+        self.assertEqual([model.id for model in models], ["gpt-6-astra"])
 
     def test_label_falls_back_to_the_id_and_levels_are_not_repeated(self):
         odd = entry("gpt-6-sol", levels=("low", "low", "high"))
         odd["displayName"] = "bad\nlabel"
-        self.assertEqual(server.parse_codex_models([odd]), (("gpt-6-sol", "gpt-6-sol", ("low", "high")),))
+        self.assertEqual(server.parse_codex_models([odd]), (server.ChatModel("gpt-6-sol", "gpt-6-sol", ("low", "high")),))
 
     def test_the_list_is_bounded(self):
         many = [entry(f"gpt-{index}") for index in range(server.MODEL_LIST_MAX_MODELS + 20)]
@@ -175,7 +193,7 @@ class LiveListTests(ModelListStateMixin, unittest.TestCase):
             patch.object(server, "read_codex_models", return_value=[entry(NEW_MODEL, "GPT-9.9 Nova")]),
         ):
             server.refresh_models()
-        self.assertEqual(server.chat_models(), ((NEW_MODEL, "GPT-9.9 Nova", LEVELS),))
+        self.assertEqual(server.chat_models(), (server.ChatModel(NEW_MODEL, "GPT-9.9 Nova", LEVELS),))
 
     def test_an_empty_answer_keeps_the_built_in_list(self):
         with (
@@ -210,7 +228,34 @@ class ChatSettingsTests(ModelListStateMixin, unittest.TestCase):
             settings = server.parse_chat_settings({"chat_settings": {"model": NEW_MODEL, "reasoning_effort": "turbo"}})
             self.assertEqual(settings["model"], NEW_MODEL)
             run = server.resolve_chat_settings(settings, {})
-        self.assertEqual(run, {"model": NEW_MODEL, "reasoning_effort": "turbo"})
+        self.assertEqual(run, {"model": NEW_MODEL, "reasoning_effort": "turbo", "fast": None})
+
+    def test_fast_follows_the_model_unless_the_chat_chose(self):
+        self.use_live((
+            server.ChatModel("gpt-offers-fast", "Offers Fast", LEVELS, False),
+            server.ChatModel("gpt-fast-default", "Fast Default", LEVELS, True),
+            server.ChatModel("gpt-no-fast", "No Fast", LEVELS),
+        ))
+        cases = (("gpt-offers-fast", None, False), ("gpt-offers-fast", True, True),
+                 ("gpt-fast-default", None, True), ("gpt-fast-default", False, False),
+                 ("gpt-no-fast", True, None), ("gpt-no-fast", None, None))
+        with patch.object(server, "read_options", return_value={}):
+            for model, choice, runs in cases:
+                with self.subTest(model=model, choice=choice):
+                    settings = server.parse_chat_settings({"chat_settings": {"model": model, "fast": choice}})
+                    self.assertEqual(settings["fast"], choice)
+                    self.assertIs(server.resolve_chat_settings(settings, {})["fast"], runs)
+
+    def test_fast_must_be_true_false_or_null(self):
+        with patch.object(server, "read_options", return_value={}):
+            for value in (1, 0, "on", "true", [], {}):
+                with self.subTest(value=value), self.assertRaises(ValueError):
+                    server.parse_chat_settings({"chat_settings": {"model": None, "fast": value}})
+
+    def test_settings_saved_before_fast_existed_still_parse(self):
+        with patch.object(server, "read_options", return_value={}):
+            settings = server.parse_chat_settings({"chat_settings": {"model": None, "reasoning_effort": None}})
+        self.assertIsNone(settings["fast"])
 
     def test_a_level_the_live_model_lacks_is_refused(self):
         self.use_live()
@@ -247,10 +292,13 @@ class ChatSettingsTests(ModelListStateMixin, unittest.TestCase):
             self.use_live()
             live = client.get("/chat-options", headers=headers).json
         self.assertEqual(built_in["models_source"], "built-in")
-        self.assertEqual([model["id"] for model in built_in["models"]], [model for model, _, _ in server.CHAT_MODELS])
+        self.assertEqual([model["id"] for model in built_in["models"]], [model.id for model in server.CHAT_MODELS])
         self.assertEqual(live["models_source"], "codex")
         self.assertEqual(live["models"][0], {"id": NEW_MODEL, "label": "GPT-9.9 Nova",
-                                             "efforts": ["low", "medium", "high", "turbo"]})
+                                             "efforts": ["low", "medium", "high", "turbo"], "fast": None})
+        # The built-in list follows the pinned CLI's catalog: every model offers Fast, two run on it by default.
+        self.assertEqual({model["id"]: model["fast"] for model in built_in["models"]}["gpt-6-sol"], True)
+        self.assertIs(built_in["default_fast"], False)
 
 
 class ReasoningEffortOptionTests(ModelListStateMixin, unittest.TestCase):

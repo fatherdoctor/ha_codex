@@ -170,10 +170,10 @@ class QueueTests(unittest.TestCase):
         self.runner.assert_called_with(chat, "Original request", session_id=self.session_id, reply="Apply it")
         continued = server.tasks[chat]
         self.assertEqual(continued["status"], "queued")
-        self.assertEqual(continued["chat_settings"], settings)
+        self.assertEqual(continued["chat_settings"], {**settings, "fast": None})
         self.assertEqual([turn["message"] for turn in continued["turns"]], ["Original request", "Apply it"])
         self.assertEqual(continued["turns"][0], before["turns"][0])
-        self.assertEqual(continued["turns"][1]["execution_settings"], settings)
+        self.assertEqual(continued["turns"][1]["execution_settings"], {**settings, "fast": False})
         self.assertEqual(server.message_queue, [])
 
     def test_waiting_message_can_be_edited_and_removed(self):

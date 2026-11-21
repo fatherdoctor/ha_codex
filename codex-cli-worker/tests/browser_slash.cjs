@@ -72,20 +72,21 @@ async function testSlash(browser, output, errors) {
       "/new",
       "/model",
       "/reasoning",
+      "/fast",
       "/usage",
       "/size",
       "/connection",
       "/settings",
     ]);
-    // No fast mode command until it works (returns in 0.6, CX-04-FB-MODEL).
-    assert.ok(!all.includes("/fast"), "typing / lists no /fast command");
+    // /fast turns Fast mode on for the chat (the chip shows a bolt), and again off.
+    assert.equal(await page.locator("#picker-fast").isHidden(), true);
     await typeMessage(page, "/fast");
-    assert.equal(
-      (await page.locator("#slash-popover").isHidden()) ||
-        !(await listed(page)).includes("/fast"),
-      true,
-      "typing /fast offers no fast command",
-    );
+    await page.locator("#message").press("Enter");
+    await page.locator("#picker-fast").waitFor();
+    assert.equal(await page.locator("#message").inputValue(), "");
+    await typeMessage(page, "/fast");
+    await page.locator("#message").press("Enter");
+    await page.locator("#picker-fast").waitFor({ state: "hidden" });
     await typeMessage(page, "/");
     assert.equal(
       await page.locator("#message").getAttribute("aria-expanded"),
@@ -233,6 +234,7 @@ async function testSlash(browser, output, errors) {
       "/new",
       "/model",
       "/reasoning",
+      "/fast",
       "/rename",
       "/usage",
       "/size",
@@ -269,6 +271,44 @@ async function testSlash(browser, output, errors) {
     }
     await context.close();
   }
+  await testNoFastTier(browser);
+}
+
+/**
+ * When the chat's model has no Fast tier (the worker sends fast: null), /fast
+ * is not listed and the lightning toggle is disabled with a plain tooltip.
+ */
+async function testNoFastTier(browser) {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 950 } });
+  const page = await context.newPage();
+  await page.route("**/chat-options", async (route) => {
+    const response = await route.fetch();
+    const catalog = await response.json();
+    for (const model of catalog.models) model.fast = null;
+    catalog.default_fast = null;
+    await route.fulfill({ response, json: catalog });
+  });
+  await page.goto("http://127.0.0.1:9137/preview/");
+  await page.locator(".chat-row").first().waitFor({ state: "attached" });
+  await page.locator("#new-chat").evaluate((el) => el.click());
+  await page.locator("#picker-button:not([disabled])").waitFor();
+  await typeMessage(page, "/fa");
+  assert.equal(
+    (await page.locator("#slash-popover").isHidden()) ||
+      !(await listed(page)).includes("/fast"),
+    true,
+    "/fast is listed for a model without Fast",
+  );
+  await page.locator("#message").fill("");
+  await page.locator("#picker-button").click();
+  await page.locator("#effort-popover").waitFor();
+  assert.equal(await page.locator("#effort-fast").isDisabled(), true);
+  assert.equal(
+    await page.locator("#effort-fast").getAttribute("title"),
+    "Fast mode is not available for this model",
+  );
+  assert.equal(await page.locator("#picker-fast").isHidden(), true);
+  await context.close();
 }
 
 module.exports = testSlash;

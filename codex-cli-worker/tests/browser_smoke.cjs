@@ -551,20 +551,22 @@ async function effortSaved(page, label) {
       await page.locator("#picker-model").textContent(),
     );
     assert.equal(await page.locator("#effort-model svg.effort-model-chevron").count(), 1);
-    // No lightning (fast mode) toggle anywhere on the page, in the composer or the panel, until it
-    // works: the Codex CLI has no setting for it (returns in 0.6, CX-04-FB-MODEL).
-    assert.equal(
-      await page.evaluate(() =>
-        [...document.querySelectorAll(".effort-bolt, [class*='bolt'], [id*='bolt'], [id*='fast'], .mdi-lightning-bolt, .mdi-flash, path")]
-          .filter((node) =>
-            node.tagName.toLowerCase() !== "path" ||
-            /^m13 3-8 10h6l-1 8 9-11h-6l1-7z$/i.test(node.getAttribute("d") || ""),
-          )
-          .filter((node) => node.getClientRects().length > 0 || node.closest("#effort-popover")).length,
-      ),
-      0,
+    // CX-04-FB-MODEL: the lightning toggle in the panel turns Fast mode on for this chat and keeps the
+    // panel open; the chip shows a small bolt once the panel closes. Fast stays on to the run checked below.
+    assert.equal(await page.locator("#effort-fast").getAttribute("aria-pressed"), "false");
+    assert.equal(await page.locator("#effort-fast").getAttribute("title"), "Fast mode: off");
+    await page.locator("#effort-fast").click();
+    await page.waitForFunction(
+      () =>
+        document.querySelector("#effort-fast").getAttribute("aria-pressed") === "true" &&
+        !document.querySelector("#picker-button").disabled,
     );
-    assert.equal(await page.getByRole("button", { name: /fast|lightning/i }).count(), 0);
+    assert.equal(await page.locator("#effort-popover").isVisible(), true);
+    assert.match(await page.locator("#effort-fast").getAttribute("title"), /^Fast mode: on/);
+    assert.equal(await page.locator("#picker-fast").isVisible(), false);
+    await page.keyboard.press("Escape");
+    assert.equal(await page.locator("#picker-fast").isVisible(), true);
+    await openPicker(page);
     assert.equal(
       await page.locator("#effort-dots span").count(),
       Number(await page.locator("#effort-slider").getAttribute("max")) + 1,
@@ -815,7 +817,9 @@ async function effortSaved(page, label) {
     assert.deepEqual(saved.chat_settings, {
       model: "gpt-6-astra",
       reasoning_effort: "xhigh",
+      fast: true,
     });
+    // The run took the chat's Fast choice with it.
     assert.deepEqual(
       saved.turns.at(-1).execution_settings,
       saved.chat_settings,
@@ -830,7 +834,7 @@ async function effortSaved(page, label) {
         async () =>
           (await (await fetch("tasks/preview-00")).json()).task.chat_settings,
       ),
-      { model: "gpt-6.1-terra", reasoning_effort: "ultra" },
+      { model: "gpt-6.1-terra", reasoning_effort: "ultra", fast: true },
     );
     // Choosing the model the add-on runs anyway clears the chat's own selection.
     await chooseModel(page, "GPT-6.1 Sol");
@@ -839,7 +843,7 @@ async function effortSaved(page, label) {
         async () =>
           (await (await fetch("tasks/preview-00")).json()).task.chat_settings,
       ),
-      { model: null, reasoning_effort: "ultra" },
+      { model: null, reasoning_effort: "ultra", fast: true },
     );
     await chooseModel(page, "GPT-6 Luna");
     assert.equal(await page.locator("#effort-label").textContent(), "Medium");

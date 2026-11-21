@@ -10,6 +10,11 @@
   and on a desktop. The desktop app's fast mode switch is left out: the Codex CLI has no setting for it.
 - **Fast mode is hidden until it works.** The chat page shows no lightning (fast mode) toggle and no `/fast` command;
   both return in 0.6 with a working toggle.
+- **Fast mode works.** The lightning button in the model and reasoning panel, and the `/fast` command, turn Fast mode on
+  or off for a chat. Codex then runs the model on its Fast service tier (about twice the speed; it uses more of your
+  plan). The chip shows a small bolt while Fast is on. A chat that never chose follows the model's own default from the
+  Codex model list, and each turn tells Codex the tier, so a choice never carries over by mistake. The button is dimmed,
+  and `/fast` is not listed, for a model without Fast.
 - **Home Assistant MCP, on by default.** The new option **Enable Home Assistant MCP** gives Codex the tools of the
   bundled Home Assistant MCP server (hass-mcp 0.6.0, as in the Claude Code app). Codex can find entities by name, area
   or domain and read automations, dashboards, history, statistics and the error log without asking. It can also

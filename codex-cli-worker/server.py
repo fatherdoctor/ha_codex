@@ -193,19 +193,39 @@ MODEL_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,99}")
 EFFORT_RE = re.compile(r"[a-z][a-z0-9_-]{0,19}")
 # Codex only emits reasoning items when summaries are requested; "auto" produced none.
 REASONING_SUMMARIES = {"concise", "detailed", "none"}
-# Supported choices in the bundled CLI 0.165.0 model catalog. Availability still
+
+
+class ChatModel(NamedTuple):
+    """One model the chat page offers, parsed once from Codex's `model/list` (or the built-in list).
+
+    fast is None when the model has no Fast service tier, False when Fast is offered but off unless a chat turns it
+    on, and True when Codex runs the model on Fast by default (its catalog's defaultServiceTier).
+    """
+
+    id: str
+    label: str
+    efforts: tuple[str, ...]
+    fast: bool | None = None
+
+
+# The service tier Codex names Fast ("2x speed, increased usage"). turn/start's serviceTier sets it for the turn
+# and the turns after it; JSON null sets the standard tier instead, and leaving the field out keeps the last one.
+FAST_SERVICE_TIER = "priority"
+# Supported choices in the bundled CLI 0.166.0 model catalog. Availability still
 # depends on the signed-in account; the CLI reports unavailable models normally.
+# Every one offers Fast; gpt-6-sol and gpt-6-luna run on it unless a chat turns it off.
 CHAT_MODELS = (
-    ("gpt-6-astra", "GPT-6 Astra", ("low", "medium", "high", "xhigh", "max", "ultra")),
-    ("gpt-6.1-sol", "GPT-6.1 Sol", ("low", "medium", "high", "xhigh", "max", "ultra")),
-    ("gpt-6.1-terra", "GPT-6.1 Terra", ("low", "medium", "high", "xhigh", "max", "ultra")),
-    ("gpt-6-sol", "GPT-6 Sol", ("low", "medium", "high", "xhigh", "max", "ultra")),
-    ("gpt-6-luna", "GPT-6 Luna", ("low", "medium", "high", "xhigh", "max")),
-    ("gpt-5.6-sol", "GPT-5.6 Sol", ("low", "medium", "high", "xhigh", "max", "ultra")),
-    ("gpt-5.6-terra", "GPT-5.6 Terra", ("low", "medium", "high", "xhigh", "max", "ultra")),
-    ("gpt-5.6-luna", "GPT-5.6 Luna", ("low", "medium", "high", "xhigh", "max")),
+    ChatModel("gpt-6-astra", "GPT-6 Astra", ("low", "medium", "high", "xhigh", "max", "ultra"), False),
+    ChatModel("gpt-6.1-sol", "GPT-6.1 Sol", ("low", "medium", "high", "xhigh", "max", "ultra"), False),
+    ChatModel("gpt-6.1-terra", "GPT-6.1 Terra", ("low", "medium", "high", "xhigh", "max", "ultra"), False),
+    ChatModel("gpt-6-sol", "GPT-6 Sol", ("low", "medium", "high", "xhigh", "max", "ultra"), True),
+    ChatModel("gpt-6-luna", "GPT-6 Luna", ("low", "medium", "high", "xhigh", "max"), True),
+    ChatModel("gpt-5.6-sol", "GPT-5.6 Sol", ("low", "medium", "high", "xhigh", "max", "ultra"), False),
+    ChatModel("gpt-5.6-terra", "GPT-5.6 Terra", ("low", "medium", "high", "xhigh", "max", "ultra"), False),
+    ChatModel("gpt-5.6-luna", "GPT-5.6 Luna", ("low", "medium", "high", "xhigh", "max"), False),
 )
-CHAT_MODEL_EFFORTS = {model: efforts for model, _, efforts in CHAT_MODELS}
+CHAT_MODEL_EFFORTS = {model.id: model.efforts for model in CHAT_MODELS}
+CHAT_MODEL_FAST = {model.id: model.fast for model in CHAT_MODELS}
 # The account's live model list from `codex app-server` (`model/list`), read again after this many seconds.
 # Until a read succeeds, and after a failed one, the chat page offers the built-in CHAT_MODELS.
 MODEL_LIST_TTL_SECONDS = 60 * 60
@@ -224,7 +244,8 @@ CLI_DEFAULT_MODEL = "gpt-6.1-sol"
 # that is still offered. The `codex_model` option is free text, so any saved value
 # keeps starting; a retired one is replaced when it is read.
 RETIRED_MODELS = {"gpt-5.5": "gpt-5.6-sol"}
-DEFAULT_CHAT_SETTINGS = {"model": None, "reasoning_effort": None}
+# fast None follows the model: Fast when Codex runs it on Fast by default, else standard speed.
+DEFAULT_CHAT_SETTINGS = {"model": None, "reasoning_effort": None, "fast": None}
 # The `model_pin` option is empty as shipped, and empty means no pin: runs use the
 # account's default model. When the owner sets it, a chat, a saved turn or the
 # `codex_model` option naming any other model is refused instead of running on it.
@@ -754,7 +775,8 @@ def resolve_chat_settings(settings: dict[str, Any], options: dict[str, Any]) -> 
         elif model != pin:
             raise ValueError(model_pin_message(model, pin))
     # A run on default names the CLI's pick only when the worker knows it (turn_model); its levels are those of that pick.
-    efforts = model_efforts(default_model(options) if model == "default" else model) or ("low", "medium", "high", "xhigh")
+    named = default_model(options) if model == "default" else model
+    efforts = model_efforts(named) or ("low", "medium", "high", "xhigh")
     effort = settings.get("reasoning_effort")
     if effort is not None and effort not in efforts:
         if settings.get("model"):
@@ -768,7 +790,15 @@ def resolve_chat_settings(settings: dict[str, Any], options: dict[str, Any]) -> 
         # neither does the model the CLI picks for default, which gets it unchanged.
         if effort not in efforts:
             effort = "medium"
-    return {"model": model, "reasoning_effort": effort}
+    return {"model": model, "reasoning_effort": effort, "fast": run_fast(settings.get("fast"), model_fast(named))}
+
+
+def run_fast(choice: bool | None, offered: bool | None) -> bool | None:
+    """Return whether a turn runs on Fast: None when its model has no Fast tier, else the chat's choice or the model's
+    default. A chat that turned Fast on keeps the choice on a model without it, and gets Fast back on one that has it."""
+    if offered is None:
+        return None
+    return offered if choice is None else choice
 
 
 def parse_chat_settings(payload: dict[str, Any], task: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -779,13 +809,15 @@ def parse_chat_settings(payload: dict[str, Any], task: dict[str, Any] | None = N
     """
     settings = payload.get("chat_settings", (task or {}).get("chat_settings", DEFAULT_CHAT_SETTINGS))
     if not isinstance(settings, dict) or set(settings) - set(DEFAULT_CHAT_SETTINGS):
-        raise ValueError("chat_settings must contain only model and reasoning_effort.")
+        raise ValueError("chat_settings must contain only model, reasoning_effort and fast.")
     settings = {**DEFAULT_CHAT_SETTINGS, **settings}
     model, effort = current_model(settings["model"]), settings["reasoning_effort"]
     if model is not None and (not isinstance(model, str) or model_efforts(model, wait=True) is None):
         raise ValueError("Select a supported model or use the add-on default.")
     if effort is not None and (not isinstance(effort, str) or effort not in known_efforts()):
         raise ValueError("Select a supported reasoning level or use the add-on default.")
+    if settings["fast"] is not None and not isinstance(settings["fast"], bool):
+        raise ValueError("Fast mode must be on, off or the model's default.")
     # Only after the checks: replacing a retired model drops a level its replacement lacks.
     settings = current_chat_settings(settings)
     resolve_chat_settings(settings, read_options())
@@ -1768,13 +1800,22 @@ def read_codex_models(codex: str) -> list[dict[str, Any]]:
         terminate_and_reap_process(proc, terminate_timeout=3, kill_timeout=2)
 
 
-def parse_codex_models(entries: list[dict[str, Any]]) -> tuple[tuple[str, str, tuple[str, ...]], ...]:
-    """Return (id, label, levels) for each model the picker shows: not hidden, with a plain id and levels.
+def parse_fast_tier(entry: dict[str, Any]) -> bool | None:
+    """Return a `model/list` entry's Fast state as ChatModel.fast: None without the Fast tier, else its default."""
+    tiers = entry.get("serviceTiers")
+    if not isinstance(tiers, list) or not any(
+            isinstance(tier, dict) and tier.get("id") == FAST_SERVICE_TIER for tier in tiers):
+        return None
+    return entry.get("defaultServiceTier") == FAST_SERVICE_TIER
+
+
+def parse_codex_models(entries: list[dict[str, Any]]) -> tuple[ChatModel, ...]:
+    """Return a ChatModel for each model the picker shows: not hidden, with a plain id and levels.
 
     An entry with a field of the wrong type is left out, not guessed at; so is a model with no level.
     The account's default model comes first, as Codex orders its own picker.
     """
-    models: list[tuple[str, str, tuple[str, ...]]] = []
+    models: list[ChatModel] = []
     seen: set[str] = set()
     for entry in sorted(entries, key=lambda item: item.get("isDefault") is not True):
         model, label, levels = entry.get("id"), entry.get("displayName"), entry.get("supportedReasoningEfforts")
@@ -1788,7 +1829,7 @@ def parse_codex_models(entries: list[dict[str, Any]]) -> tuple[tuple[str, str, t
         if not efforts:
             continue
         label = label.strip() if isinstance(label, str) and label.strip() and label.isprintable() else model
-        models.append((model, label[:100], efforts))
+        models.append(ChatModel(model, label[:100], efforts, parse_fast_tier(entry)))
         seen.add(model)
         if len(models) >= MODEL_LIST_MAX_MODELS:
             break
@@ -1811,7 +1852,7 @@ def refresh_models() -> None:
             model_list_state.update(models=models, read_at=time.monotonic())
 
 
-def live_models(wait: bool = False) -> tuple[tuple[str, str, tuple[str, ...]], ...] | None:
+def live_models(wait: bool = False) -> tuple[ChatModel, ...] | None:
     """Return the account's live model list, or None until a read succeeded.
 
     A stale or missing list starts one read in the background, at most one at a time and not more
@@ -1836,7 +1877,7 @@ def live_models(wait: bool = False) -> tuple[tuple[str, str, tuple[str, ...]], .
     return models
 
 
-def chat_models() -> tuple[tuple[str, str, tuple[str, ...]], ...]:
+def chat_models() -> tuple[ChatModel, ...]:
     """Return the models the chat page offers: the live list when Codex gave one, else the built-in list."""
     return live_models() or CHAT_MODELS
 
@@ -1849,13 +1890,21 @@ def model_efforts(model: Any, wait: bool = False) -> tuple[str, ...] | None:
     """
     if not isinstance(model, str):
         return None
-    live = {entry[0]: entry[2] for entry in live_models(wait=wait and model not in CHAT_MODEL_EFFORTS) or ()}
+    live = {entry.id: entry.efforts for entry in live_models(wait=wait and model not in CHAT_MODEL_EFFORTS) or ()}
     return live.get(model) or CHAT_MODEL_EFFORTS.get(model)
+
+
+def model_fast(model: Any) -> bool | None:
+    """Return a model's ChatModel.fast: from the live list when it has the model, else from the built-in list."""
+    if not isinstance(model, str):
+        return None
+    live = {entry.id: entry.fast for entry in live_models() or ()}
+    return live[model] if model in live else CHAT_MODEL_FAST.get(model)
 
 
 def known_efforts() -> set[str]:
     """Return every level that some offered model supports."""
-    return {effort for _, _, efforts in (*CHAT_MODELS, *(live_models() or ())) for effort in efforts}
+    return {effort for model in (*CHAT_MODELS, *(live_models() or ())) for effort in model.efforts}
 
 
 def _window_reset(resets_at: Any, weekly: bool, now: datetime) -> tuple[str, str]:
@@ -5280,6 +5329,7 @@ def create_approval_session(
                      # the ask_owner and report_failure calls (apply_status_calls).
                      **turn_model(model),
                      "effort": execution["reasoning_effort"], "summary": reasoning_summary(options),
+                     **turn_service_tier(execution),
                      "sandboxPolicy": policy,
                      "approvalPolicy": settings["approval_policy"],
                      "approvalsReviewer": settings["approvals_reviewer"]},
@@ -5301,6 +5351,18 @@ def turn_model(model: str) -> dict[str, str]:
         return {"model": model}
     seen = seen_default_model()
     return {"model": seen} if model_efforts(seen) is not None else {}
+
+
+def turn_service_tier(execution: dict[str, Any]) -> dict[str, str | None]:
+    """Return the serviceTier field of turn/start: Fast or the standard tier, named on every turn of a model with Fast.
+
+    Codex keeps a turn's tier for the turns after it, so leaving the field out would keep an earlier choice. Settings
+    saved before the field existed, and models without Fast, send nothing and keep Codex's own choice.
+    """
+    fast = execution.get("fast")
+    if fast is None:
+        return {}
+    return {"serviceTier": FAST_SERVICE_TIER if fast else None}
 
 
 # The longest plain-text answer the page keeps.
@@ -7179,10 +7241,11 @@ def chat_options() -> Response:
         model_error = ""
     except ValueError as exc:
         # The add-on's codex_model option names another model than the pin; say so on the page.
-        default = {"model": pin, "reasoning_effort": "medium"}
+        default = {"model": pin, "reasoning_effort": "medium", "fast": model_fast(pin)}
         model_error = str(exc)
     default_id = pin or default_model(options)
-    models = [{"id": model, "label": label, "efforts": efforts} for model, label, efforts in chat_models()]
+    models = [{"id": model.id, "label": model.label, "efforts": model.efforts, "fast": model.fast}
+              for model in chat_models()]
     if pin:
         models = [entry for entry in models if entry["id"] == pin]
     return jsonify({
@@ -7194,6 +7257,8 @@ def chat_options() -> Response:
         "default_model": default_id,
         "models": models,
         "default_efforts": model_efforts(default_id) or ("low", "medium", "high", "xhigh"),
+        # The add-on model's ChatModel.fast: null without Fast, else whether Codex runs it on Fast by default.
+        "default_fast": model_fast(default_id),
         # "codex" when the list is the account's own from Codex, "built-in" while the worker uses its fallback.
         "models_source": "codex" if live_models() is not None else "built-in",
         "backup_retention_days": backup_retention_days(options),
