@@ -51,8 +51,6 @@ const assert = require('node:assert/strict');
           assert.deepEqual(await expanded(), ['accounts-section']);
           assert.equal(await page.locator('#diagnostic-retention, #save-diagnostic-retention').count(), 0,
             'the log limit is set on the Configuration tab only');
-          assert.equal(await page.locator('#remote-control-name-form').count(), 0,
-            'the remote-control name is set on the Configuration tab only');
           assert.equal(await page.locator('#workspace-section #workspace-open').count(), 1,
             'Workspace instructions contains the Workspace rules button');
           // The fixture has no Supervisor, so the lookup answers null: the row is not a link and says where to go.

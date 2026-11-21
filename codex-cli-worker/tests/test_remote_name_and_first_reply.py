@@ -1,4 +1,4 @@
-"""The machine name is set on the Configuration tab only (0.3.5), and a first message gets a plain reply (0.3.2)."""
+"""The machine name is saved from the Remote connection window (0.5) and a first message gets a plain reply (0.3.2)."""
 from __future__ import annotations
 
 import json
@@ -8,6 +8,7 @@ from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import requests
 
 from test_server import server
 
@@ -23,7 +24,7 @@ def supervisor_reply(payload=None, error=None):
 
 
 class RenameRoute(unittest.TestCase):
-    """The page no longer renames: POST /remote-control/name is refused and nothing reaches Supervisor (0.3.5)."""
+    """POST /remote-control/name saves the option through Supervisor, from an administrator on the page only."""
 
     SAVED = {"remote_control_name": "Home Assistant", "HA_TOKEN": "!secret synthetic_token", "local_docs": True}
 
@@ -38,8 +39,8 @@ class RenameRoute(unittest.TestCase):
         self.stack.enter_context(patch.object(server, "OPTIONS_PATH", self.options))
         self.stack.enter_context(patch.object(server, "api_token", return_value="tok"))
         self.stack.enter_context(patch.object(server, "ha_token", return_value="synthetic-supervisor"))
-        self.stack.enter_context(patch.object(server, "ingress_admin",
-                                              return_value=({"user_id": "fixture-admin"}, "")))
+        self.admin = self.stack.enter_context(patch.object(server, "ingress_admin",
+                                                           return_value=({"user_id": "fixture-admin"}, "")))
         self.enabled = self.stack.enter_context(
             patch.object(server.remote_control_supervisor, "enabled", return_value=False))
         self.stack.enter_context(patch.object(server.remote_control_supervisor, "snapshot",
@@ -53,27 +54,77 @@ class RenameRoute(unittest.TestCase):
 
     @staticmethod
     def snapshot():
-        """The part of the remote-control state the page reads: the name from options.json."""
+        """The part of the remote-control state the page reads after a rename: the name from options.json."""
         name = server.read_options().get("remote_control_name")
         return {"configured_name": server.remote_control.machine_name(name)}
 
     def rename(self, body, **request):
         return self.client.post("/remote-control/name", json=body, **(request or self.ingress))
 
-    def test_rename_action_is_gone_and_options_stay(self):
-        before = self.options.read_text()
-        response = self.rename({"name": "Lake house"})
-        self.assertEqual(response.status_code, 404)
+    def test_saves_only_the_name_and_keeps_secret_references(self):
+        response = self.rename({"name": "  Lake house  "})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["remote_control"]["configured_name"], "Lake house")
+        self.get.assert_called_once()
+        self.assertEqual(self.get.call_args.args[0], "http://supervisor/addons/self/info")
+        self.assertEqual(self.post.call_args.args[0], "http://supervisor/addons/self/options")
+        self.assertEqual(self.post.call_args.kwargs["json"],
+                         {"options": {**self.SAVED, "remote_control_name": "Lake house"}})
+        local = json.loads(self.options.read_text())
+        self.assertEqual(local, {"remote_control_name": "Lake house", "HA_TOKEN": "resolved-synthetic",
+                                 "local_docs": True})
+        self.assertEqual(self.options.stat().st_mode & 0o777, 0o600)
+
+    def test_api_token_cannot_rename(self):
+        response = self.rename({"name": "Other"}, headers={"Authorization": "Bearer tok"})
+        self.assertEqual(response.status_code, 403)
+        self.post.assert_not_called()
+
+    def test_signed_in_person_who_is_not_an_administrator_cannot_rename(self):
+        self.admin.return_value = (None, "Sign in as an administrator.")
+        response = self.rename({"name": "Other"})
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.get_json()["error"], "Sign in as an administrator.")
         self.get.assert_not_called()
         self.post.assert_not_called()
-        self.assertEqual(self.options.read_text(), before)
 
-    def test_page_has_no_path_that_writes_add_on_options(self):
-        # The one writer of /addons/self/options was the rename; the Configuration tab is now the only one.
-        source = (Path(server.__file__)).read_text()
-        self.assertNotIn("/options\"", source)
-        self.assertFalse(hasattr(server, "save_remote_control_name"))
-        self.assertFalse(hasattr(server, "write_local_option"))
+    def test_refused_while_remote_control_is_on(self):
+        self.enabled.return_value = True
+        response = self.rename({"name": "Other"})
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("Turn remote control off", response.get_json()["error"])
+        self.get.assert_not_called()
+        self.post.assert_not_called()
+
+    def test_refuses_a_value_that_is_not_a_name(self):
+        for body in ({"name": 7}, {"name": "x" * 64}, {"name": "ok", "extra": 1}, {}):
+            with self.subTest(body=body):
+                self.assertEqual(self.rename(body).status_code, 400)
+        self.post.assert_not_called()
+
+    def test_one_limit_and_an_error_that_names_it(self):
+        refused = self.rename({"name": "x" * 64}).get_json()["error"]
+        self.assertEqual(refused, "Enter a name of up to 63 characters.")
+        self.assertEqual(self.rename({"name": "  " + "x" * 63 + "  "}).status_code, 200)
+        self.assertEqual(self.rename({"name": "Lake/house"}).status_code, 200)
+
+    def test_local_write_failure_after_supervisor_saved_says_the_name_is_saved(self):
+        self.options.write_text("not json")
+        response = self.rename({"name": "Lake house"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["notice"], "The name is saved. It shows here after the app restarts.")
+        self.post.assert_called_once()
+        with patch.object(server, "write_local_option", side_effect=OSError("read-only")):
+            self.assertIn("notice", self.rename({"name": "Other"}).get_json())
+
+    def test_supervisor_refusal_leaves_options_unchanged(self):
+        before = self.options.read_text()
+        self.post.return_value = supervisor_reply(error=requests.HTTPError("400"))
+        response = self.rename({"name": "Other"})
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("did not save", response.get_json()["error"])
+        self.assertNotIn("synthetic", response.get_json()["error"])
+        self.assertEqual(self.options.read_text(), before)
 
 
 class FirstReplyPrompt(unittest.TestCase):
@@ -105,15 +156,18 @@ class FirstReplyPrompt(unittest.TestCase):
 
 
 class PageControls(unittest.TestCase):
-    """The page shows the machine name without a field, and carries the one-time AGENTS.md hint."""
+    """The page carries the name field, the Back control and the one-time AGENTS.md hint."""
 
-    def test_name_is_shown_and_set_on_the_configuration_tab(self):
+    def test_name_field_posts_to_the_rename_action_and_has_a_back_control(self):
         html = (WEB / "index.html").read_text()
         chat = (WEB / "assets" / "chat.js").read_text()
-        self.assertNotIn('id="remote-control-name-form"', html)
-        self.assertIn('<strong id="remote-control-name"></strong>', html)
-        self.assertIn("Change it with Remote control machine name in Add-on configuration.", html)
-        self.assertNotIn("remote-control/name", chat)
+        studio = (WEB / "assets" / "studio.js").read_text()
+        self.assertIn('id="remote-control-name-form"', html)
+        self.assertIn('id="remote-control-name" maxlength="63"', html)
+        self.assertIn('api("remote-control/name", { name: input.value })', chat)
+        self.assertIn("Turn remote control off to change the name.", chat)
+        self.assertIn('id="connection-back"', html)
+        self.assertIn('$("connection-back").onclick', studio)
 
     def test_agents_hint_is_dismissible_and_outside_the_chat(self):
         html = (WEB / "index.html").read_text()

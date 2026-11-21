@@ -2,6 +2,7 @@
   /* Material Design Icons (Apache-2.0, @mdi/js 7.4.47): mdiChevronRight and mdiChevronDown, the arrows Home Assistant uses; mdiClose and mdiCheck. */
   --mdi-chevron-right: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z'/%3E%3C/svg%3E");
   --mdi-chevron-down: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z'/%3E%3C/svg%3E");
+  --mdi-arrow-left: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z'/%3E%3C/svg%3E");
   --mdi-close: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z'/%3E%3C/svg%3E");
   --mdi-check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z'/%3E%3C/svg%3E");
   color-scheme: light;
@@ -2142,7 +2143,17 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   -webkit-mask: var(--mdi-close) center / 24px no-repeat;
   mask: var(--mdi-close) center / 24px no-repeat;
 }
-.icon.icon-close {
+.icon-back::before {
+  content: "";
+  display: block;
+  width: 24px;
+  height: 24px;
+  background: currentColor;
+  -webkit-mask: var(--mdi-arrow-left) center / 24px no-repeat;
+  mask: var(--mdi-arrow-left) center / 24px no-repeat;
+}
+.icon.icon-close,
+.icon.icon-back {
   padding: 8px;
   border-radius: 50%;
   line-height: 0;
@@ -2808,4 +2819,16 @@ a.ha-nav-row:focus-visible {
   .chats-card .chat-row.current:has(.row-menu) .row-meta > span:last-child {
     visibility: hidden;
   }
+}
+
+/* CX-04-REMOTE-WIN: the Back control sits left of the title; the title takes the space between it and the X. */
+#connection-dialog .dialog-header h2 {
+  flex: 1;
+  min-width: 0;
+  margin-left: 4px;
+}
+#remote-control-name {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
 }
