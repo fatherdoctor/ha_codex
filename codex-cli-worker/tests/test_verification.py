@@ -1,4 +1,6 @@
 """Verification boundaries, evidence ownership, and credential protection."""
+import ast
+import inspect
 import json
 import os
 import subprocess
@@ -12,6 +14,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 from test_server import server
 import tool_threads
+import verification
 from verification import DEFAULT_BROWSER_MEMORY_LIMIT_MIB, MAX_BROWSERS, Verification
 from verification import browser_memory_limit, browser_process_memory, kill_tracked_processes, track_browser_processes
 
@@ -453,3 +456,46 @@ class VerificationTests(unittest.TestCase):
         self.engine.cleanup()
         self.assertFalse((root / "expired.png").exists())
         self.assertTrue((root / "user.png").exists())
+
+
+class WorkerInterfaceTests(unittest.TestCase):
+    """VerificationWorker lists exactly what verification.py reads from the worker, and server.py has each name."""
+
+    def setUp(self):
+        """Collect the names of the interface and the names that the module reads from `self.worker`."""
+        tree = ast.parse(Path(verification.__file__).read_text(encoding="utf-8"))
+        interface = next(node for node in tree.body
+                         if isinstance(node, ast.ClassDef) and node.name == "VerificationWorker")
+        self.methods = {node.name for node in interface.body if isinstance(node, ast.FunctionDef)}
+        self.values = {node.target.id for node in interface.body if isinstance(node, ast.AnnAssign)}
+        self.used = {node.attr for node in ast.walk(tree)
+                     if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Attribute)
+                     and node.value.attr == "worker" and isinstance(node.value.value, ast.Name)
+                     and node.value.value.id == "self"}
+
+    def test_the_interface_lists_each_name_that_the_module_reads_and_no_other(self):
+        """A new use of the worker must be added to the interface; a name no longer used must leave it."""
+        self.assertEqual(self.used, self.methods | self.values)
+
+    def test_the_worker_has_each_listed_name(self):
+        """server.py defines each method as a function and each value as a module global."""
+        for name in self.methods:
+            self.assertTrue(inspect.isfunction(getattr(server, name, None)), name)
+        for name in self.values:
+            self.assertTrue(hasattr(server, name), name)
+
+    def test_each_listed_method_takes_the_arguments_that_the_worker_takes(self):
+        """A method of the interface and the function in server.py have the same parameters and return type.
+
+        The worker function may take more keyword-only parameters with defaults; the module does not pass them.
+        """
+        for name in sorted(self.methods):
+            declared = inspect.signature(getattr(verification.VerificationWorker, name))
+            actual = inspect.signature(getattr(server, name))
+            wanted = [str(parameter) for key, parameter in declared.parameters.items() if key != "self"]
+            extra = [parameter for key, parameter in actual.parameters.items() if key not in declared.parameters]
+            kept = [str(parameter) for key, parameter in actual.parameters.items() if key in declared.parameters]
+            self.assertEqual(wanted, kept, name)
+            self.assertTrue(all(parameter.kind is parameter.KEYWORD_ONLY and parameter.default is not parameter.empty
+                                for parameter in extra), name)
+            self.assertEqual(str(declared.return_annotation), str(actual.return_annotation), name)

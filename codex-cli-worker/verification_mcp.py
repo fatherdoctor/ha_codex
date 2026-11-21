@@ -5,10 +5,11 @@ import json
 import os
 import socket
 import sys
+from typing import Any
 
 import tool_threads
 
-TOOL = {
+TOOL: dict[str, Any] = {
     "name": "verify",
     "description": (
         "Find entities by name, or check Home Assistant configuration, fresh entity state, Core logs, or "
@@ -37,7 +38,7 @@ TOOL = {
 }
 
 
-def verify(arguments, thread_id):
+def verify(arguments: Any, thread_id: str) -> dict[str, Any]:
     """Forward only the supported fields and the chat's thread id that Codex sent with the call."""
     if not isinstance(arguments, dict) or set(arguments) - set(TOOL["inputSchema"]["properties"]):
         raise ValueError("Unsupported verification arguments")
@@ -58,7 +59,7 @@ def verify(arguments, thread_id):
     return json.loads(raw)
 
 
-def respond(request):
+def respond(request: dict[str, Any]) -> dict[str, Any]:
     """Implement the MCP initialization, discovery and single-tool request surface."""
     method = request.get("method")
     if method == "initialize":
@@ -81,7 +82,7 @@ def respond(request):
     raise ValueError("Method not found")
 
 
-def main():
+def main() -> int:
     """Read bounded newline-delimited JSON-RPC; stdout contains protocol data only."""
     while raw := sys.stdin.buffer.readline(65537):
         if len(raw) > 65536:
