@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import io
 import json
 import threading
 import unittest
+from contextlib import redirect_stdout
+from typing import ClassVar
 
 from test_approvals import Transport  # first: it puts the worker folder on the import path
 import approvals
@@ -286,3 +289,113 @@ class HassMcpWriteCardTests(unittest.TestCase):
     def test_arguments_out_of_form_fall_back_to_the_tool_and_its_arguments(self):
         plain = self.words("call_service_tool", {"domain": "Light Domain", "service": "turn_on"})
         self.assertEqual(plain["what"], "Run the tool home_assistant_mcp.call_service_tool, with the arguments shown below.")
+
+
+class AppToolCardTests(unittest.TestCase):
+    """A tool of a ChatGPT app (GitHub through the ChatGPT sign-in, say) gets the same card in Default (CX-TOOL-CARD-ANY).
+
+    Before, every such question was declined, so a draft pull request that Codex opened through the GitHub app
+    failed in Default while it worked in Full access and Auto-review, where Codex does not ask the owner.
+    """
+
+    setUp = ToolCardTests.setUp
+    record = ToolCardTests.record
+    ARGUMENTS: ClassVar[dict] = {"repository_full_name": "example-owner/example-repo", "head": "feature",
+                                 "base": "main", "title": "Add a test", "draft": True}
+
+    def ask(self, request_id=7, message='Allow GitHub to run tool "create_pull_request"?', meta=None, **overrides):
+        """Send the request Codex 0.166.0 sends before an app tool call; return what the session wrote back."""
+        params = {
+            "threadId": "thread", "turnId": "turn", "serverName": "codex_apps", "mode": "form",
+            "message": message, "requestedSchema": {"type": "object", "properties": {}},
+            "_meta": {"codex_approval_kind": "mcp_tool_call", "source": "connector", "connector_id": "connector_github",
+                      "connector_name": "GitHub", "tool_title": "Create pull request",
+                      "tool_params": dict(self.ARGUMENTS), **(meta or {})},
+        }
+        params.update(overrides)
+        before = len(self.writer.messages())
+        with redirect_stdout(io.StringIO()) as log:
+            self.session.receive({"id": request_id, "method": "mcpServer/elicitation/request", "params": params})
+        self.log = log.getvalue()
+        return self.writer.messages()[before:]
+
+    def decide(self, decision):
+        with redirect_stdout(io.StringIO()) as log:
+            self.session.decide(self.record()["approval_id"], decision)
+        return log.getvalue()
+
+    def test_default_shows_a_card_with_the_app_the_tool_and_every_argument(self):
+        self.assertEqual(self.ask(), [])
+        record = self.record()
+        self.assertEqual((record["kind"], record["status"], record["tool"], record["app"]),
+                         ("tool", "pending", "codex_apps.create_pull_request", "GitHub"))
+        self.assertTrue(record["can_allow"])
+        self.assertEqual(json.loads(record["arguments"]), self.ARGUMENTS)
+        plain = record["confirmation"]
+        self.assertEqual(plain["what"], "Let GitHub run its tool create_pull_request, with the arguments shown below.")
+        self.assertEqual(plain["where"], "Your GitHub account, connected through your ChatGPT sign-in.")
+        self.assertIn('Codex asks: Allow GitHub to run tool "create_pull_request"?', plain["effect"])
+        self.assertTrue(self.session.waiting_for_user())
+
+    def test_approve_once_accepts_this_call_only_and_logs_names_only(self):
+        self.ask()
+        log = self.decide("allow")
+        self.assertEqual(self.writer.messages()[-1],
+                         {"id": 7, "result": {"action": "accept", "content": None, "_meta": None}})
+        self.assertEqual(log, "Tool call codex_apps.create_pull_request allowed by the owner.\n")
+        self.assertNotIn("example-repo", log)
+
+    def test_decline_declines_and_logs_one_line(self):
+        self.ask()
+        log = self.decide("deny")
+        self.assertEqual(self.writer.messages()[-1],
+                         {"id": 7, "result": {"action": "decline", "content": None, "_meta": None}})
+        self.assertEqual(log, "Tool call codex_apps.create_pull_request denied by the owner.\n")
+
+    def test_a_sentence_written_for_the_tool_names_it_by_its_title(self):
+        self.ask(message="Allow GitHub to add a comment to a pull request?", meta={"tool_title": "Add comment"})
+        record = self.record()
+        self.assertEqual(record["tool"], "codex_apps.Add comment")
+        self.assertEqual(record["question"], "Allow GitHub to add a comment to a pull request?")
+
+    def test_a_title_or_app_name_that_is_not_plain_reads_as_generic_words(self):
+        self.ask(message="Allow this?", meta={"tool_title": "<b>x</b>", "connector_name": "Git\nHub"})
+        record = self.record()
+        self.assertEqual((record["tool"], record["app"]), ("codex_apps.tool", ""))
+        self.assertEqual(record["confirmation"]["what"],
+                         "Let a ChatGPT app run its tool tool, with the arguments shown below.")
+
+    def test_a_question_with_hidden_text_can_only_be_denied(self):
+        self.ask(message='Allow GitHub hidden-secret to run tool "create_pull_request"?')
+        self.assertFalse(self.record()["can_allow"])
+        with self.assertRaises(ValueError):
+            self.session.decide(self.record()["approval_id"], "allow")
+
+    def test_read_only_still_declines_and_says_why(self):
+        self.session.thread_params["sandbox"] = "read-only"
+        reply = self.ask()
+        self.assertEqual(reply, [{"id": 7, "result": {"action": "decline"}}])
+        self.assertEqual(self.saved, [])
+        self.assertIn("Read only chat changes nothing", self.events[-1]["message"])
+        self.assertEqual(self.log, "Declined a tool question from codex_apps: the page has no card for it.\n")
+
+    def test_an_app_question_that_is_not_a_tool_call_is_still_declined_and_logged(self):
+        for number, overrides in enumerate(({"mode": "url"}, {"_meta": {"codex_approval_kind": "browser_auth"}}),
+                                           start=10):
+            with self.subTest(overrides):
+                reply = self.ask(request_id=number, **overrides)
+                self.assertEqual(reply, [{"id": number, "result": {"action": "decline"}}])
+                self.assertEqual(self.events[-1]["message"],
+                                 "The codex_apps tool asked a question this page cannot show, so it was declined "
+                                 "and nothing was changed.")
+                self.assertIn("Declined a tool question from codex_apps", self.log)
+        self.assertEqual(self.saved, [])
+
+    def test_auto_review_makes_no_card(self):
+        """In Auto-review Codex's reviewer answers in place of the owner and sends only its review events."""
+        review = {"threadId": "thread", "turnId": "turn", "reviewId": "review-1", "targetItemId": "call-1",
+                  "action": {"type": "mcpToolCall", "server": "codex_apps", "toolName": "create_pull_request"}}
+        self.session.receive({"method": "item/autoApprovalReview/completed",
+                              "params": {**review, "review": {"status": "approved", "riskLevel": "low"}}})
+        self.assertEqual(self.saved, [])
+        self.assertEqual(self.events[-1]["status"], "approved")

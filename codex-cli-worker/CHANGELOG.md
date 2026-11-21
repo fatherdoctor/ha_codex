@@ -152,6 +152,12 @@
 - The add-on Configuration page now uses plain option names and one short description for each option (25 words or fewer). A test keeps names free of code words and descriptions short.
 
 ### Fixed
+- **ChatGPT app tools ask you instead of failing in Default.** When Codex used a tool of an app connected to your
+  ChatGPT account, such as GitHub to open a draft pull request, the chat page declined the request in Default and
+  showed an error, while the same request worked in Full access and Auto-review. Now Default shows the usual
+  permission card: the app, the tool and every argument. **Allow once** runs that one call; **Deny** declines it.
+  Read only still declines app tools, because they act outside the sandbox. The app log has one line for each tool
+  request that you allow or deny and for each question that the page declines, with names only and no arguments.
 - **Replies line up and are spaced.** A reply's text started one space to the right of its "Worked for" line and of
   the lines Codex writes along the way ("I'll look for …", "I found …"). Those lines also touched each other and the
   answer, so they read as part of it. Now all of them start at the left edge, and each line Codex writes along the way
