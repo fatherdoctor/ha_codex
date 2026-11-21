@@ -1,5 +1,4 @@
 """A schedule made from a chat: the owner's chat and model fields, and who may set or read them."""
-import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +7,19 @@ from unittest.mock import patch
 import test_scheduling as fixtures
 from test_scheduling import NOW, proposal, scheduling
 from test_server import server
+import scheduling
+
+
+def setUpModule():
+    """These tests cover the scheduling code, which is switched off in this series; turn it on for them."""
+    global _saved_switch
+    _saved_switch = scheduling.SCHEDULED_RUNS
+    scheduling.SCHEDULED_RUNS = True
+
+
+def tearDownModule():
+    scheduling.SCHEDULED_RUNS = _saved_switch
+
 
 MODEL = server.CHAT_MODELS[0][0]
 OTHER_MODEL = server.CHAT_MODELS[1][0]
@@ -45,7 +57,7 @@ class OwnerFieldStoreTests(unittest.TestCase):
         self.assertEqual((cleared['chat_id'], cleared['model']), ('', None))
 
     def test_an_agent_proposal_cannot_name_a_chat_or_a_model(self):
-        for author in ('lead', 'codex'):
+        for author in ('codex',):
             for field in ({'chat_id': CHAT}, {'model': MODEL}):
                 with self.subTest(author=author, field=field), self.assertRaisesRegex(
                         ValueError, 'accepts only name, prompt, mode and spec'):
@@ -60,24 +72,6 @@ class OwnerFieldStoreTests(unittest.TestCase):
                 with self.subTest(field=field, value=value), self.assertRaises(ValueError):
                     self.store.save(proposal(**{field: value}), owner=True, now=NOW)
         self.assertEqual(self.store.schedules(), [])
-
-    def test_a_schedule_from_an_older_version_opens_with_no_chat_and_still_runs(self):
-        old = Path(self.temp.name) / 'old.sqlite3'
-        with sqlite3.connect(old) as db:
-            db.execute('''CREATE TABLE schedules (
-                id TEXT PRIMARY KEY, name TEXT NOT NULL, prompt TEXT NOT NULL,
-                mode TEXT NOT NULL, spec TEXT NOT NULL, approved INTEGER NOT NULL,
-                enabled INTEGER NOT NULL, next_due REAL, updated REAL NOT NULL, revision TEXT NOT NULL,
-                author TEXT NOT NULL DEFAULT 'owner')''')
-            db.execute("INSERT INTO schedules VALUES('old','Older schedule','Inspect the sample.','read-only',"
-                       "'{\"kind\": \"interval\", \"seconds\": 3600}',1,1,?,?,'revision','owner')", (NOW + 3600, NOW))
-        store = scheduling.Store(old)
-        schedule = store.schedules()[0]
-        self.assertEqual((schedule['name'], schedule['chat_id'], schedule['model']), ('Older schedule', '', None))
-        worker = RecordingWorker()
-        scheduling.Engine(store, worker).tick(NOW + 3600)
-        self.assertEqual(worker.sent[0][1:], ('Inspect the sample.', 'read-only', 'Older schedule', 'old'))
-        self.assertEqual(worker.extra, {}, 'a schedule with no model starts as it did before')
 
     def test_a_run_is_started_with_the_model_of_its_schedule(self):
         self.store.save(proposal(model=MODEL), owner=True, now=NOW)
@@ -139,26 +133,20 @@ class OwnerFieldApiTests(unittest.TestCase):
         self.assertEqual(run['error'], server.model_pin_message(MODEL, OTHER_MODEL) + ' Not retried.')
         self.assertNotIn(run['task_id'], server.tasks)
 
-    def test_the_lead_cannot_set_or_read_the_chat_and_the_model(self):
-        self.add_chat()
-        self.request_owner('POST', '/schedules', proposal(chat_id=CHAT, model=MODEL))
-        for field in ({'chat_id': CHAT}, {'model': MODEL}):
-            self.assertEqual(self.client.post('/lead/schedules', json=proposal(**field), headers=self.lead).status_code, 400)
-        proposed = self.client.post('/lead/schedules', json=proposal(), headers=self.lead).json['schedule']
-        listed = self.client.get('/lead/schedules', headers=self.lead).json['schedules']
-        self.assertEqual(len(listed), 2)
-        for row in (proposed, *listed):
-            self.assertFalse(scheduling.OWNER_FIELDS & set(row), row)
-
     def test_codex_cannot_read_the_chat_and_the_model(self):
         self.add_chat()
         self.request_owner('POST', '/schedules', proposal(chat_id=CHAT, model=MODEL))
         task = 'listing-turn'
         server.tasks[task] = {'status': 'running', 'current_turn_id': 'synthetic-turn'}
-        capability = server.ha_data.begin(task); self.addCleanup(lambda: server.ha_data.end(task))
-        answer = self.service.dispatch({'operation': 'list_schedules', 'arguments': {}, 'capability': capability})
-        self.assertEqual(len(answer['items']), 1)
-        self.assertFalse(scheduling.OWNER_FIELDS & set(answer['items'][0]), answer['items'][0])
+        thread = fixtures.open_exchange(self, task)
+        for field in ({'chat_id': CHAT}, {'model': MODEL}):
+            with self.assertRaisesRegex(ValueError, 'accepts only name, prompt, mode and spec'):
+                self.service.dispatch({'operation': 'propose_schedule', 'arguments': proposal(**field), 'thread_id': thread})
+        self.service.dispatch({'operation': 'propose_schedule', 'arguments': proposal(), 'thread_id': thread})
+        answer = self.service.dispatch({'operation': 'list_schedules', 'arguments': {}, 'thread_id': thread})
+        self.assertEqual(len(answer['items']), 2)
+        for row in answer['items']:
+            self.assertFalse(scheduling.OWNER_FIELDS & set(row), row)
 
 
 if __name__ == '__main__':

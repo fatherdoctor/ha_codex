@@ -1,5 +1,9 @@
 # Scheduled runs and the lead agent channel
 
+> Version 0.4.0 removed the lead agent channel and the mailbox, and Codex no longer edits a saved proposal: it only
+> proposes new schedules. The sections below on the lead API, the mailbox and its limits describe version 0.3. See
+> `codex-cli-worker/CHANGELOG.md`, entry 0.4.0.
+
 Design recorded before implementation for CX-SCHED. The worker uses the same ordinary task launcher, sandbox policy, approval session, backups and validation for scheduled and lead-submitted tasks. This adds no permission decision route for agents and no outbound recipient or notification service.
 
 ## Data and restart behavior

@@ -473,10 +473,10 @@ function pngBuffer(width = 8, height = 6) {
     // so the line counts the steps instead of reading "Worked for" (CX-FB2-FLOW).
     const storedToggle = page.locator("#activity .activity-toggle");
     await storedToggle.waitFor();
-    assert.equal(await storedToggle.textContent(), "Activity (4 steps)");
+    assert.equal(await storedToggle.textContent(), "Activity (3 steps)");
     assert.equal(await page.locator("#activity-steps").isVisible(), false);
     await storedToggle.click();
-    assert.equal(await page.locator("#activity .step").count(), 4);
+    assert.equal(await page.locator("#activity .step").count(), 3);
     assert.equal(
       await page.locator("#activity .step-command .step-text").textContent(),
       "cat /config/automations.yaml",
@@ -538,15 +538,8 @@ function pngBuffer(width = 8, height = 6) {
       await page.locator("#messages .check-invalid .check-detail").textContent(),
       /required key 'trigger'/,
     );
-    // The same exchange says which changed files have a saved previous version.
-    assert.match(
-      await page.locator("#messages .backups-saved").textContent(),
-      /^✓Previous version saved for 1 file, kept for 7 daysautomations\.yaml → \/config\/codex_tasks\/.*\/backups\/automations\.yaml$/,
-    );
-    assert.equal(
-      await page.locator("#messages .backups-missing").textContent(),
-      "!No previous version saved for 1 filescripts.yaml",
-    );
+    // The answer gives no verdict on saved copies (CX-04-NO-CHECKS).
+    assert.equal(await page.locator("#messages .backups-saved, #messages .backups-missing").count(), 0);
     await page.screenshot({
       path: path.join(output, "config-check-failed.png"),
       fullPage: true,
@@ -569,7 +562,7 @@ function pngBuffer(width = 8, height = 6) {
     // that counts up, long before Codex reports anything.
     await page
       .locator("#activity.running .step-phase.is-running")
-      .waitFor({ timeout: 5000 });
+      .waitFor({ timeout: 5000, state: "attached" });
     assert.equal(
       await page.locator("#activity .step-phase .step-text").first().textContent(),
       "Noting the current state of your configuration files",
@@ -608,10 +601,21 @@ function pngBuffer(width = 8, height = 6) {
       }),
       ["activity-pulse", "activity-pulse"],
     );
-    // Steps appear one by one while the simulated run works, expanded by default.
+    // Steps appear one by one while the simulated run works, closed under the working line until it is tapped
+    // (CX-04-FB-THINK).
     await page
       .locator("#activity.running .step-command.is-running")
-      .waitFor({ timeout: 15000 });
+      .waitFor({ timeout: 15000, state: "attached" });
+    const workingToggle = page.locator("#activity .activity-toggle");
+    assert.equal(await workingToggle.getAttribute("aria-expanded"), "false");
+    assert.equal(await page.locator("#activity-steps").isVisible(), false);
+    assert.match(await workingToggle.textContent(), /^Working on your request/);
+    await workingToggle.click();
+    assert.equal(await workingToggle.getAttribute("aria-expanded"), "true");
+    assert.equal(await page.locator("#activity-steps").isVisible(), true);
+    await workingToggle.click();
+    assert.equal(await page.locator("#activity-steps").isVisible(), false);
+    await workingToggle.click();
     assert.equal(await page.locator("#activity-steps").isVisible(), true);
     assert.ok((await elapsedSeconds()) > firstReading, "timer did not advance");
     assert.deepEqual(
@@ -634,15 +638,18 @@ function pngBuffer(width = 8, height = 6) {
         exact: true,
       })
       .waitFor();
-    // Four steps from Codex and four from the worker; the timer stops with the run,
+    // Three steps from Codex and four from the worker (its text messages show outside the list); the timer stops with the run,
     // and the closed line reads the exchange's total time (CX-FB2-FLOW).
     await page.waitForFunction(() =>
       /^Worked for \d+s$/.test(
         document.querySelector("#activity .activity-toggle")?.textContent || "",
       ),
     );
+    // The tap held only until the turn ended: the line is closed again under "Worked for".
+    assert.equal(await page.locator("#activity .activity-toggle").getAttribute("aria-expanded"), "false");
+    assert.equal(await page.locator("#activity-steps").isVisible(), false);
     await page.locator("#activity .activity-toggle").click();
-    assert.equal(await page.locator("#activity .step").count(), 8);
+    assert.equal(await page.locator("#activity .step").count(), 7);
     assert.equal(await page.locator(".elapsed").count(), 0);
     assert.equal(await page.locator("#activity").count(), 1);
     assert.equal(await page.locator("#activity .step.is-running").count(), 0);
@@ -858,7 +865,7 @@ function pngBuffer(width = 8, height = 6) {
     // The same text is in the sent message and in the echoed answer.
     assert.deepEqual(
       await page
-        .locator("#messages a")
+        .locator("#messages a:not(.activity-text a)")
         .evaluateAll((links) =>
           links.map((link) => [link.textContent, link.href, link.target, link.rel]),
         ),
@@ -959,6 +966,31 @@ function pngBuffer(width = 8, height = 6) {
       }),
       [200, "image/png"],
     );
+    // Once the daily cleanup has removed the upload, the chat says so. A new
+    // browser context has no cached copy of the image.
+    const sentChat = await page.evaluate(
+      () => document.querySelector("#messages .user-attachments img").src,
+    );
+    const sentChatId = sentChat.match(/tasks\/([^/]+)\/attachments/)[1];
+    assert.equal(
+      await page.evaluate(
+        async () => (await fetch("fixture/remove-uploads", { method: "POST" })).status,
+      ),
+      200,
+    );
+    const fresh = await browser.newContext();
+    try {
+      const freshPage = await fresh.newPage();
+      await freshPage.goto("http://127.0.0.1:9137/preview/");
+      await freshPage.locator(`[data-task-id="${sentChatId}"]`).click();
+      await freshPage
+        .locator("#messages p.attachment-missing", {
+          hasText: "Attachment removed after 7 days.",
+        })
+        .waitFor();
+    } finally {
+      await fresh.close();
+    }
     // Timing regressions, made deterministic by gating image decoding: a
     // batch stays with the chat it was picked in, and Send waits for images
     // that are still being prepared.
@@ -1411,6 +1443,9 @@ function pngBuffer(width = 8, height = 6) {
       .waitFor();
     assert.equal(await page.locator("#model-button").textContent(), "GPT-6 Luna");
     assert.equal(await page.locator("#effort-label").textContent(), "Medium");
+    // A tap on a chat keeps the side bar open (CX-04-PHONE-LIST); the scrim closes it.
+    assert.equal(await page.locator("#scrim").isHidden(), false);
+    await page.locator("#scrim").click({ position: { x: 380, y: 600 } });
     assert.equal(await page.locator("#scrim").isHidden(), true);
     assert.equal(
       await page.evaluate(
@@ -1549,6 +1584,8 @@ function pngBuffer(width = 8, height = 6) {
       .locator("#messages")
       .getByText("The dashboard configuration is valid.", { exact: true })
       .waitFor();
+    // The tap kept the side bar open (CX-04-PHONE-LIST); close it to reach the chat area.
+    await phone.locator("#scrim").click({ position: { x: 380, y: 600 } });
     // The screenshot the user attached shows with their message.
     // No bold Verification box under the answer: the checks sit in one closed block, readback and note inside.
     // CX-FB2-FLOW: that block is inside the answer's closed "Worked for" line, and a failed check keeps one

@@ -13,8 +13,8 @@ body:
     id: version
     attributes:
       label: Codex for Home Assistant version
-      description: Include the integration version, worker app version, or commit if known.
-      placeholder: "Example: integration 0.1.34, worker 0.1.34"
+      description: Give the app version and the integration version, or the commit if you built it yourself.
+      placeholder: "Example: app 0.3.6, integration 0.3.6"
     validations:
       required: true
 
@@ -31,9 +31,9 @@ body:
     attributes:
       label: Installation method
       options:
-        - "Marketplace (HACS on older Home Assistant): custom integration and app/add-on repository"
-        - Manual custom integration install
-        - Development branch
+        - The app installed the integration (the default)
+        - Integration installed from the Marketplace or HACS
+        - Integration copied by hand
         - Other
     validations:
       required: true
@@ -100,7 +100,7 @@ body:
     id: failure_time
     attributes:
       label: When did it happen?
-      description: Give the date and time of the failed interaction, with your time zone. It lets me find the right lines in the logs.
+      description: Give the date and time of the failed interaction, with your time zone. The time shows which lines in the logs belong to the failure.
       placeholder: "Example: 2026-11-12 14:32 US Central"
     validations:
       required: true

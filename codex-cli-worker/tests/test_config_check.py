@@ -250,7 +250,9 @@ class AssessChangesTests(unittest.TestCase):
             "success": False, "message": "Not saved: the file failed validation.",
         }])
         self.assertEqual({entry["path"] for entry in result["recovery_files"]}, {".storage/lovelace.home", "scripts.yaml"})
-        self.assertTrue((self.run_dir / "backups" / ".storage" / "lovelace.home").is_file())
+        # A dashboard's storage file holds secrets like the rest of .storage, so it gets no readable copy.
+        self.assertFalse((self.run_dir / "backups" / ".storage" / "lovelace.home").exists())
+        self.assertIn({"path": ".storage/lovelace.home", "copy": "", "reason": "excluded_credentials"}, result["recovery_files"])
 
     def test_storage_only_changes_skip_the_check_but_save_dashboards(self):
         """A change to dashboard storage alone skips the check and still saves the dashboard."""
@@ -306,10 +308,9 @@ class RunTaskWiringTests(unittest.TestCase):
     def run_with(self, assessment):
         """Run a resumed task through the test harness with a canned assessment."""
         from test_server import SessionIdParsingTests
-        harness = SessionIdParsingTests("read_stdout")
+        harness = SessionIdParsingTests()
         with patch.object(server, "assess_changes", return_value=assessment):
             return harness.run_resumed_task(
-                json.dumps({"type": "thread.started", "thread_id": harness.THREAD_ID}) + "\n",
                 final_payload={"status": "completed", "summary": "Edited the automation", "question": "", "details": "Notes"},
             )
 

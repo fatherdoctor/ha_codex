@@ -1,4 +1,4 @@
-// The remote-control name line and the missing AGENTS.md hint, at 400 px in light and dark. Run with
+// The remote-control name field, Back control and the missing AGENTS.md hint, at 400 px in light and dark. Run with
 // tests/web_fixture.py serving the page. Every name is synthetic. Screenshots go to REMOTE_NAME_SHOTS
 // (default /tmp/codex-remote-name-qa).
 const {chromium} = require('playwright');
@@ -18,8 +18,29 @@ const off = {enabled: false, available: true, state: 'off', configured_name: 'Ho
       const page = await context.newPage();
       const errors = []; page.on('pageerror', e => errors.push(e.message));
       let remote = off;
+      let refuseRename = false;
+      const renames = [];
+      const calls = [];
       await page.route('**/agents', route => route.fulfill({json: {ok: true, exists: false, content: ''}}));
       await page.route('**/remote-control', route => route.fulfill({json: {ok: true, remote_control: remote}}));
+      await page.route('**/remote-control/name', route => {
+        const body = route.request().postDataJSON();
+        renames.push(body);
+        calls.push('name');
+        if (refuseRename) return route.fulfill({status: 502, json: {ok: false, error: 'Home Assistant did not save the name.'}});
+        remote = {...off, configured_name: body.name};
+        return route.fulfill({json: {ok: true, remote_control: remote}});
+      });
+      await page.route('**/remote-control/start', route => {
+        calls.push('start');
+        remote = {...remote, enabled: true, state: 'ready'};
+        return route.fulfill({json: {ok: true, remote_control: remote}});
+      });
+      await page.route('**/remote-control/stop', route => {
+        calls.push('stop');
+        remote = {...remote, enabled: false, state: 'off'};
+        return route.fulfill({json: {ok: true, remote_control: remote}});
+      });
       await page.goto('http://127.0.0.1:9137/preview/');
 
       // A missing AGENTS.md is a hint above the chat, not a chat message; Dismiss keeps it away in this browser.
@@ -38,26 +59,70 @@ const off = {enabled: false, available: true, state: 'off', configured_name: 'Ho
       await page.waitForTimeout(1000);
       assert.equal(await hint.isVisible(), false, 'a dismissed hint stays away after a reload');
 
-      // The name shows as text with where to change it (0.3.5: the Configuration tab only), and fits the phone.
+      // The name field shows the configured name, saves a new one, and fits the phone.
       await page.evaluate(() => openConnection());
-      await page.waitForFunction(() => document.querySelector('#remote-control-name').textContent === 'Home Assistant');
-      assert.equal(await page.locator('#remote-control-name-line input, #remote-control-name-line button').count(), 0);
-      assert.match(await page.locator('#remote-control-name-line').textContent(), /Remote control machine name in Add-on configuration/);
+      const input = page.locator('#remote-control-name');
+      await page.waitForFunction(() => document.querySelector('#remote-control-name').value === 'Home Assistant');
+      assert.equal(await input.isDisabled(), false);
+      await input.fill('Lake house');
+      await page.locator('#remote-control-name-save').click();
+      await page.waitForFunction(() => /Saved/.test(document.querySelector('#remote-control-name-note').textContent));
+      assert.deepEqual(renames, [{name: 'Lake house'}]);
+      assert.equal(await input.inputValue(), 'Lake house');
       const fits = await page.evaluate(() => {
         const dialog = document.querySelector('#connection-dialog');
-        const line = document.querySelector('#remote-control-name-line').getBoundingClientRect();
-        return dialog.scrollWidth <= dialog.clientWidth && line.right <= dialog.getBoundingClientRect().right + 0.5;
+        const form = document.querySelector('#remote-control-name-form').getBoundingClientRect();
+        const back = document.querySelector('#connection-back').getBoundingClientRect();
+        const close = document.querySelector('#connection-dialog [data-close]').getBoundingClientRect();
+        return dialog.scrollWidth <= dialog.clientWidth && form.right <= dialog.getBoundingClientRect().right + 0.5
+          && back.right <= close.left;
       });
-      assert.equal(fits, true, 'the name line fits the dialog at 400 px');
-      await page.locator('#remote-control-name-line').screenshot({path: path.join(SHOTS, `remote-name-${colorScheme}-400.png`)});
+      assert.equal(fits, true, 'the name field, Back and the X fit the dialog at 400 px');
+      await page.locator('#remote-control-name-form').screenshot({path: path.join(SHOTS, `remote-name-${colorScheme}-400.png`)});
 
-      // The poll shows a name changed on the Configuration tab after the app restarts.
-      remote = {...off, enabled: true, state: 'ready', configured_name: 'Lake house'};
-      await page.waitForFunction(() => document.querySelector('#remote-control-name').textContent === 'Lake house', null, {timeout: 20000});
+      // Turn on saves a typed name first; a refused save shows its error and leaves remote control off.
+      const note = page.locator('#remote-control-name-note');
+      refuseRename = true;
+      calls.length = 0;
+      await input.fill('Cabin');
+      await page.locator('#remote-control-start').click();
+      await page.waitForFunction(() => /did not save/.test(document.querySelector('#remote-control-name-note').textContent));
+      assert.deepEqual(calls, ['name'], 'no start request after a refused save');
+      assert.equal(await input.isDisabled(), false, 'remote control stays off');
+      refuseRename = false;
+      calls.length = 0;
+      await page.locator('#remote-control-start').click();
+      await page.waitForFunction(() => document.querySelector('#remote-control-name').disabled);
+      assert.deepEqual(calls, ['name', 'start'], 'one name request, then the start request');
+      assert.deepEqual(renames.at(-1), {name: 'Cabin'});
+
+      // While remote control is on, the name is read-only, shows the name in use, and the page says why.
+      assert.equal(await input.inputValue(), 'Cabin');
+      assert.equal(await note.textContent(), 'Turn remote control off to change the name.');
+      // A name started from elsewhere (the ChatGPT panel, another browser) is the one the locked field shows.
+      remote = {...remote, configured_name: 'Lake house'};
+      await page.waitForFunction(() => document.querySelector('#remote-control-name').value === 'Lake house', null, {timeout: 20000});
+
+      // Turn off opens the field again and clears the note that said to turn it off.
+      await page.locator('#remote-control-stop').click();
+      await page.waitForFunction(() => !document.querySelector('#remote-control-name').disabled);
+      assert.equal(await note.textContent(), '', 'the locked note goes after Turn off');
+
+      // A name typed while off gives way to the name in use when remote control is turned on from elsewhere.
+      await input.fill('Typed, not saved');
+      remote = {...remote, enabled: true, state: 'ready', configured_name: 'Boat house'};
+      await page.waitForFunction(() => document.querySelector('#remote-control-name').value === 'Boat house', null, {timeout: 20000});
+      assert.equal(await input.isDisabled(), true, 'the field locks when remote control is on');
+      await page.locator('#remote-control-stop').click();
+      await page.waitForFunction(() => !document.querySelector('#remote-control-name').disabled);
+
+      // Back returns to Settings; the X would have closed the window alone.
+      await page.locator('#connection-back').click();
+      await page.waitForFunction(() => document.querySelector('#settings').open && !document.querySelector('#connection-dialog').open);
       assert.deepEqual(errors, []);
       await context.close();
     }
-    console.log(`PASS: remote-control name line and AGENTS.md hint at 400 px in light and dark. Screenshots: ${SHOTS}`);
+    console.log(`PASS: remote-control name field, Back control and AGENTS.md hint at 400 px in light and dark. Screenshots: ${SHOTS}`);
   } finally {
     await browser.close();
   }

@@ -6,6 +6,8 @@ import os
 import socket
 import sys
 
+import tool_threads
+
 MAX_IDS = 16
 MAX_POINTS = 5000
 DEFAULT_POINTS = 1000
@@ -60,9 +62,12 @@ TOOLS = [
     {
         "name": "exchange_info",
         "description": "Read what is particular to this message from the Home Assistant page: its backup folder, "
-                       "whether the owner's /config/AGENTS.md exists and when it last changed, the documents and images the user attached, and notes on direct Home Assistant API calls, "
-                       "the local documentation and GitHub. Call it once at the start of each message; an answer "
-                       "from an earlier message is out of date. Takes no arguments and changes nothing.",
+                       "whether the owner's AGENTS.md exists and when it last changed, the documents and images the user attached, and notes on direct Home Assistant API calls, "
+                       "the local documentation and GitHub. Call it once in a message before your first command, file "
+                       "change or other tool call, and when the message can refer to a file, a document or something "
+                       "you cannot see in this chat; an answer from an earlier message is out of date. A message you "
+                       "can answer from what you know and from the chat needs no call. Takes no arguments and "
+                       "changes nothing.",
         "inputSchema": {"type": "object", "additionalProperties": False, "properties": {}},
         "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
     },
@@ -96,12 +101,12 @@ STATUS_TOOLS = [
 ]
 
 
-def fetch(name, arguments):
-    """Forward an allowlisted operation to the worker using this turn's temporary credential."""
+def fetch(name, arguments, thread_id):
+    """Forward an allowlisted operation to the worker with the chat's thread id that Codex sent."""
     tool = next((tool for tool in TOOLS if tool["name"] == name), None)
     if tool is None or not isinstance(arguments, dict) or set(arguments) - set(tool["inputSchema"]["properties"]):
         raise ValueError("Unsupported data request")
-    payload = {**arguments, "operation": name, "capability": os.environ.get("HA_DATA_CAPABILITY", "")}
+    payload = {**arguments, "operation": name, "thread_id": thread_id}
     encoded = json.dumps(payload).encode() + b"\n"
     if len(encoded) > 16384:
         raise ValueError("Data request is too large")
@@ -152,7 +157,7 @@ def record_status(name, arguments):
     return "The question is recorded. End your turn now, and write the question, with its choices, as your answer."
 
 
-def call_tool(name, arguments):
+def call_tool(name, arguments, thread_id=""):
     """Answer a status tool here, and forward every other tool to the worker."""
     if name in {tool["name"] for tool in STATUS_TOOLS}:
         try:
@@ -160,7 +165,7 @@ def call_tool(name, arguments):
         except ValueError as error:
             return {"content": [{"type": "text", "text": f"Not recorded: {error}. Call {name} again."}], "isError": True}
     try:
-        result = fetch(name, arguments)
+        result = fetch(name, arguments, thread_id)
     except (OSError, ValueError, TypeError, AttributeError):
         result = {"status": "unavailable", "message": "Data request failed or the task has ended"}
     return {"content": [{"type": "text", "text": json.dumps(result)}], "isError": result.get("status") == "unavailable"}
@@ -188,7 +193,7 @@ def respond(request):
         return {"tools": TOOLS + STATUS_TOOLS}
     if method == "tools/call":
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
-        return call_tool(params.get("name"), params.get("arguments", {}))
+        return call_tool(params.get("name"), params.get("arguments", {}), tool_threads.thread_id_from_call(params))
     raise ValueError("Method not found")
 
 

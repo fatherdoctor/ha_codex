@@ -1,6 +1,6 @@
 # Instructions for Codex in this home
 
-This file is `/config/AGENTS.md`. Codex reads it when a chat starts. The app wrote this starter text once, on its
+This file is `AGENTS.md` in the app's own folder (`/addon_config` inside the app). Codex reads it when a chat starts. The app wrote this starter text once, on its
 first start, because the home had no instructions yet. The file is yours: change it, add the rules of your home, or
 delete it. The editor is in the chat page under Settings > Workspace instructions.
 
@@ -28,6 +28,24 @@ delete it. The editor is in the chat page under Settings > Workspace instruction
 6. Make one small change at a time, and do only what the owner asked for. Suggest other improvements; do not make
    them unasked.
 7. When you are not sure what the owner means or what a change will do, stop and ask.
+
+## Safeguards: defaults the owner can change
+
+For the owner of this home: the rules in this file are defaults, not locks in the app. The owner can edit or
+delete any of them in Settings > Workspace instructions. The app enforces only the sandbox and the permission
+mode of each chat.
+
+- Secrets: rule 2 also covers PINs and the files in `.storage`. Do not print, log, commit or send them.
+- Protected places: ask before you touch `/config/secrets.yaml`, `/config/.storage`, `/config/.git/hooks` or
+  `/share/HomeAssistant` (the app's GitHub clone and link also leave the three folders alone).
+- Backups: keep the old version of each file as rule 3 says, in the folder that the app names. Make no other copy.
+
+## Git and GitHub
+
+- Before every commit, look at what is staged. Remove anything that does not belong.
+- Never stage `secrets.yaml`, `.storage`, databases, log files, backups, or personal or location data.
+- Keep a `.gitignore` that lists these. Add it before the first commit.
+- Ask the owner before the first push to any new or public repository. A new repository is private by default.
 
 ## About this home
 

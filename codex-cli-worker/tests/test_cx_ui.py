@@ -63,7 +63,7 @@ class StudioTests(unittest.TestCase):
         task_id = response.json['task_id']
         turn = server.tasks[task_id]['turns'][-1]
         attachment = turn['prompt_attachments'][0]
-        path = server.get_task_dir(task_id) / attachment['path']
+        path = server.ATTACHMENTS_ROOT / task_id / attachment['path']
         self.assertEqual(attachment['kind'], 'file')
         self.assertEqual(attachment['name'], 'sample.html')
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)

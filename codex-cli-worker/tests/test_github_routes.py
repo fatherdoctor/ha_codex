@@ -107,7 +107,7 @@ class GitHubRouteTests(unittest.TestCase):
         self.service._complete_app(APP_TOKEN)
         quiet = {name: patch.object(server, name, return_value={}) for name in (
             "codex_login_status", "auth_status_payload", "model_pin", "usage_status_payload",
-            "integration_status", "remote_control_summary", "mailbox_status_payload", "refresh_usage_status_async")}
+            "integration_status", "remote_control_summary", "refresh_usage_status_async")}
         quiet["account_access"] = patch.object(server.account_access, "snapshot", return_value={})
         quiet["tasks"] = patch.object(server, "tasks", {})
         for item in quiet.values():
@@ -172,7 +172,8 @@ class GitHubRegistrationTests(unittest.TestCase):
             self.assertIn("github_mcp.py", text)
             self.assertIn('mcp_servers.codex_github.required=false', text)
             self.assertIn('mcp_servers.codex_github.tools.github_git.approval_mode="approve"', text)
-            self.assertIn('mcp_servers.codex_github.env_vars=["HA_DATA_CAPABILITY"]', text)
+            self.assertNotIn("codex_github.env_vars", text)
+            self.assertNotIn("CAPABILITY", text)
 
     def test_the_prompt_names_the_tool_only_when_connected(self):
         with patch.object(server.github_service, "current_state", return_value="disconnected"):

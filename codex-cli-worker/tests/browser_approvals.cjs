@@ -16,6 +16,8 @@ async function testApprovals(browser, output, errors) {
   await approvalPage.locator("#message").fill("Request permission to read sensor history");
   await approvalPage.getByRole("button", {name: "Send message", exact: true}).click();
   await approvalPage.getByRole("button", {name: "Allow once", exact: true}).waitFor();
+  // CX-04-FB-THINK: the step list starts closed, and the waiting request stays visible outside it.
+  assert.equal(await approvalPage.locator("#activity-steps").isHidden(), true);
   // CX-FB4-APPROVE: the waiting request is the last child of the latest exchange, below the working lines.
   assert.equal(await approvalPage.locator(".exchange:last-child > :last-child").evaluate(el => el.classList.contains("permission-card")), true);
   const pendingBox = await approvalPage.locator(".permission-card").boundingBox();
