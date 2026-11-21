@@ -133,13 +133,8 @@ def table_tools(way: str) -> set[str]:
 
 
 def page_args() -> list[str]:
-    """The arguments of a chat page turn; the run picks the attended or the unattended launch by who started it."""
+    """The arguments of a chat page turn; a scheduled run starts with the same ones (tests/test_sched_parity.py)."""
     return server.build_app_server_args()
-
-
-def unattended_args() -> list[str]:
-    """The arguments of a turn that no person watches (a schedule or lead run): the same launch without the call tool."""
-    return server.build_app_server_args(attended=False)
 
 
 def app_args() -> list[str]:
@@ -209,14 +204,6 @@ class WaysInTests(unittest.TestCase):
                     expected = "prompt" if f"{name}.{tool}" in ASKING_TOOLS else "approve"
                     self.assertEqual(settings.get(f"tools.{tool}.approval_mode"), expected)
 
-    def test_both_page_launches_register_the_same_tools(self):
-        """A turn is attended or not by its source, never by way in; both launches give the same read tools.
-
-        The unattended launch has nobody to answer a permission request, so it never gets the call tool. It gets the
-        Home Assistant MCP server like the page.
-        """
-        self.assertEqual(tools_of(unattended_args()), self.page - {CALL_TOOL})
-
     def test_every_page_tool_is_preapproved_except_the_tools_that_change_something(self):
         """A read tool is approved ahead; a tool that changes something asks each time ("prompt"), so the person is the gate."""
         for name, settings in registered_servers(page_args()).items():
@@ -226,10 +213,10 @@ class WaysInTests(unittest.TestCase):
                     self.assertEqual(settings.get(f"tools.{tool}.approval_mode"), expected)
 
     def test_a_task_from_the_service_action_launches_with_the_page_tools(self):
-        """The task that the service's request opens on /tasks is an attended one, so it gets the page's tools.
+        """The task that the service's request opens on /tasks is a page task, so it gets the page's tools.
 
-        run_task picks the launch by the task's source (a schedule or lead run is unattended); the request that
-        the service sends opens a task with neither source, which gets the same launch as the page.
+        Every task starts with the same launch. The request that the service sends opens a task that is not a
+        scheduled run, so it also runs in its own permission mode and notifies like a chat on the page.
         """
         task = task_started_by_service("Turn on a light")
         self.assertNotIn(task.get("task_source"), {"schedule", "lead"})

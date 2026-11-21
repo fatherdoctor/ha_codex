@@ -250,7 +250,9 @@ class AssessChangesTests(unittest.TestCase):
             "success": False, "message": "Not saved: the file failed validation.",
         }])
         self.assertEqual({entry["path"] for entry in result["recovery_files"]}, {".storage/lovelace.home", "scripts.yaml"})
-        self.assertTrue((self.run_dir / "backups" / ".storage" / "lovelace.home").is_file())
+        # A dashboard's storage file holds secrets like the rest of .storage, so it gets no readable copy.
+        self.assertFalse((self.run_dir / "backups" / ".storage" / "lovelace.home").exists())
+        self.assertIn({"path": ".storage/lovelace.home", "copy": "", "reason": "excluded_credentials"}, result["recovery_files"])
 
     def test_storage_only_changes_skip_the_check_but_save_dashboards(self):
         """A change to dashboard storage alone skips the check and still saves the dashboard."""

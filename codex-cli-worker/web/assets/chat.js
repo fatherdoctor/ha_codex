@@ -899,7 +899,8 @@ function renderRow(chat, queued = null) {
   main.append(meta);
   // One line for each chat: the last answer is the tooltip instead of a second line.
   main.title = `${title} - ${main.querySelector(".row-preview").textContent}`;
-  main.onclick = () => selectChat(chat.task_id);
+  // On a phone the side bar stays open, so the owner can look at several chats; its scrim or the close button shuts it.
+  main.onclick = () => selectChat(chat.task_id, false, true);
   row.append(main);
   // A chat that is still waiting for its first message has nothing to pin or rename yet.
   if (!chatById(chat.task_id)) return row;
@@ -1080,14 +1081,24 @@ function renderAttachments(
     img.alt = attachment.revised_prompt || alt;
     img.loading = "lazy";
     img.decoding = "async";
-    img.onerror = () =>
+    img.onerror = async () => {
+      // The worker answers 410 for an upload its daily cleanup has removed.
+      let removed = false;
+      try {
+        removed = (await fetch(link.href)).status === 410;
+      } catch {
+        // Offline or blocked: show the general message.
+      }
       figure.replaceChildren(
         textNode(
           "p",
-          "This image is no longer available.",
+          removed
+            ? "Attachment removed after 7 days."
+            : "This image is no longer available.",
           "attachment-missing",
         ),
       );
+    };
     link.append(img);
     const caption = textNode("figcaption", "");
     caption.append(
@@ -1133,57 +1144,6 @@ function renderConfigCheck(check) {
   if (check.warnings)
     node.append(textNode("pre", `Warnings: ${check.warnings}`, "check-detail"));
   return node;
-}
-/**
- * Say which changed files have a copy of their previous version and which have
- * none. Copies are deleted after the retention period set in the app options.
- */
-function renderBackups(turn) {
-  const entries = Array.isArray(turn.backups) ? turn.backups : [];
-  const saved = entries.filter((entry) => entry.status === "saved");
-  const unsaved = entries.filter((entry) =>
-    ["missing", "unverified"].includes(entry.status),
-  );
-  /** Word a number of files: "1 file" or "3 files". */
-  const count = (list) =>
-    list.length === 1 ? "1 file" : `${list.length} files`;
-  const nodes = [];
-  if (saved.length) {
-    const node = textNode("div", "", "check check-valid backups-saved");
-    const days = state.catalog?.backup_retention_days;
-    node.append(
-      textNode("span", "✓", "check-mark"),
-      textNode(
-        "span",
-        turn.backups_removed
-          ? `Previous version saved for ${count(saved)}; the copies have since been removed`
-          : `Previous version saved for ${count(saved)}${days ? `, kept for ${days === 1 ? "1 day" : `${days} days`}` : ""}`,
-      ),
-    );
-    if (!turn.backups_removed)
-      node.append(
-        textNode(
-          "pre",
-          saved.map((entry) => `${entry.path} → ${entry.copy}`).join("\n"),
-          "check-detail",
-        ),
-      );
-    nodes.push(node);
-  }
-  if (unsaved.length) {
-    const node = textNode("div", "", "check backups-missing");
-    node.append(
-      textNode("span", "!", "check-mark"),
-      textNode("span", `No previous version saved for ${count(unsaved)}`),
-      textNode(
-        "pre",
-        unsaved.map((entry) => entry.path).join("\n"),
-        "check-detail",
-      ),
-    );
-    nodes.push(node);
-  }
-  return nodes;
 }
 /** "12s", "1m 05s", or "1h 02m": how long the running exchange has taken so far. */
 function elapsedLabel(ms) {
@@ -1518,6 +1478,16 @@ async function loadBrowserPermissions() {
 function showsQuestionApart(turn) {
   return Boolean(turn.question) && !(turn.summary || "").includes(turn.question);
 }
+/** Say when the open chat will be deleted, in its last days before that; hide the line otherwise. */
+function showRetentionWarning(warning) {
+  const line = $("retention-warning");
+  if (!line) return;
+  const when = warning ? dateLabel(warning.deletes_at, true) : "";
+  line.hidden = !when;
+  line.textContent = when
+    ? `This chat will be deleted on ${when} unless you send a message. Pin it to keep it.`
+    : "";
+}
 /** Draw the open chat: every exchange with its answer, checks, saved copies, and steps. */
 function renderTask(force = false) {
   const task = state.task;
@@ -1525,6 +1495,7 @@ function renderTask(force = false) {
   const queued = task.queued_message || null;
   if (state.edit && state.edit.id !== queued?.queue_id) state.edit = null;
   $("chat-title").textContent = task.title || "Untitled chat";
+  showRetentionWarning(task.deletion_warning);
   $("chat-status").textContent =
     task.status === "in_queue"
       ? "In queue · not sent yet"
@@ -1599,7 +1570,7 @@ function renderTask(force = false) {
       let openChecks = null;
       if (latest) {
         state.latestChecks = evidence;
-        exchange.append(activityBlock());
+        exchange.append(activityBlock(), activityText());
         openChecks = () => {
           if (!state.activity || !evidence) return;
           state.activity.expanded = true;
@@ -1613,9 +1584,9 @@ function renderTask(force = false) {
         openChecks = () => worked?.openChecks?.();
       }
       const answer = textNode("div", "", "answer");
-      const heading = textNode("div", "", "answer-heading");
-      heading.append(textNode("span", "⌘", "mark"), textNode("span", "Codex"));
-      answer.append(heading);
+      // No visible "Codex" label above the reply; a screen reader still hears whose reply it is.
+      answer.setAttribute("role", "group");
+      answer.setAttribute("aria-label", "Codex reply");
       if (turn.summary) answer.append(renderMarkdown(turn.summary, "message"));
       if (turn.details && turn.details !== turn.summary)
         answer.append(renderMarkdown(turn.details, "message details"));
@@ -1630,7 +1601,6 @@ function renderTask(force = false) {
         answer.append(renderChoices(turn));
       const check = renderConfigCheck(turn.config_check);
       if (check) answer.append(check);
-      answer.append(...renderBackups(turn));
       const bad = badCheckCount(turn);
       if (bad) answer.append(failedChecksLine(bad, openChecks));
       if (attachments.length)
@@ -1664,7 +1634,7 @@ function renderTask(force = false) {
         pending.append(textNode("span", "", "elapsed"));
       }
       exchange.append(pending);
-      if (latest) exchange.append(activityBlock());
+      if (latest) exchange.append(activityBlock(), activityText());
     }
     for (const approval of waiting) {
       exchange.append(renderApproval(approval, task.task_id, turn.turn_id, active));
@@ -2019,6 +1989,12 @@ function activityBlock() {
   block.hidden = true;
   return block;
 }
+/** Build the container for the interim text messages of the latest exchange, shown outside the step list. */
+function activityText() {
+  const box = textNode("div", "", "activity-text");
+  box.id = "activity-text";
+  return box;
+}
 /** Load steps once for an idle chat, and keep loading them while Codex works. */
 function ensureActivity() {
   const activity = state.activity;
@@ -2098,10 +2074,23 @@ function renderActivity() {
   const block = $("activity");
   const activity = state.activity;
   if (!block || !activity || activity.id !== state.id) return;
-  const steps = [...activity.steps.values()].sort((a, b) => a.index - b.index);
+  const all = [...activity.steps.values()].sort((a, b) => a.index - b.index);
+  // Text messages show outside the closed list; tool steps and thinking stay inside it.
+  const steps = all.filter(step => step.kind !== "message");
+  const texts = all.filter(step => step.kind === "message" && step.text);
   const running = activity.running || taskActive();
+  const turn = state.task?.turns?.at(-1);
+  const lastText = texts.at(-1);
+  // Saved steps can still contain the final answer. Keep earlier messages and explicit commentary.
+  if (!running && turn && activity.turnId === turn.turn_id && lastText && !lastText.phase &&
+      lastText.text.trim() === turn.summary?.trim()) {
+    texts.pop();
+  }
+  const textBox = $("activity-text");
+  if (textBox)
+    textBox.replaceChildren(...texts.map(step => renderMarkdown(step.text, "message interim")));
   const checks = state.latestChecks;
-  const worked = running ? "" : workedLabel(state.task?.turns?.at(-1));
+  const worked = running ? "" : workedLabel(turn);
   block.hidden = !steps.length && !checks && !worked;
   block.classList.toggle("running", running);
   block.classList.toggle("worked", !running);
@@ -2264,7 +2253,7 @@ function reopenLastChat() {
  * left. When restoring a remembered chat, a 404 means it was deleted from
  * another tab or device: forget it and start fresh without an error.
  */
-async function selectChat(id, restoring = false) {
+async function selectChat(id, restoring = false, keepSidebar = false) {
   if (state.busy || state.settingsBusy) return;
   closePicker();
   state.drafts.set(state.id, $("message").value);
@@ -2282,7 +2271,7 @@ async function selectChat(id, restoring = false) {
   $("message").value = state.drafts.get(id) || "";
   resizeInput();
   showError(null);
-  sidebar(false);
+  if (!keepSidebar) sidebar(false);
   renderList();
   controls();
   if (!id) {
@@ -3544,23 +3533,26 @@ let loginTimer;
 let shownLogin = null;
 /**
  * Build the sign-in card: the code in large letters that stay put until the
- * sign-in ends or is canceled, the QR code of the sign-in page served by the
- * worker, and the link to the same page.
+ * sign-in ends or is canceled, the link to the sign-in page, and the QR code
+ * of the same page served by the worker. The link comes before the QR code, so
+ * a phone shows it without a scroll. A phone cannot scan its own screen, so on
+ * a phone-sized window the QR code starts folded behind "Show QR code".
  */
 function signInCard(auth) {
   const card = document.createElement("div");
-  const requirement = textNode("p", "A ChatGPT account with Codex access is required. As of November 13, 2026, this includes Free and Go. ", "muted");
-  const availability = textNode("a", "Check OpenAI’s current availability");
-  availability.href = "https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan";
-  availability.target = "_blank";
-  availability.rel = "noopener noreferrer";
-  requirement.append(availability);
-  card.append(requirement);
   card.className = "signin-card";
+  // The sign-in link comes first, as the main button; then the code, its timer and the folded QR code.
+  if (auth.verification_url) {
+    const url = new URL(auth.verification_url, location.href);
+    if (url.protocol === "https:") {
+      const link = textNode("a", "Open the ChatGPT sign-in page", "signin-link");
+      link.href = url.href;
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      card.append(link);
+    }
+  }
   if (auth.user_code) {
-    card.append(
-      textNode("p", "Enter this code on the ChatGPT sign-in page:", "muted"),
-    );
     const code = textNode("p", auth.user_code, "signin-code");
     code.setAttribute(
       "aria-label",
@@ -3576,17 +3568,11 @@ function signInCard(auth) {
     img.alt = "QR code that opens the ChatGPT sign-in page";
     img.className = "signin-qr";
     img.width = img.height = 220;
-    card.append(img);
-  }
-  if (auth.verification_url) {
-    const url = new URL(auth.verification_url, location.href);
-    if (url.protocol === "https:") {
-      const link = textNode("a", "Open the ChatGPT sign-in page");
-      link.href = url.href;
-      link.target = "_blank";
-      link.rel = "noreferrer";
-      card.append(link);
-    }
+    const fold = document.createElement("details");
+    fold.className = "disclosure signin-qr-fold";
+    fold.open = !matchMedia("(max-width:700px)").matches;
+    fold.append(textNode("summary", "Show QR code"), img);
+    card.append(fold);
   }
   return card;
 }
@@ -3633,9 +3619,7 @@ function renderLogin(auth) {
   const failure = `The last sign-in did not finish. ${auth.error || "Get a new code to try again."}`;
   $("login-status").textContent = signedIn
     ? auth.codex_login.message || "Signed in to ChatGPT."
-    : pending
-      ? "Signing in. Enter the code below on the ChatGPT sign-in page."
-      : failed
+    : failed
         ? failure
         : lapsed
           ? "The ChatGPT sign-in expired or was revoked. Sign in again."
@@ -3673,8 +3657,8 @@ function renderLogin(auth) {
     followCodeTime("chatgpt", auth.expires_in);
   }
   for (const id of ["login", "banner-login"]) $(id).hidden = pending;
-  // The sign-in card repeats the account requirement, so the section shows it once.
-  $("login-requirement").hidden = pending;
+  // While a sign-in waits, the section shows only the card and Cancel (CSS hides the rest).
+  $("chatgpt-section").classList.toggle("signing-in", pending);
   for (const id of ["login-cancel", "banner-cancel"]) $(id).hidden = !pending;
   $("signin-banner").hidden = signedIn;
 }
@@ -3755,16 +3739,19 @@ function githubExpiry(github) {
 function githubFlowCard(flow) {
   const card = document.createElement("div");
   card.className = "signin-card github-flow-card";
+  // The same order as the ChatGPT card: the link as the main button, then the code and its timer.
+  const link = githubLink(flow.verification_uri || "https://github.com/login/device", "Open github.com/login/device");
+  if (link) {
+    link.className = "signin-link";
+    card.append(link);
+  }
   if (flow.user_code) {
-    card.append(textNode("p", "Enter this code on GitHub's device sign-in page, then approve Codex for Home Assistant:", "muted"));
     const code = textNode("p", flow.user_code, "signin-code");
     code.setAttribute("aria-label", `GitHub code ${flow.user_code.split("").join(" ")}`);
     card.append(code);
   } else {
     card.append(textNode("p", "Waiting for the GitHub code…", "muted"));
   }
-  const link = githubLink(flow.verification_uri || "https://github.com/login/device", "Open github.com/login/device");
-  if (link) card.append(link);
   if (flow.user_code) card.append(...codeExpiry(flow.expires_in, newGithubCode, "github"));
   return card;
 }
@@ -3872,6 +3859,8 @@ function renderGithub(github) {
   const retry = !connected && ["expired", "failed"].includes(flow.status);
   $("github-connect").textContent = connected ? "Connect again" : retry ? "Get a new code" : "Connect GitHub";
   $("github-connect").hidden = waiting;
+  // While a sign-in waits, the section shows only the card and Cancel (CSS hides the rest).
+  $("github-section").classList.toggle("signing-in", waiting);
   $("github-cancel").hidden = !waiting;
   for (const id of ["github-test", "github-check", "github-disconnect"]) $(id).hidden = !connected;
   $("github-accept").hidden = !(state === "access_changed" && !github.permission_problem);
@@ -4070,9 +4059,52 @@ function renderRemoteControl(rc) {
   $("remote-control-log-box").hidden = !(rc.log || []).length;
   document.dispatchEvent(new CustomEvent("remote-view", {detail: rc}));
 }
-/** Show the machine name the ChatGPT app lists; it is set on the Configuration tab (0.3.5). */
+const REMOTE_NAME_LOCKED = "Turn remote control off to change the name.";
+/**
+ * Show the configured machine name in its field. Codex reads the name when remote control starts, so the field
+ * is locked while it is on and then shows the name in use. Polling never replaces a name the person is still
+ * typing while it is off. The locked note goes when remote control is off; the result of a save stays.
+ */
 function renderRemoteControlName(rc) {
-  $("remote-control-name").textContent = rc.configured_name || "";
+  const input = $("remote-control-name");
+  const note = $("remote-control-name-note");
+  if (rc.enabled) delete input.dataset.edited;
+  if (!input.dataset.edited) input.value = rc.configured_name || "";
+  input.disabled = Boolean(rc.enabled);
+  $("remote-control-name-save").disabled = Boolean(rc.enabled);
+  if (rc.enabled) note.textContent = REMOTE_NAME_LOCKED;
+  else if (note.textContent === REMOTE_NAME_LOCKED) note.textContent = "";
+}
+$("remote-control-name").oninput = () => {
+  $("remote-control-name").dataset.edited = "1";
+};
+/**
+ * Save the name in the field to the one add-on option (Remote control machine name) the Configuration tab also
+ * sets. True when it is saved; a failed save shows its error under the field.
+ */
+async function saveRemoteControlName() {
+  const input = $("remote-control-name");
+  $("remote-control-name-save").disabled = true;
+  try {
+    const data = await api("remote-control/name", { name: input.value });
+    delete input.dataset.edited;
+    renderRemoteControl(data.remote_control);
+    $("remote-control-name-note").textContent = data.notice
+      || `Saved. The ChatGPT app will show “${data.remote_control.configured_name}”.`;
+    return true;
+  } catch (error) {
+    $("remote-control-name-note").textContent = error.message;
+    $("remote-control-name-save").disabled = false;
+    return false;
+  }
+}
+$("remote-control-name-form").onsubmit = (event) => {
+  event.preventDefault();
+  saveRemoteControlName();
+};
+/** Turn on saves a typed name first, since Codex reads the name when it starts; a failed save keeps it off. */
+async function remoteNameReadyForStart() {
+  return !$("remote-control-name").dataset.edited || saveRemoteControlName();
 }
 const ADDON_CONFIGURATION_UNKNOWN =
   "Home Assistant did not give this app's address. Open the app's Configuration tab from the Home Assistant settings.";
@@ -4093,14 +4125,15 @@ async function loadAddonConfiguration() {
     description.textContent = ADDON_CONFIGURATION_UNKNOWN;
   }
 }
-for (const [id, action] of [
-  ["remote-control-start", "start"],
+for (const [id, action, prepare] of [
+  ["remote-control-start", "start", remoteNameReadyForStart],
   ["remote-control-stop", "stop"],
   ["remote-control-pair", "pair"],
 ]) {
   $(id).onclick = async () => {
     $(id).disabled = true;
     try {
+      if (prepare && !(await prepare())) return;
       const data = await api(`remote-control/${action}`, {});
       renderRemoteControl(data.remote_control);
       $("settings-result").textContent = "";

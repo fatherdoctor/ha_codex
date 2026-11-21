@@ -85,6 +85,20 @@ class ActivityStepTests(unittest.TestCase):
         self.assertEqual(plan["text"], "☑ Read config\n☐ Edit")
         self.assertEqual(reasoning["id"], "item_0")
 
+    def test_plain_text_final_answer_is_not_an_activity_message(self):
+        """The final answer belongs to the reply, even if commentary used the same words."""
+        for event in (
+            item("agent_message", "first", phase="commentary", text="Checking the automation."),
+            item("agent_message", "second", phase="commentary", text="The automation is valid."),
+            item("agent_message", "answer", phase="final_answer", text="The automation is valid."),
+        ):
+            server.record_activity_event("t", event)
+        messages = self.steps()["steps"]
+        self.assertEqual([(step["id"], step["text"]) for step in messages], [
+            ("first", "Checking the automation."), ("second", "The automation is valid."),
+        ])
+        self.assertEqual([step["phase"] for step in messages], ["commentary", "commentary"])
+
     def test_file_change_reads_as_made_only_once_it_was_made(self):
         """A change that waits, as for permission, or that was refused is not reported as done."""
         changes = [{"path": "/config/automations.yaml", "kind": "update"}, {"path": "/config/old.yaml", "kind": "delete"},

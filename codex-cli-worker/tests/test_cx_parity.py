@@ -4,8 +4,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
-import unittest.mock
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -22,7 +21,7 @@ class ParityTests(unittest.TestCase):
 
     def test_no_house_practice_is_bundled(self):
         self.assertFalse((ROOT / 'policy/house-rules.md').exists())
-        self.assertIn('/config/AGENTS.md', (ROOT / 'server.py').read_text())
+        self.assertIn('/addon_config/AGENTS.md', (ROOT / 'server.py').read_text())
 
 
 class DeviceCommandSpeedTests(unittest.TestCase):
@@ -41,7 +40,7 @@ class DeviceCommandSpeedTests(unittest.TestCase):
 
     def find(self, **arguments):
         import verification
-        engine = verification.Verification(unittest.mock.Mock(ha_token=lambda: 'synthetic'))
+        engine = verification.Verification(Mock(ha_token=lambda: 'synthetic'))
         with patch.object(verification, 'fetch_states', return_value=json.loads(json.dumps(self.STATES))) as fetch:
             result = engine.find(arguments)
         fetch.assert_called_once_with('/states', 'synthetic')
@@ -63,7 +62,7 @@ class DeviceCommandSpeedTests(unittest.TestCase):
     def test_rules_no_longer_ask_for_the_owner_file_in_each_message(self):
         rules = server.PAGE_INSTRUCTIONS
         self.assertNotIn('check for it in each message', rules)
-        self.assertIn('Owner workspace instructions: if /config/AGENTS.md exists, follow it.', rules)
+        self.assertIn('Owner workspace instructions: if /addon_config/AGENTS.md exists, follow it.', rules)
         self.assertIn('read the file again only when its owner_instructions text says to', rules)
 
     def test_exchange_info_says_when_the_owner_file_changed_or_that_it_is_gone(self):
@@ -71,7 +70,7 @@ class DeviceCommandSpeedTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             target = Path(folder) / 'AGENTS.md'
             with patch.object(server, 'AGENTS_PATH', target):
-                self.assertIn('There is no /config/AGENTS.md now', server.exchange_info('chat', None)['owner_instructions'])
+                self.assertIn(f'There is no {target} now', server.exchange_info('chat', None)['owner_instructions'])
                 target.write_text('Synthetic owner rules')
                 os.utime(target, (1_800_000_000, 1_800_000_000))
                 first = server.exchange_info('chat', None)['owner_instructions']
@@ -97,6 +96,22 @@ class DeviceCommandSpeedTests(unittest.TestCase):
         self.assertNotIn('input_text.office_overhead_note', ids)
         self.assertNotIn('synthetic-value', json.dumps(self.find(name='overhead')))
 
+    def test_find_ranks_a_renamed_light_above_its_siblings(self):
+        light = {'entity_id': 'light.hue_color_lamp_3', 'state': 'off',
+                 'attributes': {'friendly_name': 'Office Overhead'}}
+        siblings = [{'entity_id': f'sensor.office_overhead_status_{n}', 'state': 'on',
+                     'attributes': {'friendly_name': 'Office Overhead Status'}} for n in range(12)]
+        with patch.object(self, 'STATES', [*siblings, light]):
+            result = self.find(name='Office Overhead')
+        self.assertEqual(result['matches'][0], {'entity_id': light['entity_id'], 'name': 'Office Overhead', 'state': 'off'})
+        self.assertEqual((len(result['matches']), result['total_matches'], result['truncated']), (10, 13, True))
+
+    def test_find_accepts_words_split_across_name_and_entity_id(self):
+        sensor = {'entity_id': 'sensor.office_status', 'state': 'on', 'attributes': {'friendly_name': 'Overhead'}}
+        with patch.object(self, 'STATES', [sensor]):
+            result = self.find(name='Office Overhead')
+        self.assertEqual([row['entity_id'] for row in result['matches']], [sensor['entity_id']])
+
     def test_find_caps_its_answer_and_reports_no_match(self):
         import verification
         many = [{'entity_id': f'light.sample_{n:02d}', 'state': 'on', 'attributes': {}} for n in range(25)]
@@ -109,7 +124,7 @@ class DeviceCommandSpeedTests(unittest.TestCase):
 
     def test_find_refuses_bad_arguments_before_any_read(self):
         import verification
-        engine = verification.Verification(unittest.mock.Mock(ha_token=lambda: 'synthetic'))
+        engine = verification.Verification(Mock(ha_token=lambda: 'synthetic'))
         with patch.object(verification, 'fetch_states') as fetch:
             for arguments in ({}, {'name': ''}, {'name': '...'}, {'name': 'x' * 121}, {'name': 7},
                               {'name': 'office', 'domain': 'Light.x'}, {'name': 'office', 'domain': 5}):

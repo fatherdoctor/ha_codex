@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
+from app_folders import isolated_app_folders
 from test_server import server
 import tool_threads
 from ha_data import HomeAssistantData, MAX_EXPORT_BYTES, MAX_QUERIES, MAX_SOURCE_BYTES, MAX_TURN_BYTES
@@ -628,6 +629,7 @@ class DataMcpTests(unittest.TestCase):
         for failure in (None, RuntimeError("Fixture startup failure")):
             with self.subTest(failure=failure), ExitStack() as stack:
                 temporary = stack.enter_context(tempfile.TemporaryDirectory())
+                stack.enter_context(isolated_app_folders(server, Path(temporary) / "app"))
                 engine = HomeAssistantData(data_worker(), Path(temporary) / "exports")
                 tool_threads.CHATS.bind("chat", THREAD)
                 stack.callback(tool_threads.CHATS.release, "chat")

@@ -312,8 +312,9 @@ class AppServerSession:
       then turn/start, and close ends the process input.
     - It does not own the connection (owns_connection=False): the process is
       shared by many chats and the thread in thread_params["threadId"] is already
-      loaded. The session sends only turn/start, with the chat's model in the
-      turn, because no thread request carries it. Its request IDs are unique to
+      loaded. The session sends only turn/start, as the caller built it; the
+      caller names the chat's model in turn_params, because no thread request
+      carries it to a loaded thread. Its request IDs are unique to
       the session, so a reader of the shared output can give each reply to its
       session (owns_request). Close interrupts a running turn and leaves the
       input open for the other chats. The caller routes each message of the
@@ -408,10 +409,7 @@ class AppServerSession:
             if not self.owns_connection:
                 self.thread_id = self.thread_params["threadId"]
                 self.on_event({"type": "thread.started", "thread_id": self.thread_id})
-                turn = {**self.turn_params, "threadId": self.thread_id}
-                if "model" in self.thread_params and "model" not in turn:
-                    turn["model"] = self.thread_params["model"]
-                self._start_turn(turn)
+                self._start_turn({**self.turn_params, "threadId": self.thread_id})
                 return
             self._request("initialize", {"clientInfo": {
                 "name": "home_assistant_worker", "title": "Home Assistant", "version": "1",

@@ -2,6 +2,7 @@
   /* Material Design Icons (Apache-2.0, @mdi/js 7.4.47): mdiChevronRight and mdiChevronDown, the arrows Home Assistant uses; mdiClose and mdiCheck. */
   --mdi-chevron-right: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z'/%3E%3C/svg%3E");
   --mdi-chevron-down: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z'/%3E%3C/svg%3E");
+  --mdi-arrow-left: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z'/%3E%3C/svg%3E");
   --mdi-close: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z'/%3E%3C/svg%3E");
   --mdi-check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z'/%3E%3C/svg%3E");
   color-scheme: light;
@@ -121,7 +122,6 @@ aside {
   align-items: center;
   gap: 8px;
   padding: 0 9px 25px;
-  flex-wrap: wrap;
 }
 .brand strong {
   font-size: calc(20px * var(--text-scale));
@@ -144,12 +144,13 @@ aside {
   display: block;
 }
 .tag {
-  width: 100%;
-  padding-left: 33px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   letter-spacing: 1.4px;
+  line-height: 1.25;
   font-size: calc(9px * var(--text-scale));
   color: var(--muted);
-  margin-top: -5px;
 }
 .new-chat {
   display: flex;
@@ -486,6 +487,16 @@ h1 {
   background: var(--notice);
   border-bottom: 1px solid var(--line);
 }
+#retention-warning {
+  flex: none;
+  margin: 0;
+  padding: 9px 32px;
+  font-size: calc(12px * var(--text-scale));
+  line-height: 1.5;
+  color: var(--notice-text);
+  background: var(--notice);
+  border-bottom: 1px solid var(--line);
+}
 #integration-notice a {
   color: inherit;
   font-weight: 600;
@@ -607,18 +618,6 @@ h1 {
 }
 .answer {
   padding: 0 3px;
-}
-.answer-heading {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  margin-bottom: 12px;
-  font-size: calc(12px * var(--text-scale));
-  font-weight: 600;
-}
-.answer-heading .mark {
-  color: var(--accent);
-  font-size: calc(20px * var(--text-scale));
 }
 .answer .details {
   margin-top: 12px;
@@ -1669,15 +1668,16 @@ dialog :is(h3, h4):has(> .settings-toggle) {
 #settings > section:last-of-type {
   border-bottom: 1px solid var(--line);
 }
-/* The three parts of Accounts and connections sit inside it, indented. */
+/* The three parts of Accounts and connections sit inside it, indented to its title text (after the chevron). */
 #accounts-section section {
-  margin-left: 12px;
+  margin-left: 18px;
 }
 #accounts-section h4 .settings-toggle {
   font-size: calc(13px * var(--text-scale));
 }
 .settings-body {
-  padding: 2px 0 16px;
+  /* 18px = the chevron (16px) and its margin (2px): the body starts at the title text's left edge. */
+  padding: 2px 0 16px 18px;
 }
 .settings-body > :first-child {
   margin-top: 0;
@@ -1735,9 +1735,6 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   max-width: 220px;
   background: #fff;
   padding: 10px;
-}
-#login-card a {
-  color: var(--accent);
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -1802,7 +1799,8 @@ dialog :is(h3, h4):has(> .settings-toggle) {
     padding: 0 14px 0 0;
     gap: 9px;
   }
-  #integration-notice {
+  #integration-notice,
+  #retention-warning {
     padding: 8px 14px;
   }
   .messages {
@@ -1971,6 +1969,13 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   padding: 0.75rem 1rem;
   border: 1px solid var(--line);
   border-radius: 8px;
+  /* The window clips the chat column and nothing else scrolls it, so a tall banner (a sign-in code on
+   * a phone) stops at 60 % of the window height and scrolls inside itself. */
+  flex-shrink: 0;
+  max-height: 60vh;
+  max-height: 60dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 #agents-hint {
   margin: 0 0 10px;
@@ -1997,10 +2002,35 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   user-select: all;
 }
 .signin-qr {
+  display: block;
   width: min(220px, 60vw);
   height: auto;
+  margin-top: 0.5rem;
   background: #fff;
   border-radius: 4px;
+}
+.signin-qr-fold > summary {
+  cursor: pointer;
+}
+.signin-card a {
+  overflow-wrap: anywhere;
+}
+/* The sign-in link is the main button of the card, drawn like the filled buttons of Settings. */
+.signin-card a.signin-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--ha-color-fill-primary-loud-resting, var(--accent));
+  color: var(--ha-color-on-primary-loud, #fff);
+  font-weight: 500;
+  text-decoration: none;
+}
+/* While a sign-in waits, a section shows only its card and Cancel. */
+.signing-in .signin-hide {
+  display: none;
 }
 
 /*
@@ -2113,7 +2143,17 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   -webkit-mask: var(--mdi-close) center / 24px no-repeat;
   mask: var(--mdi-close) center / 24px no-repeat;
 }
-.icon.icon-close {
+.icon-back::before {
+  content: "";
+  display: block;
+  width: 24px;
+  height: 24px;
+  background: currentColor;
+  -webkit-mask: var(--mdi-arrow-left) center / 24px no-repeat;
+  mask: var(--mdi-arrow-left) center / 24px no-repeat;
+}
+.icon.icon-close,
+.icon.icon-back {
   padding: 8px;
   border-radius: 50%;
   line-height: 0;
@@ -2379,12 +2419,13 @@ main > .chat-header h1 {
   background: var(--error);
 }
 .sidebar-footer .usage {
-  padding: 6px 10px 0 28px;
+  /* 15px = the foot row's 10px padding + the status dot's 5px margin: the dots' left edge. */
+  padding: 6px 10px 0 15px;
   font-size: calc(11px * var(--text-scale));
 }
 .usage-plan,
 .sidebar-footer .usage-note {
-  margin: 4px 10px 4px 28px;
+  margin: 4px 10px 4px 15px;
   font-size: calc(11px * var(--text-scale));
   line-height: 1.4;
   color: var(--muted);
@@ -2758,4 +2799,36 @@ a.ha-nav-row:focus-visible {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--bg);
+}
+/* Interim text messages of the latest exchange, shown outside the closed step list (CX-04-SHOW-TEXT). */
+.activity-text:empty {
+  display: none;
+}
+/* CX-04-PHONE-LIST: at phone width the rows are 48 px (--fb2-row-height) and the menu button 44 px, and the selected chat shows its menu button in place of its date. */
+@media (max-width: 700px) {
+  .chats-card .chat-row .row-menu {
+    min-width: 44px;
+    min-height: 44px;
+    right: 0;
+    padding: 0;
+  }
+  .chats-card .chat-row.current .row-menu {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .chats-card .chat-row.current:has(.row-menu) .row-meta > span:last-child {
+    visibility: hidden;
+  }
+}
+
+/* CX-04-REMOTE-WIN: the Back control sits left of the title; the title takes the space between it and the X. */
+#connection-dialog .dialog-header h2 {
+  flex: 1;
+  min-width: 0;
+  margin-left: 4px;
+}
+#remote-control-name {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
 }

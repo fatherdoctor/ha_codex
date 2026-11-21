@@ -89,7 +89,6 @@ class ToolListTests(unittest.TestCase):
         # A write tool with no mode would be "auto", whose question offers "Allow for this session".
         with patch.object(server, "read_options", return_value={}):
             launches = {"page": server.build_app_server_args(),
-                        "schedule": server.build_app_server_args(attended=False),
                         "relay": server.relay_tool_args()}
         for name, args in launches.items():
             settings = server_settings(args)
@@ -109,7 +108,6 @@ class LaunchTests(unittest.TestCase):
     def launches(self, options):
         with patch.object(server, "read_options", return_value=options):
             return {"page": server.build_app_server_args(),
-                    "schedule": server.build_app_server_args(attended=False),
                     "relay": server.relay_tool_args()}
 
     def test_on_by_default_for_a_page_chat_and_the_relay(self):
@@ -124,10 +122,6 @@ class LaunchTests(unittest.TestCase):
                 relay = server_settings(launches["relay"])
                 self.assertEqual(relay["env_vars"], [hass_mcp.KEY_ENV])
                 self.assertEqual(relay["enabled_tools"], [*hass_mcp.READ_TOOLS, *hass_mcp.WRITE_TOOLS])
-
-    def test_a_scheduled_run_gets_the_same_server_as_a_page_chat(self):
-        launches = self.launches({})
-        self.assertEqual(server_settings(launches["schedule"]), server_settings(launches["page"]))
 
     def test_off_removes_the_server_everywhere(self):
         for name, args in self.launches({"home_assistant_mcp": False}).items():
