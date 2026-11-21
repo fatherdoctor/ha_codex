@@ -80,8 +80,9 @@
   chat, such as a greeting or a one-number reply, now gets its answer with no tool call. Before, the page's rules
   made Codex call `exchange_info` at the start of every message and check for `/addon_config/AGENTS.md` with a shell
   command, so a one-number reply took three model steps. Codex now calls `exchange_info` only before its first
-  command, file change or tool call in a message, or when you say you attached a file, and never runs a command to
-  look for `AGENTS.md`, which Codex loads when the chat starts.
+  command, file change or tool call in a message, or when your message can refer to a file or a document it cannot
+  see, such as "Summarize this" with a document attached, and never runs a command to look for `AGENTS.md`, which
+  Codex loads when the chat starts. The `exchange_info` tool description says the same.
 - **No copies of secret files.** The app keeps no readable copy of `secrets.yaml` or of any file under `.storage`.
   The full snapshot leaves them out, and a copy in a message's backup folder is deleted when the message ends, in
   every permission mode, also when you stop the message; the backup cleanup removes a copy that a restart left
