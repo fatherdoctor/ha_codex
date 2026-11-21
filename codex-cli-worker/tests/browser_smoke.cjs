@@ -820,6 +820,28 @@ async function effortSaved(page, label) {
       saved.turns.at(-1).execution_settings,
       saved.chat_settings,
     );
+    // A narration gap must be one normal paragraph gap, including its upper bound.
+    const replyGaps = await page.evaluate(() => {
+      const exchange = [...document.querySelectorAll("#messages .exchange")].at(-1);
+      const blocks = [...exchange.querySelectorAll("#activity-text > .message"), exchange.querySelector(".answer > .message")];
+      const sample = document.createElement("div");
+      sample.className = "message markdown";
+      sample.style.cssText = "position: fixed; visibility: hidden; top: 0; left: 0";
+      for (const text of ["First paragraph.", "Second paragraph."]) {
+        const p = document.createElement("p");
+        p.textContent = text;
+        sample.append(p);
+      }
+      exchange.append(sample);
+      const reference = sample.children[1].getBoundingClientRect().top - sample.children[0].getBoundingClientRect().bottom;
+      sample.remove();
+      return {reference, gaps: blocks.slice(1).map((block, index) =>
+        block.getBoundingClientRect().top - blocks[index].getBoundingClientRect().bottom)};
+    });
+    assert.ok(replyGaps.gaps.length >= 2, "expected both narration gaps");
+    for (const gap of replyGaps.gaps)
+      assert.ok(Math.abs(gap - replyGaps.reference) <= 2,
+        `narration gap ${gap} px differs from paragraph gap ${replyGaps.reference} px`);
     await openPicker(page);
     await page.locator("#effort-slider").press("End");
     await effortSaved(page, "Ultra");
