@@ -21,6 +21,7 @@ import stat
 import sys
 import subprocess
 import tarfile
+import tempfile
 import threading
 import time
 import uuid
@@ -1176,10 +1177,24 @@ FINAL_RESPONSE_SCHEMA = {
 }
 
 
+def write_git_identity_defaults(options: dict[str, Any]) -> None:
+    """Give Git a system-level fallback. Each checkout can still set its own name and email."""
+    name = str(options.get("git_author_name") or "").strip() or "ChatGPT Codex"
+    email = str(options.get("git_author_email") or "").strip() or "noreply@openai.com"
+    destination = DATA_ROOT / "codex-git-defaults"
+    # Let Git quote option values. Replace the complete file so a restart cannot leave half an identity.
+    with tempfile.TemporaryDirectory(dir=DATA_ROOT) as folder:
+        config = Path(folder) / "gitconfig"
+        for key, value in (("include.path", "/etc/gitconfig"), ("user.name", name), ("user.email", email)):
+            subprocess.run(["git", "config", "--file", str(config), "--", key, value], check=True)
+        config.replace(destination)
+
+
 def ensure_runtime_files() -> None:
     """Create the worker's folders, make an API token if there is none, and write Codex's config."""
     CODEX_HOME.mkdir(parents=True, exist_ok=True)
     DATA_ROOT.mkdir(parents=True, exist_ok=True)
+    write_git_identity_defaults(read_options())
     remote_control.prepare_control_parent(DATA_ROOT)
     task_root().mkdir(parents=True, exist_ok=True)
     # The GitHub sign-in's private folder: 0700, masked in every sandbox (codex-bwrap).
@@ -4775,6 +4790,10 @@ def codex_env() -> dict[str, str]:
         env.pop(key, None)
     env["CODEX_HOME"] = str(CODEX_HOME)
     env["HOME"] = str(DATA_ROOT)
+    # Direct author variables override even a repository's own identity.
+    for key in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
+        env.pop(key, None)
+    env["GIT_CONFIG_SYSTEM"] = str(DATA_ROOT / "codex-git-defaults")
     options = read_options()
     token = str(options.get("HA_TOKEN") or "").strip()
     if token:

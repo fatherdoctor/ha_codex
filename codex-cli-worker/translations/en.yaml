@@ -20,6 +20,12 @@ configuration:
   github_client_id:
     name: GitHub sign-in app ID
     description: The public ID of the GitHub app used to sign in. Change it only if you use your own GitHub app.
+  git_author_name:
+    name: Git commit name
+    description: Name to record on new commits made by Codex. Leave blank to use ChatGPT Codex.
+  git_author_email:
+    name: Git commit email
+    description: Email to record on new commits made by Codex. Leave blank to use noreply@openai.com.
   task_timeout_seconds:
     name: Time limit for a task
     description: How many seconds one task may run before the app stops it.

@@ -15,6 +15,8 @@ OPTIONS = {
     "reasoning_summary": ("reasoning headlines in the activity list", "server.py", "test_activity.py"),
     "codex_sandbox": ("sandbox mode for a run", "server.py", "test_approvals.py"),
     "notify_service": ("questions and failures sent to a notify service", "server.py", "test_choices.py"),
+    "git_author_name": ("commit author and committer", "server.py", "test_git_author.py"),
+    "git_author_email": ("commit author and committer", "server.py", "test_git_author.py"),
     "github_client_id": ("GitHub sign-in", "server.py", "test_github_routes.py"),
     "task_timeout_seconds": ("run time limit for a task", "server.py", "test_server.py"),
     "task_stall_seconds": ("stop a task that goes silent", "server.py", "test_sign_in_watchdog.py"),

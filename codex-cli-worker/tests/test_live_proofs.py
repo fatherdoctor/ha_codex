@@ -637,6 +637,37 @@ sys.stdin.read()
 """
 
 
+@unittest.skipUnless(os.environ.get("HA_TEST_REQUIRE_CODEX") == "1", "requires the built worker image")
+class SandboxGitIdentity(unittest.TestCase):
+    def test_actual_git_commit_uses_worker_defaults_then_repository_identity(self) -> None:
+        import server
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            data, checkout = root / "data", root / "checkout"
+            data.mkdir()
+            checkout.mkdir()
+            with patch.object(server, "DATA_ROOT", data), patch.object(server, "read_options", return_value={}):
+                server.write_git_identity_defaults({})
+                env = server.codex_env()
+            command = """set -eu
+                git init -q
+                git commit -q --allow-empty -m first
+                git log -1 --format='%an <%ae>%n%cn <%ce>'
+                git config user.name 'Example Project'
+                git config user.email project@example.invalid
+                git commit -q --allow-empty -m second
+                git log -1 --format='%an <%ae>%n%cn <%ce>'
+            """
+            result = subprocess.run(
+                [CODEX, "sandbox", "--config", 'sandbox_mode="workspace-write"', "--", "sh", "-c", command],
+                cwd=checkout, env=env, text=True, capture_output=True, timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.splitlines(), ["ChatGPT Codex <noreply@openai.com>"] * 2
+                             + ["Example Project <project@example.invalid>"] * 2)
+
+
 class CloseWaitsForChildren(unittest.TestCase):
     """AppServer.close ends what the app-server started, so tearDown can remove the folder (CX-PROOFS-RMTREE).
 

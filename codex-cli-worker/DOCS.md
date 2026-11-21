@@ -641,6 +641,8 @@ Sign-in uses your ChatGPT account and its Codex allowance. Availability and usag
 
 ## GitHub sign-in
 
+When Codex makes a new Git commit, its default author and committer are `ChatGPT Codex <noreply@openai.com>`. To change the defaults, open the app’s **Configuration** page, show unused optional settings, set **Git commit name** or **Git commit email**, then save and restart the app. A blank field uses its built-in default. A repository’s own `user.name` and `user.email` take precedence for commits made in that checkout. Changing the options affects future commits.
+
 Release 0.3 lets the assistant fetch, pull, push, clone and link the GitHub repositories you choose. You do every step with a button in the app page: **Settings > Accounts and connections > GitHub**, just below **ChatGPT account**. No step needs a shell, and nothing about GitHub is typed into chat.
 
 The app keeps the sign-in in its own private folder, `/data/github`. That folder is hidden in every Codex sandbox, so a task cannot read it. Codex never holds the token. It calls one tool, `github_git`, and the app runs git for it. Every push goes through the kit's push guard first.
