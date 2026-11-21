@@ -166,6 +166,7 @@ class CodexHost:
         self.selected = ""
         self.chats: dict[str, Chat] = {}
         self.stderr_tail: collections.deque[str] = collections.deque(maxlen=STDERR_LINES)
+        self._stderr_count = 0  # Lines read from the error output so far, so an exchange copies only its own.
         self._fingerprint: dict[str, str] = {}
         self._threads: dict[str, str] = {}  # thread id -> chat id, for each chat's thread and its sub-agents
         self._replies: dict[str, dict[str, Any]] = {}
@@ -547,6 +548,29 @@ class CodexHost:
         idle.sort(key=lambda chat: (chat.chat_id == self.selected, chat.last_used))
         return idle[0].chat_id
 
+    def follow(self, chat_id: str, thread_id: str | None) -> None:
+        """Let go of a thread the host holds for a chat when it is not the chat's conversation (thread_id).
+
+        That happens after a wake that loaded a thread and then failed, or a cancel while a new chat loaded: the
+        message then ran without the live process, so the chat went on in another thread. The host's thread is
+        unloaded when it is live, and forgotten, so the next wake resumes the chat's own thread. Raise HostError
+        when that thread is working or does not unload.
+        """
+        with self._wake_lock:
+            with self.lock:
+                chat = self.chats.get(chat_id)
+                if chat is None or not chat.thread_id or chat.thread_id == thread_id:
+                    return
+                old = chat.thread_id
+            self.log("Codex host: a chat went on in another thread; letting go of the one loaded here.")
+            self._pause_locked_out(chat_id)
+            with self.lock:
+                self._threads.pop(old, None)
+                chat.thread_id = ""
+                chat.thread_params = {}
+                chat.tool_names = ()
+                chat.file_signature = None
+
     def pause(self, chat_id: str) -> None:
         """Unload a live chat that does not work. Its history stays in its session file."""
         with self._wake_lock:
@@ -666,6 +690,17 @@ class CodexHost:
             return False
         return True
 
+    def stderr_mark(self) -> int:
+        """Return a mark of the error output read so far, for stderr_since."""
+        with self.lock:
+            return self._stderr_count
+
+    def stderr_since(self, mark: int) -> list[str]:
+        """Return the redacted error lines read after a mark, at most the last STDERR_LINES of them."""
+        with self.lock:
+            new = self._stderr_count - mark
+            return list(self.stderr_tail)[-new:] if new > 0 else []
+
     def request_restart(self, reason: str) -> None:
         """Mark a restart due, for example after a sign-in or an options save. It waits for running exchanges."""
         with self.lock:
@@ -696,6 +731,7 @@ class CodexHost:
             for line in iter(handle.readline, ""):
                 with self.lock:
                     self.stderr_tail.append(self.redact(line.rstrip("\n")))
+                    self._stderr_count += 1
         except (OSError, ValueError):
             pass
 

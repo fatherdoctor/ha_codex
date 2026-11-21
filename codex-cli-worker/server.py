@@ -5125,18 +5125,18 @@ def bind_chat_thread(task_id: str, thread_id: Any) -> None:
 
 
 def create_approval_session(
-    task_id: str, proc: subprocess.Popen, prompt: str, final_file: Path,
+    task_id: str, proc: subprocess.Popen | None, prompt: str, final_file: Path,
     session_id: str | None, session_holder: dict[str, str], options: dict[str, Any],
     status_calls: list[dict[str, Any]] | None = None,
-    open_thread: Callable[[dict[str, Any]], str] | None = None,
+    open_thread: Callable[[dict[str, Any]], tuple[str, subprocess.Popen]] | None = None,
 ) -> AppServerSession:
     """Bind one app-server exchange to its task and live activity, with secret values redacted.
 
     Each usable ask_owner or report_failure call of the turn is added to status_calls.
 
-    Without open_thread the session owns proc, a process for this one exchange. With it, proc is the live process
-    of codex_host: open_thread(thread_params) loads the chat's thread there and returns its id (it raises
-    codex_host.HostError when it cannot), and the session sends only the turn.
+    Without open_thread the session owns proc, a process for this one exchange. With it, proc is None:
+    open_thread(thread_params) loads the chat's thread in the live process of codex_host and returns the thread id
+    and that process (it raises codex_host.HostError when it cannot), and the session sends only the turn.
     """
     with lock:
         task = tasks.get(task_id, {})
@@ -5249,7 +5249,8 @@ def create_approval_session(
     if mode == "workspace-write":
         policy["writableRoots"] = [*TASK_WRITABLE_ROOTS, *backup_writable_root(final_file.parent)]
     if open_thread:
-        thread_params["threadId"] = open_thread(thread_params)
+        thread_params["threadId"], proc = open_thread(thread_params)
+    assert proc is not None
     return AppServerSession(
         proc.stdin, lock=lock, thread_params=thread_params,
         turn_params={"input": [{"type": "text", "text": prompt},
@@ -5829,19 +5830,13 @@ def run_live_exchange(
     """
     if not live_codex.ready_for_message():
         return None
-    known_thread = live_codex.chat(task_id).thread_id
-    if known_thread and known_thread != session_id:
-        write_task_log(task_id, "worker", "The live Codex process holds another conversation for this chat; "
-                                          "starting Codex for this message.")
-        return None
-    with lock:
-        proc = live_codex.process
-    if proc is None:
-        return None
     try:
+        # After a failed wake, or a cancel while a new chat loaded, the host may hold a thread that is not this
+        # chat's conversation: it lets that thread go, so this message resumes the chat's own.
+        live_codex.follow(task_id, session_id)
         session = create_approval_session(
-            task_id, proc, prompt, final_file, session_id, session_holder, options, status_calls,
-            open_thread=lambda params: live_codex.wake(task_id, params, live_tool_programs()))
+            task_id, None, prompt, final_file, session_id, session_holder, options, status_calls,
+            open_thread=lambda params: live_thread(task_id, params))
         live_codex.attach(task_id, session)
     except codex_host.HostError as exc:
         write_task_log(task_id, "worker", f"The live Codex process could not take this message ({exc}); "
@@ -5850,6 +5845,7 @@ def run_live_exchange(
     with lock:
         approval_sessions[task_id] = session
     write_task_log(task_id, "worker", "Codex runs this message in its live process.")
+    errors_mark = live_codex.stderr_mark()
     try:
         try:
             session.start()
@@ -5860,19 +5856,49 @@ def run_live_exchange(
             session.close()
             return None
         outcome = wait_for_exchange(session, timeout, stall_seconds)
-        if outcome == "stalled":
-            write_task_log(task_id, "worker", f"No activity from Codex for {stall_seconds} seconds; stopping the task.")
-        if outcome != "finished" or session.turn_running:
-            # A timeout, a stall or a cancel: interrupt this chat's turn and wait for its end (codex_host.cancel).
-            live_codex.cancel(task_id)
-        session.close()
+        end_live_turn(task_id, session, outcome, stall_seconds)
         error = RuntimeError(session.error) if session.error else None
+        if outcome != "finished" or error is not None or session.returncode:
+            for line in live_codex.stderr_since(errors_mark):
+                write_task_log(task_id, "stderr", line)
         return LiveExchange(session, session.returncode, outcome == "timeout", outcome == "stalled", error)
     finally:
         live_codex.detach(task_id)
         with lock:
             if approval_sessions.get(task_id) is session:
                 approval_sessions.pop(task_id, None)
+
+
+def live_thread(task_id: str, thread_params: dict[str, Any]) -> tuple[str, subprocess.Popen[str]]:
+    """Wake the chat in the live process; return its thread and the process it lives in, read after the wake.
+
+    A crash and a restart during the wake give a new process: the session must write to that one.
+    """
+    thread_id = live_codex.wake(task_id, thread_params, live_tool_programs())
+    with lock:
+        process = live_codex.process
+    if process is None:
+        raise codex_host.HostError("no Codex process")
+    return thread_id, process
+
+
+def end_live_turn(task_id: str, session: AppServerSession, outcome: str, stall_seconds: float) -> None:
+    """End this chat's turn on the live process, then tidy what a cancelled turn leaves.
+
+    A timeout, a stall or a cancel interrupts the turn and waits for its end (codex_host.cancel); the process and
+    the other chats go on. The cancel route does not wait for the turn on the live process, so the copies of secret
+    files of a cancelled exchange are removed here, once the turn has ended.
+    """
+    if outcome == "stalled":
+        write_task_log(task_id, "worker", f"No activity from Codex for {stall_seconds} seconds; stopping the task.")
+    if outcome != "finished" or session.turn_running:
+        live_codex.cancel(task_id)
+    session.close()
+    if task_cancellation_requested(task_id):
+        try:
+            drop_credential_backups(get_run_dir(task_id))
+        except OSError as exc:
+            write_task_log(task_id, "worker", f"Could not tidy the backup folder: {exc}")
 
 
 def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: str | None = None) -> None:
@@ -5987,7 +6013,6 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     # top of run_task has already refused the modes that this transport must never be given.
     args = build_app_server_args()
     ha_call.begin(task_id)
-    write_task_log(task_id, "worker", "Starting Codex: " + " ".join(args))
 
     start_phase(task_id, "launch", "Starting Codex")
     readiness = sandbox_readiness()
@@ -6015,6 +6040,7 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     if live is not None:
         approval_session, returncode, timed_out, stalled, lifecycle_error = live
     else:
+        write_task_log(task_id, "worker", "Starting Codex: " + " ".join(args))
         try:
             proc = subprocess.Popen(
                 args,
@@ -7590,18 +7616,21 @@ def cancel_task(task_id: str) -> Response:
     if not accepted:
         status_code = 404 if error == "task not found" else 409
         return jsonify({"ok": False, "error": error}), status_code
+    with lock:
+        session = approval_sessions.get(task_id)
+    on_live_process = session is not None and not session.owns_connection
     if proc is not None:
-        with lock:
-            has_approval_session = task_id in approval_sessions
-        if has_approval_session:
+        if session is not None:
             reap_approval_process(proc)
         else:
             terminate_and_reap_process(proc)
-    # run_task returns early for a stopped exchange, so the copies of secret files go here, once Codex has stopped.
-    try:
-        drop_credential_backups(get_run_dir(task_id))
-    except OSError as exc:
-        write_task_log(task_id, "worker", f"Could not tidy the backup folder: {exc}")
+    if not on_live_process:
+        # run_task returns early for a stopped exchange, so the copies of secret files go here, once Codex has
+        # stopped. On the live process the turn can run on after the interrupt: end_live_turn removes them then.
+        try:
+            drop_credential_backups(get_run_dir(task_id))
+        except OSError as exc:
+            write_task_log(task_id, "worker", f"Could not tidy the backup folder: {exc}")
     publish_cancelled_task_outcome(task_id, proc.returncode if proc is not None else None)
     start_next_queued()
     return jsonify({"ok": True, "task_id": task_id, "status": "cancelled"})
@@ -8346,6 +8375,7 @@ def main() -> None:
     # The live Codex process starts now when the owner left warm_start on and a sign-in exists, so the first
     # message does not wait for it. A message that comes first takes the start path; nothing waits on this.
     threading.Thread(target=live_codex.ready_for_message, daemon=True, name="codex-host-start").start()
+    # atexit runs on a normal exit only; on SIGTERM the container's stop ends the Codex process.
     atexit.register(live_codex.close)
     # Messages that were waiting when the worker stopped carry on in order.
     start_next_queued()

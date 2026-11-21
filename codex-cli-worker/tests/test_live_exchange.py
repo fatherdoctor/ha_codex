@@ -1,4 +1,4 @@
-"""run_task on the live Codex process (design CX-SPEED cut 3, step 5): option on, option off, crash, restart.
+"""run_task on the live Codex process (design CX-SPEED cut 3, step 5): option on, option off, crash, restart, cancel.
 
 The live process is a fake app-server that answers many exchanges on one connection, as `codex app-server` does.
 The host is the worker's own (server.make_live_codex) with short time limits, so a failure ends in seconds.
@@ -24,22 +24,27 @@ LIMITS = {"reply_timeout": 3.0, "ready_timeout": 3.0}
 class LiveCodex:
     """A fake `codex app-server` that keeps its threads between exchanges.
 
-    tool_status is what each tool program reports after a thread loads. hold keeps each turn open until the worker
-    interrupts it. crash_on_turn ends the output when a turn starts, as a process that dies would. deaf ignores
-    turn/interrupt.
+    tool_status is what each tool program reports after a thread loads; tool_statuses, when given, is used up
+    first, one per load. hold keeps each turn open until the worker interrupts it. crash_on_turn ends the output
+    when a turn starts, as a process that dies would, after it writes error_lines to its error output. deaf ignores
+    turn/interrupt. interrupt_delay ends an interrupted turn that many seconds late.
     """
 
     def __init__(self, *, tool_status: str = "ready", hold: bool = False, crash_on_turn: bool = False,
-                 deaf: bool = False) -> None:
+                 deaf: bool = False, tool_statuses: tuple[str, ...] = (), error_lines: tuple[str, ...] = (),
+                 interrupt_delay: float = 0.0) -> None:
         self.tool_status = tool_status
+        self.tool_statuses = list(tool_statuses)
         self.hold = hold
         self.crash_on_turn = crash_on_turn
         self.deaf = deaf  # Ignore turn/interrupt, as a turn that hangs would.
+        self.interrupt_delay = interrupt_delay
+        self.error_lines = error_lines
         self.sent: list[dict] = []
         self.lines: queue.Queue[str] = queue.Queue()
         self.stdin = self
         self.stdout = self
-        self.stderr = _NoErrors()
+        self.stderr = _Errors()
         self.returncode: int | None = None
         self.turns = 0
         self.open_turns: dict[str, str] = {}  # turn id -> thread id
@@ -59,9 +64,10 @@ class LiveCodex:
         if method in ("thread/start", "thread/resume"):
             thread_id = params.get("threadId") or str(uuid.uuid4())
             self.emit(id=request_id, result={"thread": {"id": thread_id}})
+            status = self.tool_statuses.pop(0) if self.tool_statuses else self.tool_status
             for name in server.live_tool_programs():
                 self.emit(method="mcpServer/startupStatus/updated",
-                          params={"name": name, "status": self.tool_status, "threadId": thread_id})
+                          params={"name": name, "status": status, "threadId": thread_id})
         elif method == "turn/start":
             self.start_turn(request_id, params["threadId"])
         elif method == "turn/interrupt" and self.deaf:
@@ -69,8 +75,12 @@ class LiveCodex:
         elif method == "turn/interrupt":
             self.emit(id=request_id, result={})
             thread_id = self.open_turns.pop(params["turnId"], params["threadId"])
-            self.emit(method="turn/completed", params={
+            completed = partial(self.emit, method="turn/completed", params={
                 "threadId": thread_id, "turn": {"id": params["turnId"], "status": "interrupted"}})
+            if self.interrupt_delay:
+                threading.Timer(self.interrupt_delay, completed).start()
+            else:
+                completed()
         elif method == "thread/unsubscribe":
             self.emit(id=request_id, result={})
             self.emit(method="thread/closed", params={"threadId": params["threadId"]})
@@ -84,7 +94,7 @@ class LiveCodex:
         self.emit(id=request_id, result={"turn": turn})
         self.emit(method="turn/started", params={"threadId": thread_id, "turn": turn})
         if self.crash_on_turn:
-            self.lines.put("")
+            threading.Thread(target=self.crash, daemon=True).start()
             return
         if self.hold:
             self.open_turns[turn["id"]] = thread_id
@@ -94,6 +104,16 @@ class LiveCodex:
             "id": f"answer-{self.turns}", "type": "agentMessage", "phase": "final_answer",
             "text": json.dumps({"status": "completed", "summary": f"Answer {self.turns}"})}})
         self.emit(method="turn/completed", params={"threadId": thread_id, "turn": {**turn, "status": "completed"}})
+
+    def crash(self) -> None:
+        """Write error_lines to the error output, then end the output once the host has read them.
+
+        On a thread of its own: the worker writes turn/start under the lock that the host's error reader takes.
+        """
+        for line in self.error_lines:
+            self.stderr.lines.put(line + "\n")
+        self.stderr.lines.join()
+        self.lines.put("")
 
     def readline(self) -> str:
         return self.lines.get(timeout=10)
@@ -115,14 +135,29 @@ class LiveCodex:
     def terminate(self) -> None:
         self.returncode = -15
         self.lines.put("")
+        self.stderr.lines.put("")
 
     kill = terminate
 
 
-class _NoErrors:
+class _Errors:
+    """The error output of the fake: the lines put in it, then an end when the process stops."""
+
+    def __init__(self) -> None:
+        self.lines: queue.Queue[str] = queue.Queue()
+        self.taken = False
+
     def readline(self) -> str:
-        threading.Event().wait(0.05)
-        return ""
+        # A line counts as read (lines.join) when the reader comes back for the next one: it has stored it then.
+        if self.taken:
+            self.taken = False
+            self.lines.task_done()
+        try:
+            line = self.lines.get(timeout=10)
+        except queue.Empty:
+            return ""
+        self.taken = True
+        return line
 
 
 class LiveExchangeTests(unittest.TestCase):
@@ -244,11 +279,11 @@ class LiveExchangeTests(unittest.TestCase):
         self.assertNotIn("version 2", lines, "the log names the row, never its value")
 
     def test_crash_fails_the_running_message_and_the_next_one_gets_a_new_process(self):
-        self.next_live = lambda: LiveCodex(crash_on_turn=True)
+        # Only the first process crashes: the host starts the next one at once, before this test goes on.
+        self.next_live = lambda: LiveCodex(crash_on_turn=not self.spawned)
         crashed = self.message()
         self.assertEqual(crashed["status"], "failed")
         self.assertEqual(self.started_alone, [], "a turn that started is never run a second time")
-        self.next_live = LiveCodex
         self.assertEqual(self.message()["status"], "completed")
         self.assertEqual(len(self.spawned), 2)
 
@@ -274,6 +309,82 @@ class LiveExchangeTests(unittest.TestCase):
         # The restart was due when the exchange ended, and no other chat worked: it ran at once.
         self.assertIsNotNone(self.spawned[0].returncode, "the process with the hung turn was stopped")
         self.assertEqual(len(self.spawned), 2)
+
+    def wait_for(self, condition, seconds: float = 5.0) -> None:
+        stop = threading.Event()
+        for _ in range(int(seconds / 0.02)):
+            if condition():
+                return
+            stop.wait(0.02)
+        self.fail("the condition did not come true in time")
+
+    def test_cancel_interrupts_only_the_turn_and_tidies_after_it_ends(self):
+        self.next_live = lambda: LiveCodex(hold=True, interrupt_delay=0.5)
+        tidied: list[bool] = []  # For each tidy of secret copies: whether the chat's turn was still running.
+        drop = server.drop_credential_backups
+        self.stack.enter_context(patch.object(server, "drop_credential_backups", side_effect=lambda path: (
+            tidied.append(self.host.chat("task").turn_running), drop(path))[1]))
+        runner = threading.Thread(target=self.message)
+        runner.start()
+        self.wait_for(lambda: self.spawned and self.spawned[0].open_turns)
+        response = server.app.test_client().post("/tasks/task/cancel", headers={"Authorization": "Bearer test-token"})
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual(tidied, [], "the cancel route leaves the tidy to the end of the turn")
+        runner.join(10)
+        self.assertFalse(runner.is_alive())
+        live = self.spawned[0]
+        self.assertEqual([call["params"]["threadId"] for call in live.methods("turn/interrupt")],
+                         [live.methods("turn/start")[0]["params"]["threadId"]])
+        self.assertEqual(tidied, [False], "one tidy, after the turn ended")
+        self.assertEqual(server.tasks["task"]["status"], "cancelled")
+        self.assertIsNone(live.returncode, "the process stays up for the other chats")
+        self.assertFalse(self.host.restart_due)
+        self.assertEqual(self.host.live_chats(), ["task"])
+        self.assertEqual(self.started_alone, [])
+
+    def test_stall_interrupts_only_the_turn(self):
+        self.options["task_stall_seconds"] = 1
+        self.next_live = lambda: LiveCodex(hold=True)
+        self.stack.enter_context(patch.object(server, "wait_for_exchange",
+                                              partial(server.wait_for_exchange, poll=0.1)))
+        task = self.message()
+        self.assertEqual(task["status"], "failed")
+        self.assertIn("stopped responding", task["summary"])
+        live = self.spawned[0]
+        self.assertEqual(len(live.methods("turn/interrupt")), 1)
+        self.assertIsNone(live.returncode, "the process stays up for the other chats")
+        self.assertFalse(self.host.restart_due)
+        self.assertEqual(self.host.live_chats(), ["task"])
+        self.assertIn("No activity from Codex for 1 seconds", self.log())
+
+    def test_a_failed_message_gets_the_error_output_of_the_live_process(self):
+        self.next_live = lambda: LiveCodex(crash_on_turn=True, error_lines=("invented failure: model gone",))
+        self.assertEqual(self.message()["status"], "failed")
+        lines = [line for line in self.log().splitlines() if "invented failure: model gone" in line]
+        self.assertEqual(len(lines), 1)
+        self.assertIn("stderr", lines[0])
+
+    def test_after_one_failed_start_the_next_message_runs_on_the_live_process(self):
+        self.next_live = lambda: LiveCodex(tool_statuses=("failed",))
+        first = self.message()
+        self.assertEqual(first["status"], "completed")
+        self.assertEqual(len(self.started_alone), 1, "the first message took the start path")
+        second = self.message(first["session_id"])
+        self.assertEqual(second["status"], "completed", second.get("error"))
+        self.assertEqual(len(self.started_alone), 1, "the second message ran on the live process")
+        live = self.spawned[0]
+        self.assertEqual([turn["params"]["threadId"] for turn in live.methods("turn/start")], [first["session_id"]])
+        self.assertNotIn("holds another conversation", self.log())
+
+    def test_a_chat_in_another_conversation_never_runs_on_the_loaded_thread(self):
+        loaded = self.message()["session_id"]
+        other = "019fc242-910a-7c92-a17d-54c014e19fc5"  # Invented: the chat went on in this thread elsewhere.
+        self.assertEqual(self.message(other)["status"], "completed")
+        live = self.spawned[0]
+        self.assertEqual([turn["params"]["threadId"] for turn in live.methods("turn/start")], [loaded, other])
+        self.assertIn(loaded, [call["params"]["threadId"] for call in live.methods("thread/unsubscribe")])
+        self.assertEqual(live.methods("thread/resume")[-1]["params"]["threadId"], other)
+        self.assertEqual(self.started_alone, [])
 
 
 if __name__ == "__main__":

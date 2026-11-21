@@ -281,7 +281,8 @@ Without the option, the app starts Codex again for each message and loads the ch
 - **Failures.** When the process cannot take a message, the app starts Codex for that message as it does with the
   option off, and writes one line with the reason in the task log. When the process stops during a message, that
   message fails and a new process starts. After 3 such stops in 10 minutes, the app uses the option-off way for one
-  hour.
+  hour. The task log of a message that fails, times out or stalls holds what Codex wrote to its error output during
+  that message.
 - **Stop and limits.** **Cancel**, the task timeout and the stall limit stop only that chat's turn. The process and
   the other loaded chats stay.
 - **Remote control** keeps its own Codex process, as before.
