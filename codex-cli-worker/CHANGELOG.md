@@ -3,6 +3,10 @@
 ## 0.4.0 (unreleased)
 
 ### What's new
+- **Name your remote connection in its window.** **Settings** > **Remote connection** has a name field again. It
+  saves the same **Remote control machine name** option as the Configuration tab and is read-only while remote
+  control is on. The window's text is shorter (the longer notes sit under **More about remote control**), and a
+  **Back** button returns to Settings.
 - **Old chats are deleted after 14 days.** A chat with no message for 14 days is deleted with all its files. Change the
   time with **Delete chats after (days without a message)**. Pinned chats never expire, a scheduled run counts as a
   message, and a chat shows a warning line for its last 3 days.

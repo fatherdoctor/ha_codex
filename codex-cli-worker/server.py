@@ -7673,6 +7673,70 @@ def get_remote_control() -> Response:
 SUPERVISOR_SELF_URL = "http://supervisor/addons/self"
 
 
+def save_remote_control_name(value: Any) -> bool:
+    """Save the remote_control_name option, as the app's Configuration tab would; True when the worker's own copy has it too.
+
+    Supervisor replaces every option on a save, so the saved options are read from Supervisor first and only the
+    name changes. Those are the options as written, with any !secret reference kept; options.json holds resolved
+    values and must not be sent back. Supervisor rewrites options.json only when the app starts, so the worker's
+    copy gets the new name as well. Raises ValueError for a value that is not a name and RuntimeError when
+    Supervisor cannot be reached or refuses. Returns False when Supervisor saved the name but the worker's copy could
+    not be updated; the name then shows after the app restarts.
+
+    One limit: the name the app shows is cut to remote_control.MAX_NAME_BYTES, so a longer value is refused rather
+    than cut without a word. Other characters are not refused; machine_name turns them into spaces.
+    """
+    if not isinstance(value, str) or len(value.strip()) > remote_control.MAX_NAME_BYTES:
+        raise ValueError(f"Enter a name of up to {remote_control.MAX_NAME_BYTES} characters.")
+    name = value.strip()
+    headers = {"Authorization": f"Bearer {ha_token()}"}
+    try:
+        info = requests.get(f"{SUPERVISOR_SELF_URL}/info", headers=headers, timeout=15)
+        info.raise_for_status()
+        options = dict(info.json()["data"]["options"])
+        options["remote_control_name"] = name
+        saved = requests.post(f"{SUPERVISOR_SELF_URL}/options", headers=headers, json={"options": options}, timeout=15)
+        saved.raise_for_status()
+    except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
+        raise RuntimeError("Home Assistant did not save the name. Try again, or change it in the app's "
+                           "Configuration tab.") from exc
+    try:
+        write_local_option("remote_control_name", name)
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def write_local_option(key: str, value: Any) -> None:
+    """Change one value in the worker's options.json, keeping the file's permissions; it can hold a token."""
+    current = json.loads(OPTIONS_PATH.read_text(encoding="utf-8")) if OPTIONS_PATH.exists() else {}
+    current[key] = value
+    temporary = OPTIONS_PATH.with_suffix(".tmp")
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        json.dump(current, handle)
+    temporary.replace(OPTIONS_PATH)
+
+
+def rename_remote_control() -> Response | tuple[Response, int]:
+    """Save a new machine name from the app page; refused while remote control is on, since Codex reads it at start."""
+    if remote_control_supervisor.enabled():
+        return jsonify({"ok": False, "error": "Turn remote control off before you rename it."}), 409
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or set(payload) != {"name"}:
+        return jsonify({"ok": False, "error": "Enter a name."}), 400
+    try:
+        applied = save_remote_control_name(payload["name"])
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except RuntimeError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 502
+    reply = {"ok": True, "remote_control": remote_control_supervisor.snapshot()}
+    if not applied:
+        reply["notice"] = "The name is saved. It shows here after the app restarts."
+    return jsonify(reply)
+
+
 # A Supervisor slug: the repository's prefix, an underscore, then the app's own slug.
 ADDON_SLUG_RE = re.compile(r"[a-z0-9_]{1,64}")
 _addon_slug: str | None = None
@@ -7715,13 +7779,15 @@ def addon_configuration() -> Response:
 @require_auth
 @require_ingress
 def change_remote_control(action: str) -> Response | tuple[Response, int]:
-    """Turn remote control on or off, or ask for a new pairing code.
+    """Turn remote control on or off, ask for a new pairing code, or save its machine name.
 
     Only from an administrator on the app page, never with the API token.
     """
     admin, refusal = ingress_admin()
     if admin is None:
         return jsonify({"ok": False, "error": refusal}), 403
+    if action == "name":
+        return rename_remote_control()
     if action == "start":
         state = remote_control_supervisor.start()
     elif action == "stop":

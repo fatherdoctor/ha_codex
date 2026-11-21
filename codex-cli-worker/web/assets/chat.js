@@ -4058,10 +4058,36 @@ function renderRemoteControl(rc) {
   $("remote-control-log-box").hidden = !(rc.log || []).length;
   document.dispatchEvent(new CustomEvent("remote-view", {detail: rc}));
 }
-/** Show the machine name the ChatGPT app lists; it is set on the Configuration tab (0.3.5). */
+/**
+ * Show the configured machine name in its field. Codex reads the name when remote control starts, so the field
+ * is locked while it is on. Polling never replaces a name the person is still typing.
+ */
 function renderRemoteControlName(rc) {
-  $("remote-control-name").textContent = rc.configured_name || "";
+  const input = $("remote-control-name");
+  if (!input.dataset.edited) input.value = rc.configured_name || "";
+  input.disabled = Boolean(rc.enabled);
+  $("remote-control-name-save").disabled = Boolean(rc.enabled);
+  if (rc.enabled) $("remote-control-name-note").textContent = "Turn remote control off to change the name.";
 }
+$("remote-control-name").oninput = () => {
+  $("remote-control-name").dataset.edited = "1";
+};
+// The name is the one add-on option (Remote control machine name) the Configuration tab also sets.
+$("remote-control-name-form").onsubmit = async (event) => {
+  event.preventDefault();
+  const input = $("remote-control-name");
+  $("remote-control-name-save").disabled = true;
+  try {
+    const data = await api("remote-control/name", { name: input.value });
+    delete input.dataset.edited;
+    renderRemoteControl(data.remote_control);
+    $("remote-control-name-note").textContent = data.notice
+      || `Saved. The ChatGPT app will show “${data.remote_control.configured_name}”.`;
+  } catch (error) {
+    $("remote-control-name-note").textContent = error.message;
+    $("remote-control-name-save").disabled = false;
+  }
+};
 const ADDON_CONFIGURATION_UNKNOWN =
   "Home Assistant did not give this app's address. Open the app's Configuration tab from the Home Assistant settings.";
 /**
