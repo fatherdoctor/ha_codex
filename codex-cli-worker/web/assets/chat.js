@@ -4130,7 +4130,8 @@ async function loadRemoteControl() {
   clearTimeout(remoteTimer);
   const { remote_control: rc } = await api("remote-control");
   renderRemoteControl(rc);
-  if ($("settings").open)
+  // A paused version cannot change state while the page is open, so there is nothing to check again.
+  if ($("settings").open && !rc.paused)
     remoteTimer = setTimeout(
       () => loadRemoteControl().catch(settingsError),
       rc.enabled ? 5000 : 15000,
@@ -4138,6 +4139,7 @@ async function loadRemoteControl() {
 }
 /** Draw one remote-control state; the buttons follow what can be done now. */
 function renderRemoteControl(rc) {
+  if (rc.paused) return renderRemoteControlPaused(rc);
   state.remoteAvailable = Boolean(rc.available);
   const name = rc.machine_name || rc.configured_name;
   let status = rc.message || rc.state || "Unknown";
@@ -4183,6 +4185,28 @@ function renderRemoteControl(rc) {
   $("remote-control-note").hidden = !rc.available;
   $("remote-control-log").textContent = (rc.log || []).join("\n");
   $("remote-control-log-box").hidden = !(rc.log || []).length;
+  document.dispatchEvent(new CustomEvent("remote-view", {detail: rc}));
+}
+/*
+ * Remote control is paused in this version: the settings part and the remote connection window show the one line
+ * the worker sends and no controls. They stay on the page, not hidden, so an owner who used it sees why it is gone.
+ */
+function renderRemoteControlPaused(rc) {
+  $("remote-control-status").textContent = rc.message;
+  $("app-pairing-status").textContent = rc.message;
+  $("remote-control-card").replaceChildren();
+  remoteCardKey = "";
+  for (const id of [
+    "remote-control-help", "remote-control-name-warning", "remote-control-policy-warning", "remote-control-name-form",
+    "remote-control-start", "remote-control-pair", "remote-control-stop", "remote-control-more",
+  ])
+    $(id).hidden = true;
+  // The pairing part's help and buttons go from the page: hidden, they would still be its last child and keep the
+  // part's spacing below the line.
+  $("app-pairing-help")?.remove();
+  document.querySelector("#app-pairing-section .settings-actions")?.remove();
+  setSectionStatus("app-pairing-section", "Paused");
+  setAccountPart("app-pairing-section", "paused");
   document.dispatchEvent(new CustomEvent("remote-view", {detail: rc}));
 }
 const REMOTE_NAME_LOCKED = "Turn remote control off to change the name.";

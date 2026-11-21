@@ -180,7 +180,7 @@ async function openThemedSections(target) {
         {title: 'Accounts and connections', status: 'ChatGPT signing in: enter the code', attention: true},
         {title: 'ChatGPT account', status: 'Signing in: enter the code', attention: true},
         {title: 'GitHub', status: 'Connected as synthetic-owner, 1 repository', attention: false},
-        {title: 'ChatGPT app pairing', status: 'Off', attention: false},
+        {title: 'ChatGPT app pairing', status: 'Paused', attention: false},  // Remote Control is paused in this version
         {title: 'Full access', status: 'Off', attention: false},
         {title: 'Text size', status: 'Normal', attention: false},
         {title: 'Scheduled runs', status: 'Paused: time zone unavailable', attention: true},
@@ -200,7 +200,8 @@ async function openThemedSections(target) {
       assert.equal(await page.getByRole('button', {name: 'Manage remote connection', exact: true}).isVisible(), false);
       for (const id of ['chatgpt-section', 'github-section', 'app-pairing-section'])
         await page.locator(`#${id} .settings-toggle`).click();
-      assert.equal(await page.getByRole('button', {name: 'Manage remote connection', exact: true}).isVisible(), true);
+      // Remote Control is paused in this version: the pairing part shows one line and no buttons (browser_remote_paused.cjs).
+      assert.equal(await page.getByRole('button', {name: 'Manage remote connection', exact: true}).isVisible(), false);
       // The window keeps its size and scrolls inside.
       assert.deepEqual(await windowSize(page), collapsedSize);
       assert.equal(await page.locator('#settings').evaluate(d => d.scrollHeight > d.clientHeight), true);

@@ -500,7 +500,7 @@
         <section id="app-pairing-section" aria-labelledby="app-pairing-title">
           <h4 id="app-pairing-title">ChatGPT app pairing</h4>
           <p id="app-pairing-status" class="muted" role="status">Loading…</p>
-          <p class="muted">The pairing code and its QR code open in their own window. The worker does not know how long a pairing code lasts, so no countdown shows. If the app refuses a code, get a new one. Turn off stops the ChatGPT app from reaching this Home Assistant until you turn it on again.</p>
+          <p id="app-pairing-help" class="muted">The pairing code and its QR code open in their own window. The worker does not know how long a pairing code lasts, so no countdown shows. If the app refuses a code, get a new one. Turn off stops the ChatGPT app from reaching this Home Assistant until you turn it on again.</p>
           <div class="settings-actions">
             <button id="app-pairing-new" hidden>Get a pairing code</button
             ><button id="remote-connection-open" class="subtle">Manage remote connection</button
@@ -542,7 +542,7 @@
       </section>
       <section id="remote-control-section" data-own-dialog>
         <h3>Remote control from the ChatGPT app</h3>
-        <p class="muted">Lets the ChatGPT app work on this Home Assistant. Off until you turn it on.</p>
+        <p id="remote-control-help" class="muted">Lets the ChatGPT app work on this Home Assistant. Off until you turn it on.</p>
         <p id="remote-control-status" class="muted" role="status">Loading…</p>
         <div id="remote-control-card"></div>
         <p id="remote-control-name-warning" class="remote-control-warning" hidden></p>

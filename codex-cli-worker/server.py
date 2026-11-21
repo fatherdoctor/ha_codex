@@ -7889,6 +7889,9 @@ def remote_control_summary() -> dict[str, Any]:
 @require_auth
 def get_remote_control() -> Response:
     """Return the remote-control state: on or off, connected or not, machine name, pairing code, recent log."""
+    if remote_control.PAUSED:
+        # The page shows the pause line and stops asking; no Core address check runs for a feature that cannot start.
+        return jsonify({"ok": True, "paused": True, "remote_control": remote_control_supervisor.paused()})
     state = dict(remote_control_supervisor.snapshot())
     state["core_address"] = core_address.snapshot(read_options())
     state["read_tools"] = "Read-only entity tools are offered while remote control is on; no Core API token is needed."
@@ -8015,6 +8018,9 @@ def change_remote_control(action: str) -> Response | tuple[Response, int]:
     admin, refusal = ingress_admin()
     if admin is None:
         return jsonify({"ok": False, "error": refusal}), 403
+    if remote_control.PAUSED:
+        return jsonify({"ok": False, "paused": True, "error": remote_control.PAUSED_MESSAGE,
+                        "remote_control": remote_control_supervisor.paused()}), 409
     if action == "name":
         return rename_remote_control()
     if action == "start":
@@ -8482,7 +8488,7 @@ def main() -> None:
     threading.Thread(target=account_access_loop, daemon=True).start()
     # The GitHub access check: at start, then hourly; it never runs a model.
     threading.Thread(target=github_service.loop, daemon=True, name="github-access").start()
-    # Remote control runs again only if the owner left it on.
+    # Remote control runs again only if the owner left it on, and not while it is paused (remote_control.PAUSED).
     remote_control_supervisor.resume()
     threading.Thread(target=stdin_reader, daemon=True).start()
     # The live Codex process starts now when the owner left warm_start on and a sign-in exists, so the first
