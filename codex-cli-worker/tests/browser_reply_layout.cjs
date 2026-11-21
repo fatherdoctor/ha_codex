@@ -16,6 +16,8 @@ if (!base) throw new Error('Set REPLY_LAYOUT_BASE to the local preview URL.');
     for (const width of [320, 390, 700, 1280]) {
       const page = await browser.newPage({viewport: {width, height: 2000}});
       await page.goto(base);
+      if (process.env.REPLY_LAYOUT_MUTATE_GAP === '1')
+        await page.addStyleTag({content: '.activity-text > .message { margin-bottom: 24px !important; }'});
       await page.locator('[data-task-id="preview-00"]').evaluate(node => node.click());
       await page.locator('#activity').waitFor({state: 'attached'});
       for (const fixture of fixtures) {
@@ -59,7 +61,18 @@ if (!base) throw new Error('Set REPLY_LAYOUT_BASE to the local preview URL.');
           const paragraphs = [...node.querySelectorAll('.answer > .message > p')].map(p => {
             const box = p.getBoundingClientRect(); return {top: box.top, bottom: box.bottom};
           });
+          // Measure a normal paragraph gap with the page's own Markdown rules.
+          const sample = document.createElement('div');
+          sample.className = 'message markdown';
+          sample.style.cssText = 'position: fixed; visibility: hidden; top: 0; left: 0';
+          for (const text of ['First paragraph.', 'Second paragraph.']) {
+            const p = document.createElement('p'); p.textContent = text; sample.append(p);
+          }
+          node.append(sample);
+          const referenceGap = sample.children[1].getBoundingClientRect().top - sample.children[0].getBoundingClientRect().bottom;
+          sample.remove();
           return {columnLeft, viewportRight: Math.min(rect.right, innerWidth), boxes, paragraphs,
+            referenceGap,
             metaLeft: firstX(node.querySelector('.turn-meta')),
             workedLeft: node.querySelector('.activity-toggle').getBoundingClientRect().left,
             exchanges: area.querySelectorAll('.exchange').length,
@@ -71,7 +84,11 @@ if (!base) throw new Error('Set REPLY_LAYOUT_BASE to the local preview URL.');
         measured.boxes.forEach((box, i) => {
           if (Math.abs(box.left - measured.columnLeft) > 1) fail(`block ${i} starts ${Math.round(box.left - measured.columnLeft)}px from the column edge`);
           if (box.right > measured.viewportRight + 1) fail(`block ${i} extends past the viewport`);
-          if (i && box.top - measured.boxes[i - 1].bottom < 8) fail(`gap before block ${i} is under 8px`);
+          if (i) {
+            const gap = box.top - measured.boxes[i - 1].bottom;
+            if (Math.abs(gap - measured.referenceGap) > 2)
+              fail(`gap before block ${i} is ${Math.round(gap)}px; paragraph gap is ${Math.round(measured.referenceGap)}px`);
+          }
         });
         measured.paragraphs.forEach((p, i) => {
           if (i && p.top - measured.paragraphs[i - 1].bottom < 8) fail(`paragraph gap ${i} is under 8px`);
