@@ -209,6 +209,13 @@ class RelayReadTests(unittest.TestCase):
             self.call(operation='states')
         self.fetch.assert_not_called()
 
+    def test_a_diagnostics_export_in_the_launch_window_keeps_the_launch(self):
+        # Review case C2: the export ends the diagnostics session while no process runs yet, after relay_env.
+        self.proc = None
+        self.broker.finish_observation_if_stopped()
+        self.proc = types.SimpleNamespace(poll=lambda: None)
+        self.assertEqual(self.call(operation='states', domain='light')['entities'][0]['entity_id'], 'light.sample')
+
     def test_inflight_result_is_discarded_after_a_new_launch(self):
         def expire(*args):
             self.broker.new_launch(); return []

@@ -307,6 +307,32 @@ def relay_bwrap() -> str | None:
     return None
 
 
+# Ubuntu's own kernel switch (Ubuntu 23.10 and later, so GitHub's ubuntu-24.04 runners). With it on, a user namespace
+# made by a process without capabilities, as Codex's sandbox inside the relay is, gets no capabilities, so Bubblewrap
+# cannot set up the sandbox's loopback ("loopback: Failed RTM_NEWADDR: Operation not permitted") and no command runs.
+# Home Assistant OS has no such switch. Turning it off only gives the nested sandbox more power, so a probe that is
+# still refused there proves at least as much as one refused with the switch on.
+USERNS_SWITCH = Path("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")
+
+
+@contextlib.contextmanager
+def unrestricted_user_namespaces():
+    """Turn Ubuntu's user namespace restriction off while the block runs, and put back what was there."""
+    try:
+        before = USERNS_SWITCH.read_text(encoding="ascii").strip()
+    except FileNotFoundError:
+        yield  # Not an Ubuntu kernel: nothing to turn off.
+        return
+    if before != "0":
+        # Fails with PermissionError outside a privileged container; the container job runs with --privileged.
+        USERNS_SWITCH.write_text("0", encoding="ascii")
+    try:
+        yield
+    finally:
+        if before != "0":
+            USERNS_SWITCH.write_text(before, encoding="ascii")
+
+
 @unittest.skipIf(relay_bwrap() is None and not os.environ.get("HA_TEST_REQUIRE_CODEX"), "no Bubblewrap for the relay")
 class RelaySandboxSockets(SandboxSockets):
     """P8 for remote control: the same probes, with Codex started the way the relay starts it.
@@ -342,10 +368,13 @@ class RelaySandboxSockets(SandboxSockets):
             script.chmod(0o755)
         # AppServer reads the binary from test_live_proofs.CODEX when it starts a process.
         cls.relay_codex = mock.patch.object(test_live_proofs, "CODEX", str(launcher))
+        cls.userns = contextlib.ExitStack()
+        cls.userns.enter_context(unrestricted_user_namespaces())
         cls.relay_codex.start()
 
     @classmethod
     def tearDownClass(cls) -> None:
+        cls.userns.close()
         cls.relay_codex.stop()
         super().tearDownClass()
 

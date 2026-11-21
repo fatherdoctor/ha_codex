@@ -72,6 +72,9 @@ class RelayReads:
         self.lock = threading.Lock()
         self.inflight = threading.Lock()
         self.observer = observer
+        # A read is authorized by the launch session; the observation session only groups diagnostics events.
+        # They are kept apart so that ending the diagnostics (an export while no process runs) cannot end a launch.
+        self.launch_session = None
         self.observation_session = None
 
     def new_launch(self):
@@ -81,7 +84,8 @@ class RelayReads:
         """
         self.end_observation()
         with self.lock:
-            self.observation_session = secrets.token_hex(16)
+            self.launch_session = secrets.token_hex(16)
+            self.observation_session = self.launch_session
 
     def end_observation(self):
         session = self.observation_session
@@ -102,14 +106,14 @@ class RelayReads:
         if session is None:
             return False
         with self.lock:
-            if session != self.observation_session:
+            if session != self.launch_session:
                 return False
         # Do not hold this lock while taking the supervisor's lock.
         proc, stopping = self.state()
         if proc is None or stopping or proc.poll() is not None:
             return False
         with self.lock:
-            return session == self.observation_session
+            return session == self.launch_session
 
     @staticmethod
     def entity_id(value):
@@ -149,7 +153,7 @@ class RelayReads:
                     pass  # Diagnostic failures must not change the read result.
 
     def _dispatch(self, request, observation):
-        session = self.observation_session
+        session = self.launch_session
         if not isinstance(request, dict) or set(request) != {'arguments'} or not self.active(session):
             raise ReadError('Remote control is not running.')
         observation['authorized'] = True

@@ -362,7 +362,7 @@ class RepeatedStartTests(unittest.TestCase):
         for environment in probe_environments:
             self.assertNotIn("HA_CALL_SOCKET", environment)
         self.assertEqual(launch["HA_CALL_SOCKET"], str(server.RELAY_CALL_SOCKET))
-        session = server.relay_reads.observation_session
+        session = server.relay_reads.launch_session
         result = server.relay_call.dispatch({"thread_id": "relay-thread", "arguments": LIGHT_OFF})
         self.assertEqual(result["status"], "ok")
         self.assertEqual(sent(self.fake), LIGHT_OFF_SENT)
@@ -371,7 +371,7 @@ class RepeatedStartTests(unittest.TestCase):
     def test_the_apps_tools_stop_when_the_relay_ends(self):
         self.supervisor.start()
         self.wait_for_launch()
-        session = server.relay_reads.observation_session
+        session = server.relay_reads.launch_session
         self.end_relay()
         self.assertIsNone(server.relay_call.task_for({"arguments": LIGHT_OFF}))
         self.assertFalse(server.relay_reads.active(session))

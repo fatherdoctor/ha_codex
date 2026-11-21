@@ -1273,6 +1273,8 @@ def expire_saved_approvals(task: dict[str, Any]) -> None:
 
 def redact(text: str) -> str:
     """Replace Supervisor tokens, tool capabilities, and values that look like keys or tokens with [redacted]."""
+    # No code makes a remote control key (harc_) since 0.4.0, but chat history and logs saved by an earlier version
+    # can hold one. Such a key no longer works; it is still hidden, because a shared file should not show key shapes.
     redacted = re.sub(r"harc_[A-Za-z0-9_-]{43}", "[redacted]", text)
     # 0.4.0 removed the lead channel, but its token hash stays in the settings table so that a rollback to 0.3 works,
     # and a rollback makes an old lead token valid again. Keep hiding it until a later version deletes the hash.
