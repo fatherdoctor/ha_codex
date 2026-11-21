@@ -40,7 +40,7 @@ configuration:
     description: How many days the app keeps backups after a chat, from 1 to 365. The default is 7.
   chat_retention_days:
     name: Delete chats after (days without a message)
-    description: Delete a chat and its files after this many days without a message, from 1 to 365. Pinned chats stay. The default is 14.
+    description: Delete a chat and its files after this many idle days, 1 to 365, default 14. Pinned chats and chats with approved, enabled schedules stay.
   ha_url:
     name: Home Assistant API URL
     description: The address Codex gets as HA_URL to call Home Assistant. Set it only if the automatic address does not work.
@@ -70,4 +70,4 @@ configuration:
     description: On each start, install or update the Codex integration from the copy in this app. An integration you installed another way is never changed.
   home_assistant_mcp:
     name: Enable Home Assistant MCP
-    description: Codex gets the tools of the bundled Home Assistant MCP server. It reads without asking; a change to the house follows the chat's permission mode.
+    description: Reads need no approval. For writes, Default and Read only ask you. Auto-review can approve for you. Full access runs without asking.
