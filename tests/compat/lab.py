@@ -183,11 +183,17 @@ class Lab:
     # ---- Home Assistant's WebSocket API ----
 
     def ws(
-        self, message_type: str, timeout: float = REQUEST_TIMEOUT, **fields: Any
+        self,
+        message_type: str,
+        connect_timeout: float = REQUEST_TIMEOUT,
+        **fields: Any,
     ) -> Any:
-        """Send one WebSocket command on a new connection and return its result."""
+        """Send one WebSocket command on a new connection and return its result.
+
+        connect_timeout is the socket's own timeout. Any other keyword, `timeout` included, goes into the message.
+        """
         ws_url = "ws" + self.url[len("http") :] + "/api/websocket"
-        connection = websocket.create_connection(ws_url, timeout=timeout)
+        connection = websocket.create_connection(ws_url, timeout=connect_timeout)
         try:
             connection.recv()  # auth_required
             connection.send(json.dumps({"type": "auth", "access_token": self.token}))
@@ -228,7 +234,8 @@ class Lab:
         }
         if data is not None:
             fields["data"] = data
-        return self.ws("supervisor/api", timeout=timeout + 10, **fields)
+        # The Supervisor command carries its own timeout; the socket waits 10 seconds longer.
+        return self.ws("supervisor/api", connect_timeout=timeout + 10, **fields)
 
     # ---- the app ----
 

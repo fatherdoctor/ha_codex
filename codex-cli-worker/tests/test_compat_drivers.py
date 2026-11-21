@@ -274,6 +274,50 @@ class ChatTaskTests(unittest.TestCase):
         )
 
 
+class MissingBrowserTests(unittest.TestCase):
+    """The Playwright package without its Chromium browser is NOT RUN, never a compatibility failure."""
+
+    def test_an_absent_browser_is_not_run_before_any_launch(self):
+        chromium = mock.Mock(executable_path="/nonexistent/chromium")
+        playwright = mock.MagicMock()
+        playwright.__enter__.return_value = mock.Mock(chromium=chromium)
+        sync_api = mock.Mock(sync_playwright=mock.Mock(return_value=playwright), TimeoutError=TimeoutError)
+        lab = StandInLab()
+        lab.addon_slug = lambda: "abc_codex_cli_worker"
+        lab.worker = lambda slug: mock.Mock(session="s", base_url="http://lab.invalid:8123/x")
+        with (
+            mock.patch.dict(sys.modules, {"playwright": mock.Mock(), "playwright.sync_api": sync_api}),
+            self.assertRaises(compat.StepResult) as caught,
+        ):
+            cx03_chat_task.step(lab, None)
+        self.assertEqual(caught.exception.code, compat.NOT_RUN)
+        self.assertIn("Chromium browser for Playwright is not installed", caught.exception.why)
+        chromium.launch.assert_not_called()
+
+
+class SupervisorCallTests(unittest.TestCase):
+    """Lab.supervisor through the real Lab.ws, with a stand-in WebSocket (StandInLab replaces supervisor)."""
+
+    def test_the_command_timeout_is_in_the_message_and_the_socket_waits_longer(self):
+        sent = []
+        connection = mock.Mock()
+        connection.recv.side_effect = [
+            '{"type": "auth_required"}',
+            '{"type": "auth_ok"}',
+            '{"id": 1, "type": "result", "success": true, "result": {"addons": []}}',
+        ]
+        connection.send.side_effect = sent.append
+        lab = compat.Lab("http://lab.invalid:8123", "stand-in", compat.DEFAULT_ADDON_REPO, [])
+        with mock.patch.object(compat.websocket, "create_connection", return_value=connection) as create:
+            self.assertEqual(lab.supervisor("get", "/store", timeout=30), {"addons": []})
+        create.assert_called_once_with("ws://lab.invalid:8123/api/websocket", timeout=40)
+        self.assertEqual(
+            compat.json.loads(sent[-1]),
+            {"id": 1, "type": "supervisor/api", "endpoint": "/store", "method": "get", "timeout": 30},
+        )
+        connection.close.assert_called_once()
+
+
 class FileEditTests(unittest.TestCase):
     LINE = "compat_marker_1767225600: added"
 
@@ -346,8 +390,16 @@ class FileEditTests(unittest.TestCase):
     def test_other_changes_fail(self):
         self.assertEqual(
             self.judge(self.finished(), self.text(extra="other: line\n"))[1],
-            "the chat changed more than the one line",
+            "the file is not the original lines with the one line added at the end",
         )
+
+    def test_two_copies_or_a_line_at_the_start_fail(self):
+        for name, text in (
+            ("two copies", self.text() + self.LINE + "\n"),
+            ("at the start", self.LINE + "\n" + cx04_file_edit.SCRATCH_TEXT),
+        ):
+            with self.subTest(name):
+                self.assertEqual(self.judge(self.finished(), text)[0], compat.FAIL)
 
     def test_scratch_script_writes_only_under_config_compat(self):
         lab = StandInLab()

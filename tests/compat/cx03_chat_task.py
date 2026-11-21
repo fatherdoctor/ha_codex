@@ -11,6 +11,7 @@ prompt that the page also shows. The step needs Playwright for Python (`pip inst
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import lab as compat
 
@@ -46,6 +47,11 @@ def step(lab: compat.Lab, args: argparse.Namespace) -> str:
     shot = compat.run_dir() / "cx-03-chat.png"
 
     with sync_playwright() as playwright:
+        # The package can be present without its browser; that is a lab that cannot run the step, not a failure.
+        if not Path(playwright.chromium.executable_path).is_file():
+            raise compat.not_run(
+                "the Chromium browser for Playwright is not installed (playwright install chromium)"
+            )
         browser = playwright.chromium.launch()
         try:
             context = browser.new_context(viewport={"width": 1280, "height": 900})

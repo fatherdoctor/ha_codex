@@ -66,8 +66,9 @@ def judge(task: dict[str, Any], text: str, line: str) -> tuple[int, str]:
     lines = text.splitlines()
     if line not in lines:
         return compat.FAIL, "the line is not in the file"
-    if [kept for kept in lines if kept != line] != SCRATCH_TEXT.splitlines():
-        return compat.FAIL, "the chat changed more than the one line"
+    # Exactly the original lines and then the one line, as the prompt asks: not two copies, not at the start.
+    if lines != SCRATCH_TEXT.splitlines() + [line]:
+        return compat.FAIL, "the file is not the original lines with the one line added at the end"
     return (
         compat.PASS,
         "the line is in the file; the previous version was saved; the configuration check is valid",
