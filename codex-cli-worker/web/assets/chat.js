@@ -98,12 +98,14 @@ function selectedEfforts(settings = selectedSettings()) {
 }
 /**
  * Return the reasoning level that applies to a chat: its own selection, or
- * else the add-on default. Falls back to medium when neither is known or the
+ * else the level the worker gives its model (the defaults' level for a chat
+ * on the default model). Falls back to medium when neither is known or the
  * chat's model does not offer that level.
  */
 function effectiveEffort(settings = selectedSettings()) {
   const effort =
     settings.reasoning_effort ||
+    (settings.model && selectedModel(settings)?.default_effort) ||
     state.catalog?.defaults.reasoning_effort ||
     "medium";
   return selectedModel(settings) && !selectedEfforts(settings).includes(effort)
@@ -373,8 +375,9 @@ $("effort-slider").addEventListener("change", async () => {
   await saveSelection({ ...selectedSettings(), reasoning_effort: effort });
   if (!$("effort-popover").hidden) $("effort-slider").focus();
 });
+// Reset goes back to the default model and its level, whatever the chat had selected, as in the ChatGPT apps.
 $("effort-reset").onclick = async () => {
-  await saveSelection({ ...selectedSettings(), reasoning_effort: null });
+  await saveSelection({ ...selectedSettings(), model: null, reasoning_effort: null });
   if (!$("effort-popover").hidden) $("effort-reset").focus();
 };
 document.addEventListener("pointerdown", (event) => {

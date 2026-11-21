@@ -3,6 +3,12 @@
 ## 0.4.0 (unreleased)
 
 ### What's new
+- **New chats start on the account's default model and level.** With the model option on `default`, a chat runs on
+  the model Codex's model list marks as the account's default, at the reasoning level Codex gives it, instead of a
+  fixed GPT-6.1 Sol at Medium. Without that list it uses the model Codex's status report names, then the newest Sol
+  model the account offers, then GPT-6.2 Sol, now first in the built-in list. A `model_reasoning_effort` other than
+  the shipped `medium` still applies. The reset button in the model and reasoning panel now also sets the model back
+  to the default, not only the level.
 - The chat page sends messages that start with a slash directly to Codex. Use the page controls for chat actions.
 - **Model and reasoning picker like the desktop app.** The model and reasoning controls below the message box are now
   one chip: the model name, then the reasoning level in grey. Select it, or press Ctrl+Shift+M, to open a panel with the
@@ -147,6 +153,11 @@
 - The add-on Configuration page now uses plain option names and one short description for each option (25 words or fewer). A test keeps names free of code words and descriptions short.
 
 ### Fixed
+- **Replies line up and are spaced.** A reply's text started one space to the right of its "Worked for" line and of
+  the lines Codex writes along the way ("I'll look for …", "I found …"). Those lines also touched each other and the
+  answer, so they read as part of it. Now all of them start at the left edge, and each line Codex writes along the way
+  is a block of its own, one paragraph gap from the next one and from the answer. The pulsing dot of the working line
+  is centered on the line instead of sitting on the text baseline.
 - **A chat set back to the default model goes back to it.** Before, a chat kept the last model it ran on when you
   chose the default again, because Codex keeps a thread's model unless a message names another one. Each message now
   names its model. A message on the default names the default model that Codex shows in its status, when the app
