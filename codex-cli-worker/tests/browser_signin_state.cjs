@@ -46,6 +46,15 @@ async function openSettings(browser, viewport, auth, github) {
   return {page, errors};
 }
 
+/** The link's text color must differ from its background, or the label is invisible (the older #login-card rule did this). */
+async function assertLinkLabelShows(page, selector, label) {
+  const colors = await page.locator(selector).evaluate(a => {
+    const style = getComputedStyle(a);
+    return {text: style.color, background: style.backgroundColor};
+  });
+  assert.notEqual(colors.text, colors.background, `${label}: the sign-in link label has the color of its button`);
+}
+
 /** The ChatGPT panel while signing in: link, code with timer, folded QR, one quiet Cancel. */
 async function checkChatgptSigningIn(page, phone, label) {
   await page.locator('#login-card .signin-code').waitFor();
@@ -66,6 +75,12 @@ async function checkChatgptSigningIn(page, phone, label) {
   const link = page.locator('#login-card a.signin-link');
   const background = await link.evaluate(a => getComputedStyle(a).backgroundColor);
   assert.notEqual(background, 'rgba(0, 0, 0, 0)', `${label}: the sign-in link is a filled button`);
+  await assertLinkLabelShows(page, '#login-card a.signin-link', `${label} Settings ChatGPT`);
+  await assertLinkLabelShows(page, '#signin-banner-card a.signin-link', `${label} banner`);
+  if (phone) {
+    const height = await link.evaluate(a => a.getBoundingClientRect().height);
+    assert.ok(height >= 44, `${label}: the sign-in link is ${height} px tall, under 44`);
+  }
   assert.equal(await page.locator('#login-cancel').evaluate(b => b.classList.contains('subtle')), true,
     `${label}: Cancel is the quiet kind of button`);
   const order = await page.evaluate(() => ['#login-card', '#login-cancel']
@@ -88,6 +103,7 @@ async function checkGithubSigningIn(page, label) {
   const text = await page.locator('#github-section').innerText();
   for (const gone of ['Disconnect', 'Use a token instead', 'Lets the assistant'])
     assert.ok(!text.includes(gone), `${label}: "${gone}" shows while signing in`);
+  await assertLinkLabelShows(page, '#github-flow a.signin-link', `${label} Settings GitHub`);
   assert.equal(await page.locator('#github-cancel').evaluate(b => b.classList.contains('subtle')), true,
     `${label}: Cancel is the quiet kind of button`);
 }
@@ -119,6 +135,8 @@ async function checkOtherStates(browser) {
   await page.locator('#github-flow .signin-code').waitFor();
   assert.ok(!(await page.locator('#github-disconnect').isVisible()), 'connect again: Disconnect is hidden');
   assert.ok(!(await page.locator('#github-details').isVisible()), 'connect again: the details are hidden');
+  for (const id of ['github-test', 'github-check', 'github-test-result', 'github-repositories', 'github-local'])
+    assert.ok(!(await page.locator(`#${id}`).isVisible()), `connect again: #${id} is hidden`);
   assert.ok(await page.locator('#github-cancel').isVisible(), 'connect again: Cancel shows');
   assert.deepEqual(errors, []);
   await page.close();

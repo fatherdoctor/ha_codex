@@ -1735,9 +1735,6 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   background: #fff;
   padding: 10px;
 }
-#login-card a {
-  color: var(--accent);
-}
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
@@ -2019,6 +2016,10 @@ dialog :is(h3, h4):has(> .settings-toggle) {
 }
 /* The sign-in link is the main button of the card, drawn like the filled buttons of Settings. */
 .signin-card a.signin-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  box-sizing: border-box;
   padding: 8px 14px;
   border-radius: 8px;
   background: var(--ha-color-fill-primary-loud-resting, var(--accent));
