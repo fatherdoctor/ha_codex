@@ -113,6 +113,7 @@
   `codex_cli_task_result` event.
 
 ### Fixed
+- The chat shows the final answer once. Interim messages still appear in order above it.
 - **Share masks three more shapes.** A password value whose first word another rule already masked (an `sk-` key, a
   token) no longer keeps the rest of its line, and a quoted password that runs on to the next line is masked whole.
   A very long run of the secret word itself (`password-password-...`) is masked about three times faster.

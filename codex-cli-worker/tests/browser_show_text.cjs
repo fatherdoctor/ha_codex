@@ -1,9 +1,10 @@
 // Every interim text message of a Codex turn shows in the chat, in order, outside the closed "Worked for" list
 // (CX-04-SHOW-TEXT). Run with tests/web_fixture.py serving the page on port 9137.
-// 1. The saved first chat has two interim messages and a final answer: both interim messages show without
-//    opening the list, in the order Codex wrote them, before the answer, and the answer is not shown twice.
+// 1. The saved first chat has two interim messages and an activity copy of the final answer: the interim
+//    messages show in order above the answer, and the answer shows once.
 // 2. "Worked for" still holds the steps and thinking, and none of the interim text is inside it.
 // 3. A Markdown link in an interim message renders as a link.
+// 4. An explicit failed entity readback remains available in the completed chat.
 const {chromium} = require('playwright');
 const assert = require('node:assert/strict');
 
@@ -38,10 +39,17 @@ const base = 'http://127.0.0.1:9137/preview/';
       assert.deepEqual(order.slice(-3), ['activity', 'activity-text', 'answer'], `${label}: order`);
       const answer = await page.locator('.answer').last().innerText();
       assert.ok(answer.trim().length > 0, `${label}: the answer shows`);
+      assert.equal(await page.locator('.answer .message:not(.details)').count(), 1, `${label}: one answer`);
+      assert.equal(await page.locator('.verification').count(), 0, `${label}: no checks without evidence`);
       assert.ok(!answer.includes('reads fine') && !answer.includes("I'll read"), `${label}: interim text is not repeated in the answer`);
       await page.locator('#activity .activity-toggle').click();
       assert.ok((await page.locator('#activity .step').count()) > 0, `${label}: the steps open under Worked for`);
       assert.equal(await page.locator('#activity-steps').innerText().then(t => t.includes('reads fine')), false, `${label}: text not duplicated in the list`);
+      await page.locator('[data-task-id="preview-03"]').evaluate(el => el.click());
+      const failedCheck = page.getByText('1 check failed', {exact: true});
+      await failedCheck.waitFor();
+      await failedCheck.click();
+      await page.getByText('Unverified · entity', {exact: true}).waitFor();
       assert.deepEqual(errors, [], `${label}: no page errors`);
       await context.close();
     }
