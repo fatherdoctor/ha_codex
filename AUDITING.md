@@ -11,7 +11,8 @@ place, that is a bug in this page and worth an issue.
 ## The shape in one paragraph
 
 The add-on is one container. A Python worker (`codex-cli-worker/server.py`) serves the chat page through Home
-Assistant Ingress and starts the Codex CLI for each exchange. Codex runs every command inside a Bubblewrap
+Assistant Ingress and runs each exchange in the Codex CLI: in one Codex process that stays up between messages, or
+in a Codex process of its own when the owner turns `warm_start` off or that process cannot take the message. Codex runs every command inside a Bubblewrap
 sandbox whose launcher the add-on wraps (`codex-bwrap`). Anything outside the sandbox goes to Codex's normal
 approval flow, and an approval has to be answered by a Home Assistant administrator on the chat page. After
 every exchange the worker validates what changed and keeps a copy of each changed file. A separate, optional
@@ -85,11 +86,13 @@ Paths are under `codex-cli-worker/` unless they start with `custom_components/`.
 | Codex is offered only `propose_schedule` and `list_schedules` (while scheduled runs are on), its rules name no mailbox, and the socket refuses the old mailbox operations | `server.py: SCHEDULING_TOOLS`, `SCHEDULING_PARAGRAPH`; `scheduling_mcp.py: TOOLS`; `schedule_api.py: Service.dispatch` | `tests/test_lead_removed.py: test_codex_is_offered_only_the_two_schedule_tools`, `test_the_socket_refuses_the_mailbox_operations` |
 | The old mailbox and lead tables in a saved schedule file stay on disk and are never read; a new file does not get them | `scheduling.py: Store.__init__` | `tests/test_lead_removed.py: test_an_old_file_keeps_its_mailbox_tables_unread`, `test_a_new_file_has_no_mailbox_or_lead_tables` |
 
-### The live Codex process (0.5, not used yet)
+### The live Codex process
 
-`codex_host.py` keeps one `codex app-server` process alive and runs each chat as a thread in it. Nothing starts it
-in this version: every exchange still starts its own Codex process. The host decides no permission; the turn carries
-the mode, and `approvals.py` answers Codex's questions, as on the start path.
+`codex_host.py` keeps one `codex app-server` process alive and runs each chat as a thread in it. `run_task` asks it
+first (`server.py: run_live_exchange`) when the owner's `warm_start` option is on, and starts a Codex process for
+the exchange, as before, when it cannot take the message before the turn starts. The host decides no permission;
+the turn carries the mode, and `approvals.py` answers Codex's questions, as on the start path: the exchange's checks
+before and after the turn are the same on both paths.
 
 | protection | enforced in | shown by |
 |---|---|---|
@@ -100,6 +103,8 @@ the mode, and `approvals.py` answers Codex's questions, as on the start path.
 | Every thread that holds tool programs is a live chat inside the cap: a wake whose tools fail or are late unloads its thread again (or makes a restart due), and a wake during a crash fails | `codex_host.py: CodexHost.wake`, `_unload_after_failed_wake` | `tests/test_codex_host.py: test_a_chat_whose_tools_fail_is_unloaded_so_the_cap_holds`, `test_a_crash_while_the_tools_start_fails_the_wake` |
 | A working chat is never paused, and a chat that is being paused gets no exchange: the check that it does not work and the end of its live state are one step under the lock, before the unload | `codex_host.py: CodexHost._pause_locked_out`, `attach` | `tests/test_codex_host.py: test_a_working_chat_is_never_paused`, `test_an_exchange_that_arrives_during_a_pause_never_gets_the_chat`, `test_a_pause_that_codex_refuses_leaves_the_chat_live` |
 | A `thread/start` or `thread/resume` reply that names another thread fails the wake and makes a restart due, so no thread stays loaded outside a chat | `codex_host.py: CodexHost.wake` | `tests/test_codex_host.py: test_a_resume_that_loads_another_thread_makes_a_restart_due` |
+| A cancel, a timeout or a stall ends only that chat's turn: the live process is never in `running_processes`, so the cancel route never ends it for the other chats; a turn that does not end after its interrupt makes a restart due | `server.py: run_live_exchange`, `create_approval_session` (`active`) | `tests/test_live_exchange.py: test_timeout_interrupts_only_the_turn`, `test_a_turn_that_does_not_stop_gets_a_new_process` |
+| With `warm_start` off, or signed out, no live process exists and each exchange starts its own process | `server.py: make_live_codex` (`enabled`), `codex_host.py: CodexHost.ready_for_message` | `tests/test_live_exchange.py: test_option_off_starts_codex_for_each_message`, `test_signed_out_starts_codex_for_the_message` |
 | When another process (remote control) wrote to a live chat's session file, the chat is unloaded and loaded again before its next turn | `codex_host.py: CodexHost.attach` | `tests/test_codex_host.py: test_a_changed_session_file_pauses_and_wakes_the_chat_before_the_turn` |
 
 ### Layer 3: what the worker checks afterwards

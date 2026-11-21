@@ -50,6 +50,7 @@ options:
   browser_verification: true
   browser_memory_limit_mib: 1536
   local_docs: true
+  warm_start: true
   ha_url: ""
   remote_control_name: Home Assistant
   install_integration: true
@@ -71,6 +72,7 @@ schema:
   browser_verification: bool
   browser_memory_limit_mib: int(512,8192)
   local_docs: bool
+  warm_start: bool
   ha_url: str?
   HA_TOKEN: password?
   remote_control_name: str?

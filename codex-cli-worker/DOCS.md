@@ -262,6 +262,32 @@ Two options stop a task that runs too long. Both are in seconds, on the app's Co
 
 Example: a task that rebuilds a large dashboard and waits 50 minutes for your answer to a permission card has 10 minutes left. For work like that, set `task_timeout_seconds: 7200`.
 
+## Keep Codex running
+
+**Keep Codex running** (`warm_start`, default on) keeps one Codex process running between messages. Each chat that
+you used recently stays loaded in that process, with its tools. A follow-up message then starts its turn at once.
+Without the option, the app starts Codex again for each message and loads the chat from its saved history.
+
+- **Loaded chats.** At most 3 chats stay loaded. When a fourth chat needs room, the app unloads the chat that was used
+  longest ago. An unloaded chat keeps its history and loads again at its next message. A chat that works is never
+  unloaded.
+- **Memory.** While it waits, the app holds one Codex process and, for each loaded chat, the small Python programs
+  of its tools. The app adds no memory limit of its own. The Info tab of the app shows its memory use; turn the option
+  off if the box is short of memory.
+- **When the process starts again.** The app compares what Codex was started with before each message: the
+  options, the ChatGPT sign-in, the Home Assistant address and token, `AGENTS.md`, and the app and Codex versions.
+  When one changed, the process starts again before the message, so an edit to `AGENTS.md` reaches the next message.
+  A process that works on a message is never stopped for this; the restart waits until the message ends.
+- **Failures.** When the process cannot take a message, the app starts Codex for that message as it does with the
+  option off, and writes one line with the reason in the task log. When the process stops during a message, that
+  message fails and a new process starts. After 3 such stops in 10 minutes, the app uses the option-off way for one
+  hour.
+- **Stop and limits.** **Cancel**, the task timeout and the stall limit stop only that chat's turn. The process and
+  the other loaded chats stay.
+- **Remote control** keeps its own Codex process, as before.
+
+A change to the option takes effect when the app restarts.
+
 ## Validation
 
 After every task the worker compares the `/config` tree with the list of files it recorded before the run, then validates what changed in two passes. This comparison also includes files written by Home Assistant or another editor during the task.

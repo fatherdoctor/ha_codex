@@ -1,8 +1,8 @@
 """Keep one `codex app-server` process alive and run each chat as a thread in it.
 
-This module is the host of that process. Nothing starts it yet: the worker still starts one Codex process for each
-exchange (server.py, run_task). A later change asks the host first and keeps the start path of today as the
-fallback for every failure here.
+This module is the host of that process. The worker asks it first for each exchange (server.py,
+run_live_exchange) while the owner's warm_start option is on, and starts a Codex process for the exchange, as
+before, when the host cannot take it.
 
 What the host does:
 

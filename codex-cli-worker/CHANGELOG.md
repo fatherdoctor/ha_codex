@@ -3,6 +3,11 @@
 ## 0.4.0 (unreleased)
 
 ### What's new
+- **Codex stays running between messages.** A follow-up message no longer starts a new Codex process: one process
+  stays up, and each of the 3 chats used most recently stays loaded in it. Turn this off with **Keep Codex running**
+  (`warm_start`) to start Codex for each message, as before. The process starts again before a message when the
+  options, the sign-in, the Home Assistant address or token, `AGENTS.md` or a version changed. Any failure of the
+  running process falls back to a new process for that message. See "Keep Codex running" in the documentation.
 - **Old chats are deleted after 14 days.** A chat with no message for 14 days is deleted with all its files. Change the
   time with **Delete chats after (days without a message)**. Pinned chats never expire, a scheduled run counts as a
   message, and a chat shows a warning line for its last 3 days.
