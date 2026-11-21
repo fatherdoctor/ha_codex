@@ -80,6 +80,9 @@
   copy at `/data/agents_before_move.md`. If both places hold a file, nothing moves and the app logs a line.
 
 ### Changed
+- **The phone chat list is easier to use.** A tap on a chat keeps the side bar open; a tap on the page to its right
+  closes it. The selected chat shows its three-dot menu button where its date was, and the button is 44 pixels or
+  larger. A long press still opens the menu. A desktop window does not change.
 - **A simple question gets a faster answer.** A message that Codex can answer from what it knows and from the
   chat, such as a greeting or a one-number reply, now gets its answer with no tool call. Before, the page's rules
   made Codex call `exchange_info` at the start of every message and check for `/addon_config/AGENTS.md` with a shell

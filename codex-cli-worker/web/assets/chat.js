@@ -899,7 +899,8 @@ function renderRow(chat, queued = null) {
   main.append(meta);
   // One line for each chat: the last answer is the tooltip instead of a second line.
   main.title = `${title} - ${main.querySelector(".row-preview").textContent}`;
-  main.onclick = () => selectChat(chat.task_id);
+  // On a phone the side bar stays open, so the owner can look at several chats; its scrim or the close button shuts it.
+  main.onclick = () => selectChat(chat.task_id, false, true);
   row.append(main);
   // A chat that is still waiting for its first message has nothing to pin or rename yet.
   if (!chatById(chat.task_id)) return row;
@@ -2252,7 +2253,7 @@ function reopenLastChat() {
  * left. When restoring a remembered chat, a 404 means it was deleted from
  * another tab or device: forget it and start fresh without an error.
  */
-async function selectChat(id, restoring = false) {
+async function selectChat(id, restoring = false, keepSidebar = false) {
   if (state.busy || state.settingsBusy) return;
   closePicker();
   state.drafts.set(state.id, $("message").value);
@@ -2270,7 +2271,7 @@ async function selectChat(id, restoring = false) {
   $("message").value = state.drafts.get(id) || "";
   resizeInput();
   showError(null);
-  sidebar(false);
+  if (!keepSidebar) sidebar(false);
   renderList();
   controls();
   if (!id) {

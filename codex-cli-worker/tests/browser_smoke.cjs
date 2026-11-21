@@ -1443,6 +1443,9 @@ function pngBuffer(width = 8, height = 6) {
       .waitFor();
     assert.equal(await page.locator("#model-button").textContent(), "GPT-6 Luna");
     assert.equal(await page.locator("#effort-label").textContent(), "Medium");
+    // A tap on a chat keeps the side bar open (CX-04-PHONE-LIST); the scrim closes it.
+    assert.equal(await page.locator("#scrim").isHidden(), false);
+    await page.locator("#scrim").click({ position: { x: 380, y: 600 } });
     assert.equal(await page.locator("#scrim").isHidden(), true);
     assert.equal(
       await page.evaluate(
@@ -1581,6 +1584,8 @@ function pngBuffer(width = 8, height = 6) {
       .locator("#messages")
       .getByText("The dashboard configuration is valid.", { exact: true })
       .waitFor();
+    // The tap kept the side bar open (CX-04-PHONE-LIST); close it to reach the chat area.
+    await phone.locator("#scrim").click({ position: { x: 380, y: 600 } });
     // The screenshot the user attached shows with their message.
     // No bold Verification box under the answer: the checks sit in one closed block, readback and note inside.
     // CX-FB2-FLOW: that block is inside the answer's closed "Worked for" line, and a failed check keeps one

@@ -822,7 +822,7 @@ API: `POST /tasks/<task_id>/reply` and `POST /tasks/<task_id>/continue` accept `
 
 ## Saved conversations
 
-The web UI lists recent chats in a resizable sidebar and opens their messages on the right. On mobile, the sidebar becomes a drawer. Select a saved chat and send a message to continue, or choose **New chat** for a fresh session. Settings contains account controls and workspace instructions.
+The web UI lists recent chats in a resizable sidebar and opens their messages on the right. On mobile, the sidebar becomes a drawer. A tap on a chat keeps the drawer open, so you can look at several chats; tap the page beside the drawer, or the close button, to shut it. Select a saved chat and send a message to continue, or choose **New chat** for a fresh session. Settings contains account controls and workspace instructions.
 
 To make the text easier to read, open **Settings** > **Text size** and choose **Normal**, **Larger** or **Largest**. The choice applies to the whole page and is saved in that browser only, so a phone and a tablet can each keep their own size.
 
@@ -943,7 +943,7 @@ API: `POST /tasks`, `POST /tasks/<task_id>/continue`, and `POST /tasks/<task_id>
 
 ### Managing chats
 
-From **0.1.50**, each chat in the sidebar has an actions menu. On desktop, hover over a chat and choose the **⋯** button, or right-click the row. On phones, long-press the chat to open a bottom sheet. With a keyboard, focus a chat and press Shift+F10; arrow keys move between items and Escape closes the menu.
+From **0.1.50**, each chat in the sidebar has an actions menu. On desktop, hover over a chat and choose the **⋯** button, or right-click the row. On phones, the selected chat shows a **⋯** button where its date was, and a long-press on any chat opens the same bottom sheet. With a keyboard, focus a chat and press Shift+F10; arrow keys move between items and Escape closes the menu.
 
 The menu lists, in this order: **Rename**, **Pin chat**, **Share**, **Archive** and **Delete**, as the ChatGPT app
 orders them. The conversation header has no menu of its own; open a chat's menu from the chat list.
