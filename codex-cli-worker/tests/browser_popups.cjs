@@ -48,6 +48,11 @@ const base = 'http://127.0.0.1:9137/preview/';
       assert.equal(await isShown('plus-menu'), false, `${label}: outside press closes the add menu`);
       await page.locator('#picker-button').click();
       assert.equal(await isShown('effort-popover'), true, `${label}: model and reasoning panel opens`);
+      const chip = await page.locator('#picker-button').boundingBox();
+      const panel = await page.locator('#effort-popover').boundingBox();
+      assert.ok(panel.x >= 0 && panel.x + panel.width <= width, `${label}: the panel is inside the viewport`);
+      if (width > 700)
+        assert.ok(Math.abs(panel.x + panel.width - (chip.x + chip.width)) <= 4, `${label}: the panel's right edge is on the chip's`);
       await page.mouse.click(blank.x, blank.y);
       assert.equal(await isShown('effort-popover'), false, `${label}: outside press closes the model and reasoning panel`);
       await page.locator('#picker-button').click();

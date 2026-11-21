@@ -605,6 +605,29 @@ async function effortSaved(page, label) {
     assert.equal(await page.locator("#picker-model").textContent(), "GPT-6 Astra");
     assert.equal(await page.locator("#picker-model").isVisible(), true);
     assert.equal(await page.locator("#effort-label").textContent(), "Extra High");
+    // On a desktop (1280 px) the panel and the model list open right above the chip, with their right
+    // edges on the chip's right edge, as in the desktop app, and inside the window.
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await openPicker(page);
+    for (const id of ["#effort-popover", "#model-popover"]) {
+      if (id === "#model-popover") {
+        await page.locator("#effort-model").click();
+        await page.locator(id).waitFor();
+      }
+      const chip = await page.locator("#picker-button").boundingBox();
+      const box = await page.locator(id).boundingBox();
+      assert.ok(
+        Math.abs(box.x + box.width - (chip.x + chip.width)) <= 4,
+        `${id} right edge ${box.x + box.width} is on the chip's right edge ${chip.x + chip.width}`,
+      );
+      assert.ok(
+        box.y + box.height <= chip.y && chip.y - (box.y + box.height) <= 30,
+        `${id} sits right above the chip (${box.y + box.height} vs ${chip.y})`,
+      );
+      assert.ok(box.x >= 0 && box.x + box.width <= 1280, `${id} is inside the window`);
+    }
+    await page.keyboard.press("Escape");
+    await page.setViewportSize({ width: 1440, height: 950 });
     // Ctrl+Shift+M opens the panel too; a press outside closes it.
     await page.locator("#message").focus();
     await page.keyboard.press("Control+Shift+M");
@@ -617,6 +640,42 @@ async function effortSaved(page, label) {
     await page.mouse.click(outside.x + 4, outside.y + outside.height / 2);
     assert.equal(await page.locator("#effort-popover").isHidden(), true);
     assert.equal(await page.locator("#picker-open-label").isVisible(), false);
+    // One menu at a time: opening the picker, by any route, closes the add menu, the command list
+    // and the permissions pop-up, and opening one of those closes the picker.
+    await page.locator("#attach").click();
+    assert.equal(await page.locator("#plus-menu").isVisible(), true);
+    await page.keyboard.press("Control+Shift+M");
+    await page.locator("#effort-popover").waitFor();
+    assert.equal(await page.locator("#plus-menu").isHidden(), true, "Ctrl+Shift+M closes the add menu");
+    await page.locator("#attach").click();
+    assert.equal(await page.locator("#plus-menu").isVisible(), true);
+    assert.equal(await page.locator("#effort-popover").isHidden(), true, "the add menu closes the picker");
+    await page.locator("#picker-button").click();
+    await page.locator("#effort-popover").waitFor();
+    assert.equal(await page.locator("#plus-menu").isHidden(), true, "the chip closes the add menu");
+    await page.keyboard.press("Escape");
+    await page.locator("#message").fill("");
+    await page.locator("#message").pressSequentially("/");
+    await page.locator("#slash-popover").waitFor();
+    await page.keyboard.press("Control+Shift+M");
+    await page.locator("#effort-popover").waitFor();
+    assert.equal(await page.locator("#slash-popover").isHidden(), true, "Ctrl+Shift+M closes the command list");
+    await page.keyboard.press("Escape");
+    await page.locator("#message").fill("");
+    await page.locator("#permission-button").click();
+    assert.equal(await page.locator("#permissions-dialog").evaluate((node) => node.open), true);
+    await page.keyboard.press("Control+Shift+M");
+    await page.locator("#effort-popover").waitFor();
+    assert.equal(
+      await page.locator("#permissions-dialog").evaluate((node) => node.open),
+      false,
+      "Ctrl+Shift+M closes the permissions pop-up",
+    );
+    await page.locator("#permission-button").click();
+    assert.equal(await page.locator("#permissions-dialog").evaluate((node) => node.open), true);
+    assert.equal(await page.locator("#effort-popover").isHidden(), true, "the permissions pop-up closes the picker");
+    await page.keyboard.press("Escape");
+    assert.equal(await page.locator("#permissions-dialog").evaluate((node) => node.open), false);
     await page.locator("#message").fill("Draft that should stay in this chat");
     await page.locator('[data-task-id="preview-01"]').click();
     await page

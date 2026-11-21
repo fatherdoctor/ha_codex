@@ -1212,7 +1212,7 @@ textarea::placeholder {
   margin-top: 7px;
 }
 .compose-tools {
-  position: relative; /* Anchors the picker popovers, so they open from the left edge on phones. */
+  position: relative; /* Anchors the pop-ups; placePicker (chat.js) puts the picker panel right above the chip. */
   display: flex;
   align-items: center;
   gap: 2px;

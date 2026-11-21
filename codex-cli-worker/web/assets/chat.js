@@ -234,16 +234,56 @@ async function saveSelection(settings) {
   }
 }
 /**
+ * Put the open panel or model list right above the chip with its right edge
+ * on the chip's right edge, as in the desktop app, moved in when that would
+ * leave the window (on a phone the chip sits near the right edge).
+ */
+function placePicker() {
+  const margin = 8;
+  const chip = $("picker-button").getBoundingClientRect();
+  for (const id of ["effort-popover", "model-popover"]) {
+    const popover = $(id);
+    if (popover.hidden || !popover.offsetParent) continue;
+    const width = popover.offsetWidth;
+    const left = Math.max(
+      margin,
+      Math.min(chip.right - width, innerWidth - width - margin),
+    );
+    popover.style.right = "auto";
+    popover.style.left = `${left - popover.offsetParent.getBoundingClientRect().left}px`;
+  }
+}
+window.addEventListener("resize", () => {
+  if (pickerOpen()) placePicker();
+});
+/**
+ * Close the other menus of the message box, so only the picker is open: the
+ * add menu, the slash command list, the permissions pop-up and a chat's
+ * actions menu.
+ */
+function closeOtherMenus() {
+  $("plus-menu").hidden = true;
+  $("attach").setAttribute("aria-expanded", "false");
+  if (!$("slash-popover").hidden) {
+    slash.dismissed = $("message").value;
+    renderSlash();
+  }
+  if ($("permissions-dialog").open) $("permissions-dialog").close();
+  closeChatMenu();
+}
+/**
  * Show the reasoning panel above the chip, filled for the open chat, with
  * the focus on its slider. The model list behind it is closed.
  */
 function showEffortPanel() {
+  closeOtherMenus();
   $("model-popover").hidden = true;
   $("effort-model").setAttribute("aria-expanded", "false");
   $("effort-popover").hidden = false;
   $("picker-button").setAttribute("aria-expanded", "true");
   renderEffort();
   renderChip();
+  placePicker();
   if (!$("effort-slider").disabled) $("effort-slider").focus();
 }
 /**
@@ -297,12 +337,14 @@ function renderModels() {
  * model that is no longer in the list.
  */
 function showModelList() {
+  closeOtherMenus();
   $("effort-popover").hidden = true;
   $("model-popover").hidden = false;
   $("picker-button").setAttribute("aria-expanded", "true");
   $("effort-model").setAttribute("aria-expanded", "true");
   renderModels();
   renderChip();
+  placePicker();
   const options = $("model-options");
   (
     options.querySelector('[aria-pressed="true"]') || options.firstElementChild
@@ -353,7 +395,8 @@ document.addEventListener("keydown", (event) => {
     !event.metaKey &&
     event.key.toLowerCase() === "m" &&
     (pickerOpen() || !$("picker-button").disabled) &&
-    !document.querySelector("dialog[open]")
+    // A modal dialog keeps the keys; the permissions pop-up is not modal and closes instead.
+    !document.querySelector("dialog:modal")
   ) {
     event.preventDefault();
     openPicker("effort");
@@ -2970,6 +3013,7 @@ if (
 )
   for (const id of ["file-input", "document-input"]) $(id).removeAttribute("multiple");
 $("attach").onclick = () => {
+  closePicker();
   const panel = $('plus-menu'); panel.hidden = !panel.hidden;
   $('attach').setAttribute('aria-expanded', String(!panel.hidden));
 };
@@ -3349,6 +3393,8 @@ function renderSlash() {
     list.append(option);
   });
   const open = slash.matches.length > 0;
+  // The command list and the model and reasoning picker are never open together.
+  if (open) closePicker();
   list.hidden = !open;
   $("message").setAttribute("aria-expanded", String(open));
   if (open)
