@@ -2791,7 +2791,7 @@ a.ha-nav-row:focus-visible {
     opacity: 1;
     pointer-events: auto;
   }
-  .chats-card .chat-row.current .row-meta > span:last-child {
+  .chats-card .chat-row.current:has(.row-menu) .row-meta > span:last-child {
     visibility: hidden;
   }
 }
