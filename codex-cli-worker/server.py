@@ -748,7 +748,7 @@ def resolve_chat_settings(settings: dict[str, Any], options: dict[str, Any]) -> 
             model = pin
         elif model != pin:
             raise ValueError(model_pin_message(model, pin))
-    # A run on default names no model; its levels are those of the model the CLI picks.
+    # A run on default names the CLI's pick only when the worker knows it (turn_model); its levels are those of that pick.
     efforts = model_efforts(default_model(options) if model == "default" else model) or ("low", "medium", "high", "xhigh")
     effort = settings.get("reasoning_effort")
     if effort is not None and effort not in efforts:
@@ -5281,12 +5281,13 @@ def turn_model(model: str) -> dict[str, str]:
 
     A thread that is already loaded (the live process) ignores the model of thread/resume, and a resume without one
     keeps the thread's last model, so each turn names its model; a chat set back to the default gets the CLI's pick
-    by name. Before /status named that pick, the turn names none, as before.
+    by name. The pick is named only when it is a model the worker knows: for any other model /status gives its
+    display text, which is not a model id. Before /status named a known pick, the turn names none, as before.
     """
     if model not in {"default", "gpt-5.3-codex"}:
         return {"model": model}
     seen = seen_default_model()
-    return {"model": seen} if seen else {}
+    return {"model": seen} if model_efforts(seen) is not None else {}
 
 
 # The longest plain-text answer the page keeps.

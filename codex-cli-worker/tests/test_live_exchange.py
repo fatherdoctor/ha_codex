@@ -160,6 +160,10 @@ class _Errors:
         return line
 
 
+# An invented live model list: (model id, display name, reasoning levels).
+INVENTED_LIVE_MODELS = (("invented-default-model", "Invented Default", ("low", "medium", "high")),)
+
+
 class LiveExchangeTests(unittest.TestCase):
     """Run the real run_task with the worker's host on a fake live process."""
 
@@ -401,7 +405,8 @@ class LiveExchangeTests(unittest.TestCase):
 
     def test_a_chat_set_back_to_the_default_model_names_it(self):
         session_id = self.message(model="invented-model-a")["session_id"]
-        with patch.dict(server.usage_state, {"_default_model": "invented-default-model"}):
+        with patch.dict(server.usage_state, {"_default_model": "invented-default-model"}), \
+                patch.object(server, "live_models", return_value=INVENTED_LIVE_MODELS):
             self.assertEqual(self.message(session_id, model="default")["status"], "completed")
         turns = self.spawned[0].methods("turn/start")
         self.assertEqual([turn["params"]["model"] for turn in turns], ["invented-model-a", "invented-default-model"])
@@ -410,6 +415,14 @@ class LiveExchangeTests(unittest.TestCase):
         with patch.dict(server.usage_state, {"_default_model": ""}):
             self.assertEqual(self.message(model="default")["status"], "completed")
         self.assertNotIn("model", self.spawned[0].methods("turn/start")[0]["params"])
+
+    def test_the_default_names_no_model_when_the_worker_does_not_know_the_cli_pick(self):
+        # /status gives a display name, not a model id, for a model that neither model list has.
+        with patch.dict(server.usage_state, {"_default_model": "Invented Display Name"}), \
+                patch.object(server, "live_models", return_value=INVENTED_LIVE_MODELS):
+            self.assertEqual(self.message(model="default")["status"], "completed")
+        self.assertNotIn("model", self.spawned[0].methods("turn/start")[0]["params"])
+
 
 if __name__ == "__main__":
     unittest.main()

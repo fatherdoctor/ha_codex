@@ -130,7 +130,8 @@
 ### Fixed
 - **A chat set back to the default model goes back to it.** Before, a chat kept the last model it ran on when you
   chose the default again, because Codex keeps a thread's model unless a message names another one. Each message now
-  names its model, and the default by the name Codex gives it in its status.
+  names its model. A message on the default names the default model that Codex shows in its status, when the app
+  knows that model. Until then, for example in the first moments after a start, the chat keeps its last model.
 - The chat shows the final answer once. Interim messages still appear in order above it.
 - **Share masks three more shapes.** A password value whose first word another rule already masked (an `sk-` key, a
   token) no longer keeps the rest of its line, and a quoted password that runs on to the next line is masked whole.

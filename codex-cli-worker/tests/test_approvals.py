@@ -394,9 +394,10 @@ class SharedConnectionTests(unittest.TestCase):
             self.writer, lock=threading.RLock(),
             thread_params=thread_params if thread_params is not None else {
                 "threadId": "live-thread", "sandbox": "read-only", "approvalPolicy": "on-request",
-                "approvalsReviewer": "user", "model": "test-model"},
+                "approvalsReviewer": "user"},
             turn_params=turn_params if turn_params is not None else {
-                "input": [{"type": "text", "text": "Check a sensor"}], "approvalPolicy": "on-request"},
+                "input": [{"type": "text", "text": "Check a sensor"}], "approvalPolicy": "on-request",
+                "model": "test-model"},
             on_event=self.events.append, on_approvals=lambda records: setattr(self, "records", records),
             on_final=self.finals.append, is_active=lambda: active,
             redact=lambda text: text, owns_connection=False,
@@ -423,15 +424,10 @@ class SharedConnectionTests(unittest.TestCase):
         self.assertEqual(self.events[0], {"type": "thread.started", "thread_id": "live-thread"})
         self.assertTrue(session.turn_running)
 
-    def test_a_model_in_the_turn_is_kept(self):
-        """A model that the caller put in the turn is not replaced by the thread's."""
-        session = self.make(turn_params={"input": [], "model": "turn-model"})
-        session.start()
-        self.assertEqual(self.writer.messages()[0]["params"]["model"], "turn-model")
-
-    def test_no_model_when_the_chat_has_none(self):
-        """The default model is not named, as on the start path."""
-        session = self.make(thread_params={"threadId": "live-thread"})
+    def test_the_thread_model_is_not_copied_into_the_turn(self):
+        """The caller names the model in the turn (server.turn_model); a turn without one stays without one."""
+        session = self.make(thread_params={"threadId": "live-thread", "model": "thread-model"},
+                            turn_params={"input": []})
         session.start()
         self.assertNotIn("model", self.writer.messages()[0]["params"])
 
