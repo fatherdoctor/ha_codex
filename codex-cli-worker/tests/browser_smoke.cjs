@@ -501,6 +501,131 @@ async function effortSaved(page, label) {
       }),
       ["message", 0, 48000, "message", 0],
     );
+    // CX-REPLY-ALIGN: at phone and desktop widths a finished reply (its "Worked for" line, its text and its
+    // "Completed" line) starts at the left edge of the message column, with no indent, and no part of it is cut off.
+    await page.locator('[data-task-id="preview-01"]').click();
+    await page.locator("#activity.worked .activity-toggle").waitFor();
+    await page.locator("#messages .answer .turn-meta").waitFor();
+    for (const width of [320, 390, 700, 1280]) {
+      await page.setViewportSize({ width, height: 900 });
+      const reply = await page.evaluate(() => {
+        const area = document.querySelector("#messages");
+        const box = area.getBoundingClientRect();
+        const style = getComputedStyle(area);
+        const left = box.left + parseFloat(style.paddingLeft);
+        const right = box.right - parseFloat(style.paddingRight);
+        const exchange = [...area.querySelectorAll(".exchange")].at(-1);
+        const parts = {
+          worked: exchange.querySelector("#activity .activity-toggle"),
+          text: exchange.querySelector(".answer > .message"),
+          completed: exchange.querySelector(".answer > .turn-meta"),
+        };
+        return {
+          left,
+          right,
+          windowRight: innerWidth,
+          scrolled: area.scrollLeft,
+          wider: area.scrollWidth > area.clientWidth,
+          parts: Object.fromEntries(
+            Object.entries(parts).map(([name, node]) => {
+              const rect = node.getBoundingClientRect();
+              // The reply text and the Completed line are measured at their first character, so an indent counts.
+              let left = rect.left;
+              if (name !== "worked") {
+                const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, {
+                  acceptNode: (text) => (text.data.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP),
+                });
+                const text = walker.nextNode();
+                const range = document.createRange();
+                const start = text.data.search(/\S/);
+                range.setStart(text, start);
+                range.setEnd(text, start + 1);
+                left = range.getBoundingClientRect().left;
+              }
+              return [name, { left, right: rect.right, cut: node.scrollWidth > node.clientWidth + 1 }];
+            }),
+          ),
+        };
+      });
+      assert.equal(reply.scrolled, 0, `the messages scroll sideways at ${width} px`);
+      assert.equal(reply.wider, false, `the messages are wider than their column at ${width} px`);
+      for (const [name, part] of Object.entries(reply.parts)) {
+        assert.ok(
+          Math.abs(part.left - reply.left) <= 1,
+          `${name} starts at ${part.left} px, the column at ${reply.left} px (${width} px window)`,
+        );
+        assert.ok(
+          part.right <= reply.right + 0.5 && part.right <= reply.windowRight,
+          `${name} ends at ${part.right} px, past the column at ${reply.right} px (${width} px window)`,
+        );
+        assert.equal(part.cut, false, `${name} is cut off at ${width} px`);
+      }
+      // The pulsing dot of the working line ("Working on your request… · 4 steps · 4s") sits on the middle of
+      // the line, not on its text baseline. A copy of the line is measured; the real one is on screen only while Codex works.
+      const line = await page.evaluate(() => {
+        const block = document.createElement("div");
+        block.className = "activity running";
+        block.id = "dot-check";
+        const toggle = document.createElement("button");
+        toggle.className = "activity-toggle";
+        const chevron = document.createElement("span");
+        chevron.className = "activity-chevron";
+        const label = document.createElement("span");
+        label.textContent = "Working on your request… · 4 steps";
+        const elapsed = document.createElement("span");
+        elapsed.className = "elapsed";
+        elapsed.textContent = " · 4s";
+        label.append(elapsed);
+        toggle.append(chevron, label);
+        block.append(toggle);
+        const area = document.querySelector("#messages");
+        area.append(block);
+        block.scrollIntoView({ block: "center" });
+        const rect = (node) => {
+          const r = node.getBoundingClientRect();
+          return { x: r.left, y: r.top, width: r.width, height: r.height };
+        };
+        return { toggle: rect(toggle), chevron: rect(chevron), label: rect(label) };
+      });
+      // The dot is drawn by ::before, so find its rows in a picture of the chevron's column of the line.
+      const shot = await page.screenshot({
+        clip: { x: line.chevron.x, y: line.toggle.y, width: line.chevron.width, height: line.toggle.height },
+        animations: "disabled",
+      });
+      const dotRows = await page.evaluate(async (data) => {
+        document.querySelector("#dot-check").remove();
+        const image = new Image();
+        image.src = `data:image/png;base64,${data}`;
+        await image.decode();
+        const canvas = document.createElement("canvas");
+        canvas.width = image.width;
+        canvas.height = image.height;
+        const context = canvas.getContext("2d");
+        context.drawImage(image, 0, 0);
+        const pixels = context.getImageData(0, 0, image.width, image.height).data;
+        const background = pixels.slice(0, 3);
+        const rows = [];
+        for (let y = 0; y < image.height; y++)
+          for (let x = 0; x < image.width; x++) {
+            const at = (y * image.width + x) * 4;
+            if ([0, 1, 2].some((c) => Math.abs(pixels[at + c] - background[c]) > 40)) {
+              rows.push(y);
+              break;
+            }
+          }
+        return rows;
+      }, shot.toString("base64"));
+      assert.ok(dotRows.length >= 4, `the working dot is not drawn at ${width} px`);
+      const dot = {
+        dot: line.toggle.y + (dotRows[0] + dotRows.at(-1) + 1) / 2,
+        line: line.label.y + line.label.height / 2,
+      };
+      assert.ok(
+        Math.abs(dot.dot - dot.line) <= 1.5,
+        `the working dot's middle is at ${dot.dot} px, the line's at ${dot.line} px (${width} px window)`,
+      );
+    }
+    await page.setViewportSize({ width: 1440, height: 950 });
     await page.locator('[data-task-id="preview-00"]').click();
     await page
       .locator("#messages")
@@ -809,6 +934,36 @@ async function effortSaved(page, label) {
     assert.equal(await page.locator("#activity .step.is-running").count(), 0);
     assert.equal(await page.locator(".message.user").count(), 2);
     assert.equal(await page.locator(".answer").count(), 2);
+    // CX-REPLY-ALIGN: the text messages Codex wrote along the way ("I'll look for …", "I found …") are blocks of
+    // their own above the answer, spaced apart from each other and from the answer, and start where it starts.
+    const narration = await page.evaluate(() => {
+      const exchange = [...document.querySelectorAll("#messages .exchange")].at(-1);
+      const blocks = [...exchange.querySelectorAll("#activity-text > .message"), exchange.querySelector(".answer > .message")];
+      const firstCharacter = (node) => {
+        const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, {
+          acceptNode: (text) => (text.data.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP),
+        });
+        const text = walker.nextNode();
+        const range = document.createRange();
+        const start = text.data.search(/\S/);
+        range.setStart(text, start);
+        range.setEnd(text, start + 1);
+        return range.getBoundingClientRect().left;
+      };
+      return blocks.map((node) => {
+        const rect = node.getBoundingClientRect();
+        return { top: rect.top, bottom: rect.bottom, left: firstCharacter(node) };
+      });
+    });
+    assert.ok(narration.length >= 3, `${narration.length - 1} narration blocks above the answer`);
+    for (let n = 1; n < narration.length; n++) {
+      const gap = narration[n].top - narration[n - 1].bottom;
+      assert.ok(gap >= 8, `block ${n} is ${gap} px below the one above it`);
+      assert.ok(
+        Math.abs(narration[n].left - narration[0].left) <= 1,
+        `block ${n} starts at ${narration[n].left} px, the first at ${narration[0].left} px`,
+      );
+    }
     const saved = await page.evaluate(
       async () => (await (await fetch("tasks/preview-00")).json()).task,
     );

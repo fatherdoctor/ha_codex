@@ -146,6 +146,11 @@
 - The add-on Configuration page now uses plain option names and one short description for each option (25 words or fewer). A test keeps names free of code words and descriptions short.
 
 ### Fixed
+- **Replies line up and are spaced.** A reply's text started one space to the right of its "Worked for" line and of
+  the lines Codex writes along the way ("I'll look for …", "I found …"). Those lines also touched each other and the
+  answer, so they read as part of it. Now all of them start at the left edge, and each line Codex writes along the way
+  is a block of its own, one paragraph gap from the next one and from the answer. The pulsing dot of the working line
+  is centered on the line instead of sitting on the text baseline.
 - **A chat set back to the default model goes back to it.** Before, a chat kept the last model it ran on when you
   chose the default again, because Codex keeps a thread's model unless a message names another one. Each message now
   names its model. A message on the default names the default model that Codex shows in its status, when the app
