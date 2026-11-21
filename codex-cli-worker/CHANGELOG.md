@@ -81,6 +81,16 @@
   copy at `/data/agents_before_move.md`. If both places hold a file, nothing moves and the app logs a line.
 
 ### Changed
+- **The phone chat list is easier to use.** A tap on a chat keeps the side bar open; a tap on the page to its right
+  closes it. The selected chat shows its three-dot menu button where its date was, and the button is 44 pixels or
+  larger. A long press still opens the menu. A desktop window does not change.
+- **A simple question gets a faster answer.** A message that Codex can answer from what it knows and from the
+  chat, such as a greeting or a one-number reply, now gets its answer with no tool call. Before, the page's rules
+  made Codex call `exchange_info` at the start of every message and check for `/addon_config/AGENTS.md` with a shell
+  command, so a one-number reply took three model steps. Codex now calls `exchange_info` only before its first
+  command, file change or tool call in a message, or when your message can refer to a file or a document it cannot
+  see, such as "Summarize this" with a document attached, and never runs a command to look for `AGENTS.md`, which
+  Codex loads when the chat starts. The `exchange_info` tool description says the same.
 - **No copies of secret files.** The app keeps no readable copy of `secrets.yaml` or of any file under `.storage`.
   The full snapshot leaves them out, and a copy in a message's backup folder is deleted when the message ends, in
   every permission mode, also when you stop the message; the backup cleanup removes a copy that a restart left
@@ -121,9 +131,14 @@
 - **A chat set back to the default model goes back to it.** Before, a chat kept the last model it ran on when you
   chose the default again, because Codex keeps a thread's model unless a message names another one. Each message now
   names its model, and the default by the name Codex gives it in its status.
+- The chat shows the final answer once. Interim messages still appear in order above it.
 - **Share masks three more shapes.** A password value whose first word another rule already masked (an `sk-` key, a
   token) no longer keeps the rest of its line, and a quoted password that runs on to the next line is masked whole.
   A very long run of the secret word itself (`password-password-...`) is masked about three times faster.
+- **Signing in shows only what you need.** While a ChatGPT or GitHub sign-in waits, its part of Settings and the
+  sign-in banner above the chat show the sign-in link as the main button (44 px tall or more), then the code with its timer, then (ChatGPT) the folded **Show QR code**, then one
+  quiet **Cancel**. It no longer shows Sign out, the Codex availability text or the "confirmed Codex access" line
+  until the sign-in ends. The signed-out and signed-in states keep them.
 - **Sign-in works on a phone.** On a small screen, the sign-in banner above the chat now scrolls, so the link to the
   sign-in page and the whole code are always in reach. The link now comes before the QR code. A phone cannot scan its
   own screen, so on a phone-sized window the QR code starts folded under **Show QR code**; a larger window shows it

@@ -84,6 +84,7 @@ class FirstReplyPrompt(unittest.TestCase):
         text = server.PAGE_INSTRUCTIONS
         self.assertIn("Owner workspace instructions: if /addon_config/AGENTS.md exists, follow it.", text)
         self.assertNotIn("Follow /addon_config/AGENTS.md.", text)
+        self.assertNotIn("check for the file yourself", text)
 
     def test_answer_is_a_reply_not_a_worker_report(self):
         line = next(line for line in server.PAGE_INSTRUCTIONS.splitlines()

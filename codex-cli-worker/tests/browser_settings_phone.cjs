@@ -347,6 +347,8 @@ async function openThemedSections(target) {
     await page.close();
     // The sign-in cards on smaller phones: they scroll to the link, and the QR code starts folded.
     await require('./browser_signin_phone.cjs')(browser);
+    // The signing-in state of those cards shows the link, the code and Cancel only.
+    await require('./browser_signin_state.cjs')(browser);
     console.log(`PASS: settings at 400 px in light and dark: collapsed sections with status headers, button rows that fit, code countdown, expiry and a new code; at 400 and 1280 px one window size, one arrow size and even spacing; the Home Assistant look with and without a host theme, and a dropped theme variable falls back. Screenshots: ${SHOTS}`);
   } finally {
     await browser.close();

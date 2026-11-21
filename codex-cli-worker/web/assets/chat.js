@@ -899,7 +899,8 @@ function renderRow(chat, queued = null) {
   main.append(meta);
   // One line for each chat: the last answer is the tooltip instead of a second line.
   main.title = `${title} - ${main.querySelector(".row-preview").textContent}`;
-  main.onclick = () => selectChat(chat.task_id);
+  // On a phone the side bar stays open, so the owner can look at several chats; its scrim or the close button shuts it.
+  main.onclick = () => selectChat(chat.task_id, false, true);
   row.append(main);
   // A chat that is still waiting for its first message has nothing to pin or rename yet.
   if (!chatById(chat.task_id)) return row;
@@ -2074,16 +2075,22 @@ function renderActivity() {
   const activity = state.activity;
   if (!block || !activity || activity.id !== state.id) return;
   const all = [...activity.steps.values()].sort((a, b) => a.index - b.index);
-  // Each text message Codex wrote along the way shows in order outside the closed list; tool steps and
-  // thinking stay inside it. The final answer is never a step, so it is not shown twice.
+  // Text messages show outside the closed list; tool steps and thinking stay inside it.
   const steps = all.filter(step => step.kind !== "message");
   const texts = all.filter(step => step.kind === "message" && step.text);
+  const running = activity.running || taskActive();
+  const turn = state.task?.turns?.at(-1);
+  const lastText = texts.at(-1);
+  // Saved steps can still contain the final answer. Keep earlier messages and explicit commentary.
+  if (!running && turn && activity.turnId === turn.turn_id && lastText && !lastText.phase &&
+      lastText.text.trim() === turn.summary?.trim()) {
+    texts.pop();
+  }
   const textBox = $("activity-text");
   if (textBox)
     textBox.replaceChildren(...texts.map(step => renderMarkdown(step.text, "message interim")));
-  const running = activity.running || taskActive();
   const checks = state.latestChecks;
-  const worked = running ? "" : workedLabel(state.task?.turns?.at(-1));
+  const worked = running ? "" : workedLabel(turn);
   block.hidden = !steps.length && !checks && !worked;
   block.classList.toggle("running", running);
   block.classList.toggle("worked", !running);
@@ -2246,7 +2253,7 @@ function reopenLastChat() {
  * left. When restoring a remembered chat, a 404 means it was deleted from
  * another tab or device: forget it and start fresh without an error.
  */
-async function selectChat(id, restoring = false) {
+async function selectChat(id, restoring = false, keepSidebar = false) {
   if (state.busy || state.settingsBusy) return;
   closePicker();
   state.drafts.set(state.id, $("message").value);
@@ -2264,7 +2271,7 @@ async function selectChat(id, restoring = false) {
   $("message").value = state.drafts.get(id) || "";
   resizeInput();
   showError(null);
-  sidebar(false);
+  if (!keepSidebar) sidebar(false);
   renderList();
   controls();
   if (!id) {
@@ -3533,18 +3540,19 @@ let shownLogin = null;
  */
 function signInCard(auth) {
   const card = document.createElement("div");
-  const requirement = textNode("p", "A ChatGPT account with Codex access is required. As of November 13, 2026, this includes Free and Go. ", "muted");
-  const availability = textNode("a", "Check OpenAI’s current availability");
-  availability.href = "https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan";
-  availability.target = "_blank";
-  availability.rel = "noopener noreferrer";
-  requirement.append(availability);
-  card.append(requirement);
   card.className = "signin-card";
+  // The sign-in link comes first, as the main button; then the code, its timer and the folded QR code.
+  if (auth.verification_url) {
+    const url = new URL(auth.verification_url, location.href);
+    if (url.protocol === "https:") {
+      const link = textNode("a", "Open the ChatGPT sign-in page", "signin-link");
+      link.href = url.href;
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      card.append(link);
+    }
+  }
   if (auth.user_code) {
-    card.append(
-      textNode("p", "Enter this code on the ChatGPT sign-in page:", "muted"),
-    );
     const code = textNode("p", auth.user_code, "signin-code");
     code.setAttribute(
       "aria-label",
@@ -3553,16 +3561,6 @@ function signInCard(auth) {
     card.append(code, ...codeExpiry(auth.expires_in, newChatgptCode, "chatgpt"));
   } else {
     card.append(textNode("p", "Waiting for the sign-in code…", "muted"));
-  }
-  if (auth.verification_url) {
-    const url = new URL(auth.verification_url, location.href);
-    if (url.protocol === "https:") {
-      const link = textNode("a", "Open the ChatGPT sign-in page");
-      link.href = url.href;
-      link.target = "_blank";
-      link.rel = "noreferrer";
-      card.append(link);
-    }
   }
   if (auth.qr_path) {
     const img = document.createElement("img");
@@ -3621,9 +3619,7 @@ function renderLogin(auth) {
   const failure = `The last sign-in did not finish. ${auth.error || "Get a new code to try again."}`;
   $("login-status").textContent = signedIn
     ? auth.codex_login.message || "Signed in to ChatGPT."
-    : pending
-      ? "Signing in. Enter the code below on the ChatGPT sign-in page."
-      : failed
+    : failed
         ? failure
         : lapsed
           ? "The ChatGPT sign-in expired or was revoked. Sign in again."
@@ -3661,8 +3657,8 @@ function renderLogin(auth) {
     followCodeTime("chatgpt", auth.expires_in);
   }
   for (const id of ["login", "banner-login"]) $(id).hidden = pending;
-  // The sign-in card repeats the account requirement, so the section shows it once.
-  $("login-requirement").hidden = pending;
+  // While a sign-in waits, the section shows only the card and Cancel (CSS hides the rest).
+  $("chatgpt-section").classList.toggle("signing-in", pending);
   for (const id of ["login-cancel", "banner-cancel"]) $(id).hidden = !pending;
   $("signin-banner").hidden = signedIn;
 }
@@ -3743,16 +3739,19 @@ function githubExpiry(github) {
 function githubFlowCard(flow) {
   const card = document.createElement("div");
   card.className = "signin-card github-flow-card";
+  // The same order as the ChatGPT card: the link as the main button, then the code and its timer.
+  const link = githubLink(flow.verification_uri || "https://github.com/login/device", "Open github.com/login/device");
+  if (link) {
+    link.className = "signin-link";
+    card.append(link);
+  }
   if (flow.user_code) {
-    card.append(textNode("p", "Enter this code on GitHub's device sign-in page, then approve Codex for Home Assistant:", "muted"));
     const code = textNode("p", flow.user_code, "signin-code");
     code.setAttribute("aria-label", `GitHub code ${flow.user_code.split("").join(" ")}`);
     card.append(code);
   } else {
     card.append(textNode("p", "Waiting for the GitHub code…", "muted"));
   }
-  const link = githubLink(flow.verification_uri || "https://github.com/login/device", "Open github.com/login/device");
-  if (link) card.append(link);
   if (flow.user_code) card.append(...codeExpiry(flow.expires_in, newGithubCode, "github"));
   return card;
 }
@@ -3860,6 +3859,8 @@ function renderGithub(github) {
   const retry = !connected && ["expired", "failed"].includes(flow.status);
   $("github-connect").textContent = connected ? "Connect again" : retry ? "Get a new code" : "Connect GitHub";
   $("github-connect").hidden = waiting;
+  // While a sign-in waits, the section shows only the card and Cancel (CSS hides the rest).
+  $("github-section").classList.toggle("signing-in", waiting);
   $("github-cancel").hidden = !waiting;
   for (const id of ["github-test", "github-check", "github-disconnect"]) $(id).hidden = !connected;
   $("github-accept").hidden = !(state === "access_changed" && !github.permission_problem);

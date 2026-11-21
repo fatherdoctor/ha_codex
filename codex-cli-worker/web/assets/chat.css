@@ -1735,9 +1735,6 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   background: #fff;
   padding: 10px;
 }
-#login-card a {
-  color: var(--accent);
-}
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
@@ -2016,6 +2013,23 @@ dialog :is(h3, h4):has(> .settings-toggle) {
 }
 .signin-card a {
   overflow-wrap: anywhere;
+}
+/* The sign-in link is the main button of the card, drawn like the filled buttons of Settings. */
+.signin-card a.signin-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--ha-color-fill-primary-loud-resting, var(--accent));
+  color: var(--ha-color-on-primary-loud, #fff);
+  font-weight: 500;
+  text-decoration: none;
+}
+/* While a sign-in waits, a section shows only its card and Cancel. */
+.signing-in .signin-hide {
+  display: none;
 }
 
 /*
@@ -2778,4 +2792,20 @@ a.ha-nav-row:focus-visible {
 /* Interim text messages of the latest exchange, shown outside the closed step list (CX-04-SHOW-TEXT). */
 .activity-text:empty {
   display: none;
+}
+/* CX-04-PHONE-LIST: at phone width the rows are 48 px (--fb2-row-height) and the menu button 44 px, and the selected chat shows its menu button in place of its date. */
+@media (max-width: 700px) {
+  .chats-card .chat-row .row-menu {
+    min-width: 44px;
+    min-height: 44px;
+    right: 0;
+    padding: 0;
+  }
+  .chats-card .chat-row.current .row-menu {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .chats-card .chat-row.current:has(.row-menu) .row-meta > span:last-child {
+    visibility: hidden;
+  }
 }
