@@ -53,6 +53,9 @@ configuration:
   local_docs:
     name: Local Home Assistant documentation
     description: Download the official Home Assistant documentation from GitHub into private app storage, about 25 MB, so Codex can search it directly instead of searching the web for documentation. The copy is fetched in the background when the app first starts and again after each Home Assistant update. Turn this off to stop the downloads; Codex then uses web search as before.
+  warm_start:
+    name: Keep Codex running
+    description: Keep one Codex process running between messages, with each recent chat loaded in it, so a message starts faster. At most 3 chats stay loaded; the app unloads the chat used longest ago when it needs room. The process uses memory while it waits. Turn this off to start Codex again for each message, as earlier versions did.
   HA_TOKEN:
     name: HA_TOKEN
     description: Optional Home Assistant token exposed to Codex subprocesses as the HA_TOKEN environment variable, together with HA_URL, the address above. Codex can then call Home Assistant's API with the rights of the token's user, for example to reload automations or restart Home Assistant.

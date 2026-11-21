@@ -88,7 +88,7 @@ RUN pip3 install --no-cache-dir --break-system-packages \
 WORKDIR /data
 
 COPY run.sh /
-COPY server.py account_access.py safety_block.py starter_agents.md /
+COPY server.py account_access.py safety_block.py codex_host.py starter_agents.md /
 COPY interaction_diagnostics.py diagnostics_scrub.py /
 # Codex's managed requirements (the sandbox modes and approval policies a client may ask for) and managed
 # config (the tool keys kept out of commands), read-only, outside /config and every sandbox's writable roots.
