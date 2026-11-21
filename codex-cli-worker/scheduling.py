@@ -11,7 +11,9 @@ import sqlite3
 import threading
 import time
 import uuid
+from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
+from typing import Any, Protocol
 from zoneinfo import ZoneInfo
 
 # Build-time switch for scheduled runs. While it is True (the 0.4 series), the pages offer schedules, Codex gets
@@ -28,27 +30,48 @@ MAX_RUNS = 500
 OWNER_FIELDS = frozenset({'chat_id', 'model'})
 CHAT_ID = re.compile(r'(?:[A-Za-z0-9][A-Za-z0-9._-]{0,127})?')
 MODEL_ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,79}')
+
+
 class Busy(ValueError):
-    pass
+    """The worker is running other work, so a due schedule waits and stays due."""
 
 
 ACTIVE = ('reserved', 'queued', 'running', 'waiting_for_approval', 'waiting_for_input')
 
 
-def text(value, label, limit):
+class TaskRunner(Protocol):
+    """What the Engine uses to start and follow a scheduled run's task.
+
+    schedule_api.Worker gives this for the add-on. The Engine also reads an optional `dispatch_slot()` context
+    manager with getattr, so a runner without one (such as a test double) still works.
+    """
+
+    def busy(self) -> bool: ...
+    def snapshot(self, task_id: str) -> dict[str, Any] | None: ...
+    def submit(self, task_id: str, prompt: str, mode: str, name: str, schedule_id: str,
+               model: str | None = None) -> None: ...
+
+
+def text(value: Any, label: str, limit: int) -> str:
+    """Return the value stripped, or refuse it when it is not text, is blank or is longer than the limit."""
     if not isinstance(value, str) or not value.strip() or len(value) > limit:
         raise ValueError(f'{label} must be nonempty text, at most {limit} characters.')
     return value.strip()
 
 
-def cron_fields(expression):
+def cron_fields(expression: Any) -> tuple[list[set[int]], bool, bool]:
+    """Parse five numeric cron fields into their sets of values.
+
+    Return the minute, hour, day, month and weekday sets (Sunday is 0), and whether the day-of-month and the weekday
+    fields start with a wildcard; cron matches either day field only when neither does.
+    """
     expression = text(expression, 'cron', 256)
     parts = expression.split()
     if len(parts) != 5:
         raise ValueError('Use five numeric cron fields: minute hour day month weekday (Home Assistant time).')
-    fields = []
+    fields: list[set[int]] = []
     for part, low, high in zip(parts, (0, 0, 1, 1, 0), (59, 23, 31, 12, 7)):
-        values = set()
+        values: set[int] = set()
         for item in part.split(','):
             base, *steps = item.split('/')
             if len(steps) > 1 or (steps and (not steps[0].isdigit() or int(steps[0]) < 1)):
@@ -74,7 +97,7 @@ def cron_fields(expression):
     return fields, parts[2].startswith('*'), parts[4].startswith('*')
 
 
-def local_timestamp(date, zone):
+def local_timestamp(date: datetime, zone: str) -> float:
     """Use the first repeated occurrence and reject nonexistent local wall times."""
     aware = date.replace(tzinfo=ZoneInfo(zone), fold=0)
     stamp = aware.timestamp()
@@ -83,8 +106,11 @@ def local_timestamp(date, zone):
     return stamp
 
 
-def next_due(spec, after, zone='UTC'):
-    """Cron follows Home Assistant wall time; repeated minutes run only once."""
+def next_due(spec: dict[str, Any], after: float, zone: str = 'UTC') -> float | None:
+    """Return the first time after `after` when the schedule is due, or None when a one-off time has passed.
+
+    Cron follows Home Assistant wall time; repeated minutes run only once.
+    """
     if spec['kind'] == 'once':
         return spec['at'] if spec['at'] > after else None
     if spec['kind'] == 'interval':
@@ -110,14 +136,14 @@ def next_due(spec, after, zone='UTC'):
     raise ValueError('Cron has no occurrence in the next 366 days.')
 
 
-def owner_fields(payload):
+def owner_fields(payload: dict[str, Any]) -> dict[str, Any]:
     """Return the chat and model an owner's request names; a field left out is left out.
 
     Only the owner's editor sets these. The chat is where the schedule was made,
     so the page can show it there. The model is None for the add-on's own model;
     schedule_api checks a named one against the models the worker offers.
     """
-    fields = {}
+    fields: dict[str, Any] = {}
     if 'chat_id' in payload:
         chat_id = payload['chat_id']
         if not isinstance(chat_id, str) or CHAT_ID.fullmatch(chat_id) is None:
@@ -131,7 +157,12 @@ def owner_fields(payload):
     return fields
 
 
-def validate(payload, now, zone="UTC", *, owner=False):
+def validate(payload: Any, now: float, zone: str | None = "UTC", *, owner: bool = False) -> dict[str, Any]:
+    """Check a schedule request and return its clean name, prompt, mode, spec and next due time.
+
+    An owner's request may also name the chat and the model; Codex's may not. A refusal is a ValueError whose text
+    says why.
+    """
     allowed = {'name', 'prompt', 'mode', 'spec'}
     if not isinstance(payload, dict) or set(payload) - (allowed | OWNER_FIELDS if owner else allowed):
         raise ValueError('A schedule accepts only name, prompt, mode, spec, model and chat_id.' if owner
@@ -146,7 +177,7 @@ def validate(payload, now, zone="UTC", *, owner=False):
     mode = payload.get('mode', 'default')
     if mode not in ('default', 'read-only'):
         raise ValueError('Mode must be default or read-only.')
-    spec = payload.get('spec')
+    spec: Any = payload.get('spec')
     if not isinstance(spec, dict):
         raise ValueError('spec must describe interval, cron or once.')
     kind = spec.get('kind')
@@ -178,7 +209,9 @@ def validate(payload, now, zone="UTC", *, owner=False):
 
 class Store:
     """Transactions protect occurrence reservation and owner approval from concurrent edits."""
-    def __init__(self, path, zone="UTC"):
+
+    def __init__(self, path: str | os.PathLike[str], zone: str | None = "UTC") -> None:
+        """Open or make the schedules database, owner-only, and save the Home Assistant time zone when known."""
         self.timezone = zone
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -213,7 +246,8 @@ class Store:
         if zone is not None:
             self.set_timezone(zone, time.time())
 
-    def set_timezone(self, zone, now):
+    def set_timezone(self, zone: str, now: float) -> None:
+        """Save the Home Assistant time zone; when it changed, recompute the next due time of each enabled cron."""
         ZoneInfo(zone)
         with self.connect() as db:
             previous = db.execute("SELECT value FROM settings WHERE key='ha_timezone'").fetchone()
@@ -227,7 +261,8 @@ class Store:
         self.timezone = zone
 
     @contextlib.contextmanager
-    def connect(self):
+    def connect(self) -> Iterator[sqlite3.Connection]:
+        """Yield a connection inside one immediate transaction: commit on success, roll back on any error."""
         db = sqlite3.connect(self.path, timeout=5)
         db.row_factory = sqlite3.Row
         if db.execute('PRAGMA journal_mode').fetchone()[0] != 'persist':
@@ -243,16 +278,23 @@ class Store:
             db.close()
 
     @staticmethod
-    def schedule(row):
+    def schedule(row: sqlite3.Row) -> dict[str, Any]:
+        """Return a saved schedule row as a dict, with its spec decoded and its flags as bools."""
         value = dict(row); value['spec'] = json.loads(value['spec'])
         value['approved'] = bool(value['approved']); value['enabled'] = bool(value['enabled'])
         return value
 
-    def schedules(self):
+    def schedules(self) -> list[dict[str, Any]]:
+        """Return every saved schedule and proposal, newest change first."""
         with self.connect() as db:
             return [self.schedule(row) for row in db.execute('SELECT * FROM schedules ORDER BY updated DESC, id')]
 
-    def save(self, payload, *, owner, now, schedule_id=None, author=None):
+    def save(self, payload: Any, *, owner: bool, now: float, schedule_id: str | None = None,
+             author: str | None = None) -> dict[str, Any]:
+        """Save an owner's schedule (approved and enabled) or a Codex proposal (neither), and return the saved row.
+
+        With schedule_id, an owner's edit replaces that schedule; Codex cannot edit.
+        """
         value = validate(payload, now, self.timezone, owner=owner)
         author = 'owner' if owner else author
         if author not in ('owner', 'codex'):
@@ -278,7 +320,8 @@ class Store:
                 approved, approved, value['next_due'], now, uuid.uuid4().hex, author, chat_id, model))
             return self.schedule(db.execute('SELECT * FROM schedules WHERE id=?', (schedule_id,)).fetchone())
 
-    def action(self, schedule_id, action, now, revision=None):
+    def action(self, schedule_id: str, action: str, now: float, revision: str | None = None) -> None:
+        """Approve, pause, resume or delete a schedule; approval needs the revision the owner reviewed."""
         with self.connect() as db:
             row = db.execute('SELECT * FROM schedules WHERE id=?', (schedule_id,)).fetchone()
             if row is None:
@@ -302,7 +345,7 @@ class Store:
             db.execute('UPDATE schedules SET approved=?,enabled=?,next_due=?,updated=?,revision=? WHERE id=?',
                        (int(approved), int(action != 'pause'), due, now, uuid.uuid4().hex, schedule_id))
 
-    def reserve(self, now, schedule_id):
+    def reserve(self, now: float, schedule_id: str) -> dict[str, Any] | None:
         """Claim before dispatch. Missing tasks after a crash become interrupted, never retried."""
         with self.connect() as db:
             row = db.execute('SELECT * FROM schedules WHERE id=? AND approved=1 AND enabled=1 AND next_due<=?',
@@ -327,7 +370,7 @@ class Store:
             db.execute('UPDATE schedules SET next_due=?,enabled=? WHERE id=?', (following, int(following is not None), schedule_id))
             return {'id': run_id, 'task_id': task_id, 'schedule': self.schedule(row)}
 
-    def defer(self, run):
+    def defer(self, run: dict[str, Any]) -> None:
         """Undo a busy reservation without overwriting a concurrent owner edit."""
         with self.connect() as db:
             schedule = run['schedule']
@@ -335,24 +378,29 @@ class Store:
                        (schedule['next_due'], schedule['id'], schedule['revision']))
             db.execute("UPDATE runs SET status='deferred',error='Worker became busy; occurrence remains due.' WHERE id=?", (run['id'],))
 
-    def finish(self, run_id, status, error=''):
+    def finish(self, run_id: str, status: str, error: str = '') -> None:
+        """Record a run's status and error, and keep only the newest MAX_RUNS finished runs."""
         with self.connect() as db:
             db.execute('UPDATE runs SET status=?,error=? WHERE id=?', (status, error[:500], run_id))
             db.execute('''DELETE FROM runs WHERE id IN (
                 SELECT id FROM runs WHERE status NOT IN ('reserved','queued','running','waiting_for_approval','waiting_for_input')
                 ORDER BY created DESC, id DESC LIMIT -1 OFFSET ?)''', (MAX_RUNS,))
 
-    def runs(self):
+    def runs(self) -> list[dict[str, Any]]:
+        """Return the run log, newest first."""
         with self.connect() as db:
             return [dict(row) for row in db.execute('SELECT * FROM runs ORDER BY created DESC,id DESC LIMIT 600')]
 
+
 class Engine:
     """One scheduler tick dispatches at most one ordinary task, never native decisions."""
-    def __init__(self, store, worker):
+
+    def __init__(self, store: Store, worker: TaskRunner) -> None:
         self.store = store; self.worker = worker
         self.tick_lock = threading.Lock()
 
-    def reconcile(self):
+    def reconcile(self) -> None:
+        """Copy each unfinished run's task status into the run log; a run whose task is gone becomes interrupted."""
         for run in self.store.runs():
             if run['status'] in ACTIVE:
                 task = self.worker.snapshot(run['task_id'])
@@ -362,7 +410,8 @@ class Engine:
                     pending = any(a.get('status') == 'pending' for a in task.get('approvals') or [])
                     self.store.finish(run['id'], 'waiting_for_approval' if pending else task.get('status', 'interrupted'))
 
-    def submit(self, run, prompt, mode, name):
+    def submit(self, run: dict[str, Any], prompt: str, mode: str, name: str) -> str:
+        """Start a reserved run's task and return its id; a busy worker defers the run, any other refusal fails it."""
         schedule = run['schedule']
         # A schedule with no model of its own starts exactly as before.
         own_model = {'model': schedule['model']} if schedule.get('model') else {}
@@ -382,7 +431,8 @@ class Engine:
         self.store.finish(run['id'], 'queued')
         return run['task_id']
 
-    def tick(self, now=None):
+    def tick(self, now: float | None = None) -> None:
+        """Run one scheduler pass, unless another pass holds the tick lock."""
         if not self.tick_lock.acquire(blocking=False):
             return
         try:
@@ -394,7 +444,8 @@ class Engine:
         finally:
             self.tick_lock.release()
 
-    def dispatch_due(self, now):
+    def dispatch_due(self, now: float) -> None:
+        """Start the earliest due schedule, at most one per pass, when the worker is free."""
         if not SCHEDULED_RUNS or self.worker.busy():
             return
         for schedule in sorted(self.store.schedules(), key=lambda s: s['next_due'] or float('inf')):
