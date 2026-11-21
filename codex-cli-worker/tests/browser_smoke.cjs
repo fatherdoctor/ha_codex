@@ -988,7 +988,7 @@ async function effortSaved(page, label) {
       { model: "gpt-6.1-terra", reasoning_effort: "ultra" },
     );
     // Choosing the model the add-on runs anyway clears the chat's own selection.
-    await chooseModel(page, "GPT-6.1 Sol");
+    await chooseModel(page, "GPT-6.2 Sol");
     assert.deepEqual(
       await page.evaluate(
         async () =>
@@ -1005,11 +1005,19 @@ async function effortSaved(page, label) {
     await effortSaved(page, "High");
     await page
       .getByRole("button", {
-        name: "Use add-on default reasoning",
+        name: "Use the default model and reasoning",
         exact: true,
       })
       .click();
     await effortSaved(page, "Medium");
+    // Reset goes back to the default model too, not only its level.
+    assert.deepEqual(
+      await page.evaluate(
+        async () =>
+          (await (await fetch("tasks/preview-00")).json()).task.chat_settings,
+      ),
+      { model: null, reasoning_effort: null },
+    );
     await page.keyboard.press("Escape");
     assert.equal(await page.locator("#effort-popover").isHidden(), true);
     const divider = await page.locator("#divider").boundingBox();
@@ -1050,7 +1058,7 @@ async function effortSaved(page, label) {
     );
     assert.equal(
       await page.evaluate(() => document.activeElement.textContent),
-      "GPT-6 Astra",
+      "GPT-6.2 Sol",
     );
     await page.keyboard.press("Escape");
     await page.evaluate(() => {
@@ -1060,7 +1068,7 @@ async function effortSaved(page, label) {
     // A new chat names the model it runs on, and the menu marks that model.
     assert.equal(
       await page.locator("#picker-model").textContent(),
-      "GPT-6.1 Sol",
+      "GPT-6.2 Sol",
     );
     await openPicker(page);
     await page.locator("#effort-model").click();
@@ -1072,9 +1080,9 @@ async function effortSaved(page, label) {
             .filter((option) => option.getAttribute("aria-pressed") === "true")
             .map((option) => option.textContent),
         ),
-      ["GPT-6.1 Sol✓"],
+      ["GPT-6.2 Sol✓"],
     );
-    assert.equal(await page.locator("#model-options .model-option").count(), 8);
+    assert.equal(await page.locator("#model-options .model-option").count(), 9);
     await modelRow(page, "GPT-5.6 Luna").click();
     await page.locator("#effort-popover").waitFor();
     await page.waitForFunction(
@@ -1722,7 +1730,8 @@ async function effortSaved(page, label) {
         exact: true,
       })
       .waitFor();
-    assert.equal(await page.locator("#picker-model").textContent(), "GPT-6 Luna");
+    // preview-00 was reset to the default model above, so it shows that model.
+    assert.equal(await page.locator("#picker-model").textContent(), "GPT-6.2 Sol");
     assert.equal(await page.locator("#effort-label").textContent(), "Medium");
     // A tap on a chat keeps the side bar open (CX-04-PHONE-LIST); the scrim closes it.
     assert.equal(await page.locator("#scrim").isHidden(), false);

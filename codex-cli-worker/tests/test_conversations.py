@@ -225,7 +225,7 @@ class ConversationTests(unittest.TestCase):
         task_id = self.create()
         self.assertEqual(self.post(f"/tasks/{task_id}/settings", {"chat_settings": {}}).status_code, 409)
         catalog = self.client.get("/chat-options", headers=self.headers).json
-        self.assertEqual(len(catalog["models"]), 8)
+        self.assertEqual(len(catalog["models"]), 9)
         efforts = {model["id"]: model["efforts"] for model in catalog["models"]}
         self.assertEqual(efforts["gpt-6.1-sol"], ["low", "medium", "high", "xhigh", "max", "ultra"])
         self.assertEqual(efforts["gpt-6.1-terra"], ["low", "medium", "high", "xhigh", "max", "ultra"])
