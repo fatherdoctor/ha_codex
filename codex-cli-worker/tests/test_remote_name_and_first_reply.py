@@ -39,8 +39,8 @@ class RenameRoute(unittest.TestCase):
         self.stack.enter_context(patch.object(server, "OPTIONS_PATH", self.options))
         self.stack.enter_context(patch.object(server, "api_token", return_value="tok"))
         self.stack.enter_context(patch.object(server, "ha_token", return_value="synthetic-supervisor"))
-        self.stack.enter_context(patch.object(server, "ingress_admin",
-                                              return_value=({"user_id": "fixture-admin"}, "")))
+        self.admin = self.stack.enter_context(patch.object(server, "ingress_admin",
+                                                           return_value=({"user_id": "fixture-admin"}, "")))
         self.enabled = self.stack.enter_context(
             patch.object(server.remote_control_supervisor, "enabled", return_value=False))
         self.stack.enter_context(patch.object(server.remote_control_supervisor, "snapshot",
@@ -78,6 +78,14 @@ class RenameRoute(unittest.TestCase):
     def test_api_token_cannot_rename(self):
         response = self.rename({"name": "Other"}, headers={"Authorization": "Bearer tok"})
         self.assertEqual(response.status_code, 403)
+        self.post.assert_not_called()
+
+    def test_signed_in_person_who_is_not_an_administrator_cannot_rename(self):
+        self.admin.return_value = (None, "Sign in as an administrator.")
+        response = self.rename({"name": "Other"})
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.get_json()["error"], "Sign in as an administrator.")
+        self.get.assert_not_called()
         self.post.assert_not_called()
 
     def test_refused_while_remote_control_is_on(self):

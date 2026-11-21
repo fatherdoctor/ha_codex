@@ -18,12 +18,27 @@ const off = {enabled: false, available: true, state: 'off', configured_name: 'Ho
       const page = await context.newPage();
       const errors = []; page.on('pageerror', e => errors.push(e.message));
       let remote = off;
+      let refuseRename = false;
       const renames = [];
+      const calls = [];
       await page.route('**/agents', route => route.fulfill({json: {ok: true, exists: false, content: ''}}));
       await page.route('**/remote-control', route => route.fulfill({json: {ok: true, remote_control: remote}}));
       await page.route('**/remote-control/name', route => {
-        renames.push(route.request().postDataJSON());
-        remote = {...off, configured_name: 'Lake house'};
+        const body = route.request().postDataJSON();
+        renames.push(body);
+        calls.push('name');
+        if (refuseRename) return route.fulfill({status: 502, json: {ok: false, error: 'Home Assistant did not save the name.'}});
+        remote = {...off, configured_name: body.name};
+        return route.fulfill({json: {ok: true, remote_control: remote}});
+      });
+      await page.route('**/remote-control/start', route => {
+        calls.push('start');
+        remote = {...remote, enabled: true, state: 'ready'};
+        return route.fulfill({json: {ok: true, remote_control: remote}});
+      });
+      await page.route('**/remote-control/stop', route => {
+        calls.push('stop');
+        remote = {...remote, enabled: false, state: 'off'};
         return route.fulfill({json: {ok: true, remote_control: remote}});
       });
       await page.goto('http://127.0.0.1:9137/preview/');
@@ -65,10 +80,33 @@ const off = {enabled: false, available: true, state: 'off', configured_name: 'Ho
       assert.equal(fits, true, 'the name field, Back and the X fit the dialog at 400 px');
       await page.locator('#remote-control-name-form').screenshot({path: path.join(SHOTS, `remote-name-${colorScheme}-400.png`)});
 
-      // While remote control is on, the name is read-only and the page says why.
-      remote = {...off, enabled: true, state: 'ready', configured_name: 'Lake house'};
-      await page.waitForFunction(() => document.querySelector('#remote-control-name').disabled, null, {timeout: 20000});
-      assert.equal(await page.locator('#remote-control-name-note').textContent(), 'Turn remote control off to change the name.');
+      // Turn on saves a typed name first; a refused save shows its error and leaves remote control off.
+      const note = page.locator('#remote-control-name-note');
+      refuseRename = true;
+      calls.length = 0;
+      await input.fill('Cabin');
+      await page.locator('#remote-control-start').click();
+      await page.waitForFunction(() => /did not save/.test(document.querySelector('#remote-control-name-note').textContent));
+      assert.deepEqual(calls, ['name'], 'no start request after a refused save');
+      assert.equal(await input.isDisabled(), false, 'remote control stays off');
+      refuseRename = false;
+      calls.length = 0;
+      await page.locator('#remote-control-start').click();
+      await page.waitForFunction(() => document.querySelector('#remote-control-name').disabled);
+      assert.deepEqual(calls, ['name', 'start'], 'one name request, then the start request');
+      assert.deepEqual(renames.at(-1), {name: 'Cabin'});
+
+      // While remote control is on, the name is read-only, shows the name in use, and the page says why.
+      assert.equal(await input.inputValue(), 'Cabin');
+      assert.equal(await note.textContent(), 'Turn remote control off to change the name.');
+      // A name started from elsewhere (the ChatGPT panel, another browser) is the one the locked field shows.
+      remote = {...remote, configured_name: 'Lake house'};
+      await page.waitForFunction(() => document.querySelector('#remote-control-name').value === 'Lake house', null, {timeout: 20000});
+
+      // Turn off opens the field again and clears the note that said to turn it off.
+      await page.locator('#remote-control-stop').click();
+      await page.waitForFunction(() => !document.querySelector('#remote-control-name').disabled);
+      assert.equal(await note.textContent(), '', 'the locked note goes after Turn off');
 
       // Back returns to Settings; the X would have closed the window alone.
       await page.locator('#connection-back').click();

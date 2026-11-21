@@ -4059,23 +4059,30 @@ function renderRemoteControl(rc) {
   $("remote-control-log-box").hidden = !(rc.log || []).length;
   document.dispatchEvent(new CustomEvent("remote-view", {detail: rc}));
 }
+const REMOTE_NAME_LOCKED = "Turn remote control off to change the name.";
 /**
  * Show the configured machine name in its field. Codex reads the name when remote control starts, so the field
- * is locked while it is on. Polling never replaces a name the person is still typing.
+ * is locked while it is on and then shows the name in use. Polling never replaces a name the person is still
+ * typing while it is off. The locked note goes when remote control is off; the result of a save stays.
  */
 function renderRemoteControlName(rc) {
   const input = $("remote-control-name");
+  const note = $("remote-control-name-note");
+  if (rc.enabled) delete input.dataset.edited;
   if (!input.dataset.edited) input.value = rc.configured_name || "";
   input.disabled = Boolean(rc.enabled);
   $("remote-control-name-save").disabled = Boolean(rc.enabled);
-  if (rc.enabled) $("remote-control-name-note").textContent = "Turn remote control off to change the name.";
+  if (rc.enabled) note.textContent = REMOTE_NAME_LOCKED;
+  else if (note.textContent === REMOTE_NAME_LOCKED) note.textContent = "";
 }
 $("remote-control-name").oninput = () => {
   $("remote-control-name").dataset.edited = "1";
 };
-// The name is the one add-on option (Remote control machine name) the Configuration tab also sets.
-$("remote-control-name-form").onsubmit = async (event) => {
-  event.preventDefault();
+/**
+ * Save the name in the field to the one add-on option (Remote control machine name) the Configuration tab also
+ * sets. True when it is saved; a failed save shows its error under the field.
+ */
+async function saveRemoteControlName() {
   const input = $("remote-control-name");
   $("remote-control-name-save").disabled = true;
   try {
@@ -4084,11 +4091,21 @@ $("remote-control-name-form").onsubmit = async (event) => {
     renderRemoteControl(data.remote_control);
     $("remote-control-name-note").textContent = data.notice
       || `Saved. The ChatGPT app will show “${data.remote_control.configured_name}”.`;
+    return true;
   } catch (error) {
     $("remote-control-name-note").textContent = error.message;
     $("remote-control-name-save").disabled = false;
+    return false;
   }
+}
+$("remote-control-name-form").onsubmit = (event) => {
+  event.preventDefault();
+  saveRemoteControlName();
 };
+/** Turn on saves a typed name first, since Codex reads the name when it starts; a failed save keeps it off. */
+async function remoteNameReadyForStart() {
+  return !$("remote-control-name").dataset.edited || saveRemoteControlName();
+}
 const ADDON_CONFIGURATION_UNKNOWN =
   "Home Assistant did not give this app's address. Open the app's Configuration tab from the Home Assistant settings.";
 /**
@@ -4108,14 +4125,15 @@ async function loadAddonConfiguration() {
     description.textContent = ADDON_CONFIGURATION_UNKNOWN;
   }
 }
-for (const [id, action] of [
-  ["remote-control-start", "start"],
+for (const [id, action, prepare] of [
+  ["remote-control-start", "start", remoteNameReadyForStart],
   ["remote-control-stop", "stop"],
   ["remote-control-pair", "pair"],
 ]) {
   $(id).onclick = async () => {
     $(id).disabled = true;
     try {
+      if (prepare && !(await prepare())) return;
       const data = await api(`remote-control/${action}`, {});
       renderRemoteControl(data.remote_control);
       $("settings-result").textContent = "";
