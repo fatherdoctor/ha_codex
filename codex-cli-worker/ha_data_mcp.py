@@ -63,8 +63,11 @@ TOOLS = [
         "name": "exchange_info",
         "description": "Read what is particular to this message from the Home Assistant page: its backup folder, "
                        "whether the owner's AGENTS.md exists and when it last changed, the documents and images the user attached, and notes on direct Home Assistant API calls, "
-                       "the local documentation and GitHub. Call it once at the start of each message; an answer "
-                       "from an earlier message is out of date. Takes no arguments and changes nothing.",
+                       "the local documentation and GitHub. Call it once in a message before your first command, file "
+                       "change or other tool call, and when the message can refer to a file, a document or something "
+                       "you cannot see in this chat; an answer from an earlier message is out of date. A message you "
+                       "can answer from what you know and from the chat needs no call. Takes no arguments and "
+                       "changes nothing.",
         "inputSchema": {"type": "object", "additionalProperties": False, "properties": {}},
         "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
     },
