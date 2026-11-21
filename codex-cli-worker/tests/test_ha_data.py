@@ -13,7 +13,9 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
+from app_folders import isolated_app_folders
 from test_server import server
+import tool_threads
 from ha_data import HomeAssistantData, MAX_EXPORT_BYTES, MAX_QUERIES, MAX_SOURCE_BYTES, MAX_TURN_BYTES
 from ha_data_mcp import MAX_RESPONSE_BYTES, STATISTIC_TYPES, TOOLS, respond
 
@@ -31,6 +33,9 @@ def data_worker():
     )
 
 
+THREAD = "11111111-2222-4333-8444-555555555555"
+
+
 class HistoricalDataTests(unittest.TestCase):
     """Exercise the worker's authenticated reads using realistic REST and WebSocket responses."""
 
@@ -41,6 +46,8 @@ class HistoricalDataTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.engine = HomeAssistantData(self.worker, Path(temporary.name) / "exports")
         self.addCleanup(self.engine.end, "chat")
+        tool_threads.CHATS.bind("chat", THREAD)
+        self.addCleanup(tool_threads.CHATS.release, "chat")
         self.capability = self.engine.begin("chat")
 
     def saved_result(self, receipt):
@@ -55,7 +62,7 @@ class HistoricalDataTests(unittest.TestCase):
     def payload(self, operation="history", **fields):
         """Build a valid scoped request and allow a test to change one boundary."""
         key = "entity_ids" if operation == "history" else "statistic_ids"
-        return {"operation": operation, "capability": self.capability, key: ["sensor.kitchen"],
+        return {"operation": operation, "thread_id": THREAD, key: ["sensor.kitchen"],
                 "start_time": START, "end_time": END, **fields}
 
     def rest_response(self, raw, status=200):
@@ -121,7 +128,7 @@ class HistoricalDataTests(unittest.TestCase):
 
     def test_ended_cancelled_completed_and_replaced_turns_cannot_query(self):
         """Refuse stale credentials before HA reads, even when an old task id is reused."""
-        for outcome in ("ended", "cancelled", "completed", "new_turn", "new_capability", "restarted"):
+        for outcome in ("ended", "cancelled", "completed", "new_turn", "restarted"):
             with self.subTest(outcome=outcome):
                 self.worker.tasks["chat"] = {"status": "running", "current_turn_id": "turn"}
                 self.capability = self.engine.begin("chat")
@@ -133,20 +140,39 @@ class HistoricalDataTests(unittest.TestCase):
                     self.worker.tasks["chat"]["status"] = "completed"
                 elif outcome == "new_turn":
                     self.worker.tasks["chat"]["current_turn_id"] = "replacement"
-                elif outcome == "new_capability":
-                    self.engine.begin("chat")
                 else:
                     self.engine = HomeAssistantData(self.worker, self.engine.export_root)
                 with patch.object(self.engine, "history") as read, self.assertRaises(ValueError):
                     self.engine.dispatch(self.payload())
                 read.assert_not_called()
 
-    def test_missing_or_malformed_capabilities_cannot_query(self):
-        """Reject Unicode, non-string and unrelated credentials without reaching HA."""
+    def test_missing_or_malformed_thread_ids_cannot_query(self):
+        """Reject Unicode, non-string, unbound and malformed thread ids without reaching HA."""
+        unbound = "99999999-2222-4333-8444-555555555555"
+        lettered = "abcdefab-2222-4333-8444-555555555555"
+        tool_threads.CHATS.bind("chat", lettered)
         with patch.object(self.engine, "history") as read:
-            for value in (None, "", "wrong", "שלום", [], 1):
+            for value in (None, "", "wrong", "שלום", [], 1, lettered.upper(), unbound):
                 with self.subTest(value=value), self.assertRaises(ValueError):
-                    self.engine.dispatch(self.payload(capability=value))
+                    self.engine.dispatch(self.payload(thread_id=value))
+            missing = self.payload()
+            del missing["thread_id"]
+            with self.assertRaises(ValueError):
+                self.engine.dispatch(missing)
+            self.assertEqual(self.engine.dispatch(self.payload(capability=self.capability))["status"], "unavailable")
+        read.assert_not_called()
+
+    def test_a_thread_is_refused_once_released_and_needs_a_begun_exchange(self):
+        """A released thread, or a bound thread whose exchange never began, cannot query."""
+        other = "99999999-2222-4333-8444-555555555555"
+        tool_threads.CHATS.bind("other", other)
+        self.addCleanup(tool_threads.CHATS.release, "other")
+        with patch.object(self.engine, "history") as read:
+            with self.assertRaises(ValueError):
+                self.engine.dispatch(self.payload(thread_id=other))
+            tool_threads.CHATS.release("chat")
+            with self.assertRaises(ValueError):
+                self.engine.dispatch(self.payload())
         read.assert_not_called()
 
     def test_late_results_are_discarded_after_turn_replacement_or_cancellation(self):
@@ -568,7 +594,7 @@ class DataMcpTests(unittest.TestCase):
     def test_tools_refuse_arbitrary_operations_and_capability_overrides(self):
         """Reject tools and privileged arguments supplied by the model before connecting to the worker."""
         with patch("ha_data_mcp.socket.socket") as connect:
-            for name, arguments in (("call_service", {}), ("history", {"capability": "chosen"}),
+            for name, arguments in (("call_service", {}), ("history", {"capability": "chosen"}), ("history", {"thread_id": THREAD}),
                                     ("statistics", {"operation": "sql"}), ("history", {"url": "http://example.test"})):
                 with self.subTest(name=name, arguments=arguments):
                     result = respond({"method": "tools/call", "params": {"name": name, "arguments": arguments}})
@@ -603,10 +629,13 @@ class DataMcpTests(unittest.TestCase):
         for failure in (None, RuntimeError("Fixture startup failure")):
             with self.subTest(failure=failure), ExitStack() as stack:
                 temporary = stack.enter_context(tempfile.TemporaryDirectory())
+                stack.enter_context(isolated_app_folders(server, Path(temporary) / "app"))
                 engine = HomeAssistantData(data_worker(), Path(temporary) / "exports")
+                tool_threads.CHATS.bind("chat", THREAD)
+                stack.callback(tool_threads.CHATS.release, "chat")
                 capability = engine.begin("chat")
                 with patch.object(engine, "history", return_value={"status": "observed"}):
-                    receipt = engine.dispatch({"operation": "history", "capability": capability, "entity_ids": ["sensor.kitchen"],
+                    receipt = engine.dispatch({"operation": "history", "thread_id": THREAD, "entity_ids": ["sensor.kitchen"],
                                                "start_time": START, "end_time": END})
                 export = Path(receipt["file"]["path"])
                 self.assertTrue(export.exists())
@@ -622,22 +651,18 @@ class DataMcpTests(unittest.TestCase):
                 server._run_background_task("chat", "Read history", None, None)
                 self.assertEqual(failed.call_count, int(failure is not None))
                 with self.assertRaises(ValueError):
-                    engine.dispatch({"operation": "history", "capability": capability, "entity_ids": ["sensor.kitchen"],
+                    engine.dispatch({"operation": "history", "thread_id": THREAD, "entity_ids": ["sensor.kitchen"],
                                      "start_time": START, "end_time": END})
                 self.assertEqual(engine.capabilities, {})
                 self.assertFalse(export.exists())
 
-    def test_both_cli_paths_register_automatically_approved_data_tools(self):
-        """Use the same required bridge in exec and app-server so changing sandbox mode cannot hide it."""
-        options = {**server.DEFAULT_OPTIONS, "codex_sandbox": "workspace-write"}
-        with patch.object(server, "read_options", return_value=options), patch.object(server, "tasks", {}):
-            exec_args = server.build_codex_args("chat", Path("prompt"), Path("final"), None)
-            app_args = server.build_app_server_args()
-        for args in (exec_args, app_args):
-            self.assertIn('mcp_servers.home_assistant_data.tools.history.approval_mode="approve"', args)
-            self.assertIn('mcp_servers.home_assistant_data.tools.statistics.approval_mode="approve"', args)
-            self.assertIn('mcp_servers.home_assistant_data.required=true', args)
-            self.assertNotIn("SUPERVISOR_TOKEN", " ".join(args))
+    def test_app_server_registers_automatically_approved_data_tools(self):
+        """Register the required bridge with automatic approval, so changing the sandbox mode cannot hide it."""
+        args = server.build_app_server_args()
+        self.assertIn('mcp_servers.home_assistant_data.tools.history.approval_mode="approve"', args)
+        self.assertIn('mcp_servers.home_assistant_data.tools.statistics.approval_mode="approve"', args)
+        self.assertIn('mcp_servers.home_assistant_data.required=true', args)
+        self.assertNotIn("SUPERVISOR_TOKEN", " ".join(args))
 
 
 if __name__ == "__main__":

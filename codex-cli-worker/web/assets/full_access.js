@@ -1,7 +1,7 @@
 "use strict";
 /**
- * The owner's Full access setting: the banner above every chat, the Full
- * access choice in a chat's permissions, and the Settings section that turns
+ * The owner's Full access setting: the Full access choice in a chat's
+ * permissions (in bold while the setting is on), and the Settings section that turns
  * it on (after the warning is confirmed) or off. The worker checks again that
  * the change comes from an administrator and that the warning was confirmed.
  * The switch is a warning, not a grant layer: a chat set to Full access only
@@ -15,7 +15,6 @@ function renderFullAccess(setting) {
   fullAccess = setting;
   const on = setting.enabled === true;
   document.body.dataset.fullAccess = on ? "on" : "off";
-  $("full-access-banner").hidden = !on;
   $("full-access-state").textContent = on ? "On. Chats set to Full access run outside the sandbox." : "Off.";
   $("full-access-toggle").textContent = on ? "Turn off Full access" : "Turn on Full access";
   $("full-access-toggle").disabled = false;

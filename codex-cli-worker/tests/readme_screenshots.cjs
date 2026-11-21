@@ -16,7 +16,7 @@ const sizes = {desktop: {width: 1280, height: 800}, phone: {width: 390, height: 
 // Script errors from every page opened in this run; the run fails if any page reported one.
 const pageErrors = [];
 
-// A fixed date keeps the "next run" and mailbox times the same on every refresh. 12:00 UTC is 07:00 in
+// A fixed date keeps the "next run" time the same on every refresh. 12:00 UTC is 07:00 in
 // New York on that date, so the daily 07:00 proposal shows 07:00 as its next run.
 const sampleTime = Date.parse('2026-11-16T12:00:00Z') / 1000;
 const sampleProposal = {
@@ -29,25 +29,15 @@ const sampleSchedule = {
   prompt: 'Run the configuration check and report anything new.', mode: 'read-only',
   spec: {kind: 'interval', seconds: 7 * 24 * 3600}, next_due: sampleTime + 86400,
 };
-const sampleMail = [
-  {id: 'mail-0', parent: null, author: 'lead', created: sampleTime - 3600,
-   // Short lines: the mailbox shows each message as written, without wrapping.
-   body: 'Proposed "Morning battery check".\nIt reads battery levels only.'},
-  {id: 'mail-1', parent: 'mail-0', author: 'owner', created: sampleTime - 1800,
-   body: 'Thanks. I will read the prompt first.'},
-];
-
-/** Answer the schedule and mailbox routes with the sample data above; nothing is saved. */
+/** Answer the schedule routes with the sample data above; nothing is saved. */
 async function sampleScheduling(page) {
   await page.route('**/schedules**', route => {
     if (new URL(route.request().url()).pathname.includes('/assets/')) return route.continue();
     return route.fulfill({json: {
-      ok: true, timezone: 'America/New_York', schedules: [sampleProposal, sampleSchedule], mailbox: sampleMail,
+      ok: true, timezone: 'America/New_York', schedules: [sampleProposal, sampleSchedule],
       runs: [{created: sampleTime - 7200, status: 'completed', task_id: 'sample-task', error: ''}],
-      lead_token_configured: true,
     }});
   });
-  await page.route('**/schedule-mailbox**', route => route.fulfill({json: {ok: true}}));
 }
 
 /** Open a page at one size and color scheme, with the sidebar closed on a phone. */
@@ -155,7 +145,7 @@ async function deleteCurrentChat(page) {
   assert.fail('the confirm chat was still running after 5 seconds');
 }
 
-/** Settings: a schedule proposal waiting for approval, and the local mailbox. */
+/** Settings: a schedule proposal waiting for approval. */
 async function settings(browser, size, scheme) {
   const page = await openPage(browser, size, scheme);
   await tallWindow(page, size);
@@ -163,10 +153,6 @@ async function settings(browser, size, scheme) {
   const schedules = page.locator('#schedule-list');
   await schedules.getByRole('button', {name: 'Approve this proposal', exact: true}).waitFor();
   await shootRange(page, page.locator('#scheduled-work h3').first(), schedules, `schedule-proposal-${scheme}-${size}.png`);
-  const mailbox = page.locator('#schedule-mailbox');
-  await mailbox.getByText(sampleMail[1].body, {exact: true}).waitFor();
-  await shootRange(page, page.locator('#scheduled-work h4').filter({hasText: 'Local mailbox'}), mailbox,
-    `mailbox-${scheme}-${size}.png`);
   return page;
 }
 

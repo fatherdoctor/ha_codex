@@ -15,6 +15,8 @@ import time
 import uuid
 from typing import Any, Callable, TextIO
 
+import hass_mcp
+
 
 APPROVAL_GONE = "This permission request is no longer waiting for an answer."
 DISPLAY_LIMIT = 32000
@@ -26,8 +28,10 @@ FILE_APPROVAL = "item/fileChange/requestApproval"
 TOOL_APPROVAL = "mcpServer/elicitation/request"
 
 # The (server, tool) pairs whose action requests get a page card: the plain Home Assistant tool that server.py
-# registers as home_assistant_call. A question from any other server or tool is still declined (_elicitation_refusal).
-TOOL_CARDS = frozenset({("home_assistant_call", "call")})
+# registers as home_assistant_call, and the write tools of the bundled Home Assistant MCP server (hass_mcp.py), which
+# Codex asks about before each call. A question from any other server or tool is still declined (_elicitation_refusal).
+TOOL_CARDS = frozenset({("home_assistant_call", "call"),
+                        *((hass_mcp.SERVER_NAME, tool) for tool in hass_mcp.WRITE_TOOLS)})
 
 # Codex 0.166.0 asks before a tool call with a form whose _meta has codex_approval_kind "mcp_tool_call" and the full
 # arguments in tool_params. The tool name is only in its message, which for a tool outside the ChatGPT apps is always
@@ -146,12 +150,78 @@ def _target_names(domain: str, target: Any) -> list[str]:
             names += [f"every {domain} {_TARGET_WORDS[key]} {item}" for item in ids]
     return names
 
+# The target fields a Home Assistant action's data can hold at its top level.
+_TARGET_FIELDS = ("entity_id", *_TARGET_WORDS)
+
+def _data_targets(domain: str, data: dict[str, Any]) -> list[str]:
+    """Name what an action reaches from the target fields at the top level of its data (the REST API's form)."""
+    return _target_names(domain, {key: data[key] for key in _TARGET_FIELDS if key in data})
+
+_SERVICE_NAME_PART = re.compile(r"[a-z0-9_]+")
+
+_ENTITY_ACTIONS = {"on": "turn_on", "off": "turn_off", "toggle": "toggle"}
+
+# What each dashboard tool of hass-mcp does, in the card's words.
+_DASHBOARD_WORDS = {
+    "set_dashboard_config": "Replace the whole configuration of a dashboard.",
+    "add_card": "Add a card to a dashboard.",
+    "update_card": "Replace a card on a dashboard.",
+    "remove_card": "Remove a card from a dashboard.",
+    "move_card": "Move a card on a dashboard.",
+    "add_view": "Add a view to a dashboard.",
+    "remove_view": "Remove a view from a dashboard.",
+    "update_view": "Change a view of a dashboard.",
+    "restore_dashboard": "Restore a dashboard from one of its backups.",
+}
+
+def _hass_mcp_confirmation(tool: str, parsed: Any) -> dict[str, str] | None:
+    """Plain words for a write tool of the Home Assistant MCP server, or None when the arguments do not fit its form.
+
+    entity_action and call_service_tool are Home Assistant actions and get the same words as home_assistant_call.
+    entity_action sends {"entity_id": entity_id, **params} (hass-mcp 0.6.0, app/server.py), so a target inside
+    params replaces the entity id, and the card names what params holds.
+    """
+    arguments = parsed if isinstance(parsed, dict) else {}
+    if tool == "restart_ha":
+        return _service_confirmation("homeassistant", "restart", [])
+    if tool == "entity_action":
+        entity_id, params = arguments.get("entity_id"), arguments.get("params") or {}
+        service = _ENTITY_ACTIONS.get(arguments.get("action"))
+        if not isinstance(entity_id, str) or not _ENTITY_ID.fullmatch(entity_id):
+            return None
+        if not service or not isinstance(params, dict):
+            return None
+        domain = entity_id.split(".")[0]
+        return _service_confirmation(domain, service, _data_targets(domain, {"entity_id": entity_id, **params}))
+    if tool == "call_service_tool":
+        domain, service, data = arguments.get("domain"), arguments.get("service"), arguments.get("data") or {}
+        if not all(isinstance(name, str) and _SERVICE_NAME_PART.fullmatch(name) for name in (domain, service)):
+            return None
+        if not isinstance(data, dict):
+            return None
+        return _service_confirmation(domain, service, _data_targets(domain, data))
+    if tool in _DASHBOARD_WORDS:
+        url_path = arguments.get("url_path")
+        where = f"The dashboard {url_path}." if isinstance(url_path, str) and url_path else "The default dashboard."
+        if arguments.get("dry_run") is True:
+            effect = "Nothing changes: this is a dry run that only shows what the change would be."
+        else:
+            effect = "The dashboard changes at once; open it to see the change."
+        return {"what": _DASHBOARD_WORDS[tool], "where": where, "effect": effect}
+    return None
+
+
 def _tool_confirmation(tool: str, arguments: str) -> dict[str, str]:
     """Plain words for a tool request: the Home Assistant action it names, else the tool and its arguments."""
     try:
         parsed = json.loads(arguments)
     except ValueError:
         parsed = None
+    server, _, name = tool.partition(".")
+    if server == hass_mcp.SERVER_NAME:
+        words = _hass_mcp_confirmation(name, parsed)
+        if words:
+            return words
     service = parsed.get("service") if isinstance(parsed, dict) else None
     call = _SERVICE_NAME.fullmatch(service) if isinstance(service, str) else None
     if call:
@@ -234,6 +304,23 @@ class AppServerSession:
     All state and writes use the worker's reentrant lock, including cancellation
     and the HTTP decision route. A browser cannot supply protocol request IDs,
     commands, permission scopes, or policy amendments.
+
+    The session works in one of two ways:
+
+    - It owns the connection (the default): one new app-server process for one
+      exchange. The session sends initialize, then thread/start or thread/resume,
+      then turn/start, and close ends the process input.
+    - It does not own the connection (owns_connection=False): the process is
+      shared by many chats and the thread in thread_params["threadId"] is already
+      loaded. The session sends only turn/start, as the caller built it; the
+      caller names the chat's model in turn_params, because no thread request
+      carries it to a loaded thread. Its request IDs are unique to
+      the session, so a reader of the shared output can give each reply to its
+      session (owns_request). Close interrupts a running turn and leaves the
+      input open for the other chats. The caller routes each message of the
+      shared output by thread id and request ID; read is for an owned
+      connection only, because on a shared output it would take the lines of
+      the other chats.
     """
 
     def __init__(
@@ -241,10 +328,17 @@ class AppServerSession:
         turn_params: dict[str, Any], on_event: Callable[[dict[str, Any]], None],
         on_approvals: Callable[[list[dict[str, Any]]], None],
         on_final: Callable[[str], None], is_active: Callable[[], bool],
-        redact: Callable[[str], str],
+        redact: Callable[[str], str], owns_connection: bool = True,
     ) -> None:
         """Bind a live transport to one worker exchange and its persistence callbacks."""
+        attached_thread = thread_params.get("threadId")
+        if not owns_connection and (not isinstance(attached_thread, str) or not attached_thread):
+            raise ValueError("A session on a shared connection needs the thread id of a loaded thread.")
         self.writer = writer
+        self.owns_connection = owns_connection
+        # The prefix of every request ID that this session sends. On a shared connection a reply has no thread id,
+        # so the ID alone says which session sent the request.
+        self.request_prefix = "worker" if owns_connection else f"worker-{uuid.uuid4().hex}"
         self.lock = lock
         self.thread_params = copy.deepcopy(thread_params)
         self.turn_params = copy.deepcopy(turn_params)
@@ -262,6 +356,7 @@ class AppServerSession:
         self.turn_id = ""
         self._closed = False
         self._turn_ended = False
+        self._turn_requested = False
         self._next_id = 0
         self._requests: dict[str, str] = {}
         self._pending: dict[str, Any] = {}
@@ -278,19 +373,52 @@ class AppServerSession:
     def _request(self, method: str, params: dict[str, Any]) -> None:
         """Send a client request with a namespace distinct from server request IDs."""
         self._next_id += 1
-        request_id = f"worker-{self._next_id}"
+        request_id = f"{self.request_prefix}-{self._next_id}"
         self._requests[request_id] = method
         self._write({"id": request_id, "method": method, "params": params})
 
+    def owns_request(self, request_id: Any) -> bool:
+        """Return True when the ID has this session's prefix, so a reply with it belongs to this session.
+
+        The check is by prefix only: it does not say whether the request still waits. _reply ignores an ID it does
+        not know.
+        """
+        return isinstance(request_id, str) and request_id.startswith(self.request_prefix + "-")
+
+    @property
+    def turn_running(self) -> bool:
+        """Return True when turn/start was sent, Codex did not refuse it, and turn/completed has not arrived.
+
+        On a shared connection, a caller reads this after close: the turn can still run in the process. Close sends
+        turn/interrupt when it knows the turn id; when the reply to turn/start comes later, the session sends it
+        then. The session still reads that reply and turn/completed after close, so the value turns False when the
+        turn ends. On an owned connection close ends the process, and the value is not kept after close.
+        """
+        with self.lock:
+            return self._turn_requested and not self._turn_ended
+
     def start(self) -> None:
-        """Initialize the protocol; thread and turn creation follow their replies."""
+        """Initialize the protocol; thread and turn creation follow their replies.
+
+        On a shared connection the process is initialized and the thread is loaded, so the turn starts at once.
+        """
         with self.lock:
             if self._closed or not self.is_active():
                 self.close()
                 return
+            if not self.owns_connection:
+                self.thread_id = self.thread_params["threadId"]
+                self.on_event({"type": "thread.started", "thread_id": self.thread_id})
+                self._start_turn({**self.turn_params, "threadId": self.thread_id})
+                return
             self._request("initialize", {"clientInfo": {
                 "name": "home_assistant_worker", "title": "Home Assistant", "version": "1",
             }})
+
+    def _start_turn(self, params: dict[str, Any]) -> None:
+        """Send turn/start and remember that a turn can now run."""
+        self._turn_requested = True
+        self._request("turn/start", params)
 
     def read(self, handle: TextIO) -> None:
         """Read the JSONL transport until completion or EOF, failing closed on errors."""
@@ -311,18 +439,21 @@ class AppServerSession:
             try:
                 self.close()
             except OSError:
-                # A failed audit write must not keep the transport alive.
+                # A failed close must not keep the transport alive.
                 pass
 
     def close(self) -> None:
-        """Expire all live requests and close stdin; saved records cannot grant access."""
+        """Expire all live requests and close stdin; saved records cannot grant access.
+
+        On a shared connection the input stays open: other chats use it. A running turn gets turn/interrupt there.
+        """
         with self.lock:
             if self._closed:
                 return
             self._closed = True
             if self.thread_id and self.turn_id and not self._turn_ended:
                 try:
-                    self._write({"id": "worker-stop", "method": "turn/interrupt", "params": {
+                    self._write({"id": f"{self.request_prefix}-stop", "method": "turn/interrupt", "params": {
                         "threadId": self.thread_id, "turnId": self.turn_id,
                     }})
                 except (OSError, ValueError):
@@ -337,10 +468,11 @@ class AppServerSession:
                     self.on_approvals(copy.deepcopy(self._records))
             finally:
                 self.finished.set()
-                try:
-                    self.writer.close()
-                except (OSError, ValueError):
-                    pass
+                if self.owns_connection:
+                    try:
+                        self.writer.close()
+                    except (OSError, ValueError):
+                        pass
 
     def _display(self, value: Any) -> tuple[str, bool]:
         """Redact display text and signal when review would hide part of an action."""
@@ -464,6 +596,8 @@ class AppServerSession:
         with self.lock:
             self.last_activity = time.monotonic()
             if self._closed:
+                if not self.owns_connection:
+                    self._track_closed_turn(message)
                 return
             if not isinstance(message, dict):
                 raise ValueError("invalid app-server message")
@@ -526,12 +660,46 @@ class AppServerSession:
                     self.error = self.redact(str((turn.get("error") or {}).get("message") or "Codex finished without a final answer."))
                 self.close()
 
+    def _track_closed_turn(self, message: Any) -> None:
+        """Keep the turn state of a closed session on a shared connection, and nothing else.
+
+        The process goes on with the turn after close, so turn_running must still see it end. Three messages count:
+        the reply to turn/start (an error means no turn ran; a turn id gets the turn/interrupt that close could not
+        send yet), and turn/completed for this thread and turn. A closed session sends no event, final text,
+        approval or decision.
+        """
+        if not isinstance(message, dict):
+            return
+        params = message.get("params") or {}
+        if "id" in message and "method" not in message:
+            if self._requests.get(message["id"]) != "turn/start":
+                return
+            self._requests.pop(message["id"])
+            turn = (message.get("result") or {}).get("turn") or {}
+            if message.get("error") or not turn.get("id"):
+                self._turn_requested = False
+                return
+            self.turn_id = turn["id"]
+            if not self._turn_ended:
+                try:
+                    self._write({"id": f"{self.request_prefix}-stop", "method": "turn/interrupt", "params": {
+                        "threadId": self.thread_id, "turnId": self.turn_id,
+                    }})
+                except (OSError, ValueError):
+                    pass
+        elif (message.get("method") == "turn/completed" and self.turn_id
+              and params.get("threadId") == self.thread_id and (params.get("turn") or {}).get("id") == self.turn_id):
+            self._turn_ended = True
+
     def _reply(self, message: dict[str, Any]) -> None:
         """Advance initialization only after the preceding request succeeded."""
         method = self._requests.pop(message["id"], None)
         if method is None:
             return
         if message.get("error"):
+            if method == "turn/start":
+                # Codex refused the turn, so no turn runs.
+                self._turn_requested = False
             raise ValueError(f"{method}: {message['error'].get('message', 'request failed')}")
         result = message.get("result") or {}
         if method == "initialize":
@@ -543,7 +711,7 @@ class AppServerSession:
             if expected and self.thread_id != expected:
                 raise ValueError("Codex resumed a different conversation")
             self.on_event({"type": "thread.started", "thread_id": self.thread_id})
-            self._request("turn/start", {**self.turn_params, "threadId": self.thread_id})
+            self._start_turn({**self.turn_params, "threadId": self.thread_id})
         elif method == "turn/start":
             self.turn_id = result["turn"]["id"]
 
@@ -584,9 +752,25 @@ class AppServerSession:
         items = [{"text": entry["step"], "completed": entry["status"] == "completed"} for entry in plan]
         self.on_event({"type": "item.updated", "item": {"id": "app-server:plan", "type": "todo_list", "items": items}})
 
+    def _spawned(self, method: str, item: dict[str, Any]) -> bool:
+        """Return True for the completed spawn item of this thread, the only collab item whose ids Codex made.
+
+        In the other collab tools (send_input, wait, resume_agent, close_agent and the rest) the model writes the
+        receiver, so those ids may name the thread of another chat.
+        """
+        return (method == "item/completed" and item.get("tool") == "spawnAgent"
+                and item.get("senderThreadId") == self.thread_id)
+
     def _item(self, method: str, item: dict[str, Any]) -> None:
         """Translate app-server items into the worker's existing activity format."""
         kind = item.get("type")
+        if kind == "collabAgentToolCall":
+            if self._spawned(method, item):
+                # The ids of the sub-agents that this thread started. Their tool calls name their own thread.
+                threads = [value for value in item.get("receiverThreadIds") or [] if isinstance(value, str)]
+                if threads:
+                    self.on_event({"type": "agent.threads", "parent": self.thread_id, "threads": threads})
+            return
         mapped = {"agentMessage": "agent_message", "commandExecution": "command_execution",
                   "fileChange": "file_change", "mcpToolCall": "mcp_tool_call", "webSearch": "web_search"}
         if kind not in mapped and kind != "reasoning":

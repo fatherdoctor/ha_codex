@@ -1,8 +1,9 @@
 """Stdio MCP bridge for the home_assistant_call tool: one Home Assistant action per call.
 
 The tool is registered with the approval mode "prompt", so Codex asks the person before each call.
-This bridge only forwards the request and the turn's call key (HA_CALL_CAPABILITY) to the
-worker's socket. The worker checks the key and the form of the request (ha_call.py).
+This bridge only forwards the request to the worker's socket, with the chat's thread id that Codex sent
+with the call. Under remote control it sends the relay's key (HA_CALL_CAPABILITY) in its place. The worker
+checks the chat or the key, and the form of the request (ha_call.py).
 """
 from __future__ import annotations
 
@@ -10,6 +11,8 @@ import json
 import os
 import socket
 import sys
+
+import tool_threads
 
 TOOL = {
     "name": "call",
@@ -45,10 +48,11 @@ TOOL = {
 MAX_REQUEST_BYTES = 65536
 
 
-def call(arguments):
-    """Forward the arguments and the turn's call key to the worker, once, and return its answer."""
-    encoded = json.dumps({"capability": os.environ.get("HA_CALL_CAPABILITY", ""),
-                          "arguments": arguments}).encode() + b"\n"
+def call(arguments, thread_id):
+    """Forward the arguments, and the chat's thread id or the relay's key, to the worker once; return its answer."""
+    relay_key = os.environ.get("HA_CALL_CAPABILITY")
+    origin = {"capability": relay_key} if relay_key else {"thread_id": thread_id}
+    encoded = json.dumps({**origin, "arguments": arguments}).encode() + b"\n"
     if len(encoded) > MAX_REQUEST_BYTES:
         raise ValueError("Call request is too large")
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
@@ -77,7 +81,7 @@ def respond(request):
         try:
             if params.get("name") != TOOL["name"]:
                 raise ValueError("Unknown tool")
-            result = call(params.get("arguments", {}))
+            result = call(params.get("arguments", {}), tool_threads.thread_id_from_call(params))
         except (OSError, ValueError, TypeError):
             # A timeout is an OSError: the action may have reached Home Assistant, so read the state back.
             result = {"status": "unavailable",

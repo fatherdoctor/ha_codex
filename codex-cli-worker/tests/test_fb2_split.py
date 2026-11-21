@@ -91,7 +91,7 @@ class SettingsPage(unittest.TestCase):
     def test_moved_and_empty_parts_are_gone(self):
         # Advanced came back in 0.3.6 to hold Browser permissions (SettingsAccordion below).
         for gone in ('id="appearance-section"', 'id="diagnostic-retention"',
-                     'id="save-diagnostic-retention"', 'id="remote-control-name-form"'):
+                     'id="save-diagnostic-retention"'):
             with self.subTest(gone=gone):
                 self.assertNotIn(gone, self.html)
         self.assertNotIn('api("diagnostics/settings", {', self.chat)

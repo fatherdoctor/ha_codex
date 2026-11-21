@@ -55,9 +55,6 @@
       },
       "weekly_reset": {
         "name": "Weekly reset"
-      },
-      "mailbox_unread_lead": {
-        "name": "Mailbox unread for the lead"
       }
     },
     "binary_sensor": {

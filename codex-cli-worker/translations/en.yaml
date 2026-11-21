@@ -14,9 +14,6 @@ configuration:
   codex_sandbox:
     name: Sandbox mode
     description: What Codex may do without asking. Workspace-write lets it edit files in /config. Read-only lets it look but not change.
-  task_root:
-    name: Task folder
-    description: The folder where the app saves prompts, logs and file backups. Keep it inside /config so each file is copied before a change.
   notify_service:
     name: Notification service
     description: A notify service for questions and failures. Leave it empty to use Home Assistant persistent notifications.
@@ -41,6 +38,9 @@ configuration:
   backup_retention_days:
     name: Keep backups for days
     description: How many days the app keeps backups after a chat, from 1 to 365. The default is 7.
+  chat_retention_days:
+    name: Delete chats after (days without a message)
+    description: A chat with no message for this many days is deleted with all its files, from 1 to 365. Pinned chats are never deleted, and a chat with an approved, enabled schedule counts as in use. The chat shows a warning for its last 3 days. Default is 14 days.
   ha_url:
     name: Home Assistant API URL
     description: The address Codex gets as HA_URL to call Home Assistant. Set it only if the automatic address does not work.
@@ -53,6 +53,9 @@ configuration:
   local_docs:
     name: Local Home Assistant documentation
     description: Download the official documentation, about 25 MB, so Codex can search it without the web. Turn it off to stop the download.
+  warm_start:
+    name: Keep Codex running
+    description: Keep one Codex process running between messages, with each recent chat loaded in it, so a message starts faster. At most 3 chats stay loaded; the app unloads the chat used longest ago when it needs room. The process uses memory while it waits. Turn this off to start Codex again for each message, as earlier versions did.
   HA_TOKEN:
     name: Home Assistant access token
     description: An optional token for Codex to call Home Assistant, with the rights of the token's user. Codex keeps its read and call tools without it.
@@ -65,3 +68,6 @@ configuration:
   install_integration:
     name: Install the integration
     description: On each start, install or update the Codex integration from the copy in this app. An integration you installed another way is never changed.
+  home_assistant_mcp:
+    name: Enable Home Assistant MCP
+    description: Give Codex the tools of the bundled Home Assistant MCP server (hass-mcp 0.6.0), in chats, scheduled runs and under remote control. Codex can then find entities, areas, automations, dashboards, history, statistics and the error log without a search through files, and uses these read tools without asking. They show what Home Assistant returns, including attributes such as camera picture links, which hold a short-lived access token. A tool call that changes the house or a dashboard is answered as your chat's permission mode says. In Default and Read only, Codex asks you before each one; in Auto-review, Codex's reviewer can allow it without asking you; in Full access, it runs without a question. Turn this off to remove the tools.

@@ -35,7 +35,7 @@ class ParityReviewDocsTests(unittest.TestCase):
         self.assertNotIn('sandbox escalation while it is on', text)
         self.assertIn('full-access', text, 'The retained full-access restriction must remain explicit.')
         self.assertIn('credential', text)
-        self.assertIn('/config/agents.md', text)
+        self.assertIn('agents.md', text)
 
     def test_f1_page_note_describes_normal_remote_approval_and_retained_refusals(self):
         parser = _RemoteNote()
@@ -45,7 +45,7 @@ class ParityReviewDocsTests(unittest.TestCase):
 
     def test_no_house_practice_is_bundled(self):
         self.assertFalse((ROOT / 'policy/house-rules.md').exists())
-        self.assertIn('/config/AGENTS.md', (ROOT / 'server.py').read_text())
+        self.assertIn('/addon_config/AGENTS.md', (ROOT / 'server.py').read_text())
 
 
 if __name__ == '__main__':

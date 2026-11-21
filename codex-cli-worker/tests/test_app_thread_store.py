@@ -6,7 +6,6 @@ The app-server messages here are written by hand from the Codex 0.166.0 protocol
 thread/resume take developerInstructions; turn/start takes input; an mcpToolCall item carries server, tool, status
 and arguments). They are not recordings of a real app server.
 """
-import io
 import json
 import os
 from pathlib import Path
@@ -18,6 +17,7 @@ import unittest
 from unittest.mock import patch
 
 from test_server import server
+import tool_threads
 import test_approvals as approvals
 import test_attachments as attachments
 import test_ha_data as data
@@ -90,6 +90,49 @@ class FixedTextTests(unittest.TestCase):
         self.assertIn("If exchange_info is not available, make no backup copy, and say in your answer that this "
                       "change has no backup.", text)
 
+    def test_a_plain_message_needs_no_tool_call(self):
+        """A greeting or a one-number reply is answered directly: no forced exchange_info call, no file check.
+
+        Codex loads the owner's AGENTS.md through the CODEX_HOME link when a chat starts, so the rules never send
+        the model to the shell to look for it.
+        """
+        text = server.PAGE_INSTRUCTIONS
+        self.assertNotIn("At the start of each message", text)
+        self.assertNotIn("check for the file yourself", text)
+        self.assertIn("needs no tool call and no command: answer it directly", text)
+        self.assertIn("Codex has already loaded that file into this chat when the chat started, so never run a "
+                      "command to look for it or to read it.", text)
+
+    def test_any_command_file_change_or_tool_call_still_gets_this_message_details_first(self):
+        """A message that acts (a Home Assistant call, a file edit, a command) still calls exchange_info first.
+
+        Only the two status tools are exempt.
+        """
+        text = server.PAGE_INSTRUCTIONS
+        self.assertIn("before your first command, file change or tool call in a message (ask_owner and "
+                      "report_failure excepted), and when the message can refer to a file", text)
+        self.assertIn("call the home_assistant_data exchange_info tool once.", text)
+        self.assertIn("Follow its backups text before you change, move, or delete a file under /config.", text)
+
+    def test_a_message_about_a_document_calls_exchange_info_without_the_word_attached(self):
+        """Only exchange_info names an attached document (images go in the turn input), so "Summarize this" with a
+        document must call it: the rule follows what the message can refer to, not the word "attached"."""
+        text = server.PAGE_INSTRUCTIONS
+        self.assertNotIn("when the user says they attached or uploaded a file", text)
+        self.assertIn("when the message can refer to a file, a document or something that you cannot see in this "
+                      "chat (only exchange_info names the documents the user attached), call the home_assistant_data "
+                      "exchange_info tool once.", text)
+
+    def test_the_exchange_info_tool_description_agrees_with_the_page_rules(self):
+        """Codex reads the tool description with the page rules on every message, so both give the same order."""
+        tool = next(tool for tool in ha_data_mcp.TOOLS if tool["name"] == "exchange_info")
+        description = tool["description"]
+        self.assertNotIn("at the start of each message", description.lower())
+        self.assertIn("Call it once in a message before your first command, file change or other tool call", description)
+        self.assertIn("when the message can refer to a file, a document or something you cannot see in this chat",
+                      description)
+        self.assertIn("A message you can answer from what you know and from the chat needs no call.", description)
+
     def test_the_tool_needs_no_approval_and_the_app_thread_rules_point_to_it(self):
         """exchange_info is approved like history; the remote-control rules tell an app thread to call it on the page."""
         args = server.data_mcp_args()
@@ -134,12 +177,13 @@ class ExchangeRecordTests(unittest.TestCase):
         # A resume never marks the thread: only a thread this page starts gets the rules at its first turn.
         self.assertNotIn("page_instructions", server.tasks[task_id])
 
-    def test_the_exec_path_passes_the_rules_as_developer_instructions(self):
-        """Upstream's codex exec path, reached only by tests, gets the same rules through its configuration."""
+    def test_the_rules_are_the_threads_developer_instructions(self):
+        """Every thread this page starts gets the fixed rules through the app-server thread settings."""
         task_id = self.create(OWNER_TEXT)
-        with patch.object(server, "read_options", return_value={"codex_sandbox": "workspace-write"}):
-            args = server.build_codex_args(task_id, Path("prompt"), Path("final"), None)
-        self.assertIn("developer_instructions=" + json.dumps(server.PAGE_INSTRUCTIONS), args)
+        session = server.create_approval_session(
+            task_id, attachments.StubAppServer(attachments.SESSION_ID), "Prompt", Path("final"), None, {},
+            {"codex_sandbox": "workspace-write"})
+        self.assertEqual(session.thread_params["developerInstructions"], server.PAGE_INSTRUCTIONS)
 
     def run_and_record_plain(self, task_id, session_id=None, reply=None):
         """Run one exchange through run_codex's fake process and return exchange_info's details and the message."""
@@ -162,12 +206,14 @@ class ExchangeInfoToolTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.engine = HomeAssistantData(self.worker, Path(temporary.name) / "exports")
         self.addCleanup(self.engine.end, "chat")
+        tool_threads.CHATS.bind("chat", data.THREAD)
+        self.addCleanup(tool_threads.CHATS.release, "chat")
         self.capability = self.engine.begin("chat")
         self.engine.set_exchange_info("chat", {"task_id": "chat", "backups": "Copy files to /config/backup-a."})
 
     def call(self, **fields):
         """Send one exchange_info request as the MCP bridge does."""
-        return self.engine.dispatch({"operation": "exchange_info", "capability": self.capability, **fields})
+        return self.engine.dispatch({"operation": "exchange_info", "thread_id": data.THREAD, **fields})
 
     def test_the_running_exchange_reads_its_own_details(self):
         """The reply holds the recorded details, reads no Home Assistant data and uses no query budget."""
@@ -177,18 +223,22 @@ class ExchangeInfoToolTests(unittest.TestCase):
         self.worker.ha_token.assert_not_called()
         self.assertEqual(self.engine.queries["chat"], 0)
 
-    def test_arguments_and_a_wrong_or_ended_capability_are_refused(self):
-        """Arguments are refused; a wrong capability and an ended or replaced exchange get nothing."""
+    def test_arguments_and_a_wrong_thread_or_ended_exchange_are_refused(self):
+        """Arguments are refused; a wrong thread and an ended or released exchange get nothing."""
         with self.assertRaises(DataError):
             self.call(path="/config")
+        for thread in ("not-a-thread", "", None, "99999999-2222-4333-8444-555555555555"):
+            with self.assertRaises(DataError):
+                self.engine.dispatch({"operation": "exchange_info", "thread_id": thread})
         with self.assertRaises(DataError):
-            self.engine.dispatch({"operation": "exchange_info", "capability": "not-the-capability"})
-        old = self.capability
+            self.engine.dispatch({"operation": "exchange_info", "capability": self.capability})
         self.capability = self.engine.begin("chat")
         self.assertEqual(self.call(), {"status": "unavailable", "message": "No details are recorded for this exchange"})
-        with self.assertRaises(DataError):
-            self.engine.dispatch({"operation": "exchange_info", "capability": old})
         self.engine.end("chat")
+        with self.assertRaises(DataError):
+            self.call()
+        self.capability = self.engine.begin("chat")
+        tool_threads.CHATS.release("chat")
         with self.assertRaises(DataError):
             self.call()
 
@@ -220,10 +270,10 @@ class ExchangeInfoToolTests(unittest.TestCase):
 
             answering = threading.Thread(target=answer_twice, daemon=True)
             answering.start()
-            with patch.dict("os.environ", {"HA_DATA_SOCKET": path, "HA_DATA_CAPABILITY": "capability"}):
-                self.assertEqual(len(ha_data_mcp.fetch("exchange_info", {})["rules"]), ha_data_mcp.MAX_RESPONSE_BYTES + 100)
+            with patch.dict("os.environ", {"HA_DATA_SOCKET": path}):
+                self.assertEqual(len(ha_data_mcp.fetch("exchange_info", {}, data.THREAD)["rules"]), ha_data_mcp.MAX_RESPONSE_BYTES + 100)
                 with self.assertRaises(ValueError):
-                    ha_data_mcp.fetch("history", {})
+                    ha_data_mcp.fetch("history", {}, data.THREAD)
             answering.join(timeout=5)
             self.assertFalse(answering.is_alive())
 
@@ -355,6 +405,17 @@ class StatusCallTests(unittest.TestCase):
             final_file.write_text("```json\n" + json.dumps(old) + "\n```")
             self.assertEqual(server.parse_final(final_file, 0), old)
 
+    def test_a_non_zero_exit_code_fails_the_answer_and_names_the_code(self):
+        """A timeout or a broken exchange passes a non-zero code; the answer is then failed, also without a file."""
+        with tempfile.TemporaryDirectory() as folder:
+            final_file = Path(folder) / "final.json"
+            missing = server.parse_final(final_file, -1)
+            self.assertEqual(missing["status"], "failed")
+            self.assertIn("returncode=-1", missing["summary"])
+            final_file.write_text("Partly done.")
+            self.assertEqual(server.parse_final(final_file, 1),
+                             {"status": "failed", "summary": "Partly done.", "details": "returncode=1"})
+
     def test_an_example_of_the_old_answer_inside_a_plain_answer_stays_plain(self):
         """Only a whole answer is read as an old JSON answer, so an example of one does not set the status."""
         with tempfile.TemporaryDirectory() as folder:
@@ -435,14 +496,14 @@ class StatusRunTests(unittest.TestCase):
 
         return Process()
 
-    def run_exchange(self, items, final_text, *, validation_errors=()):
+    def run_exchange(self, items, final_text, *, validation_errors=(), message="Tidy up my automations"):
         """Run one page exchange and return the stored task."""
         proc = self.process(items, final_text)
         self.stack.enter_context(patch.object(server.subprocess, "Popen", return_value=proc))
         self.stack.enter_context(patch.object(server, "assess_changes", return_value={
             "validation_errors": list(validation_errors), "recovery_files": [], "lovelace_results": [],
             "config_check": {"result": "invalid" if validation_errors else "skipped", "errors": "", "warnings": ""}}))
-        server.run_task("task", "Tidy up my automations")
+        server.run_task("task", message)
         return server.tasks["task"]
 
     def mcp_item(self, call):
@@ -457,6 +518,21 @@ class StatusRunTests(unittest.TestCase):
         self.assertEqual((task["question"], task["choices"], task["details"], task["error"]), ("", [], "", ""))
         turn_start = next(message for message in self.sent if message.get("method") == "turn/start")
         self.assertNotIn("outputSchema", turn_start["params"])
+
+    def test_a_plain_message_with_no_tool_call_still_has_its_details_ready_and_its_own_words_as_input(self):
+        """A plain question answered with no tool call: the worker set this message's details once, before the turn,
+        so a call would get them, and the turn input is the user's words only."""
+        recorded = []
+        keep = server.ha_data.set_exchange_info
+        self.stack.enter_context(patch.object(server.ha_data, "set_exchange_info",
+                                              side_effect=lambda *a: (recorded.append(a), keep(*a))))
+        task = self.run_exchange([], "4", message="How many lights are on in the kitchen?")
+        self.assertEqual((task["status"], task["summary"], task["error"]), ("completed", "4", ""))
+        self.assertEqual([item[0] for item in recorded], ["task"])
+        self.assertIn("backups", recorded[0][1])
+        turn_start = next(message for message in self.sent if message.get("method") == "turn/start")
+        self.assertEqual(turn_start["params"]["input"][0],
+                         {"type": "text", "text": "How many lights are on in the kitchen?"})
 
     def test_needs_input_comes_from_ask_owner_with_its_choices(self):
         """ask_owner sets the question and the choices; the answer text stays the summary."""
@@ -498,37 +574,13 @@ class StatusRunTests(unittest.TestCase):
                 self.assertEqual((task["question"], task["choices"]), ("", []))
                 self.assertIn("automations.yaml", task["error"])
 
-    def test_a_non_zero_exit_wins_over_a_question_in_an_old_json_answer(self):
-        """A Codex run that exits with an error fails the task, also when an old JSON answer asks a question.
-
-        Only the exec path (codex exec, no user approvals) has an exit code of its own; the app server path
-        reports a failed turn as a connection error, which other tests cover.
-        """
-        old_question = json.dumps({"status": "needs_input", "summary": "Edited.", "question": "Remove one?",
-                                   "details": "", "choices": ["Yes"]})
-
-        class ExecProcess:
-            """codex exec: it writes the old JSON answer, then exits with code 1."""
-
-            def __init__(self, args, **kwargs):
-                """Remember where codex exec writes its last message."""
-                del kwargs
-                self.output = Path(args[args.index("--output-last-message") + 1])
-                self.stdin, self.stdout, self.stderr = io.StringIO(), io.StringIO(""), io.StringIO("")
-                self.returncode = None
-
-            def poll(self):
-                """Running until the worker waits for it."""
-                return self.returncode
-
-            def wait(self, timeout=None):
-                """Write the answer and exit with an error."""
-                self.output.write_text(old_question, encoding="utf-8")
-                self.returncode = 1
-                return 1
-
-        self.stack.enter_context(patch.object(server, "uses_user_approvals", return_value=False))
-        self.stack.enter_context(patch.object(server.subprocess, "Popen", side_effect=ExecProcess))
+    def test_a_failed_turn_wins_over_a_question_in_an_old_json_answer(self):
+        """A turn that ends as failed fails the task, also when an old JSON answer asks a question."""
+        old_question = {"status": "needs_input", "summary": "Edited.", "question": "Remove one?",
+                        "details": "", "choices": ["Yes"]}
+        proc = attachments.StubAppServer("019fc242-910a-7c92-a17d-54c014e19fc4", old_question,
+                                         turn_error="Model connection lost")
+        self.stack.enter_context(patch.object(server.subprocess, "Popen", return_value=proc))
         self.stack.enter_context(patch.object(server, "assess_changes", return_value={
             "validation_errors": [], "recovery_files": [], "lovelace_results": [],
             "config_check": {"result": "skipped", "errors": "", "warnings": ""}}))
@@ -536,7 +588,7 @@ class StatusRunTests(unittest.TestCase):
         task = server.tasks["task"]
         self.assertEqual(task["status"], "failed")
         self.assertEqual(task["question"], "")
-        self.assertIn("Codex exited with 1.", task["details"])
+        self.assertIn("Model connection lost", task["details"])
 
 
 class OwnerNoticeTests(unittest.TestCase):

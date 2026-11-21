@@ -34,8 +34,10 @@ const assert = require('node:assert/strict');
           await toggle('accounts-section').click();
           await toggle('github-section').click();
           assert.deepEqual(await expanded(), ['accounts-section']);
-          await toggle('scheduled-work').click();
-          assert.deepEqual(await expanded(), ['scheduled-work'], 'opening Scheduled runs closes Accounts and connections');
+          // Scheduled runs is on the page only while they are switched on (the fixture starts with them off).
+          const otherSection = await page.locator('#scheduled-work').count() ? 'scheduled-work' : 'workspace-section';
+          await toggle(otherSection).click();
+          assert.deepEqual(await expanded(), [otherSection], `opening ${otherSection} closes Accounts and connections`);
           assert.equal(await page.locator('#accounts-section > .settings-body').isVisible(), false);
           await toggle('advanced-section').click();
           assert.deepEqual(await expanded(), ['advanced-section']);
@@ -49,8 +51,6 @@ const assert = require('node:assert/strict');
           assert.deepEqual(await expanded(), ['accounts-section']);
           assert.equal(await page.locator('#diagnostic-retention, #save-diagnostic-retention').count(), 0,
             'the log limit is set on the Configuration tab only');
-          assert.equal(await page.locator('#remote-control-name-form').count(), 0,
-            'the remote-control name is set on the Configuration tab only');
           assert.equal(await page.locator('#workspace-section #workspace-open').count(), 1,
             'Workspace instructions contains the Workspace rules button');
           // The fixture has no Supervisor, so the lookup answers null: the row is not a link and says where to go.

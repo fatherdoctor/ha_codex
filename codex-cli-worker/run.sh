@@ -1,7 +1,7 @@
 #!/usr/bin/with-contenv bashio
 set -euo pipefail
 
-mkdir -p /data/codex-home /config/codex_tasks
+mkdir -p /data/codex-home /data/codex_tasks
 export CODEX_HOME=/data/codex-home
 export HOME=/data
 export PYTHONDONTWRITEBYTECODE=1
@@ -23,6 +23,23 @@ fi
 if [ -n "${legacy_token}" ]; then
     bashio::addon.option 'api_token'
     bashio::log.info "Removed legacy worker API token from app options."
+fi
+
+# Versions before 0.4 shipped model_pin as gpt-6.1-sol. Clear exactly that value once, on the first start
+# after the update; the marker keeps a value the owner sets later. Write the marker first so a failed
+# call is not retried on every start.
+pin_marker=/data/model_pin_default_cleared
+if [ ! -e "${pin_marker}" ]; then
+    : > "${pin_marker}"
+    old_pin="$(python3 -c 'import json, pathlib; p=pathlib.Path("/data/options.json"); data=json.loads(p.read_text()) if p.exists() else {}; print(data.get("model_pin") or "")')"
+    if [ "${old_pin}" = "gpt-6.1-sol" ]; then
+        if bashio::addon.option 'model_pin'; then
+            export MODEL_PIN_CLEARED=1
+            bashio::log.info "Cleared the old default model pin gpt-6.1-sol; runs use the account's default model unless you set the model_pin option."
+        else
+            bashio::log.warning "Could not clear the old default model pin gpt-6.1-sol."
+        fi
+    fi
 fi
 
 # Install or update the bundled Codex integration in /config (integration_sync.py); never blocks the start.

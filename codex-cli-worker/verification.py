@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import copy
-import hmac
 import json
 import os
 import re
@@ -23,6 +22,7 @@ import websocket
 from browser_permissions import (BrowserPermissionStore, HEX, LIMITS, MAX_CANDIDATES, MAX_RETRIES, PATH,
                                  describe, scope, valid_rule)
 from relay_reads import PRIVATE, ReadError, fetch_states, password_state
+import tool_threads
 
 MAX_CHECKS = 24
 MAX_FIND_MATCHES = 10
@@ -64,8 +64,9 @@ def public_check(entry):
 def find_row(row, words, domain):
     """Return (other words, answer row) for one item of Core's state list, or None when it does not match or is hidden.
 
-    A match holds every word in its friendly name or entity id. The answer row carries only the entity id,
-    the friendly name and the state. The count of other words in the name and id orders the answer.
+    A match holds every word across its friendly name and entity id. Rank by the fewest extra words in either
+    field that holds the whole query. If the words are split across both fields, rank by their combined words.
+    The answer row carries only the entity id, friendly name and state.
     """
     entity_id = row.get("entity_id")
     state = row.get("state")
@@ -79,11 +80,15 @@ def find_row(row, words, domain):
     attributes = row.get("attributes")
     friendly = attributes.get("friendly_name") if isinstance(attributes, dict) else None
     name = friendly if isinstance(friendly, str) else ""
-    searched = f"{name} {object_id.replace('_', ' ')}".lower()
-    if not all(word in searched for word in words):
-        return None
-    # A light named "Office Overhead" has no other word; its "Office Overhead Ping" button has one.
-    other_words = len(set(re.findall(r"[a-z0-9]+", searched)) - set(words))
+    fields = (name.lower(), object_id.replace("_", " "))
+    matching_fields = [field for field in fields if all(word in field for word in words)]
+    if not matching_fields:
+        combined = " ".join(fields)
+        if not all(word in combined for word in words):
+            return None
+        matching_fields = [combined]
+    query_words = set(words)
+    other_words = min(len(set(re.findall(r"[a-z0-9]+", field)) - query_words) for field in matching_fields)
     return other_words, {"entity_id": entity_id, "name": name[:120], "state": state[:120]}
 
 
@@ -93,17 +98,23 @@ class Verification:
     def __init__(self, worker):
         """Keep the worker that provides tasks, options and Home Assistant access; no capability is issued yet."""
         self.worker = worker
+        # One private exchange id per running task; the manual check from the page still sends one. A chat's tool
+        # request names its thread instead (tool_threads.py); the name and the "capability expired" answer are
+        # kept from earlier versions.
         self.capabilities = {}
         self.lock = threading.RLock()
         self.execution_lock = threading.Lock()
         self.permissions = BrowserPermissionStore(worker)
         self.ui_captures = {}
         # Authority stays in worker memory, never in agent-writable task.json.
-        # Restarting the worker expires one-off grants; audit records remain.
+        # Restarting the worker expires one-off grants.
         self.retry_grants = {}
 
     def begin(self, task_id):
-        """Issue a new capability for the task's turn, clear its recorded checks, and delete expired screenshots."""
+        """Start the exchange's checks: a new exchange id, no recorded checks, and no expired screenshots.
+
+        The exchange id stays in the worker. A request names its chat by thread id (tool_threads).
+        """
         self.cleanup()
         with self.lock:
             capability = secrets.token_urlsafe(32)
@@ -112,26 +123,23 @@ class Verification:
         return capability
 
     def end(self, task_id):
-        """Withdraw the task's capability so later requests that present it are refused."""
+        """End the exchange's checks, so later requests for its chat are refused."""
         with self.lock:
             self.capabilities.pop(task_id, None)
 
     def dispatch(self, payload):
-        """Run a request's check for the running task that owns its capability; raise ValueError if there is none."""
+        """Run a request's check for the chat that its thread id names; raise ValueError if no exchange runs there."""
         if not isinstance(payload, dict):
             raise ValueError("Expected a verification object")
-        supplied = payload.get("capability", "")
-        if not isinstance(supplied, str) or not supplied or not supplied.isascii():
-            raise ValueError("No active verification capability")
+        task_id = tool_threads.CHATS.task_for(payload.get("thread_id"))
         with self.lock:
-            task_id = next((key for key, value in self.capabilities.items()
-                            if hmac.compare_digest(supplied, value)), None)
-        if not task_id or self.worker.task_cancellation_requested(task_id):
-            raise ValueError("Verification capability expired")
+            supplied = self.capabilities.get(task_id) if task_id else None
+        if not supplied or self.worker.task_cancellation_requested(task_id):
+            raise ValueError("No running exchange for this chat")
         with self.worker.lock:
             if self.worker.tasks.get(task_id, {}).get("status") != "running":
-                raise ValueError("Verification capability expired")
-        return self.run(task_id, {k: v for k, v in payload.items() if k != "capability"}, supplied)
+                raise ValueError("No running exchange for this chat")
+        return self.run(task_id, {k: v for k, v in payload.items() if k != "thread_id"}, supplied)
 
     def active(self, task_id, turn_id, capability):
         """Reject checks that outlive cancellation, completion, or a replaced turn."""
@@ -674,30 +682,6 @@ class Verification:
                 self.core("DELETE", "codex_cli/browser_session", json={"session_id": session["session_id"]})
             except Exception:
                 pass  # Core independently revokes the session after 180 seconds.
-
-    def after_changes(self, task_id, lovelace_results):
-        """Check each dashboard the worker saved for this turn: read its configuration back, then capture its views.
-
-        Captures stop at the turn's dashboard limit. If the saved dashboard file cannot be read, a dashboard
-        check with an empty path is run instead; it captures nothing and leaves an unavailable (or disabled)
-        result on the turn.
-        """
-        for ref in lovelace_results:
-            if not ref.get("success") or self.worker.task_cancellation_requested(task_id):
-                continue
-            try:
-                storage = json.loads((self.worker.CONFIG_ROOT / ref["storage_file"]).read_text())
-                config = storage["data"]["config"]
-                base = "/" + (ref.get("url_path") or "lovelace")
-                self.run(task_id, {"operation": "dashboard_readback", "path": base, "expected_config": config})
-                with self.worker.lock:
-                    checks = self.worker.tasks.get(task_id, {}).get("verification") or []
-                    remaining = max(0, MAX_BROWSERS - sum(check.get("operation") == "dashboard" for check in checks))
-                for index, view in enumerate(config.get("views", [])[:remaining]):
-                    path = base + "/" + str(view.get("path", index))
-                    self.run(task_id, {"operation": "dashboard", "path": path})
-            except (OSError, ValueError, KeyError):
-                self.run(task_id, {"operation": "dashboard", "path": ""})
 
     def require_dashboard_save_permission(self, task_id):
         """Worker writes obey the same narrowed mode as the current chat turn."""

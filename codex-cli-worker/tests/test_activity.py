@@ -9,6 +9,7 @@ from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
 
+from app_server_fixture import StubAppServer
 from test_server import server
 
 
@@ -83,6 +84,20 @@ class ActivityStepTests(unittest.TestCase):
         self.assertEqual(tool["text"], "codex_apps · github.get_repo")
         self.assertEqual(plan["text"], "☑ Read config\n☐ Edit")
         self.assertEqual(reasoning["id"], "item_0")
+
+    def test_plain_text_final_answer_is_not_an_activity_message(self):
+        """The final answer belongs to the reply, even if commentary used the same words."""
+        for event in (
+            item("agent_message", "first", phase="commentary", text="Checking the automation."),
+            item("agent_message", "second", phase="commentary", text="The automation is valid."),
+            item("agent_message", "answer", phase="final_answer", text="The automation is valid."),
+        ):
+            server.record_activity_event("t", event)
+        messages = self.steps()["steps"]
+        self.assertEqual([(step["id"], step["text"]) for step in messages], [
+            ("first", "Checking the automation."), ("second", "The automation is valid."),
+        ])
+        self.assertEqual([step["phase"] for step in messages], ["commentary", "commentary"])
 
     def test_file_change_reads_as_made_only_once_it_was_made(self):
         """A change that waits, as for permission, or that was refused is not reported as done."""
@@ -320,13 +335,12 @@ class ReasoningSummaryOptionTests(unittest.TestCase):
         for configured, expected in (("detailed", "detailed"), ("none", "none"), (None, "concise"), ("auto", "concise"), ("  Concise ", "concise")):
             with self.subTest(configured=configured):
                 self.assertEqual(server.reasoning_summary({"reasoning_summary": configured}), expected)
-        with (
-            patch.object(server, "tasks", {"t": {"task_id": "t", "turns": [], "chat_settings": server.DEFAULT_CHAT_SETTINGS}}),
-            patch.object(server, "read_options", return_value={"reasoning_summary": "detailed"}),
-        ):
-            args = server.build_codex_args("t", Path("p"), Path("f"), None)
-        self.assertIn('model_reasoning_summary="detailed"', args)
-        self.assertIn('model_reasoning_effort="medium"', args)
+        with patch.object(server, "tasks", {"t": {"task_id": "t", "turns": [], "chat_settings": server.DEFAULT_CHAT_SETTINGS}}):
+            session = server.create_approval_session(
+                "t", StubAppServer("thread"), "Prompt", Path("final"), None, {}, {"reasoning_summary": "detailed"},
+            )
+        self.assertEqual(session.turn_params["summary"], "detailed")
+        self.assertEqual(session.turn_params["effort"], "medium")
 
 
 if __name__ == "__main__":

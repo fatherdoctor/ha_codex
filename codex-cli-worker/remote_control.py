@@ -49,8 +49,11 @@ BACKOFF_CAP = 300.0
 HEALTHY_RUN = 600.0
 STOP_GRACE = 10.0
 LOG_LINES = 40
-# Keep the chat path's explicitly configured Core API pair. Supervisor tokens
-# and per-turn MCP capabilities never belong to a relay process.
+# Keep the chat path's explicitly configured Core API pair, and strip the Supervisor token and the per-turn MCP
+# capabilities from the base environment. When the Home Assistant MCP option is on, server.relay_env adds the
+# Supervisor token back under HA_MCP_CAPABILITY for the bundled hass-mcp only (hass_mcp.py): the shell exclude
+# HA_*_CAPABILITY keeps it from each command's environment, but a command that runs outside the sandbox can read
+# the environment of the relay's Codex process.
 STRIPPED_ENV = (
     "SUPERVISOR_TOKEN", "HASSIO_TOKEN",
     "HA_VERIFICATION_CAPABILITY", "HA_DATA_CAPABILITY", "HA_DATA_SOCKET",
