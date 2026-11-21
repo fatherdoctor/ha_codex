@@ -2017,6 +2017,19 @@ dialog :is(h3, h4):has(> .settings-toggle) {
 .signin-card a {
   overflow-wrap: anywhere;
 }
+/* The sign-in link is the main button of the card, drawn like the filled buttons of Settings. */
+.signin-card a.signin-link {
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--ha-color-fill-primary-loud-resting, var(--accent));
+  color: var(--ha-color-on-primary-loud, #fff);
+  font-weight: 500;
+  text-decoration: none;
+}
+/* While a sign-in waits, a section shows only its card and Cancel. */
+.signing-in .signin-hide {
+  display: none;
+}
 
 /*
  * Settings and its dialogs (Status, Remote connection, Permissions, Workspace rules) look like Home Assistant's
