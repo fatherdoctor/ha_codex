@@ -408,7 +408,9 @@ def main():
                 extra.update(config_check={"result": "invalid", "warnings": "",
                                            "errors": "Invalid config for 'automation' at automations.yaml, line 12: required key 'trigger' not provided"},
                              validation_errors=["Home Assistant configuration check failed: required key 'trigger' not provided"],
-                             recovery_files=[{"path": "automations.yaml", "copy": saved_copy}])
+                             recovery_files=[{"path": "automations.yaml", "copy": saved_copy}],
+                             verification=[{"operation": "entity", "status": "unavailable",
+                                            "message": "The requested entity was not found."}])
             server.update_task(f"preview-{index:02}", title=title if index < 3 or index == 4 else f"Earlier chat {index}",
                                prompt=message, created_at=f"2026-09-{20 - index % 19:02}T10:00:00+00:00",
                                turns=[turn], current_turn_id=turn["turn_id"],
@@ -422,6 +424,10 @@ def main():
                 server.start_activity("preview-00", turn["turn_id"])
                 for event in preview_events(summary):
                     server.record_activity_event("preview-00", event)
+                # Older activity records can store the final plain-text answer as an unlabeled message.
+                server.record_activity_event("preview-00", {"type": "item.completed", "item": {
+                    "id": "saved-answer", "type": "agent_message", "text": f" {summary}\n",
+                }})
                 server.finish_activity("preview-00")
         # A prefix checks that every browser URL works under Home Assistant Ingress.
         mounted = DispatcherMiddleware(Response("Open /preview/", status=404), {"/preview": server.app})
