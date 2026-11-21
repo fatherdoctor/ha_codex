@@ -373,6 +373,58 @@ class ApprovalTests(unittest.TestCase):
         self.assertNotIn("private-content", recorded)
         self.assertIn("Checking the configuration", recorded)
 
+    def test_reasoning_summary_stream_updates_one_activity_step_until_completion(self):
+        """Summary deltas reach the live activity, while other turns and raw content do not."""
+        server.start_activity("stream-test", "turn")
+        self.session.on_event = lambda event: server.record_activity_event("stream-test", event)
+        def receive(method, **fields):
+            self.session.receive({"method": method, "params": {"threadId": "thread", "turnId": "turn", **fields}})
+        receive("item/started", item={"id": "thought", "type": "reasoning", "summary": [], "content": ["private-content"]})
+        receive("item/reasoning/summaryTextDelta", itemId="thought", summaryIndex=0, delta="Checking ")
+        receive("item/reasoning/summaryTextDelta", itemId="thought", summaryIndex=0, delta="settings")
+        receive("item/reasoning/summaryTextDelta", itemId="thought", summaryIndex=1, delta="Next step")
+        with server.lock:
+            payload = server.activity_payload_locked(server.task_activity["stream-test"])
+        self.assertEqual(len(payload["steps"]), 1)
+        self.assertEqual(payload["steps"][0]["text"], "Checking settings\nNext step")
+        self.assertEqual(payload["steps"][0]["status"], "running")
+        for thread, turn in [("other", "turn"), ("thread", "other")]:
+            self.session.receive({"method": "item/reasoning/summaryTextDelta", "params": {
+                "threadId": thread, "turnId": turn, "itemId": "thought", "summaryIndex": 0, "delta": "wrong"}})
+        receive("item/completed", item={"id": "thought", "type": "reasoning",
+                "summary": ["Checking settings", "Next step"], "content": ["private-content"]})
+        receive("item/reasoning/summaryTextDelta", itemId="thought", summaryIndex=0, delta="late")
+        with server.lock:
+            payload = server.activity_payload_locked(server.task_activity["stream-test"])
+        self.assertEqual(len(payload["steps"]), 1)
+        self.assertEqual(payload["steps"][0]["text"], "Checking settings\nNext step")
+        self.assertEqual(payload["steps"][0]["status"], "done")
+        self.assertNotIn("private-content", json.dumps(payload))
+        with server.lock:
+            server.task_activity.pop("stream-test", None)
+
+    def test_reasoning_summary_ignores_bad_and_unbounded_deltas(self):
+        """Invalid or late updates cannot create a step or grow the session without bound."""
+        def send(index, delta, item="thought"):
+            self.session.receive({"method": "item/reasoning/summaryTextDelta", "params": {
+                "threadId": "thread", "turnId": "turn", "itemId": item, "summaryIndex": index, "delta": delta}})
+        before = len(self.events)
+        send(0, "no start")
+        self.assertEqual(len(self.events), before)
+        self.session.receive({"method": "item/started", "params": {"threadId": "thread", "turnId": "turn",
+                              "item": {"id": "thought", "type": "reasoning", "summary": []}}})
+        before = len(self.events)
+        for index, delta in [(-1, "x"), (50, "x"), (True, "x"), (0, None)]:
+            send(index, delta)
+        self.assertEqual(len(self.events), before)
+        send(0, "x" * (DISPLAY_LIMIT + 100))
+        self.assertEqual(len(self.events[-1]["item"]["text"]), DISPLAY_LIMIT)
+        before = len(self.events)
+        send(0, "extra")
+        self.assertEqual(len(self.events), before)
+        self.session.close()
+        self.assertEqual(self.session._reasoning_summaries, {})
+
     def test_write_failure_stops_transport_and_refuses_retry(self):
         """A broken stdin cannot leave a decision available for a later retry."""
         approval_id = self.request()

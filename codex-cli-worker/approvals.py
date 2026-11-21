@@ -363,6 +363,8 @@ class AppServerSession:
         self._pending_files: dict[str, str] = {}
         self._records: list[dict[str, Any]] = []
         self._file_changes: dict[str, list[dict[str, Any]]] = {}
+        # Only requested summary text is retained, and only while its item is live.
+        self._reasoning_summaries: dict[str, list[str]] = {}
         self._final_text = ""
 
     def _write(self, message: dict[str, Any]) -> None:
@@ -460,6 +462,7 @@ class AppServerSession:
                     pass
             self._pending.clear()
             self._pending_files.clear()
+            self._reasoning_summaries.clear()
             for record in self._records:
                 if record["status"] == "pending":
                     record["status"] = "expired"
@@ -641,6 +644,9 @@ class AppServerSession:
                     self.on_event({"type": "turn.started"})
             elif params.get("threadId") == self.thread_id and params.get("turnId") == self.turn_id and method in {"item/started", "item/completed"}:
                 self._item(method, params["item"])
+            elif (self.turn_id and params.get("threadId") == self.thread_id and params.get("turnId") == self.turn_id
+                  and method == "item/reasoning/summaryTextDelta"):
+                self._reasoning_delta(params)
             elif method in AUTO_REVIEW_EVENTS and params.get("threadId") == self.thread_id and params.get("turnId") == self.turn_id:
                 self.on_event(auto_review_event(method, params, self.redact))
             elif (method == "turn/plan/updated" and self.turn_id
@@ -761,6 +767,23 @@ class AppServerSession:
         return (method == "item/completed" and item.get("tool") == "spawnAgent"
                 and item.get("senderThreadId") == self.thread_id)
 
+    def _reasoning_delta(self, params: dict[str, Any]) -> None:
+        """Update a live summary part without exposing the separate reasoning content."""
+        item_id, index, delta = params.get("itemId"), params.get("summaryIndex"), params.get("delta")
+        if (not isinstance(item_id, str) or item_id not in self._reasoning_summaries
+                or type(index) is not int or not 0 <= index < REQUEST_LIMIT or not isinstance(delta, str)):
+            return
+        parts = self._reasoning_summaries[item_id]
+        while len(parts) <= index:
+            parts.append("")
+        remaining = max(0, DISPLAY_LIMIT - sum(len(part) for part in parts))
+        if not delta or not remaining:
+            return
+        parts[index] += delta[:remaining]
+        self.on_event({"type": "item.updated", "item": {
+            "id": item_id, "type": "reasoning", "status": "in_progress", "text": "\n".join(parts),
+        }})
+
     def _item(self, method: str, item: dict[str, Any]) -> None:
         """Translate app-server items into the worker's existing activity format."""
         kind = item.get("type")
@@ -788,6 +811,10 @@ class AppServerSession:
                 self._file_changes.pop(str(item["id"]), None)
             event_item["changes"] = [{"path": c["path"], "kind": c["kind"], "move_path": c["move_path"]} for c in changes]
         elif kind == "reasoning":
+            if method == "item/started" and len(self._reasoning_summaries) < REQUEST_LIMIT:
+                self._reasoning_summaries[str(item["id"])] = []
+            elif method == "item/completed":
+                self._reasoning_summaries.pop(str(item["id"]), None)
             event_item = {"id": item["id"], "type": "reasoning", "text": "\n".join(item.get("summary") or [])}
         elif kind == "agentMessage" and method == "item/completed":
             if item.get("phase") != "commentary":

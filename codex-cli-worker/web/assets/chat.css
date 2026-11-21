@@ -1053,13 +1053,6 @@ h1 {
 .activity-toggle:hover {
   color: var(--text);
 }
-.activity-thinking {
-  color: var(--muted);
-  font-size: calc(12px * var(--text-scale));
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .activity.running .activity-chevron::before {
   width: 7px;
   height: 7px;
@@ -1083,6 +1076,13 @@ h1 {
   margin: 6px 0 4px;
   padding-left: 2px;
   border-left: 2px solid var(--line);
+}
+.activity-thinking {
+  color: var(--muted);
+  font-size: calc(12px * var(--text-scale));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .step {
   display: flex;
