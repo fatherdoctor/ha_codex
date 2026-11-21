@@ -3,6 +3,7 @@
 ## 0.4.0 (unreleased)
 
 ### What's new
+- **Shorter Documentation tab.** The app's Documentation tab (`DOCS.md`) is now a short guide: install and sign in, the four permission modes, where files go, and how to get help (about 380 words, down from about 25,900). The full text moved to `docs/app-reference.md`, and the Info tab (`README.md`) keeps five sections: Quick Start, Requirements, Features, Setup and Using ChatGPT for Home Assistant.
 - **Model and reasoning picker like the desktop app.** The model and reasoning controls below the message box are now
   one chip: the model name, then the reasoning level in grey. Select it, or press Ctrl+Shift+M, to open a panel with the
   reasoning level, the model name and a slider with one stop per level the model offers. Select the model name to pick
