@@ -2074,16 +2074,22 @@ function renderActivity() {
   const activity = state.activity;
   if (!block || !activity || activity.id !== state.id) return;
   const all = [...activity.steps.values()].sort((a, b) => a.index - b.index);
-  // Each text message Codex wrote along the way shows in order outside the closed list; tool steps and
-  // thinking stay inside it. The final answer is never a step, so it is not shown twice.
+  // Text messages show outside the closed list; tool steps and thinking stay inside it.
   const steps = all.filter(step => step.kind !== "message");
   const texts = all.filter(step => step.kind === "message" && step.text);
+  const running = activity.running || taskActive();
+  const turn = state.task?.turns?.at(-1);
+  const lastText = texts.at(-1);
+  // Saved steps can still contain the final answer. Keep earlier messages and explicit commentary.
+  if (!running && turn && activity.turnId === turn.turn_id && lastText && !lastText.phase &&
+      lastText.text.trim() === turn.summary?.trim()) {
+    texts.pop();
+  }
   const textBox = $("activity-text");
   if (textBox)
     textBox.replaceChildren(...texts.map(step => renderMarkdown(step.text, "message interim")));
-  const running = activity.running || taskActive();
   const checks = state.latestChecks;
-  const worked = running ? "" : workedLabel(state.task?.turns?.at(-1));
+  const worked = running ? "" : workedLabel(turn);
   block.hidden = !steps.length && !checks && !worked;
   block.classList.toggle("running", running);
   block.classList.toggle("worked", !running);

@@ -2078,10 +2078,13 @@ def activity_step_from_item(item: dict[str, Any]) -> dict[str, Any] | None:
         step["status"] = "failed"
     if kind == "agent_message":
         text = str(item.get("text") or "")
-        if not text.strip() or is_final_answer(text):
+        phase = item.get("phase")
+        if not text.strip() or phase == "final_answer" or is_final_answer(text):
             return None
         step["kind"] = "message"
         step["text"], _ = clip_activity_text(text.strip(), ACTIVITY_TEXT_MAX)
+        if phase == "commentary":
+            step["phase"] = phase
     elif kind == "reasoning":
         text = MARKDOWN_BOLD_RE.sub(r"\1", str(item.get("text") or "")).strip()
         if not text:
