@@ -486,6 +486,33 @@ async function effortSaved(page, label) {
       animations: "disabled",
     });
     await page.setViewportSize({ width: 1440, height: 950 });
+    // Laundry schedule: preserve the equations and the Markdown around them.
+    const inlineMath = String.raw`\(30 + 45 + 20 = 95\)`;
+    const displayMath = String.raw`\[
+15 + 95 = 110
+\]`;
+    const dollarMath = "$$15 + 95 = 110$$";
+    const laundry = await page.evaluate(({ inlineMath, displayMath, dollarMath }) => {
+      const answer = renderMarkdown([
+        "Each load takes " + inlineMath + " minutes.",
+        "**Earliest finish:**",
+        displayMath,
+        dollarMath,
+        "The supply budget is $15.",
+      ].join("\n\n"), "message");
+      return {
+        inline: [...answer.querySelectorAll("p > code")].map(node => node.textContent),
+        blocks: [...answer.querySelectorAll("pre > code")].map(node => node.textContent),
+        label: answer.querySelector("strong")?.textContent,
+        lastLine: answer.lastElementChild.textContent,
+      };
+    }, { inlineMath, displayMath, dollarMath });
+    assert.deepEqual(laundry, {
+      inline: [inlineMath],
+      blocks: [displayMath, dollarMath],
+      label: "Earliest finish:",
+      lastLine: "The supply budget is $15.",
+    });
     // A message that would keep the parser busy, or is very long, stays plain text.
     assert.deepEqual(
       await page.evaluate(() => {
