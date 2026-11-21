@@ -108,6 +108,14 @@ const off = {enabled: false, available: true, state: 'off', configured_name: 'Ho
       await page.waitForFunction(() => !document.querySelector('#remote-control-name').disabled);
       assert.equal(await note.textContent(), '', 'the locked note goes after Turn off');
 
+      // A name typed while off gives way to the name in use when remote control is turned on from elsewhere.
+      await input.fill('Typed, not saved');
+      remote = {...remote, enabled: true, state: 'ready', configured_name: 'Boat house'};
+      await page.waitForFunction(() => document.querySelector('#remote-control-name').value === 'Boat house', null, {timeout: 20000});
+      assert.equal(await input.isDisabled(), true, 'the field locks when remote control is on');
+      await page.locator('#remote-control-stop').click();
+      await page.waitForFunction(() => !document.querySelector('#remote-control-name').disabled);
+
       // Back returns to Settings; the X would have closed the window alone.
       await page.locator('#connection-back').click();
       await page.waitForFunction(() => document.querySelector('#settings').open && !document.querySelector('#connection-dialog').open);

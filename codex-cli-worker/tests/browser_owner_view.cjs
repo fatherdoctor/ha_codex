@@ -1,9 +1,10 @@
 // What the owner sees on a phone (390 px) and on a desktop (1280 px), checked on every pull request:
 // 1. Settings shows its sections in order, and nothing in it is wider than the window.
 // 2. The ChatGPT and GitHub panels show their main controls, in order and inside the window, when signed out,
-//    while signing in and when signed in.
-// 3. The Remote connection window shows Turn on when remote control is off, and the pairing code, Copy code,
-//    New pairing code and Turn off when it is on, inside the window.
+//    while signing in and when signed in. The ChatGPT status line says which of signed out and signed in it is,
+//    because both states show Sign in and Sign out.
+// 3. The Remote connection window shows Save name and Turn on when remote control is off, and the pairing code,
+//    Copy code, Save name, New pairing code and Turn off when it is on, inside the window.
 // 4. A chat's final answer shows once, under its in-between messages, which show once each and in order: in the saved
 //    first chat, whose stored steps hold a copy of the answer, and in a new chat sent from the page.
 // The checks look at structure (which controls show, their order, their boxes), not at pixels. The panel states
@@ -40,6 +41,8 @@ const GITHUB = {
   'signed in': {...githubBase, state: 'connected', kind: 'app', account: {login: 'example-owner'},
     connected_at: '2026-11-15T13:15:00Z', expires_at: '2099-01-01T00:00:00Z', permissions: {contents: 'write'}},
 };
+// The ChatGPT status line in the two states whose controls are the same.
+const CHATGPT_STATUS = {'signed out': 'Not signed in to ChatGPT.', 'signed in': 'Signed in using ChatGPT.'};
 // The controls each panel shows, in page order. A link counts by its text; a sign-in or pairing code counts as
 // "code". While signing in and in the Remote window the list is exact. Signed out and signed in it holds the main
 // controls, which must show in this order; other controls may show between them.
@@ -62,11 +65,12 @@ const REMOTE = {
     pairing_qr: PAIRING_QR, pairing_url: 'https://chatgpt.com/codex/pair?pairing_code=SAMPLE-NOT-VALID'},
 };
 const REMOTE_CONTROLS = {
-  off: {exact: true, names: ['Turn on']},
-  on: {exact: true, names: ['Continue in ChatGPT', 'code', 'Copy code', 'New pairing code', 'Turn off']},
+  // Save name shows in both states. While remote control is on, the button is disabled but still shows.
+  off: {exact: true, names: ['Save name', 'Turn on']},
+  on: {exact: true, names: ['Continue in ChatGPT', 'code', 'Copy code', 'Save name', 'New pairing code', 'Turn off']},
 };
 
-/** Each shown element under root that reaches past the window's sides, after clipping by a scrolling parent. */
+/** Each shown element under root that reaches past the window's sides, after clipping by a parent that clips. */
 function outsideWindow(root) {
   // This function and shownControls run in the page, one at a time, so each carries its own helper.
   const shown = el => el.checkVisibility({visibilityProperty: true});
@@ -86,12 +90,13 @@ function outsideWindow(root) {
   }
   const pageWidth = document.documentElement.scrollWidth;
   if (pageWidth > innerWidth) found.push(`page scrolls sideways to ${pageWidth}`);
-  // A box that scrolls hides what is past its side, so the loop above cannot see it: the box must not scroll
-  // sideways. Code blocks and text fields may.
+  // A box that scrolls or clips hides what is past its side, so the loop above cannot see it: the box must hold
+  // all of its content across. Code blocks and text fields may scroll sideways. A box 1 px wide or less is text
+  // for screen readers only, which clips its content on purpose.
   for (const el of [root, ...root.querySelectorAll('*')]) {
-    if (!shown(el) || el.matches('pre, pre *, textarea')) continue;
-    if (['auto', 'scroll'].includes(getComputedStyle(el).overflowX) && el.scrollWidth > el.clientWidth + 1)
-      found.push(`${el.tagName.toLowerCase()}#${el.id} scrolls sideways (${el.scrollWidth} > ${el.clientWidth})`);
+    if (!shown(el) || el.matches('pre, pre *, textarea') || el.clientWidth <= 1) continue;
+    if (['auto', 'scroll', 'hidden', 'clip'].includes(getComputedStyle(el).overflowX) && el.scrollWidth > el.clientWidth + 1)
+      found.push(`${el.tagName.toLowerCase()}#${el.id} hides content past its side (${el.scrollWidth} > ${el.clientWidth})`);
   }
   return found;
 }
@@ -180,6 +185,8 @@ async function checkAccounts(browser, viewport, state, label) {
     await page.locator('#github-status').filter({hasNotText: 'Loading'}).waitFor();
   }
   await assertControls(page, '#chatgpt-section', CHATGPT_CONTROLS[state], `${label} ChatGPT ${state}`);
+  if (state in CHATGPT_STATUS)
+    assert.equal(await page.locator('#login-status').textContent(), CHATGPT_STATUS[state], `${label} ChatGPT ${state}: status line`);
   await assertControls(page, '#github-section', GITHUB_CONTROLS[state], `${label} GitHub ${state}`);
   assert.deepEqual(await page.locator('#accounts-section').evaluate(outsideWindow), [], `${label} ${state}: accounts fit`);
   assert.deepEqual(errors, [], `${label} ${state}: no script error`);
