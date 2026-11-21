@@ -6,8 +6,8 @@
 - **Home Assistant MCP, on by default.** The new option **Enable Home Assistant MCP** gives Codex the tools of the
   bundled Home Assistant MCP server (hass-mcp 0.6.0, as in the Claude Code app). Codex can find entities by name, area
   or domain and read automations, dashboards, history, statistics and the error log without asking. It can also
-  control a device, call a service, restart Home Assistant or edit a dashboard, and asks you before each such call
-  with a card on the chat page. Scheduled runs get the tools too. The image installs hass-mcp at a fixed version,
+  control a device, call a service, restart Home Assistant or edit a dashboard; each such call is answered as the
+  chat's permission mode says (in Default and Read only, Codex asks you with a card on the chat page). Scheduled runs get the tools too. The image installs hass-mcp at a fixed version,
   checked by hash, and grows by about 60 MB.
 - **A warning when something needs you.** On the chat page, the Settings cog turns into a warning symbol while
   something needs you. On a phone, the conversations button shows it too. Yellow means an approval or a schedule
