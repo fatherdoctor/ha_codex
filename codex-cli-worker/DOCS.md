@@ -279,7 +279,7 @@ The chat shows the outcome under the answer: a passing check as a short confirma
 
 A conversation from the chat page is a Codex thread, and the ChatGPT app shows the same thread when remote control is on. From 0.3.3 the page sends its fixed rules as Codex developer instructions when it starts a thread. The thread's first message is your own text, so the app shows your words as the message and as the title, not the page's rules.
 
-Details that change from one message to the next are not part of the rules: the backup folder, the documents and images you attached, and the notes on direct API calls (the `HA_TOKEN` option), the local documentation and GitHub. Codex reads them from the `exchange_info` tool at the start of each message. Codex keeps the developer instructions a thread started with, so an update of this app changes the rules of a new thread; an older thread keeps its rules until Codex compacts it.
+Details that change from one message to the next are not part of the rules: the backup folder, the documents and images you attached, and the notes on direct API calls (the `HA_TOKEN` option), the local documentation and GitHub. Codex reads them from the `exchange_info` tool before its first command, file change or tool call in a message, and when your message can refer to a file, a document or something it cannot see in the chat, such as "Summarize this" with a document attached. A message that Codex can answer from what it knows and from the chat, such as a greeting or a one-number reply, needs no tool call, so it gets its answer in one step. Codex keeps the developer instructions a thread started with, so an update of this app changes the rules of a new thread; an older thread keeps its rules until Codex compacts it.
 
 A thread that this page did not start has no page rules: a thread started in the ChatGPT app, or one started by 0.3.2 or earlier. A message from the page on such a thread starts with a one-line note that tells Codex to call `exchange_info`, which then also returns the rules. A thread from 0.3.2 or earlier also keeps that version's instructions in its history, so it can still answer in the app with the page's JSON format. The page still reads such a JSON answer.
 
@@ -655,9 +655,10 @@ copy the text from `starter_agents.md` into the editor.
 The editor under **Settings** writes the file without a question. The folder is not one of the places Codex may write on its own, so when you ask a chat to change the file, Codex asks for your approval first.
 
 From **0.3.4**, Codex no longer looks for the file in every message. Codex loads the file when a chat
-starts. In each message the worker tells Codex whether the file exists and when it last changed, and Codex reads
-it again only after a change. A change you make to the file still reaches a chat that is already open, on its
-next message.
+starts, and the page's rules tell it never to look for the file with a command. When Codex calls `exchange_info`
+in a message, the worker tells it whether the file exists and when it last changed, and Codex reads it again only
+after a change. A change you make to the file still reaches a chat that is already open, on its next message that
+runs a command, changes a file or calls a tool; a message that Codex answers directly uses the copy it has.
 
 The optional `HA_TOKEN` app option is passed to Codex subprocesses as the `HA_TOKEN` environment variable. Configure it only if you want Codex tasks to call Home Assistant APIs directly. A Home Assistant long-lived access token inherits its user's permissions; use a dedicated user with permissions appropriate for the intended work.
 
