@@ -54,6 +54,7 @@ options:
   ha_url: ""
   remote_control_name: Home Assistant
   install_integration: true
+  home_assistant_mcp: true
 schema:
   codex_model: str
   model_pin: str?
@@ -78,3 +79,4 @@ schema:
   remote_control_name: str?
   interactions_to_keep: int(10,100)?
   install_integration: bool
+  home_assistant_mcp: bool

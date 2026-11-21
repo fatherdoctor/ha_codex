@@ -315,12 +315,18 @@ def worker_app_server_args(root: Path) -> tuple[list[str], list[str]]:
 
     server.build_app_server_args is the launch the chat page uses. Only the binary and each tool program's
     command change: the command becomes the relay, which then starts the same program with the same arguments.
+
+    The option home_assistant_mcp is off here: these proofs cover the worker's own tool programs, and the bundled
+    hass-mcp (installed only in the image, with a Supervisor token) cannot start on a test runner, so Codex would
+    report it failed after its 20 second start timeout. test_ha_mcp_option.py covers that server's launch.
     """
+    import hass_mcp
     import server
 
     relay = root / "relay.py"
     relay.write_text(RELAY, encoding="utf-8")
-    args = server.build_app_server_args()
+    with patch.object(hass_mcp, "enabled", lambda _options: False):
+        args = server.build_app_server_args()
     assert args[1] == "app-server", args[:2]
     args = args[2:]
     names = []

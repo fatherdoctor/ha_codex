@@ -81,6 +81,42 @@ Each exchange has a separate temporary data credential, revoked on completion an
 
 API references: [Home Assistant REST history](https://developers.home-assistant.io/docs/api/rest/#get-apihistoryperiodtimestamp) and the [Core recorder WebSocket command definitions](https://github.com/home-assistant/core/blob/2026.9.4/homeassistant/components/recorder/websocket_api.py).
 
+## Home Assistant MCP
+
+The option **Enable Home Assistant MCP** (`home_assistant_mcp`, on by default) gives Codex the tools of
+[hass-mcp](https://github.com/voska/hass-mcp) 0.6.0, the Home Assistant MCP server that the Claude Code app for
+Home Assistant also bundles. With these tools Codex finds entities by name, area or domain, reads automations,
+dashboards, history, statistics and the error log without a search through files, and, when you allow it,
+controls a device, calls a service, restarts Home Assistant or edits a dashboard.
+
+- Codex gets the tools in a chat on the chat page, in a task from `codex_cli.start_task`, in a scheduled run and
+  under remote control ([Ways in](#ways-in)).
+- The tools that only read change nothing, so Codex uses them without asking, in every permission mode.
+- Each call of a tool that changes something needs an answer: `entity_action`, `call_service_tool`,
+  `restart_ha` and the dashboard tools (`set_dashboard_config`, `add_card`, `update_card`, `remove_card`,
+  `move_card`, `add_view`, `remove_view`, `update_view`, `restore_dashboard`). The request shows on the chat page
+  as a card with the tool's arguments in full and what the call does, the same as for the `call` tool
+  ([Changes to the house: the `call` tool](#changes-to-the-house-the-call-tool)). Allow once runs that one call;
+  Codex asks again before the next one. Your permission mode decides who answers, as for the `call` tool: in
+  Default and Read only, Codex asks you; in Auto-review, Codex's reviewer can allow the call without asking you;
+  in Full access, the call runs without a question ([Permission modes](#permission-modes)).
+- A card can show **Allow once** only when it shows the whole call. A write longer than 32,000 characters
+  shows Allow turned off. A whole dashboard of ordinary size can be that long: about 70 small cards reach
+  32,000 characters. Codex can still change the dashboard with the card and view tools.
+- In a scheduled run nobody watches the chat, so a request waits on the chat page until you answer it.
+- The tools show what Home Assistant returns. That includes attributes such as a camera's picture link, which
+  holds a short-lived access token. Your `AGENTS.md` can tell Codex how to treat such values.
+- The server uses the app's Supervisor token. Codex starts it outside the sandbox, and no command that Codex
+  runs in the sandbox can read the token: on the chat page the server reads it from a folder the sandbox hides,
+  and under remote control the relay process holds it for its whole run and passes it to the server in a variable
+  that commands do not inherit. A command that runs outside
+  the sandbox (Full access, or an approved request for more access) can read the token.
+- If Home Assistant does not answer, the server fails to start and the chat starts without it.
+- The image installs hass-mcp and each package it needs at a fixed version, checked by hash
+  (`hass-mcp.requirements.txt`). It adds about 60 MB to the image.
+
+Turn the option off to remove the tools. The change takes effect when the app restarts.
+
 ## Local Home Assistant documentation
 
 From **0.1.70**, the worker keeps a copy of the official Home Assistant
@@ -445,17 +481,22 @@ Codex can be reached three ways: the chat page, the ChatGPT app paired through r
 
 | Request | Chat page | ChatGPT app | codex_cli.start_task |
 |---|---|---|---|
-| Read an entity's state or find an entity | `home_assistant.verify` | `home_assistant_relay.read` | `home_assistant.verify` |
-| Read history or long-term statistics | `home_assistant_data.history`, `home_assistant_data.statistics` | not available | `home_assistant_data.history`, `home_assistant_data.statistics` |
-| Control a device or call a service | `home_assistant_call.call` | `home_assistant_call.call` | `home_assistant_call.call` |
+| Read an entity's state or find an entity | `home_assistant.verify`, `home_assistant_mcp.get_entity`, `home_assistant_mcp.list_entities`, `home_assistant_mcp.get_entities_by_area`, `home_assistant_mcp.search_entities_tool`, `home_assistant_mcp.domain_summary_tool`, `home_assistant_mcp.system_overview`, `home_assistant_mcp.get_version` | `home_assistant_relay.read`, `home_assistant_mcp.get_entity`, `home_assistant_mcp.list_entities`, `home_assistant_mcp.get_entities_by_area`, `home_assistant_mcp.search_entities_tool`, `home_assistant_mcp.domain_summary_tool`, `home_assistant_mcp.system_overview`, `home_assistant_mcp.get_version` | `home_assistant.verify`, `home_assistant_mcp.get_entity`, `home_assistant_mcp.list_entities`, `home_assistant_mcp.get_entities_by_area`, `home_assistant_mcp.search_entities_tool`, `home_assistant_mcp.domain_summary_tool`, `home_assistant_mcp.system_overview`, `home_assistant_mcp.get_version` |
+| Read history or long-term statistics | `home_assistant_data.history`, `home_assistant_data.statistics`, `home_assistant_mcp.get_history`, `home_assistant_mcp.get_history_range`, `home_assistant_mcp.get_statistics`, `home_assistant_mcp.get_statistics_range` | `home_assistant_mcp.get_history`, `home_assistant_mcp.get_history_range`, `home_assistant_mcp.get_statistics`, `home_assistant_mcp.get_statistics_range` | `home_assistant_data.history`, `home_assistant_data.statistics`, `home_assistant_mcp.get_history`, `home_assistant_mcp.get_history_range`, `home_assistant_mcp.get_statistics`, `home_assistant_mcp.get_statistics_range` |
+| Read automations, dashboards or the error log | `home_assistant_mcp.list_automations`, `home_assistant_mcp.list_dashboards`, `home_assistant_mcp.get_dashboard_config`, `home_assistant_mcp.list_view_sections`, `home_assistant_mcp.list_dashboard_backups`, `home_assistant_mcp.get_error_log` | `home_assistant_mcp.list_automations`, `home_assistant_mcp.list_dashboards`, `home_assistant_mcp.get_dashboard_config`, `home_assistant_mcp.list_view_sections`, `home_assistant_mcp.list_dashboard_backups`, `home_assistant_mcp.get_error_log` | `home_assistant_mcp.list_automations`, `home_assistant_mcp.list_dashboards`, `home_assistant_mcp.get_dashboard_config`, `home_assistant_mcp.list_view_sections`, `home_assistant_mcp.list_dashboard_backups`, `home_assistant_mcp.get_error_log` |
+| Control a device or call a service | `home_assistant_call.call`, `home_assistant_mcp.entity_action`, `home_assistant_mcp.call_service_tool`, `home_assistant_mcp.restart_ha` | `home_assistant_call.call`, `home_assistant_mcp.entity_action`, `home_assistant_mcp.call_service_tool`, `home_assistant_mcp.restart_ha` | `home_assistant_call.call`, `home_assistant_mcp.entity_action`, `home_assistant_mcp.call_service_tool`, `home_assistant_mcp.restart_ha` |
+| Change a dashboard | `home_assistant_mcp.set_dashboard_config`, `home_assistant_mcp.add_card`, `home_assistant_mcp.update_card`, `home_assistant_mcp.remove_card`, `home_assistant_mcp.move_card`, `home_assistant_mcp.add_view`, `home_assistant_mcp.remove_view`, `home_assistant_mcp.update_view`, `home_assistant_mcp.restore_dashboard` | `home_assistant_mcp.set_dashboard_config`, `home_assistant_mcp.add_card`, `home_assistant_mcp.update_card`, `home_assistant_mcp.remove_card`, `home_assistant_mcp.move_card`, `home_assistant_mcp.add_view`, `home_assistant_mcp.remove_view`, `home_assistant_mcp.update_view`, `home_assistant_mcp.restore_dashboard` | `home_assistant_mcp.set_dashboard_config`, `home_assistant_mcp.add_card`, `home_assistant_mcp.update_card`, `home_assistant_mcp.remove_card`, `home_assistant_mcp.move_card`, `home_assistant_mcp.add_view`, `home_assistant_mcp.remove_view`, `home_assistant_mcp.update_view`, `home_assistant_mcp.restore_dashboard` |
 | Send a notification | `home_assistant_call.call` | `home_assistant_call.call` | `home_assistant_call.call` |
 | Ask the owner a question or report the turn's state | `home_assistant_data.ask_owner`, `home_assistant_data.report_failure`, `home_assistant_data.exchange_info` | not available | `home_assistant_data.ask_owner`, `home_assistant_data.report_failure`, `home_assistant_data.exchange_info` |
 | Work with a GitHub repository | `codex_github.github_git` | not available | `codex_github.github_git` |
 | Propose a schedule | `codex_scheduling.propose_schedule`, `codex_scheduling.list_schedules` | not available | `codex_scheduling.propose_schedule`, `codex_scheduling.list_schedules` |
 
 - `codex_cli.start_task` starts the same kind of task as the chat page, so it gets the same tools.
-- Codex asks you before each `call`, on the chat page or in the ChatGPT app
-  ([Changes to the house: the `call` tool](#changes-to-the-house-the-call-tool)).
+- Each `call` and each `home_assistant_mcp` tool that changes something needs an answer, on the chat page or in
+  the ChatGPT app ([Changes to the house: the `call` tool](#changes-to-the-house-the-call-tool)). In Default and
+  Read only, Codex asks you; in Auto-review, Codex's reviewer can allow it without asking you; in Full access, it
+  runs without a question ([Permission modes](#permission-modes)). The
+  `home_assistant_mcp` tools are there only while [Enable Home Assistant MCP](#home-assistant-mcp) is on.
 - File edits and shell commands use Codex's own tools on every way in, and the [sandbox](#sandbox) applies on every
   way in. On the chat page and for `codex_cli.start_task`, a request for more access shows on the chat page as a
   [permission request](#permission-requests). The ChatGPT app shows Codex's own requests in the app instead, as
@@ -561,7 +602,7 @@ is not evidence that the requested permissions were granted.
 - **One supervised process.** The app runs `codex app-server --listen unix://<private socket> --remote-control` in the foreground and starts it again, with a growing delay, if it exits. **Turn off** stops it.
 - **Machine name.** The ChatGPT app lists this machine as **Home Assistant** unless you change the **Remote control machine name** option on the app's Configuration tab, or in **Settings** > **Remote connection** while remote control is off (the field there saves the same option; the page showed the name only in 0.3.5 and 0.3.6). The name from the Configuration tab takes effect when the app restarts; the name saved on the page takes effect the next time you turn remote control on. Pairing is kept with the Codex sign-in, so the app should show the new name the next time remote control connects; if it still shows the old name, choose **New pairing code**. Codex has no name setting, so the app starts it with that name as its host name inside a private namespace. If the private name namespace is unavailable, the page explains that Codex is using its existing host name.
 - **Pairing.** The manual code is shown as large text. A QR for the app link appears only when an app-link code is available; otherwise type the manual code or request a new code. Pairing is kept in the app's private storage with the Codex sign-in, so a restart does not ask for it again. **New pairing code** asks Codex for a fresh one when the ChatGPT app has lost this machine.
-- **Automatic Core address and first-run reads.** Relay commands receive the discovered or explicitly overridden `HA_URL`; an owner-configured `HA_TOKEN` remains optional. The separate observational read tool needs no hand-made token. Relay processes never receive the Supervisor token or a chat turn's private MCP capabilities; from **0.3.6** they get the `call` tool with a key of their own, kept out of the commands Codex runs. Never print credentials; approval does not create them.
+- **Automatic Core address and first-run reads.** Relay commands receive the discovered or explicitly overridden `HA_URL`; an owner-configured `HA_TOKEN` remains optional. The separate observational read tool needs no hand-made token. While **Enable Home Assistant MCP** is on (the default), the relay process holds the app's Supervisor token for its whole run, to start the Home Assistant MCP server; with the option off, the relay gets no Supervisor token. The commands Codex runs in the sandbox do not see that token, but a command that runs outside the sandbox can read it ([Home Assistant MCP](#home-assistant-mcp)). Relay processes never receive a chat turn's private MCP capabilities; from **0.3.6** they get the `call` tool with a key of their own, kept out of the commands Codex runs. Never print credentials; approval does not create them.
 - **No command check of its own (0.3.6).** Commands from the ChatGPT app do not pass through this app's Allow and Deny buttons. They are held by Codex's own approval flow on the phone, the sandbox mode of the thread, and Codex's managed requirements (`/etc/codex/requirements.toml`, read-only): the values of the four permission modes and no hooks (the full-access sandbox and the `never` policy only while the Full access switch is on), so a hook planted in `/config` or Codex's home never runs. The managed config (`/etc/codex/managed_config.toml`, read-only) holds one setting: the commands Codex runs never see the tools' keys (`HA_*_CAPABILITY`), whatever a client sends with a thread. The app ships no hook, no command-prefix rules, no rule-load self-test and no config watch, so **Turn on** is always available.
   - The phone uses Codex's own approval card, not this page's buttons: review what will change, where and the effect, then allow or deny that request. An allowed command runs outside the sandbox.
   - A valid owner `allow` rule in a Codex `.rules` file can let a matching command run outside the sandbox without a request. The app does not read or block owner rules.

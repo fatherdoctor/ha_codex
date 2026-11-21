@@ -74,7 +74,8 @@ Please use extra care when changing or reviewing:
 - Codex CLI authentication and logout behavior.
 - Worker API token generation, storage, rotation, or validation.
 - Home Assistant Ingress validation.
-- Home Assistant Supervisor or Core API calls.
+- Home Assistant Supervisor or Core API calls, including the bundled Home Assistant MCP server (`hass_mcp.py`,
+  `hass_mcp_launch.py`), which holds the Supervisor token and must never pass it to a command Codex runs.
 - File reads and writes under `/config`.
 - Task execution, cancellation, user replies, and task logs.
 - AppArmor, container permissions, networking, mounted paths, and app/add-on configuration.
