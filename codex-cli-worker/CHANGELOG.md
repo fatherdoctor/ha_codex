@@ -174,6 +174,10 @@
 - The new Codex host (see "Under the hood") is not connected. Every message still starts its own Codex process.
 
 ### Under the hood
+- A new browser check, `browser_owner_view.cjs`, opens the page at 390 and 1280 px wide. It checks that Settings
+  shows its sections in order and fits the window. It checks the main controls of the ChatGPT and GitHub panels
+  signed out, while signing in and signed in, and the Remote connection window off and on. It also checks that a
+  chat shows its final answer once. It checks structure, not pixels. The staged workflow `ci/verification.yaml` runs it.
 - Upgrade code for data that only test installs held is removed. The schedule file no longer adds the `author`,
   `chat_id` and `model` columns to an old table: a new file has them from the start, in the same order. Startup no
   longer looks for an exact copy of the house rules that versions before 0.3.0 bundled in Codex's home folder. An
