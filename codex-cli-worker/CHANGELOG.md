@@ -184,7 +184,6 @@
   runs on the same machine), not as a piece of hardware.
 
 ### Known issues
-- Remote control still uses its own keys. The tool requests of a chat no longer do (see "Under the hood").
 - The new Codex host (see "Under the hood") is not connected. Every message still starts its own Codex process.
 
 ### Under the hood
@@ -201,6 +200,10 @@
   adds to every tool call, and the worker answers it only while that chat's exchange runs. A sub-agent that the chat
   starts counts as the chat, and a thread that one chat holds is never given to another. The sandbox already stops a
   command in Read only, Default and Auto-review from reaching the tool sockets.
+- Remote control no longer uses secret keys for its tools either. Its call tool has a socket of its own, so the socket
+  tells the worker that a request comes from the ChatGPT app, and the call and read tools answer only while the
+  remote-control process runs. A test runs the sandbox check on the pinned Codex inside the remote-control sandbox
+  too: in Read only, Default and Auto-review no command reaches any of the worker's sockets.
 - A new module, `codex_host.py`, can keep one Codex process running and hold each chat as a thread in it, with at
   most three chats loaded at a time. Nothing starts it in this version. A later change connects it, with an option to
   turn it off.

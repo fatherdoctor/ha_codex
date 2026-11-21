@@ -114,8 +114,8 @@ def remote_env(base: dict[str, str]) -> dict[str, str]:
     return env
 
 
-# The tool keys a command must never see; server.SHELL_EXCLUDED_ENV sets the same pattern on each launch,
-# and the managed config (/etc/codex/managed_config.toml) sets it above every client setting.
+# The names a command must never see (since D-CX-KEYS only HA_MCP_CAPABILITY, the token of the bundled hass-mcp);
+# server.SHELL_EXCLUDED_ENV sets the same pattern on each launch, and the managed config (/etc/codex/managed_config.toml) sets it above every client setting.
 TOOL_KEY_EXCLUDE = "HA_*_CAPABILITY"
 
 
@@ -241,8 +241,8 @@ class Supervisor:
 
         env_factory gives the environment of the probe (the namespace check), which
         runs for every Start request. launch_env_factory, when given, gives the environment of a real launch
-        only; it may issue keys, because a probe or a second Start never calls it. Without it, env_factory
-        serves both.
+        only; it may start the launch's read session, because a probe or a second Start never calls it.
+        Without it, env_factory serves both.
         """
         self.control_factory = control_factory
         self.instructions_factory = instructions_factory
@@ -405,7 +405,7 @@ class Supervisor:
                 # Namespace probing and environment refresh can call Supervisor.
                 # Keep both outside the lock used by snapshot, reads and stop.
                 command = self._command("app-server", "--listen", f"unix://{path}", "--remote-control")
-                # The keys of a launch are made here and nowhere else: a probe must not end the running relay's.
+                # A launch's read session starts here and nowhere else: a probe must not end the running relay's.
                 environment = remote_env(self.launch_env_factory())
                 with self.lock:
                     if self.wake.is_set() or not self.enabled():

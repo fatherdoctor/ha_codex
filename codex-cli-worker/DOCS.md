@@ -418,14 +418,15 @@ A scheduled run has the same tool. Its question waits in the run's chat until an
 ([Scheduled runs](#scheduled-runs)).
 
 The ChatGPT app has the same tool while remote control is on. There, Codex asks in the app before each call; the
-worker does not see that answer. The tool's key in the app holds while the remote-control process runs, and each
-start of that process makes a new one. The checks below hold in the app too.
+worker does not see that answer. In the app the tool uses its own socket, which answers only while the
+remote-control process runs. The checks below hold in the app too.
 
-The tool gives Codex no token. Its bridge passes the request to the worker over a private socket, with a key that
-is valid for the running message only. The worker sends the call to Home Assistant once, with its own access, and
+The tool gives Codex no token. Its bridge passes the request to the worker over a private socket, with the thread id
+that Codex adds to the call. The worker sends the call to Home Assistant once, with its own access, and
 checks these things first, in every mode:
 
-- A request without the current key of a running chat sends nothing.
+- On a chat's socket, a request that does not name a chat with a running message sends nothing. On the app's
+  socket, a request while remote control is off sends nothing.
 - The service must be `domain.service`. `entity_id`, `device_id`, `area_id`, `floor_id` and `label_id` go in
   `target`, the other fields in `data`. A request in any other form sends nothing.
 
@@ -460,10 +461,14 @@ connection. A command that runs outside the sandbox - one you approve when Codex
 one that Codex's reviewer approves in Auto-review, or any command in Full access - can reach the sockets, and can
 then do what the tools can do. That approval is the protection, as it is for the command itself.
 
-Remote control keeps its own keys (`HA_*_CAPABILITY`), kept out of the commands that its Codex runs with Codex's
-`shell_environment_policy` setting. The remote-control launch sets it, and `/etc/codex/managed_config.toml` in the
-image sets it for every client. A thread that the ChatGPT app starts cannot change it, because the managed file
-outranks a thread's own settings.
+Remote control holds no key either (0.4). Its call tool and its read tool each have a socket of their own, so
+the socket tells the worker that a request comes from the app, and both answer only while the remote-control
+process runs. The same sandbox keeps the commands of the app's Codex from those sockets, and the same approval
+covers a command that runs outside it. With the option **Enable Home Assistant MCP** on, the relay's Codex holds
+the Supervisor token as `HA_MCP_CAPABILITY` for the bundled hass-mcp server; Codex's `shell_environment_policy`
+setting keeps every `HA_*_CAPABILITY` name out of the commands it runs. The remote-control launch sets it, and
+`/etc/codex/managed_config.toml` in the image sets it for every client. A thread that the ChatGPT app starts cannot
+change it, because the managed file outranks a thread's own settings.
 
 These checks do not cover a command that uses the `HA_TOKEN` option (see "AGENTS.md and HA_TOKEN").
 
@@ -548,7 +553,7 @@ were redundant with `file,` and have been removed. Tool sandbox labels retain th
 `network netlink raw,` rule; the relay alone keeps its parent transport access. Native approvals
 and the managed requirements remain in effect. The relay starts in `/config`.
 
-**First run: no hand-made token for reads.** Pair remote control, then ask for entity ids or current state. The `home_assistant_relay.read` tool uses the worker's existing Supervisor access for bounded, observational entity listings and state readback. The relay receives only a temporary read capability; the Supervisor credential stays in the worker. The page shows the discovered Core address and explains the read tool. Capability rotation, relay exit or stopping revokes a pending read; late results are discarded. This tool is separate from a page task's verification/history tools and cannot call services, reload, approve an action or read credential stores. From **0.3.6**, a change goes through the separate `home_assistant_call` `call` tool, which Codex asks you for in the app before each call (see "Changes to the house: the `call` tool").
+**First run: no hand-made token for reads.** Pair remote control, then ask for entity ids or current state. The `home_assistant_relay.read` tool uses the worker's existing Supervisor access for bounded, observational entity listings and state readback. The relay receives no key for it; the Supervisor credential stays in the worker, and a command in the sandbox cannot reach its socket. The page shows the discovered Core address and explains the read tool. A new relay launch, relay exit or stopping revokes a pending read; late results are discarded. This tool is separate from a page task's verification/history tools and cannot call services, reload, approve an action or read credential stores. From **0.3.6**, a change goes through the separate `home_assistant_call` `call` tool, which Codex asks you for in the app before each call (see "Changes to the house: the `call` tool").
 
 Use `{"operation":"states","domain":"light","limit":10}` to list a page, then `{"operation":"state","entity_id":"light.sample","attributes":["friendly_name","brightness"]}` for selected observational attributes. Lists are sorted and return `next_offset`; limits are 1–50 and the default is 10. State strings longer than 512 characters are explicitly marked truncated. Credential-like entity ids and undocumented attributes are refused, and recognized credential values are redacted. A state read does not prove automation behavior. Responses are capped at 64 KiB and Core responses at 16 MiB; request a smaller page or fewer attributes when a read is too large. One relay read runs at a time. Downloads above 16 MiB return an explicit error asking for a single entity. Password-mode input_text entities and credential-like id substrings are excluded from both listings and state readback.
 
