@@ -134,4 +134,12 @@ RUN chmod 0444 /usr/share/ha_codex/policy.json
 
 RUN chmod a+x /run.sh /server.py
 
+# Bundle spreadsheet support in the system Python used by Codex's sandbox.
+# Both MIT-licensed wheels are pure Python and work on either image architecture.
+RUN printf '%s\n' \
+        'openpyxl==3.1.5 --hash=sha256:5282c12b107bffeef825f4617dc029afaf41d0ea60823bbb665ef3079dc79de2' \
+        'et-xmlfile==2.0.0 --hash=sha256:7a91720bc756843502c3b7504c77b8fe44217c85c537d85037f0f536151b2caa' \
+    | python3 -m pip install --break-system-packages --no-cache-dir --no-compile \
+        --only-binary=:all: --require-hashes -r /dev/stdin
+
 CMD ["/run.sh"]

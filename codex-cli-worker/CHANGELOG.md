@@ -3,6 +3,7 @@
 ## 0.4.0 (unreleased)
 
 ### What's new
+- The app includes openpyxl so Codex can read and create Excel workbooks offline.
 - **New chats start on the account's default model and level.** With the model option on `default`, a chat runs on
   the model Codex's model list marks as the account's default, at the reasoning level Codex gives it, instead of a
   fixed GPT-6.1 Sol at Medium. Without that list it uses the model Codex's status report names, then the newest Sol
