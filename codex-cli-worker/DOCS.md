@@ -73,7 +73,7 @@ means = [point["mean"] for point in series["points"] if point.get("mean") is not
 print({"buckets_with_mean": len(means), "lowest_mean": min(means) if means else None})
 ```
 
-The app includes `openpyxl` in the Python environment that Codex uses. Ask Codex to create or read an Excel workbook offline without installing a package.
+The app includes `openpyxl` in the Python environment that Codex uses. Codex can read existing Excel workbooks in read-only mode and create them in a writable workspace. Both work offline.
 
 Limits: up to 16 distinct IDs; seven days for raw history and 366 days for statistics; 64 queries per exchange, with one in progress at a time. `max_points` defaults to 1,000, must be at least the number of requested IDs, and accepts up to 5,000. Points are shared fairly across requested IDs, with unused shares and integer remainders redistributed. Each series in the file reports `available_points`, `returned_points`, and `truncated`. A truncated series contains only its first points and cannot represent the whole window. Query a smaller window, fewer IDs, or coarser statistics before analyzing a complete period. Responses from Home Assistant are limited to 1 MiB, each saved file to 4 MiB, and temporary files to 32 MiB per exchange. Receipts are limited to 8 KiB. Large requests fail with guidance to narrow the query; a full storage budget requires a new exchange. Statistics queries are also rejected before reaching Core when their expected bucket count exceeds 10,000. Files avoid the model's output limit; bounded queries still protect Home Assistant, memory and disk use. Longer analyses can use several smaller time windows, calculating compact summaries from each file.
 

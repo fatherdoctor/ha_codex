@@ -642,28 +642,31 @@ class SandboxWorkbook(unittest.TestCase):
     """The image ships spreadsheet support for the Python that Codex commands run."""
 
     def test_openpyxl_round_trip(self) -> None:
-        script = textwrap.dedent("""
-            from io import BytesIO
-            from openpyxl import Workbook, load_workbook
+        create = textwrap.dedent("""
+            from openpyxl import Workbook
 
             book = Workbook()
             book.active["A1"] = "=SUM(1,2)"
-            data = BytesIO()
-            book.save(data)
-            data.seek(0)
-            assert load_workbook(data).active["A1"].value == "=SUM(1,2)"
-            print("Workbook reopened")
+            book.save("example.xlsx")
+        """)
+        read = textwrap.dedent("""
+            from openpyxl import load_workbook
+
+            book = load_workbook("example.xlsx", read_only=True)
+            print(book.active["A1"].value)
+            book.close()
         """)
         with tempfile.TemporaryDirectory() as work:
-            for mode in ("read-only", "workspace-write"):
-                with self.subTest(mode=mode):
-                    result = subprocess.run(
-                        [CODEX, "sandbox", "--config", f'sandbox_mode="{mode}"',
-                         "--config", "check_for_update_on_startup=false", "--", "python3", "-I", "-c", script],
-                        cwd=work, capture_output=True, text=True, timeout=30,
-                    )
-                    self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertEqual(result.stdout.strip(), "Workbook reopened")
+            # Saving a workbook needs temporary files. Reading an existing workbook does not.
+            for mode, script, expected in (("workspace-write", create, ""), ("read-only", read, "=SUM(1,2)")):
+                result = subprocess.run(
+                    [CODEX, "sandbox", "--config", f'sandbox_mode="{mode}"',
+                     "--config", "check_for_update_on_startup=false", "--", "python3", "-I", "-c", script],
+                    cwd=work, capture_output=True, text=True, timeout=30,
+                )
+                self.assertEqual(result.returncode, 0, f"{mode}: {result.stderr}")
+                self.assertEqual(result.stdout.strip(), expected, mode)
+
 
 
 class CloseWaitsForChildren(unittest.TestCase):
