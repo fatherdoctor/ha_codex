@@ -76,6 +76,9 @@
   copy at `/data/agents_before_move.md`. If both places hold a file, nothing moves and the app logs a line.
 
 ### Changed
+- **The phone chat list is easier to use.** A tap on a chat keeps the side bar open; a tap on the page to its right
+  closes it. The selected chat shows its three-dot menu button where its date was, and the button is 44 pixels or
+  larger. A long press still opens the menu. A desktop window does not change.
 - **No copies of secret files.** The app keeps no readable copy of `secrets.yaml` or of any file under `.storage`.
   The full snapshot leaves them out, and a copy in a message's backup folder is deleted when the message ends, in
   every permission mode, also when you stop the message; the backup cleanup removes a copy that a restart left
