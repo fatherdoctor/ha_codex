@@ -103,7 +103,7 @@ When a task completes, fails or needs input, the worker fires the event `codex_c
 
 A task returns a structured response with `status`, `summary`, `question`, `details` and `choices`. The first four are plain strings, and the Home Assistant consumer or notification service that receives them decides how they look. `choices` is a list of up to three short answers that Codex offers with a question; it is empty otherwise. The chat page formats Markdown in them (see [Formatted messages](../../codex-cli-worker/DOCS.md#formatted-messages)).
 
-To ask for a preferred style, add an instruction to `/config/AGENTS.md`, which you can edit from the app's web page. Codex treats it as guidance, not as a formatting guarantee. For Markdown-friendly output, add this:
+To ask for a preferred style, add an instruction to the app's `AGENTS.md`, which you can edit from the app's web page (**Settings** > **Workspace instructions**). Codex treats it as guidance, not as a formatting guarantee. For Markdown-friendly output, add this:
 
 ```md
 For the final structured response, use concise Markdown in summary, question,

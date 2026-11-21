@@ -32,7 +32,7 @@
         <div class="brand">
           <span class="brand-icon" aria-hidden="true"
             ><img class="brand-mark-light" src="assets/brand/icon.svg" alt="" width="24" height="24" /><img class="brand-mark-dark" src="assets/brand/dark_icon.svg" alt="" width="24" height="24" /></span
-          ><strong>Codex</strong><span class="tag">for Home Assistant</span
+          ><strong>Codex</strong><span class="tag"><span>for</span><span>Home Assistant</span></span
           ><button
             id="close-sidebar"
             class="icon mobile"
@@ -124,6 +124,7 @@
         <div class="phone-thread-tools"><button id="phone-history" class="icon" aria-label="Open conversations" aria-describedby="attention-label">☰</button>
           <span id="phone-title">New chat</span></div>
         <p id="integration-notice" role="status" hidden></p>
+        <p id="retention-warning" role="status" hidden></p>
         <section id="session-banner" class="page-banner" role="alert" hidden>
           <p><strong>Your Home Assistant session expired.</strong> Reload the page to continue.</p>
           <div class="settings-actions"><button id="session-reload">Reload</button></div>
@@ -151,7 +152,7 @@
         <div class="compose-area">
           <!-- The hint sits above the composer, not above the chat: the integration notice stays next to the list. -->
           <section id="agents-hint" class="page-banner" role="status" hidden>
-            <p><strong>No workspace instructions yet.</strong> Codex works without /config/AGENTS.md. Write one to tell it the rules of your home.</p>
+            <p><strong>No workspace instructions yet.</strong> Codex works without an AGENTS.md file. Write one to tell it the rules of your home.</p>
             <div class="settings-actions"><button id="agents-hint-open">Write instructions</button
               ><button id="agents-hint-dismiss" class="subtle">Dismiss</button></div>
           </section>
@@ -404,7 +405,7 @@
           <summary>Advanced settings</summary>
           <label for="schedule-mode">Permissions</label><select id="schedule-mode"><option value="default">Default</option><option value="read-only">Read only</option></select>
           <p class="muted">Each run starts a new chat. A permission request waits in that chat; it is never allowed automatically.</p>
-          <p class="muted">Up to 24 runs per schedule and 64 scheduled or lead runs per UTC day. The assistant runs one task at a time.</p>
+          <p class="muted">Up to 24 runs per schedule and 64 scheduled runs per UTC day. The assistant runs one task at a time.</p>
           <div id="schedule-saved" hidden>
             <p id="schedule-state" class="muted"></p>
             <div class="settings-actions"><button id="schedule-toggle" type="button" class="subtle">Pause</button><button id="schedule-delete" type="button" class="subtle">Delete schedule</button></div>
@@ -540,15 +541,6 @@
               >
         </fieldset>
       </section>
-      <section id="settings-commands">
-        <h3>Commands</h3>
-        <p class="muted">
-          Type <kbd>/</kbd> at the start of the message box to see them, then
-          tap one or pick it with the arrow keys and Enter. The page runs them
-          itself; they are not sent to Codex.
-        </p>
-        <dl id="command-list" class="command-list"></dl>
-      </section>
       <section id="remote-control-section" data-own-dialog>
         <h3>Remote control from the ChatGPT app</h3>
         <p class="muted">
@@ -568,7 +560,7 @@
           runs outside the sandbox. This app adds no check of its own. Codex's
           managed requirements refuse a full-access request while Full access
           is off in Settings, and the sandbox hides credential files. Put limits
-          specific to your installation in /config/AGENTS.md. Codex may downgrade
+          specific to your installation in the app's AGENTS.md (Settings > Workspace instructions). Codex may downgrade
           a disallowed full-access relay request to read-only. Not every relay
           thread warning reaches this page; a missing warning does not prove
           the requested permissions were granted.

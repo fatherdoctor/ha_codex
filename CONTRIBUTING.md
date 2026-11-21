@@ -107,6 +107,8 @@ For the worker's standalone Python tests, without the Home Assistant pytest fixt
 python -m unittest discover -s codex-cli-worker/tests -v
 ```
 
+The tests never write under the app's real folders (`/data`, `/config`, `/addon_config`): under `pytest`, `codex-cli-worker/tests/conftest.py` fails a test that does, and `test_no_real_data_root.py` checks the chat tests in a plain `unittest` run. An older test run as root could leave `/data/schedules.sqlite3` behind, and that file makes the sandbox tests in `test_bwrap.py` and `test_cx_pair_f.py` fail. The tests do not remove it for you: if a `/data` folder is left over from such a run on a test machine (never on an install), remove it by hand before you run the suite.
+
 For a local chat UI check, start `python codex-cli-worker/tests/web_fixture.py`, redirecting its output to a file, then run `node codex-cli-worker/tests/browser_smoke.cjs` in another terminal with Playwright on `NODE_PATH`. Set `CODEX_CHAT_BROWSER=msedge` to use installed Edge when Playwright's Chromium is unavailable. The fixture uses temporary data and never contacts Home Assistant or starts Codex. Stop it after testing and before starting another instance on port 9137. See [verification checks](codex-cli-worker/VERIFICATION.md#validation) and [sandbox checks](codex-cli-worker/SANDBOX_TESTING.md) for those features.
 
 For integration changes, verify that Home Assistant can:

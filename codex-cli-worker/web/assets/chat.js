@@ -782,8 +782,8 @@ function controls() {
   else if (working && task?.browser_retry)
     notice = "Retrying the dashboard inspection. You can continue this chat when it finishes.";
   else if (working)
-    notice =
-      "Codex is working. Your response will appear here when it finishes.";
+    // A working chat shows no notice here; the in-chat "Working on your request" line says it.
+    notice = "";
   else if (task && !task.can_continue)
     notice =
       "This chat has no saved session to continue. Start a new chat and include the context you need.";
@@ -1080,14 +1080,24 @@ function renderAttachments(
     img.alt = attachment.revised_prompt || alt;
     img.loading = "lazy";
     img.decoding = "async";
-    img.onerror = () =>
+    img.onerror = async () => {
+      // The worker answers 410 for an upload its daily cleanup has removed.
+      let removed = false;
+      try {
+        removed = (await fetch(link.href)).status === 410;
+      } catch {
+        // Offline or blocked: show the general message.
+      }
       figure.replaceChildren(
         textNode(
           "p",
-          "This image is no longer available.",
+          removed
+            ? "Attachment removed after 7 days."
+            : "This image is no longer available.",
           "attachment-missing",
         ),
       );
+    };
     link.append(img);
     const caption = textNode("figcaption", "");
     caption.append(
@@ -1133,57 +1143,6 @@ function renderConfigCheck(check) {
   if (check.warnings)
     node.append(textNode("pre", `Warnings: ${check.warnings}`, "check-detail"));
   return node;
-}
-/**
- * Say which changed files have a copy of their previous version and which have
- * none. Copies are deleted after the retention period set in the app options.
- */
-function renderBackups(turn) {
-  const entries = Array.isArray(turn.backups) ? turn.backups : [];
-  const saved = entries.filter((entry) => entry.status === "saved");
-  const unsaved = entries.filter((entry) =>
-    ["missing", "unverified"].includes(entry.status),
-  );
-  /** Word a number of files: "1 file" or "3 files". */
-  const count = (list) =>
-    list.length === 1 ? "1 file" : `${list.length} files`;
-  const nodes = [];
-  if (saved.length) {
-    const node = textNode("div", "", "check check-valid backups-saved");
-    const days = state.catalog?.backup_retention_days;
-    node.append(
-      textNode("span", "✓", "check-mark"),
-      textNode(
-        "span",
-        turn.backups_removed
-          ? `Previous version saved for ${count(saved)}; the copies have since been removed`
-          : `Previous version saved for ${count(saved)}${days ? `, kept for ${days === 1 ? "1 day" : `${days} days`}` : ""}`,
-      ),
-    );
-    if (!turn.backups_removed)
-      node.append(
-        textNode(
-          "pre",
-          saved.map((entry) => `${entry.path} → ${entry.copy}`).join("\n"),
-          "check-detail",
-        ),
-      );
-    nodes.push(node);
-  }
-  if (unsaved.length) {
-    const node = textNode("div", "", "check backups-missing");
-    node.append(
-      textNode("span", "!", "check-mark"),
-      textNode("span", `No previous version saved for ${count(unsaved)}`),
-      textNode(
-        "pre",
-        unsaved.map((entry) => entry.path).join("\n"),
-        "check-detail",
-      ),
-    );
-    nodes.push(node);
-  }
-  return nodes;
 }
 /** "12s", "1m 05s", or "1h 02m": how long the running exchange has taken so far. */
 function elapsedLabel(ms) {
@@ -1518,6 +1477,16 @@ async function loadBrowserPermissions() {
 function showsQuestionApart(turn) {
   return Boolean(turn.question) && !(turn.summary || "").includes(turn.question);
 }
+/** Say when the open chat will be deleted, in its last days before that; hide the line otherwise. */
+function showRetentionWarning(warning) {
+  const line = $("retention-warning");
+  if (!line) return;
+  const when = warning ? dateLabel(warning.deletes_at, true) : "";
+  line.hidden = !when;
+  line.textContent = when
+    ? `This chat will be deleted on ${when} unless you send a message. Pin it to keep it.`
+    : "";
+}
 /** Draw the open chat: every exchange with its answer, checks, saved copies, and steps. */
 function renderTask(force = false) {
   const task = state.task;
@@ -1525,6 +1494,7 @@ function renderTask(force = false) {
   const queued = task.queued_message || null;
   if (state.edit && state.edit.id !== queued?.queue_id) state.edit = null;
   $("chat-title").textContent = task.title || "Untitled chat";
+  showRetentionWarning(task.deletion_warning);
   $("chat-status").textContent =
     task.status === "in_queue"
       ? "In queue · not sent yet"
@@ -1570,8 +1540,8 @@ function renderTask(force = false) {
     const latest = turn === turns[turns.length - 1];
     const exchange = textNode("section", "", "exchange");
     const source = turn.task_source || (turn === turns[0] ? task.task_source : null);
-    if (source === "schedule" || source === "lead")
-      exchange.append(textNode("p", source === "schedule" ? "Scheduled run" : "Started by lead", "muted task-source"));
+    // Chats the removed lead channel started keep their limits but show no lead label.
+    if (source === "schedule") exchange.append(textNode("p", "Scheduled run", "muted task-source"));
     const sent = messageAttachments(turn.prompt_attachments);
     if (sent.length)
       exchange.append(
@@ -1599,7 +1569,7 @@ function renderTask(force = false) {
       let openChecks = null;
       if (latest) {
         state.latestChecks = evidence;
-        exchange.append(activityBlock());
+        exchange.append(activityBlock(), activityText());
         openChecks = () => {
           if (!state.activity || !evidence) return;
           state.activity.expanded = true;
@@ -1613,9 +1583,9 @@ function renderTask(force = false) {
         openChecks = () => worked?.openChecks?.();
       }
       const answer = textNode("div", "", "answer");
-      const heading = textNode("div", "", "answer-heading");
-      heading.append(textNode("span", "⌘", "mark"), textNode("span", "Codex"));
-      answer.append(heading);
+      // No visible "Codex" label above the reply; a screen reader still hears whose reply it is.
+      answer.setAttribute("role", "group");
+      answer.setAttribute("aria-label", "Codex reply");
       if (turn.summary) answer.append(renderMarkdown(turn.summary, "message"));
       if (turn.details && turn.details !== turn.summary)
         answer.append(renderMarkdown(turn.details, "message details"));
@@ -1630,7 +1600,6 @@ function renderTask(force = false) {
         answer.append(renderChoices(turn));
       const check = renderConfigCheck(turn.config_check);
       if (check) answer.append(check);
-      answer.append(...renderBackups(turn));
       const bad = badCheckCount(turn);
       if (bad) answer.append(failedChecksLine(bad, openChecks));
       if (attachments.length)
@@ -1664,7 +1633,7 @@ function renderTask(force = false) {
         pending.append(textNode("span", "", "elapsed"));
       }
       exchange.append(pending);
-      if (latest) exchange.append(activityBlock());
+      if (latest) exchange.append(activityBlock(), activityText());
     }
     for (const approval of waiting) {
       exchange.append(renderApproval(approval, task.task_id, turn.turn_id, active));
@@ -2019,6 +1988,12 @@ function activityBlock() {
   block.hidden = true;
   return block;
 }
+/** Build the container for the interim text messages of the latest exchange, shown outside the step list. */
+function activityText() {
+  const box = textNode("div", "", "activity-text");
+  box.id = "activity-text";
+  return box;
+}
 /** Load steps once for an idle chat, and keep loading them while Codex works. */
 function ensureActivity() {
   const activity = state.activity;
@@ -2098,7 +2073,14 @@ function renderActivity() {
   const block = $("activity");
   const activity = state.activity;
   if (!block || !activity || activity.id !== state.id) return;
-  const steps = [...activity.steps.values()].sort((a, b) => a.index - b.index);
+  const all = [...activity.steps.values()].sort((a, b) => a.index - b.index);
+  // Each text message Codex wrote along the way shows in order outside the closed list; tool steps and
+  // thinking stay inside it. The final answer is never a step, so it is not shown twice.
+  const steps = all.filter(step => step.kind !== "message");
+  const texts = all.filter(step => step.kind === "message" && step.text);
+  const textBox = $("activity-text");
+  if (textBox)
+    textBox.replaceChildren(...texts.map(step => renderMarkdown(step.text, "message interim")));
   const running = activity.running || taskActive();
   const checks = state.latestChecks;
   const worked = running ? "" : workedLabel(state.task?.turns?.at(-1));
@@ -2642,12 +2624,15 @@ function openDelete(id) {
 $("delete-cancel").onclick = () => $("delete-dialog").close();
 for (const name of ["rename", "share", "delete"])
   $(name + "-dialog").addEventListener("close", () => {
-    // Return focus to the row's menu button, or to New chat when the row is gone.
-    const trigger = menu.returnId
-      ? $("chat-list").querySelector(
-          `[data-menu-for="${CSS.escape(menu.returnId)}"]`,
-        )
-      : null;
+    // A command in the message box opened the dialog: the browser has already
+    // put focus back in the box. This event comes later than the close, so a
+    // move of focus here takes it away while the person types.
+    if (!menu.returnId) return;
+    // The chat menu opened it: return focus to the row's menu button, or to
+    // New chat when the row is gone.
+    const trigger = $("chat-list").querySelector(
+      `[data-menu-for="${CSS.escape(menu.returnId)}"]`,
+    );
     menu.returnId = null;
     (trigger || $("new-chat")).focus();
   });
@@ -3083,44 +3068,44 @@ window.addEventListener("resize", () => {
 const SLASH_COMMANDS = [
   {
     name: "new",
+    icon: "＋",
     description: "Start a new chat",
-    when: "always",
     available: () => !$("new-chat").disabled,
     run: () => selectChat(null),
   },
   {
     name: "stop",
+    icon: "■",
     description: "Stop the chat that is working",
-    when: "while a chat is working",
     available: () => !$("cancel").hidden && !$("cancel").disabled,
     run: () => $("cancel").click(),
   },
   {
     name: "model",
+    icon: "◇",
     description: "Choose the model for this chat",
-    when: "always",
     available: () => Boolean(state.catalog) && !$("model-button").disabled,
     run: () => openPicker("model"),
   },
   {
     name: "reasoning",
+    icon: "✦",
     description: "Choose how long Codex thinks before it answers",
-    when: "always",
     available: () => Boolean(state.catalog) && !$("effort-button").disabled,
     run: () => openPicker("effort"),
   },
   {
     name: "rename",
+    icon: "✎",
     description: "Rename this chat",
-    when: "with a chat open",
     available: () => Boolean(state.id && chatById(state.id)),
     run: () => openRename(state.id),
   },
   {
     name: "usage",
+    icon: "◔",
     aliases: ["status"],
     description: "Show how much of your ChatGPT plan is used",
-    when: "always",
     available: () => true,
     run: () => {
       loadUsage();
@@ -3130,24 +3115,58 @@ const SLASH_COMMANDS = [
   },
   {
     name: "size",
+    icon: "Aa",
     description: "Change the text size",
-    when: "always",
     available: () => true,
     run: () => openSettingsAt("text-size-section"),
   },
   {
+    name: "connection",
+    icon: "⇄",
+    description: "Open the remote connection and its status",
+    // Listed until Settings has shown that remote control cannot run here.
+    available: () => state.remoteAvailable !== false,
+    run: () => openConnection(),
+  },
+  {
     name: "settings",
+    icon: "⚙",
     description: "Open Settings",
-    when: "always",
     available: () => true,
     run: () => $("settings-button").click(),
   },
   {
-    name: "help",
-    description: "List these commands",
-    when: "always",
-    available: () => true,
-    run: () => openSettingsAt("settings-commands"),
+    name: "pin",
+    icon: "⚲",
+    description: "Pin or unpin this chat",
+    available: () => Boolean(state.id && chatById(state.id)),
+    run: () => togglePin(state.id),
+  },
+  {
+    name: "share",
+    icon: "↗",
+    description: "Download this chat as a file",
+    available: () => Boolean(state.id && chatById(state.id)),
+    run: () => openShare(state.id),
+  },
+  {
+    name: "archive",
+    icon: "▤",
+    description: "Archive this chat, or restore it",
+    available: () => chatIdle(),
+    run: () =>
+      document.dispatchEvent(
+        new CustomEvent("thread-action", {
+          detail: { action: "archive", id: state.id },
+        }),
+      ),
+  },
+  {
+    name: "delete",
+    icon: "⌫",
+    description: "Delete this chat and its history",
+    available: () => chatIdle(),
+    run: () => openDelete(state.id),
   },
 ];
 /** Open Settings with one section open and in view, as the GitHub banner does. */
@@ -3155,6 +3174,19 @@ async function openSettingsAt(sectionId) {
   await $("settings-button").onclick();
   openSettingsSection($(sectionId));
   $(sectionId).scrollIntoView({ block: "start" });
+}
+/**
+ * True when a saved chat is open and nothing is running or queued in it: the
+ * same rule the chat menu uses to enable Archive and Delete.
+ */
+function chatIdle() {
+  const chat = state.id && chatById(state.id);
+  return Boolean(
+    chat &&
+      !["queued", "running"].includes(chat.status) &&
+      state.active !== state.id &&
+      !state.task?.queued_message,
+  );
 }
 const slash = { matches: [], index: 0, dismissed: null };
 /**
@@ -3186,6 +3218,12 @@ function slashCommand(value) {
     ) || null
   );
 }
+/** Build a command's icon; screen readers skip it and read the name. */
+function slashIcon(glyph) {
+  const icon = textNode("span", glyph, "slash-icon");
+  icon.setAttribute("aria-hidden", "true");
+  return icon;
+}
 /** Show or hide the command list for the message box's current text. */
 function renderSlash() {
   const value = $("message").value;
@@ -3202,8 +3240,20 @@ function renderSlash() {
     option.id = `slash-${command.name}`;
     option.setAttribute("role", "option");
     option.setAttribute("aria-selected", String(index === slash.index));
+    const typed = /^\/(\S*)$/.exec(value)[1];
+    const name = textNode("span", "/", "slash-name");
+    // Mark the letters the person typed; an alias match, such as /stat for
+    // /usage, marks nothing.
+    const marked = command.name.startsWith(typed.toLowerCase())
+      ? typed.length
+      : 0;
+    name.append(
+      textNode("span", command.name.slice(0, marked), "slash-match"),
+      document.createTextNode(command.name.slice(marked)),
+    );
     option.append(
-      textNode("span", `/${command.name}`, "slash-name"),
+      slashIcon(command.icon),
+      name,
       textNode("span", command.description, "slash-description"),
     );
     // Keep the focus, and the phone keyboard, on the message box.
@@ -3225,6 +3275,9 @@ function renderSlash() {
 function runSlash(command) {
   $("message").value = "";
   slash.dismissed = null;
+  // A dialog this command opens returns focus to the message box, not to a
+  // row that the chat menu used earlier.
+  menu.returnId = null;
   resizeInput();
   renderSlash();
   controls();
@@ -3263,26 +3316,20 @@ $("message").addEventListener("blur", () => {
     renderSlash();
   }
 });
+// A press anywhere outside the message box and the list closes the list.
+document.addEventListener("pointerdown", (event) => {
+  if (
+    !$("slash-popover").hidden &&
+    !event.target.closest("#slash-popover, #message")
+  ) {
+    slash.dismissed = $("message").value;
+    renderSlash();
+  }
+});
 $("message").addEventListener("focus", () => {
   slash.dismissed = null;
   renderSlash();
 });
-/** Fill the Commands section of Settings from the same list. */
-function renderCommandList() {
-  const list = $("command-list");
-  list.replaceChildren();
-  for (const command of SLASH_COMMANDS) {
-    const names = [command.name, ...(command.aliases || [])]
-      .map((name) => `/${name}`)
-      .join(" or ");
-    const note = command.when === "always" ? "" : ` (${command.when})`;
-    list.append(
-      textNode("dt", names),
-      textNode("dd", command.description + note),
-    );
-  }
-}
-renderCommandList();
 /*
  * Settings sections start collapsed (add-on 0.3.2). Each section's first
  * heading becomes a button with the title and a one-line status; the rest of
@@ -3369,7 +3416,6 @@ function setAccountPart(sectionId, word, attention = false) {
 }
 collapseSettingsSections();
 setSectionStatus("workspace-section", "AGENTS.md");
-setSectionStatus("settings-commands", `${SLASH_COMMANDS.length} commands`);
 const TEXT_SIZES = ["normal", "larger", "largest"];
 const TEXT_SIZE_KEY = "codex-text-size";
 /**
@@ -3480,8 +3526,10 @@ let loginTimer;
 let shownLogin = null;
 /**
  * Build the sign-in card: the code in large letters that stay put until the
- * sign-in ends or is canceled, the QR code of the sign-in page served by the
- * worker, and the link to the same page.
+ * sign-in ends or is canceled, the link to the sign-in page, and the QR code
+ * of the same page served by the worker. The link comes before the QR code, so
+ * a phone shows it without a scroll. A phone cannot scan its own screen, so on
+ * a phone-sized window the QR code starts folded behind "Show QR code".
  */
 function signInCard(auth) {
   const card = document.createElement("div");
@@ -3506,14 +3554,6 @@ function signInCard(auth) {
   } else {
     card.append(textNode("p", "Waiting for the sign-in code…", "muted"));
   }
-  if (auth.qr_path) {
-    const img = document.createElement("img");
-    img.src = auth.qr_path;
-    img.alt = "QR code that opens the ChatGPT sign-in page";
-    img.className = "signin-qr";
-    img.width = img.height = 220;
-    card.append(img);
-  }
   if (auth.verification_url) {
     const url = new URL(auth.verification_url, location.href);
     if (url.protocol === "https:") {
@@ -3523,6 +3563,18 @@ function signInCard(auth) {
       link.rel = "noreferrer";
       card.append(link);
     }
+  }
+  if (auth.qr_path) {
+    const img = document.createElement("img");
+    img.src = auth.qr_path;
+    img.alt = "QR code that opens the ChatGPT sign-in page";
+    img.className = "signin-qr";
+    img.width = img.height = 220;
+    const fold = document.createElement("details");
+    fold.className = "disclosure signin-qr-fold";
+    fold.open = !matchMedia("(max-width:700px)").matches;
+    fold.append(textNode("summary", "Show QR code"), img);
+    card.append(fold);
   }
   return card;
 }
@@ -3959,6 +4011,7 @@ async function loadRemoteControl() {
 }
 /** Draw one remote-control state; the buttons follow what can be done now. */
 function renderRemoteControl(rc) {
+  state.remoteAvailable = Boolean(rc.available);
   const name = rc.machine_name || rc.configured_name;
   let status = rc.message || rc.state || "Unknown";
   if (!rc.available) status = rc.blocked_reason;

@@ -121,7 +121,6 @@ aside {
   align-items: center;
   gap: 8px;
   padding: 0 9px 25px;
-  flex-wrap: wrap;
 }
 .brand strong {
   font-size: calc(20px * var(--text-scale));
@@ -144,12 +143,13 @@ aside {
   display: block;
 }
 .tag {
-  width: 100%;
-  padding-left: 33px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   letter-spacing: 1.4px;
+  line-height: 1.25;
   font-size: calc(9px * var(--text-scale));
   color: var(--muted);
-  margin-top: -5px;
 }
 .new-chat {
   display: flex;
@@ -486,6 +486,16 @@ h1 {
   background: var(--notice);
   border-bottom: 1px solid var(--line);
 }
+#retention-warning {
+  flex: none;
+  margin: 0;
+  padding: 9px 32px;
+  font-size: calc(12px * var(--text-scale));
+  line-height: 1.5;
+  color: var(--notice-text);
+  background: var(--notice);
+  border-bottom: 1px solid var(--line);
+}
 #integration-notice a {
   color: inherit;
   font-weight: 600;
@@ -607,18 +617,6 @@ h1 {
 }
 .answer {
   padding: 0 3px;
-}
-.answer-heading {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  margin-bottom: 12px;
-  font-size: calc(12px * var(--text-scale));
-  font-weight: 600;
-}
-.answer-heading .mark {
-  color: var(--accent);
-  font-size: calc(20px * var(--text-scale));
 }
 .answer .details {
   margin-top: 12px;
@@ -1669,15 +1667,16 @@ dialog :is(h3, h4):has(> .settings-toggle) {
 #settings > section:last-of-type {
   border-bottom: 1px solid var(--line);
 }
-/* The three parts of Accounts and connections sit inside it, indented. */
+/* The three parts of Accounts and connections sit inside it, indented to its title text (after the chevron). */
 #accounts-section section {
-  margin-left: 12px;
+  margin-left: 18px;
 }
 #accounts-section h4 .settings-toggle {
   font-size: calc(13px * var(--text-scale));
 }
 .settings-body {
-  padding: 2px 0 16px;
+  /* 18px = the chevron (16px) and its margin (2px): the body starts at the title text's left edge. */
+  padding: 2px 0 16px 18px;
 }
 .settings-body > :first-child {
   margin-top: 0;
@@ -1799,10 +1798,11 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   .chat-header {
     height: 65px;
     min-height: 65px;
-    padding: 0 14px;
+    padding: 0 14px 0 0;
     gap: 9px;
   }
-  #integration-notice {
+  #integration-notice,
+  #retention-warning {
     padding: 8px 14px;
   }
   .messages {
@@ -1928,32 +1928,14 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.command-list {
-  margin: 0;
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 6px 14px;
-  font-size: calc(14px * var(--text-scale));
-}
-.command-list dt {
-  font-weight: 600;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
-.command-list dd {
-  margin: 0;
+.slash-icon {
+  flex: 0 0 1.6em;
+  text-align: center;
   color: var(--muted);
-  min-width: 0;
 }
-/* On a narrow phone the two columns leave each description a word wide, so
-   each command goes above its description instead. */
-@media (max-width: 480px) {
-  .command-list {
-    grid-template-columns: minmax(0, 1fr);
-    row-gap: 2px;
-  }
-  .command-list dd {
-    margin-bottom: 8px;
-  }
+.slash-match {
+  background: color-mix(in srgb, var(--accent, currentColor) 22%, transparent);
+  border-radius: 3px;
 }
 /* Remote-control pairing code: large, steady, and in a font that tells 0 from O. */
 .pairing-code {
@@ -1989,6 +1971,13 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   padding: 0.75rem 1rem;
   border: 1px solid var(--line);
   border-radius: 8px;
+  /* The window clips the chat column and nothing else scrolls it, so a tall banner (a sign-in code on
+   * a phone) stops at 60 % of the window height and scrolls inside itself. */
+  flex-shrink: 0;
+  max-height: 60vh;
+  max-height: 60dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 #agents-hint {
   margin: 0 0 10px;
@@ -2015,10 +2004,18 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   user-select: all;
 }
 .signin-qr {
+  display: block;
   width: min(220px, 60vw);
   height: auto;
+  margin-top: 0.5rem;
   background: #fff;
   border-radius: 4px;
+}
+.signin-qr-fold > summary {
+  cursor: pointer;
+}
+.signin-card a {
+  overflow-wrap: anywhere;
 }
 
 /*
@@ -2229,8 +2226,8 @@ details.disclosure > summary::-webkit-details-marker {
   --mdi-cog: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.21,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.21,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.67 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z'/%3E%3C/svg%3E");
   --mdi-stop: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M18,18H6V6H18V18Z'/%3E%3C/svg%3E");
   --mdi-arrow-up: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M13,20H11V8L5.5,13.5L4.08,12.08L12,4.16L19.92,12.08L18.5,13.5L13,8V20Z'/%3E%3C/svg%3E");
-  /* mdiAlert for the warning that replaces the cog while something needs the owner. */
-  --mdi-alert: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z'/%3E%3C/svg%3E");
+  /* The sidebar-panel icon of the phone's chat-list buttons: a rounded box with a left panel line. */
+  --mdi-sidebar: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3.5' y='4.5' width='17' height='15' rx='2.5'/%3E%3Cpath d='M9.5 4.5v15'/%3E%3C/svg%3E");
   /* A row that needs the owner shows an amber dot: Home Assistant's warning color, else the page's own. */
   --needs-owner: var(--warning-color, #b26a00);
 }
@@ -2247,43 +2244,74 @@ details.disclosure > summary::-webkit-details-marker {
 }
 /*
  * While something needs the owner (body[data-attention], set by showAttention in chat.js),
- * the cog and the phone's menu buttons show a warning symbol: yellow while something waits,
- * red on a sign-out. The dismiss row under Settings carries the same symbol.
+ * a small dot shows at the top right of the Settings cog and of the phone's chat-list buttons:
+ * yellow while something waits, red on a sign-out. The dismiss row under Settings carries the
+ * same dot in front of its label. No warning symbol replaces an icon.
  */
-body[data-attention] #settings-button .mdi-icon,
+#settings-button .mdi-icon,
 #attention-dismiss .mdi-icon {
-  -webkit-mask: var(--mdi-alert) center / 18px no-repeat;
-  mask: var(--mdi-alert) center / 18px no-repeat;
+  position: relative;
 }
-body[data-attention="yellow"] #settings-button .mdi-icon,
-body[data-attention="yellow"] #attention-dismiss .mdi-icon {
-  color: var(--needs-owner);
-}
-body[data-attention="red"] #settings-button .mdi-icon,
-body[data-attention="red"] #attention-dismiss .mdi-icon {
-  color: var(--error);
-}
-body[data-attention] #menu,
-body[data-attention] #phone-history {
-  font-size: 0;
-}
-body[data-attention] #menu::before,
-body[data-attention] #phone-history::before {
+body[data-attention] #settings-button::after,
+body[data-attention] #menu::after,
+body[data-attention] #phone-history::after {
   content: "";
-  display: inline-block;
-  width: 20px;
-  height: 20px;
-  vertical-align: middle;
-  -webkit-mask: var(--mdi-alert) center / 20px no-repeat;
-  mask: var(--mdi-alert) center / 20px no-repeat;
-}
-body[data-attention="yellow"] #menu::before,
-body[data-attention="yellow"] #phone-history::before {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
   background: var(--needs-owner);
 }
-body[data-attention="red"] #menu::before,
-body[data-attention="red"] #phone-history::before {
+body[data-attention="red"] #settings-button::after,
+body[data-attention="red"] #menu::after,
+body[data-attention="red"] #phone-history::after {
   background: var(--error);
+}
+body[data-attention] #settings-button {
+  position: relative;
+}
+body[data-attention] #settings-button::after {
+  top: 6px;
+  left: 22px;
+}
+#attention-dismiss .mdi-icon {
+  -webkit-mask: none;
+  mask: none;
+  width: 9px;
+  height: 9px;
+  margin: 0 4.5px;
+  border-radius: 50%;
+  background: var(--needs-owner);
+}
+body[data-attention="red"] #attention-dismiss .mdi-icon {
+  background: var(--error);
+}
+/* The phone's chat-list buttons: the sidebar-panel icon (a rounded box with a left panel line), the same
+ * size as Home Assistant's own menu button, its center 28px from the page edge so it sits under it. */
+#menu,
+#phone-history {
+  position: relative;
+  font-size: 0;
+  width: 56px;
+  height: 48px;
+  padding: 0;
+}
+#menu::before,
+#phone-history::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 24px;
+  height: 24px;
+  background: currentColor;
+  -webkit-mask: var(--mdi-sidebar) center / 24px no-repeat;
+  mask: var(--mdi-sidebar) center / 24px no-repeat;
+}
+body[data-attention] #menu::after,
+body[data-attention] #phone-history::after {
+  top: 8px;
+  right: 12px;
 }
 .mdi-stop {
   -webkit-mask: var(--mdi-stop) center / 20px no-repeat;
@@ -2366,12 +2394,13 @@ main > .chat-header h1 {
   background: var(--error);
 }
 .sidebar-footer .usage {
-  padding: 6px 10px 0 28px;
+  /* 15px = the foot row's 10px padding + the status dot's 5px margin: the dots' left edge. */
+  padding: 6px 10px 0 15px;
   font-size: calc(11px * var(--text-scale));
 }
 .usage-plan,
 .sidebar-footer .usage-note {
-  margin: 4px 10px 4px 28px;
+  margin: 4px 10px 4px 15px;
   font-size: calc(11px * var(--text-scale));
   line-height: 1.4;
   color: var(--muted);
@@ -2745,4 +2774,8 @@ a.ha-nav-row:focus-visible {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--bg);
+}
+/* Interim text messages of the latest exchange, shown outside the closed step list (CX-04-SHOW-TEXT). */
+.activity-text:empty {
+  display: none;
 }

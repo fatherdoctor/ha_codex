@@ -167,8 +167,8 @@ physical WallPanel or reproduce its app transitions.
 
 Each turn retains `verification` and `verification_attachments` in the task API,
 `codex_cli.get_task`, and normal task-result events. The chat shows expandable
-results and private screenshots. Automatic captures after the final answer are
-labeled as captures, not images already inspected by the AI.
+results and private screenshots. Every check is one Codex ran during the turn;
+the app runs none of its own after the final answer.
 
 ## Task tools
 
@@ -327,9 +327,9 @@ HTTP errors, and invalid dashboard templates still require separate fixes.
 ## Credential and recovery boundaries
 
 Supervisor credentials are removed from AI subprocess environments. An explicitly
-configured `HA_TOKEN` retains its opt-in behavior. Known credential files such as
-`secrets.yaml`, auth stores, and `core.config_entries` remain in change detection
-but are excluded from per-file backups and full snapshots. Snapshots made before
+configured `HA_TOKEN` retains its opt-in behavior. Secret files, which are every
+`secrets.yaml` and every file under `.storage` (dashboards kept in storage included),
+remain in change detection but are excluded from per-file backups and full snapshots. Snapshots made before
 0.1.58 are not rewritten; like all backups they are deleted after the retention
 period. Those files need Home Assistant backups for recovery. Other files can contain inline
 secrets, so this is targeted protection, not complete secret detection.

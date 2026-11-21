@@ -68,6 +68,8 @@ jobs:
           node codex-cli-worker/tests/browser_full_access.cjs
           node codex-cli-worker/tests/browser_four_modes.cjs
           node codex-cli-worker/tests/browser_attention.cjs
+          node codex-cli-worker/tests/browser_icon_dots.cjs
+          node codex-cli-worker/tests/browser_usage_align.cjs
           node codex-cli-worker/tests/browser_unused_styles.cjs
           node codex-cli-worker/tests/browser_brand_mark.cjs
 

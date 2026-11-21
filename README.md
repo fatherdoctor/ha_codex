@@ -20,8 +20,8 @@ on a test Home Assistant first.
   that uses the network, a write outside your configuration folder and `/share`, or a change to a device. Only an
   administrator can answer. The other [permission modes](#permission-modes) ask less or more.
 - Codex is told to save the earlier copy of a file before it changes it, and the chat lists the copies it saved. A
-  copy can be missing, and credential files are never copied, so keep your own Home Assistant backups
-  ([Backups](codex-cli-worker/DOCS.md#backups)).
+  copy can be missing, and `secrets.yaml` and the files under `.storage` (dashboards kept there too) are never
+  copied, so keep your own Home Assistant backups ([Backups](codex-cli-worker/DOCS.md#backups)).
 - After a change to YAML, the app asks Home Assistant to check the configuration, unless you turned that option off
   or Home Assistant cannot run the check. The chat says which ([Validation](codex-cli-worker/DOCS.md#validation)).
 - The Codex program is pinned and never updates itself.
@@ -102,9 +102,9 @@ The app's own install of the integration (steps 2 to 4) needs nothing else.
 
 Every app option is in [codex-cli-worker/DOCS.md](codex-cli-worker/DOCS.md).
 
-Put rules for your house in `/config/AGENTS.md`. The chat has an editor for it under **Settings** > **Workspace instructions** >
+Put rules for your house in the app's `AGENTS.md`, kept in its own `addon_config` folder and not in `/config`. The chat has an editor for it under **Settings** > **Workspace instructions** >
 **Workspace rules**. Codex uses its defaults and your workspace instructions; the app bundles no house rules. A new
-install that has no `/config/AGENTS.md` gets a short starter file there once, which is yours to change or delete.
+install that has no `AGENTS.md` gets a short starter file there once, which is yours to change or delete.
 
 ## Updating
 
@@ -122,7 +122,7 @@ How releases are tested and how a bad release is undone: [docs/updates-and-rollb
 3. Uninstalling the app does not remove the integration. Delete `/config/custom_components/codex_cli` (or remove
    **Codex** in **Settings** > **Marketplace** if you installed it there), and restart Home Assistant.
 
-Task logs stay in `/config/codex_tasks` until you delete that folder.
+The chats and their logs are in the app's private folder (`/data/codex_tasks`), which uninstalling the app removes.
 
 ## An example, step by step
 
@@ -184,8 +184,8 @@ What the safeguards do not do:
   reading a private file or changing the app's settings.
 - The app does not check what Codex writes in `/config`. An edit can add a shell command that Home Assistant runs
   later; review what a chat changed before you reload or restart.
-- Backups depend on Codex following its instructions, and credential files are never copied. Keep your own Home
-  Assistant backups.
+- Backups depend on Codex following its instructions, and `secrets.yaml` and the files under `.storage` are never
+  copied. Keep your own Home Assistant backups.
 
 The app asks for no host networking, Docker access or elevated Supervisor roles, and it keeps AppArmor on. Your
 `/config` folder is mounted for writing, because editing it is the purpose of the app. More detail:
@@ -200,7 +200,7 @@ Codex uses your ChatGPT account.
    managed workspace, an administrator may need to allow device-code sign-in; see
    [Codex Sign-In](codex-cli-worker/DOCS.md#codex-sign-in).
 2. In the chat, open **Settings** and choose **Sign in**.
-3. Scan the QR code, or open the link, and enter the one-time code. The code stays on screen, with the time it still
+3. Open the link, or scan the QR code (on a phone, under **Show QR code**), and enter the one-time code. The code stays on screen, with the time it still
    works, until the sign-in ends or you cancel it. If it runs out, choose **Get a new code**.
 
 When the sign-in is missing, ended or rejected, a banner returns above the chat, the integration raises a Home

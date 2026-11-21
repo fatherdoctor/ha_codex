@@ -74,6 +74,7 @@ class FakeCodex:
         self.after_thread: list[dict] = []  # Lines sent after the tool notices of each thread/start or resume.
         self.crash_after_thread = False  # End the output right after the reply to thread/start or resume.
         self.loaded: set[str] = set()  # Threads that hold their tool programs now.
+        self.resume_as = ""  # When set, thread/resume loads and names this thread instead of the one asked for.
         self.threads = 0
         self.reaped = False
 
@@ -87,7 +88,7 @@ class FakeCodex:
                 self.threads += 1
                 thread_id = f"p{self.number}-thread-{self.threads}"
             else:
-                thread_id = params["threadId"]
+                thread_id = self.resume_as or params["threadId"]
             self.loaded.add(thread_id)
             self.stdout.put({"id": request_id, "result": {"thread": {"id": thread_id}}})
             if self.crash_after_thread:
@@ -275,6 +276,15 @@ class ProcessTests(HostTest):
         self.assertEqual(self.spawned_args[0][-2:], ["--config", "thread_unload_delay_secs=0"])
         self.assertEqual([m["method"] for m in self.codex.sent[:2]], ["initialize", "initialized"])
 
+    def test_no_process_starts_after_close(self) -> None:
+        self.start()
+        self.host.close()
+        self.assertFalse(self.host.ready_for_message())
+        self.host.request_restart("an options save")
+        self.assertFalse(self.host.ready_for_message())
+        self.assertEqual(len(self.processes), 1)
+        self.assertFalse(self.host.running())
+
     def test_the_owner_switch_off_starts_no_process(self) -> None:
         self.on = False
         self.assertFalse(self.host.ready_for_message())
@@ -435,6 +445,49 @@ class WakeAndPauseTests(HostTest):
         with self.assertRaises(HostError):
             self.host.pause("chat-a")
         self.assertEqual(self.host.live_chats(), ["chat-a"])
+
+    def test_an_exchange_that_arrives_during_a_pause_never_gets_the_chat(self) -> None:
+        lock = ReleaseHookLock()
+        self.host = self.make_host(lock=lock)
+        self.start()
+        self.wake("chat-a")
+        session = FakeSession("worker-a")
+        attached: list[str] = []
+
+        def attach_now() -> None:
+            # A message for the chat arrives the moment the pause has checked that the chat does not work.
+            try:
+                self.host.attach("chat-a", session)
+                attached.append("attached")
+            except HostError as exc:
+                attached.append(str(exc))
+
+        lock.after_release = attach_now
+        self.host.pause("chat-a")
+        # The exchange finds the chat paused and takes the queue or the start path, not the unloaded thread.
+        self.assertEqual(attached, ["the chat is not live"])
+        self.assertEqual(self.host.live_chats(), [])
+        self.assertIsNone(self.host.chat("chat-a").session)
+        self.assertEqual(self.codex.loaded, set())
+
+    def test_a_pause_that_codex_refuses_leaves_the_chat_live(self) -> None:
+        self.start()
+        self.wake("chat-a")
+        self.codex.broken.add("thread/unsubscribe")
+        with self.assertRaises(HostError):
+            self.host.pause("chat-a")
+        self.assertEqual(self.host.live_chats(), ["chat-a"])
+
+    def test_a_resume_that_loads_another_thread_makes_a_restart_due(self) -> None:
+        self.start()
+        self.wake("chat-a")
+        self.host.pause("chat-a")
+        self.codex.resume_as = "other-thread"
+        with self.assertRaisesRegex(HostError, "another thread"):
+            self.wake("chat-a")
+        self.assertEqual(self.codex.loaded, {"other-thread"})
+        self.assertTrue(self.host.restart_due)
+        self.assertEqual(self.host.live_chats(), [])
 
     def test_the_chat_stays_live_after_its_exchange(self) -> None:
         self.start()

@@ -24,6 +24,10 @@ on a test install and added here when they exist.
 | `sign-in-notification` | The Home Assistant notification that asks you to sign in, with the code blurred. |
 | `repairs-sign-in` | **Settings** > **Repairs** with the notice that the sign-in has ended. |
 
+`sign-in-light-phone.png` and `sign-in-dark-phone.png` are out of date: on a phone the QR code now starts folded
+under **Show QR code**, below the link. The script stops before the sign-in shots, because it waits for the
+ChatGPT section of **Settings**, which now starts collapsed. Retake them when the script opens that section.
+
 ## Refreshing the screenshots
 
 Run the **README screenshots** workflow from the **Actions** tab (it also runs when a release is published). It

@@ -158,8 +158,8 @@ class NothingSentTests(CallTestCase):
         tool_threads.CHATS.release("t1")
         self.assert_nothing_sent(self.call({"service": "light.turn_off"}))
 
-    def test_a_bound_chat_that_no_person_attends_sends_nothing(self):
-        """begin runs only for an attended exchange: a bound thread without it sends nothing."""
+    def test_a_bound_chat_whose_exchange_did_not_begin_sends_nothing(self):
+        """begin runs when run_task starts an exchange: a bound thread without it sends nothing."""
         tool_threads.CHATS.bind("t2", "22222222-2222-4333-8444-555555555555")
         self.addCleanup(tool_threads.CHATS.release, "t2")
         self.worker.tasks["t2"] = {"status": "running"}
@@ -393,22 +393,21 @@ def configured(args):
 
 
 class LaunchTests(unittest.TestCase):
-    """Which launch gets the tool, that none approves it ahead, and that the keys stay out of shell commands."""
+    """The chat launch gets the tool, no launch approves it ahead, and the keys stay out of shell commands.
+
+    A chat on the page and a scheduled run start with the same launch (tests/test_sched_parity.py).
+    """
 
     def launches(self):
         task = {"task_id": "t", "turns": [], "chat_settings": server.DEFAULT_CHAT_SETTINGS}
         with patch.object(server, "tasks", {"t": task}), patch.object(server, "read_options", return_value={}):
-            return {"page": server.build_app_server_args(),
-                    "schedule": server.build_app_server_args(attended=False)}
+            return {"page": server.build_app_server_args()}
 
-    def test_only_an_attended_page_chat_gets_the_tool(self):
-        launches = self.launches()
-        prefix = "mcp_servers.home_assistant_call."
-        call_values = {name: [value for value in configured(args) if value.startswith(prefix)]
-                       for name, args in launches.items()}
-        self.assertTrue(call_values["page"])
-        self.assertEqual(call_values["schedule"], [])
-        self.assertFalse([value for value in call_values["page"] if ".env_vars=" in value])
+    def test_the_chat_launch_gets_the_tool_without_a_key(self):
+        call_values = [value for value in configured(self.launches()["page"])
+                       if value.startswith("mcp_servers.home_assistant_call.")]
+        self.assertTrue(call_values)
+        self.assertFalse([value for value in call_values if ".env_vars=" in value])
 
     def test_only_the_relay_launch_hands_the_bridge_a_key(self):
         relay = [value for value in configured(server.relay_tool_args())
@@ -454,7 +453,7 @@ class Launched(BaseException):
 
 
 class RunTaskLaunchTests(unittest.TestCase):
-    """run_task itself, not only build_app_server_args, gives the tool and its key to a page chat only."""
+    """run_task itself, not only build_app_server_args, gives the tool and its key to every exchange it starts."""
 
     def launch(self, task_source):
         task = {"task_id": "t", "turns": [], "status": "queued", "task_source": task_source,
@@ -490,17 +489,9 @@ class RunTaskLaunchTests(unittest.TestCase):
             started["key_held"] = "t" in server.ha_call.capabilities
         return started
 
-    def test_a_scheduled_or_lead_run_gets_neither_the_tool_nor_its_key(self):
-        for source in ("schedule", "lead"):
-            with self.subTest(task_source=source):
-                started = self.launch(source)
-                self.assertFalse([value for value in configured(started["args"])
-                                  if value.startswith("mcp_servers.home_assistant_call.")])
-                self.assertNotIn("HA_CALL_CAPABILITY", started["env"])
-                self.assertFalse(started["key_held"])
-
-    def test_a_page_chat_gets_the_tool_and_its_key(self):
-        for source in ("page", None):
+    def test_every_exchange_gets_the_tool_and_its_key(self):
+        """A scheduled run starts like a chat on the page; so does a chat that the removed lead channel started."""
+        for source in ("page", None, "schedule", "lead"):
             with self.subTest(task_source=source):
                 started = self.launch(source)
                 self.assertTrue([value for value in configured(started["args"])
@@ -522,8 +513,8 @@ class RunTaskLaunchTests(unittest.TestCase):
         self.assertNotIn("t", calls.capabilities)
 
 
-    def test_only_a_page_chat_is_told_to_use_the_tool(self):
-        for source, has_tool in (("page", True), ("schedule", False), ("lead", False)):
+    def test_every_exchange_is_told_to_use_the_tool(self):
+        for source, has_tool in (("page", True), ("schedule", True), ("lead", True)):
             task = {"task_id": "t", "turns": [], "task_source": source}
             with self.subTest(task_source=source), patch.object(server, "tasks", {"t": task}), \
                     patch.object(server, "read_options", return_value={"HA_TOKEN": "invented-token"}):

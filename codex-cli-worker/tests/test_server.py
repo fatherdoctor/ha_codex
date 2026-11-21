@@ -13,6 +13,7 @@ from pathlib import Path
 from threading import Event, Thread
 from unittest.mock import patch
 
+from app_folders import isolated_app_folders
 from app_server_fixture import StubAppServer
 
 
@@ -135,22 +136,23 @@ class SessionIdParsingTests(unittest.TestCase):
 
         return result, events
 
-    def test_only_actionable_verification_results_add_a_review_warning(self) -> None:
-        """Only verification checks that failed, found issues or could not run add a review note to a completed task."""
+    def test_checks_during_the_turn_add_no_review_note(self) -> None:
+        """A check Codex ran during the turn, whatever its result, adds nothing to the answer's text."""
         for check_status in ("disabled", "captured", "passed", "failed", "issues", "unavailable"):
             with self.subTest(check_status=check_status):
-                def record_check(task_id, _results):
-                    """Record one verification check with the status under test."""
+                real_begin = server.verification.begin
+
+                def begin_with_check(task_id):
+                    """Start the turn's verification record with one check of the status under test."""
+                    real_begin(task_id)
                     server.update_task(task_id, verification=[{"status": check_status}])
 
-                with patch.object(server.verification, "after_changes", side_effect=record_check):
+                with patch.object(server.verification, "begin", side_effect=begin_with_check):
                     task, _ = self.run_resumed_task(
                         final_payload={"status": "completed", "summary": "Done", "details": "Original details"},
                     )
                 self.assertEqual(task["status"], "completed")
-                self.assertIn("Original details", task["details"])
-                self.assertEqual("Verification needs review" in task["details"],
-                                 check_status in {"failed", "issues", "unavailable"})
+                self.assertEqual(task["details"], "Original details")
 
     def test_resume_rejects_a_different_thread(self) -> None:
         """A resumed task fails, and keeps its own session id, when Codex answers from another conversation."""
@@ -529,17 +531,15 @@ class ModelSelectionTests(unittest.TestCase):
         )
 
     def test_worker_model_schema_matches_supported_choices(self) -> None:
-        """config.yaml and the worker default the model to "default", and the schema lists the accepted models."""
+        """config.yaml and the worker default the model to "default", and the schema takes any text."""
         config = server.yaml.safe_load(
             (SERVER_PATH.parent / "config.yaml").read_text(encoding="utf-8")
         )
 
         self.assertEqual(config["options"]["codex_model"], "default")
         self.assertEqual(server.DEFAULT_OPTIONS["codex_model"], "default")
-        self.assertEqual(
-            config["schema"]["codex_model"],
-            "list(default|gpt-6-astra|gpt-6.1-sol|gpt-6.1-terra|gpt-6-sol|gpt-6-luna|gpt-5.6-sol|gpt-5.6-terra|gpt-5.6-luna|gpt-5.5)",
-        )
+        # Free text: no list to keep current when Codex adds a model.
+        self.assertEqual(config["schema"]["codex_model"], "str")
 
     def test_home_assistant_api_url_defaults_to_core(self) -> None:
         """An empty override must not invent a Core port before Supervisor discovery."""
@@ -576,19 +576,35 @@ class ModelSelectionTests(unittest.TestCase):
 
         self.assertEqual(session.thread_params["model"], "gpt-5.6-sol")
 
-    def test_retired_models_stay_accepted_and_lead_to_an_offered_model(self) -> None:
-        """Every retired model stays in the option schema, is not offered in chats, and leads to a model that is."""
-        config = server.yaml.safe_load(
-            (SERVER_PATH.parent / "config.yaml").read_text(encoding="utf-8")
-        )
-        accepted = config["schema"]["codex_model"].removeprefix("list(").removesuffix(")").split("|")
-
+    def test_retired_models_are_not_offered_and_lead_to_an_offered_model(self) -> None:
+        """Every retired model is not offered in chats, and leads to a model that is."""
         for model in server.RETIRED_MODELS:
             with self.subTest(model=model):
-                # Home Assistant does not start an app whose saved option is missing from the list.
-                self.assertIn(model, accepted)
                 self.assertNotIn(model, server.CHAT_MODEL_EFFORTS)
                 self.assertIn(server.current_model(model), server.CHAT_MODEL_EFFORTS)
+
+    def test_every_value_of_the_old_option_list_still_resolves(self) -> None:
+        """Each value the dropdown once offered keeps working as the free-text option."""
+        old_list = ("default", "gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna",
+                    "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5")
+        for model in old_list:
+            with self.subTest(model=model):
+                execution = server.resolve_chat_settings(
+                    server.DEFAULT_CHAT_SETTINGS, {"codex_model": model})
+                expected = "default" if model == "default" else server.current_model(model)
+                self.assertEqual(execution["model"], expected)
+
+    def test_free_text_model_is_trimmed_and_passed_through(self) -> None:
+        """A model name the app does not know is passed to Codex as typed, minus stray spaces; empty means default."""
+        execution = server.resolve_chat_settings(
+            server.DEFAULT_CHAT_SETTINGS, {"codex_model": "  gpt-9-new  "})
+        self.assertEqual(execution["model"], "gpt-9-new")
+        self.assertEqual(execution["reasoning_effort"], "medium")
+        for empty in ("", "   ", None):
+            with self.subTest(empty=empty):
+                execution = server.resolve_chat_settings(
+                    server.DEFAULT_CHAT_SETTINGS, {"codex_model": empty})
+                self.assertEqual(execution["model"], "default")
 
     def test_explicit_model_is_passed_to_codex(self) -> None:
         """A model named in the options is passed to app-server on new and resumed sessions."""
@@ -612,7 +628,7 @@ class RuntimeConfigTests(unittest.TestCase):
             with (
                 patch.object(server, "CODEX_HOME", root / "codex-home"),
                 patch.object(server, "DATA_ROOT", root),
-                patch.object(server, "AUTH_QR_DIR", root / "auth-qr"),
+                patch.object(server, "OLD_AUTH_QR_DIR", root / "auth-qr"),
                 patch.object(server, "CODEX_CONFIG_PATH", root / "codex-home" / "config.toml"),
                 patch.object(server, "task_root", return_value=root / "tasks"),
                 patch.object(server, "api_token", return_value="configured"),
@@ -908,6 +924,10 @@ class TaskCancellationTests(unittest.TestCase):
 
     def setUp(self) -> None:
         """Start with no tasks, running processes or task runners, and keep the existing ones to restore."""
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        # A run writes the interaction log under DATA_ROOT; here it goes to a temporary folder.
+        self.addCleanup(isolated_app_folders(server, Path(temporary.name)).close)
         self.saved_tasks = dict(server.tasks)
         self.saved_processes = dict(server.running_processes)
         self.saved_runners = set(server.active_task_runners)

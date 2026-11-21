@@ -60,15 +60,14 @@ function schedule(id, approved, revision = 'r1') {
       };
       const look = () => page.evaluate(() => {
         const visible = (id) => { const el = document.getElementById(id); return el.offsetParent !== null; };
-        const iconColor = (sel) => getComputedStyle(document.querySelector(sel)).backgroundColor;
         const menu = ['menu', 'phone-history'].find(visible);
         return {
           level: document.body.dataset.attention || '',
           label: document.getElementById('attention-label').textContent,
           dismiss: !document.getElementById('attention-dismiss').hidden,
-          cog: iconColor('#settings-button .mdi-icon'),
-          menuMark: menu ? getComputedStyle(document.getElementById(menu), '::before').content : null,
-          menuColor: menu ? getComputedStyle(document.getElementById(menu), '::before').backgroundColor : null,
+          cog: getComputedStyle(document.getElementById('settings-button'), '::after').backgroundColor,
+          menuMark: menu ? getComputedStyle(document.getElementById(menu), '::after').content : null,
+          menuColor: menu ? getComputedStyle(document.getElementById(menu), '::after').backgroundColor : null,
         };
       });
       const dismiss = async () => {
@@ -86,7 +85,7 @@ function schedule(id, approved, revision = 'r1') {
       // Never signed in to GitHub, Remote off, nothing waits: no warning.
       let seen = await look();
       assert.deepEqual([seen.level, seen.label, seen.dismiss], ['', '', false], `${width} nothing`);
-      if (width < 700) assert.equal(seen.menuMark, 'none', `${width} menu stays three lines`);
+      if (width < 700) assert.equal(seen.menuMark, 'none', `${width} no dot on the menu button`);
 
       // GitHub signed out on purpose reads "disconnected": still nothing.
       world.github = github('ok'); await reread();
@@ -97,7 +96,7 @@ function schedule(id, approved, revision = 'r1') {
       world.github = github('revoked'); await reread();
       seen = await look();
       assert.deepEqual([seen.level, seen.label, seen.dismiss], ['red', 'GitHub signed out', true], `${width} github red`);
-      if (width < 700) assert.notEqual(seen.menuMark, 'none', `${width} menu mirrors`);
+      if (width < 700) assert.notEqual(seen.menuMark, 'none', `${width} menu button shows the dot`);
       await dismiss();
       assert.equal((await look()).level, '', `${width} github dismissed`);
       // It stays away on the next read, and comes back after GitHub worked and failed again.
