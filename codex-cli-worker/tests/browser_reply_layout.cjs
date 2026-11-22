@@ -42,8 +42,23 @@ async function showFixture(page, fixture) {
   }, fixture);
 }
 
+/** One normal paragraph gap in pixels, taken from the page's own Markdown rules. The one copy of this sample; the
+ * smoke test reads it from here. */
+async function paragraphGap(page) {
+  return page.evaluate(() => {
+    const sample = document.createElement("div");
+    sample.className = "message markdown";
+    sample.style.cssText = "position: fixed; visibility: hidden; top: 0; left: 0";
+    sample.innerHTML = "<p>First paragraph.</p><p>Second paragraph.</p>";
+    document.body.append(sample);
+    const gap = sample.children[1].getBoundingClientRect().top - sample.children[0].getBoundingClientRect().bottom;
+    sample.remove();
+    return gap;
+  });
+}
+
 /** In the page: the box of each narration block and of the answer, and the other parts the check reads. */
-function measureExchange(node) {
+function measureExchange(node, referenceGap) {
   const area = node.closest("#messages");
   const rect = area.getBoundingClientRect();
   const firstX = (element) => {
@@ -61,18 +76,6 @@ function measureExchange(node) {
     const bounds = block.getBoundingClientRect();
     return { left: firstX(block), top: bounds.top, bottom: bounds.bottom, right: bounds.right };
   };
-  // One normal paragraph gap, taken from the page's own Markdown rules.
-  const sample = document.createElement("div");
-  sample.className = "message markdown";
-  sample.style.cssText = "position: fixed; visibility: hidden; top: 0; left: 0";
-  for (const text of ["First paragraph.", "Second paragraph."]) {
-    const p = document.createElement("p");
-    p.textContent = text;
-    sample.append(p);
-  }
-  node.append(sample);
-  const referenceGap = sample.children[1].getBoundingClientRect().top - sample.children[0].getBoundingClientRect().bottom;
-  sample.remove();
   return {
     columnLeft: rect.left + parseFloat(getComputedStyle(area).paddingLeft),
     viewportRight: Math.min(rect.right, innerWidth),
@@ -130,10 +133,11 @@ module.exports = async function checkReplyLayout(browser, output, errors = [], b
     if (process.env.REPLY_LAYOUT_MUTATE_GAP === "1")
       await page.addStyleTag({ content: "#activity-steps > .message.interim { margin-bottom: 24px !important; }" });
     await page.locator("#activity .activity-toggle").waitFor();
+    const referenceGap = await paragraphGap(page);
     for (const fixture of fixtures) {
       await showFixture(page, fixture);
       const exchange = page.locator("#messages .exchange").last();
-      const measured = await exchange.evaluate(measureExchange);
+      const measured = await exchange.evaluate(measureExchange, referenceGap);
       for (const failure of judge(measured, fixture)) failures.push(`item ${fixture.id} at ${width}px: ${failure}`);
       if (output) {
         fs.mkdirSync(output, { recursive: true });
@@ -145,6 +149,8 @@ module.exports = async function checkReplyLayout(browser, output, errors = [], b
   assert.deepEqual(failures, [], failures.join("\n"));
   assert.equal(fixtures.length, 5);
 };
+
+module.exports.paragraphGap = paragraphGap;
 
 if (require.main === module) {
   const { chromium } = require("playwright");

@@ -985,16 +985,7 @@ async function effortSaved(page, label) {
     });
     // The upper bound (N1 of CX-REPLY-ALIGNc): step groups sit between these blocks, so the gap itself varies; what
     // is compared with a paragraph gap is the space each narration block leaves below itself. The answer is last.
-    const paragraphGap = await page.evaluate(() => {
-      const sample = document.createElement("div");
-      sample.className = "message markdown";
-      sample.style.cssText = "position: fixed; visibility: hidden; top: 0; left: 0";
-      sample.innerHTML = "<p>First paragraph.</p><p>Second paragraph.</p>";
-      document.body.append(sample);
-      const margin = parseFloat(getComputedStyle(sample.firstElementChild).marginBottom);
-      sample.remove();
-      return margin;
-    });
+    const paragraphGap = await require("./browser_reply_layout.cjs").paragraphGap(page);
     assert.ok(paragraphGap > 0, "no paragraph gap to compare with");
     for (const [n, block] of narration.slice(0, -1).entries())
       assert.ok(block.margin <= paragraphGap + 2, `narration block ${n} leaves ${block.margin} px below it; a paragraph leaves ${paragraphGap} px`);
