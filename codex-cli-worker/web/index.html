@@ -19,6 +19,7 @@
     <script src="assets/studio.js" defer></script>
     <script src="assets/schedules.js" defer></script>
     <script src="assets/full_access.js" defer></script>
+    <script src="assets/update_banner.js" defer></script>
   </head>
   <body>
     <div class="app">
@@ -140,6 +141,15 @@
         <section id="github-banner" class="page-banner" role="status" hidden>
           <p><strong id="github-banner-text">The add-on's GitHub sign-in needs attention.</strong></p>
           <div class="settings-actions"><button id="github-banner-open">Open GitHub settings</button></div>
+        </section>
+        <section id="restart-banner" class="page-banner" role="status" hidden>
+          <p><strong id="restart-banner-text">Restart Home Assistant to finish.</strong></p>
+          <div class="settings-actions"><button id="restart-banner-dismiss" class="subtle">Dismiss</button></div>
+        </section>
+        <section id="update-banner" class="page-banner" role="status" hidden>
+          <p><strong id="update-banner-text">An app update is available.</strong></p>
+          <div class="settings-actions"><a id="update-banner-open" class="banner-link" target="_top" hidden>Open the app's Info page</a
+            ><button id="update-banner-dismiss" class="subtle">Dismiss</button></div>
         </section>
         <div
           id="messages"
@@ -279,8 +289,8 @@
                     <button
                       id="effort-reset"
                       type="button"
-                      aria-label="Use add-on default reasoning"
-                      title="Use add-on default reasoning"
+                      aria-label="Use the default model and reasoning"
+                      title="Use the default model and reasoning"
                     >
                       ↺
                     </button>

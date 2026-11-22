@@ -80,6 +80,8 @@ def main():
         server.fire_ha_event = lambda *args: (True, "")
         server.notify = lambda *args, **kwargs: None
         server.refresh_usage_status_async = lambda **kwargs: None
+        # No Supervisor here: no update banner unless a browser test answers /update-status itself.
+        server.update_status.read = lambda token: server.update_status.UpdateStatus(None, None)
         server.lookup_ha_users = lambda: [{"id": "preview-admin", "name": "Preview", "is_active": True,
                                            "system_generated": False, "group_ids": ["system-admin"]}]
         from browser_permissions import describe, scope
@@ -238,7 +240,18 @@ def main():
                         command = 'curl "$HA_URL/api/history/period?filter_entity_id=sensor.energy" -H "Authorization: Bearer $HA_TOKEN"'
                     else:
                         command = "curl '$HA_URL/api/history/period' -H 'Authorization: Bearer $HA_TOKEN'\n# <img src=x onerror=alert(1)>"
-                    if (reply or prompt).startswith("Request permission to call"):
+                    if (reply or prompt).startswith("Request permission to use a ChatGPT app"):
+                        # Codex's request before a tool call of a ChatGPT app, as Codex 0.166.0 sends it
+                        # (CX-TOOL-CARD-ANY); the repository is invented.
+                        session.receive({"id": 0, "method": "mcpServer/elicitation/request", "params": {
+                            "threadId": session_id, "turnId": "preview-native", "serverName": "codex_apps",
+                            "mode": "form", "message": 'Allow GitHub to run tool "create_pull_request"?',
+                            "requestedSchema": {"type": "object", "properties": {}},
+                            "_meta": {"codex_approval_kind": "mcp_tool_call", "source": "connector",
+                                      "connector_name": "GitHub", "tool_title": "Create pull request",
+                                      "tool_params": {"repository_full_name": "example-owner/example-repo",
+                                                      "head": "feature", "base": "main", "draft": True}}}})
+                    elif (reply or prompt).startswith("Request permission to call"):
                         # Codex's own request before a tool call, as Codex 0.166.0 sends it (CX-SIMPLE.B). A clipped
                         # request carries an argument longer than the page shows, so it has no Allow button.
                         text = "x" * 40000 if "clipped" in (reply or prompt) else "Dinner is ready.\n<img src=x onerror=alert(1)>"

@@ -53,6 +53,7 @@ import ha_data_mcp
 import hass_mcp
 import remote_control
 import tool_threads
+import update_status
 from core_address import CoreAddress, probe_core
 from relay_reads import RelayReads, ReadError as RelayReadError
 import retention
@@ -164,6 +165,7 @@ HA_DOCS_GIT_TIMEOUT_SECONDS = 300
 HA_DOCS_GIT_STALL_SECONDS = 60
 
 DEFAULT_OPTIONS = {
+    "model_choice": "Account default",
     "codex_model": "default",
     "model_reasoning_effort": "medium",
     "reasoning_summary": "concise",
@@ -211,10 +213,12 @@ class ChatModel(NamedTuple):
 # The service tier Codex names Fast ("2x speed, increased usage"). turn/start's serviceTier sets it for the turn
 # and the turns after it; JSON null sets the standard tier instead, and leaving the field out keeps the last one.
 FAST_SERVICE_TIER = "priority"
-# Supported choices in the bundled CLI 0.166.0 model catalog. Availability still
-# depends on the signed-in account; the CLI reports unavailable models normally.
+# Supported choices in the bundled CLI 0.166.0 model catalog, newest Sol first, plus gpt-6.2-sol, which the account's
+# own list offers (the CLI's offline catalog stops at gpt-6.1-sol). Availability still depends on the signed-in
+# account; the CLI reports unavailable models normally.
 # Every one offers Fast; gpt-6-sol and gpt-6-luna run on it unless a chat turns it off.
 CHAT_MODELS = (
+    ChatModel("gpt-6.2-sol", "GPT-6.2 Sol", ("low", "medium", "high", "xhigh", "max", "ultra"), False),
     ChatModel("gpt-6-astra", "GPT-6 Astra", ("low", "medium", "high", "xhigh", "max", "ultra"), False),
     ChatModel("gpt-6.1-sol", "GPT-6.1 Sol", ("low", "medium", "high", "xhigh", "max", "ultra"), False),
     ChatModel("gpt-6.1-terra", "GPT-6.1 Terra", ("low", "medium", "high", "xhigh", "max", "ultra"), False),
@@ -235,10 +239,14 @@ MODEL_LIST_MAX_PAGES = 5
 MODEL_LIST_MAX_MODELS = 100
 model_list_lock = threading.Lock()
 # The times are time.monotonic() values, or None before the first read; 0 would be a real time on a fresh boot.
-model_list_state: dict[str, Any] = {"models": None, "read_at": None, "tried_at": None, "reading": False}
-# The model the bundled CLI picks when none is named. The CLI refreshes its model
-# list per account, so the model its own /status names replaces this once seen.
-CLI_DEFAULT_MODEL = "gpt-6.1-sol"
+# "default" is the account's default model and its level (CodexDefault), or None when the list marked none.
+model_list_state: dict[str, Any] = {
+    "models": None, "default": None, "read_at": None, "tried_at": None, "reading": False}
+# The model a chat on default shows before Codex named one: the first of the built-in list (default_model has the
+# order that comes before it).
+CLI_DEFAULT_MODEL = CHAT_MODELS[0].id
+# A Sol model id and its version numbers: gpt-6.2-sol -> "6.2".
+SOL_MODEL_RE = re.compile(r"gpt-(\d+(?:\.\d+)*)-sol")
 # Models that are no longer offered, each with the next model up. An add-on option
 # or a chat that still has one selected runs on the first model in that chain
 # that is still offered. The `codex_model` option is free text, so any saved value
@@ -247,8 +255,8 @@ RETIRED_MODELS = {"gpt-5.5": "gpt-5.6-sol"}
 # fast None follows the model: Fast when Codex runs it on Fast by default, else standard speed.
 DEFAULT_CHAT_SETTINGS = {"model": None, "reasoning_effort": None, "fast": None}
 # The `model_pin` option is empty as shipped, and empty means no pin: runs use the
-# account's default model. When the owner sets it, a chat, a saved turn or the
-# `codex_model` option naming any other model is refused instead of running on it.
+# configured model. When the owner sets it, an explicit chat choice or saved turn
+# naming any other model is refused instead of running on it.
 # Versions before 0.4 shipped this value as the default; run.sh clears it once, on the
 # first start of 0.4, and sets MODEL_PIN_CLEARED so that start does not read the stale
 # copy in options.json. A value set after that is kept.
@@ -704,17 +712,45 @@ def current_model(model: Any) -> Any:
 
 
 def configured_model(options: dict[str, Any]) -> str:
-    """Return the model the codex_model option names; free text, so trim it, and empty means default."""
-    return current_model(str(options.get("codex_model") or "").strip() or "default")
+    """Return the inherited model, preserving custom names saved before the drop-down existed."""
+    pin = model_pin(options)
+    if pin:
+        return pin
+    choice = options.get("model_choice", "Account default")
+    if choice in {"Account default", "custom"}:
+        choice = str(options.get("codex_model") or "").strip() or "default"
+    return current_model(choice)
+
+
+def log_legacy_model_choice(options: dict[str, Any]) -> None:
+    """Explain the retained free-text setting once at worker startup."""
+    if (options.get("model_choice", "Account default") == "Account default"
+            and str(options.get("codex_model") or "").strip() not in {"", "default"}):
+        print("Your saved custom model is still configured. Choose a model in the Model drop-down "
+              "or clear Custom model to use your account default.", flush=True)
 
 
 def default_model(options: dict[str, Any]) -> str:
     """Return the model a chat runs on when it has not selected one."""
     model = configured_model(options)
     if model in {"default", "gpt-5.3-codex"}:
-        # The add-on leaves the choice to the CLI.
-        return seen_default_model() or CLI_DEFAULT_MODEL
+        # The add-on leaves the choice to Codex: its pick for the account, else the newest Sol it offers.
+        return codex_default_model() or newest_sol_model(live_models() or ()) or CLI_DEFAULT_MODEL
     return model
+
+
+def codex_default_model() -> str:
+    """Return the model Codex picks for the account: the one its live list marks as default, else the one /status
+    named, or an empty string before either was read."""
+    default = live_default()
+    return default.model if default else seen_default_model()
+
+
+def newest_sol_model(models: tuple[ChatModel, ...]) -> str:
+    """Return the Sol model with the highest version in a model list, or an empty string when it has none."""
+    versions = {model: tuple(int(part) for part in match.group(1).split("."))
+                for model in (entry.id for entry in models) if (match := SOL_MODEL_RE.fullmatch(model))}
+    return max(versions, key=versions.__getitem__) if versions else ""
 
 
 def seen_default_model() -> str:
@@ -785,11 +821,7 @@ def resolve_chat_settings(settings: dict[str, Any], options: dict[str, Any]) -> 
         # The chat then shows Medium, so the run uses it.
         effort = "medium"
     if effort is None:
-        effort = model_reasoning_effort(options)
-        # The add-on level may not suit the model: none offered supports minimal, and
-        # neither does the model the CLI picks for default, which gets it unchanged.
-        if effort not in efforts:
-            effort = "medium"
+        effort = default_effort(options, model, efforts)
     return {"model": model, "reasoning_effort": effort, "fast": run_fast(settings.get("fast"), model_fast(named))}
 
 
@@ -799,6 +831,23 @@ def run_fast(choice: bool | None, offered: bool | None) -> bool | None:
     if offered is None:
         return None
     return offered if choice is None else choice
+
+
+def default_effort(options: dict[str, Any], model: str, efforts: tuple[str, ...]) -> str:
+    """Return the level of a run whose chat chose none: the add-on's level, or Codex's own for the account's model.
+
+    The model_reasoning_effort option ships as medium, so medium cannot tell an owner's choice from the shipped value.
+    At that value a run that follows Codex's model (default, no pin) takes the level Codex gives that model, as the
+    ChatGPT apps do; any other value is the owner's and applies to every model that offers it.
+    """
+    effort = model_reasoning_effort(options)
+    default = live_default()
+    if (model == "default" and effort == DEFAULT_OPTIONS["model_reasoning_effort"] and default
+            and default.effort in efforts):
+        return default.effort
+    # The add-on level may not suit the model: none offered supports minimal, and
+    # neither does the model the CLI picks for default, which gets it unchanged.
+    return effort if effort in efforts else "medium"
 
 
 def parse_chat_settings(payload: dict[str, Any], task: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1495,10 +1544,13 @@ def _parse_status_model(text: str) -> str:
 
 
 def forget_default_model() -> None:
-    """Forget the model the CLI named, as the account may have changed; a check still running will not restore it."""
+    """Forget the model the CLI and the live list named, as the account may have changed; a check still running will
+    not restore the CLI's."""
     with usage_lock:
         usage_state["_model_generation"] += 1
         usage_state["_default_model"] = ""
+    with model_list_lock:
+        model_list_state["default"] = None
 
 
 def _has_rich_status_panel(text: str) -> bool:
@@ -1836,20 +1888,47 @@ def parse_codex_models(entries: list[dict[str, Any]]) -> tuple[ChatModel, ...]:
     return tuple(models)
 
 
+class CodexDefault(NamedTuple):
+    """The model Codex's live list marks as the account's default, and the level Codex gives it."""
+
+    model: str
+    effort: str
+
+
+def parse_codex_default(entries: list[dict[str, Any]],
+                        models: tuple[ChatModel, ...]) -> CodexDefault | None:
+    """Return the entry marked isDefault as a CodexDefault, or None when no offered model is marked.
+
+    Its level is defaultReasoningEffort when the model offers it, else medium when offered, else its first level.
+    """
+    offered = {model.id: model.efforts for model in models}
+    for entry in entries:
+        model = entry.get("id")
+        if entry.get("isDefault") is True and model in offered:
+            effort = entry.get("defaultReasoningEffort")
+            efforts = offered[model]
+            if effort not in efforts:
+                effort = "medium" if "medium" in efforts else efforts[0]
+            return CodexDefault(model, effort)
+    return None
+
+
 def refresh_models() -> None:
     """Read the live model list once and keep it; on a failure keep the last good list (or none)."""
     codex = codex_binary_path()
-    models = None
+    models = default = None
     try:
         if codex:
-            models = parse_codex_models(read_codex_models(codex)) or None
+            entries = read_codex_models(codex)
+            models = parse_codex_models(entries) or None
+            default = parse_codex_default(entries, models or ())
     except Exception as exc:  # noqa: BLE001 - any failure leaves the built-in or last good list in use
         print(f"Could not read the model list from Codex: {_diagnostic_error(exc)}", flush=True)
     with model_list_lock:
         model_list_state["reading"] = False
         model_list_state["tried_at"] = time.monotonic()
         if models:
-            model_list_state.update(models=models, read_at=time.monotonic())
+            model_list_state.update(models=models, default=default, read_at=time.monotonic())
 
 
 def live_models(wait: bool = False) -> tuple[ChatModel, ...] | None:
@@ -1875,6 +1954,13 @@ def live_models(wait: bool = False) -> tuple[ChatModel, ...] | None:
     if due:
         threading.Thread(target=refresh_models, name="model-list", daemon=True).start()
     return models
+
+
+def live_default() -> CodexDefault | None:
+    """Return the account's default model and level from the live list, or None before a read or when none is marked."""
+    live_models()
+    with model_list_lock:
+        return model_list_state["default"]
 
 
 def chat_models() -> tuple[ChatModel, ...]:
@@ -5344,12 +5430,13 @@ def turn_model(model: str) -> dict[str, str]:
 
     A thread that is already loaded (the live process) ignores the model of thread/resume, and a resume without one
     keeps the thread's last model, so each turn names its model; a chat set back to the default gets the CLI's pick
-    by name. The pick is named only when it is a model the worker knows: for any other model /status gives its
-    display text, which is not a model id. Before /status named a known pick, the turn names none, as before.
+    by name (codex_default_model: the live list's default, else /status). The pick is named only when it is a model
+    the worker knows: for any other model /status gives its display text, which is not a model id. Before either named
+    a known pick, the turn names none, as before.
     """
     if model not in {"default", "gpt-5.3-codex"}:
         return {"model": model}
-    seen = seen_default_model()
+    seen = codex_default_model()
     return {"model": seen} if model_efforts(seen) is not None else {}
 
 
@@ -7236,22 +7323,17 @@ def chat_options() -> Response:
     """Return the models, defaults, and settings the web UI needs."""
     options = read_options()
     pin = model_pin(options)
-    try:
-        default = resolve_chat_settings(DEFAULT_CHAT_SETTINGS, options)
-        model_error = ""
-    except ValueError as exc:
-        # The add-on's codex_model option names another model than the pin; say so on the page.
-        default = {"model": pin, "reasoning_effort": "medium", "fast": model_fast(pin)}
-        model_error = str(exc)
-    default_id = pin or default_model(options)
-    models = [{"id": model.id, "label": model.label, "efforts": model.efforts, "fast": model.fast}
-              for model in chat_models()]
+    default = resolve_chat_settings(DEFAULT_CHAT_SETTINGS, options)
+    default_id = default_model(options)
+    # default_effort is the level a chat on that model runs at while it chose none (resolve_chat_settings).
+    models = [{"id": model.id, "label": model.label, "efforts": model.efforts, "fast": model.fast,
+               "default_effort": default_effort(options, model.id, model.efforts)} for model in chat_models()]
     if pin:
         models = [entry for entry in models if entry["id"] == pin]
     return jsonify({
         "ok": True,
         "model_pin": pin,
-        "model_error": model_error,
+        "model_error": "",
         "defaults": default,
         # The defaults' model by name, also when the add-on leaves the choice to the CLI.
         "default_model": default_id,
@@ -7499,32 +7581,48 @@ def get_log(task_id: str) -> Response:
     return Response(data, mimetype="text/plain")
 
 
+def stored_activity_payload(task_id: str, turn_id: str, after: int) -> dict[str, Any]:
+    """The saved steps of a finished exchange after a sequence number, or an empty list when none were saved."""
+    stored = load_stored_activity(task_id, turn_id)
+    if stored is None:
+        return {"ok": True, "turn_id": turn_id, "seq": 0, "running": False, "total": 0, "steps": []}
+    steps = [step for step in stored["steps"] if isinstance(step, dict) and int(step.get("seq") or 0) > after]
+    return {
+        "ok": True, "turn_id": str(stored.get("turn_id") or turn_id), "seq": int(stored.get("seq") or 0),
+        "running": False, "total": len(stored["steps"]), "steps": steps,
+    }
+
+
 @app.get("/tasks/<task_id>/activity")
 @require_auth
 def get_activity(task_id: str) -> Response:
-    """Return the steps Codex reported for the latest exchange, after a sequence number."""
+    """Return the steps Codex reported for an exchange, after a sequence number.
+
+    Without `turn` it is the latest exchange. With `turn`, an earlier answer's
+    "Worked for" line asks for that exchange's saved steps; the id must have
+    the turn id form and belong to this chat, so it never names another path.
+    """
     if TASK_ID_RE.fullmatch(task_id) is None:
         return jsonify({"ok": False, "error": "task not found"}), 404
     try:
         after = int(request.args.get("after", "0"))
     except ValueError:
         return jsonify({"ok": False, "error": "after must be a number"}), 400
+    wanted = request.args.get("turn")
+    if wanted is not None and TURN_ID_RE.fullmatch(wanted) is None:
+        return jsonify({"ok": False, "error": "turn not found"}), 404
     with lock:
         task = tasks.get(task_id)
         if task is None:
             return jsonify({"ok": False, "error": "task not found"}), 404
+        known = {turn.get("turn_id") for turn in task.get("turns") or []} | {task.get("current_turn_id")}
+        if wanted is not None and wanted not in known:
+            return jsonify({"ok": False, "error": "turn not found"}), 404
         record = task_activity.get(task_id)
-        if record is not None:
+        if record is not None and wanted in (None, record["turn_id"]):
             return jsonify({"ok": True, **activity_payload_locked(record, after)})
-        turn_id = str(task.get("current_turn_id") or "")
-    stored = load_stored_activity(task_id, turn_id)
-    if stored is None:
-        return jsonify({"ok": True, "turn_id": turn_id, "seq": 0, "running": False, "total": 0, "steps": []})
-    steps = [step for step in stored["steps"] if isinstance(step, dict) and int(step.get("seq") or 0) > after]
-    return jsonify({
-        "ok": True, "turn_id": str(stored.get("turn_id") or turn_id), "seq": int(stored.get("seq") or 0),
-        "running": False, "total": len(stored["steps"]), "steps": steps,
-    })
+        turn_id = wanted or str(task.get("current_turn_id") or "")
+    return jsonify(stored_activity_payload(task_id, turn_id, after))
 
 
 # The marks the chat page shows in front of each kind of step, so a shared
@@ -8069,6 +8167,18 @@ def addon_configuration() -> Response:
     return jsonify({"ok": True, "url": f"/config/app/{slug}/config" if slug else None})
 
 
+@app.get("/update-status")
+@require_auth
+def get_update_status() -> Response:
+    """Return the versions the page's update banners name: a restart to finish, an app update; null for none.
+
+    It changes nothing and holds only version numbers and the slug path, so the worker token is enough.
+    """
+    status = update_status.read(ha_token())
+    slug = addon_slug() if status.update_version else None
+    return jsonify({"ok": True, **status.as_json(), "info_url": f"/config/app/{slug}/info" if slug else None})
+
+
 @app.post("/remote-control/<action>")
 @require_auth
 @require_ingress
@@ -8498,7 +8608,9 @@ def main() -> None:
     protected policy (for example a full-access mode carried over from an
     older version, or approvals that would never ask).
     """
-    problem = protected_policy.policy_problem(read_options())
+    options = read_options()
+    log_legacy_model_choice(options)
+    problem = protected_policy.policy_problem(options)
     if problem:
         print(f"Codex CLI Worker will not start: {problem}", flush=True)
         sys.exit(1)

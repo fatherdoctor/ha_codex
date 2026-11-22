@@ -228,7 +228,7 @@ class ConversationTests(unittest.TestCase):
         task_id = self.create()
         self.assertEqual(self.post(f"/tasks/{task_id}/settings", {"chat_settings": {}}).status_code, 409)
         catalog = self.client.get("/chat-options", headers=self.headers).json
-        self.assertEqual(len(catalog["models"]), 8)
+        self.assertEqual(len(catalog["models"]), 9)
         efforts = {model["id"]: model["efforts"] for model in catalog["models"]}
         self.assertEqual(efforts["gpt-6.1-sol"], ["low", "medium", "high", "xhigh", "max", "ultra"])
         self.assertEqual(efforts["gpt-6.1-terra"], ["low", "medium", "high", "xhigh", "max", "ultra"])
@@ -579,7 +579,7 @@ class ConversationTests(unittest.TestCase):
         self.assertIn(b'assets/chat.js', response.data)
         # The Markdown parser is bundled, so the chat never loads a script from another server.
         scripts = re.findall(rb'<script src="([^"]+)"', response.data)
-        self.assertEqual(scripts, [b"assets/text-size.js", b"assets/vendor/marked.umd.js", b"assets/markdown.js", b"assets/chat.js", b"assets/studio.js", b"assets/schedules.js", b"assets/full_access.js"])
+        self.assertEqual(scripts, [b"assets/text-size.js", b"assets/vendor/marked.umd.js", b"assets/markdown.js", b"assets/chat.js", b"assets/studio.js", b"assets/schedules.js", b"assets/full_access.js", b"assets/update_banner.js"])
         for name in ("text-size.js", "chat.js", "chat.css", "studio.js", "studio.css", "markdown.js", "vendor/marked.umd.js", "vendor/marked.LICENSE.md"):
             with self.client.get("/assets/" + name) as asset:
                 self.assertEqual(asset.status_code, 200)
