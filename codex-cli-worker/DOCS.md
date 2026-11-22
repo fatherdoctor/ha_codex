@@ -239,6 +239,17 @@ After the restart, the app's Supervisor discovery shows **Discovered: Codex** un
 services**. The app announces itself only once Home Assistant has loaded the integration, so a fresh install
 logs no `Cannot find integration codex_cli` error before the restart. Choose **Add**, then **Submit**; the integration is added only after you confirm.
 
+**Update banners on the chat page.** Two banners above the chat say what still needs you. The app installs and
+restarts nothing itself.
+
+| Banner | When it shows |
+|---|---|
+| **Version X is installed. Restart Home Assistant to finish.** | The integration in `/config/custom_components/codex_cli` has a version that Home Assistant has not loaded. Home Assistant keeps the integration it loaded at its last start, so this shows after the app writes a new version, and after the first install. The app asks Home Assistant which version it loaded (the WebSocket command `manifest/get`), so it never guesses. With the option below off, this banner never shows. |
+| **Update available: version X** | Supervisor offers a newer version of the app. The banner links to the app's Info page, where you choose **Update**. |
+
+**Dismiss** hides a banner for that version, in that browser; a newer version shows it again. If Home Assistant or
+Supervisor cannot answer, the page shows no banner.
+
 **Option:** **Install the Codex integration** (`install_integration`, default on). Turn it off to install and update
 the integration yourself; the app then reads and writes nothing in `custom_components`. Discovery is announced
 either way, once Home Assistant has loaded the integration.
