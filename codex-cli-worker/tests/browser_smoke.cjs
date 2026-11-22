@@ -980,9 +980,15 @@ async function effortSaved(page, label) {
       };
       return blocks.map((node) => {
         const rect = node.getBoundingClientRect();
-        return { top: rect.top, bottom: rect.bottom, left: firstCharacter(node) };
+        return { top: rect.top, bottom: rect.bottom, left: firstCharacter(node), margin: parseFloat(getComputedStyle(node).marginBottom) };
       });
     });
+    // The upper bound (N1 of CX-REPLY-ALIGNc): step groups sit between these blocks, so the gap itself varies; what
+    // is compared with a paragraph gap is the space each narration block leaves below itself. The answer is last.
+    const paragraphGap = await require("./browser_reply_layout.cjs").paragraphGap(page);
+    assert.ok(paragraphGap > 0, "no paragraph gap to compare with");
+    for (const [n, block] of narration.slice(0, -1).entries())
+      assert.ok(block.margin <= paragraphGap + 2, `narration block ${n} leaves ${block.margin} px below it; a paragraph leaves ${paragraphGap} px`);
     assert.ok(narration.length >= 3, `${narration.length - 1} narration blocks above the answer`);
     for (let n = 1; n < narration.length; n++) {
       const gap = narration[n].top - narration[n - 1].bottom;
@@ -2019,9 +2025,10 @@ async function effortSaved(page, label) {
     await require("./browser_file_link.cjs")(browser, output, errors);
     await require("./browser_answer_bleed.cjs")(browser, output, errors);
     await require("./browser_thinking.cjs")(browser, output, errors);
+    await require("./browser_reply_layout.cjs")(browser, output, errors);
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: queued messages (wait behind a working chat, edit, remove, start in order), choices under a question (pick one, draft kept, late answer refused), attached images (pick, reject, remove, send, render, batch stays with its chat, send waits for decoding), chat actions (pin, rename, delete, long press), generated image attachments, Markdown formatting (sent messages, answers, untrusted text, slow or long text, narrow screens), saved model/reasoning choices, model compatibility, the model a chat runs on by name, quota bars, the line about the Codex integration, keyboard/reset controls, history, pagination, continuation, new chats, drafts, reopening the last chat, safe text, settings, text size (three sizes, kept per device, phone and iPad), slash-prefixed messages (Enter and Send), file links in answers (card, download, refused paths), narration kept out of the answer (inside the closed list, aligned with it at four widths), the live Thinking line (newest summary, replaced as it streams, under the steps, gone at the end), resize, mobile and dark mode. Screenshots: " +
+      "PASS: queued messages (wait behind a working chat, edit, remove, start in order), choices under a question (pick one, draft kept, late answer refused), attached images (pick, reject, remove, send, render, batch stays with its chat, send waits for decoding), chat actions (pin, rename, delete, long press), generated image attachments, Markdown formatting (sent messages, answers, untrusted text, slow or long text, narrow screens), saved model/reasoning choices, model compatibility, the model a chat runs on by name, quota bars, the line about the Codex integration, keyboard/reset controls, history, pagination, continuation, new chats, drafts, reopening the last chat, safe text, settings, text size (three sizes, kept per device, phone and iPad), slash-prefixed messages (Enter and Send), file links in answers (card, download, refused paths), narration kept out of the answer (inside the closed list, aligned with it at four widths), the live Thinking line (newest summary, replaced as it streams, under the steps, gone at the end), reply layout (five transcript-shaped examples at four widths: narration count, edges, gaps), resize, mobile and dark mode. Screenshots: " +
         output,
     );
   } finally {

@@ -1,6 +1,9 @@
 "use strict";
 /** Return the page element with the given id. */
 const $ = (id) => document.getElementById(id);
+// Remote Control is paused in this version: the worker marks the page root (server.mark_remote_paused), the page
+// hides every part of it and sends no remote-control request.
+const REMOTE_PAUSED = document.documentElement.hasAttribute("data-remote-paused");
 const labels = {
   queued: "Starting",
   in_queue: "In queue",
@@ -3197,8 +3200,8 @@ const SLASH_COMMANDS = [
     name: "connection",
     icon: "⇄",
     description: "Open the remote connection and its status",
-    // Listed until Settings has shown that remote control cannot run here.
-    available: () => state.remoteAvailable !== false,
+    // Listed until Settings has shown that remote control cannot run here, and never while it is paused.
+    available: () => !REMOTE_PAUSED && state.remoteAvailable !== false,
     run: () => openConnection(),
   },
   {
@@ -4072,6 +4075,7 @@ let remoteCardKey = "";
  */
 async function loadRemoteControl() {
   clearTimeout(remoteTimer);
+  if (REMOTE_PAUSED) return;
   const { remote_control: rc } = await api("remote-control");
   renderRemoteControl(rc);
   if ($("settings").open)
