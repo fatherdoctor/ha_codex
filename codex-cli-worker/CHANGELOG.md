@@ -3,6 +3,7 @@
 ## 0.4.0 (unreleased)
 
 ### What's new
+- **Git commits identify Codex.** New commits use ChatGPT Codex as the default author and committer. You can configure the name and email for the app or for an individual repository.
 - **A schedule wakes the chat it was made in.** Each run of a schedule made from a chat is that chat's next
   message: Codex continues the same conversation, and the chat moves to the top of the list with a dot until you open
   it. Earlier, each run started a new chat. The run keeps the schedule's permissions and model, never a wider mode
