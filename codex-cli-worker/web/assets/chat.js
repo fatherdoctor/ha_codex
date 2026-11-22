@@ -3321,18 +3321,16 @@ $("divider").addEventListener("keydown", (event) => {
 window.addEventListener("resize", () => {
   if (innerWidth > 700) setWidth($("divider").getAttribute("aria-valuenow"));
 });
-/**
- * Slash commands. Messages go to Codex as plain text through the app server,
- * which does not read the TUI's slash commands, so "/new" sent as a message
- * would only reach the model as words. The page runs these commands itself
- * instead: typing "/" at the start of the message box lists them, filtered as
- * you type, and a tap, or Enter or Tab on the highlighted one, runs it.
- * A command is listed only while the page can run it (Stop only while a
- * chat is working, Rename only with a chat open).
- * There is no /fast command, and the picker has no lightning (fast mode)
- * toggle: the Codex CLI has no setting for fast mode yet. Both return in 0.6
- * with a working toggle (CX-04-FB-MODEL).
- */
+// Version 0.5 sends slash-prefixed messages through the regular composer.
+const SLASH_COMMANDS_ENABLED = false;
+if (!SLASH_COMMANDS_ENABLED) {
+  const message = $("message");
+  message.removeAttribute("aria-autocomplete");
+  message.removeAttribute("aria-controls");
+  message.removeAttribute("aria-expanded");
+}
+
+/** Page shortcuts and their availability when slash commands are enabled. */
 const SLASH_COMMANDS = [
   {
     name: "new",
@@ -3475,6 +3473,7 @@ function slashMatches(value) {
 }
 /** Return the runnable command a whole message names exactly, if any. */
 function slashCommand(value) {
+  if (!SLASH_COMMANDS_ENABLED) return null;
   const typed = /^\/(\S+)$/.exec(value.trim());
   if (!typed) return null;
   const word = typed[1].toLowerCase();
@@ -3494,6 +3493,7 @@ function slashIcon(glyph) {
 }
 /** Show or hide the command list for the message box's current text. */
 function renderSlash() {
+  if (!SLASH_COMMANDS_ENABLED) return;
   const value = $("message").value;
   if (slash.dismissed !== null && slash.dismissed !== value)
     slash.dismissed = null;
