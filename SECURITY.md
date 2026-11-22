@@ -19,7 +19,7 @@ Codex's own reviewer answer. Full access runs without the sandbox and asks
 nothing; it is off until an administrator turns it on in the app's Settings, and
 the `codex_sandbox` option does not accept it. Review each approved command and
 keep connections short-lived. See [SSH setup and
-limits](codex-cli-worker/DOCS.md#ssh-connections).
+limits](docs/app-reference.md#ssh-connections).
 
 From 0.3.6 the app has no command check of its own: Codex's permission modes and the
 sandbox are the protection. A command you allow once runs outside the sandbox and can

@@ -215,7 +215,7 @@ class StarterAgentsText(unittest.TestCase):
         for path in (ROOT.parent / "README.md", ROOT / "README.md"):
             with self.subTest(path=str(path.relative_to(ROOT.parent))):
                 self.assertIn("gets a short starter file there once", " ".join(path.read_text(encoding="utf-8").split()))
-        self.assertIn("**Starter instructions.**", (ROOT / "DOCS.md").read_text(encoding="utf-8"))
+        self.assertIn("**Starter instructions.**", (ROOT.parent / "docs" / "app-reference.md").read_text(encoding="utf-8"))
         self.assertIn("server.py: write_starter_agents_file", (ROOT.parent / "AUDITING.md").read_text(encoding="utf-8"))
 
     def test_it_is_plain_ascii_with_one_final_newline(self):
