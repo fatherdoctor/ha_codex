@@ -1,8 +1,9 @@
-// Every interim text message of a Codex turn shows in the chat, in order, outside the closed "Worked for" list
-// (CX-04-SHOW-TEXT). Run with tests/web_fixture.py serving the page on port 9137.
-// 1. The saved first chat has two interim messages and an activity copy of the final answer: the interim
-//    messages show in order above the answer, and the answer shows once.
-// 2. "Worked for" still holds the steps and thinking, and none of the interim text is inside it.
+// Every interim text message of a finished Codex turn shows in the chat, in order, inside its "Worked for" list,
+// between the step groups (CX-04-SHOW-TEXT, moved into the list by CX-BLEED-FIX). Run with tests/web_fixture.py
+// serving the page on port 9137.
+// 1. The saved first chat has two interim messages and an activity copy of the final answer: with the list closed,
+//    no interim message shows and the answer follows the closed line and shows once.
+// 2. With the list open, the interim messages show in order between the step groups, never as step rows.
 // 3. A Markdown link in an interim message renders as a link.
 // 4. An explicit failed entity readback remains available in the completed chat.
 const {chromium} = require('playwright');
@@ -20,23 +21,17 @@ const base = 'http://127.0.0.1:9137/preview/';
       page.on('pageerror', error => errors.push(error.message));
       await page.goto(base);
       await page.locator('[data-task-id="preview-00"]').evaluate(el => el.click());
-      await page.locator('#activity-text .interim').first().waitFor();
+      await page.locator('#activity .interim').first().waitFor({state: 'attached'});
       const label = `width ${width}`;
-      const texts = await page.locator('#activity-text .interim').allTextContents();
-      assert.equal(texts.length, 2, `${label}: two interim messages show`);
-      assert.match(texts[0], /I'll read the automation/, `${label}: first message first`);
-      assert.match(texts[1], /The file reads fine/, `${label}: second message second`);
       assert.equal(await page.locator('#activity-steps').isVisible(), false, `${label}: Worked for stays closed`);
-      assert.equal(await page.locator('#activity-text .interim').first().isVisible(), true, `${label}: text shows while closed`);
-      assert.equal(await page.locator('#activity .step-message').count(), 0, `${label}: no message row inside the steps`);
-      const link = page.locator('#activity-text a', {hasText: 'Home Assistant docs'});
-      assert.equal(await link.getAttribute('href'), 'https://www.home-assistant.io/docs/automation/', `${label}: link renders`);
-      // Order in the page: the closed line, then the interim text, then the answer, which shows once.
+      assert.equal(await page.locator('#activity-text .interim').count(), 0, `${label}: no interim text outside the list`);
+      assert.equal(await page.locator('.interim:visible').count(), 0, `${label}: no interim text shows while closed`);
+      // Order in the page: the closed line, then the answer, which shows once.
       const order = await page.evaluate(() => {
-        const nodes = [...document.querySelectorAll('#activity, #activity-text, .answer')];
+        const nodes = [...document.querySelectorAll('#activity, .answer')];
         return nodes.map(node => node.id || node.className.split(' ')[0]);
       });
-      assert.deepEqual(order.slice(-3), ['activity', 'activity-text', 'answer'], `${label}: order`);
+      assert.deepEqual(order.slice(-2), ['activity', 'answer'], `${label}: order`);
       const answer = await page.locator('.answer').last().innerText();
       assert.ok(answer.trim().length > 0, `${label}: the answer shows`);
       assert.equal(await page.locator('.answer .message:not(.details)').count(), 1, `${label}: one answer`);
@@ -44,7 +39,14 @@ const base = 'http://127.0.0.1:9137/preview/';
       assert.ok(!answer.includes('reads fine') && !answer.includes("I'll read"), `${label}: interim text is not repeated in the answer`);
       await page.locator('#activity .activity-toggle').click();
       assert.ok((await page.locator('#activity .step').count()) > 0, `${label}: the steps open under Worked for`);
-      assert.equal(await page.locator('#activity-steps').innerText().then(t => t.includes('reads fine')), false, `${label}: text not duplicated in the list`);
+      const texts = await page.locator('#activity-steps > .interim').allTextContents();
+      assert.equal(texts.length, 2, `${label}: two interim messages show in the open list`);
+      assert.match(texts[0], /I'll read the automation/, `${label}: first message first`);
+      assert.match(texts[1], /The file reads fine/, `${label}: second message second`);
+      assert.equal(await page.locator('#activity .step-message').count(), 0, `${label}: no message row inside the steps`);
+      assert.equal(await page.locator('#activity-steps').innerText().then(t => t.includes('evening routine looks good')), false, `${label}: the answer is not repeated in the list`);
+      const link = page.locator('#activity-steps a', {hasText: 'Home Assistant docs'});
+      assert.equal(await link.getAttribute('href'), 'https://www.home-assistant.io/docs/automation/', `${label}: link renders`);
       await page.locator('[data-task-id="preview-03"]').evaluate(el => el.click());
       const failedCheck = page.getByText('1 check failed', {exact: true});
       await failedCheck.waitFor();

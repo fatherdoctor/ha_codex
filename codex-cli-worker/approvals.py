@@ -29,7 +29,8 @@ TOOL_APPROVAL = "mcpServer/elicitation/request"
 
 # The (server, tool) pairs whose action requests get a page card: the plain Home Assistant tool that server.py
 # registers as home_assistant_call, and the write tools of the bundled Home Assistant MCP server (hass_mcp.py), which
-# Codex asks about before each call. A question from any other server or tool is still declined (_elicitation_refusal).
+# Codex asks about before each call. The tools of the ChatGPT apps get a card too (app_tool_request). A question from
+# any other server or tool is still declined (_elicitation_refusal).
 TOOL_CARDS = frozenset({("home_assistant_call", "call"),
                         *((hass_mcp.SERVER_NAME, tool) for tool in hass_mcp.WRITE_TOOLS)})
 
@@ -40,6 +41,16 @@ _TOOL_QUESTION = re.compile(r'Allow the ([A-Za-z0-9_-]{1,64}) MCP server to run 
 
 
 _SERVER_NAME = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+# The server through which Codex reaches the ChatGPT apps (GitHub, Calendar and others connected to the ChatGPT
+# account). Codex asks before an app tool call in the same form, but its message is either "Allow <app> to run tool
+# "<tool>"?" or a sentence that OpenAI writes for that tool, such as "Allow GitHub to add a comment to a pull
+# request?" (codex-rs/core/src/mcp_tool_approval_templates.rs at rust-v0.166.0). So the tool is named from the
+# message when it has the first form, else from the tool title in _meta.
+CODEX_APPS_SERVER = "codex_apps"
+_APP_TOOL_QUESTION = re.compile(r'Allow .{1,64} to run tool "([A-Za-z0-9_.-]{1,128})"\?')
+# An app or tool title is shown only when it is a short plain name; anything else reads as the generic word.
+_PLAIN_TITLE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 _.()-]{0,63}")
 
 
 def _elicitation_refusal(params: dict[str, Any]) -> str:
@@ -57,16 +68,37 @@ def decision_result(kind: str, allow: bool) -> dict[str, Any]:
     return {"decision": "accept" if allow else "decline"}
 
 
+def _is_tool_question(params: dict[str, Any]) -> bool:
+    """True when this is Codex's own form before a tool call, not a question that a tool server asks."""
+    meta = params.get("_meta")
+    return params.get("mode") == "form" and isinstance(meta, dict) and meta.get("codex_approval_kind") == "mcp_tool_call"
+
+
+def plain_title(value: Any) -> str:
+    """The value when it is a short plain name, else an empty string."""
+    text = value.strip() if isinstance(value, str) else ""
+    return text if _PLAIN_TITLE.fullmatch(text) else ""
+
+
 def tool_request(params: dict[str, Any]) -> tuple[str, str] | None:
     """Return (server, tool) when this is Codex's own request to run a tool that has a page card, else None."""
-    meta = params.get("_meta")
-    if params.get("mode") != "form" or not isinstance(meta, dict) or meta.get("codex_approval_kind") != "mcp_tool_call":
+    if not _is_tool_question(params):
         return None
     question = _TOOL_QUESTION.fullmatch(str(params.get("message") or ""))
     server = params.get("serverName")
     if not question or question.group(1) != server or (server, question.group(2)) not in TOOL_CARDS:
         return None
     return server, question.group(2)
+
+
+def app_tool_request(params: dict[str, Any]) -> tuple[str, str] | None:
+    """Return (codex_apps, tool) when this is Codex's request to run a tool of a ChatGPT app, else None."""
+    if params.get("serverName") != CODEX_APPS_SERVER or not _is_tool_question(params):
+        return None
+    question = _APP_TOOL_QUESTION.fullmatch(str(params.get("message") or ""))
+    if question:
+        return CODEX_APPS_SERVER, question.group(1)
+    return CODEX_APPS_SERVER, plain_title(params["_meta"].get("tool_title")) or "tool"
 
 
 _SERVICE_PATH = re.compile(r"/api/services/([a-z0-9_]+)/([a-z0-9_]+)")
@@ -231,6 +263,18 @@ def _tool_confirmation(tool: str, arguments: str) -> dict[str, str]:
     return {"what": f"Run the tool {tool}, with the arguments shown below.", "where": "This Home Assistant.",
             "effect": "Only what the tool does with these arguments."}
 
+
+def _app_tool_confirmation(record: dict[str, Any]) -> dict[str, str]:
+    """Plain words for a ChatGPT app's tool call: which app and tool, and that it acts outside Home Assistant."""
+    app = record.get("app") or "a ChatGPT app"
+    tool = record["tool"].partition(".")[2]
+    effect = "Only what the app does with these arguments, in that service, outside this Home Assistant."
+    if record.get("question"):
+        effect = f"Codex asks: {record['question']} " + effect
+    return {"what": f"Let {app} run its tool {tool}, with the arguments shown below.",
+            "where": f"Your {app} account, connected through your ChatGPT sign-in.", "effect": effect}
+
+
 def _file_effect(paths: list[str]) -> str:
     """The plain effect of changing these files: the most specific one that applies to each, without repeats."""
     effects: list[str] = []
@@ -254,6 +298,8 @@ def confirmation(record: dict[str, Any]) -> dict[str, str]:
     """Describe the redacted action without making or suppressing its approval decision."""
     if record["kind"] == "command":
         text = _command_confirmation(record["command"], record["cwd"], record.get("network", ""))
+    elif record["kind"] == "tool" and record["tool"].startswith(CODEX_APPS_SERVER + "."):
+        text = _app_tool_confirmation(record)
     elif record["kind"] == "tool":
         text = _tool_confirmation(record["tool"], record["arguments"])
     else:
@@ -510,11 +556,16 @@ class AppServerSession:
         }
         if kind == "tool":
             # Shown in full or not allowed: the arguments Codex will send, as JSON, after credentials are hidden.
-            server, tool = tool_request(params)
+            server, tool = self._tool_card(params)
             record["tool"] = f"{server}.{tool}"
+            if server == CODEX_APPS_SERVER:
+                record["app"] = plain_title(params["_meta"].get("connector_name"))
+                # Codex's own sentence, not model text; still redacted and clipped like every shown value.
+                record["question"], clipped = self._display(params.get("message"))
             arguments = params["_meta"].get("tool_params")
-            record["arguments"], clipped = self._display(
+            record["arguments"], arguments_clipped = self._display(
                 json.dumps(arguments, indent=2, sort_keys=True, ensure_ascii=False))
+            clipped |= arguments_clipped
             record["scope"] = "Allow this one tool call once. Codex asks again before the next one."
             record["can_allow"] = isinstance(arguments, dict)
         elif method == COMMAND_APPROVAL:
@@ -559,6 +610,30 @@ class AppServerSession:
         # Persist the reviewable request before it can receive a decision.
         self.on_approvals(copy.deepcopy(self._records))
 
+    def _tool_card(self, params: dict[str, Any]) -> tuple[str, str] | None:
+        """Return (server, tool) when this tool question gets a page card in this chat, else None.
+
+        A Read only chat promises that nothing changes, and an app tool acts outside the sandbox, in the app's own
+        service, so there an app tool question is declined as before.
+        """
+        if self.thread_params.get("sandbox") == "read-only":
+            return tool_request(params)
+        return tool_request(params) or app_tool_request(params)
+
+    def _decline_tool_question(self, request_id: Any, params: dict[str, Any]) -> None:
+        """Decline a tool question that has no card here, say so in the chat, and log the server's name."""
+        self._write({"id": request_id, "result": {"action": "decline"}})
+        message = _elicitation_refusal(params)
+        # Today only Read only declines an app tool question (see _tool_card); test both, so a later mode that
+        # declines one does not show this Read only sentence.
+        if app_tool_request(params) and self.thread_params.get("sandbox") == "read-only":
+            message = ("A ChatGPT app asked to run one of its tools. A Read only chat changes nothing, so it was "
+                       "declined. Switch the chat to Default to approve app tools one call at a time.")
+        self.on_event({"type": "error", "message": message})
+        name = params.get("serverName")
+        server = name if isinstance(name, str) and _SERVER_NAME.fullmatch(name) else "an unnamed server"
+        print(f"Declined a tool question from {server}: the page has no card for it.", flush=True)
+
     def waiting_for_user(self) -> bool:
         """Return True while a permission request waits for the user, when silence from Codex is expected."""
         with self.lock:
@@ -593,6 +668,14 @@ class AppServerSession:
                 record["status"] = "expired"
                 self.fail("Could not deliver the permission decision. The exchange was stopped.")
                 raise OSError(self.error) from None
+            finally:
+                if record["kind"] == "tool":
+                    # Logged after delivery, so the line shows the final status: a decision that could not
+                    # reach Codex reads expired, not allowed. Names only: the arguments can hold a message's text.
+                    outcome = record["status"] + " by the owner"
+                    if record["status"] == "expired":
+                        outcome = "expired: the owner's decision did not reach Codex"
+                    print(f"Tool call {record['tool']} {outcome}.", flush=True)
 
     def receive(self, message: dict[str, Any]) -> None:
         """Dispatch a server message without treating model prose as permission."""
@@ -615,13 +698,12 @@ class AppServerSession:
                     # Broad turn/session grants are deliberately unsupported.
                     self._write({"id": message["id"], "result": {"permissions": {}, "scope": "turn"}})
                     self.on_event({"type": "error", "message": "Broad permission grant denied. Request a single command or file change instead."})
-                elif method == TOOL_APPROVAL and tool_request(params):
+                elif method == TOOL_APPROVAL and self._tool_card(params):
                     self._publish_approval(message["id"], method, params)
                 elif method == TOOL_APPROVAL:
                     # The page has no card for any other tool question, so say so in the chat
                     # instead of declining where nobody can see it.
-                    self._write({"id": message["id"], "result": {"action": "decline"}})
-                    self.on_event({"type": "error", "message": _elicitation_refusal(params)})
+                    self._decline_tool_question(message["id"], params)
                 else:
                     self._write({"id": message["id"], "error": {"code": -32601, "message": "Unsupported worker request"}})
                 return

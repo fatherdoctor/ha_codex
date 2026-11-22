@@ -211,7 +211,7 @@ async function checkRemote(browser, viewport, state, label) {
   await page.close();
 }
 
-/** In the open chat: the final answer shows once, under the two in-between messages, which show once each and in order. */
+/** In the open chat: the final answer shows once, after the two in-between messages (inside its closed list), which show once each and in order. */
 async function assertAnswerOnce(page, label) {
   const seen = await page.locator('#messages').evaluate(list => {
     const answers = [...list.querySelectorAll('.answer .message:not(.details)')];
@@ -241,7 +241,7 @@ async function checkAnswerOnce(browser, viewport, label) {
   // so the check opens it this way, not from the list.
   await page.addInitScript(() => localStorage.setItem('codex-last-chat', 'preview-00'));
   await page.goto(PAGE);
-  await page.locator('#activity-text .interim').first().waitFor();
+  await page.locator('#activity .interim').first().waitFor({state: 'attached'});
   await page.locator('#messages .answer').first().waitFor();
   await assertAnswerOnce(page, `${label} saved chat`);
   await page.getByRole('button', {name: 'New chat', exact: false}).first().evaluate(el => el.click());
@@ -249,7 +249,7 @@ async function checkAnswerOnce(browser, viewport, label) {
   await page.locator('#message').fill(prompt);
   await page.getByRole('button', {name: 'Send message', exact: true}).click();
   await page.locator('#messages').getByText(`Preview response: ${prompt}`, {exact: true}).first().waitFor();
-  await page.locator('#activity-text .interim').first().waitFor();
+  await page.locator('#activity .interim').first().waitFor({state: 'attached'});
   await assertAnswerOnce(page, `${label} new chat`);
   assert.deepEqual(errors, [], `${label}: no script error`);
   await page.close();

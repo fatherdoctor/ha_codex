@@ -41,6 +41,8 @@ const state = {
   retriedChecks: new Set(),
   // Earlier answers whose "Worked for" line the owner opened. The latest answer keeps this in state.activity.
   workedOpen: new Set(),
+  // The saved steps of earlier answers, by "<chat id>/<turn id>", loaded the first time their line opens.
+  earlierSteps: new Map(),
   // The checks block of the latest answer. renderActivity puts it inside that answer's "Worked for" line.
   latestChecks: null,
 };
@@ -98,12 +100,14 @@ function selectedEfforts(settings = selectedSettings()) {
 }
 /**
  * Return the reasoning level that applies to a chat: its own selection, or
- * else the add-on default. Falls back to medium when neither is known or the
+ * else the level the worker gives its model (the defaults' level for a chat
+ * on the default model). Falls back to medium when neither is known or the
  * chat's model does not offer that level.
  */
 function effectiveEffort(settings = selectedSettings()) {
   const effort =
     settings.reasoning_effort ||
+    (settings.model && selectedModel(settings)?.default_effort) ||
     state.catalog?.defaults.reasoning_effort ||
     "medium";
   return selectedModel(settings) && !selectedEfforts(settings).includes(effort)
@@ -373,8 +377,9 @@ $("effort-slider").addEventListener("change", async () => {
   await saveSelection({ ...selectedSettings(), reasoning_effort: effort });
   if (!$("effort-popover").hidden) $("effort-slider").focus();
 });
+// Reset goes back to the default model and its level, whatever the chat had selected, as in the ChatGPT apps.
 $("effort-reset").onclick = async () => {
-  await saveSelection({ ...selectedSettings(), reasoning_effort: null });
+  await saveSelection({ ...selectedSettings(), model: null, reasoning_effort: null });
   if (!$("effort-popover").hidden) $("effort-reset").focus();
 };
 document.addEventListener("pointerdown", (event) => {
@@ -1173,6 +1178,38 @@ function sizeLabel(bytes) {
     ? `${Math.max(1, Math.round(bytes / 1024))} KB`
     : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
+/** Build the card that downloads one file: its name, size and a download arrow. */
+function fileCard(name, size, href) {
+  const card = textNode("a", `${name} · ${sizeLabel(size)} ↓`, "document-attachment");
+  card.href = href;
+  card.download = name || "document";
+  return card;
+}
+/**
+ * Return what turns a link in an answer into a download of a file Codex saved
+ * in this chat's files folder, or null when the chat has none. Only files the
+ * worker listed are offered, and the worker checks the path again when asked.
+ */
+function chatFileLinks(task) {
+  const listing = task?.chat_files;
+  if (!listing?.folder || !listing.files?.length) return null;
+  const sizes = new Map(listing.files.map((file) => [file.path, file.size]));
+  const prefix = `${listing.folder.replace(/\/+$/, "")}/`;
+  return (href) => {
+    let path = String(href || "").replace(/^file:\/\//, "");
+    try {
+      // Per part, so that %23 and %3F in a file name become # and ? (decodeURI keeps them encoded).
+      path = path.split("/").map(decodeURIComponent).join("/");
+    } catch {
+      return null;
+    }
+    const relative = path.startsWith(prefix) ? path.slice(prefix.length) : "";
+    if (!sizes.has(relative)) return null;
+    const parts = relative.split("/");
+    const url = `tasks/${encodeURIComponent(task.task_id)}/files/${parts.map(encodeURIComponent).join("/")}`;
+    return fileCard(parts.at(-1), sizes.get(relative), url);
+  };
+}
 /** Render image attachments with a full-size link and a download button. */
 function renderAttachments(
   taskId,
@@ -1183,10 +1220,7 @@ function renderAttachments(
   const list = textNode("div", "", className);
   for (const attachment of attachments) {
     if (attachment.kind === 'file') {
-      const file = textNode('a', `${attachment.name} · ${sizeLabel(attachment.size)} ↓`, 'document-attachment');
-      file.href = attachmentUrl(taskId, attachment, true);
-      file.download = attachment.name || 'document';
-      list.append(file);
+      list.append(fileCard(attachment.name, attachment.size, attachmentUrl(taskId, attachment, true)));
       continue;
     }
     const figure = textNode("figure", "", "attachment");
@@ -1386,32 +1420,86 @@ function workedLabel(turn) {
 function badCheckCount(turn) {
   return (turn.verification || []).filter(check => BAD_CHECK_STATUSES.has(check.status)).length;
 }
+// Only an exchange with a turn id of this form can have saved steps (see TURN_ID_RE in server.py).
+const SAVED_TURN_ID = /^[0-9a-f]{32}$/;
+/** Return the cache entry for an earlier answer's saved steps, made empty the first time. */
+function earlierSteps(taskId, turnId) {
+  const key = `${taskId}/${turnId}`;
+  let entry = state.earlierSteps.get(key);
+  if (!entry) {
+    entry = {steps: null, loading: false, failed: false, open: new Set(), redraws: new Set()};
+    state.earlierSteps.set(key, entry);
+  }
+  return entry;
+}
 /**
- * Build the "Worked for" line of an earlier answer. Only the latest exchange
- * has its steps on the page, so here the line opens the checks block alone.
- * With no checks it is plain text, and with no times either it is left out.
- * The line opens by itself when the checks block wants attention (a browser
- * permission review or a retry result).
+ * Fetch an earlier answer's saved steps once, then redraw its list. A chat
+ * redrawn while the fetch runs adds its own list to the ones redrawn after it.
+ * A failed fetch leaves the steps unknown, so the next opening tries again.
  */
-function renderWorked(turn, checks) {
+async function loadEarlierSteps(taskId, turn, entry, redraw) {
+  if (entry.steps) return;
+  entry.redraws.add(redraw);
+  if (entry.loading) return;
+  entry.loading = true;
+  try {
+    const data = await api(
+      `tasks/${encodeURIComponent(taskId)}/activity?turn=${encodeURIComponent(turn.turn_id)}`,
+    );
+    entry.steps = workLogEntries(data.steps, turn);
+    entry.failed = false;
+  } catch (error) {
+    entry.failed = true;
+  } finally {
+    entry.loading = false;
+  }
+  const redraws = [...entry.redraws];
+  entry.redraws.clear();
+  for (const draw of redraws) draw();
+}
+/** Build the work log of an earlier answer, or one line that says why there is none. */
+function earlierStepRows(entry, hasChecks, redraw) {
+  if (entry.steps === null)
+    return [textNode("p", entry.failed ? "Could not load the steps. Close and open this line to try again." : "Loading steps…", "muted")];
+  if (!entry.steps.length)
+    return hasChecks ? [] : [textNode("p", "No steps were saved for this answer.", "muted")];
+  return entry.steps.map(step => workLogNode(step, entry.open, redraw));
+}
+/**
+ * Build the "Worked for" line of an earlier answer: closed, like the latest
+ * answer's line, and opening the same list of steps and then the checks. The
+ * steps load from the worker the first time the line opens. An answer with no
+ * saved steps possible (an old chat) and no checks keeps the plain line, and
+ * with no times either it is left out. The line opens by itself when the
+ * checks block wants attention (a browser permission review or a retry result).
+ */
+function renderWorked(turn, checks, taskId) {
   const label = workedLabel(turn);
-  if (!checks) return label ? textNode("p", label, "worked-line") : null;
+  const saved = SAVED_TURN_ID.test(turn.turn_id || "");
+  if (!checks && !(saved && label)) return label ? textNode("p", label, "worked-line") : null;
   const block = textNode("div", "", "activity worked");
   const toggle = textNode("button", "", "activity-toggle");
   toggle.type = "button";
   toggle.append(textNode("span", "", "activity-chevron"), textNode("span", label || "Checks and readback"));
   const list = textNode("div", "", "activity-steps");
-  list.append(checks);
+  const entry = saved ? earlierSteps(taskId, turn.turn_id) : null;
+  const fill = () => {
+    const rows = entry ? earlierStepRows(entry, Boolean(checks), fill) : [];
+    list.replaceChildren(...groupWorkLog([...rows, ...(checks ? [checks] : [])]));
+  };
   const show = open => {
     if (open) state.workedOpen.add(turn.turn_id);
     else state.workedOpen.delete(turn.turn_id);
     toggle.setAttribute("aria-expanded", String(open));
     list.hidden = !open;
+    if (open && entry) loadEarlierSteps(taskId, turn, entry, fill);
   };
-  show(checks.open || state.workedOpen.has(turn.turn_id));
+  fill();
+  show(Boolean(checks?.open) || state.workedOpen.has(turn.turn_id));
   toggle.onclick = () => show(list.hidden);
   block.append(toggle, list);
   block.openChecks = () => {
+    if (!checks) return;
     show(true);
     checks.open = true;
     checks.scrollIntoView({block: "nearest"});
@@ -1699,7 +1787,7 @@ function renderTask(force = false) {
           evidence.scrollIntoView({block: "nearest"});
         };
       } else {
-        const worked = renderWorked(turn, evidence);
+        const worked = renderWorked(turn, evidence, task.task_id);
         if (worked) exchange.append(worked);
         openChecks = () => worked?.openChecks?.();
       }
@@ -1707,9 +1795,10 @@ function renderTask(force = false) {
       // No visible "Codex" label above the reply; a screen reader still hears whose reply it is.
       answer.setAttribute("role", "group");
       answer.setAttribute("aria-label", "Codex reply");
-      if (turn.summary) answer.append(renderMarkdown(turn.summary, "message"));
+      const fileLinks = chatFileLinks(task);
+      if (turn.summary) answer.append(renderMarkdown(turn.summary, "message", fileLinks));
       if (turn.details && turn.details !== turn.summary)
-        answer.append(renderMarkdown(turn.details, "message details"));
+        answer.append(renderMarkdown(turn.details, "message details", fileLinks));
       if (showsQuestionApart(turn)) answer.append(renderMarkdown(turn.question, "message question"));
       // Only the question still waiting can be answered with a choice.
       if (
@@ -2109,7 +2198,7 @@ function activityBlock() {
   block.hidden = true;
   return block;
 }
-/** Build the container for the interim text messages of the latest exchange, shown outside the step list. */
+/** Build the container for the text messages of the running exchange, shown outside the closed step list. */
 function activityText() {
   const box = textNode("div", "", "activity-text");
   box.id = "activity-text";
@@ -2188,30 +2277,29 @@ async function pollActivity() {
  * the steps and shows the running time, and the list starts closed. A tap on
  * the heading opens it and holds until the turn ends. When the exchange is
  * over, the heading becomes the closed "Worked for" line above the answer, and
- * the list holds the steps and then the answer's checks.
+ * the list holds the steps with Codex's text messages between them, and then
+ * the answer's checks.
  */
 function renderActivity() {
   const block = $("activity");
   const activity = state.activity;
   if (!block || !activity || activity.id !== state.id) return;
   const all = [...activity.steps.values()].sort((a, b) => a.index - b.index);
-  // Text messages show outside the closed list; tool steps and thinking stay inside it.
-  const steps = all.filter(step => step.kind !== "message");
-  const texts = all.filter(step => step.kind === "message" && step.text);
   const running = activity.running || taskActive();
   const turn = state.task?.turns?.at(-1);
-  const lastText = texts.at(-1);
-  // Saved steps can still contain the final answer. Keep earlier messages and explicit commentary.
-  if (!running && turn && activity.turnId === turn.turn_id && lastText && !lastText.phase &&
-      lastText.text.trim() === turn.summary?.trim()) {
-    texts.pop();
-  }
+  // While Codex works, its text messages show outside the closed list, so the owner can follow along. Once the
+  // exchange is over they move into the list, and the answer starts right under the "Worked for" line.
+  const entries = running
+    ? all.filter(step => step.kind !== "message")
+    : workLogEntries(all, activity.turnId === turn?.turn_id ? turn : null);
+  const texts = running ? all.filter(step => step.kind === "message" && step.text) : [];
+  const steps = entries.filter(step => step.kind !== "message");
   const textBox = $("activity-text");
   if (textBox)
     textBox.replaceChildren(...texts.map(step => renderMarkdown(step.text, "message interim")));
   const checks = state.latestChecks;
   const worked = running ? "" : workedLabel(turn);
-  block.hidden = !steps.length && !checks && !worked;
+  block.hidden = !entries.length && !checks && !worked;
   block.classList.toggle("running", running);
   block.classList.toggle("worked", !running);
   // The step list takes the place of the waiting line once Codex reports steps.
@@ -2221,7 +2309,7 @@ function renderActivity() {
     block.replaceChildren();
     return;
   }
-  if (!steps.length && !checks) {
+  if (!entries.length && !checks) {
     // Nothing to open: the total time alone.
     block.replaceChildren(textNode("p", worked, "worked-line"));
     return;
@@ -2245,7 +2333,7 @@ function renderActivity() {
     "span",
     running
       ? `${state.task?.permission_required ? "Waiting for your permission…" : "Working on your request…"} · ${count}`
-      : worked || (steps.length ? `Activity (${count})` : "Checks and readback"),
+      : worked || idleLabel(steps.length, entries.length, count),
   );
   if (running) label.append(textNode("span", "", "elapsed"));
   toggle.append(textNode("span", "", "activity-chevron"), label);
@@ -2257,8 +2345,8 @@ function renderActivity() {
   const list = textNode("div", "", "activity-steps");
   list.id = "activity-steps";
   list.hidden = !expanded;
-  for (const step of steps) list.append(renderStep(step, activity));
-  if (checks) list.append(checks);
+  const nodes = entries.map(entry => workLogNode(entry, activity.open, renderActivity));
+  list.append(...groupWorkLog(checks ? [...nodes, checks] : nodes));
   const latestReasoning = running
     ? [...steps].reverse().find(step => step.kind === "reasoning" &&
         typeof step.text === "string" && step.text.trim())
@@ -2270,12 +2358,61 @@ function renderActivity() {
   tickElapsed();
   if (nearBottom) area.scrollTop = area.scrollHeight;
 }
+/** Name a finished list that has no "Worked for" time (a chat saved by an older version). */
+function idleLabel(stepCount, entryCount, count) {
+  if (stepCount) return `Activity (${count})`;
+  return entryCount ? "Activity" : "Checks and readback";
+}
+/**
+ * Return the work log of a finished exchange in order: its steps and the text
+ * messages Codex wrote along the way. Saved steps can still hold a copy of the
+ * final answer (`turn.summary`); it is left out, since the answer shows below
+ * the log. Pass no turn when the steps belong to another exchange.
+ */
+function workLogEntries(steps, turn) {
+  const entries = [...steps]
+    .filter(step => step.kind !== "message" || step.text)
+    .sort((a, b) => a.index - b.index);
+  const lastText = entries.findLast(step => step.kind === "message");
+  // Explicit commentary (a message with a phase) is never the answer, even when the words match.
+  if (turn && lastText && !lastText.phase && lastText.text.trim() === turn.summary?.trim())
+    entries.splice(entries.indexOf(lastText), 1);
+  return entries;
+}
+/** Build one entry of a work log: a text message as a paragraph block, anything else as a step row. */
+function workLogNode(entry, open, redraw) {
+  if (entry.kind === "message") return renderMarkdown(entry.text, "message interim");
+  return renderStep(entry, open, redraw);
+}
+/**
+ * Put each run of step rows (and the checks after them) in an indented group,
+ * and leave the text messages between the groups, so a message starts where
+ * the answer starts, as in the desktop app.
+ */
+function groupWorkLog(nodes) {
+  const out = [];
+  let group = null;
+  for (const node of nodes) {
+    if (node.classList.contains("interim")) {
+      out.push(node);
+      group = null;
+      continue;
+    }
+    if (!group) {
+      group = textNode("div", "", "step-group");
+      out.push(group);
+    }
+    group.append(node);
+  }
+  return out;
+}
 /**
  * Build one row of the step list: icon, text, and a line with a failed
  * command's exit code, the duration, and the running state. A step with
- * output gets a button that shows or hides it.
+ * output gets a button that shows or hides it; `open` holds the indexes of
+ * the steps whose output shows, and `redraw` draws the list again after a tap.
  */
-function renderStep(step, activity) {
+function renderStep(step, open, redraw) {
   const row = textNode("div", "", `step step-${step.kind} is-${step.status}`);
   row.append(textNode("span", stepIcons[step.kind] || "•", "step-icon"));
   const body = textNode("div", "", "step-body");
@@ -2291,10 +2428,10 @@ function renderStep(step, activity) {
   const footer = textNode("div", "", "step-meta");
   if (meta.length) footer.append(textNode("span", meta.join(" · ")));
   if (step.output) {
-    const open = activity.open.has(step.index);
+    const shown = open.has(step.index);
     const button = textNode(
       "button",
-      open
+      shown
         ? "Hide output"
         : step.output_truncated
           ? "Show output (first part)"
@@ -2303,12 +2440,12 @@ function renderStep(step, activity) {
     );
     button.type = "button";
     button.onclick = () => {
-      if (open) activity.open.delete(step.index);
-      else activity.open.add(step.index);
-      renderActivity();
+      if (shown) open.delete(step.index);
+      else open.add(step.index);
+      redraw();
     };
     footer.append(button);
-    if (open) body.append(textNode("pre", step.output, "step-output"));
+    if (shown) body.append(textNode("pre", step.output, "step-output"));
   }
   if (footer.childElementCount) body.insertBefore(footer, body.children[1] || null);
   row.append(body);
