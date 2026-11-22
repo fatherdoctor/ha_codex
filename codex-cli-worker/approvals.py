@@ -263,6 +263,7 @@ def _tool_confirmation(tool: str, arguments: str) -> dict[str, str]:
     return {"what": f"Run the tool {tool}, with the arguments shown below.", "where": "This Home Assistant.",
             "effect": "Only what the tool does with these arguments."}
 
+
 def _app_tool_confirmation(record: dict[str, Any]) -> dict[str, str]:
     """Plain words for a ChatGPT app's tool call: which app and tool, and that it acts outside Home Assistant."""
     app = record.get("app") or "a ChatGPT app"
@@ -620,7 +621,9 @@ class AppServerSession:
         """Decline a tool question that has no card here, say so in the chat, and log the server's name."""
         self._write({"id": request_id, "result": {"action": "decline"}})
         message = _elicitation_refusal(params)
-        if app_tool_request(params):
+        # Today only Read only declines an app tool question (see _tool_card); test both, so a later mode that
+        # declines one does not show this Read only sentence.
+        if app_tool_request(params) and self.thread_params.get("sandbox") == "read-only":
             message = ("A ChatGPT app asked to run one of its tools. A Read only chat changes nothing, so it was "
                        "declined. Switch the chat to Default to approve app tools one call at a time.")
         self.on_event({"type": "error", "message": message})
@@ -655,9 +658,6 @@ class AppServerSession:
             record["status"] = "allowed" if decision == "allow" else "denied"
             if decided_by:
                 record["decided_by"] = dict(decided_by)
-            if record["kind"] == "tool":
-                # Names only: the arguments can hold the text of a message or a file.
-                print(f"Tool call {record['tool']} {record['status']} by the owner.", flush=True)
             try:
                 self.on_approvals(copy.deepcopy(self._records))
                 self._write({"id": request_id, "result": decision_result(record["kind"], decision == "allow")})
@@ -665,6 +665,14 @@ class AppServerSession:
                 record["status"] = "expired"
                 self.fail("Could not deliver the permission decision. The exchange was stopped.")
                 raise OSError(self.error) from None
+            finally:
+                if record["kind"] == "tool":
+                    # Logged after delivery, so the line shows the final status: a decision that could not
+                    # reach Codex reads expired, not allowed. Names only: the arguments can hold a message's text.
+                    outcome = record["status"] + " by the owner"
+                    if record["status"] == "expired":
+                        outcome = "expired: the owner's decision did not reach Codex"
+                    print(f"Tool call {record['tool']} {outcome}.", flush=True)
 
     def receive(self, message: dict[str, Any]) -> None:
         """Dispatch a server message without treating model prose as permission."""

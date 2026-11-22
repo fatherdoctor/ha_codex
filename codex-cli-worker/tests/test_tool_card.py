@@ -305,6 +305,15 @@ class AppToolCardTests(unittest.TestCase):
 
     def ask(self, request_id=7, message='Allow GitHub to run tool "create_pull_request"?', meta=None, **overrides):
         """Send the request Codex 0.166.0 sends before an app tool call; return what the session wrote back."""
+        params = self.ask_params(message, meta, **overrides)
+        before = len(self.writer.messages())
+        with redirect_stdout(io.StringIO()) as log:
+            self.session.receive({"id": request_id, "method": "mcpServer/elicitation/request", "params": params})
+        self.log = log.getvalue()
+        return self.writer.messages()[before:]
+
+    def ask_params(self, message='Allow GitHub to run tool "create_pull_request"?', meta=None, **overrides):
+        """Return the params of the request Codex 0.166.0 sends before an app tool call."""
         params = {
             "threadId": "thread", "turnId": "turn", "serverName": "codex_apps", "mode": "form",
             "message": message, "requestedSchema": {"type": "object", "properties": {}},
@@ -313,11 +322,7 @@ class AppToolCardTests(unittest.TestCase):
                       "tool_params": dict(self.ARGUMENTS), **(meta or {})},
         }
         params.update(overrides)
-        before = len(self.writer.messages())
-        with redirect_stdout(io.StringIO()) as log:
-            self.session.receive({"id": request_id, "method": "mcpServer/elicitation/request", "params": params})
-        self.log = log.getvalue()
-        return self.writer.messages()[before:]
+        return params
 
     def decide(self, decision):
         with redirect_stdout(io.StringIO()) as log:
@@ -352,6 +357,20 @@ class AppToolCardTests(unittest.TestCase):
                          {"id": 7, "result": {"action": "decline", "content": None, "_meta": None}})
         self.assertEqual(log, "Tool call codex_apps.create_pull_request denied by the owner.\n")
 
+    def test_a_decision_that_does_not_reach_codex_logs_expired_not_allowed(self):
+        self.ask()
+
+        def refuse(records):
+            raise OSError("disk full")
+
+        self.session.on_approvals = refuse
+        with redirect_stdout(io.StringIO()) as log, self.assertRaises(OSError):
+            self.session.decide(self.record()["approval_id"], "allow")
+        self.assertEqual(log.getvalue(), "Tool call codex_apps.create_pull_request expired: the owner's decision "
+                                         "did not reach Codex.\n")
+        self.assertNotIn({"id": 7, "result": {"action": "accept", "content": None, "_meta": None}},
+                         self.writer.messages())
+
     def test_a_sentence_written_for_the_tool_names_it_by_its_title(self):
         self.ask(message="Allow GitHub to add a comment to a pull request?", meta={"tool_title": "Add comment"})
         record = self.record()
@@ -378,6 +397,16 @@ class AppToolCardTests(unittest.TestCase):
         self.assertEqual(self.saved, [])
         self.assertIn("Read only chat changes nothing", self.events[-1]["message"])
         self.assertEqual(self.log, "Declined a tool question from codex_apps: the page has no card for it.\n")
+
+    def test_the_read_only_sentence_needs_a_read_only_chat(self):
+        """Only Read only declines an app tool question today; a decline anywhere else must not blame Read only."""
+        with redirect_stdout(io.StringIO()):
+            self.session._decline_tool_question(8, self.ask_params())
+        self.assertNotIn("Read only", self.events[-1]["message"])
+        self.session.thread_params["sandbox"] = "read-only"
+        with redirect_stdout(io.StringIO()):
+            self.session._decline_tool_question(9, self.ask_params())
+        self.assertIn("Read only chat changes nothing", self.events[-1]["message"])
 
     def test_an_app_question_that_is_not_a_tool_call_is_still_declined_and_logged(self):
         for number, overrides in enumerate(({"mode": "url"}, {"_meta": {"codex_approval_kind": "browser_auth"}}),
