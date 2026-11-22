@@ -20,13 +20,9 @@ const assert = require('node:assert/strict');
           await page.locator('#settings[open]').waitFor();
 
           assert.equal(await page.locator('#appearance-section').count(), 0, 'the empty Appearance section is removed');
-          // Advanced is the last section, folded, and holds Browser permissions as a part of its own.
+          // The dashboard browser is gone (0.4), and with it the Advanced section that held Browser permissions.
           const toggle = id => page.locator(`#${id} > :is(h3, h4) > .settings-toggle`);
-          assert.equal(await page.locator('#settings > section').last().getAttribute('id'), 'advanced-section');
-          assert.equal(await toggle('advanced-section').getAttribute('aria-expanded'), 'false', 'Advanced starts folded');
-          assert.equal(await page.locator('#browser-permissions-section').isVisible(), false);
-          await page.waitForFunction(() => document.querySelector('#advanced-section .settings-status').textContent !== '');
-          assert.match(await page.locator('#advanced-section > h3 .settings-status').textContent(), /^Browser permissions: /);
+          assert.equal(await page.locator('#advanced-section, #browser-permissions-section').count(), 0);
           // One top-level section is open at a time. Opening a part opens its section and closes the others.
           const expanded = () => page.evaluate(() => [...document.querySelectorAll('#settings > section')]
             .filter(section => section.querySelector(':scope > :is(h3, h4) > .settings-toggle')?.getAttribute('aria-expanded') === 'true')
@@ -39,11 +35,7 @@ const assert = require('node:assert/strict');
           await toggle(otherSection).click();
           assert.deepEqual(await expanded(), [otherSection], `opening ${otherSection} closes Accounts and connections`);
           assert.equal(await page.locator('#accounts-section > .settings-body').isVisible(), false);
-          await toggle('advanced-section').click();
-          assert.deepEqual(await expanded(), ['advanced-section']);
-          await toggle('browser-permissions-section').click();
-          assert.equal(await page.locator('#browser-permissions').isVisible(), true, 'Browser permissions opens inside Advanced');
-          await toggle('advanced-section').click();
+          await toggle(otherSection).click();
           assert.deepEqual(await expanded(), [], 'a second tap closes the open section');
           // A part keeps its own state while its section is closed: GitHub is still open when Accounts opens again.
           await toggle('accounts-section').click();

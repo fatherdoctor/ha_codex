@@ -47,12 +47,6 @@ configuration:
   ha_url:
     name: Home Assistant API URL
     description: The address Codex gets as HA_URL to call Home Assistant. Set it only if the automatic address does not work.
-  browser_verification:
-    name: Built-in browser
-    description: Let Codex open dashboards and take screenshots. The browser uses memory while it runs. Turn it off if memory is short.
-  browser_memory_limit_mib:
-    name: Browser memory limit (MiB)
-    description: The most memory the browser may use for screenshots, from 512 to 8192. The default is 1536.
   local_docs:
     name: Local Home Assistant documentation
     description: Download the official documentation, about 25 MB, so Codex can search it without the web. Turn it off to stop the download.

@@ -41,7 +41,7 @@ from flask import Flask, Response, jsonify, request, send_file
 
 # Also support the existing importlib-based test harness.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from verification import DEFAULT_BROWSER_MEMORY_LIMIT_MIB, Verification, public_check
+from verification import Verification, public_check
 from approvals import APPROVAL_GONE
 from safety_block import SafetyBlockSession as AppServerSession
 import codex_host
@@ -178,8 +178,6 @@ DEFAULT_OPTIONS = {
     "full_snapshot": False,
     "backup_retention_days": 7,
     "chat_retention_days": retention.DEFAULT_DAYS,
-    "browser_verification": True,
-    "browser_memory_limit_mib": DEFAULT_BROWSER_MEMORY_LIMIT_MIB,
     "local_docs": True,
     "warm_start": True,
     "ha_url": "",
@@ -2855,8 +2853,8 @@ def task_payload(
 ) -> dict[str, Any]:
     """Return a task as the API sends it: a short summary for lists, or the full record with its turns.
 
-    Exact blocked browser requests are part of the human Ingress review only;
-    with `private` False, each verification check carries their labels instead.
+    A dashboard check saved by a version before 0.4.0 can hold exact blocked browser requests; with `private`
+    False, each verification check carries only their labels.
     """
     if summary:
         fields = ("task_id", "title", "status", "created_at", "updated_at", "summary", "question")
@@ -2869,7 +2867,6 @@ def task_payload(
         result["chat_settings"] = current_chat_settings(task.get("chat_settings", DEFAULT_CHAT_SETTINGS))
         result["turns"] = task_turns(task)
         result["history_incomplete"] = task.get("history_incomplete", "turns" not in task)
-        result["browser_retry"] = verification.retry_status(task.get("task_id"))
         if not private:
             for record in [result, *result["turns"]]:
                 if isinstance(record.get("verification"), list):
@@ -5011,11 +5008,10 @@ Use the home_assistant MCP verify tool for authenticated Home Assistant checks, 
   {"operation":"entity","entity_id":"light.kitchen","expected_state":"on","attributes":["brightness"]}
   {"operation":"config_check"}
   {"operation":"logs"}
-  {"operation":"dashboard","path":"/lovelace/0"}
   {"operation":"dashboard_readback","path":"/lovelace/0"}
 The MCP tool runs through the worker outside the shell network sandbox. Use it for supported verification instead of shell socket commands. If the user's task needs a different API or shell networking in a sandboxed mode, request approval for that specific command. Approval does not supply API credentials. Logs are limited to Core.
-Use fresh entity readback after any user-authorized reload or change. These read tools do not perform reloads or device actions; the home_assistant_call call tool does, and only when the user asked for the change. A matching state does not prove automation behavior. Dashboard inspection is observational, blocks writes, and captures desktop/mobile screenshots. Inspect the returned image_paths with your image viewer before making visual claims. Record any unavailable checks or blocked resources in your answer. Treat policy blocks as limits of this inspection; they do not establish writes or dashboard or tablet faults. Explain each remaining block using its reported reason and approval availability. Common built-in state/numeric-state conditions and passive knob rotation subscriptions are allowed automatically. Browser Mod needs separate support, and browser approvals cannot change Home Assistant account permissions. Assess other errors separately. Relevant changed storage dashboards are also checked after the worker saves them. For YAML dashboards and specific affected views, explicitly request the dashboard path. Do not expose credentials or try to obtain the user's login. Verification evidence is attached to this exchange automatically.
-After an authorized storage-dashboard edit, add "save_pending":true to the dashboard request to have the worker save that turn's pending dashboard edit and verify API readback before capturing it. This requires auto_save_lovelace to be enabled. Without save_pending, the browser inspects only the dashboard currently loaded in Home Assistant.
+Use fresh entity readback after any user-authorized reload or change. These read tools do not perform reloads or device actions; the home_assistant_call call tool does, and only when the user asked for the change. A matching state does not prove automation behavior. Do not expose credentials or try to obtain the user's login. Verification results are attached to this exchange automatically.
+To change a dashboard, make the change, read its configuration back with dashboard_readback, and report what changed. After a storage-dashboard edit, add "save_pending":true to the dashboard_readback request to have the worker save that turn's pending edit first and compare the readback with it. This requires auto_save_lovelace to be enabled. Without save_pending, the readback reads the dashboard currently loaded in Home Assistant, and the worker saves the edit when the turn ends. No tool renders or screenshots a dashboard.
 
 For a device command such as "set the kitchen ceiling to 50%", make one home_assistant_call call with the service, the name the user gave and the data, for example {"service":"light.turn_on","name":"kitchen ceiling","data":{"brightness_pct":50}} (Codex asks the owner before each call). The worker sends it only when exactly one entity of the service's domain has that name, and its answer reads the new state back, so no find and no second read are needed. If the answer is not_sent with candidates, ask the owner which one and call again with that target.entity_id; if no entity fits, look with home_assistant.verify find (fewer words, another domain) once, then ask. Do not search files under /config or .storage or run shell commands to find an entity, and read /addon_config/AGENTS.md first only when exchange_info says to.
 Before changing an entity whose entity_id you already have, look up its state with home_assistant.verify (operation entity, exact entity_id) instead of a sandboxed REST call.
@@ -8361,61 +8357,6 @@ def restart_remote_control() -> None:
     if remote_control_supervisor.enabled():
         remote_control_supervisor.stop()
         remote_control_supervisor.start()
-
-
-@app.get("/browser-permissions")
-@require_auth
-@require_ingress
-def browser_permissions_list():
-    """Let the human Ingress UI inspect remembered browser permissions."""
-    try:
-        return jsonify({"ok": True, "permissions": verification.permissions.list()})
-    except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc), "unreadable": True}), 503
-
-
-@app.delete("/browser-permissions")
-@require_auth
-@require_ingress
-def browser_permissions_clear():
-    """Remove every saved exception, which also recovers from an unreadable permissions file."""
-    try:
-        verification.permissions.clear()
-        return jsonify({"ok": True})
-    except (OSError, ValueError):
-        return jsonify({"ok": False, "error": "Could not save browser permissions. Try again."}), 503
-
-
-@app.delete("/browser-permissions/<permission_id>")
-@require_auth
-@require_ingress
-def browser_permissions_revoke(permission_id: str):
-    """Revoke one saved exception from Ingress; API tokens cannot grant or revoke."""
-    try:
-        verification.permissions.revoke(permission_id)
-        return jsonify({"ok": True})
-    except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
-    except OSError:
-        return jsonify({"ok": False, "error": "Could not save browser permissions. Try again."}), 503
-
-
-@app.post("/tasks/<task_id>/browser-permissions")
-@require_auth
-@require_ingress
-def browser_permissions_approve(task_id: str):
-    """Approve a selected batch and retry only its dashboard capture, through Ingress."""
-    if (request.content_length or 0) > 8192:
-        return jsonify({"ok": False, "error": "Browser permission request is too large"}), 413
-    try:
-        result = verification.request_retry(task_id, request.get_json(silent=True))
-        return jsonify({"ok": True, **result}), 202
-    except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
-    except RuntimeError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 409
-    except OSError:
-        return jsonify({"ok": False, "error": "Could not save browser permissions. Try again."}), 503
 
 
 @app.post("/tasks/<task_id>/reply")

@@ -24,8 +24,6 @@ OPTIONS = {
     "full_snapshot": ("archive of the config folder before a message", "server.py", "test_backups.py"),
     "backup_retention_days": ("how long backups are kept", "server.py", "test_backups.py"),
     "chat_retention_days": ("delete chats after days without a message", "retention.py", "test_retention.py"),
-    "browser_verification": ("built-in browser for dashboard checks", "verification.py", "test_verification.py"),
-    "browser_memory_limit_mib": ("memory budget of the built-in browser", "verification.py", "test_verification.py"),
     "local_docs": ("local copy of the Home Assistant documentation", "server.py", "test_local_docs.py"),
     "warm_start": ("keep Codex running between messages", "server.py", "test_live_exchange.py"),
     "ha_url": ("address for Codex's own Home Assistant API calls", "server.py", "test_ha_url_review.py"),
