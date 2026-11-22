@@ -1042,13 +1042,14 @@ async function effortSaved(page, label) {
       })
       .click();
     await effortSaved(page, "Medium");
-    // Reset goes back to the default model too, not only its level.
+    // Reset goes back to the default model too, not only its level. It leaves the Fast choice alone, and the chat
+    // turned Fast on earlier in this flow, so the saved settings keep fast: true.
     assert.deepEqual(
       await page.evaluate(
         async () =>
           (await (await fetch("tasks/preview-00")).json()).task.chat_settings,
       ),
-      { model: null, reasoning_effort: null },
+      { model: null, reasoning_effort: null, fast: true },
     );
     await page.keyboard.press("Escape");
     assert.equal(await page.locator("#effort-popover").isHidden(), true);

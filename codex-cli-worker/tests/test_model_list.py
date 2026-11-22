@@ -298,6 +298,7 @@ class ChatSettingsTests(ModelListStateMixin, unittest.TestCase):
                                              "efforts": ["low", "medium", "high", "turbo"], "fast": None,
                                              "default_effort": "medium"})
         # The built-in list follows the pinned CLI's catalog: every model offers Fast, two run on it by default.
+        # GPT-6.2 Sol's value is taken from GPT-6.1 Sol until the account's live list answers.
         self.assertEqual({model["id"]: model["fast"] for model in built_in["models"]}["gpt-6-sol"], True)
         self.assertIs(built_in["default_fast"], False)
 
@@ -387,7 +388,7 @@ class AccountDefaultTests(ModelListStateMixin, unittest.TestCase):
 
     def test_then_the_first_built_in_model(self):
         self.assertEqual(server.default_model({}), "gpt-6.2-sol")
-        self.assertEqual(server.CLI_DEFAULT_MODEL, server.CHAT_MODELS[0][0])
+        self.assertEqual(server.CLI_DEFAULT_MODEL, server.CHAT_MODELS[0].id)
         # Without a pick from Codex the turn names no model and Codex chooses, as before.
         self.assertEqual(server.turn_model("default"), {})
 

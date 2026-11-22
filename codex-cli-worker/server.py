@@ -216,7 +216,8 @@ FAST_SERVICE_TIER = "priority"
 # Supported choices in the bundled CLI 0.166.0 model catalog, newest Sol first, plus gpt-6.2-sol, which the account's
 # own list offers (the CLI's offline catalog stops at gpt-6.1-sol). Availability still depends on the signed-in
 # account; the CLI reports unavailable models normally.
-# Every one offers Fast; gpt-6-sol and gpt-6-luna run on it unless a chat turns it off.
+# Every one offers Fast; gpt-6-sol and gpt-6-luna run on it unless a chat turns it off. The pinned catalog stops at
+# GPT-6.1 Sol, so the GPT-6.2 Sol value is taken from GPT-6.1 Sol until the account's live list answers.
 CHAT_MODELS = (
     ChatModel("gpt-6.2-sol", "GPT-6.2 Sol", ("low", "medium", "high", "xhigh", "max", "ultra"), False),
     ChatModel("gpt-6-astra", "GPT-6 Astra", ("low", "medium", "high", "xhigh", "max", "ultra"), False),
