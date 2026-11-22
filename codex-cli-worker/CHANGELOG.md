@@ -3,6 +3,13 @@
 ## 0.4.0 (unreleased)
 
 ### What's new
+- **A schedule wakes the chat it was made in.** Each run of a schedule made from a chat is that chat's next
+  message: Codex continues the same conversation, and the chat moves to the top of the list with a dot until you open
+  it. Earlier, each run started a new chat. The run keeps the schedule's permissions and model, never a wider mode
+  set on the chat. A deleted or archived chat gets a new chat named for the schedule, which later runs continue; a
+  schedule made in Settings still starts a new chat for each run. The run log is copied once into a new shape at
+  start, and a rollback still reads it.
+- **Shorter Documentation tab.** The app's Documentation tab (`DOCS.md`) is now a short guide: install and sign in, the four permission modes, where files go, and how to get help (about 380 words, down from about 25,900). The full text moved to `docs/app-reference.md`, and the Info tab (`README.md`) keeps five sections: Quick Start, Requirements, Features, Setup and Using ChatGPT for Home Assistant.
 - **Files Codex makes can be downloaded.** When you ask for a file such as a spreadsheet, Codex saves it in the
   chat's own files folder and links to it, and the chat page shows the link as a card with the file's name and size
   that downloads it, on a phone and on a desktop. Before, the link showed as plain text and nothing downloaded. Only
@@ -20,6 +27,7 @@
   model the account offers, then GPT-6.2 Sol, now first in the built-in list. A `model_reasoning_effort` other than
   the shipped `medium` still applies. The reset button in the model and reasoning panel now also sets the model back
   to the default, not only the level.
+- The chat page sends messages that start with a slash directly to Codex. Use the page controls for chat actions.
 - **Choose the default model on the Configuration page.** Pick a built-in model, follow your account default, or enter a custom name. Existing installations keep their saved model.
 - **Model and reasoning picker like the desktop app.** The model and reasoning controls below the message box are now
   one chip: the model name, then the reasoning level in grey. Select it, or press Ctrl+Shift+M, to open a panel with the
@@ -116,10 +124,27 @@
   copy at `/data/agents_before_move.md`. If both places hold a file, nothing moves and the app logs a line.
 
 ### Changed
+- **Dashboard changes without screenshots.** Codex changes a dashboard, reads its configuration back and reports
+  what changed, as the Codex CLI does. The built-in browser that opened dashboards and took desktop, mobile and
+  Fully Kiosk screenshots is removed, with the blocked-request review, **Settings > Advanced > Browser
+  permissions** and the screenshot note under the checks. The `dashboard` check is gone; `save_pending` now goes on
+  `dashboard_readback`. The **Enable built-in browser** and **Browser memory limit (MiB)** options are removed, and
+  a saved value is ignored. The image no longer includes Chromium or Playwright.
+- **The Dashboard verification user is removed.** The integration no longer creates this read-only Home Assistant
+  system user or issues it browser sessions. On its first start it removes the user an earlier version created,
+  only when its own file names a system user with that exact name, and logs one line. Restart Home Assistant after
+  the update.
 - **Earlier answers open their steps.** Every answer's **Worked for** line now opens the steps of that exchange, not
   only the latest answer's. The line starts closed; its steps load from the worker the first time it opens, and then
   the answer's checks follow. The worker already saved each exchange's steps; `GET /tasks/<task_id>/activity` takes
   `turn=<turn_id>` to read an earlier one.
+- **Remote Control is hidden in this version.** The ChatGPT app could read a chat but not reply while the app kept
+  that chat loaded between messages, so Remote Control is turned off and hidden until that is fixed. The side bar's
+  **Remote** row, the **ChatGPT app pairing** part of **Settings**, the **Remote connection** window and the
+  `connection` slash command are gone, and the page does not ask for the remote state. The remote-control process
+  does not start. Your settings are kept: the **Remote control machine name** option stays on the Configuration tab
+  and is ignored, and if you had Remote Control on, the app logs one line at start and keeps that choice for when it
+  returns. The name field from "Name your remote connection in its window" above is part of what is hidden.
 - **The phone chat list is easier to use.** A tap on a chat keeps the side bar open; a tap on the page to its right
   closes it. The selected chat shows its three-dot menu button where its date was, and the button is 44 pixels or
   larger. A long press still opens the menu. A desktop window does not change.

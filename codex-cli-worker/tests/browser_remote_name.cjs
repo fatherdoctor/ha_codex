@@ -3,6 +3,7 @@
 // (default /tmp/codex-remote-name-qa).
 const {chromium} = require('playwright');
 const assert = require('node:assert/strict');
+const {unpauseRemote} = require('./remote_unpaused.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -41,6 +42,7 @@ const off = {enabled: false, available: true, state: 'off', configured_name: 'Ho
         remote = {...remote, enabled: false, state: 'off'};
         return route.fulfill({json: {ok: true, remote_control: remote}});
       });
+      await unpauseRemote(page);
       await page.goto('http://127.0.0.1:9137/preview/');
 
       // A missing AGENTS.md is a hint above the chat, not a chat message; Dismiss keeps it away in this browser.
