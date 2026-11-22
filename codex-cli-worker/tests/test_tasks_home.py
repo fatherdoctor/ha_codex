@@ -376,7 +376,7 @@ class BackupFolder(Sandbox):
         source = (WORKER / "server.py").read_text(encoding="utf-8")
         self.assertIn('policy["writableRoots"] = [*TASK_WRITABLE_ROOTS, *backup_writable_root(final_file.parent)]',
                       source)
-        self.assertEqual(server.TASK_WRITABLE_ROOTS, ("/config", "/share"))
+        self.assertEqual(server.TASK_WRITABLE_ROOTS, ("/config", "/share", "/media"))
 
 
 if __name__ == "__main__":

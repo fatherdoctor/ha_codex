@@ -24,7 +24,7 @@ class CodexSandboxReadinessTests(unittest.TestCase):
             with (
                 self.subTest(mode=mode),
                 patch.object(server, "codex_binary_path", return_value=server.CODEX_BINARY),
-                patch.object(server, "codex_workdir", return_value="/share/codex"),
+                patch.object(server, "codex_workdir", return_value="/media/.agents/codex"),
                 patch.object(server, "codex_env", return_value={"CODEX_HOME": "/data/codex-home"}),
                 patch.object(server.subprocess, "run", return_value=completed()) as run,
             ):
@@ -40,7 +40,7 @@ class CodexSandboxReadinessTests(unittest.TestCase):
                 self.assertEqual(set(options[0::2]), {"--config"})
                 self.assertNotIn("linux", args)
                 self.assertNotIn("exec", args)
-                self.assertEqual(run.call_args.kwargs["cwd"], "/share/codex")
+                self.assertEqual(run.call_args.kwargs["cwd"], "/media/.agents/codex")
                 self.assertEqual(run.call_args.kwargs["env"]["CODEX_HOME"], "/data/codex-home")
                 self.assertEqual(run.call_args.kwargs["stdin"], subprocess.DEVNULL)
                 self.assertEqual(run.call_args.kwargs["timeout"], server.CODEX_SANDBOX_PROBE_TIMEOUT_SECONDS)

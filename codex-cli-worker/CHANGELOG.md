@@ -110,14 +110,16 @@
   copy at `/data/agents_before_move.md`. If both places hold a file, nothing moves and the app logs a line.
 
 ### Changed
-- **Codex works from `/share/codex`.** Codex's working folder is now `/share/codex` instead of `/config`, so its
-  notes, scratch files and drafts no longer land in Home Assistant's configuration. The app creates the folder at
-  start when it is missing and never moves or empties it. `/config` and `/share` stay writable in `workspace-write`
-  exactly as before, every hidden file and read-only folder of the sandbox stays the same, and the approval cards
-  are unchanged. When the folder cannot be created, Codex works from `/config` as before and the log says why. An
-  `AGENTS.md` that you put in `/share/codex` is read as the working folder's instructions, after the app's own
-  `AGENTS.md`. The starter `AGENTS.md` of a new install says to ask before changing files in other apps' folders
-  under `/share`.
+- **Codex works from `/media/.agents/codex`.** Codex's working folder is now `/media/.agents/codex` instead of
+  `/config`, so its notes, scratch files and drafts no longer land in Home Assistant's configuration, and the
+  automatic backup leaves them out unless you include the media folder in your backup settings. The app now maps
+  Home Assistant's `/media` folder read-write, and `/media` is a writable place in `workspace-write` beside
+  `/config` and `/share`, the same `/media` access the Claude add-on has. Every hidden file and read-only folder of
+  the sandbox stays the same, and the approval cards are unchanged. The app creates the folder at start when it is
+  missing and never moves or empties it. When the folder cannot be created, when `/media` is missing, or when any
+  part of its path is a link, Codex works from `/config` as before and the log says why. An `AGENTS.md` that you put
+  in the working folder is read as the working folder's instructions, after the app's own `AGENTS.md`. The starter
+  `AGENTS.md` of a new install says to ask before changing files in other apps' folders under `/share` and `/media`.
   The remote connection for the ChatGPT app starts its Codex in the same working folder. The `github_git` tool now
   refuses a relative path such as `.` and asks for the full path, so a path meant for the working folder cannot
   name the configuration repository in `/config`.

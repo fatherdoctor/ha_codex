@@ -472,7 +472,7 @@ class GitRunnerTests(GitRunnerCase):
                 self.runner.prepare(path)
 
     def test_a_relative_path_is_refused_not_read_against_config(self):
-        """Codex starts in /share/codex, so "." or "house" read against /config could name the wrong repository."""
+        """Codex starts in /media/.agents/codex, so "." or "house" read against /config could name the wrong repository."""
         git(self.config, "init", "-q")
         for path in (".", "house", "./house"):
             with self.subTest(path=path), self.assertRaises(gh.GitHubError) as refused:

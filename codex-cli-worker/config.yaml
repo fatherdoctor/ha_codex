@@ -24,6 +24,8 @@ map:
     path: /addon_config
   - type: share
     read_only: false
+  - type: media
+    read_only: false
 homeassistant_api: true
 hassio_api: true
 backup_exclude:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""HTTP worker that runs Codex CLI for Home Assistant: working folder /share/codex, configuration in /config."""
+"""HTTP worker that runs Codex CLI for Home Assistant: working folder /media/.agents/codex, configuration in /config."""
 
 from __future__ import annotations
 
@@ -65,9 +65,10 @@ import safety_block
 from interaction_diagnostics import RollingDiagnostics, InteractionRecorder
 
 # Where a workspace-write task may write without an approval. /share is the owner's ruling of 2026-11-16:
-# the add-on gets the same /share access as the Claude add-on (clones live there). /data/github stays
-# masked by codex-bwrap and is never a writable root.
-TASK_WRITABLE_ROOTS = ("/config", "/share")
+# the add-on gets the same /share access as the Claude add-on (clones live there). /media is the ruling of
+# 2026-11-22, for the same reason: the Claude add-on writes anywhere in /media, and Codex's working folder
+# (CODEX_WORKDIR) is there. /data/github stays masked by codex-bwrap and is never a writable root.
+TASK_WRITABLE_ROOTS = ("/config", "/share", "/media")
 
 
 class _ToolWorker:
@@ -83,9 +84,12 @@ verification = Verification(_ToolWorker())
 
 CONFIG_ROOT = Path("/config")
 # Codex's working folder: its notes, scratch files and drafts go here, not into Home Assistant's
-# configuration. It is created at start and is never moved or emptied. /config stays a writable root
-# (TASK_WRITABLE_ROOTS), so configuration edits work as before; only the folder Codex starts in changes.
-CODEX_WORKDIR = Path("/share/codex")
+# configuration. It is in /media because the automatic backup leaves /media out, so scratch files do not
+# make every backup larger. It is created at start and is never moved or emptied. /config stays a writable
+# root (TASK_WRITABLE_ROOTS), so configuration edits work as before; only the folder Codex starts in changes.
+# One constant, so a later option for the folder replaces one read.
+MEDIA_ROOT = Path("/media")
+CODEX_WORKDIR = MEDIA_ROOT / ".agents" / "codex"
 DATA_ROOT = Path("/data")
 # Files a person attaches to a message live in their own folder in the app's data folder, and the
 # backup leaves them out (config.yaml, backup_exclude: "*/chat_uploads"). The Supervisor matches each
@@ -1121,7 +1125,7 @@ def migrate_agents_file() -> bool:
     """Move an AGENTS.md from HA's config folder into the app's own folder once; return True when moved.
 
     The file is MOVED after a backup copy in the app's data folder, never copied: when Codex works from
-    /config (older versions, or when /share/codex is missing) it would read both. Only a regular file moves
+    /config (older versions, or when its working folder is missing) it would read both. Only a regular file moves
     (a link or folder is the owner's own arrangement), and nothing moves when the new place already has a file, so neither is
     overwritten; that case is logged. A failure is logged and never stops the start.
     """
@@ -1197,19 +1201,34 @@ FINAL_RESPONSE_SCHEMA = {
 
 
 def ensure_codex_workdir() -> None:
-    """Create Codex's working folder if it is missing; a folder that is there already is left as it is."""
-    try:
-        CODEX_WORKDIR.mkdir(parents=True, exist_ok=True)
-    except OSError as err:
-        print(f"Cannot create {CODEX_WORKDIR}; Codex works from {CONFIG_ROOT}: {err}", flush=True)
+    """Create Codex's working folder if it is missing; log one line when Codex must work from /config.
+
+    A folder that is there already is left as it is. /media itself is never created: without the media
+    map, a folder made here would be in the container and lost at the next update. The folders are made
+    one at a time and a link stops the walk, so the start never creates a folder through a link.
+    """
+    if MEDIA_ROOT.is_dir():
+        folder = MEDIA_ROOT
+        try:
+            for part in CODEX_WORKDIR.relative_to(MEDIA_ROOT).parts:
+                folder = folder / part
+                if folder.is_symlink():
+                    break
+                folder.mkdir(exist_ok=True)
+        except OSError as err:
+            print(f"Cannot create {CODEX_WORKDIR}; Codex works from {CONFIG_ROOT}: {err}", flush=True)
+            return
+    if codex_workdir() != str(CODEX_WORKDIR):
+        print(f"{CODEX_WORKDIR} is missing or has a link in its path; Codex works from {CONFIG_ROOT}.", flush=True)
 
 
 def codex_workdir() -> str:
     """The folder each Codex process starts in: CODEX_WORKDIR, or /config when it is not a real folder.
 
-    A link is not used, so the working folder cannot be pointed somewhere else by a file in /share.
+    A link in any part of the path is refused, so a file in /media cannot point the working folder
+    somewhere else.
     """
-    if CODEX_WORKDIR.is_dir() and not CODEX_WORKDIR.is_symlink():
+    if CODEX_WORKDIR.is_dir() and CODEX_WORKDIR.resolve() == CODEX_WORKDIR:
         return str(CODEX_WORKDIR)
     return str(CONFIG_ROOT)
 

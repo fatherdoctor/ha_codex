@@ -573,7 +573,7 @@ class GitRunner:
     def repository_path(self, value: Any) -> Path:
         """A work tree under /share or /config (links resolved first) with a real .git folder, not protected.
 
-        A relative path is refused, not read against a base: Codex starts in its working folder (/share/codex),
+        A relative path is refused, not read against a base: Codex starts in its working folder (/media/.agents/codex),
         so "." read against /config could name the configuration repository instead of the one Codex means.
         """
         if not isinstance(value, str) or not value or len(value) > 4096 or "\x00" in value:
