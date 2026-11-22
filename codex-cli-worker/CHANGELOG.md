@@ -3,6 +3,7 @@
 ## 0.4.0 (unreleased)
 
 ### What's new
+- The page asks Codex to lead with the answer, use tables for comparisons, list sources separately, and link to files it creates.
 - **Files Codex makes can be downloaded.** When you ask for a file such as a spreadsheet, Codex saves it in the
   chat's own files folder and links to it, and the chat page shows the link as a card with the file's name and size
   that downloads it, on a phone and on a desktop. Before, the link showed as plain text and nothing downloaded. Only
