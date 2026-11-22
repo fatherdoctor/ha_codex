@@ -1014,6 +1014,13 @@ h1 {
 .activity-steps > .message.interim {
   margin: 12px 0;
 }
+.activity-thinking {
+  color: var(--muted);
+  font-size: calc(12px * var(--text-scale));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .step {
   display: flex;
   gap: 10px;

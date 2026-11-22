@@ -81,6 +81,8 @@
 - **Steps stay closed while Codex works.** Under the "Working on your request…" line, the steps stay closed until you
   tap it. Your choice holds until the turn ends. Then the steps close under "Worked for…" as before. A permission
   request stays visible outside the closed list.
+- **Live Thinking line.** While Codex works, its latest reasoning summary appears below the steps and updates as it
+  arrives. The updates go to the chat only; the task's log keeps the finished summary once.
 - **Cleaner chat page buttons.** The plus on the attach button is now an icon centered in a round button, on a desktop
   and a phone. The **New chat** plus is a 20 px icon in the same style. The extra plus button beside the chat title on
   a phone is gone; **New chat** stays in the conversation list. The banner across the top of the page while Full

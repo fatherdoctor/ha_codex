@@ -2138,7 +2138,15 @@ function renderActivity() {
   list.hidden = !expanded;
   const nodes = entries.map(entry => workLogNode(entry, activity.open, renderActivity));
   list.append(...groupWorkLog(checks ? [...nodes, checks] : nodes));
-  block.replaceChildren(toggle, list);
+  const latestReasoning = running
+    ? [...steps].reverse().find(step => step.kind === "reasoning" &&
+        typeof step.text === "string" && step.text.trim())
+    : null;
+  const thinking = latestReasoning
+    ? textNode("div", `Thinking: ${latestReasoning.text.replace(/\s+/g, " ").trim()}`, "activity-thinking")
+    : null;
+  // Under the list, so with the list open the newest thought is next to the newest step.
+  block.replaceChildren(...[toggle, list, thinking].filter(Boolean));
   tickElapsed();
   if (nearBottom) area.scrollTop = area.scrollHeight;
 }
