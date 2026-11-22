@@ -45,9 +45,9 @@ class ReviewTests(unittest.TestCase):
         raw=json.dumps([{'entity_id':'light.sample','state':'off','attributes':{'unselected':'x'*(3*1024*1024)}}]).encode()
         _,_,session=response(raw)
         broker=relay_reads.RelayReads(lambda:(types.SimpleNamespace(poll=lambda:None),False),lambda:'synthetic',lambda s:s)
-        cap=broker.environment({})['HA_RELAY_CAPABILITY']
+        broker.new_launch()
         with patch.object(core_address.requests,'Session',return_value=session):
-            result=broker.dispatch({'capability':cap,'arguments':{'operation':'states','domain':'light'}})
+            result=broker.dispatch({'arguments':{'operation':'states','domain':'light'}})
         self.assertEqual(result['total'],1);self.assertLess(len(json.dumps(result)),65536)
 
     def test_f3_upstream_history_and_option_label_are_preserved(self):
@@ -66,11 +66,11 @@ class ReviewTests(unittest.TestCase):
             with self.subTest(suffix=suffix),self.assertRaises(ValueError):relay_reads.RelayReads.entity_id('input_text.'+suffix)
         row={'entity_id':'input_text.sample','state':'synthetic-private-value','attributes':{'mode':'password'}}
         fetch=Mock(return_value=[row]);broker=relay_reads.RelayReads(lambda:(types.SimpleNamespace(poll=lambda:None),False),lambda:'synthetic',lambda s:s,fetch)
-        cap=broker.environment({})['HA_RELAY_CAPABILITY']
-        result=broker.dispatch({'capability':cap,'arguments':{'operation':'states'}})
+        broker.new_launch()
+        result=broker.dispatch({'arguments':{'operation':'states'}})
         self.assertEqual(result['entities'],[])
         fetch.return_value=row
-        with self.assertRaises(ValueError):broker.dispatch({'capability':cap,'arguments':{'operation':'state','entity_id':row['entity_id']}})
+        with self.assertRaises(ValueError):broker.dispatch({'arguments':{'operation':'state','entity_id':row['entity_id']}})
 
     def test_f5_transient_discovery_is_retried_for_this_launch(self):
         fetch=Mock(side_effect=[OSError('synthetic timeout'),{'result':'ok','data':{'port':80,'ssl':False}}])
@@ -129,8 +129,8 @@ class TransportEdges(unittest.TestCase):
     def test_f4_password_mode_and_compound_names_are_filtered_in_listings(self):
         rows=[{'entity_id':'input_text.'+name,'state':'synthetic','attributes':{'mode':mode}} for name,mode in (('entry_passcode','text'),('sample','PASSWORD'),('safe_label','text'))]
         broker=relay_reads.RelayReads(lambda:(types.SimpleNamespace(poll=lambda:None),False),lambda:'synthetic',lambda s:s,Mock(return_value=rows))
-        cap=broker.environment({})['HA_RELAY_CAPABILITY']
-        result=broker.dispatch({'capability':cap,'arguments':{'operation':'states'}})
+        broker.new_launch()
+        result=broker.dispatch({'arguments':{'operation':'states'}})
         self.assertEqual([r['entity_id'] for r in result['entities']],['input_text.safe_label'])
 
     def test_f5_each_relay_launch_retries_after_an_unavailable_launch(self):
@@ -162,11 +162,11 @@ class NativeErrorTests(unittest.TestCase):
             pytest_socket.socket_allow_hosts([],allow_unix_socket=True)
         broker=relay_reads.RelayReads(lambda:(types.SimpleNamespace(poll=lambda:None),False),lambda:'synthetic',lambda s:s,
             Mock(side_effect=relay_reads.StateResponseTooLarge('Core state response exceeds 16 MiB. Request a single entity instead.')))
-        cap=broker.environment({})['HA_RELAY_CAPABILITY']
+        broker.new_launch()
         with tempfile.TemporaryDirectory() as tmp:
             path=Path(tmp)/'read.sock';listener=broker.serve(path)
             try:
-                with patch.dict(os.environ,{'HA_RELAY_CAPABILITY':cap,'HA_RELAY_SOCKET':str(path)}):
+                with patch.dict(os.environ,{'HA_RELAY_SOCKET':str(path)}):
                     result=relay_reads_mcp.read({'operation':'states'})
                 self.assertFalse(result['ok']);self.assertIn('16 MiB',result['error'])
             finally:listener.shutdown();listener.server_close()

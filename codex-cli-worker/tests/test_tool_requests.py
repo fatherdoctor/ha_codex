@@ -24,7 +24,7 @@ import ha_call_mcp
 import ha_data_mcp
 import tool_threads
 import verification_mcp
-from ha_call import RELAY_TASK, HomeAssistantCall
+from ha_call import RELAY_TASK, HomeAssistantCall, RelayCall
 from ha_data import DataError, HomeAssistantData
 from verification import Verification
 
@@ -139,11 +139,9 @@ class BridgesSendTheThreadId(unittest.TestCase):
     def test_verification_and_data_and_call_bridges(self):
         self.assertEqual(self.call(verification_mcp, "verify", "verify")[-1], CHAT)
         self.assertEqual(self.call(ha_data_mcp, "fetch", "history")[-1], CHAT)
-        with patch.dict("os.environ", {}, clear=False) as environment:
-            environment.pop("HA_CALL_CAPABILITY", None)
-            self.assertEqual(self.call(ha_call_mcp, "call", "call")[-1], CHAT)
+        self.assertEqual(self.call(ha_call_mcp, "call", "call")[-1], CHAT)
 
-    def test_the_call_bridge_sends_the_key_only_under_remote_control(self):
+    def test_the_call_bridge_sends_no_key_and_uses_the_socket_it_is_given(self):
         sent = []
 
         class Socket:
@@ -151,22 +149,23 @@ class BridgesSendTheThreadId(unittest.TestCase):
             def __enter__(self): return self
             def __exit__(self, *args): return False
             def settimeout(self, value): pass
-            def connect(self, path): pass
+            def connect(self, path): sent.append(path)
             def sendall(self, data): sent.append(data)
             def makefile(self, mode):
                 import io
                 return io.BytesIO(b'{"status": "refused"}\n')
 
         with patch.object(ha_call_mcp.socket, "socket", Socket):
-            with patch.dict("os.environ", {"HA_CALL_CAPABILITY": "relay-key"}):
+            with patch.dict("os.environ", {"HA_CALL_SOCKET": "/synthetic/app.sock", "HA_CALL_CAPABILITY": "old-key"}):
                 ha_call_mcp.call({}, CHAT)
             with patch.dict("os.environ", {}) as environment:
-                environment.pop("HA_CALL_CAPABILITY", None)
+                environment.pop("HA_CALL_SOCKET", None)
                 ha_call_mcp.call({}, CHAT)
-        self.assertIn(b'"capability": "relay-key"', sent[0])
-        self.assertNotIn(CHAT.encode(), sent[0])
-        self.assertIn(('"thread_id": "%s"' % CHAT).encode(), sent[1])
-        self.assertNotIn(b"capability", sent[1])
+        self.assertEqual(sent[0], "/synthetic/app.sock")
+        self.assertEqual(sent[2], "/data/ha-call.sock")
+        for request in (sent[1], sent[3]):
+            self.assertIn(('"thread_id": "%s"' % CHAT).encode(), request)
+            self.assertNotIn(b"capability", request)
 
 
 class TwoChats(unittest.TestCase):
@@ -186,7 +185,7 @@ class TwoChats(unittest.TestCase):
         self.addCleanup(patcher.stop)
         self.data = HomeAssistantData(server, self.root / "ha-data")
         self.checks = Verification(server)
-        self.calls = HomeAssistantCall(server, relay_running=lambda: True)
+        self.calls = HomeAssistantCall(server)
         for task_id, thread_id in (("a", CHAT), ("b", OTHER)):
             server.tasks[task_id] = {"task_id": task_id, "status": "running", "current_turn_id": "turn-" + task_id}
             tool_threads.CHATS.bind(task_id, thread_id)
@@ -264,19 +263,19 @@ class ModulesFindTheChat(TwoChats):
         answer = self.calls.dispatch({"thread_id": OTHER, "arguments": {"service": "light.turn_off"}})
         self.assertEqual(answer["status"], "unavailable")
 
-    def test_remote_control_requests_use_the_relay_key_only(self):
-        relay_key = self.calls.begin(RELAY_TASK)
-        chat_value = self.calls.capabilities["a"]
-        self.assertEqual(self.calls.task_for({"capability": relay_key, "arguments": {}}), RELAY_TASK)
-        # A key never resolves to a chat, even with the chat's thread id beside it.
-        self.assertIsNone(self.calls.task_for({"capability": chat_value, "thread_id": CHAT, "arguments": {}}))
-        self.assertIsNone(self.calls.task_for({"capability": "", "thread_id": CHAT, "arguments": {}}))
-        self.assertIsNone(self.calls.task_for({"capability": [relay_key], "arguments": {}}))
-        # The relay key with a chat's thread id is still the relay, never the chat.
-        self.assertEqual(self.calls.task_for({"capability": relay_key, "thread_id": CHAT, "arguments": {}}),
-                         RELAY_TASK)
-        self.calls.relay_running = lambda: False
-        self.assertIsNone(self.calls.task_for({"capability": relay_key, "arguments": {}}))
+    def test_the_socket_not_a_key_says_who_asks(self):
+        # The chat socket answers only a running chat's thread; nothing on it is ever the relay's.
+        for payload in ({"arguments": {}}, {"capability": "invented-key", "arguments": {}},
+                        {"thread_id": RELAY_TASK, "arguments": {}}):
+            with self.subTest(payload=payload):
+                self.assertIsNone(self.calls.task_for(payload))
+        self.assertEqual(self.calls.task_for({"capability": "invented-key", "thread_id": CHAT, "arguments": {}}), "a")
+        # The app's socket answers while the relay runs, and never names a chat, even with a chat's thread id.
+        running = [True]
+        relay = RelayCall(server, relay_running=lambda: running[0])
+        self.assertEqual(relay.task_for({"thread_id": CHAT, "arguments": {}}), RELAY_TASK)
+        running[0] = False
+        self.assertIsNone(relay.task_for({"thread_id": CHAT, "arguments": {}}))
 
     def test_a_scheduling_request_needs_the_thread_id(self):
         with patch.object(server, "ha_data", self.data):
@@ -289,17 +288,21 @@ class ModulesFindTheChat(TwoChats):
 
 
 class TheChatHoldsNoKey(unittest.TestCase):
-    """No HA_*_CAPABILITY name in the chat's Codex command line; remote control keeps its own."""
+    """No tool key in the chat's Codex command line or in remote control's (D-CX-KEYS)."""
 
     def test_the_chat_command_line(self):
         text = " ".join(server.build_app_server_args())
         self.assertNotIn("CAPABILITY", text)
         self.assertNotIn("shell_environment_policy", text)
 
-    def test_remote_control_keeps_its_keys(self):
-        text = " ".join(server.relay_tool_args())
+    def test_remote_control_holds_no_tool_key(self):
+        with patch.object(server, "read_options", return_value={}):
+            text = " ".join(server.relay_tool_args())
+        # The exclude stays for the hass-mcp token (HA_MCP_CAPABILITY), which only that server gets.
         self.assertIn("shell_environment_policy.exclude", text)
-        self.assertIn('mcp_servers.home_assistant_call.env_vars=["HA_CALL_CAPABILITY"]', text)
+        self.assertIn('mcp_servers.home_assistant_call.env_vars=["HA_CALL_SOCKET"]', text)
+        self.assertNotIn("HA_CALL_CAPABILITY", text)
+        self.assertNotIn("HA_RELAY_CAPABILITY", text)
 
     def test_run_task_puts_no_key_in_the_environment(self):
         source = Path(server.__file__).read_text(encoding="utf-8")
@@ -434,9 +437,10 @@ class TheWorkerBindsAndReleases(TwoChats):
                               "capability": self.checks.capabilities["b"]})
         self.assertFalse(server.tasks["b"].get("verification"))
 
-    def test_r8_a_null_key_beside_a_thread_id_is_refused(self):
-        # A request with a key field is a remote-control request; a null key is no key, and never the chat.
-        self.assertIsNone(self.calls.task_for({"capability": None, "thread_id": CHAT, "arguments": {}}))
+    def test_r8_a_key_field_neither_opens_nor_closes_a_chat(self):
+        # D-CX-KEYS: the chat socket reads no key; the thread id alone names the chat.
+        self.assertEqual(self.calls.task_for({"capability": None, "thread_id": CHAT, "arguments": {}}), "a")
+        self.assertIsNone(self.calls.task_for({"capability": None, "thread_id": "unbound", "arguments": {}}))
 
     def test_a_follow_up_binds_its_thread_at_the_start(self):
         follow_up = "cccccccc-dddd-4eee-8fff-000000000000"
