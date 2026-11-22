@@ -10,6 +10,9 @@ delete it. The editor is in the chat page under Settings > Workspace instruction
 - `/config` is the Home Assistant configuration folder: `configuration.yaml`, `automations.yaml`, `scripts.yaml`,
   `scenes.yaml`, and the folders beside them.
 - `/config/secrets.yaml` and `/config/.storage` hold passwords, tokens and Home Assistant's own records.
+- `/share/codex` is your working folder. Put your notes, scratch files and drafts there, not in `/config`.
+- Other folders under `/share` belong to other apps or to the owner, for example another assistant's folder or a
+  clone of a repository.
 
 ## Rules
 
@@ -38,6 +41,8 @@ mode of each chat.
 - Secrets: rule 2 also covers PINs and the files in `.storage`. Do not print, log, commit or send them.
 - Protected places: ask before you touch `/config/secrets.yaml`, `/config/.storage`, `/config/.git/hooks` or
   `/share/HomeAssistant` (the app's GitHub clone and link also leave the three folders alone).
+- Other apps' folders: ask before you change or delete a file under `/share` outside `/share/codex`, unless the
+  owner asked for that change in this chat. Reading them needs no question.
 - Backups: keep the old version of each file as rule 3 says, in the folder that the app names. Make no other copy.
 
 ## Git and GitHub

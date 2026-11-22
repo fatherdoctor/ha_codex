@@ -91,7 +91,7 @@ def worker_approval_session(proc, workspace, root, mode, resume_id, approve, fin
         policy = session.turn_params["sandboxPolicy"]
         assert policy["networkAccess"] is False, policy
         assert policy["type"] == ("readOnly" if mode == "read-only" else "workspaceWrite"), policy
-        assert session.thread_params["cwd"] == "/config", session.thread_params
+        assert session.thread_params["cwd"] == server.codex_workdir(), session.thread_params
         session.thread_params["cwd"] = str(workspace)
         if mode == "workspace-write":
             assert policy["writableRoots"] == ["/config", "/share"], policy

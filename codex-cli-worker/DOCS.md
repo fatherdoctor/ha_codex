@@ -392,6 +392,14 @@ Codex needs to be able to write to the backup folder. In `workspace-write` mode 
 - `read-only`: Codex can inspect files. Writes and shell networking require permission for the specific action.
 - `workspace-write`: Codex can edit the mounted `/config` workspace and the shared `/share` folder, the same `/share` access the Claude add-on has. Shell networking and writes elsewhere require permission. This remains the default setting.
 
+**Working folder.** Codex starts each chat in `/share/codex`, its own folder for notes, scratch files and drafts, so
+they stay out of Home Assistant's configuration. The app creates the folder at start when it is missing and never
+moves, empties or rewrites what is in it. The folder is inside `/share`, so it adds no writable place: what Codex may
+write without a request is still `/config`, `/share` and the exchange's backup folder. Other apps keep their files
+under `/share` too (another assistant's folder, a clone of a repository); the sandbox does not stop a write there in
+`workspace-write`, so the starter `AGENTS.md` tells Codex to ask first, and your own `AGENTS.md` can say more. When
+`/share/codex` cannot be created, or is a link, Codex works from `/config` as before and the app's log says why.
+
 The app's `codex_sandbox` option takes only these two values. An older setting that names `danger-full-access` stops the app at startup with a log line saying so. A chat can still run without the sandbox in the Full access permission mode, which the owner turns on in Settings (see "Permission modes" below).
 
 **Protected policy.** The sandbox modes the `codex_sandbox` option may name come from `/usr/share/ha_codex/policy.json` inside the app image, outside `/config` and sandbox writable roots. A value it does not list stops startup and each task. The app adds no command check of its own: Codex's approval mode and the sandbox, with its private-file masks, are the protection (0.3.6). No house rules are bundled or copied into Codex's home. Codex uses its defaults and the owner's `AGENTS.md` (in the app's own folder, see [AGENTS.md and HA_TOKEN](#agentsmd-and-ha_token)), whose existing editor and reading path remain available. Owners who want house practices can use the Whole Home Agent starter kit (published separately) and choose their own instructions. Native approval remains specific to the displayed request; read each action before allowing it.
@@ -738,7 +746,12 @@ its data, and an update of an app that has started before writes nothing. The ru
 command check and the approval cards work the same with or without them. To get the starter on an older install,
 copy the text from `starter_agents.md` into the editor.
 
-**Where the file lives (0.4).** The file is `AGENTS.md` in the app's own `addon_config` folder: `/addon_configs/<app folder>/AGENTS.md` on the host and `/addon_config/AGENTS.md` inside the app. It is not in the top level of `/config`. Codex loads it as its global instructions through a link the app keeps at `$CODEX_HOME/AGENTS.md` (`/data/codex-home/AGENTS.md`), where Codex looks for global instructions ([Codex: AGENTS.md guide](https://developers.openai.com/codex/guides/agents-md)). On the first start of this version, an `AGENTS.md` that an older version left in `/config` is **moved** into the app's folder, after a backup copy at `/data/agents_before_move.md`. It is moved and not copied because Codex works in `/config` and would read both. If both places already hold a file, the app moves nothing, logs a line, and leaves the one in `/config` for you to merge or delete. The folder is part of the app's backup like its other data.
+**Where the file lives (0.4).** The file is `AGENTS.md` in the app's own `addon_config` folder: `/addon_configs/<app folder>/AGENTS.md` on the host and `/addon_config/AGENTS.md` inside the app. It is not in the top level of `/config`. Codex loads it as its global instructions through a link the app keeps at `$CODEX_HOME/AGENTS.md` (`/data/codex-home/AGENTS.md`), where Codex looks for global instructions ([Codex: AGENTS.md guide](https://developers.openai.com/codex/guides/agents-md)). On the first start of this version, an `AGENTS.md` that an older version left in `/config` is **moved** into the app's folder, after a backup copy at `/data/agents_before_move.md`. It is moved and not copied because Codex then worked in `/config` and would have read both. If both places already hold a file, the app moves nothing, logs a line, and leaves the one in `/config` for you to merge or delete. The folder is part of the app's backup like its other data.
+
+**A second file in the working folder.** Codex also reads an `AGENTS.md` in its working folder, `/share/codex/AGENTS.md`,
+when one is there; the app neither writes nor moves that file. Codex reads the app's file first and the working
+folder's file after it, so where the two disagree, the working folder's file wins. An `AGENTS.md` left in `/config`
+is not read while Codex works from `/share/codex`.
 
 The editor under **Settings** writes the file without a question. The folder is not one of the places Codex may write on its own, so when you ask a chat to change the file, Codex asks for your approval first.
 

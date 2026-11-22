@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""HTTP worker that runs Codex CLI against /config for Home Assistant."""
+"""HTTP worker that runs Codex CLI for Home Assistant: working folder /share/codex, configuration in /config."""
 
 from __future__ import annotations
 
@@ -82,6 +82,10 @@ verification = Verification(_ToolWorker())
 
 
 CONFIG_ROOT = Path("/config")
+# Codex's working folder: its notes, scratch files and drafts go here, not into Home Assistant's
+# configuration. It is created at start and is never moved or emptied. /config stays a writable root
+# (TASK_WRITABLE_ROOTS), so configuration edits work as before; only the folder Codex starts in changes.
+CODEX_WORKDIR = Path("/share/codex")
 DATA_ROOT = Path("/data")
 # Files a person attaches to a message live in their own folder in the app's data folder, and the
 # backup leaves them out (config.yaml, backup_exclude: "*/chat_uploads"). The Supervisor matches each
@@ -123,8 +127,8 @@ CODEX_CONFIG_PATH = CODEX_HOME / "config.toml"
 CODEX_BINARY = "/usr/local/bin/codex"
 # The owner's workspace instructions live in the app's own addon_config folder (config.yaml maps it at
 # /addon_config; HA's config folder stays at /config). Codex loads them as its global instructions
-# through a link at CODEX_HOME/AGENTS.md. Codex runs with its working folder in /config, so a second copy
-# there would be read twice; the file is moved out of /config once and never copied.
+# through a link at CODEX_HOME/AGENTS.md. Versions before 0.4 kept the file at /config/AGENTS.md, where
+# Codex read it as the instructions of its working folder; it is moved out of /config once and never copied.
 ADDON_CONFIG_ROOT = Path("/addon_config")
 AGENTS_PATH = ADDON_CONFIG_ROOT / "AGENTS.md"
 LEGACY_AGENTS_PATH = CONFIG_ROOT / "AGENTS.md"
@@ -923,7 +927,7 @@ def _codex_sandbox_probe(mode: str) -> dict[str, Any]:
                 "--",
                 "/bin/true",
             ],
-            cwd=str(CONFIG_ROOT),
+            cwd=codex_workdir(),
             env=codex_env(),
             stdin=subprocess.DEVNULL,
             capture_output=True,
@@ -1116,9 +1120,9 @@ def write_starter_agents_file() -> bool:
 def migrate_agents_file() -> bool:
     """Move an AGENTS.md from HA's config folder into the app's own folder once; return True when moved.
 
-    The file is MOVED after a backup copy in the app's data folder, never copied: Codex runs with its
-    working folder in /config and would read both. Only a regular file moves (a link or folder is the
-    owner's own arrangement), and nothing moves when the new place already has a file, so neither is
+    The file is MOVED after a backup copy in the app's data folder, never copied: when Codex works from
+    /config (older versions, or when /share/codex is missing) it would read both. Only a regular file moves
+    (a link or folder is the owner's own arrangement), and nothing moves when the new place already has a file, so neither is
     overwritten; that case is logged. A failure is logged and never stops the start.
     """
     try:
@@ -1192,12 +1196,31 @@ FINAL_RESPONSE_SCHEMA = {
 }
 
 
+def ensure_codex_workdir() -> None:
+    """Create Codex's working folder if it is missing; a folder that is there already is left as it is."""
+    try:
+        CODEX_WORKDIR.mkdir(parents=True, exist_ok=True)
+    except OSError as err:
+        print(f"Cannot create {CODEX_WORKDIR}; Codex works from {CONFIG_ROOT}: {err}", flush=True)
+
+
+def codex_workdir() -> str:
+    """The folder each Codex process starts in: CODEX_WORKDIR, or /config when it is not a real folder.
+
+    A link is not used, so the working folder cannot be pointed somewhere else by a file in /share.
+    """
+    if CODEX_WORKDIR.is_dir() and not CODEX_WORKDIR.is_symlink():
+        return str(CODEX_WORKDIR)
+    return str(CONFIG_ROOT)
+
+
 def ensure_runtime_files() -> None:
     """Create the worker's folders, make an API token if there is none, and write Codex's config."""
     CODEX_HOME.mkdir(parents=True, exist_ok=True)
     DATA_ROOT.mkdir(parents=True, exist_ok=True)
     remote_control.prepare_control_parent(DATA_ROOT)
     task_root().mkdir(parents=True, exist_ok=True)
+    ensure_codex_workdir()
     # The GitHub sign-in's private folder: 0700, masked in every sandbox (codex-bwrap).
     github_service.store.ensure()
     if not api_token():
@@ -1654,7 +1677,7 @@ def fetch_codex_usage_status() -> dict[str, Any]:
                 "--config",
                 status_line_config,
             ],
-            cwd="/config",
+            cwd=codex_workdir(),
             env=env,
             stdin=slave_fd,
             stdout=slave_fd,
@@ -1759,7 +1782,7 @@ def read_codex_rate_limits(codex: str) -> dict[str, Any]:
     """Ask `codex app-server` for the account's rate limits (`account/rateLimits/read`) and return its result."""
     proc = subprocess.Popen(
         [codex, "app-server", "--config", "check_for_update_on_startup=false"],
-        cwd="/config", env=codex_env(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        cwd=codex_workdir(), env=codex_env(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL, text=True, bufsize=1,
     )
     try:
@@ -1786,7 +1809,7 @@ def read_codex_models(codex: str) -> list[dict[str, Any]]:
     """Ask `codex app-server` for the account's model list (`model/list`, every page) and return its entries."""
     proc = subprocess.Popen(
         [codex, "app-server", "--config", "check_for_update_on_startup=false"],
-        cwd="/config", env=codex_env(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        cwd=codex_workdir(), env=codex_env(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL, text=True, bufsize=1,
     )
     try:
@@ -3462,13 +3485,20 @@ def drop_credential_backups(run_dir: Path) -> None:
 
 
 def secret_config_path(path: Any) -> bool:
-    """Whether a path Codex names (absolute, or relative to /config) is a secret file under /config."""
+    """Whether a path Codex names is a secret file under /config.
+
+    A relative path is read both against /config and against Codex's working folder, and either
+    reading that names a secret file counts: a diff is blanked once too often, never once too few.
+    """
     text = str(path or "")
     if not text:
         return False
-    full = os.path.normpath(os.path.join(CONFIG_ROOT.as_posix(), text))
     prefix = CONFIG_ROOT.as_posix() + "/"
-    return full.startswith(prefix) and secret_file_path(full[len(prefix):])
+    for base in (CONFIG_ROOT.as_posix(), codex_workdir()):
+        full = os.path.normpath(os.path.join(base, text))
+        if full.startswith(prefix) and secret_file_path(full[len(prefix):]):
+            return True
+    return False
 
 
 def forget_secret_diffs(records: list[dict[str, Any]]) -> None:
@@ -4126,7 +4156,7 @@ def codex_local_login_status() -> dict[str, Any]:
     try:
         proc = subprocess.run(
             [codex, "login", "status"],
-            cwd="/config",
+            cwd=codex_workdir(),
             env=codex_env(),
             text=True,
             capture_output=True,
@@ -4385,7 +4415,7 @@ def run_codex_device_login(login_id: str) -> None:
     try:
         proc = subprocess.Popen(
             [codex, "login", "--device-auth"],
-            cwd="/config",
+            cwd=codex_workdir(),
             env=codex_env(),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -4491,7 +4521,7 @@ def logout_codex() -> dict[str, Any]:
     try:
         proc = subprocess.run(
             [codex, "logout"],
-            cwd="/config",
+            cwd=codex_workdir(),
             env=codex_env(),
             text=True,
             capture_output=True,
@@ -4882,7 +4912,8 @@ def home_assistant_api_instructions(options: dict[str, Any]) -> str:
 def remote_control_instructions(options: dict[str, Any]) -> str:
     """Offer token-free observational reads and keep native command decisions intact."""
     return (
-        "You are running in the Home Assistant add-on. Workspace: /config. "
+        "You are running in the Home Assistant add-on. Home Assistant configuration: /config. "
+        f"Put notes, scratch files and drafts in {CODEX_WORKDIR}, not in /config. "
         + (f"Owner workspace instructions: {AGENTS_PATH}. " if AGENTS_PATH.is_file() else "")
         + "When this thread continues on the Home Assistant page, "
         "call the home_assistant_data exchange_info tool first there. "
@@ -4910,7 +4941,8 @@ def remote_control_instructions(options: dict[str, Any]) -> str:
 # only text that never changes. What changes from one message to the next is in exchange_info().
 _PAGE_INSTRUCTIONS_TEMPLATE = """You are Codex running as a Home Assistant add-on worker.
 
-Workspace: /config
+Working folder: @@WORKDIR@@ (your notes, scratch files and drafts go here, not into /config)
+Home Assistant configuration: /config
 
 Owner workspace instructions: if /addon_config/AGENTS.md exists, follow it. Codex has already loaded that file into this chat when the chat started, so never run a command to look for it or to read it. The owner can create, change or remove it at any time. When you call exchange_info, it says whether the file exists and when it last changed: read the file again only when its owner_instructions text says to.
 
@@ -4950,7 +4982,8 @@ SCHEDULING_PARAGRAPH = 'Use the codex_scheduling tools to propose a recurring or
 def build_page_instructions():
     """The page rules; the scheduling paragraph is in them only while scheduled runs are switched on."""
     paragraph = SCHEDULING_PARAGRAPH + "\n\n" if scheduling.SCHEDULED_RUNS else ""
-    return _PAGE_INSTRUCTIONS_TEMPLATE.replace("@@SCHEDULING_PARAGRAPH@@", paragraph)
+    return (_PAGE_INSTRUCTIONS_TEMPLATE.replace("@@SCHEDULING_PARAGRAPH@@", paragraph)
+            .replace("@@WORKDIR@@", str(CODEX_WORKDIR)))
 
 
 PAGE_INSTRUCTIONS = build_page_instructions()  # for callers that read it at import; the send paths call the function
@@ -5338,7 +5371,7 @@ def create_approval_session(
     settings = task_mode_settings(task_id, options)
     mode = settings["sandbox"]
     thread_params: dict[str, Any] = {
-        "cwd": "/config", "sandbox": mode, "approvalPolicy": settings["approval_policy"],
+        "cwd": codex_workdir(), "sandbox": mode, "approvalPolicy": settings["approval_policy"],
         "approvalsReviewer": settings["approvals_reviewer"],
     }
     if session_id:
@@ -5904,7 +5937,7 @@ def live_fingerprint_rows() -> dict[str, Any]:
 
 def spawn_live_process(args: list[str], env: dict[str, str]) -> subprocess.Popen[str]:
     """Start the live process in the way run_task starts a process for one exchange."""
-    return subprocess.Popen(args, cwd="/config", env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+    return subprocess.Popen(args, cwd=codex_workdir(), env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, text=True, bufsize=1)
 
 
@@ -6167,7 +6200,7 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
         try:
             proc = subprocess.Popen(
                 args,
-                cwd="/config",
+                cwd=codex_workdir(),
                 env=codex_env(),
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,

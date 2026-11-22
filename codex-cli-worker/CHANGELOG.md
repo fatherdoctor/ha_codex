@@ -110,6 +110,14 @@
   copy at `/data/agents_before_move.md`. If both places hold a file, nothing moves and the app logs a line.
 
 ### Changed
+- **Codex works from `/share/codex`.** Codex's working folder is now `/share/codex` instead of `/config`, so its
+  notes, scratch files and drafts no longer land in Home Assistant's configuration. The app creates the folder at
+  start when it is missing and never moves or empties it. `/config` and `/share` stay writable in `workspace-write`
+  exactly as before, every hidden file and read-only folder of the sandbox stays the same, and the approval cards
+  are unchanged. When the folder cannot be created, Codex works from `/config` as before and the log says why. An
+  `AGENTS.md` that you put in `/share/codex` is read as the working folder's instructions, after the app's own
+  `AGENTS.md`. The starter `AGENTS.md` of a new install says to ask before changing files in other apps' folders
+  under `/share`.
 - **Earlier answers open their steps.** Every answer's **Worked for** line now opens the steps of that exchange, not
   only the latest answer's. The line starts closed; its steps load from the worker the first time it opens, and then
   the answer's checks follow. The worker already saved each exchange's steps; `GET /tasks/<task_id>/activity` takes
