@@ -812,7 +812,7 @@ class ApprovalApiTests(unittest.TestCase):
         self.assertEqual(self.session.thread_params["approvalsReviewer"], "user")
         self.assertNotIn("outputSchema", self.session.turn_params)
         self.assertEqual(self.session.turn_params["sandboxPolicy"], {
-            "type": "workspaceWrite", "networkAccess": False, "writableRoots": ["/config", "/share", "/media"]})
+            "type": "workspaceWrite", "networkAccess": False, "writableRoots": ["/config", "/share", "/media", "/media/.agents"]})
         self.assertFalse(server.protected_policy.policy_problem({}))
         self.assertFalse(server.protected_policy.policy_problem({"codex_sandbox": "read-only"}))
         # A refused mode never reaches Codex: run_task stops it before launch.

@@ -94,7 +94,7 @@ def worker_approval_session(proc, workspace, root, mode, resume_id, approve, fin
         assert session.thread_params["cwd"] == server.codex_workdir(), session.thread_params
         session.thread_params["cwd"] = str(workspace)
         if mode == "workspace-write":
-            assert policy["writableRoots"] == ["/config", "/share", "/media"], policy
+            assert policy["writableRoots"] == ["/config", "/share", "/media", "/media/.agents"], policy
             policy["writableRoots"] = [str(workspace)]
         save_approvals = session.on_approvals
         save_final = session.on_final

@@ -120,9 +120,10 @@
   `/config`, so its notes, scratch files and drafts no longer land in Home Assistant's configuration, and the
   automatic backup leaves them out unless you include the media folder in your backup settings. The app now maps
   Home Assistant's `/media` folder read-write, and `/media` is a writable place in `workspace-write` beside
-  `/config` and `/share`, the same `/media` access the Claude add-on has. Every hidden file and read-only folder of
+  `/config` and `/share`, the same `/media` access the Claude add-on has. `/media/.agents` is a writable place of its
+  own, because Codex's sandbox otherwise keeps a folder named `.agents` read-only. Every hidden file and read-only folder of
   the sandbox stays the same, and the approval cards are unchanged. The app creates the folder at start when it is
-  missing and never moves or empties it. When the folder cannot be created, when `/media` is missing, or when any
+  missing and never moves or empties it; it does not create `/media`. When the folder cannot be created, when `/media` is missing, or when any
   part of its path is a link, Codex works from `/config` as before and the log says why. An `AGENTS.md` that you put
   in the working folder is read as the working folder's instructions, after the app's own `AGENTS.md`. The starter
   `AGENTS.md` of a new install says to ask before changing files in other apps' folders under `/share` and `/media`.

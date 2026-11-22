@@ -195,7 +195,7 @@ class ExchangeRecordTests(unittest.TestCase):
                 task_id, attachments.StubAppServer(attachments.SESSION_ID), "Prompt", Path("final"), None, {},
                 {"codex_sandbox": "workspace-write"})
         self.assertEqual(session.thread_params["cwd"], str(workdir))
-        self.assertEqual(session.turn_params["sandboxPolicy"]["writableRoots"][:3], ["/config", "/share", "/media"])
+        self.assertEqual(session.turn_params["sandboxPolicy"]["writableRoots"][:4], ["/config", "/share", "/media", "/media/.agents"])
 
     def run_and_record_plain(self, task_id, session_id=None, reply=None):
         """Run one exchange through run_codex's fake process and return exchange_info's details and the message."""

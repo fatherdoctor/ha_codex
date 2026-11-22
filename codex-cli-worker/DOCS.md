@@ -396,13 +396,20 @@ Codex needs to be able to write to the backup folder. In `workspace-write` mode 
 drafts, so they stay out of Home Assistant's configuration. The working folder is in `/media` because the automatic
 backup leaves the media folder out unless you include it in your backup settings: scratch files do not make each
 backup larger, and they are not restored from a backup. Keep instructions you need in the app's own `AGENTS.md`
-(Settings), which the backup keeps. The dot at the start of `.agents` keeps the folder out of the media browser's list.
+(Settings), which the backup keeps.
 The app creates the folder at start when it is missing and never moves, empties or rewrites what is in it. What Codex
-may write without a request is `/config`, `/share`, `/media`, the exchange's backup folder and the chat's files folder. Other apps keep their
+may write without a request is `/config`, `/share`, `/media` (with `/media/.agents`), the exchange's backup folder and the chat's files folder. Other apps keep their
 files under `/share` and `/media` too (another assistant's folder, a clone of a repository, recordings); the sandbox
 does not stop a write there in `workspace-write`, so the starter `AGENTS.md` tells Codex to ask first, and your own
 `AGENTS.md` can say more. When the folder cannot be created, when `/media` is missing, or when any part of the path is
-a link, Codex works from `/config` as before and the app's log says why.
+a link, Codex works from `/config` as before and the app's log says why. The app does not check that `/media` is
+the media folder of Home Assistant: the app's configuration maps it, and without that map the working folder would be
+lost at each update.
+
+Codex's own sandbox keeps a folder named `.agents`, `.git` or `.codex` read-only when it is directly in a writable
+place, because in a project such a folder holds instructions or skills that Codex loads. `/media/.agents` is not a
+project folder and nothing in it is loaded as instructions, so the app gives it as a writable place of its own: a
+write anywhere in `/media/.agents`, such as another assistant's folder beside `codex`, needs no request.
 
 The app's `codex_sandbox` option takes only these two values. An older setting that names `danger-full-access` stops the app at startup with a log line saying so. A chat can still run without the sandbox in the Full access permission mode, which the owner turns on in Settings (see "Permission modes" below).
 

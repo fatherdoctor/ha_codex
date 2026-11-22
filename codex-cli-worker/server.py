@@ -64,13 +64,6 @@ from account_access import AccountAccess, rejected_sign_in_error
 import safety_block
 from interaction_diagnostics import RollingDiagnostics, InteractionRecorder
 
-# Where a workspace-write task may write without an approval. /share is the owner's ruling of 2026-11-16:
-# the add-on gets the same /share access as the Claude add-on (clones live there). /media is the ruling of
-# 2026-11-22, for the same reason: the Claude add-on writes anywhere in /media, and Codex's working folder
-# (CODEX_WORKDIR) is there. /data/github stays masked by codex-bwrap and is never a writable root.
-TASK_WRITABLE_ROOTS = ("/config", "/share", "/media")
-
-
 class _ToolWorker:
     """Let worker-owned tools reach this module's functions and state by name."""
 
@@ -90,6 +83,15 @@ CONFIG_ROOT = Path("/config")
 # One constant, so a later option for the folder replaces one read.
 MEDIA_ROOT = Path("/media")
 CODEX_WORKDIR = MEDIA_ROOT / ".agents" / "codex"
+# Where a workspace-write task may write without an approval. /share is the owner's ruling of 2026-11-16:
+# the add-on gets the same /share access as the Claude add-on (clones live there). /media is the ruling of
+# 2026-11-22, for the same reason: the Claude add-on writes anywhere in /media, and Codex's working folder
+# is there. The working folder's parent is a root of its own because Codex's sandbox keeps a folder named
+# .agents (like .git and .codex) read-only when it sits directly in a writable root: with /media alone,
+# /media/.agents/claude and a new file in /media/.agents would need a card. A project's .agents folder holds
+# skills Codex loads; /media/.agents is not a project folder, and nothing in it is loaded as instructions.
+# /data/github stays masked by codex-bwrap and is never a writable root.
+TASK_WRITABLE_ROOTS = (str(CONFIG_ROOT), "/share", str(MEDIA_ROOT), str(CODEX_WORKDIR.parent))
 DATA_ROOT = Path("/data")
 # Files a person attaches to a message live in their own folder in the app's data folder, and the
 # backup leaves them out (config.yaml, backup_exclude: "*/chat_uploads"). The Supervisor matches each
@@ -1203,23 +1205,29 @@ FINAL_RESPONSE_SCHEMA = {
 def ensure_codex_workdir() -> None:
     """Create Codex's working folder if it is missing; log one line when Codex must work from /config.
 
-    A folder that is there already is left as it is. /media itself is never created: without the media
-    map, a folder made here would be in the container and lost at the next update. The folders are made
-    one at a time and a link stops the walk, so the start never creates a folder through a link.
+    A folder that is there already is left as it is. /media itself is never created, so a missing /media
+    leaves Codex in /config. The app does not check that /media is the mapped folder: config.yaml maps it
+    (tests/test_codex_workdir.py checks the map). Below /media the folders are made one at a time and a link
+    stops the walk, so the start never creates a folder through a link below /media.
     """
     if MEDIA_ROOT.is_dir():
-        folder = MEDIA_ROOT
         try:
-            for part in CODEX_WORKDIR.relative_to(MEDIA_ROOT).parts:
-                folder = folder / part
-                if folder.is_symlink():
-                    break
-                folder.mkdir(exist_ok=True)
+            _make_workdir_below_media()
         except OSError as err:
             print(f"Cannot create {CODEX_WORKDIR}; Codex works from {CONFIG_ROOT}: {err}", flush=True)
             return
     if codex_workdir() != str(CODEX_WORKDIR):
         print(f"{CODEX_WORKDIR} is missing or has a link in its path; Codex works from {CONFIG_ROOT}.", flush=True)
+
+
+def _make_workdir_below_media() -> None:
+    """Make each missing folder from /media down to CODEX_WORKDIR; stop at the first link."""
+    folder = MEDIA_ROOT
+    for part in CODEX_WORKDIR.relative_to(MEDIA_ROOT).parts:
+        folder = folder / part
+        if folder.is_symlink():
+            return
+        folder.mkdir(exist_ok=True)
 
 
 def codex_workdir() -> str:

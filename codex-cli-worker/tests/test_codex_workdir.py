@@ -72,6 +72,16 @@ class CodexWorkdirTests(unittest.TestCase):
         printed.assert_called_once()
         self.assertIn("has a link in its path", printed.call_args.args[0])
 
+    def test_a_link_higher_in_the_path_to_a_folder_with_codex_is_refused(self) -> None:
+        """A link at /media/.agents to a folder that already holds codex/ is refused, not only a link at codex."""
+        elsewhere = self.root / "elsewhere"
+        (elsewhere / "codex").mkdir(parents=True)
+        (self.media / ".agents").symlink_to(elsewhere, target_is_directory=True)
+        with patch("builtins.print") as printed:
+            server.ensure_codex_workdir()
+        self.assertEqual(server.codex_workdir(), str(self.config))
+        printed.assert_called_once()
+
     def test_without_media_the_app_works_from_config_and_logs_one_line(self) -> None:
         """Without the media folder the start makes nothing (a folder in the container would be lost at update)."""
         self.media.rmdir()
@@ -86,12 +96,23 @@ class CodexWorkdirTests(unittest.TestCase):
         self.assertEqual(SHIPPED_WORKDIR, Path("/media/.agents/codex"))
         self.assertTrue(any(SHIPPED_WORKDIR.is_relative_to(root) for root in server.TASK_WRITABLE_ROOTS))
 
-    def test_a_write_anywhere_in_media_needs_no_approval(self) -> None:
-        """The owner's ruling of 2026-11-22: all of /media is writable, as it is for the Claude add-on."""
-        for path in ("/media/.agents/claude/notes.md", "/media/recordings/clip.mp4", "/media/x"):
-            with self.subTest(path=path):
-                self.assertTrue(any(Path(path).is_relative_to(root) for root in server.TASK_WRITABLE_ROOTS))
+    def test_media_and_the_working_folders_parent_are_writable_roots(self) -> None:
+        """The owner's ruling of 2026-11-22: /media is writable, as it is for the Claude add-on.
+
+        Codex's sandbox keeps a folder named .agents read-only when it sits directly in a root, so the working
+        folder's parent is a root of its own, built from the constant. This checks the list the turn gets; the
+        sandbox's own answer for a write in /media/.agents is a check in SANDBOX_TESTING.md.
+        """
+        self.assertIn("/media", server.TASK_WRITABLE_ROOTS)
+        self.assertIn(str(SHIPPED_WORKDIR.parent), server.TASK_WRITABLE_ROOTS)
+        self.assertEqual(str(SHIPPED_WORKDIR.parent), "/media/.agents")
         self.assertFalse(any(Path("/data/github/token").is_relative_to(root) for root in server.TASK_WRITABLE_ROOTS))
+
+    def test_the_app_maps_media_read_write(self) -> None:
+        """Without the map, the working folder would be in the container and lost at each update."""
+        config = server.yaml.safe_load(Path(server.__file__).with_name("config.yaml").read_text(encoding="utf-8"))
+        maps = [entry for entry in config["map"] if entry.get("type") == "media"]
+        self.assertEqual(maps, [{"type": "media", "read_only": False}])
 
     def test_the_page_rules_name_the_folder_codex_starts_in(self) -> None:
         """The rules say where Codex works and that /config is Home Assistant's configuration.
