@@ -155,6 +155,16 @@ def main():
 
         release = threading.Event()
 
+        def spreadsheet_answer(task_id):
+            """Save an invented workbook and a hidden file in the chat's files folder; answer with links (CX-FILE-LINK)."""
+            folder = server.chat_files_dir(task_id)
+            (folder / "2025").mkdir(parents=True, exist_ok=True)
+            (folder / "2025" / "park visits.xlsx").write_bytes(b"PK\x03\x04 invented workbook")
+            (folder / ".notes.txt").write_text("hidden")
+            return (f"**Done.** [Download the workbook]({folder}/2025/park%20visits.xlsx)\n\n"
+                    f"Not offered: [secrets](/config/secrets.yaml), [hidden]({folder}/.notes.txt), "
+                    f"[missing]({folder}/missing.xlsx) and [outside]({folder}/../task.json).")
+
         def finish(task_id, prompt, session_id=session_id, reply=None):
             """Simulate a run with recorded steps instead of launching Codex.
 
@@ -162,7 +172,10 @@ def main():
             live. A message that starts with "Take your time" keeps its chat
             working until POST fixture/release, so the browser can queue
             messages behind it. A message that starts with "Ask me" is answered
-            with a question and two choices. Every other chat completes at once.
+            with a question and two choices. A message that starts with "Make a
+            spreadsheet" saves an invented workbook in the chat's files folder and
+            links it, beside links the page must not offer. Every other chat
+            completes at once.
             """
             summary = "Preview response: " + (reply or prompt)
             live = task_id == "preview-00"
@@ -240,7 +253,18 @@ def main():
                         command = 'curl "$HA_URL/api/history/period?filter_entity_id=sensor.energy" -H "Authorization: Bearer $HA_TOKEN"'
                     else:
                         command = "curl '$HA_URL/api/history/period' -H 'Authorization: Bearer $HA_TOKEN'\n# <img src=x onerror=alert(1)>"
-                    if (reply or prompt).startswith("Request permission to call"):
+                    if (reply or prompt).startswith("Request permission to use a ChatGPT app"):
+                        # Codex's request before a tool call of a ChatGPT app, as Codex 0.166.0 sends it
+                        # (CX-TOOL-CARD-ANY); the repository is invented.
+                        session.receive({"id": 0, "method": "mcpServer/elicitation/request", "params": {
+                            "threadId": session_id, "turnId": "preview-native", "serverName": "codex_apps",
+                            "mode": "form", "message": 'Allow GitHub to run tool "create_pull_request"?',
+                            "requestedSchema": {"type": "object", "properties": {}},
+                            "_meta": {"codex_approval_kind": "mcp_tool_call", "source": "connector",
+                                      "connector_name": "GitHub", "tool_title": "Create pull request",
+                                      "tool_params": {"repository_full_name": "example-owner/example-repo",
+                                                      "head": "feature", "base": "main", "draft": True}}}})
+                    elif (reply or prompt).startswith("Request permission to call"):
                         # Codex's own request before a tool call, as Codex 0.166.0 sends it (CX-SIMPLE.B). A clipped
                         # request carries an argument longer than the page shows, so it has no Allow button.
                         text = "x" * 40000 if "clipped" in (reply or prompt) else "Dinner is ready.\n<img src=x onerror=alert(1)>"
@@ -282,7 +306,9 @@ def main():
                         question="Remove the duplicate automation?",
                         choices=["Go ahead", "Don't change anything"])
                 else:
-                    server.update_task(task_id, status="completed", session_id=session_id, summary=summary,
+                    spreadsheet = (reply or prompt).startswith("Make a spreadsheet")
+                    server.update_task(task_id, status="completed", session_id=session_id,
+                                       summary=spreadsheet_answer(task_id) if spreadsheet else summary,
                                        details="", question="", completed_at=server.utc_now())
                     if (reply or prompt).startswith("Inspect with blocked browser requests"):
                         server.update_task(task_id, verification=[permission_check()])
