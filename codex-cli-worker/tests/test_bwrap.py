@@ -65,7 +65,6 @@ class BubblewrapCompatibilityTests(unittest.TestCase):
                      f'HIDDEN_DIRS="{root}/run/s6 {root}/data/remote_control_control {root}/data/github"')
             .replace('HIDDEN_FILES="/config/secrets.yaml /config/.storage/auth',
                      f'HIDDEN_FILES="{root}/config/secrets.yaml {root}/config/.storage/auth')
-            .replace('READ_ONLY_DIRS="/config/.storage"', f'READ_ONLY_DIRS="{root}/config/.storage"')
             .replace("/usr/bin/python3 /opt/codex-sandbox/codex-bwrap-probe.py",
                      f"{sys.executable} {helper}"),
             encoding="utf-8",
@@ -153,8 +152,8 @@ class BubblewrapCompatibilityTests(unittest.TestCase):
         args = ["--ro-bind", "/", "/", "--bind", str(root / "config"), str(root / "config"), "--",
                 "/usr/local/bin/codex", "--apply-seccomp-then-exec", "--", "/bin/sh", "-c", "cat secrets.yaml"]
         _, record = self.run_wrapper(args, stderr=b"", exit_code=0)
-        masks = ["--ro-bind", str(root / "config" / ".storage"), str(root / "config" / ".storage"),
-                 "--tmpfs", str(root / "run" / "s6"),
+        # .storage itself gets no bind of its own: it stays writable under Codex's bind of /config.
+        masks = ["--tmpfs", str(root / "run" / "s6"),
                  "--ro-bind", "/dev/null", str(root / "config" / "secrets.yaml"),
                  "--ro-bind", "/dev/null", str(root / "config" / ".storage" / "auth")]
         self.assertEqual(record["args"], ["--cap-drop", "ALL", *args[:6], *masks, *args[6:]])

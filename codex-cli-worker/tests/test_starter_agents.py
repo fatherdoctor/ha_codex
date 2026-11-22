@@ -179,6 +179,13 @@ class StarterAgentsText(unittest.TestCase):
             with self.subTest(rule=heading):
                 self.assertIn(heading, self.text)
 
+    def test_it_says_why_storage_is_left_to_home_assistant(self):
+        # The sandbox no longer keeps .storage read-only, so this rule is what keeps Codex out of it.
+        rule = " ".join(self.text.split("5. Leave `/config/.storage` to Home Assistant.", 1)[1].split("\n6. ", 1)[0].split())
+        self.assertIn("Do not edit its files while Home Assistant runs", rule)
+        self.assertIn("writes over changed files from memory", rule)
+        self.assertIn("the API", rule)
+
     def test_it_has_the_safeguard_defaults_and_says_they_are_not_locks(self):
         section = self.text.split("## Safeguards: defaults the owner can change", 1)[1].split("## About this home", 1)[0]
         self.assertIn("not locks in the app", section)
