@@ -1226,6 +1226,38 @@ function sizeLabel(bytes) {
     ? `${Math.max(1, Math.round(bytes / 1024))} KB`
     : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
+/** Build the card that downloads one file: its name, size and a download arrow. */
+function fileCard(name, size, href) {
+  const card = textNode("a", `${name} · ${sizeLabel(size)} ↓`, "document-attachment");
+  card.href = href;
+  card.download = name || "document";
+  return card;
+}
+/**
+ * Return what turns a link in an answer into a download of a file Codex saved
+ * in this chat's files folder, or null when the chat has none. Only files the
+ * worker listed are offered, and the worker checks the path again when asked.
+ */
+function chatFileLinks(task) {
+  const listing = task?.chat_files;
+  if (!listing?.folder || !listing.files?.length) return null;
+  const sizes = new Map(listing.files.map((file) => [file.path, file.size]));
+  const prefix = `${listing.folder.replace(/\/+$/, "")}/`;
+  return (href) => {
+    let path = String(href || "").replace(/^file:\/\//, "");
+    try {
+      // Per part, so that %23 and %3F in a file name become # and ? (decodeURI keeps them encoded).
+      path = path.split("/").map(decodeURIComponent).join("/");
+    } catch {
+      return null;
+    }
+    const relative = path.startsWith(prefix) ? path.slice(prefix.length) : "";
+    if (!sizes.has(relative)) return null;
+    const parts = relative.split("/");
+    const url = `tasks/${encodeURIComponent(task.task_id)}/files/${parts.map(encodeURIComponent).join("/")}`;
+    return fileCard(parts.at(-1), sizes.get(relative), url);
+  };
+}
 /** Render image attachments with a full-size link and a download button. */
 function renderAttachments(
   taskId,
@@ -1236,10 +1268,7 @@ function renderAttachments(
   const list = textNode("div", "", className);
   for (const attachment of attachments) {
     if (attachment.kind === 'file') {
-      const file = textNode('a', `${attachment.name} · ${sizeLabel(attachment.size)} ↓`, 'document-attachment');
-      file.href = attachmentUrl(taskId, attachment, true);
-      file.download = attachment.name || 'document';
-      list.append(file);
+      list.append(fileCard(attachment.name, attachment.size, attachmentUrl(taskId, attachment, true)));
       continue;
     }
     const figure = textNode("figure", "", "attachment");
@@ -1814,9 +1843,10 @@ function renderTask(force = false) {
       // No visible "Codex" label above the reply; a screen reader still hears whose reply it is.
       answer.setAttribute("role", "group");
       answer.setAttribute("aria-label", "Codex reply");
-      if (turn.summary) answer.append(renderMarkdown(turn.summary, "message"));
+      const fileLinks = chatFileLinks(task);
+      if (turn.summary) answer.append(renderMarkdown(turn.summary, "message", fileLinks));
       if (turn.details && turn.details !== turn.summary)
-        answer.append(renderMarkdown(turn.details, "message details"));
+        answer.append(renderMarkdown(turn.details, "message details", fileLinks));
       if (showsQuestionApart(turn)) answer.append(renderMarkdown(turn.question, "message question"));
       // Only the question still waiting can be answered with a choice.
       if (
