@@ -56,8 +56,7 @@ const GITHUB_CONTROLS = {
   'signing in': {exact: true, names: ['Open github.com/login/device', 'code', 'Cancel']},
   'signed in': {exact: false, names: ['Read test', 'Check now', 'Disconnect']},
 };
-const SECTIONS = ['Accounts and connections', 'Full access', 'Text size', 'Scheduled runs', 'Workspace instructions',
-  'Advanced'];
+const SECTIONS = ['Accounts and connections', 'Full access', 'Text size', 'Scheduled runs', 'Workspace instructions'];
 const remoteBase = {available: true, configured_name: 'Home Assistant', machine_name: '', log: []};
 const REMOTE = {
   off: {...remoteBase, enabled: false, state: 'off'},

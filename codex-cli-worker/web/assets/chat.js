@@ -38,7 +38,6 @@ const state = {
   activity: null,
   permissionModes: new Map(),
   // Checks whose retry the owner started on this page. Their result shows open; a reload forgets them.
-  retriedChecks: new Set(),
   // Earlier answers whose "Worked for" line the owner opened. The latest answer keeps this in state.activity.
   workedOpen: new Set(),
   // The saved steps of earlier answers, by "<chat id>/<turn id>", loaded the first time their line opens.
@@ -904,8 +903,6 @@ function controls() {
       "This chat's message is waiting in the queue and has not been sent yet. You can edit or remove it above.";
   else if (task?.permission_required)
     notice = "Review the permission request above to continue, or stop the task.";
-  else if (working && task?.browser_retry)
-    notice = "Retrying the dashboard inspection. You can continue this chat when it finishes.";
   else if (working)
     // A working chat shows no notice here; the in-chat "Working on your request" line says it.
     notice = "";
@@ -981,6 +978,7 @@ function renderRow(chat, queued = null) {
   row.classList.toggle("current", chat.task_id === state.id);
   row.classList.toggle("menu-open", chat.task_id === menu.id);
   row.classList.toggle("queued", Boolean(queued));
+  row.classList.toggle("unread", Boolean(chat.unread) && !queued);
   const main = textNode("button", "", "row-main");
   main.type = "button";
   main.dataset.taskId = chat.task_id;
@@ -991,6 +989,13 @@ function renderRow(chat, queued = null) {
   else if (chat.pinned) heading.append(pinIcon());
   else heading.append(chatIcon());
   heading.append(textNode("span", title));
+  if (chat.unread && !queued) {
+    // A scheduled run answered here since the owner last opened the chat.
+    const dot = textNode("span", "", "unread-dot");
+    dot.setAttribute("role", "img");
+    dot.setAttribute("aria-label", "New scheduled run");
+    heading.append(dot);
+  }
   main.append(heading);
   main.append(
     textNode(
@@ -1134,6 +1139,7 @@ async function loadList(older = false) {
   if (!state.archived)
     noteAttention("approvals", state.chats.filter((chat) => chat.permission_required).map((chat) => chat.task_id));
   if (hadSelected && !merged.has(state.id)) await selectChat(null);
+  markRead(state.id);
   renderList();
   // Approval panels in the open chat depend on whether any chat is working.
   if (activeChanged && state.task) renderTask();
@@ -1325,14 +1331,11 @@ function tickElapsed() {
 const BAD_CHECK_STATUSES = new Set(["failed", "issues", "unavailable"]);
 /**
  * Build the collapsed checks block of an answer: one expandable row per check
- * with its result, details, and findings, then the screenshots that have not
- * expired. It stays closed under the answer, except while a batch of blocked
- * browser requests waits for the owner, a retry runs, or a retry the owner
- * started on this page has its result. The closed line counts
- * the bad results, so a failed check shows without opening the block. Returns
- * null when the turn has no checks.
+ * with its result and details. It stays closed under the answer. The closed
+ * line counts the bad results, so a failed check shows without opening the
+ * block. Returns null when the turn has no checks.
  */
-function renderVerification(turn, taskId) {
+function renderVerification(turn) {
   const checks = turn.verification || [];
   if (!checks.length) return null;
   const section = textNode("details", "", "verification disclosure");
@@ -1341,69 +1344,16 @@ function renderVerification(turn, taskId) {
   const summary = textNode("summary", bad ? `${title} · ${bad} failed` : title);
   if (bad) summary.classList.add("has-failed");
   section.append(summary);
-  if (state.task?.browser_retry?.turn_id === turn.turn_id) {
-    section.open = true;
-    const progress = textNode("p", "Retrying dashboard inspection…", "browser-permission-progress");
-    progress.setAttribute("role", "status");
-    section.append(progress);
-  }
   for (const check of checks) {
     const row = textNode("details", "", `verification-result disclosure is-${check.status}`);
-    // A retry result opens its own row. The block opens too when the owner started that retry on this page,
-    // so the result shows where they clicked; a saved chat opened later starts closed.
-    if (check.retry_of && check === checks[checks.length - 1]) {
-      row.open = true;
-      if (state.retriedChecks.has(check.retry_of)) section.open = true;
-    }
-    const label = {
-      passed: "Passed", failed: "Failed", observed: "Readback", captured: "Screenshots captured",
-      issues: "Needs review", disabled: "Disabled", unavailable: "Unverified",
-    }[check.status] || "Unverified";
+    const label = {passed: "Passed", failed: "Failed", observed: "Readback"}[check.status] || "Unverified";
     row.append(textNode("summary", `${label} · ${check.entity_id || check.path || check.target || check.operation}`));
     if (check.message) row.append(textNode("pre", check.message));
     if (check.state !== undefined) row.append(textNode("p", `State: ${check.state}${check.expected_state !== null ? ` · Expected: ${check.expected_state}` : ""}`));
     if (check.attributes && Object.keys(check.attributes).length) row.append(textNode("pre", JSON.stringify(check.attributes, null, 2)));
-    if (Array.isArray(check.findings) && check.findings.length) {
-      const groups = {
-        resource: "Resources that could not load", home_assistant: "Home Assistant errors",
-        dashboard: "Dashboard errors", policy: "Blocked actions and requests",
-        diagnostic: "Blocked diagnostic logging and notifications",
-      };
-      for (const [kind, title] of Object.entries(groups)) {
-        const findings = check.findings.filter(finding => finding.kind === kind);
-        if (!findings.length) continue;
-        row.append(textNode("h4", title));
-        for (const finding of findings) {
-          row.append(textNode("p", finding.message));
-          const views = Array.isArray(finding.viewports) ? finding.viewports.join(", ") : "";
-          row.append(textNode("small", `${finding.count > 1 ? `${finding.count} occurrences` : "1 occurrence"}${views ? ` · ${views}` : ""}`));
-        }
-      }
-      if (check.findings_omitted) row.append(textNode("p", "Additional findings were omitted because the evidence limit was reached."));
-    } else {
-      for (const error of [...(Array.isArray(check.errors) ? check.errors : []), ...(Array.isArray(check.blocked) ? check.blocked : [])]) row.append(textNode("p", error));
-    }
     if (check.checked_at) row.append(textNode("small", dateLabel(check.checked_at, true)));
-    if (check.permission_decision) {
-      const names = (check.permission_decision.approved || []).map(item => item.label).join(", ");
-      row.append(textNode("p", `${check.permission_decision.remember ? "Remembered for this dashboard" : "Allowed for this retry"}: ${names}`));
-      const kept = (check.permission_decision.carried || []).map(item => item.label).join(", ");
-      if (kept) row.append(textNode("p", `Still allowed from earlier in this exchange: ${kept}`));
-    }
-    if (check.permissions_used?.length)
-      row.append(textNode("p", `${check.permissions_used.length} user-approved browser permission(s) used.`));
-    if (check.permission_review_unavailable) row.append(textNode("p", check.permission_review_unavailable));
-    if (check.permission_store_error) row.append(textNode("p", check.permission_store_error));
-    if (check.permission_candidates_omitted)
-      row.append(textNode("p", "Some blocked requests can't be offered for approval: they were incomplete, looked like credentials, or exceeded the review limit."));
-    const review = renderBrowserPermissions(check, turn, taskId);
-    if (review) row.append(review);
-    if (review?.classList.contains("browser-permission-review")) section.open = true;
     section.append(row);
   }
-  const images = imageAttachments(turn.verification_attachments).filter(image => image.expires_at * 1000 > Date.now());
-  if (images.length) section.append(renderAttachments(taskId, images, "Dashboard verification screenshot"));
-  section.append(textNode("p", "Screenshots are evidence for visual review. State and configuration checks do not prove automation behavior.", "verification-note"));
   return section;
 }
 /**
@@ -1470,8 +1420,7 @@ function earlierStepRows(entry, hasChecks, redraw) {
  * answer's line, and opening the same list of steps and then the checks. The
  * steps load from the worker the first time the line opens. An answer with no
  * saved steps possible (an old chat) and no checks keeps the plain line, and
- * with no times either it is left out. The line opens by itself when the
- * checks block wants attention (a browser permission review or a retry result).
+ * with no times either it is left out.
  */
 function renderWorked(turn, checks, taskId) {
   const label = workedLabel(turn);
@@ -1520,165 +1469,6 @@ function failedChecksLine(count, openChecks) {
   line.onclick = openChecks;
   return line;
 }
-/** Let the owner review a batch of complete requests without interrupting capture. */
-function renderBrowserPermissions(check, turn, taskId) {
-  const candidates = check.permission_candidates || [];
-  if (!candidates.length || !check.check_id) return null;
-  if ((turn.verification || []).some(item => item.retry_of === check.check_id))
-    return textNode("p", "This batch was reviewed in a later inspection.", "muted");
-  if (check.permission_review) {
-    const retrying = state.task?.browser_retry?.source_check_id === check.check_id;
-    return textNode("p", retrying ? "Retrying with the approved requests…"
-      : "This batch was already approved. If no retry result is available, start a new inspection.", "muted");
-  }
-  if (turn.turn_id !== state.task?.current_turn_id) return null;
-  if (state.task?.cancellation_requested)
-    return textNode("p", "This exchange was stopped, so its requests can't be approved. Start a new inspection to review them.", "muted");
-  const panel = textNode("div", "", "browser-permission-review");
-  panel.append(textNode("h4", "Review blocked browser requests"));
-  panel.append(textNode("p", "Select requests you trust. Unreviewed handlers may have side effects. Known device controls, writes, sign-in changes, URL signing and camera signaling stay blocked."));
-  const fields = document.createElement("fieldset");
-  fields.append(textNode("legend", `Additional access for ${check.path}`));
-  const boxes = [];
-  const selectLabel = textNode("label", "", "browser-permission-choice");
-  const selectAll = document.createElement("input");
-  selectAll.type = "checkbox";
-  selectLabel.append(selectAll, textNode("span", "Select all requests"));
-  fields.append(selectLabel);
-  for (const candidate of candidates) {
-    const item = textNode("div", "", "browser-permission-request");
-    const label = textNode("label", "", "browser-permission-choice");
-    const box = document.createElement("input");
-    box.type = "checkbox";
-    box.value = candidate.id;
-    boxes.push(box);
-    label.append(box, textNode("span", candidate.label));
-    const details = textNode("details", "", "browser-permission-details disclosure");
-    details.append(textNode("summary", "Request details"), textNode("pre", candidate.description));
-    item.append(label, details);
-    fields.append(item);
-  }
-  const rememberLabel = textNode("label", "", "browser-permission-choice browser-permission-remember");
-  const remember = document.createElement("input");
-  remember.type = "checkbox";
-  rememberLabel.append(remember, textNode("span", "Remember for this dashboard"));
-  fields.append(rememberLabel);
-  const actions = textNode("div", "", "browser-permission-actions");
-  const allow = textNode("button", "Allow selected and retry");
-  allow.type = "button";
-  const keep = textNode("button", "Keep blocked", "subtle");
-  keep.type = "button";
-  keep.onclick = () => {
-    const result = panel.closest(".verification-result");
-    result.open = false;
-    result.querySelector("summary").focus();
-  };
-  actions.append(allow, keep);
-  const feedback = textNode("p", "", "browser-permission-feedback");
-  feedback.setAttribute("role", "status");
-  // The worker accepts a batch only while no task or inspection runs in any chat.
-  const busy = Boolean(state.task?.browser_retry) || Boolean(state.active) ||
-    ["queued", "running", "in_queue"].includes(state.task?.status);
-  fields.disabled = busy;
-  const update = () => {
-    const selected = boxes.filter(box => box.checked).length;
-    selectAll.checked = selected === boxes.length;
-    selectAll.indeterminate = selected > 0 && selected < boxes.length;
-    allow.disabled = busy || !selected;
-  };
-  selectAll.onchange = () => { for (const box of boxes) box.checked = selectAll.checked; update(); };
-  for (const box of boxes) box.onchange = update;
-  update();
-  allow.onclick = async () => {
-    const generation = state.generation;
-    fields.disabled = allow.disabled = keep.disabled = true;
-    feedback.textContent = "Starting a fresh inspection…";
-    state.retriedChecks.add(check.check_id);
-    try {
-      await api(`tasks/${encodeURIComponent(taskId)}/browser-permissions`, {
-        turn_id: turn.turn_id, check_id: check.check_id,
-        candidate_ids: boxes.filter(box => box.checked).map(box => box.value), remember: remember.checked,
-      });
-      if (state.id === taskId && state.generation === generation) {
-        await fetchSelected(true);
-        clearTimeout(refreshTimer);
-        refreshTimer = setTimeout(refresh, 1000);
-      }
-    } catch (error) {
-      if (!panel.isConnected) return;
-      feedback.textContent = String(error.message || error);
-      fields.disabled = busy;
-      keep.disabled = false;
-      update();
-    }
-  };
-  panel.append(fields, actions, feedback);
-  if (busy) feedback.textContent = "Wait for running tasks and inspections to finish before approving this batch.";
-  return panel;
-}
-
-let browserPermissionLoad = 0;
-/** List saved exceptions in Settings, with an explicit revoke action for each. */
-async function loadBrowserPermissions() {
-  const load = ++browserPermissionLoad;
-  const area = $("browser-permissions");
-  area.textContent = "Loading saved permissions…";
-  try {
-    const { permissions } = await api("browser-permissions");
-    if (load !== browserPermissionLoad) return;
-    area.replaceChildren();
-    if (!permissions.length) area.append(textNode("p", "No browser permissions remembered.", "muted"));
-    const remembered = permissions.length ? `${permissions.length} remembered` : "None remembered";
-    setSectionStatus("browser-permissions-section", remembered);
-    setSectionStatus("advanced-section", `Browser permissions: ${remembered.toLowerCase()}`);
-    for (const permission of permissions) {
-      const row = textNode("div", "", "saved-browser-permission");
-      const info = textNode("div", "", "saved-browser-permission-info");
-      info.append(textNode("strong", permission.label), textNode("p", permission.path));
-      const details = textNode("details", "", "browser-permission-details disclosure");
-      details.append(textNode("summary", "Request details"), textNode("pre", permission.description));
-      info.append(details);
-      const revoke = textNode("button", "Revoke", "subtle");
-      revoke.type = "button";
-      revoke.setAttribute("aria-label", `Revoke ${permission.label} for ${permission.path}`);
-      revoke.onclick = async () => {
-        revoke.disabled = true;
-        try {
-          await api(`browser-permissions/${encodeURIComponent(permission.id)}`, undefined, "DELETE");
-          await loadBrowserPermissions();
-          const next = area.querySelector("button");
-          if (next) next.focus();
-          else { area.tabIndex = -1; area.focus(); }
-          $("settings-result").textContent = "Browser permission revoked.";
-        } catch (error) { revoke.disabled = false; settingsError(error); }
-      };
-      row.append(info, revoke);
-      area.append(row);
-    }
-  } catch (error) {
-    if (load !== browserPermissionLoad) return;
-    area.replaceChildren(textNode("p", String(error.message || error)));
-    setSectionStatus("browser-permissions-section", "Could not be read", true);
-    // Advanced is closed by default, so its header carries the problem too.
-    setSectionStatus("advanced-section", "Browser permissions could not be read", true);
-    // An unreadable permissions file can only be replaced, never edited here.
-    if (error.status === 503) {
-      const clear = textNode("button", "Remove all saved permissions", "subtle");
-      clear.type = "button";
-      clear.onclick = async () => {
-        clear.disabled = true;
-        try {
-          await api("browser-permissions", undefined, "DELETE");
-          await loadBrowserPermissions();
-          area.tabIndex = -1;
-          area.focus();
-          $("settings-result").textContent = "Saved browser permissions removed.";
-        } catch (failure) { clear.disabled = false; settingsError(failure); }
-      };
-      area.append(clear);
-    }
-  }
-}
 /**
  * Whether the question needs its own line: from 0.3.3 the answer text already holds it (ask_owner),
  * while an older answer kept the question apart from its summary.
@@ -1716,7 +1506,6 @@ function renderTask(force = false) {
     queued && [queued.queue_id, queued.message, queued.prompt_attachments],
     state.edit?.id,
     state.catalog?.backup_retention_days,
-    task.browser_retry,
     // Approval panels depend on whether any chat is working.
     state.active,
   ]);
@@ -1774,7 +1563,7 @@ function renderTask(force = false) {
       turn.summary || turn.details || turn.question || attachments.length || turn.verification?.length;
     if (hasAnswer) {
       // The steps and checks sit closed behind one "Worked for" line above the answer, as in the desktop app.
-      const evidence = renderVerification(turn, task.task_id);
+      const evidence = renderVerification(turn);
       let openChecks = null;
       if (latest) {
         state.latestChecks = evidence;
@@ -2314,7 +2103,6 @@ function renderActivity() {
     block.replaceChildren(textNode("p", worked, "worked-line"));
     return;
   }
-  // A checks block that asks for the owner (a browser permission review, a retry result) opens the line.
   // While Codex works the steps start closed under the waiting line; a tap holds only until the turn ends.
   if (!running && activity.tappedWhileRunning) {
     activity.expanded = null;
@@ -2537,6 +2325,7 @@ async function selectChat(id, restoring = false, keepSidebar = false) {
   resizeInput();
   showError(null);
   if (!keepSidebar) sidebar(false);
+  markRead(id);
   renderList();
   controls();
   if (!id) {
@@ -2788,6 +2577,16 @@ $("chat-menu").addEventListener("click", async (event) => {
   else if (action === "share") openShare(id);
   else document.dispatchEvent(new CustomEvent("thread-action", {detail: {action, id}}));
 });
+/**
+ * Clear the unread mark a scheduled run left on the open chat, while the page is in view.
+ * A failed request leaves nothing to undo: the next list refresh shows the mark again.
+ */
+function markRead(id) {
+  const chat = id && chatById(id);
+  if (!chat?.unread || document.hidden) return;
+  chat.unread = false;
+  api(`tasks/${encodeURIComponent(id)}/read`, {}).catch(() => {});
+}
 /** Pin or unpin a chat through the worker API and re-sort the list. */
 async function togglePin(id) {
   const chat = chatById(id);
@@ -3329,18 +3128,16 @@ $("divider").addEventListener("keydown", (event) => {
 window.addEventListener("resize", () => {
   if (innerWidth > 700) setWidth($("divider").getAttribute("aria-valuenow"));
 });
-/**
- * Slash commands. Messages go to Codex as plain text through the app server,
- * which does not read the TUI's slash commands, so "/new" sent as a message
- * would only reach the model as words. The page runs these commands itself
- * instead: typing "/" at the start of the message box lists them, filtered as
- * you type, and a tap, or Enter or Tab on the highlighted one, runs it.
- * A command is listed only while the page can run it (Stop only while a
- * chat is working, Rename only with a chat open).
- * There is no /fast command, and the picker has no lightning (fast mode)
- * toggle: the Codex CLI has no setting for fast mode yet. Both return in 0.6
- * with a working toggle (CX-04-FB-MODEL).
- */
+// Version 0.5 sends slash-prefixed messages through the regular composer.
+const SLASH_COMMANDS_ENABLED = false;
+if (!SLASH_COMMANDS_ENABLED) {
+  const message = $("message");
+  message.removeAttribute("aria-autocomplete");
+  message.removeAttribute("aria-controls");
+  message.removeAttribute("aria-expanded");
+}
+
+/** Page shortcuts and their availability when slash commands are enabled. */
 const SLASH_COMMANDS = [
   {
     name: "new",
@@ -3483,6 +3280,7 @@ function slashMatches(value) {
 }
 /** Return the runnable command a whole message names exactly, if any. */
 function slashCommand(value) {
+  if (!SLASH_COMMANDS_ENABLED) return null;
   const typed = /^\/(\S+)$/.exec(value.trim());
   if (!typed) return null;
   const word = typed[1].toLowerCase();
@@ -3502,6 +3300,7 @@ function slashIcon(glyph) {
 }
 /** Show or hide the command list for the message box's current text. */
 function renderSlash() {
+  if (!SLASH_COMMANDS_ENABLED) return;
   const value = $("message").value;
   if (slash.dismissed !== null && slash.dismissed !== value)
     slash.dismissed = null;
@@ -3617,9 +3416,9 @@ $("message").addEventListener("focus", () => {
  */
 function collapseSettingsSections() {
   // Sections marked data-own-dialog move to a dialog of their own (studio.js) and stay open there.
-  // The parts of Accounts and connections and of Advanced collapse too, inside them, each under its own header.
+  // The parts of Accounts and connections collapse too, inside it, each under its own header.
   const sections = document.querySelectorAll(
-    "#settings > section:not([data-own-dialog]), #accounts-section > section, #advanced-section > section",
+    "#settings > section:not([data-own-dialog]), #accounts-section > section",
   );
   sections.forEach((section, index) => {
     const heading = section.querySelector(":scope > h3, :scope > h4");
@@ -4493,7 +4292,6 @@ $("settings-button").onclick = async () => {
     loadLogin(),
     loadGithub(),
     loadRemoteControl(),
-    loadBrowserPermissions(),
     loadAddonConfiguration(),
   ]);
   for (const result of results)
@@ -4540,7 +4338,7 @@ async function refresh() {
       showError(error);
     }
   }
-  refreshTimer = setTimeout(refresh, state.task?.browser_retry ? 1000 : state.active ? 3000 : 12000);
+  refreshTimer = setTimeout(refresh, state.active ? 3000 : 12000);
 }
 sidebar(false);
 controls();
