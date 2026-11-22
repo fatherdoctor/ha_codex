@@ -1187,6 +1187,38 @@ function sizeLabel(bytes) {
     ? `${Math.max(1, Math.round(bytes / 1024))} KB`
     : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
+/** Build the card that downloads one file: its name, size and a download arrow. */
+function fileCard(name, size, href) {
+  const card = textNode("a", `${name} · ${sizeLabel(size)} ↓`, "document-attachment");
+  card.href = href;
+  card.download = name || "document";
+  return card;
+}
+/**
+ * Return what turns a link in an answer into a download of a file Codex saved
+ * in this chat's files folder, or null when the chat has none. Only files the
+ * worker listed are offered, and the worker checks the path again when asked.
+ */
+function chatFileLinks(task) {
+  const listing = task?.chat_files;
+  if (!listing?.folder || !listing.files?.length) return null;
+  const sizes = new Map(listing.files.map((file) => [file.path, file.size]));
+  const prefix = `${listing.folder.replace(/\/+$/, "")}/`;
+  return (href) => {
+    let path = String(href || "").replace(/^file:\/\//, "");
+    try {
+      // Per part, so that %23 and %3F in a file name become # and ? (decodeURI keeps them encoded).
+      path = path.split("/").map(decodeURIComponent).join("/");
+    } catch {
+      return null;
+    }
+    const relative = path.startsWith(prefix) ? path.slice(prefix.length) : "";
+    if (!sizes.has(relative)) return null;
+    const parts = relative.split("/");
+    const url = `tasks/${encodeURIComponent(task.task_id)}/files/${parts.map(encodeURIComponent).join("/")}`;
+    return fileCard(parts.at(-1), sizes.get(relative), url);
+  };
+}
 /** Render image attachments with a full-size link and a download button. */
 function renderAttachments(
   taskId,
@@ -1197,10 +1229,7 @@ function renderAttachments(
   const list = textNode("div", "", className);
   for (const attachment of attachments) {
     if (attachment.kind === 'file') {
-      const file = textNode('a', `${attachment.name} · ${sizeLabel(attachment.size)} ↓`, 'document-attachment');
-      file.href = attachmentUrl(taskId, attachment, true);
-      file.download = attachment.name || 'document';
-      list.append(file);
+      list.append(fileCard(attachment.name, attachment.size, attachmentUrl(taskId, attachment, true)));
       continue;
     }
     const figure = textNode("figure", "", "attachment");
@@ -1417,19 +1446,16 @@ function earlierSteps(taskId, turnId) {
  * redrawn while the fetch runs adds its own list to the ones redrawn after it.
  * A failed fetch leaves the steps unknown, so the next opening tries again.
  */
-async function loadEarlierSteps(taskId, turnId, entry, redraw) {
+async function loadEarlierSteps(taskId, turn, entry, redraw) {
   if (entry.steps) return;
   entry.redraws.add(redraw);
   if (entry.loading) return;
   entry.loading = true;
   try {
     const data = await api(
-      `tasks/${encodeURIComponent(taskId)}/activity?turn=${encodeURIComponent(turnId)}`,
+      `tasks/${encodeURIComponent(taskId)}/activity?turn=${encodeURIComponent(turn.turn_id)}`,
     );
-    // As in the latest answer's list, text messages are not steps; the answer itself shows below.
-    entry.steps = data.steps
-      .filter(step => step.kind !== "message")
-      .sort((a, b) => a.index - b.index);
+    entry.steps = workLogEntries(data.steps, turn);
     entry.failed = false;
   } catch (error) {
     entry.failed = true;
@@ -1440,13 +1466,13 @@ async function loadEarlierSteps(taskId, turnId, entry, redraw) {
   entry.redraws.clear();
   for (const draw of redraws) draw();
 }
-/** Build the step rows of an earlier answer, or one line that says why there are none. */
+/** Build the work log of an earlier answer, or one line that says why there is none. */
 function earlierStepRows(entry, hasChecks, redraw) {
   if (entry.steps === null)
     return [textNode("p", entry.failed ? "Could not load the steps. Close and open this line to try again." : "Loading steps…", "muted")];
   if (!entry.steps.length)
     return hasChecks ? [] : [textNode("p", "No steps were saved for this answer.", "muted")];
-  return entry.steps.map(step => renderStep(step, entry.open, redraw));
+  return entry.steps.map(step => workLogNode(step, entry.open, redraw));
 }
 /**
  * Build the "Worked for" line of an earlier answer: closed, like the latest
@@ -1468,14 +1494,14 @@ function renderWorked(turn, checks, taskId) {
   const entry = saved ? earlierSteps(taskId, turn.turn_id) : null;
   const fill = () => {
     const rows = entry ? earlierStepRows(entry, Boolean(checks), fill) : [];
-    list.replaceChildren(...rows, ...(checks ? [checks] : []));
+    list.replaceChildren(...groupWorkLog([...rows, ...(checks ? [checks] : [])]));
   };
   const show = open => {
     if (open) state.workedOpen.add(turn.turn_id);
     else state.workedOpen.delete(turn.turn_id);
     toggle.setAttribute("aria-expanded", String(open));
     list.hidden = !open;
-    if (open && entry) loadEarlierSteps(taskId, turn.turn_id, entry, fill);
+    if (open && entry) loadEarlierSteps(taskId, turn, entry, fill);
   };
   fill();
   show(Boolean(checks?.open) || state.workedOpen.has(turn.turn_id));
@@ -1778,9 +1804,10 @@ function renderTask(force = false) {
       // No visible "Codex" label above the reply; a screen reader still hears whose reply it is.
       answer.setAttribute("role", "group");
       answer.setAttribute("aria-label", "Codex reply");
-      if (turn.summary) answer.append(renderMarkdown(turn.summary, "message"));
+      const fileLinks = chatFileLinks(task);
+      if (turn.summary) answer.append(renderMarkdown(turn.summary, "message", fileLinks));
       if (turn.details && turn.details !== turn.summary)
-        answer.append(renderMarkdown(turn.details, "message details"));
+        answer.append(renderMarkdown(turn.details, "message details", fileLinks));
       if (showsQuestionApart(turn)) answer.append(renderMarkdown(turn.question, "message question"));
       // Only the question still waiting can be answered with a choice.
       if (
@@ -2180,7 +2207,7 @@ function activityBlock() {
   block.hidden = true;
   return block;
 }
-/** Build the container for the interim text messages of the latest exchange, shown outside the step list. */
+/** Build the container for the text messages of the running exchange, shown outside the closed step list. */
 function activityText() {
   const box = textNode("div", "", "activity-text");
   box.id = "activity-text";
@@ -2259,30 +2286,29 @@ async function pollActivity() {
  * the steps and shows the running time, and the list starts closed. A tap on
  * the heading opens it and holds until the turn ends. When the exchange is
  * over, the heading becomes the closed "Worked for" line above the answer, and
- * the list holds the steps and then the answer's checks.
+ * the list holds the steps with Codex's text messages between them, and then
+ * the answer's checks.
  */
 function renderActivity() {
   const block = $("activity");
   const activity = state.activity;
   if (!block || !activity || activity.id !== state.id) return;
   const all = [...activity.steps.values()].sort((a, b) => a.index - b.index);
-  // Text messages show outside the closed list; tool steps and thinking stay inside it.
-  const steps = all.filter(step => step.kind !== "message");
-  const texts = all.filter(step => step.kind === "message" && step.text);
   const running = activity.running || taskActive();
   const turn = state.task?.turns?.at(-1);
-  const lastText = texts.at(-1);
-  // Saved steps can still contain the final answer. Keep earlier messages and explicit commentary.
-  if (!running && turn && activity.turnId === turn.turn_id && lastText && !lastText.phase &&
-      lastText.text.trim() === turn.summary?.trim()) {
-    texts.pop();
-  }
+  // While Codex works, its text messages show outside the closed list, so the owner can follow along. Once the
+  // exchange is over they move into the list, and the answer starts right under the "Worked for" line.
+  const entries = running
+    ? all.filter(step => step.kind !== "message")
+    : workLogEntries(all, activity.turnId === turn?.turn_id ? turn : null);
+  const texts = running ? all.filter(step => step.kind === "message" && step.text) : [];
+  const steps = entries.filter(step => step.kind !== "message");
   const textBox = $("activity-text");
   if (textBox)
     textBox.replaceChildren(...texts.map(step => renderMarkdown(step.text, "message interim")));
   const checks = state.latestChecks;
   const worked = running ? "" : workedLabel(turn);
-  block.hidden = !steps.length && !checks && !worked;
+  block.hidden = !entries.length && !checks && !worked;
   block.classList.toggle("running", running);
   block.classList.toggle("worked", !running);
   // The step list takes the place of the waiting line once Codex reports steps.
@@ -2292,7 +2318,7 @@ function renderActivity() {
     block.replaceChildren();
     return;
   }
-  if (!steps.length && !checks) {
+  if (!entries.length && !checks) {
     // Nothing to open: the total time alone.
     block.replaceChildren(textNode("p", worked, "worked-line"));
     return;
@@ -2316,7 +2342,7 @@ function renderActivity() {
     "span",
     running
       ? `${state.task?.permission_required ? "Waiting for your permission…" : "Working on your request…"} · ${count}`
-      : worked || (steps.length ? `Activity (${count})` : "Checks and readback"),
+      : worked || idleLabel(steps.length, entries.length, count),
   );
   if (running) label.append(textNode("span", "", "elapsed"));
   toggle.append(textNode("span", "", "activity-chevron"), label);
@@ -2328,11 +2354,59 @@ function renderActivity() {
   const list = textNode("div", "", "activity-steps");
   list.id = "activity-steps";
   list.hidden = !expanded;
-  for (const step of steps) list.append(renderStep(step, activity.open, renderActivity));
-  if (checks) list.append(checks);
+  const nodes = entries.map(entry => workLogNode(entry, activity.open, renderActivity));
+  list.append(...groupWorkLog(checks ? [...nodes, checks] : nodes));
   block.replaceChildren(toggle, list);
   tickElapsed();
   if (nearBottom) area.scrollTop = area.scrollHeight;
+}
+/** Name a finished list that has no "Worked for" time (a chat saved by an older version). */
+function idleLabel(stepCount, entryCount, count) {
+  if (stepCount) return `Activity (${count})`;
+  return entryCount ? "Activity" : "Checks and readback";
+}
+/**
+ * Return the work log of a finished exchange in order: its steps and the text
+ * messages Codex wrote along the way. Saved steps can still hold a copy of the
+ * final answer (`turn.summary`); it is left out, since the answer shows below
+ * the log. Pass no turn when the steps belong to another exchange.
+ */
+function workLogEntries(steps, turn) {
+  const entries = [...steps]
+    .filter(step => step.kind !== "message" || step.text)
+    .sort((a, b) => a.index - b.index);
+  const lastText = entries.findLast(step => step.kind === "message");
+  // Explicit commentary (a message with a phase) is never the answer, even when the words match.
+  if (turn && lastText && !lastText.phase && lastText.text.trim() === turn.summary?.trim())
+    entries.splice(entries.indexOf(lastText), 1);
+  return entries;
+}
+/** Build one entry of a work log: a text message as a paragraph block, anything else as a step row. */
+function workLogNode(entry, open, redraw) {
+  if (entry.kind === "message") return renderMarkdown(entry.text, "message interim");
+  return renderStep(entry, open, redraw);
+}
+/**
+ * Put each run of step rows (and the checks after them) in an indented group,
+ * and leave the text messages between the groups, so a message starts where
+ * the answer starts, as in the desktop app.
+ */
+function groupWorkLog(nodes) {
+  const out = [];
+  let group = null;
+  for (const node of nodes) {
+    if (node.classList.contains("interim")) {
+      out.push(node);
+      group = null;
+      continue;
+    }
+    if (!group) {
+      group = textNode("div", "", "step-group");
+      out.push(group);
+    }
+    group.append(node);
+  }
+  return out;
 }
 /**
  * Build one row of the step list: icon, text, and a line with a failed

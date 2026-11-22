@@ -1086,8 +1086,14 @@ h1 {
 }
 .activity-steps {
   margin: 6px 0 4px;
+}
+/* The rows sit indented behind a rule; the text messages between the groups start where the answer starts (CX-BLEED-FIX). */
+.step-group {
   padding-left: 2px;
   border-left: 2px solid var(--line);
+}
+.activity-steps > .message.interim {
+  margin: 12px 0;
 }
 .step {
   display: flex;
@@ -2020,6 +2026,18 @@ dialog :is(h3, h4):has(> .settings-toggle) {
 #agents-hint {
   margin: 0 0 10px;
 }
+/* The update banner's link to the app's Info page looks like the banner's other buttons. */
+.page-banner .banner-link {
+  display: inline-block;
+  border-radius: 9px;
+  padding: 10px 16px;
+  background: var(--text);
+  color: var(--bg);
+  text-align: center;
+  text-decoration: none;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 #remote-control-name {
   display: block;
   width: 100%;
@@ -2736,7 +2754,7 @@ body.resizing {
   margin: 10px 0 8px;
   padding: 4px 0;
 }
-.activity.worked .activity-steps > .verification {
+.activity.worked .step-group > .verification {
   margin: 8px 0 4px 8px;
 }
 .check-failed-line {
@@ -2840,7 +2858,7 @@ a.ha-nav-row:focus-visible {
   border-radius: 8px;
   background: var(--bg);
 }
-/* Interim text messages of the latest exchange, shown outside the closed step list (CX-04-SHOW-TEXT). */
+/* Text messages of the running exchange, shown outside the closed step list (CX-04-SHOW-TEXT); a finished exchange keeps them in its list. */
 .activity-text:empty {
   display: none;
 }
