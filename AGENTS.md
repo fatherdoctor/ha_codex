@@ -101,6 +101,6 @@ When one is:
 - `CONTRIBUTING.md` - test setup in full, manual checks, what a pull request holds.
 - `SECURITY.md` - reporting a vulnerability, and what the app can reach.
 - `docs/updates-and-rollback.md` - how a release reaches an install, the lab pass, rollback.
-- `codex-cli-worker/DOCS.md`, `VERIFICATION.md` and `SANDBOX_TESTING.md` (same folder) - options, the
-  verification tools and the sandbox checks.
+- `codex-cli-worker/DOCS.md` (the short guide), `docs/app-reference.md` (the detail behind it), and `VERIFICATION.md`
+  and `SANDBOX_TESTING.md` in `codex-cli-worker/` - options, the verification tools and the sandbox checks.
 - `codex-cli-worker/CHANGELOG.md` - what each version changed.
