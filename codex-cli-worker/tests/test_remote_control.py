@@ -179,6 +179,20 @@ class SupervisorTests(unittest.TestCase):
         self.assertTrue(wait_for(lambda: self.procs))
         self.assertEqual(self.cwds, [self.workdir])
 
+    def test_the_namespace_probe_runs_in_the_working_folder(self) -> None:
+        """The probe starts where the launch starts, so a missing /config cannot fail the probe alone."""
+        probe_cwds: list[str] = []
+
+        def run(cmd, **kwargs):
+            probe_cwds.append(kwargs["cwd"])
+            return types.SimpleNamespace(returncode=0)
+
+        self.sup.run = run
+        self.sup.start()
+        self.assertTrue(wait_for(lambda: self.procs))
+        self.assertEqual(probe_cwds, [self.workdir])
+        self.assertEqual(self.cwds, [self.workdir])
+
     def test_resume_runs_when_left_on(self) -> None:
         self.sup.save_enabled(True)
         self.sup.resume()

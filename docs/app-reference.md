@@ -410,6 +410,8 @@ Codex's own sandbox keeps a folder named `.agents`, `.git` or `.codex` read-only
 place, because in a project such a folder holds instructions or skills that Codex loads. `/media/.agents` is not a
 project folder and nothing in it is loaded as instructions, so the app gives it as a writable place of its own: a
 write anywhere in `/media/.agents`, such as another assistant's folder beside `codex`, needs no request.
+A chat from the ChatGPT app over remote control starts in the same folder and, in `workspace-write`, may write the
+same places without a request as a chat on the page, except the exchange's backup folder and the chat's files folder.
 
 The app's `codex_sandbox` option takes only these two values. An older setting that names `danger-full-access` stops the app at startup with a log line saying so. A chat can still run without the sandbox in the Full access permission mode, which the owner turns on in Settings (see "Permission modes" below).
 
@@ -707,7 +709,7 @@ You can also ask the assistant in chat to clone or link a connected repository. 
 
 ### The `github_git` tool
 
-Codex can call `repos`, `fetch`, `pull`, `push`, `clone` and `link`, for connected repositories only and only during a chat or scheduled run. Every operation is available in every sandbox mode (0.3.6). A pull fetches only; the assistant then fast-forwards the work tree in its own shell (`git merge --ff-only`), so the app never checks files out into a folder a task can change. A push never forces, deletes or pushes tags. `fetch`, `pull`, `push` and `link` take the full path of the work tree, starting with `/` (for example `/share/house_repo` or `/config`); the app refuses a relative path such as `.`, because Codex starts in `/media/.agents/codex` and a relative path could name a different repository than the one Codex means.
+Codex can call `repos`, `fetch`, `pull`, `push`, `clone` and `link`, for connected repositories only and only during a chat or scheduled run. Every operation is available in every sandbox mode (0.3.6). A pull fetches only; the assistant then fast-forwards the work tree in its own shell (`git merge --ff-only`), so the app never checks files out into a folder a task can change. A push never forces, deletes or pushes tags. `fetch`, `pull`, `push` and `link` take the full path of the work tree, starting with `/` (for example `/share/house_repo` or `/config`); the app refuses a relative path such as `.`, because Codex starts in `/media/.agents/codex` and a relative path could name a different repository than the one Codex means. The **Link** form under **Settings** > **GitHub** uses the same check.
 
 Limits of a push:
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -135,6 +136,24 @@ class CodexWorkdirTests(unittest.TestCase):
         for path in (f"{self.workdir}/notes.md", "notes.md", f"{config}/automations.yaml"):
             with self.subTest(path=path):
                 self.assertFalse(server.secret_config_path(path))
+
+
+class RemoteControlWorkdirTests(unittest.TestCase):
+    """The relay's Codex starts in the working folder and may write what the chat page's Codex may write."""
+
+    def test_the_app_gives_the_relay_the_working_folder(self) -> None:
+        """The one line in server.py that makes remote control start in the working folder, not the /config default."""
+        self.assertIs(server.remote_control_supervisor.workdir_factory, server.codex_workdir)
+
+    def test_the_relay_gets_the_pages_writable_folders(self) -> None:
+        """A relay thread names no writable folders, so the process's config must; else /config asks each time."""
+        with patch.object(server, "read_options", return_value={}):
+            args = server.relay_tool_args()
+        values = [args[i + 1] for i, flag in enumerate(args[:-1]) if flag == "--config"]
+        roots = [v.split("=", 1)[1] for v in values if v.startswith("sandbox_workspace_write.writable_roots=")]
+        self.assertEqual(len(roots), 1)
+        self.assertEqual(json.loads(roots[0]), list(server.TASK_WRITABLE_ROOTS))
+        self.assertLessEqual({"/config", "/share"}, set(json.loads(roots[0])))
 
 
 if __name__ == "__main__":

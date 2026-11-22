@@ -128,9 +128,11 @@
   part of its path is a link, Codex works from `/config` as before and the log says why. An `AGENTS.md` that you put
   in the working folder is read as the working folder's instructions, after the app's own `AGENTS.md`. The starter
   `AGENTS.md` of a new install says to ask before changing files in other apps' folders under `/share` and `/media`.
-  The remote connection for the ChatGPT app starts its Codex in the same working folder. The `github_git` tool now
-  refuses a relative path such as `.` and asks for the full path, so a path meant for the working folder cannot
-  name the configuration repository in `/config`.
+  The remote connection for the ChatGPT app starts its Codex in the same working folder and now has the same
+  writable folders as the chat page: before, it could write only its start folder without a request, so a chat from
+  the ChatGPT app would have asked before each change in `/config`. The `github_git` tool and the **Link** form
+  under **Settings** > **GitHub** now refuse a relative path such as `.` and ask for the full path, so a path meant
+  for the working folder cannot name the configuration repository in `/config`.
 - **Earlier answers open their steps.** Every answer's **Worked for** line now opens the steps of that exchange, not
   only the latest answer's. The line starts closed; its steps load from the worker the first time it opens, and then
   the answer's checks follow. The worker already saved each exchange's steps; `GET /tasks/<task_id>/activity` takes
