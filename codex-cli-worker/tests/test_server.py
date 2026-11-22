@@ -539,7 +539,7 @@ class ModelSelectionTests(unittest.TestCase):
         self.assertEqual(config["options"]["codex_model"], "default")
         self.assertEqual(server.DEFAULT_OPTIONS["codex_model"], "default")
         # Free text: no list to keep current when Codex adds a model.
-        self.assertEqual(config["schema"]["codex_model"], "str")
+        self.assertEqual(config["schema"]["codex_model"], "str?")
 
     def test_home_assistant_api_url_defaults_to_core(self) -> None:
         """An empty override must not invent a Core port before Supervisor discovery."""
