@@ -1,6 +1,6 @@
 """Parts the add-on removed stay removed; each test fails if one comes back by mistake.
 
-- 0.3.5 removed the add-on's own grant layer: the action groups, the permission overrides and the
+- 0.3.6 removed the add-on's own grant layer: the action groups, the permission overrides and the
   ``act`` tool (``home_assistant_actions``). No launch approves a house action ahead of Codex's own
   permissions.
 - 0.3.6 (CX-SIMPLE.G) removed the add-on's own guards: the command check (hook) and its rules, the
@@ -48,7 +48,7 @@ def configured_servers(args: list[str]) -> set[str]:
 
 
 class GrantLayerLaunchTests(unittest.TestCase):
-    """0.3.5: no launch registers the act tool. Each way Codex starts: the chat page (and a schedule run, which starts the same way) and the ChatGPT app."""
+    """0.3.6: no launch registers the act tool. Each way Codex starts: the chat page (and a schedule run, which starts the same way) and the ChatGPT app."""
 
     def page_launches(self) -> dict[str, list[str]]:
         task = {"task_id": "t", "turns": [], "chat_settings": server.DEFAULT_CHAT_SETTINGS}
@@ -77,7 +77,7 @@ class GrantLayerLaunchTests(unittest.TestCase):
 
 
 class GrantLayerPartsTests(unittest.TestCase):
-    """0.3.5: the settings route, the modules and the overrides socket of the grant layer are gone."""
+    """0.3.6: the settings route, the modules and the overrides socket of the grant layer are gone."""
 
     def test_the_settings_route_is_gone(self):
         rules = {rule.rule for rule in server.app.url_map.iter_rules()}
