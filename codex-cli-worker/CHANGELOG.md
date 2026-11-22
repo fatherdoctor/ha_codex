@@ -262,6 +262,11 @@
   sends only `turn/start` on a thread that is already loaded, with the chat's model in the turn, and it uses request
   IDs that no other chat on the process uses. A cancel sends `turn/interrupt` and leaves the process input open for
   the other chats. Nothing uses this mode yet. Each exchange still starts its own Codex process.
+- A new test file, `tests/test_run_task_exits.py`, runs one whole exchange for each way a run can end: an answer, a
+  question, a failure Codex reports, a turn that ends in an error, a Codex that cannot start, a cancel before, during
+  or right after the start, a timeout, a stall, and a run that the policy, the sandbox check or the model pin refuses.
+  Each test checks the state, the log line, the result event and the notice that the run leaves. No behavior changes;
+  the tests guard the next step, which splits the run function into smaller parts.
 
 ## 0.3.6 - 2026-11-18
 
