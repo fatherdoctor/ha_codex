@@ -153,6 +153,19 @@ async def test_a_person_or_renamed_user_is_never_removed(hass, hass_storage, cap
                     "not a system user named Dashboard verification"]
 
 
+async def test_stored_id_naming_no_user_removes_nobody_and_deletes_the_file(hass, hass_storage, caplog):
+    """A stored ID that names no user removes nobody, logs no "Kept user" line and still deletes the file."""
+    other = await hass.auth.async_create_system_user("Another app", group_ids=[GROUP_ID_READ_ONLY])
+    hass_storage[STORE_KEY] = {"version": 1, "data": {"user_id": "no-such-user-id"}}
+    caplog.set_level(logging.INFO)
+    with patch.object(hass.auth, "async_remove_user") as remove:
+        await integration._async_remove_browser_user(hass)
+    remove.assert_not_called()
+    assert await hass.auth.async_get_user(other.id) is not None
+    assert not [r for r in caplog.records if r.getMessage().startswith("Kept user")]
+    assert STORE_KEY not in hass_storage
+
+
 async def test_nothing_to_remove_on_a_new_install(hass, hass_storage):
     """Without the file, no user is looked up or removed."""
     with patch.object(hass.auth, "async_remove_user") as remove:
