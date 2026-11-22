@@ -37,6 +37,38 @@ const markdownParser = new marked.Marked({
     },
   },
 });
+// Read math before marked treats a backslash before punctuation as an escape.
+// Reuse its code tokens so the delimiters and formula reach the page as literal text.
+markdownParser.use({
+  extensions: [
+    {
+      name: "displayMath",
+      level: "block",
+      start(src) {
+        return src.search(/^ {0,3}(?:\\\[|\$\$)/m);
+      },
+      tokenizer(src) {
+        markdownTick();
+        const match = /^ {0,3}(\\\[[\s\S]*?\\\]|\$\$[\s\S]*?\$\$)/.exec(src);
+        if (!match) return;
+        const end = /^[ \t]*(?:\n|$)/.exec(src.slice(match[0].length));
+        if (end) return { type: "code", raw: match[0] + end[0], text: match[1] };
+      },
+    },
+    {
+      name: "inlineMath",
+      level: "inline",
+      start(src) {
+        return src.search(/\\(?:\(|\[)|\$\$/);
+      },
+      tokenizer(src) {
+        markdownTick();
+        const match = /^(?:\\\([^\n]*?\\\)|\\\[[\s\S]*?\\\]|\$\$[\s\S]*?\$\$)/.exec(src);
+        if (match) return { type: "codespan", raw: match[0], text: match[0] };
+      },
+    },
+  ],
+});
 const markdownInlineTags = { strong: "strong", em: "em", del: "del" };
 const markdownLinkSchemes = ["http:", "https:", "mailto:"];
 /** Return a link target that is safe to open, or nothing for any other URL. */
