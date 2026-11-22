@@ -1,38 +1,28 @@
-# Tool transport extraction: preliminary note
+# Tool transport extraction plan
 
-This note is incomplete. On the reviewed release branch, `codex-cli-worker/tool_socket.py` and
-`codex-cli-worker/mcp_stdio.py` do not exist. They are proposed extraction targets, so their present behavior
-cannot be read. The proposed characterization test files for those modules do not exist on this branch either.
-The move needs a decision about whether to characterize the existing implementations first.
+The shared transport files do not exist on the reviewed branch. `tool_socket.py` and `mcp_stdio.py` are destinations for a later move. This note describes the existing behavior and a sequence to preserve it. Sources are the worker files and test drafts named below.
 
-## Existing boundaries
+## Current boundaries
 
-- `codex-cli-worker/verification.py` and `codex-cli-worker/ha_data.py` each provide a Unix socket server.
-  Their handlers read one bounded JSON line, dispatch it, and write one JSON line. The verification handler
-  sets a 240-second timeout; the data handler sets 60 seconds. Both restrict the socket to its owner.
-- `codex-cli-worker/ha_call.py`, `relay_reads.py`, `schedule_api.py`, and `github_access.py` also serve tool
-  sockets. Each has its own dispatch and refusal behavior.
-- `codex-cli-worker/ha_call_mcp.py` reads bounded JSON-RPC input, sends responses on stdout, and formats
-  action results. The other tool bridges have their own tool tables and result formatting.
-- `codex-cli-worker/server.py` builds individual MCP configurations. They carry distinct server names,
-  tool approvals, timeouts, required flags, and relay environment settings. The scheduler is conditional.
+Six server implementations use a Unix stream socket: `verification.py`, `ha_data.py`, `ha_call.py`, `relay_reads.py`, `schedule_api.py`, and `github_access.py`. Their `serve` methods replace an existing socket path, set owner-only permissions, start a threaded server, and return it. A connection serves one bounded request and writes one JSON line. The call implementation also serves a separate relay instance. See each module's `serve` method and `server.py`'s startup calls.
 
-## Proposed sequence to confirm
+`remote_control.py` is different: `ControlClient` connects to a Unix socket and speaks WebSocket JSON-RPC. It initializes the connection, makes a request, and closes the transport. It is not a seventh `tool_socket.serve` caller. Preserve this client and its separate error, timeout, and close behavior; do not turn it into a line-based server.
 
-1. Characterize each existing socket server and each MCP bridge before extraction. Include framing, byte
-   limits, timeout, refusal, malformed input, connection close, result format, and end of stream.
-2. Introduce a shared socket server with explicit dispatch, size, timeout, and refusal inputs. Switch one
-   existing server at a time. Preserve socket ownership, daemon threads, cleanup, and the old responses.
-3. Introduce a shared stdio loop. Keep each bridge's tool definitions, argument checks, server identity,
-   and result formatter. Check protocol errors, notifications, and output boundaries for every bridge.
-4. Replace the MCP argument builders with a table only after recording their output. Preserve the names,
-   executable and environment, scheduling switch, relay options, approval modes, and timeouts.
-5. Run the existing tool and page tests and the new characterization tests after each move. Compare the
-   configuration and protocol results with the recorded baseline.
+The servers have distinct contracts. Verification and data read at most 16 KiB and return their own unavailable messages. Call reads at most 64 KiB. Relay reads use 16 KiB and distinguish invalid JSON from other failures. Scheduling and GitHub read at most 64 KiB and retain different error fields and text. Scheduling also limits its response to 64 KiB. Their timeout values and exception handling differ. Preserve those differences, including cancellation and write failures.
 
-## Open test mapping
+Six stdio programs (`verification_mcp.py`, `ha_data_mcp.py`, `ha_call_mcp.py`, `relay_reads_mcp.py`, `scheduling_mcp.py`, and `github_mcp.py`) each read JSON-RPC lines and expose initialization, ping, discovery, and tool calls. They keep separate tool tables, validation, and result formats. In particular, the GitHub bridge returns a text field, while scheduling serializes its result. Each program has its own server identity and remains a separate process.
 
-The proposed socket and stdio characterization cards name tests for the new modules, but those modules
-are the result of the later move. A test written against them now cannot capture current behavior. The
-socket tests should guard step 2 and the stdio tests step 3 once their targets and baseline are agreed.
-The server configuration needs separate coverage for step 4; the proposed two test files do not name it.
+## Move sequence and test map
+
+1. **Record the baseline.** Compare the six server handlers, six bridge programs, `remote_control.ControlClient`, and the MCP argument builders before changing them. Record complete config outputs and representative successful and refused responses. Keep the existing test drafts separate from the release base until their own reviews complete.
+2. **Extract socket setup.** Introduce `tool_socket.serve(path, dispatch, max_bytes, timeout, refusal)` and move one server implementation at a time. Keep each service's parser, dispatch, exception-to-response mapping, and response limit where the shared interface cannot express them. Preserve path replacement, permissions, one request per connection, timeout, daemon threads, and returned server lifecycle. Run the socket characterization tests after each move:
+   - `tests/test_tool_socket_char.py` in [draft 266](https://github.com/fatherdoctor/ha_codex/pull/266) exercises framing, invalid or empty input, oversize rejection, socket permissions, and close for data, call, relay reads, scheduling, and GitHub.
+   - Verification is the sixth server in the F4 source review. The existing `tests/verification_socket_test.py::test_parallel_request_is_rejected_while_active_check_is_blocked` covers concurrent refusal, but draft 266 does **not** yet characterize its framing or malformed-input behavior. Add or identify equivalent characterization before moving verification; do not claim that draft 266 covers it.
+   - The lead requested a fake-server test for `ControlClient` on draft 266. That test is not in its current head. Use it to guard the separate client, including request, refusal, and close; it does not replace verification server coverage.
+3. **Extract stdio dispatch and loop.** Introduce `mcp_stdio.run(server_info, tools, call, format_result)`. Switch the six bridges one at a time. Keep each tool table, argument checks, result formatter, identity, bounds, notification behavior, and EOF handling. `tests/test_mcp_stdio_char.py` in [draft 267](https://github.com/fatherdoctor/ha_codex/pull/267) exercises all six programs for initialization, discovery, requests, replies, malformed and oversized input, notifications, and EOF. Its stubbed adapter tests cover successful and failed calls; retain each bridge's exact output text and schema with its existing tests as well.
+4. **Consolidate launch settings.** Replace the repeated `server.py` MCP argument builders with a table only after comparing their complete outputs. Keep each name, executable and script, enabled/required flag, startup and tool timeout, approval mode, and environment forwarding. Preserve the scheduling-off switch, the distinct relay call socket, relay read configuration, and the bundled `hass_mcp.mcp_args` option. `approvals.py` matches `home_assistant_call` and `call` by name, so retain both names. `tests/test_scheduled_runs_off.py`, `tests/test_mcp_decline.py`, `tests/test_github_routes.py`, `tests/test_four_modes.py`, and `tests/test_ha_mcp_option.py` cover portions of this configuration; compare the full generated arguments because the two new characterization drafts do not cover this table.
+5. **Verify each increment.** Run the affected existing tests and the mapped characterization tests after each server or bridge move. Compare protocol output, errors, bounds, and launch configuration with the baseline. Run the full worker suite on the final head. Retain the current client and process boundaries unless a separate approved change calls for them.
+
+## Risks and coverage gaps
+
+A shared refusal callback can accidentally erase a service-specific error, and a single default timeout or size limit can change a caller's contract. Moving serialization can change a tool's visible result. A renamed process or approval mode can change how a call is approved. A table can omit the scheduler switch or relay-specific environment. The verification socket framing and the requested remote-control fake-server test are not yet covered by the cited socket draft; establish those guards before relying on it for either path. The tests above use fake or isolated services and do not require a live installation.
