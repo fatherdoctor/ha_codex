@@ -3,6 +3,8 @@
 ## 0.4.0 (unreleased)
 
 ### What's new
+- **Permission labels match the ChatGPT desktop app.** The modes read **Ask for approval** (was Default), **Approve for me**
+  (was Auto-review), **Full access** in the warning color, and **Read only** last. The stored values do not change.
 - **Update banners.** The chat page says **Version X is installed. Restart Home Assistant to finish.** while Home
   Assistant still runs an older copy of the integration (or none, after the first install), and **Update available:
   version X** with a link to the app's Info page when Supervisor offers a newer app. Each banner can be dismissed for

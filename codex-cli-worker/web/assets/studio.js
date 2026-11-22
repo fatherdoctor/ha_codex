@@ -1,6 +1,6 @@
 "use strict";
 /** Production controls for the Quiet Studio layout. No sample account data. */
-const permissionNames = {default: "Default permissions", "auto-review": "Auto-review", "read-only": "Read only", "full-access": "Full access"};
+const permissionNames = {default: "Ask for approval", "auto-review": "Approve for me", "read-only": "Read only", "full-access": "Full access"};
 function updateStudio() {
   document.body.dataset.newChat = String(!state.id);
   const hour = new Date().getHours();
@@ -8,8 +8,7 @@ function updateStudio() {
   if (greeting) greeting.textContent = hour < 12 ? "Good morning" : hour < 18 ? "Nice to see you again" : "Good evening";
   $("phone-title").textContent = state.task?.title || "New chat";
   const permissionLabel = permissionNames[selectedPermissionMode()];
-  $("permission-label").textContent = innerWidth <= 700 && selectedPermissionMode() === 'default'
-    ? 'Default' : permissionLabel;
+  $("permission-label").textContent = permissionLabel;
   $("permission-button").setAttribute('aria-label', permissionLabel);
   $("permission-button").title = permissionLabel;
   $("permission-button").classList.toggle("full-access", selectedPermissionMode() === "full-access");

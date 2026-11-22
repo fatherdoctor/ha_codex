@@ -73,4 +73,4 @@ configuration:
     description: On each start, install or update the Codex integration from the copy in this app. An integration you installed another way is never changed.
   home_assistant_mcp:
     name: Enable Home Assistant MCP
-    description: Reads need no approval. For writes, Default and Read only ask you. Auto-review can approve for you. Full access runs without asking.
+    description: Reads need no approval. For writes, Ask for approval and Read only ask you. Approve for me can approve for you. Full access runs without asking.
