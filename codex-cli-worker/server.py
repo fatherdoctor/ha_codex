@@ -53,6 +53,7 @@ import ha_data_mcp
 import hass_mcp
 import remote_control
 import tool_threads
+import update_status
 from core_address import CoreAddress, probe_core
 from relay_reads import RelayReads, ReadError as RelayReadError
 import retention
@@ -164,6 +165,7 @@ HA_DOCS_GIT_TIMEOUT_SECONDS = 300
 HA_DOCS_GIT_STALL_SECONDS = 60
 
 DEFAULT_OPTIONS = {
+    "model_choice": "Account default",
     "codex_model": "default",
     "model_reasoning_effort": "medium",
     "reasoning_summary": "concise",
@@ -232,8 +234,8 @@ SOL_MODEL_RE = re.compile(r"gpt-(\d+(?:\.\d+)*)-sol")
 RETIRED_MODELS = {"gpt-5.5": "gpt-5.6-sol"}
 DEFAULT_CHAT_SETTINGS = {"model": None, "reasoning_effort": None}
 # The `model_pin` option is empty as shipped, and empty means no pin: runs use the
-# account's default model. When the owner sets it, a chat, a saved turn or the
-# `codex_model` option naming any other model is refused instead of running on it.
+# configured model. When the owner sets it, an explicit chat choice or saved turn
+# naming any other model is refused instead of running on it.
 # Versions before 0.4 shipped this value as the default; run.sh clears it once, on the
 # first start of 0.4, and sets MODEL_PIN_CLEARED so that start does not read the stale
 # copy in options.json. A value set after that is kept.
@@ -689,8 +691,22 @@ def current_model(model: Any) -> Any:
 
 
 def configured_model(options: dict[str, Any]) -> str:
-    """Return the model the codex_model option names; free text, so trim it, and empty means default."""
-    return current_model(str(options.get("codex_model") or "").strip() or "default")
+    """Return the inherited model, preserving custom names saved before the drop-down existed."""
+    pin = model_pin(options)
+    if pin:
+        return pin
+    choice = options.get("model_choice", "Account default")
+    if choice in {"Account default", "custom"}:
+        choice = str(options.get("codex_model") or "").strip() or "default"
+    return current_model(choice)
+
+
+def log_legacy_model_choice(options: dict[str, Any]) -> None:
+    """Explain the retained free-text setting once at worker startup."""
+    if (options.get("model_choice", "Account default") == "Account default"
+            and str(options.get("codex_model") or "").strip() not in {"", "default"}):
+        print("Your saved custom model is still configured. Choose a model in the Model drop-down "
+              "or clear Custom model to use your account default.", flush=True)
 
 
 def default_model(options: dict[str, Any]) -> str:
@@ -7245,14 +7261,8 @@ def chat_options() -> Response:
     """Return the models, defaults, and settings the web UI needs."""
     options = read_options()
     pin = model_pin(options)
-    try:
-        default = resolve_chat_settings(DEFAULT_CHAT_SETTINGS, options)
-        model_error = ""
-    except ValueError as exc:
-        # The add-on's codex_model option names another model than the pin; say so on the page.
-        default = {"model": pin, "reasoning_effort": "medium"}
-        model_error = str(exc)
-    default_id = pin or default_model(options)
+    default = resolve_chat_settings(DEFAULT_CHAT_SETTINGS, options)
+    default_id = default_model(options)
     # default_effort is the level a chat on that model runs at while it chose none (resolve_chat_settings).
     models = [{"id": model, "label": label, "efforts": efforts,
                "default_effort": default_effort(options, model, efforts)} for model, label, efforts in chat_models()]
@@ -7261,7 +7271,7 @@ def chat_options() -> Response:
     return jsonify({
         "ok": True,
         "model_pin": pin,
-        "model_error": model_error,
+        "model_error": "",
         "defaults": default,
         # The defaults' model by name, also when the add-on leaves the choice to the CLI.
         "default_model": default_id,
@@ -7507,32 +7517,48 @@ def get_log(task_id: str) -> Response:
     return Response(data, mimetype="text/plain")
 
 
+def stored_activity_payload(task_id: str, turn_id: str, after: int) -> dict[str, Any]:
+    """The saved steps of a finished exchange after a sequence number, or an empty list when none were saved."""
+    stored = load_stored_activity(task_id, turn_id)
+    if stored is None:
+        return {"ok": True, "turn_id": turn_id, "seq": 0, "running": False, "total": 0, "steps": []}
+    steps = [step for step in stored["steps"] if isinstance(step, dict) and int(step.get("seq") or 0) > after]
+    return {
+        "ok": True, "turn_id": str(stored.get("turn_id") or turn_id), "seq": int(stored.get("seq") or 0),
+        "running": False, "total": len(stored["steps"]), "steps": steps,
+    }
+
+
 @app.get("/tasks/<task_id>/activity")
 @require_auth
 def get_activity(task_id: str) -> Response:
-    """Return the steps Codex reported for the latest exchange, after a sequence number."""
+    """Return the steps Codex reported for an exchange, after a sequence number.
+
+    Without `turn` it is the latest exchange. With `turn`, an earlier answer's
+    "Worked for" line asks for that exchange's saved steps; the id must have
+    the turn id form and belong to this chat, so it never names another path.
+    """
     if TASK_ID_RE.fullmatch(task_id) is None:
         return jsonify({"ok": False, "error": "task not found"}), 404
     try:
         after = int(request.args.get("after", "0"))
     except ValueError:
         return jsonify({"ok": False, "error": "after must be a number"}), 400
+    wanted = request.args.get("turn")
+    if wanted is not None and TURN_ID_RE.fullmatch(wanted) is None:
+        return jsonify({"ok": False, "error": "turn not found"}), 404
     with lock:
         task = tasks.get(task_id)
         if task is None:
             return jsonify({"ok": False, "error": "task not found"}), 404
+        known = {turn.get("turn_id") for turn in task.get("turns") or []} | {task.get("current_turn_id")}
+        if wanted is not None and wanted not in known:
+            return jsonify({"ok": False, "error": "turn not found"}), 404
         record = task_activity.get(task_id)
-        if record is not None:
+        if record is not None and wanted in (None, record["turn_id"]):
             return jsonify({"ok": True, **activity_payload_locked(record, after)})
-        turn_id = str(task.get("current_turn_id") or "")
-    stored = load_stored_activity(task_id, turn_id)
-    if stored is None:
-        return jsonify({"ok": True, "turn_id": turn_id, "seq": 0, "running": False, "total": 0, "steps": []})
-    steps = [step for step in stored["steps"] if isinstance(step, dict) and int(step.get("seq") or 0) > after]
-    return jsonify({
-        "ok": True, "turn_id": str(stored.get("turn_id") or turn_id), "seq": int(stored.get("seq") or 0),
-        "running": False, "total": len(stored["steps"]), "steps": steps,
-    })
+        turn_id = wanted or str(task.get("current_turn_id") or "")
+    return jsonify(stored_activity_payload(task_id, turn_id, after))
 
 
 # The marks the chat page shows in front of each kind of step, so a shared
@@ -8077,6 +8103,18 @@ def addon_configuration() -> Response:
     return jsonify({"ok": True, "url": f"/config/app/{slug}/config" if slug else None})
 
 
+@app.get("/update-status")
+@require_auth
+def get_update_status() -> Response:
+    """Return the versions the page's update banners name: a restart to finish, an app update; null for none.
+
+    It changes nothing and holds only version numbers and the slug path, so the worker token is enough.
+    """
+    status = update_status.read(ha_token())
+    slug = addon_slug() if status.update_version else None
+    return jsonify({"ok": True, **status.as_json(), "info_url": f"/config/app/{slug}/info" if slug else None})
+
+
 @app.post("/remote-control/<action>")
 @require_auth
 @require_ingress
@@ -8506,7 +8544,9 @@ def main() -> None:
     protected policy (for example a full-access mode carried over from an
     older version, or approvals that would never ask).
     """
-    problem = protected_policy.policy_problem(read_options())
+    options = read_options()
+    log_legacy_model_choice(options)
+    problem = protected_policy.policy_problem(options)
     if problem:
         print(f"Codex CLI Worker will not start: {problem}", flush=True)
         sys.exit(1)

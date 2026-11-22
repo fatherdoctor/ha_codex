@@ -486,6 +486,33 @@ async function effortSaved(page, label) {
       animations: "disabled",
     });
     await page.setViewportSize({ width: 1440, height: 950 });
+    // Laundry schedule: preserve the equations and the Markdown around them.
+    const inlineMath = String.raw`\(30 + 45 + 20 = 95\)`;
+    const displayMath = String.raw`\[
+15 + 95 = 110
+\]`;
+    const dollarMath = "$$15 + 95 = 110$$";
+    const laundry = await page.evaluate(({ inlineMath, displayMath, dollarMath }) => {
+      const answer = renderMarkdown([
+        "Each load takes " + inlineMath + " minutes.",
+        "**Earliest finish:**",
+        displayMath,
+        dollarMath,
+        "The supply budget is $15.",
+      ].join("\n\n"), "message");
+      return {
+        inline: [...answer.querySelectorAll("p > code")].map(node => node.textContent),
+        blocks: [...answer.querySelectorAll("pre > code")].map(node => node.textContent),
+        label: answer.querySelector("strong")?.textContent,
+        lastLine: answer.lastElementChild.textContent,
+      };
+    }, { inlineMath, displayMath, dollarMath });
+    assert.deepEqual(laundry, {
+      inline: [inlineMath],
+      blocks: [displayMath, dollarMath],
+      label: "Earliest finish:",
+      lastLine: "The supply budget is $15.",
+    });
     // A message that would keep the parser busy, or is very long, stays plain text.
     assert.deepEqual(
       await page.evaluate(() => {
@@ -935,10 +962,11 @@ async function effortSaved(page, label) {
     assert.equal(await page.locator(".message.user").count(), 2);
     assert.equal(await page.locator(".answer").count(), 2);
     // CX-REPLY-ALIGN: the text messages Codex wrote along the way ("I'll look for …", "I found …") are blocks of
-    // their own above the answer, spaced apart from each other and from the answer, and start where it starts.
+    // their own, spaced apart from each other and from the answer, and start where it starts. Once the exchange is
+    // over they sit inside the open list, between its step groups (CX-BLEED-FIX).
     const narration = await page.evaluate(() => {
       const exchange = [...document.querySelectorAll("#messages .exchange")].at(-1);
-      const blocks = [...exchange.querySelectorAll("#activity-text > .message"), exchange.querySelector(".answer > .message")];
+      const blocks = [...exchange.querySelectorAll("#activity-steps > .message.interim"), exchange.querySelector(".answer > .message")];
       const firstCharacter = (node) => {
         const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, {
           acceptNode: (text) => (text.data.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP),
@@ -1154,7 +1182,7 @@ async function effortSaved(page, label) {
     // The same text is in the sent message and in the echoed answer.
     assert.deepEqual(
       await page
-        .locator("#messages a:not(.activity-text a)")
+        .locator("#messages a:not(.interim a)")
         .evaluateAll((links) =>
           links.map((link) => [link.textContent, link.href, link.target, link.rel]),
         ),
@@ -1989,9 +2017,10 @@ async function effortSaved(page, label) {
     await require("./browser_approvals.cjs")(browser, output, errors);
     await require("./browser_text_size.cjs")(browser, output, errors);
     await require("./browser_slash.cjs")(browser, errors);
+    await require("./browser_answer_bleed.cjs")(browser, output, errors);
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: queued messages (wait behind a working chat, edit, remove, start in order), choices under a question (pick one, draft kept, late answer refused), attached images (pick, reject, remove, send, render, batch stays with its chat, send waits for decoding), chat actions (pin, rename, delete, long press), generated image attachments, Markdown formatting (sent messages, answers, untrusted text, slow or long text, narrow screens), saved model/reasoning choices, model compatibility, the model a chat runs on by name, quota bars, the line about the Codex integration, keyboard/reset controls, history, pagination, continuation, new chats, drafts, reopening the last chat, safe text, settings, text size (three sizes, kept per device, phone and iPad), slash-prefixed messages (Enter and Send), resize, mobile and dark mode. Screenshots: " +
+      "PASS: queued messages (wait behind a working chat, edit, remove, start in order), choices under a question (pick one, draft kept, late answer refused), attached images (pick, reject, remove, send, render, batch stays with its chat, send waits for decoding), chat actions (pin, rename, delete, long press), generated image attachments, Markdown formatting (sent messages, answers, untrusted text, slow or long text, narrow screens), saved model/reasoning choices, model compatibility, the model a chat runs on by name, quota bars, the line about the Codex integration, keyboard/reset controls, history, pagination, continuation, new chats, drafts, reopening the last chat, safe text, settings, text size (three sizes, kept per device, phone and iPad), slash-prefixed messages (Enter and Send), narration kept out of the answer (inside the closed list, aligned with it at four widths), resize, mobile and dark mode. Screenshots: " +
         output,
     );
   } finally {

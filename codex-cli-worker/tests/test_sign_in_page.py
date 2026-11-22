@@ -291,11 +291,11 @@ class ModelPinTests(_Worker):
         self.assertEqual(server.model_pin_error({"model": PIN}, self.options), "")
         self.assertEqual(server.model_pin_error(execution, {"model_pin": "none"}), "")
 
-    def test_codex_model_option_disagreeing_with_the_pin_is_shown_not_crashed(self):
+    def test_pin_takes_priority_over_the_inherited_custom_model(self):
         self.options["codex_model"] = "gpt-6-luna"
         data = self.client.get("/chat-options", headers=self.headers).get_json()
         self.assertTrue(data["ok"])
-        self.assertIn("gpt-6-luna", data["model_error"])
+        self.assertEqual(data["model_error"], "")
         self.assertEqual([model["id"] for model in data["models"]], [PIN])
 
     def test_none_turns_the_pin_off(self):
