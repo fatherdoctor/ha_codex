@@ -136,10 +136,13 @@ class SupervisorTests(unittest.TestCase):
         self.procs: list[FakeProc] = []
         self.commands: list[list[str]] = []
         self.envs: list[dict[str, str]] = []
+        self.cwds: list[str] = []
+        self.workdir = str(Path(self.tmp.name))
 
         def popen(cmd, **kwargs):
             self.commands.append(cmd)
             self.envs.append(kwargs["env"])
+            self.cwds.append(kwargs["cwd"])
             proc = FakeProc()
             self.procs.append(proc)
             return proc
@@ -147,7 +150,8 @@ class SupervisorTests(unittest.TestCase):
         self.sup = rc.Supervisor(
             codex_binary="/usr/local/bin/codex", state_path=self.state,
             env_factory=lambda: {"HA_TOKEN": "secret", "CODEX_HOME": "/data/codex-home"},
-            name_factory=lambda: "Home Assistant", popen=popen, control_factory=FakeControl)
+            name_factory=lambda: "Home Assistant", popen=popen, control_factory=FakeControl,
+            workdir_factory=lambda: self.workdir)
         patcher = patch.multiple(rc, BACKOFF_START=0.05, BACKOFF_CAP=0.1, STOP_GRACE=0.2)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -168,6 +172,12 @@ class SupervisorTests(unittest.TestCase):
         self.assertEqual(state["blocked_reason"], "")
         self.assertNotIn("config_findings", state)
         self.assertTrue(wait_for(lambda: self.procs))
+
+    def test_the_process_starts_in_the_working_folder(self) -> None:
+        """The remote Codex starts where the chat page's Codex works, not in /config."""
+        self.sup.start()
+        self.assertTrue(wait_for(lambda: self.procs))
+        self.assertEqual(self.cwds, [self.workdir])
 
     def test_resume_runs_when_left_on(self) -> None:
         self.sup.save_enabled(True)

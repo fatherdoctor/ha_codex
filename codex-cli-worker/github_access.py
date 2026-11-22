@@ -571,11 +571,16 @@ class GitRunner:
         raise GitHubError("The repository must be under /share or /config.")
 
     def repository_path(self, value: Any) -> Path:
-        """A work tree under /share or /config (links resolved first) with a real .git folder, not protected."""
+        """A work tree under /share or /config (links resolved first) with a real .git folder, not protected.
+
+        A relative path is refused, not read against a base: Codex starts in its working folder (/share/codex),
+        so "." read against /config could name the configuration repository instead of the one Codex means.
+        """
         if not isinstance(value, str) or not value or len(value) > 4096 or "\x00" in value:
             raise GitHubError("Give the path of a git work tree under /share or /config.")
-        candidate = Path(value) if value.startswith("/") else self.config_root.resolve() / value
-        resolved = Path(os.path.realpath(candidate))
+        if not value.startswith("/"):
+            raise GitHubError("Give the full path of the work tree, starting with /, for example /share/house_repo.")
+        resolved = Path(os.path.realpath(value))
         self.inside(resolved)
         dot_git = resolved / ".git"
         if dot_git.is_symlink() or not dot_git.is_dir():

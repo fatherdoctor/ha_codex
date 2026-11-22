@@ -8008,6 +8008,7 @@ remote_control_supervisor = remote_control.Supervisor(
     name_factory=lambda: read_options().get("remote_control_name"),
     instructions_factory=lambda: remote_control_instructions(read_options()),
     tool_args_factory=relay_tool_args,
+    workdir_factory=codex_workdir,
 )
 
 

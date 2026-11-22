@@ -694,7 +694,7 @@ You can also ask the assistant in chat to clone or link a connected repository. 
 
 ### The `github_git` tool
 
-Codex can call `repos`, `fetch`, `pull`, `push`, `clone` and `link`, for connected repositories only and only during a chat or scheduled run. Every operation is available in every sandbox mode (0.3.6). A pull fetches only; the assistant then fast-forwards the work tree in its own shell (`git merge --ff-only`), so the app never checks files out into a folder a task can change. A push never forces, deletes or pushes tags.
+Codex can call `repos`, `fetch`, `pull`, `push`, `clone` and `link`, for connected repositories only and only during a chat or scheduled run. Every operation is available in every sandbox mode (0.3.6). A pull fetches only; the assistant then fast-forwards the work tree in its own shell (`git merge --ff-only`), so the app never checks files out into a folder a task can change. A push never forces, deletes or pushes tags. `fetch`, `pull`, `push` and `link` take the full path of the work tree, starting with `/` (for example `/share/house_repo` or `/config`); the app refuses a relative path such as `.`, because Codex starts in `/share/codex` and a relative path could name a different repository than the one Codex means.
 
 Limits of a push:
 
@@ -751,7 +751,9 @@ copy the text from `starter_agents.md` into the editor.
 **A second file in the working folder.** Codex also reads an `AGENTS.md` in its working folder, `/share/codex/AGENTS.md`,
 when one is there; the app neither writes nor moves that file. Codex reads the app's file first and the working
 folder's file after it, so where the two disagree, the working folder's file wins. An `AGENTS.md` left in `/config`
-is not read while Codex works from `/share/codex`.
+is not read while Codex works from `/share/codex`. The working folder's file is in `/share`, which is writable, so
+Codex or another app with `/share` access can change it without an approval card; the approval described below
+covers the app's file only.
 
 The editor under **Settings** writes the file without a question. The folder is not one of the places Codex may write on its own, so when you ask a chat to change the file, Codex asks for your approval first.
 
