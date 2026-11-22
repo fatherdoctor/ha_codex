@@ -122,22 +122,22 @@ class SettingsPage(unittest.TestCase):
 
 
 class SettingsAccordion(unittest.TestCase):
-    """One top-level Settings section open at a time, and Browser permissions folded under Advanced (0.3.6)."""
+    """One top-level Settings section open at a time, and no Browser permissions section since 0.4."""
 
     def setUp(self):
         self.html = (WEB / "index.html").read_text()
         self.chat = (WEB / "assets" / "chat.js").read_text()
         self.settings = self.html.split('<dialog id="settings">', 1)[1].split("</dialog>", 1)[0]
 
-    def test_browser_permissions_is_a_part_of_advanced_the_last_section(self):
-        advanced = self.settings.split('<section id="advanced-section"', 1)[1]
-        self.assertLess(advanced.index('id="browser-permissions-section"'), advanced.index('id="addon-configuration"'))
-        self.assertEqual(self.settings.count('id="browser-permissions-section"'), 1)
-        self.assertEqual(self.settings.count('id="browser-permissions"'), 1)
-        # Advanced is the last section; only the Add-on configuration row and the result line follow it.
-        after = advanced.split('id="addon-configuration"', 1)[1]
+    def test_no_browser_permissions_and_no_advanced_section(self):
+        """0.4 removed the dashboard browser, so Settings has no Browser permissions and no Advanced section."""
+        self.assertNotIn("browser-permissions", self.settings)
+        self.assertNotIn('id="advanced-section"', self.settings)
+        self.assertNotIn("advanced-section", self.chat)
+        self.assertNotIn("browser-permissions", self.chat)
+        # Only the Add-on configuration row and the result line follow the last section.
+        after = self.settings.split('id="addon-configuration"', 1)[1]
         self.assertNotIn("<section", after)
-        self.assertIn("#advanced-section > section", self.chat)
 
     def test_opening_a_top_level_section_closes_the_others(self):
         opener = self.chat.split("function openSettingsSection(", 1)[1].split("\n}\n", 1)[0]

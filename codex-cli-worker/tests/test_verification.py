@@ -1,26 +1,23 @@
-"""Verification boundaries, evidence ownership, and credential protection."""
+"""Verification boundaries, result ownership, and credential protection."""
 import json
 import os
-import subprocess
-import sys
 import tarfile
 import tempfile
-import time
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock, patch
 
 from test_server import server
 import tool_threads
-from verification import DEFAULT_BROWSER_MEMORY_LIMIT_MIB, MAX_BROWSERS, Verification
-from verification import browser_memory_limit, browser_process_memory, kill_tracked_processes, track_browser_processes
+from verification import Verification
+import verification_mcp
 
 
 THREAD = "11111111-2222-4333-8444-555555555555"
 
 
 class VerificationTests(unittest.TestCase):
-    """Checks, browser captures, and credential handling for one running chat turn."""
+    """Checks and credential handling for one running chat turn."""
 
     def setUp(self):
         """Create a temporary worker with one running chat turn and begin verification for it."""
@@ -141,128 +138,42 @@ class VerificationTests(unittest.TestCase):
         self.assertEqual(json.loads(ws.send.call_args_list[0].args[0]), {"type": "auth", "access_token": "supervisor-secret"})
         ws.close.assert_called_once()
 
-    def test_paths_and_disabled_browser_fail_before_auth(self):
-        """Reject unsafe paths and prevent disabled captures from issuing credentials or launching."""
-        with patch.object(self.engine, "core") as core:
-            for path in ("https://evil.test/", "//evil", "/lovelace/%2e%2e", "/lovelace/0?token=x"):
-                self.assertEqual(self.engine.run("chat", {"operation": "dashboard", "path": path})["status"], "unavailable")
-            self.options["browser_verification"] = False
-            self.engine.begin("chat")
-            with patch("verification.subprocess.Popen") as launch:
-                self.assertEqual(self.engine.run("chat", {"operation": "dashboard", "path": "/lovelace/0"})["status"], "disabled")
-                launch.assert_not_called()
-            core.assert_not_called()
-
-    def test_browser_session_revoked_when_launch_fails(self):
-        """Revoke the browser session and keep its token out of the result when the browser cannot start."""
-        with patch.object(self.engine, "core", return_value={"session_id": "lease", "url": "http://homeassistant:8123", "access_token": "private"}) as core:
-            with patch("verification.subprocess.Popen", side_effect=OSError("unavailable")):
-                result = self.engine.run("chat", {"operation": "dashboard", "path": "/lovelace/0"})
+    def test_no_operation_renders_or_screenshots_a_dashboard(self):
+        """The dashboard capture is gone: the tool does not offer it and the worker refuses it without a Core call."""
+        self.assertNotIn("dashboard", verification_mcp.TOOL["inputSchema"]["properties"]["operation"]["enum"])
+        self.assertNotIn("screenshot", verification_mcp.TOOL["description"])
+        with patch.object(self.engine, "core") as core, patch("verification.requests.request") as request:
+            result = self.engine.run("chat", {"operation": "dashboard", "path": "/lovelace/0"})
         self.assertEqual(result["status"], "unavailable")
-        core.assert_called_with("DELETE", "codex_cli/browser_session", json={"session_id": "lease"})
-        self.assertNotIn("private", json.dumps(result))
+        self.assertNotIn("dashboard,", result["message"])
+        core.assert_not_called()
+        request.assert_not_called()
+        self.assertFalse(hasattr(self.engine, "browser"))
+        self.assertFalse(hasattr(self.engine, "request_retry"))
 
-    def test_kiosk_captures_join_browser_evidence_and_survive_reload(self):
-        """Attach every matching display to the same turn and retain its image after reloading task metadata."""
-        png = b"\x89PNG\r\n\x1a\n" + b"\0" * 16
-        original_popen = subprocess.Popen
+    def test_readback_with_save_pending_saves_the_turn_edit_first(self):
+        """save_pending on a readback saves the pending edit, then reads the dashboard back; without it, nothing is saved."""
+        calls = []
+        with patch.object(self.engine, "save_pending_dashboard", side_effect=lambda *a: calls.append(("save", a))), \
+             patch.object(self.engine, "ws_read", side_effect=lambda m: calls.append(("read", m)) or {"views": [{}]}):
+            result = self.engine.run("chat", {"operation": "dashboard_readback", "path": "/lovelace/0",
+                                              "save_pending": True})
+            self.assertEqual(result["status"], "observed")
+            self.assertEqual([name for name, _ in calls], ["save", "read"])
+            self.assertEqual(calls[0][1], ("chat", "/lovelace/0"))
+            calls.clear()
+            self.engine.run("chat", {"operation": "dashboard_readback", "path": "/lovelace/0"})
+            self.assertEqual([name for name, _ in calls], ["read"])
 
-        def launch(_args, **kwargs):
-            """Exercise browser stdin and screenshot storage without launching Chromium."""
-            script = ("import json,sys; from pathlib import Path; p=json.load(sys.stdin); "
-                      f"[(Path(p['directory'])/(name+'.png')).write_bytes({png!r}) for name in ('desktop','mobile')]; "
-                      "print(json.dumps({'status':'captured','screenshots':[{'name':'desktop'},{'name':'mobile'}]}))")
-            return original_popen([sys.executable, "-c", script], **kwargs)
-
-        targets = [{"entity_id": "image.renamed_tablet", "name": "Hall tablet"},
-                   {"entity_id": "image.second_tablet", "name": "Kitchen tablet"}]
-
-        def core(method, path, **kwargs):
-            """Return only the kiosk targets selected by the authenticated Home Assistant endpoint."""
-            if path == "codex_cli/kiosk_screenshots":
-                self.assertEqual(kwargs["json"], {"path": "/dashboard-home/default_view"})
-                return {"screenshots": targets}
-            return {"session_id": "lease", "url": "http://homeassistant:8123"}
-
-        response = MagicMock()
-        response.__enter__.return_value = response
-        response.status_code = 200
-        response.iter_content.side_effect = lambda _size: iter([png])
-        with patch.object(self.engine, "core", side_effect=core), \
-             patch("verification.requests.post", return_value=response) as capture, \
-             patch.object(server, "ha_token", return_value="supervisor-secret"), \
-             patch.object(server, "api_token", return_value="paired-secret"), \
-             patch("verification.subprocess.Popen", side_effect=launch):
-            result = self.engine.run("chat", {"operation": "dashboard", "path": "/dashboard-home/default_view"})
-        self.assertEqual(result["status"], "captured")
-        self.assertEqual([item["entity_id"] for item in result["kiosk_screenshots"]],
-                         [item["entity_id"] for item in targets])
-        self.assertEqual(len(result["image_paths"]), 4)
-        for call, target in zip(capture.call_args_list, targets):
-            self.assertEqual(call.args, ("http://supervisor/core/api/codex_cli/kiosk_screenshots",))
-            self.assertEqual(call.kwargs["json"], {"path": "/dashboard-home/default_view",
-                             "entity_id": target["entity_id"], "worker_token": "paired-secret"})
-            self.assertEqual(call.kwargs["headers"], {"Authorization": "Bearer supervisor-secret"})
-            self.assertFalse(call.kwargs["allow_redirects"])
-        saved = json.loads((server.get_task_dir("chat") / "task.json").read_text())
-        self.assertEqual(len(saved["verification_attachments"]), 4)
-        server.tasks["chat"] = saved
-        client = server.app.test_client()
-        for item in saved["verification_attachments"]:
-            with patch.object(server, "is_ingress_request", return_value=True):
-                self.assertEqual(client.get(item["url"]).data, png)
-        self.assertNotIn("secret", json.dumps(saved))
-        self.capability = self.engine.begin("chat")
-        write = server._write_attachment_file
-        writes = 0
-
-        def fail_first_kiosk(*args, **kwargs):
-            """Fail the optional write after the desktop and mobile screenshots have been stored."""
-            nonlocal writes
-            writes += 1
-            if writes == 3:
-                raise OSError("Disk write failed")
-            return write(*args, **kwargs)
-
-        with patch.object(self.engine, "core", side_effect=core), \
-             patch("verification.requests.post", return_value=response), \
-             patch("verification.subprocess.Popen", side_effect=launch), \
-             patch.object(server, "_write_attachment_file", side_effect=fail_first_kiosk):
-            result = self.engine.run("chat", {"operation": "dashboard", "path": "/dashboard-home/default_view"})
-        self.assertEqual(result["status"], "captured")
-        self.assertEqual([item["viewport"] for item in server.tasks["chat"]["verification_attachments"]],
-                         ["desktop", "mobile", "kiosk"])
-        self.assertEqual([item["entity_id"] for item in result["kiosk_screenshots"]], ["image.second_tablet"])
-
-    def test_kiosk_absence_is_silent_and_failed_images_do_not_stop_other_devices(self):
-        """Skip absent integrations, unmatched devices, failed captures and oversized images without losing later captures."""
-        turn_id = server.tasks["chat"]["current_turn_id"]
-        for targets in ([], None, {}, "invalid", [None, "invalid", {}]):
-            with self.subTest(targets=targets), \
-                 patch.object(self.engine, "core", return_value={"screenshots": targets}), \
-                 patch("verification.requests.post") as capture:
-                self.assertEqual(self.engine.kiosk_images("chat", "/lovelace/0", turn_id, self.capability), [])
-                capture.assert_not_called()
-        with patch.object(self.engine, "core", side_effect=ValueError("Home Assistant returned HTTP 404")):
-            self.assertEqual(self.engine.kiosk_images("chat", "/lovelace/0", turn_id, self.capability), [])
-        responses = [MagicMock() for _ in range(7)]
-        for response in responses:
-            response.__enter__.return_value = response
-            response.status_code = 200
-        responses[0].status_code = 404
-        responses[1].iter_content.return_value = [b"x" * (5 * 1024 * 1024 + 1)]
-        for response in responses[2:]:
-            response.iter_content.return_value = [b"\x89PNG\r\n\x1a\n" + b"\0" * 16]
-        targets = [{"entity_id": f"image.tablet_{index}"} for index in range(7)]
-        with patch.object(self.engine, "core", return_value={"screenshots": targets}), \
-             patch("verification.requests.post", side_effect=responses):
-            images = self.engine.kiosk_images("chat", "/lovelace/0", turn_id, self.capability)
-        self.assertEqual([item["entity_id"] for item in images], [f"image.tablet_{index}" for index in range(2, 7)])
-        self.engine.end("chat")
-        with patch.object(self.engine, "core", return_value={"screenshots": targets}), \
-             patch("verification.requests.post") as capture:
-            self.assertEqual(self.engine.kiosk_images("chat", "/lovelace/0", turn_id, self.capability), [])
-            capture.assert_not_called()
+    def test_readback_refuses_save_pending_when_auto_save_is_off(self):
+        """A refused save is reported, and the readback does not run as if the edit were saved."""
+        self.options["auto_save_lovelace"] = False
+        with patch.object(self.engine, "ws_read") as read:
+            result = self.engine.run("chat", {"operation": "dashboard_readback", "path": "/lovelace/0",
+                                              "save_pending": True})
+        self.assertEqual(result["status"], "unavailable")
+        self.assertIn("auto-save is disabled", result["message"])
+        read.assert_not_called()
 
     def test_snapshot_excludes_credentials_but_manifest_detects_changes(self):
         """Secret files (secrets.yaml and all of .storage) stay out of the archive but in change detection."""
@@ -315,105 +226,6 @@ class VerificationTests(unittest.TestCase):
         # The worker's own calls keep going through the Supervisor proxy with its token.
         with patch.dict(os.environ, {"SUPERVISOR_TOKEN": "private"}), patch.dict(self.options, {"ha_url": "https://ha.example.test"}):
             self.assertEqual(server.ha_base_url(), "http://supervisor/core")
-
-    def test_browser_memory_budget_stops_process_and_revokes_session(self):
-        """Stop an over-budget browser and revoke its temporary session."""
-        original_popen = subprocess.Popen
-        processes = []
-        def launch(_args, **kwargs):
-            """Substitute a real waiting process for Chromium to observe cleanup."""
-            process = original_popen([sys.executable, "-c", "import sys,time; sys.stdin.read(); time.sleep(60)"], **kwargs)
-            processes.append(process)
-            return process
-        with patch.object(self.engine, "core", return_value={"session_id": "lease", "url": "http://homeassistant:8123", "access_token": "private"}) as core:
-            with patch("verification.subprocess.Popen", side_effect=launch), patch("verification.track_browser_processes", return_value=(DEFAULT_BROWSER_MEMORY_LIMIT_MIB + 1) * 1024 * 1024):
-                result = self.engine.run("chat", {"operation": "dashboard", "path": "/lovelace/0"})
-        self.assertEqual(result["status"], "unavailable")
-        self.assertIn("memory budget", result["message"])
-        self.assertIsNotNone(processes[0].poll())
-        core.assert_called_with("DELETE", "codex_cli/browser_session", json={"session_id": "lease"})
-
-    def test_browser_memory_option_defaults_and_rejects_unbounded_values(self):
-        """Keep missing or malformed options bounded while accepting supported budgets."""
-        self.assertEqual(browser_memory_limit({}), DEFAULT_BROWSER_MEMORY_LIMIT_MIB)
-        for invalid in (None, True, False, 0, -1, 511, 8193, "2048", 2048.5):
-            self.assertEqual(browser_memory_limit({"browser_memory_limit_mib": invalid}), DEFAULT_BROWSER_MEMORY_LIMIT_MIB)
-        for limit in (512, 1536, 2048, 8192):
-            self.assertEqual(browser_memory_limit({"browser_memory_limit_mib": limit}), limit)
-
-    def test_browser_uses_configured_budget_for_each_capture(self):
-        """Apply lowered and raised budgets on successive captures without caching options."""
-        original_popen = subprocess.Popen
-        def launch(_args, **kwargs):
-            """Return a result after the memory guard has sampled the process."""
-            return original_popen([sys.executable, "-c",
-                "import sys,time; sys.stdin.read(); time.sleep(.3); print('{\"status\":\"issues\",\"screenshots\":[]}')"], **kwargs)
-        for limit, measured, status in ((512, 600, "unavailable"), (2048, 1600, "issues")):
-            with self.subTest(limit=limit):
-                self.options["browser_memory_limit_mib"] = limit
-                with patch.object(self.engine, "core", return_value={"session_id": "lease", "url": "http://homeassistant:8123", "access_token": "private"}) as core:
-                    with patch("verification.subprocess.Popen", side_effect=launch), patch("verification.track_browser_processes", return_value=measured * 1024 * 1024):
-                        result = self.engine.run("chat", {"operation": "dashboard", "path": "/lovelace/0"})
-                self.assertEqual(result["status"], status)
-                if status == "unavailable":
-                    self.assertIn(f"{limit} MiB memory budget", result["message"])
-                    self.assertIn("Browser memory limit", result["message"])
-                else:
-                    self.assertEqual(result["memory_limit_mib"], limit)
-                    self.assertEqual(result["memory_peak_mib"], measured)
-                    self.assertNotIn("kiosk_screenshots", result)
-                core.assert_called_with("DELETE", "codex_cli/browser_session", json={"session_id": "lease"})
-
-    @unittest.skipIf(os.name == "nt", "Linux container process accounting")
-    def test_memory_accounting_includes_swap_and_falls_back_if_pss_unavailable(self):
-        """Account for swapped pages and stay conservative without valid proportional data."""
-        with patch("verification.Path.read_text", return_value="Rss: 2000 kB\nPss: 600 kB\nSwapPss: 100 kB\n"):
-            self.assertEqual(browser_process_memory(123, 500), 700 * 1024)
-        for content in ("Rss: 2000 kB\n", "Pss: invalid kB\n", "Pss: -1 kB\n"):
-            with patch("verification.Path.read_text", return_value=content):
-                self.assertEqual(browser_process_memory(123, 500), 500 * os.sysconf("SC_PAGE_SIZE"))
-        with patch("verification.Path.read_text", side_effect=PermissionError):
-            self.assertEqual(browser_process_memory(123, 500), 500 * os.sysconf("SC_PAGE_SIZE"))
-
-    @unittest.skipIf(os.name == "nt", "Linux shared-memory accounting")
-    def test_shared_browser_pages_are_not_charged_twice(self):
-        """Use real shared pages to distinguish proportional accounting from summed RSS."""
-        script = "import os,time; shared=bytearray(64*1024*1024); child=os.fork(); print('ready',flush=True); time.sleep(60)"
-        process = subprocess.Popen([sys.executable, "-c", script], stdout=subprocess.PIPE, text=True, start_new_session=True)
-        tracked = {}
-        try:
-            self.assertEqual(process.stdout.readline().strip(), "ready")
-            self.assertEqual(process.stdout.readline().strip(), "ready")
-            memory = track_browser_processes(process.pid, tracked)
-            self.assertEqual(len(tracked), 2)
-            rss = sum(int(Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[21]) for pid in tracked) * os.sysconf("SC_PAGE_SIZE")
-            self.assertGreater(memory, 64 * 1024 * 1024)
-            self.assertLess(memory, rss - 32 * 1024 * 1024)
-        finally:
-            kill_tracked_processes(tracked)
-            process.kill() if process.poll() is None else None
-            process.wait(timeout=5)
-            process.stdout.close()
-
-    @unittest.skipIf(os.name == "nt", "Linux container process accounting")
-    def test_tracks_and_stops_detached_browser_descendants(self):
-        """Track a browser descendant that started its own session, so it is measured and can be stopped."""
-        script = "import subprocess,sys,time; subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'],start_new_session=True); time.sleep(60)"
-        process = subprocess.Popen([sys.executable, "-c", script], start_new_session=True)
-        tracked = {}
-        try:
-            deadline = time.monotonic() + 3
-            while time.monotonic() < deadline:
-                memory = track_browser_processes(process.pid, tracked)
-                if len(tracked) >= 2:
-                    break
-                time.sleep(.05)
-            self.assertGreaterEqual(len(tracked), 2)
-            self.assertGreater(memory, 0)
-        finally:
-            kill_tracked_processes(tracked)
-            process.kill() if process.poll() is None else None
-            process.wait(timeout=5)
 
     def test_pending_dashboard_cannot_save_unrelated_or_unvalidated_files(self):
         """Refuse to save a pending dashboard in read-only mode, with auto-save off, or without a turn baseline."""

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import importlib.util
-import hashlib
 import io
 import json
 import struct
@@ -82,38 +81,6 @@ def main():
         server.refresh_usage_status_async = lambda **kwargs: None
         server.lookup_ha_users = lambda: [{"id": "preview-admin", "name": "Preview", "is_active": True,
                                            "system_generated": False, "group_ids": ["system-admin"]}]
-        from browser_permissions import describe, scope
-
-        permission_scope = scope({"installation_id": "a" * 32, "url": "http://fixture:8123"})
-        permission_requests = [
-            ("websocket", {"type": "bubble_card_tools/list_modules"}),
-            ("websocket", {"type": "subscribe_condition", "condition": {"condition": "state", "entity_id": "light.kitchen", "state": "on"}}),
-            ("map_tiles", {"type": "map_tiles/raster"}),
-            ("websocket", {"type": "custom/get", "query": "<img src=x onerror=alert(1)>"}),
-        ]
-        permission_rules = []
-        for kind, body in permission_requests:
-            # The controller's canonical form: sorted keys, compact, unescaped UTF-8.
-            snapshot = json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-            rule = {"id": hashlib.sha256(f"{kind}\n{snapshot}".encode()).hexdigest(), "kind": kind, "request": snapshot}
-            permission_rules.append({**rule, **describe(rule)})
-
-        def permission_check(grants=()):
-            """Make fixture evidence while the real worker handles approval and persistence."""
-            allowed = {item["id"] for item in grants}
-            pending = [item for item in permission_rules if item["id"] not in allowed]
-            return {"operation": "dashboard", "check_id": server.uuid.uuid4().hex, "path": "/lovelace/home",
-                    "status": "issues" if pending else "captured", "permission_scope": permission_scope,
-                    "message": "Fixture dashboard inspection.", "permission_candidates": pending,
-                    "permissions_used": sorted(allowed)}
-
-        def permission_capture(task_id, payload, turn_id=None, capability=None, *, retry=None):
-            """Simulate only capture, leaving the actual retry ownership and routes intact."""
-            time.sleep(0.4)
-            remembered = server.verification.permissions.rules(permission_scope, payload["path"])
-            return permission_check([*remembered, *((retry or {}).get("grants") or [])])
-
-        server.verification.browser = permission_capture
         # Connected unless POST fixture/integration says otherwise, so the line about
         # the integration stays out of the other checks.
         integration = {"state": "ok", "version": server.MIN_INTEGRATION_VERSION,
@@ -282,8 +249,6 @@ def main():
                 else:
                     server.update_task(task_id, status="completed", session_id=session_id, summary=summary,
                                        details="", question="", completed_at=server.utc_now())
-                    if (reply or prompt).startswith("Inspect with blocked browser requests"):
-                        server.update_task(task_id, verification=[permission_check()])
                 server.finish_activity(task_id)
                 server.active_task_runners.discard(task_id)
                 # The real runner starts the next queued message when it ends.
@@ -304,11 +269,6 @@ def main():
             integration["state"] = str((server.request.get_json(silent=True) or {}).get("state") or "ok")
             return {"ok": True}
 
-        def corrupt_permissions():
-            """Make the private permissions file unreadable, as damage or a downgrade could."""
-            (server.DATA_ROOT / "browser-permissions.json").write_text('{"broken": true}', encoding="utf-8")
-            return {"ok": True}
-
         server.start_background_task = finish
         server.app.add_url_rule("/fixture/release", "fixture_release", release_held, methods=["POST"])
 
@@ -323,8 +283,6 @@ def main():
 
         server.app.add_url_rule("/fixture/remove-uploads", "fixture_remove_uploads", remove_uploads, methods=["POST"])
         server.app.add_url_rule("/fixture/integration", "fixture_integration", set_integration, methods=["POST"])
-        server.app.add_url_rule("/fixture/browser-permissions/corrupt", "fixture_corrupt_permissions",
-                                corrupt_permissions, methods=["POST"])
         examples = [
             ("A quieter evening routine", "Review my evening lighting automation. Suggest improvements before making changes.",
              "Your evening routine looks good. There are two small changes that would make it easier to maintain.",
@@ -386,21 +344,9 @@ def main():
                 extra["verification"] = [
                     {"operation": "entity", "status": "passed", "entity_id": "sensor.energy", "state": "42", "expected_state": "42",
                      "message": "Fresh entity state readback.", "attributes": {"unit_of_measurement": "kWh"}},
-                    {"operation": "dashboard", "status": "issues", "path": "/lovelace/energy",
-                     "message": "Screenshots captured for visual inspection.", "errors": ["Custom element does not exist: sample-card"],
-                     "blocked": ["WebSocket call_service"],
-                     "findings": [
-                         {"kind": "dashboard", "message": "Custom element does not exist: sample-card", "count": 2, "viewports": ["desktop", "mobile"]},
-                         {"kind": "policy", "message": "WebSocket call_service (light.turn_on)", "count": 2, "viewports": ["desktop", "mobile"]},
-                         {"kind": "diagnostic", "message": "WebSocket call_service (system_log.write)", "count": 4, "viewports": ["desktop", "mobile"]},
-                     ]},
+                    {"operation": "dashboard_readback", "status": "failed", "path": "/lovelace/energy",
+                     "message": "Fresh dashboard configuration readback differs from the saved configuration.", "view_count": 2},
                 ]
-                shot_id = "a" * 32
-                shot = root / "tasks" / "preview-01" / "turns" / turn["turn_id"] / "attachments" / f"{shot_id}.png"
-                shot.write_bytes(preview_png(390, 844))
-                extra["verification_attachments"] = [server.attachment_record(
-                    "preview-01", shot_id, shot, "image/png", name="dashboard-mobile.png", origin="verification",
-                    viewport="mobile", expires_at=time.time() + 3600)]
             if index == 3:
                 # A YAML edit that Home Assistant rejected. Codex saved the previous
                 # version of the file, and the failed check points to it.

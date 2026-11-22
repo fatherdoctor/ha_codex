@@ -106,6 +106,16 @@
   copy at `/data/agents_before_move.md`. If both places hold a file, nothing moves and the app logs a line.
 
 ### Changed
+- **Dashboard changes without screenshots.** Codex changes a dashboard, reads its configuration back and reports
+  what changed, as the Codex CLI does. The built-in browser that opened dashboards and took desktop, mobile and
+  Fully Kiosk screenshots is removed, with the blocked-request review, **Settings > Advanced > Browser
+  permissions** and the screenshot note under the checks. The `dashboard` check is gone; `save_pending` now goes on
+  `dashboard_readback`. The **Enable built-in browser** and **Browser memory limit (MiB)** options are removed, and
+  a saved value is ignored. The image no longer includes Chromium or Playwright.
+- **The Dashboard verification user is removed.** The integration no longer creates this read-only Home Assistant
+  system user or issues it browser sessions. On its first start it removes the user an earlier version created,
+  only when its own file names a system user with that exact name, and logs one line. Restart Home Assistant after
+  the update.
 - **Earlier answers open their steps.** Every answer's **Worked for** line now opens the steps of that exchange, not
   only the latest answer's. The line starts closed; its steps load from the worker the first time it opens, and then
   the answer's checks follow. The worker already saved each exchange's steps; `GET /tasks/<task_id>/activity` takes

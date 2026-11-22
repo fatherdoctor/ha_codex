@@ -1942,24 +1942,23 @@ async function effortSaved(page, label) {
       await phone.evaluate(() => { const probe = document.createElement("span"); probe.style.color = "var(--error)";
         document.body.append(probe); const color = getComputedStyle(probe).color; probe.remove(); return color; }));
     assert.ok(await closedLine.evaluate(node => node.getBoundingClientRect().height) <= 24);
-    assert.equal(await phone.locator(".verification-note").isVisible(), false);
+    assert.equal(await phone.locator(".verification-result").first().isVisible(), false);
     await phone.locator(".verification > summary").click();
-    assert.equal(await phone.locator(".verification-note").isVisible(), true);
+    assert.equal(await phone.locator(".verification-result").first().isVisible(), true);
     assert.equal(await phone.locator(".verification-result").count(), 2);
     await phone.locator(".verification-result").nth(1).locator("summary").click();
-    assert.equal(await phone.locator(".verification").getByText("Custom element does not exist: sample-card", {exact:true}).isVisible(), true);
-    assert.equal(await phone.locator(".verification").getByText("Custom element does not exist: sample-card", {exact:true}).count(), 1);
-    assert.equal(await phone.locator(".verification").getByText("Blocked diagnostic logging and notifications", {exact:true}).isVisible(), true);
-    assert.equal(await phone.locator(".verification").getByText("4 occurrences · desktop, mobile", {exact:true}).isVisible(), true);
-    assert.equal(await phone.locator(".verification img").count(), 1);
-    assert.equal(await phone.locator(".verification img").evaluate(img => img.complete && img.naturalWidth > 0), true);
+    assert.equal(await phone.locator(".verification-result").nth(1).locator("summary").textContent(), "Failed · /lovelace/energy");
+    assert.equal(await phone.locator(".verification").getByText("Fresh dashboard configuration readback differs from the saved configuration.", {exact:true}).isVisible(), true);
+    // No dashboard is rendered: no screenshot and no screenshot note in the checks.
+    assert.equal(await phone.locator(".verification img").count(), 0);
+    assert.equal(await phone.locator(".verification").getByText(/screenshot/i).count(), 0);
     await phone.screenshot({path: path.join(output, "verification-mobile.png"), fullPage: true});
     // From a closed "Worked for" line, the failed-check line opens the line and the checks in one tap.
     await phone.locator("#activity > .activity-toggle").click();
     await phone.locator(".verification").evaluate(node => { node.open = false; });
     assert.equal(await phone.locator(".verification > summary").isVisible(), false);
     await failedLine.click();
-    assert.equal(await phone.locator(".verification-note").isVisible(), true);
+    assert.equal(await phone.locator(".verification-result").first().isVisible(), true);
     assert.equal(
       await phone.locator("#messages .user-attachments img").count(),
       1,

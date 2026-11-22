@@ -2,47 +2,19 @@
 
 This app runs Codex CLI tasks against the Home Assistant config folder mounted at `/config`.
 
-## Dashboard browser verification
+## Checks and dashboard changes
 
-**Codex can open your dashboards in a real browser and inspect desktop and mobile
-screenshots while working on a change.** It can review the layout and revise its
-work. Screenshots and findings appear with the conversation, including missing
-cards, failed resources, and browser errors.
+**Codex checks its own work during a task.** It can find an entity by name, read fresh entity states, read Core
+logs, run the configuration check and read a dashboard's configuration back, without a Home Assistant password or
+a token you create. To change a dashboard, Codex makes the change, reads the configuration back and reports what
+changed; the dashboard backup and the undo line stay as they are. No tool renders or screenshots a dashboard. See
+[verification tools, authentication and limits](VERIFICATION.md).
 
-For example, ask: **"Inspect `/lovelace/home` on desktop and mobile, show me
-screenshots, and report any layout or card errors."** Replace the path with your
-dashboard view. The app takes no screenshots of its own after the answer: Codex
-checks its work during the task, when it decides to or when you ask.
-
-Browser sign-in uses a temporary, local, read-only identity, without a Home
-Assistant password or manually created token. Tasks can also fetch fresh entity
-states, read Core logs, and check configuration. See [verification tools,
-authentication, screenshots, and limits](VERIFICATION.md).
-
-Dashboard captures load integrations' registered static assets and supported
-public HTTPS scripts, styles, fonts, and images. Update **both** the app and
-integration together, then restart Home Assistant, to use the current resource
-and permission support. Repeated findings are grouped by cause and viewport.
-The browser blocks service calls and writes. See
-[resource compatibility and privacy](VERIFICATION.md#dashboard-resources).
-
-With the app and integration at **0.1.79** or newer, inspections also collect
-fresh screenshots from matching Fully Kiosk devices. See
-[Fully Kiosk screenshots](VERIFICATION.md#fully-kiosk-screenshots) for requirements
-and matching rules.
-
-**Enable built-in browser** in the app's **Configuration** tab controls dashboard
-inspection and screenshots. The browser uses RAM while it runs. Turn this off
-to completely disable browser launches if you do not need them or have limited
-RAM; state and configuration checks remain available.
-
-From 0.1.60, **Browser memory limit (MiB)** in the same tab
-controls the memory budget for dashboard captures. The default is **1536 MiB
-(1.5 GiB)**, with a range of **512 to 8192 MiB**. For larger dashboards, increase
-it to values such as 2048 or 3072 if the host has enough free memory alongside
-Home Assistant and other apps. This is a capture limit, not reserved RAM or a
-limit on the whole app. Save the options and restart the app if Home Assistant
-prompts you; the next capture uses the new value.
+Versions before 0.4.0 opened dashboards in a built-in browser and kept screenshots in the chat. Version 0.4.0
+removed that browser, the **Dashboard verification** Home Assistant user it signed in as, and the **Enable built-in
+browser** and **Browser memory limit (MiB)** options. The integration removes the old user on its first start;
+see [Upgrading from an earlier version](VERIFICATION.md#upgrading-from-an-earlier-version). The integration
+changed, so restart Home Assistant after the update.
 
 ## Historical data and statistics
 
@@ -261,7 +233,7 @@ The line cannot be dismissed. It goes away by itself, within a minute, once the 
 
 The version is read from the installed files. After an update of the integration, Home Assistant keeps running the previous version until it restarts, and the app cannot see that.
 
-This is a general connection check, not a feature-by-feature compatibility check. Its minimum is currently **0.1.69**; newer features, including browser permissions and Fully Kiosk screenshots, need newer integration versions. Update the app and integration together even if no warning is shown.
+This is a general connection check, not a feature-by-feature compatibility check. Its minimum is currently **0.1.69**; newer features need newer integration versions. Update the app and integration together even if no warning is shown.
 
 API: `GET /status` has `integration` with `state` (`ok`, `starting`, `not_installed`, `outdated`, or `not_connected`), `version` (the installed version, empty when the integration is not installed or its version cannot be read), and `minimum_version`.
 
@@ -1225,9 +1197,8 @@ URLs and QR images remain limited to verified Ingress administrators; API tokens
 or start pairing. No live account enrollment or device handoff is implied by local rendering tests.
 
 Settings → Workspace instructions → Workspace rules opens a separate editor. The file is read only when that editor
-opens, and Save remains an explicit action. Existing account, diagnostic, scheduling and browser-permission
-controls remain in Settings; **Browser permissions** is a part of **Advanced**, the last section, which starts
-collapsed and shows in its header how many permissions are remembered, or that they could not be read. The
+opens, and Save remains an explicit action. Existing account, diagnostic and scheduling controls remain in
+Settings. Version 0.4.0 removed **Advanced** with its **Browser permissions** part, with the dashboard browser. The
 **Add-on configuration** row at the foot of Settings opens the app's Configuration tab in Home Assistant
 (`/config/app/<slug>/config`), where the plain options are set. When Supervisor cannot name the app, the row
 is not a link and says to open the Configuration tab from the Home Assistant settings.

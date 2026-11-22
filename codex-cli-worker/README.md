@@ -8,17 +8,11 @@ The app provides a responsive chat UI with saved conversations, a resizable desk
 
 Codex runs in a sandbox: `workspace-write` (the default) or `read-only`. A chat runs without one only in the Full access mode, which an administrator turns on in Settings. Commands and file changes that need extra access ask a Home Assistant administrator to **Allow once** or **Deny** in the chat. See [sandbox modes, safeguards, and permission requests](https://github.com/fatherdoctor/ha_codex/blob/main/codex-cli-worker/DOCS.md#sandbox).
 
-## Dashboard browser verification
+## Checks and dashboard changes
 
-**Codex can inspect your dashboards in a real browser at desktop and mobile sizes.** It can review screenshots during a task and revise its work, with images and findings kept in the conversation. Checks report missing cards, failed resources, and browser errors. Saved storage dashboards also receive automatic captures within the task's remaining time.
-
-Browser sign-in is automatic and uses a temporary, local, read-only identity. Update both the app and integration, and leave **Enable built-in browser** on. Ask for a specific dashboard view to inspect it. See [setup and verification limits](https://github.com/fatherdoctor/ha_codex/blob/main/codex-cli-worker/VERIFICATION.md).
-
-Matching Fully Kiosk devices can also supply fresh screenshots of the view they are displaying, without being navigated, refreshed, or woken. This requires enabled current-page and screenshot entities in Home Assistant's Fully Kiosk Browser integration.
+**Codex checks its own work during a task:** fresh entity states, the configuration check, Core logs and a dashboard's configuration read back from Home Assistant. To change a dashboard, it makes the change, reads it back and reports what changed. No tool renders or screenshots a dashboard. See [verification tools and limits](https://github.com/fatherdoctor/ha_codex/blob/main/codex-cli-worker/VERIFICATION.md).
 
 For setup, security notes, and action examples, see the [repository README](https://github.com/fatherdoctor/ha_codex/blob/main/README.md) and [app documentation](https://github.com/fatherdoctor/ha_codex/blob/main/codex-cli-worker/DOCS.md).
-
-When a dashboard inspection blocks additional browser requests, open **Review blocked browser requests** in its result to approve a selected batch and retry the capture. Choose **Remember for this dashboard** to reuse those exceptions, and revoke them under **Settings > Advanced > Browser permissions**. Approving a custom request is a trust decision. Known controls, writes, URL signing and camera signaling stay blocked. See [permission scopes and limits](https://github.com/fatherdoctor/ha_codex/blob/main/codex-cli-worker/VERIFICATION.md#approving-additional-browser-requests).
 
 ## History and statistics
 
