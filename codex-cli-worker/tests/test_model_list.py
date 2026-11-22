@@ -342,6 +342,43 @@ class AccountDefaultTests(ModelListStateMixin, unittest.TestCase):
         # Without a pick from Codex the turn names no model and Codex chooses, as before.
         self.assertEqual(server.turn_model("default"), {})
 
+    def test_configuration_choices_match_the_built_in_models(self):
+        config = server.yaml.safe_load((SERVER_PATH.parent / "config.yaml").read_text())
+        models = [model for model, _, _ in server.CHAT_MODELS]
+        self.assertEqual(config["schema"]["model_choice"], "list(" + "|".join(["Account default", *models, "custom"]) + ")")
+        self.assertEqual(config["options"]["model_choice"], "Account default")
+
+    def test_configuration_choice_for_display_and_for_a_turn(self):
+        self.use_live(SOL_LIVE, server.CodexDefault("gpt-6.1-sol", "low"))
+        for options, display, execution in (
+            ({"model_choice": "Account default"}, "gpt-6.1-sol", "default"),
+            ({"model_choice": "custom", "codex_model": ""}, "gpt-6.1-sol", "default"),
+            ({"model_choice": "custom", "codex_model": NEW_MODEL}, NEW_MODEL, NEW_MODEL),
+            ({"model_choice": "gpt-6-sol", "codex_model": NEW_MODEL}, "gpt-6-sol", "gpt-6-sol"),
+            ({"model_choice": "Account default", "codex_model": NEW_MODEL}, NEW_MODEL, NEW_MODEL),
+            ({"model_choice": "gpt-6-sol", "model_pin": NEW_MODEL}, NEW_MODEL, NEW_MODEL),
+        ):
+            with self.subTest(options=options):
+                self.assertEqual(server.default_model(options), display)
+                self.assertEqual(server.resolve_chat_settings({}, options)["model"], execution)
+
+    def test_old_stored_options_load_and_suggest_the_dropdown_at_startup(self):
+        with tempfile.TemporaryDirectory() as folder:
+            options_file = Path(folder) / "options.json"
+            options_file.write_text('{"codex_model": "  gpt-9.9-nova  "}')
+            with patch.object(server, "OPTIONS_PATH", options_file):
+                options = server.read_options()
+        self.assertEqual(server.resolve_chat_settings({}, options)["model"], NEW_MODEL)
+        with patch("builtins.print") as log:
+            server.log_legacy_model_choice(options)
+            server.resolve_chat_settings({}, options)
+            server.default_model(options)
+            for choice in ("custom", "gpt-6-sol"):
+                server.log_legacy_model_choice(dict(options, model_choice=choice))
+            server.log_legacy_model_choice(server.DEFAULT_OPTIONS)
+        log.assert_called_once()
+        self.assertIn("drop-down", log.call_args.args[0])
+
     def test_the_option_or_the_pin_still_wins(self):
         self.use_live(SOL_LIVE, server.CodexDefault("gpt-6.1-sol", "low"))
         self.assertEqual(server.default_model({"codex_model": "gpt-6-astra"}), "gpt-6-astra")

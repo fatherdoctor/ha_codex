@@ -1,10 +1,13 @@
 configuration:
-  codex_model:
+  model_choice:
     name: Model
-    description: The model for new chats, as free text. Use default to let Codex pick, or type a name from the chat page's model list.
+    description: Account default lets Codex choose for new chats. Select a model here, or choose custom to enter another name below.
+  codex_model:
+    name: Custom model (when Model is Custom)
+    description: Enter a model name as free text. See the chat page's model list for names. Clear a previous value to use the account default.
   model_pin:
     name: Model pin
-    description: Empty means your account's default model. Set one to run chats only on it. Clear the field to turn the pin off.
+    description: Set a model to use it for every chat. Clear the field to turn the pin off.
   model_reasoning_effort:
     name: Reasoning effort
     description: How much the model thinks. Free text, such as low, medium, high, xhigh, max or ultra. Models that lack a level use medium.

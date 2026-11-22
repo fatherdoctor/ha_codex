@@ -32,7 +32,7 @@ from functools import wraps
 from http.cookiejar import LWPCookieJar, LoadError
 from zoneinfo import ZoneInfo
 from pathlib import Path
-from typing import Any, Callable, NamedTuple, TextIO
+from typing import Any, BinaryIO, Callable, NamedTuple, TextIO
 from urllib.parse import urlparse, urlunparse
 
 import requests
@@ -54,6 +54,7 @@ import ha_data_mcp
 import hass_mcp
 import remote_control
 import tool_threads
+import update_status
 from core_address import CoreAddress, probe_core
 from relay_reads import RelayReads, ReadError as RelayReadError
 import retention
@@ -165,6 +166,7 @@ HA_DOCS_GIT_TIMEOUT_SECONDS = 300
 HA_DOCS_GIT_STALL_SECONDS = 60
 
 DEFAULT_OPTIONS = {
+    "model_choice": "Account default",
     "codex_model": "default",
     "model_reasoning_effort": "medium",
     "reasoning_summary": "concise",
@@ -233,8 +235,8 @@ SOL_MODEL_RE = re.compile(r"gpt-(\d+(?:\.\d+)*)-sol")
 RETIRED_MODELS = {"gpt-5.5": "gpt-5.6-sol"}
 DEFAULT_CHAT_SETTINGS = {"model": None, "reasoning_effort": None}
 # The `model_pin` option is empty as shipped, and empty means no pin: runs use the
-# account's default model. When the owner sets it, a chat, a saved turn or the
-# `codex_model` option naming any other model is refused instead of running on it.
+# configured model. When the owner sets it, an explicit chat choice or saved turn
+# naming any other model is refused instead of running on it.
 # Versions before 0.4 shipped this value as the default; run.sh clears it once, on the
 # first start of 0.4, and sets MODEL_PIN_CLEARED so that start does not read the stale
 # copy in options.json. A value set after that is kept.
@@ -690,8 +692,22 @@ def current_model(model: Any) -> Any:
 
 
 def configured_model(options: dict[str, Any]) -> str:
-    """Return the model the codex_model option names; free text, so trim it, and empty means default."""
-    return current_model(str(options.get("codex_model") or "").strip() or "default")
+    """Return the inherited model, preserving custom names saved before the drop-down existed."""
+    pin = model_pin(options)
+    if pin:
+        return pin
+    choice = options.get("model_choice", "Account default")
+    if choice in {"Account default", "custom"}:
+        choice = str(options.get("codex_model") or "").strip() or "default"
+    return current_model(choice)
+
+
+def log_legacy_model_choice(options: dict[str, Any]) -> None:
+    """Explain the retained free-text setting once at worker startup."""
+    if (options.get("model_choice", "Account default") == "Account default"
+            and str(options.get("codex_model") or "").strip() not in {"", "default"}):
+        print("Your saved custom model is still configured. Choose a model in the Model drop-down "
+              "or clear Custom model to use your account default.", flush=True)
 
 
 def default_model(options: dict[str, Any]) -> str:
@@ -3413,22 +3429,101 @@ def codex_backup_dir(run_dir: Path, options: dict[str, Any]) -> Path | None:
         return None
     folder = run_dir / BACKUP_DIR
     # In workspace-write, the exchange's own backup folder is added to the writable roots
-    # (backup_writable_root); a folder outside the task folder is never one.
+    # (private_writable_root); a folder outside the task folder is never one.
     if mode != "danger-full-access" and not folder.resolve().is_relative_to(task_root().resolve()):
         return None
     return folder
 
 
-def backup_writable_root(run_dir: Path) -> list[str]:
-    """The exchange's backup folder as an extra writable root for workspace-write, when the worker made one.
+def private_writable_root(folder: Path) -> list[str]:
+    """A folder of this chat under the app's private /data as an extra writable root for workspace-write.
 
-    Only that one folder under the app's private /data is opened for writing; the rest of /data stays read-only
-    and its hidden files stay hidden (codex-bwrap masks them after Codex's binds).
+    Used for the exchange's backup folder and the chat's files folder, when the worker made them. Only that one
+    folder is opened for writing; the rest of /data stays read-only and its hidden files stay hidden (codex-bwrap
+    masks them after Codex's binds).
     """
-    folder = run_dir / BACKUP_DIR
     if folder.is_symlink() or not folder.is_dir() or not folder.resolve().is_relative_to(task_root().resolve()):
         return []
     return [str(folder)]
+
+
+# Files Codex makes for the person, such as a spreadsheet or a report, go in the chat's own files folder. The chat
+# page turns a link to a file in it into a download; the worker serves no other file this way. The folder is deleted
+# with the chat, and nothing in it is part of the /config change review.
+CHAT_FILES_DIR = "files"
+# The page polls GET /tasks/<id> while a chat is open, and the listing rides on that answer, so it stays bounded.
+CHAT_FILES_LIST_MAX = 200
+
+
+def chat_files_dir(task_id: str) -> Path:
+    """Return the folder that holds the files Codex made for the person in this chat."""
+    return get_task_dir(task_id) / CHAT_FILES_DIR
+
+
+def prepare_chat_files_dir(task_id: str) -> bool:
+    """Create the chat's files folder before a message runs; False when it cannot be used."""
+    folder = chat_files_dir(task_id)
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        write_task_log(task_id, "worker", f"Could not create the files folder: {exc}")
+        return False
+    return bool(private_writable_root(folder))
+
+
+def _visible_part(name: str) -> bool:
+    """Whether one part of a path in the files folder may be listed or served: hidden names never are."""
+    return bool(name) and not name.startswith(".")
+
+
+def chat_files(task_id: str) -> dict[str, Any] | None:
+    """List the files in the chat's files folder for the chat page: {"folder", "files": [{"path", "size"}]}.
+
+    Codex can write in this folder, so links are neither listed nor followed. None when there is no folder.
+    """
+    folder = chat_files_dir(task_id)
+    if folder.is_symlink() or not folder.is_dir():
+        return None
+    found: list[dict[str, Any]] = []
+    for current, folders, names in os.walk(folder):
+        folders[:] = sorted(name for name in folders if _visible_part(name))
+        for name in sorted(filter(_visible_part, names)):
+            path = Path(current) / name
+            if len(found) >= CHAT_FILES_LIST_MAX:
+                return {"folder": str(folder), "files": found}
+            try:
+                info = path.lstat()
+            except OSError:
+                continue
+            if stat.S_ISREG(info.st_mode):
+                found.append({"path": path.relative_to(folder).as_posix(), "size": info.st_size})
+    return {"folder": str(folder), "files": found}
+
+
+def open_chat_file(task_id: str, relative: str) -> tuple[BinaryIO, str] | None:
+    """Open one file of the chat's files folder for download: (binary file, its name), or None.
+
+    The path must stay inside the folder with no hidden part, and the file is opened without following a link;
+    the opened file's real path is checked again, since Codex may change the folder while the worker reads it.
+    """
+    folder = chat_files_dir(task_id)
+    parts = Path(relative).parts
+    if not safe_relative_path(relative) or not parts or not all(map(_visible_part, parts)) or folder.is_symlink():
+        return None
+    try:
+        base = folder.resolve(strict=True)
+        # O_NONBLOCK: a named pipe would otherwise block this thread until a writer appears; fstat refuses it below.
+        descriptor = os.open(folder / relative, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return None
+    try:
+        real = Path(os.readlink(f"/proc/self/fd/{descriptor}"))
+        if stat.S_ISREG(os.fstat(descriptor).st_mode) and real.is_relative_to(base):
+            return os.fdopen(descriptor, "rb"), parts[-1]
+    except OSError:
+        pass
+    os.close(descriptor)
+    return None
 
 
 def safe_relative_path(rel: str) -> bool:
@@ -4923,7 +5018,7 @@ A message that you can answer from what you know and from this chat, for example
 
 Do not wait for terminal input. In sandboxed modes, request a native command or file-change approval when an authorized task requires access outside the sandbox. The worker shows the action to the user and delivers their Allow once or Deny decision to the pending request. Never bypass a denial or request permanent permission rules.
 
-Answer in plain text; Markdown is fine. Answer a greeting, a test message or a question directly. Do not describe this worker, and do not report that an optional instruction file is absent. Never answer with a JSON object, also in a thread whose earlier answers were JSON objects. Only a turn with an output schema is answered with the object that the schema asks for.
+Answer in plain text; Markdown is fine. When the person asks for a file such as a spreadsheet or a report, save it in the folder that exchange_info's files text names and link to it there with its full path: the chat page shows that link as a download card, and a link to any other file is not one. Answer a greeting, a test message or a question directly. Do not describe this worker, and do not report that an optional instruction file is absent. Never answer with a JSON object, also in a thread whose earlier answers were JSON objects. Only a turn with an output schema is answered with the object that the schema asks for.
 For other decisions or verification, call the home_assistant_data ask_owner tool with one concise question, then end your turn and write the same question as your answer. If you are asking whether to go ahead with a change, say in your answer exactly what you would change. When the answer is one of a few options, also give up to three choices in the call and in your answer, each a few words of plain text, for example "Go ahead" and "Don't change anything". The user answers by picking one or by typing something else, and the answer arrives as the next message.
 If the task cannot be done, call the home_assistant_data report_failure tool with the reason, then end your turn and explain the reason in your answer.
 If these tools are not available, ask your question or explain the failure in your answer only.
@@ -4976,6 +5071,15 @@ def owner_instructions_note() -> str:
             "its text, or if exchange_info gave a different time earlier in this chat. Otherwise do not read it again.")
 
 
+def chat_files_note(task_id: str) -> str:
+    """Name the folder for files the person can download from this chat, when the worker made it."""
+    folder = chat_files_dir(task_id)
+    if not private_writable_root(folder):
+        return ""
+    return (f"Save a file made for the person to download in {folder}/ and link it with its full path, for "
+            f"example [report.xlsx]({folder}/report.xlsx). Only a link into that folder becomes a download.")
+
+
 def exchange_info(task_id: str, backup_dir: Path | None, include_rules: bool = False) -> dict[str, str]:
     """Return what Codex needs to know about this message only, for the exchange_info tool.
 
@@ -4987,6 +5091,7 @@ def exchange_info(task_id: str, backup_dir: Path | None, include_rules: bool = F
         or "This message has no backup folder. Make no backup copies.",
         "owner_instructions": owner_instructions_note(),
         "attachments": attached_image_note(task_id).strip(),
+        "files": chat_files_note(task_id),
         "home_assistant_api": home_assistant_api_instructions(read_options()).strip(),
         "documentation": ha_docs_note().strip(),
         "github": github_service.prompt_note().strip(),
@@ -5357,7 +5462,8 @@ def create_approval_session(
     else:
         policy = {"type": "readOnly" if mode == "read-only" else "workspaceWrite", "networkAccess": False}
     if mode == "workspace-write":
-        policy["writableRoots"] = [*TASK_WRITABLE_ROOTS, *backup_writable_root(final_file.parent)]
+        policy["writableRoots"] = [*TASK_WRITABLE_ROOTS, *private_writable_root(final_file.parent / BACKUP_DIR),
+                                   *private_writable_root(chat_files_dir(task_id))]
     if open_thread:
         thread_params["threadId"], proc = open_thread(thread_params)
     assert proc is not None
@@ -6089,6 +6195,7 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
         except OSError as exc:
             write_task_log(task_id, "worker", f"Could not create the backup folder: {exc}")
             backup_dir = None
+    prepare_chat_files_dir(task_id)
 
     try:
         final_file.unlink(missing_ok=True)
@@ -7264,14 +7371,8 @@ def chat_options() -> Response:
     """Return the models, defaults, and settings the web UI needs."""
     options = read_options()
     pin = model_pin(options)
-    try:
-        default = resolve_chat_settings(DEFAULT_CHAT_SETTINGS, options)
-        model_error = ""
-    except ValueError as exc:
-        # The add-on's codex_model option names another model than the pin; say so on the page.
-        default = {"model": pin, "reasoning_effort": "medium"}
-        model_error = str(exc)
-    default_id = pin or default_model(options)
+    default = resolve_chat_settings(DEFAULT_CHAT_SETTINGS, options)
+    default_id = default_model(options)
     # default_effort is the level a chat on that model runs at while it chose none (resolve_chat_settings).
     models = [{"id": model, "label": label, "efforts": efforts,
                "default_effort": default_effort(options, model, efforts)} for model, label, efforts in chat_models()]
@@ -7280,7 +7381,7 @@ def chat_options() -> Response:
     return jsonify({
         "ok": True,
         "model_pin": pin,
-        "model_error": model_error,
+        "model_error": "",
         "defaults": default,
         # The defaults' model by name, also when the add-on leaves the choice to the CLI.
         "default_model": default_id,
@@ -7501,7 +7602,28 @@ def get_task(task_id: str) -> Response:
             }
     if result is None:
         return jsonify({"ok": False, "error": "task not found"}), 404
+    if task:
+        # Read outside the lock: the folder is on disk, and the page needs it to turn file links into downloads.
+        result["chat_files"] = chat_files(task_id)
     return jsonify({"ok": True, "task": result})
+
+
+@app.get("/tasks/<task_id>/files/<path:relative>")
+@require_auth
+def get_chat_file(task_id: str, relative: str) -> Response:
+    """Download a file Codex made for the person in this chat's files folder; no other file is served here."""
+    with lock:
+        known = TASK_ID_RE.fullmatch(task_id) is not None and task_id in tasks
+    opened = open_chat_file(task_id, relative) if known else None
+    if opened is None:
+        return jsonify({"ok": False, "error": "file not found"}), 404
+    handle, name = opened
+    # Always a download with a neutral type, never shown inside the page: the file is Codex's output, not the app's.
+    response = send_file(handle, mimetype="application/octet-stream", as_attachment=True, download_name=name,
+                         conditional=False, etag=False, max_age=0)
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @app.get("/tasks/<task_id>/log")
@@ -7526,32 +7648,48 @@ def get_log(task_id: str) -> Response:
     return Response(data, mimetype="text/plain")
 
 
+def stored_activity_payload(task_id: str, turn_id: str, after: int) -> dict[str, Any]:
+    """The saved steps of a finished exchange after a sequence number, or an empty list when none were saved."""
+    stored = load_stored_activity(task_id, turn_id)
+    if stored is None:
+        return {"ok": True, "turn_id": turn_id, "seq": 0, "running": False, "total": 0, "steps": []}
+    steps = [step for step in stored["steps"] if isinstance(step, dict) and int(step.get("seq") or 0) > after]
+    return {
+        "ok": True, "turn_id": str(stored.get("turn_id") or turn_id), "seq": int(stored.get("seq") or 0),
+        "running": False, "total": len(stored["steps"]), "steps": steps,
+    }
+
+
 @app.get("/tasks/<task_id>/activity")
 @require_auth
 def get_activity(task_id: str) -> Response:
-    """Return the steps Codex reported for the latest exchange, after a sequence number."""
+    """Return the steps Codex reported for an exchange, after a sequence number.
+
+    Without `turn` it is the latest exchange. With `turn`, an earlier answer's
+    "Worked for" line asks for that exchange's saved steps; the id must have
+    the turn id form and belong to this chat, so it never names another path.
+    """
     if TASK_ID_RE.fullmatch(task_id) is None:
         return jsonify({"ok": False, "error": "task not found"}), 404
     try:
         after = int(request.args.get("after", "0"))
     except ValueError:
         return jsonify({"ok": False, "error": "after must be a number"}), 400
+    wanted = request.args.get("turn")
+    if wanted is not None and TURN_ID_RE.fullmatch(wanted) is None:
+        return jsonify({"ok": False, "error": "turn not found"}), 404
     with lock:
         task = tasks.get(task_id)
         if task is None:
             return jsonify({"ok": False, "error": "task not found"}), 404
+        known = {turn.get("turn_id") for turn in task.get("turns") or []} | {task.get("current_turn_id")}
+        if wanted is not None and wanted not in known:
+            return jsonify({"ok": False, "error": "turn not found"}), 404
         record = task_activity.get(task_id)
-        if record is not None:
+        if record is not None and wanted in (None, record["turn_id"]):
             return jsonify({"ok": True, **activity_payload_locked(record, after)})
-        turn_id = str(task.get("current_turn_id") or "")
-    stored = load_stored_activity(task_id, turn_id)
-    if stored is None:
-        return jsonify({"ok": True, "turn_id": turn_id, "seq": 0, "running": False, "total": 0, "steps": []})
-    steps = [step for step in stored["steps"] if isinstance(step, dict) and int(step.get("seq") or 0) > after]
-    return jsonify({
-        "ok": True, "turn_id": str(stored.get("turn_id") or turn_id), "seq": int(stored.get("seq") or 0),
-        "running": False, "total": len(stored["steps"]), "steps": steps,
-    })
+        turn_id = wanted or str(task.get("current_turn_id") or "")
+    return jsonify(stored_activity_payload(task_id, turn_id, after))
 
 
 # The marks the chat page shows in front of each kind of step, so a shared
@@ -8096,6 +8234,18 @@ def addon_configuration() -> Response:
     return jsonify({"ok": True, "url": f"/config/app/{slug}/config" if slug else None})
 
 
+@app.get("/update-status")
+@require_auth
+def get_update_status() -> Response:
+    """Return the versions the page's update banners name: a restart to finish, an app update; null for none.
+
+    It changes nothing and holds only version numbers and the slug path, so the worker token is enough.
+    """
+    status = update_status.read(ha_token())
+    slug = addon_slug() if status.update_version else None
+    return jsonify({"ok": True, **status.as_json(), "info_url": f"/config/app/{slug}/info" if slug else None})
+
+
 @app.post("/remote-control/<action>")
 @require_auth
 @require_ingress
@@ -8525,7 +8675,9 @@ def main() -> None:
     protected policy (for example a full-access mode carried over from an
     older version, or approvals that would never ask).
     """
-    problem = protected_policy.policy_problem(read_options())
+    options = read_options()
+    log_legacy_model_choice(options)
+    problem = protected_policy.policy_problem(options)
     if problem:
         print(f"Codex CLI Worker will not start: {problem}", flush=True)
         sys.exit(1)
