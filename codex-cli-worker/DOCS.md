@@ -357,7 +357,7 @@ The chat shows the outcome under the answer: a passing check as a short confirma
 
 A conversation from the chat page is a Codex thread, and the ChatGPT app shows the same thread when remote control is on. From 0.3.3 the page sends its fixed rules as Codex developer instructions when it starts a thread. The thread's first message is your own text, so the app shows your words as the message and as the title, not the page's rules.
 
-Details that change from one message to the next are not part of the rules: the backup folder, the documents and images you attached, and the notes on direct API calls (the `HA_TOKEN` option), the local documentation and GitHub. Codex reads them from the `exchange_info` tool before its first command, file change or tool call in a message, and when your message can refer to a file, a document or something it cannot see in the chat, such as "Summarize this" with a document attached. A message that Codex can answer from what it knows and from the chat, such as a greeting or a one-number reply, needs no tool call, so it gets its answer in one step. Codex keeps the developer instructions a thread started with, so an update of this app changes the rules of a new thread; an older thread keeps its rules until Codex compacts it.
+Details that change from one message to the next are not part of the rules: the backup folder, the chat's files folder (see [Files Codex makes for you](#files-codex-makes-for-you)), the documents and images you attached, and the notes on direct API calls (the `HA_TOKEN` option), the local documentation and GitHub. Codex reads them from the `exchange_info` tool before its first command, file change or tool call in a message, and when your message can refer to a file, a document or something it cannot see in the chat, such as "Summarize this" with a document attached. A message that Codex can answer from what it knows and from the chat, such as a greeting or a one-number reply, needs no tool call, so it gets its answer in one step. Codex keeps the developer instructions a thread started with, so an update of this app changes the rules of a new thread; an older thread keeps its rules until Codex compacts it.
 
 A thread that this page did not start has no page rules: a thread started in the ChatGPT app, or one started by 0.3.2 or earlier. A message from the page on such a thread starts with a one-line note that tells Codex to call `exchange_info`, which then also returns the rules. A thread from 0.3.2 or earlier also keeps that version's instructions in its history, so it can still answer in the app with the page's JSON format. The page still reads such a JSON answer.
 
@@ -375,7 +375,7 @@ From **0.1.63**, the worker no longer archives the whole configuration folder be
 - Secret files are never copied: every `secrets.yaml` and every file under `.storage`, where Home Assistant keeps sign-ins, tokens and integration credentials beside dashboards. The full snapshot leaves them out, Codex is told not to copy them, and the worker deletes such a copy when the message ends, in every permission mode. A message that you stop loses the copies at once; a message that a restart cuts off loses them at the next backup cleanup, when the app starts or within the hour. A permission card for a change to one of these files shows the change while it waits for your answer; after the answer, or when the request expires, the chat's record keeps the file's path but not the changed lines. To undo a change to one of them, use a Home Assistant backup.
 - In a sandbox (Default, Auto-review and Read only), `/config/.storage` is read-only and `/config/secrets.yaml` is hidden. A `secrets.yaml` in another folder, such as `esphome/secrets.yaml`, gets no copy (above) but is not hidden: a sandboxed command can read and change it without a request. Codex can change these files only through a permission request. In Default, you see that request as a card and decide. In Auto-review, Codex's reviewer decides, and in Full access nobody is asked: no app-side check can stop a change there, because Codex runs without the sandbox.
 
-Codex needs to be able to write to the backup folder. In `workspace-write` mode the app adds that one exchange's backup folder to the sandbox's writable places, beside `/config`, `/share` and `/media`; the rest of `/data` stays read-only to Codex, and the private files the sandbox hides stay hidden. In `read-only` mode Codex is given no backup folder; any explicitly approved writes still need a separate recovery plan. A per-file copy depends on Codex following the instruction; if a file was changed without one, restore it from a Home Assistant backup.
+Codex needs to be able to write to the backup folder. In `workspace-write` mode the app adds that one exchange's backup folder to the sandbox's writable places, beside `/config`, `/share` and `/media` and the chat's files folder (see [Files Codex makes for you](#files-codex-makes-for-you)); the rest of `/data` stays read-only to Codex, and the private files the sandbox hides stay hidden. In `read-only` mode Codex is given no backup folder; any explicitly approved writes still need a separate recovery plan. A per-file copy depends on Codex following the instruction; if a file was changed without one, restore it from a Home Assistant backup.
 
 **Full snapshot (optional).** Turn on **Full snapshot before every message** (`full_snapshot`) to archive tracked files, excluding secret files (every `secrets.yaml` and every file under `.storage`), to `snapshot-before.tar.gz` in the exchange's folder before Codex starts. When a change fails validation, the worker can then take a missing per-file copy from that archive when a matching file is available. The exclusions below still apply, so this is not a complete Home Assistant backup. Creating the archive adds a wait before every message that grows with the amount of tracked data.
 
@@ -390,7 +390,7 @@ Codex needs to be able to write to the backup folder. In `workspace-write` mode 
 ## Sandbox
 
 - `read-only`: Codex can inspect files. Writes and shell networking require permission for the specific action.
-- `workspace-write`: Codex can edit the mounted `/config` workspace, the shared `/share` folder and the `/media` folder, the same `/share` and `/media` access the Claude add-on has. Shell networking and writes elsewhere require permission. This remains the default setting.
+- `workspace-write`: Codex can edit the mounted `/config` workspace, the shared `/share` folder and the `/media` folder, the same `/share` and `/media` access the Claude add-on has, and can save files for you in the chat's own files folder under `/data`. Shell networking and writes elsewhere require permission. This remains the default setting.
 
 **Working folder.** Codex starts each chat in `/media/.agents/codex`, its own folder for notes, scratch files and
 drafts, so they stay out of Home Assistant's configuration. The working folder is in `/media` because the automatic
@@ -398,7 +398,7 @@ backup leaves the media folder out unless you include it in your backup settings
 backup larger, and they are not restored from a backup. Keep instructions you need in the app's own `AGENTS.md`
 (Settings), which the backup keeps. The dot at the start of `.agents` keeps the folder out of the media browser's list.
 The app creates the folder at start when it is missing and never moves, empties or rewrites what is in it. What Codex
-may write without a request is `/config`, `/share`, `/media` and the exchange's backup folder. Other apps keep their
+may write without a request is `/config`, `/share`, `/media`, the exchange's backup folder and the chat's files folder. Other apps keep their
 files under `/share` and `/media` too (another assistant's folder, a clone of a repository, recordings); the sandbox
 does not stop a write there in `workspace-write`, so the starter `AGENTS.md` tells Codex to ask first, and your own
 `AGENTS.md` can say more. When the folder cannot be created, when `/media` is missing, or when any part of the path is
@@ -421,6 +421,8 @@ The worker exposes the Codex version and a structured sandbox preflight in its a
 ### Permission requests
 
 In `workspace-write` and `read-only`, the worker uses Codex's live approval protocol with the approval policy `on-request`. When Codex requests access for a command or file change, the chat shows **Permission needed**, the reason, the command and working folder or the file paths, rename destinations, and diff, and **Allow once** and **Deny** buttons. Review the action, then choose a button. When Codex asks before it runs the Home Assistant tool (`call` of the `home_assistant_call` server), the card shows the tool name and every argument it will send, such as the action, its target and the full text of a message, in plain words and as JSON. The plain words name each entity, area, device, floor and label of the target. A request that the card cannot show in full, because it is too long or a known credential in it is hidden, has **Allow once** turned off: deny it. **Allow once** on a tool request allows that one call; Codex asks again before the next one. Typing a reply or answering a follow-up question does not grant sandbox access. Open the app chat to answer permission requests, including tasks started by the integration or a notification.
+
+ChatGPT apps are services, such as GitHub or a calendar, that you connect to your ChatGPT account. Codex can use their tools through that account. These tools act in the app's own service, outside this Home Assistant and outside the sandbox. In Default, Codex asks before each such call, and the chat shows the same card: the app, the tool, the question Codex asks and every argument. In Read only, the page declines each app tool request and says so in the chat. In Auto-review, Codex's reviewer answers instead of you; in Full access, Codex does not ask. The app log records each tool request that you allow or deny, and each question that the page declines, by name only, without its arguments.
 
 When a request starts waiting, the worker sends a **Codex needs permission** notification through `notify_service`, or a persistent notification when none is set. It carries the reason Codex gave and the task, not the command or the diff, and has no buttons: the decision is made in the chat, where the complete action is shown. A notification that Home Assistant has not received by the time the request is answered or expires is not sent, so it cannot replace a later notification about the task's question.
 
@@ -1047,6 +1049,26 @@ In the Home Assistant Android app, the paperclip picks one image at a time; use 
 Limits: PNG, JPEG, GIF, and WebP only, checked by inspecting the bytes rather than the file name; at most 6 images per message and 10 MiB per image after resizing. The worker stores attached images and files under `/data/chat_uploads/<task_id>/<turn_id>/`, which the app's backup leaves out, serves them through its authenticated API, and removes them after 7 days or with the chat, whichever comes first. It does not publish uploads under `/config/www`.
 
 API: `POST /tasks`, `POST /tasks/<task_id>/continue`, and `POST /tasks/<task_id>/reply` accept an optional `attachments` list of `{"name": "shot.png", "data": "<base64>"}` objects; a `data:` URL prefix is tolerated. Invalid entries return HTTP 400 and no task or turn is created, and requests over roughly 81 MiB return HTTP 413. Each turn in `GET /tasks/<task_id>` and `codex_cli.get_task` lists its uploads under `prompt_attachments` with the same fields as generated images plus `origin: "user"`; generated images carry `origin: "codex"`. `GET /tasks/<task_id>/attachments/<attachment_id>` serves both kinds with the same checks. The `attachments` list on the task result and in the `codex_cli_task_result` event contains only images generated by Codex.
+
+### Files Codex makes for you
+
+When you ask for a file, such as a spreadsheet, a report or an export, Codex saves it in the chat's own files
+folder, `/data/codex_tasks/<task_id>/files/`, and links to it in its answer. The chat page shows that link as a card
+with the file's name and size; select it to download the file. The page and the worker offer only files in that
+folder: a link to any other path, to a hidden file (a name that starts with a dot) or to a symbolic link stays plain
+text. Codex can write in this folder in the **Default**, **Auto-review** and **Full access** modes; in **Read only**
+it asks you first, and the file is saved only after your **Allow once**. The folder is not under `/config`, so its files are not part of the change review, the
+configuration check or the backups of `/config`. It is deleted with the chat. Up to 200 files are listed for the page.
+
+The remote connection in the ChatGPT app runs in OpenAI's app and cannot reach files on your Home Assistant system,
+so a file link in an answer read there does not download. Open the chat on the app's page to download it.
+
+API: `GET /tasks/<task_id>` includes `chat_files`: `{"folder": "/data/codex_tasks/<task_id>/files", "files":
+[{"path": "2025/visits.xlsx", "size": 11}]}`, or `null` when the chat has no folder yet.
+`GET /tasks/<task_id>/files/<path>` returns one of those files as a download (`application/octet-stream`,
+`Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`), never shown inside the page. It requires the
+worker API token or an authenticated Home Assistant Ingress session, opens the file without following a symbolic
+link, and returns HTTP 404 for a path outside the folder, a hidden name, a folder, a missing file or an unknown chat.
 
 ### Managing chats
 
