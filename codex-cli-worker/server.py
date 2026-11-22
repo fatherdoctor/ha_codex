@@ -8101,15 +8101,25 @@ def relay_read_mcp_args() -> list[str]:
 
 
 def relay_tool_args() -> list[str]:
-    """The app's tools: the read tool, approved ahead, the call tool, which Codex asks for each time, and the
-    Home Assistant MCP server when its option is on (hass_mcp.py): its read tools approved ahead, its write tools
-    asked about before each call.
+    """The relay's settings beside its instructions: the page's writable folders, and the app's tools: the read
+    tool, approved ahead, the call tool, which Codex asks for each time, and the Home Assistant MCP server when its
+    option is on (hass_mcp.py): its read tools approved ahead, its write tools asked about before each call.
 
     The shell exclude keeps HA_MCP_CAPABILITY, the token relay_env gives hass-mcp, out of every command;
     /etc/codex/managed_config.toml holds the same exclude for every client.
     """
-    return [*shell_exclude_args(), *relay_read_mcp_args(), *call_mcp_args(relay=True),
+    return [*shell_exclude_args(), *relay_writable_roots_args(), *relay_read_mcp_args(), *call_mcp_args(relay=True),
             *hass_mcp.mcp_args(read_options(), sys.executable, relay=True)]
+
+
+def relay_writable_roots_args() -> list[str]:
+    """Give the relay's Codex the chat page's writable folders.
+
+    The page sends TASK_WRITABLE_ROOTS with each turn; the relay's threads come from the ChatGPT app, so the
+    process's config must carry them. Without it a relay thread in workspace-write may write only its start
+    folder, which is the working folder (/share/codex), and asks before each change in /config.
+    """
+    return ["--config", "sandbox_workspace_write.writable_roots=" + json.dumps(list(TASK_WRITABLE_ROOTS))]
 
 
 remote_control_supervisor = remote_control.Supervisor(
