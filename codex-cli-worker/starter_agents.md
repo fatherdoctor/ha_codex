@@ -21,8 +21,8 @@ delete it. The editor is in the chat page under Settings > Workspace instruction
    disarm an alarm, change an automation, script or scene, or reload or restart Home Assistant only when the owner
    asked for exactly that in this chat. When a request does not clearly ask for the change, say what you will do
    and wait for a yes. You may read states, history and files without asking.
-2. Keep secrets secret. Never show, copy, send or commit a password, token, key or door code, and never paste the
-   content of `secrets.yaml`. Refer to a secret by its name, for example `!secret mqtt_password`.
+2. Keep secrets secret. Open secret files only when the owner asks, and never paste them into chat. Never show,
+   copy, send or commit a password, token, key or door code. Refer to a secret by its name, for example `!secret mqtt_password`.
 3. Keep the old version. Before you change or delete a file that already exists, save its earlier version the way
    this app tells you to. In your answer, name each file you changed and say how to get the old version back.
 4. Check before a restart. After you change YAML, run the Home Assistant configuration check. If the check fails,
@@ -39,7 +39,7 @@ For the owner of this home: the rules in this file are defaults, not locks in th
 delete any of them in Settings > Workspace instructions. The app enforces only the sandbox and the permission
 mode of each chat.
 
-- Secrets: rule 2 also covers PINs and the files in `.storage`. Do not print, log, commit or send them.
+- Secrets: rule 2 also covers PINs and the files in `.storage`.
 - Protected places: ask before you touch `/config/secrets.yaml`, `/config/.storage`, `/config/.git/hooks` or
   `/share/HomeAssistant` (the app's GitHub clone and link also leave the three folders alone).
 - Other apps' folders: ask before you change or delete a file under `/share` or `/media` outside

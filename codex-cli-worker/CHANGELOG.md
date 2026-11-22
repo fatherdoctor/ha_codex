@@ -224,6 +224,14 @@ These are draft checks for the installed release. They do not report a live-syst
   copy at `/data/agents_before_move.md`. If both places hold a file, nothing moves and the app logs a line.
 
 ### Changed
+- **Secret files are no longer hidden in the sandbox.** Codex can now read `secrets.yaml` and Home Assistant's
+  sign-in files `.storage/auth` and `.storage/auth_provider.homeassistant`, and change them in `workspace-write`
+  without a permission card, like any other file in `/config`. The Claude add-on works the same way. Before, a read
+  saw an empty file, and a change needed a card. Rule 2 of the starter `AGENTS.md` now says to open secret files only
+  when you ask and never to paste them into the chat. An `AGENTS.md` you already have is not changed. Whatever Codex
+  reads goes into the chat and to the model provider. If you want these files kept back, say so in your `AGENTS.md`.
+  The app's own private files stay hidden: its options, API token, schedule database, GitHub sign-in and the
+  container environment that holds the Supervisor token.
 - **Codex works from `/media/.agents/codex`.** Codex's working folder is now `/media/.agents/codex` instead of
   `/config`, so its notes, scratch files and drafts no longer land in Home Assistant's configuration, and the
   automatic backup leaves them out unless you include the media folder in your backup settings. The app now maps
@@ -278,8 +286,7 @@ These are draft checks for the installed release. They do not report a live-syst
   but not the changed lines. This includes dashboards kept in storage: to undo a change to one, use a Home
   Assistant backup.
 - **`.storage` is left to Home Assistant by the starter instructions.** The sandbox keeps `.storage` writable like
-  the rest of `/config`, as the Claude add-on does; only its sign-in files `auth` and `auth_provider.homeassistant`
-  stay hidden, with `secrets.yaml`. Rule 5 of the starter `AGENTS.md` now says not to edit `.storage` files while
+  the rest of `/config`, as the Claude add-on does (see "Secret files are no longer hidden" under Changed). Rule 5 of the starter `AGENTS.md` now says not to edit `.storage` files while
   Home Assistant runs, because Home Assistant writes over a changed file from memory, and to use the API or the
   settings pages. An `AGENTS.md` you already have is not changed; copy the rule from `starter_agents.md` if you want it.
 - **Working files out of the configuration folder.** The chats (prompts, logs, per-turn backups, attachments) are now
