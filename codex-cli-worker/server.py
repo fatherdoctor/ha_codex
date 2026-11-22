@@ -7507,32 +7507,48 @@ def get_log(task_id: str) -> Response:
     return Response(data, mimetype="text/plain")
 
 
+def stored_activity_payload(task_id: str, turn_id: str, after: int) -> dict[str, Any]:
+    """The saved steps of a finished exchange after a sequence number, or an empty list when none were saved."""
+    stored = load_stored_activity(task_id, turn_id)
+    if stored is None:
+        return {"ok": True, "turn_id": turn_id, "seq": 0, "running": False, "total": 0, "steps": []}
+    steps = [step for step in stored["steps"] if isinstance(step, dict) and int(step.get("seq") or 0) > after]
+    return {
+        "ok": True, "turn_id": str(stored.get("turn_id") or turn_id), "seq": int(stored.get("seq") or 0),
+        "running": False, "total": len(stored["steps"]), "steps": steps,
+    }
+
+
 @app.get("/tasks/<task_id>/activity")
 @require_auth
 def get_activity(task_id: str) -> Response:
-    """Return the steps Codex reported for the latest exchange, after a sequence number."""
+    """Return the steps Codex reported for an exchange, after a sequence number.
+
+    Without `turn` it is the latest exchange. With `turn`, an earlier answer's
+    "Worked for" line asks for that exchange's saved steps; the id must have
+    the turn id form and belong to this chat, so it never names another path.
+    """
     if TASK_ID_RE.fullmatch(task_id) is None:
         return jsonify({"ok": False, "error": "task not found"}), 404
     try:
         after = int(request.args.get("after", "0"))
     except ValueError:
         return jsonify({"ok": False, "error": "after must be a number"}), 400
+    wanted = request.args.get("turn")
+    if wanted is not None and TURN_ID_RE.fullmatch(wanted) is None:
+        return jsonify({"ok": False, "error": "turn not found"}), 404
     with lock:
         task = tasks.get(task_id)
         if task is None:
             return jsonify({"ok": False, "error": "task not found"}), 404
+        known = {turn.get("turn_id") for turn in task.get("turns") or []} | {task.get("current_turn_id")}
+        if wanted is not None and wanted not in known:
+            return jsonify({"ok": False, "error": "turn not found"}), 404
         record = task_activity.get(task_id)
-        if record is not None:
+        if record is not None and wanted in (None, record["turn_id"]):
             return jsonify({"ok": True, **activity_payload_locked(record, after)})
-        turn_id = str(task.get("current_turn_id") or "")
-    stored = load_stored_activity(task_id, turn_id)
-    if stored is None:
-        return jsonify({"ok": True, "turn_id": turn_id, "seq": 0, "running": False, "total": 0, "steps": []})
-    steps = [step for step in stored["steps"] if isinstance(step, dict) and int(step.get("seq") or 0) > after]
-    return jsonify({
-        "ok": True, "turn_id": str(stored.get("turn_id") or turn_id), "seq": int(stored.get("seq") or 0),
-        "running": False, "total": len(stored["steps"]), "steps": steps,
-    })
+        turn_id = wanted or str(task.get("current_turn_id") or "")
+    return jsonify(stored_activity_payload(task_id, turn_id, after))
 
 
 # The marks the chat page shows in front of each kind of step, so a shared
