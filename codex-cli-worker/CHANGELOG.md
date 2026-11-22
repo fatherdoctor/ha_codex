@@ -3,6 +3,10 @@
 ## 0.4.0 (unreleased)
 
 ### What's new
+- **Update banners.** The chat page says **Version X is installed. Restart Home Assistant to finish.** while Home
+  Assistant still runs an older copy of the integration (or none, after the first install), and **Update available:
+  version X** with a link to the app's Info page when Supervisor offers a newer app. Each banner can be dismissed for
+  its version. The app reads both facts from Home Assistant and Supervisor; it installs and restarts nothing.
 - The app includes openpyxl so Codex can read and create Excel workbooks offline.
 - **New chats start on the account's default model and level.** With the model option on `default`, a chat runs on
   the model Codex's model list marks as the account's default, at the reasoning level Codex gives it, instead of a

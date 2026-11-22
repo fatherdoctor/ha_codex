@@ -80,6 +80,8 @@ def main():
         server.fire_ha_event = lambda *args: (True, "")
         server.notify = lambda *args, **kwargs: None
         server.refresh_usage_status_async = lambda **kwargs: None
+        # No Supervisor here: no update banner unless a browser test answers /update-status itself.
+        server.update_status.read = lambda token: server.update_status.UpdateStatus(None, None)
         server.lookup_ha_users = lambda: [{"id": "preview-admin", "name": "Preview", "is_active": True,
                                            "system_generated": False, "group_ids": ["system-admin"]}]
         from browser_permissions import describe, scope

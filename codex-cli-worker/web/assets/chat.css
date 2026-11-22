@@ -2009,6 +2009,18 @@ dialog :is(h3, h4):has(> .settings-toggle) {
 #agents-hint {
   margin: 0 0 10px;
 }
+/* The update banner's link to the app's Info page looks like the banner's other buttons. */
+.page-banner .banner-link {
+  display: inline-block;
+  border-radius: 9px;
+  padding: 10px 16px;
+  background: var(--text);
+  color: var(--bg);
+  text-align: center;
+  text-decoration: none;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 #remote-control-name {
   display: block;
   width: 100%;

@@ -53,6 +53,7 @@ import ha_data_mcp
 import hass_mcp
 import remote_control
 import tool_threads
+import update_status
 from core_address import CoreAddress, probe_core
 from relay_reads import RelayReads, ReadError as RelayReadError
 import retention
@@ -8100,6 +8101,18 @@ def addon_configuration() -> Response:
     # Home Assistant 2026.2 moved an app's pages to /config/app/<slug>/, and 2026.5 removed the old
     # /hassio/addon/<slug>/ panel, so that path opens a page that does not exist.
     return jsonify({"ok": True, "url": f"/config/app/{slug}/config" if slug else None})
+
+
+@app.get("/update-status")
+@require_auth
+def get_update_status() -> Response:
+    """Return the versions the page's update banners name: a restart to finish, an app update; null for none.
+
+    It changes nothing and holds only version numbers and the slug path, so the worker token is enough.
+    """
+    status = update_status.read(ha_token())
+    slug = addon_slug() if status.update_version else None
+    return jsonify({"ok": True, **status.as_json(), "info_url": f"/config/app/{slug}/info" if slug else None})
 
 
 @app.post("/remote-control/<action>")
