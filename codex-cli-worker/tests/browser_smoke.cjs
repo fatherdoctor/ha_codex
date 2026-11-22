@@ -486,6 +486,33 @@ async function effortSaved(page, label) {
       animations: "disabled",
     });
     await page.setViewportSize({ width: 1440, height: 950 });
+    // Laundry schedule: preserve the equations and the Markdown around them.
+    const inlineMath = String.raw`\(30 + 45 + 20 = 95\)`;
+    const displayMath = String.raw`\[
+15 + 95 = 110
+\]`;
+    const dollarMath = "$$15 + 95 = 110$$";
+    const laundry = await page.evaluate(({ inlineMath, displayMath, dollarMath }) => {
+      const answer = renderMarkdown([
+        "Each load takes " + inlineMath + " minutes.",
+        "**Earliest finish:**",
+        displayMath,
+        dollarMath,
+        "The supply budget is $15.",
+      ].join("\n\n"), "message");
+      return {
+        inline: [...answer.querySelectorAll("p > code")].map(node => node.textContent),
+        blocks: [...answer.querySelectorAll("pre > code")].map(node => node.textContent),
+        label: answer.querySelector("strong")?.textContent,
+        lastLine: answer.lastElementChild.textContent,
+      };
+    }, { inlineMath, displayMath, dollarMath });
+    assert.deepEqual(laundry, {
+      inline: [inlineMath],
+      blocks: [displayMath, dollarMath],
+      label: "Earliest finish:",
+      lastLine: "The supply budget is $15.",
+    });
     // A message that would keep the parser busy, or is very long, stays plain text.
     assert.deepEqual(
       await page.evaluate(() => {
@@ -935,10 +962,11 @@ async function effortSaved(page, label) {
     assert.equal(await page.locator(".message.user").count(), 2);
     assert.equal(await page.locator(".answer").count(), 2);
     // CX-REPLY-ALIGN: the text messages Codex wrote along the way ("I'll look for …", "I found …") are blocks of
-    // their own above the answer, spaced apart from each other and from the answer, and start where it starts.
+    // their own, spaced apart from each other and from the answer, and start where it starts. Once the exchange is
+    // over they sit inside the open list, between its step groups (CX-BLEED-FIX).
     const narration = await page.evaluate(() => {
       const exchange = [...document.querySelectorAll("#messages .exchange")].at(-1);
-      const blocks = [...exchange.querySelectorAll("#activity-text > .message"), exchange.querySelector(".answer > .message")];
+      const blocks = [...exchange.querySelectorAll("#activity-steps > .message.interim"), exchange.querySelector(".answer > .message")];
       const firstCharacter = (node) => {
         const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, {
           acceptNode: (text) => (text.data.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP),
@@ -988,7 +1016,7 @@ async function effortSaved(page, label) {
       { model: "gpt-6.1-terra", reasoning_effort: "ultra" },
     );
     // Choosing the model the add-on runs anyway clears the chat's own selection.
-    await chooseModel(page, "GPT-6.1 Sol");
+    await chooseModel(page, "GPT-6.2 Sol");
     assert.deepEqual(
       await page.evaluate(
         async () =>
@@ -1005,11 +1033,19 @@ async function effortSaved(page, label) {
     await effortSaved(page, "High");
     await page
       .getByRole("button", {
-        name: "Use add-on default reasoning",
+        name: "Use the default model and reasoning",
         exact: true,
       })
       .click();
     await effortSaved(page, "Medium");
+    // Reset goes back to the default model too, not only its level.
+    assert.deepEqual(
+      await page.evaluate(
+        async () =>
+          (await (await fetch("tasks/preview-00")).json()).task.chat_settings,
+      ),
+      { model: null, reasoning_effort: null },
+    );
     await page.keyboard.press("Escape");
     assert.equal(await page.locator("#effort-popover").isHidden(), true);
     const divider = await page.locator("#divider").boundingBox();
@@ -1050,7 +1086,7 @@ async function effortSaved(page, label) {
     );
     assert.equal(
       await page.evaluate(() => document.activeElement.textContent),
-      "GPT-6 Astra",
+      "GPT-6.2 Sol",
     );
     await page.keyboard.press("Escape");
     await page.evaluate(() => {
@@ -1060,7 +1096,7 @@ async function effortSaved(page, label) {
     // A new chat names the model it runs on, and the menu marks that model.
     assert.equal(
       await page.locator("#picker-model").textContent(),
-      "GPT-6.1 Sol",
+      "GPT-6.2 Sol",
     );
     await openPicker(page);
     await page.locator("#effort-model").click();
@@ -1072,9 +1108,9 @@ async function effortSaved(page, label) {
             .filter((option) => option.getAttribute("aria-pressed") === "true")
             .map((option) => option.textContent),
         ),
-      ["GPT-6.1 Sol✓"],
+      ["GPT-6.2 Sol✓"],
     );
-    assert.equal(await page.locator("#model-options .model-option").count(), 8);
+    assert.equal(await page.locator("#model-options .model-option").count(), 9);
     await modelRow(page, "GPT-5.6 Luna").click();
     await page.locator("#effort-popover").waitFor();
     await page.waitForFunction(
@@ -1146,7 +1182,7 @@ async function effortSaved(page, label) {
     // The same text is in the sent message and in the echoed answer.
     assert.deepEqual(
       await page
-        .locator("#messages a:not(.activity-text a)")
+        .locator("#messages a:not(.interim a)")
         .evaluateAll((links) =>
           links.map((link) => [link.textContent, link.href, link.target, link.rel]),
         ),
@@ -1722,7 +1758,8 @@ async function effortSaved(page, label) {
         exact: true,
       })
       .waitFor();
-    assert.equal(await page.locator("#picker-model").textContent(), "GPT-6 Luna");
+    // preview-00 was reset to the default model above, so it shows that model.
+    assert.equal(await page.locator("#picker-model").textContent(), "GPT-6.2 Sol");
     assert.equal(await page.locator("#effort-label").textContent(), "Medium");
     // A tap on a chat keeps the side bar open (CX-04-PHONE-LIST); the scrim closes it.
     assert.equal(await page.locator("#scrim").isHidden(), false);
@@ -1980,9 +2017,11 @@ async function effortSaved(page, label) {
     await require("./browser_approvals.cjs")(browser, output, errors);
     await require("./browser_text_size.cjs")(browser, output, errors);
     await require("./browser_slash.cjs")(browser, output, errors);
+    await require("./browser_file_link.cjs")(browser, output, errors);
+    await require("./browser_answer_bleed.cjs")(browser, output, errors);
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: queued messages (wait behind a working chat, edit, remove, start in order), choices under a question (pick one, draft kept, late answer refused), attached images (pick, reject, remove, send, render, batch stays with its chat, send waits for decoding), chat actions (pin, rename, delete, long press), generated image attachments, Markdown formatting (sent messages, answers, untrusted text, slow or long text, narrow screens), saved model/reasoning choices, model compatibility, the model a chat runs on by name, quota bars, the line about the Codex integration, keyboard/reset controls, history, pagination, continuation, new chats, drafts, reopening the last chat, safe text, settings, text size (three sizes, kept per device, phone and iPad), slash commands (list, filter, tap, keys, run not sent), resize, mobile and dark mode. Screenshots: " +
+      "PASS: queued messages (wait behind a working chat, edit, remove, start in order), choices under a question (pick one, draft kept, late answer refused), attached images (pick, reject, remove, send, render, batch stays with its chat, send waits for decoding), chat actions (pin, rename, delete, long press), generated image attachments, Markdown formatting (sent messages, answers, untrusted text, slow or long text, narrow screens), saved model/reasoning choices, model compatibility, the model a chat runs on by name, quota bars, the line about the Codex integration, keyboard/reset controls, history, pagination, continuation, new chats, drafts, reopening the last chat, safe text, settings, text size (three sizes, kept per device, phone and iPad), slash commands (list, filter, tap, keys, run not sent), file links in answers (card, download, refused paths), narration kept out of the answer (inside the closed list, aligned with it at four widths), resize, mobile and dark mode. Screenshots: " +
         output,
     );
   } finally {
