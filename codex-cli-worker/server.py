@@ -42,7 +42,7 @@ from flask import Flask, Response, jsonify, request, send_file
 
 # Also support the existing importlib-based test harness.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from verification import DEFAULT_BROWSER_MEMORY_LIMIT_MIB, Verification, public_check
+from verification import Verification, public_check
 from approvals import APPROVAL_GONE
 from safety_block import SafetyBlockSession as AppServerSession
 import codex_host
@@ -179,8 +179,6 @@ DEFAULT_OPTIONS = {
     "full_snapshot": False,
     "backup_retention_days": 7,
     "chat_retention_days": retention.DEFAULT_DAYS,
-    "browser_verification": True,
-    "browser_memory_limit_mib": DEFAULT_BROWSER_MEMORY_LIMIT_MIB,
     "local_docs": True,
     "warm_start": True,
     "ha_url": "",
@@ -2870,8 +2868,8 @@ def task_payload(
 ) -> dict[str, Any]:
     """Return a task as the API sends it: a short summary for lists, or the full record with its turns.
 
-    Exact blocked browser requests are part of the human Ingress review only;
-    with `private` False, each verification check carries their labels instead.
+    A dashboard check saved by a version before 0.4.0 can hold exact blocked browser requests; with `private`
+    False, each verification check carries only their labels.
     """
     if summary:
         fields = ("task_id", "title", "status", "created_at", "updated_at", "summary", "question")
@@ -2879,12 +2877,12 @@ def task_payload(
         result["summary"] = str(result["summary"])[:240]
         result["pinned"] = bool(task.get("pinned"))
         result["archived"] = bool(task.get("archived"))
+        result["unread"] = bool(task.get("unread"))
     else:
         result = copy.deepcopy(task)
         result["chat_settings"] = current_chat_settings(task.get("chat_settings", DEFAULT_CHAT_SETTINGS))
         result["turns"] = task_turns(task)
         result["history_incomplete"] = task.get("history_incomplete", "turns" not in task)
-        result["browser_retry"] = verification.retry_status(task.get("task_id"))
         if not private:
             for record in [result, *result["turns"]]:
                 if isinstance(record.get("verification"), list):
@@ -3951,9 +3949,34 @@ def notify(title: str, message: str, *, still_wanted: Callable[[], bool] | None 
 BACKGROUND_SOURCES = frozenset({'schedule', 'lead'})
 
 
+def current_turn(task: dict[str, Any]) -> dict[str, Any]:
+    """Return the chat's current exchange, or an empty dict when its exchange list does not hold it."""
+    return next((item for item in task.get('turns') or [] if item.get('turn_id') == task.get('current_turn_id')), {})
+
+
+def exchange_source(task: dict[str, Any]) -> str | None:
+    """Return the task_source of the chat's current exchange: the exchange's own, else the chat's."""
+    return current_turn(task).get('task_source') or task.get('task_source')
+
+
+def unattended_mode(task: dict[str, Any]) -> str | None:
+    """Return the mode of unattended work ('default' or 'read-only') for the chat's current exchange, or None.
+
+    A chat that a schedule started is unattended for good. A scheduled run in a
+    chat the owner made marks only its own exchange, so the owner's next message
+    runs in the chat's own mode again.
+    """
+    turn = current_turn(task)
+    if turn.get('task_source') in BACKGROUND_SOURCES:
+        return turn.get('background_mode') or task.get('background_mode') or 'default'
+    if task.get('task_source') in BACKGROUND_SOURCES:
+        return task.get('background_mode') or 'default'
+    return None
+
+
 def background_task(task_id: str) -> bool:
     with lock:
-        return tasks.get(task_id, {}).get('task_source') in BACKGROUND_SOURCES
+        return unattended_mode(tasks.get(task_id, {})) is not None
 
 
 def notify_task_outcome(task_id, status, summary, turn_id='', question='', choices=None):
@@ -5030,11 +5053,10 @@ Use the home_assistant MCP verify tool for authenticated Home Assistant checks, 
   {"operation":"entity","entity_id":"light.kitchen","expected_state":"on","attributes":["brightness"]}
   {"operation":"config_check"}
   {"operation":"logs"}
-  {"operation":"dashboard","path":"/lovelace/0"}
   {"operation":"dashboard_readback","path":"/lovelace/0"}
 The MCP tool runs through the worker outside the shell network sandbox. Use it for supported verification instead of shell socket commands. If the user's task needs a different API or shell networking in a sandboxed mode, request approval for that specific command. Approval does not supply API credentials. Logs are limited to Core.
-Use fresh entity readback after any user-authorized reload or change. These read tools do not perform reloads or device actions; the home_assistant_call call tool does, and only when the user asked for the change. A matching state does not prove automation behavior. Dashboard inspection is observational, blocks writes, and captures desktop/mobile screenshots. Inspect the returned image_paths with your image viewer before making visual claims. Record any unavailable checks or blocked resources in your answer. Treat policy blocks as limits of this inspection; they do not establish writes or dashboard or tablet faults. Explain each remaining block using its reported reason and approval availability. Common built-in state/numeric-state conditions and passive knob rotation subscriptions are allowed automatically. Browser Mod needs separate support, and browser approvals cannot change Home Assistant account permissions. Assess other errors separately. Relevant changed storage dashboards are also checked after the worker saves them. For YAML dashboards and specific affected views, explicitly request the dashboard path. Do not expose credentials or try to obtain the user's login. Verification evidence is attached to this exchange automatically.
-After an authorized storage-dashboard edit, add "save_pending":true to the dashboard request to have the worker save that turn's pending dashboard edit and verify API readback before capturing it. This requires auto_save_lovelace to be enabled. Without save_pending, the browser inspects only the dashboard currently loaded in Home Assistant.
+Use fresh entity readback after any user-authorized reload or change. These read tools do not perform reloads or device actions; the home_assistant_call call tool does, and only when the user asked for the change. A matching state does not prove automation behavior. Do not expose credentials or try to obtain the user's login. Verification results are attached to this exchange automatically.
+To change a dashboard, make the change, read its configuration back with dashboard_readback, and report what changed. After a storage-dashboard edit, add "save_pending":true to the dashboard_readback request to have the worker save that turn's pending edit first and compare the readback with it. This requires auto_save_lovelace to be enabled. Without save_pending, the readback reads the dashboard currently loaded in Home Assistant, and the worker saves the edit when the turn ends. No tool renders or screenshots a dashboard.
 
 For a device command such as "set the kitchen ceiling to 50%", make one home_assistant_call call with the service, the name the user gave and the data, for example {"service":"light.turn_on","name":"kitchen ceiling","data":{"brightness_pct":50}} (Codex asks the owner before each call). The worker sends it only when exactly one entity of the service's domain has that name, and its answer reads the new state back, so no find and no second read are needed. If the answer is not_sent with candidates, ask the owner which one and call again with that target.entity_id; if no entity fits, look with home_assistant.verify find (fewer words, another domain) once, then ask. Do not search files under /config or .storage or run shell commands to find an entity, and read /addon_config/AGENTS.md first only when exchange_info says to.
 Before changing an entity whose entity_id you already have, look up its state with home_assistant.verify (operation entity, exact entity_id) instead of a sandboxed REST call.
@@ -5236,8 +5258,7 @@ def task_options(task_id: str) -> dict[str, Any]:
     options = dict(read_options())
     with lock:
         task = tasks.get(task_id, {})
-        if (task.get('permission_mode') == 'read-only'
-                or (task.get('task_source') in BACKGROUND_SOURCES and task.get('background_mode') == 'read-only')):
+        if task.get('permission_mode') == 'read-only' or unattended_mode(task) == 'read-only':
             options['codex_sandbox'] = 'read-only'
     return options
 
@@ -5256,7 +5277,7 @@ def task_mode_settings(task_id: str, options: dict[str, Any] | None = None) -> d
     with lock:
         task = tasks.get(task_id, {})
         mode = task.get('permission_mode') or protected_policy.DEFAULT_MODE
-        if task.get('task_source') in BACKGROUND_SOURCES:
+        if unattended_mode(task) is not None:
             mode = protected_policy.DEFAULT_MODE
     if mode == protected_policy.FULL_ACCESS_MODE and not full_access.is_on():
         mode = protected_policy.DEFAULT_MODE
@@ -6818,7 +6839,7 @@ def _run_background_task(
     """Run an exchange in its thread and always release the worker and clean up afterwards."""
     with lock:
         diagnostic_task = tasks.get(task_id, {})
-        source = "scheduled_run" if diagnostic_task.get("task_source") == "schedule" else "addon_page"
+        source = "scheduled_run" if exchange_source(diagnostic_task) == "schedule" else "addon_page"
         model = (diagnostic_task.get("chat_settings") or {}).get("model", "default")
     try:
         record_diagnostic("begin", task_id, source, model)
@@ -7125,10 +7146,20 @@ SCHEDULING_MARKUP = re.compile(r"[ \t]*<!-- scheduling:begin -->.*?<!-- scheduli
 
 def render_index() -> str:
     """Return the chat page; while scheduled runs are off, without the markup that belongs to them."""
-    page = (WEB_ROOT / "index.html").read_text(encoding="utf-8")
+    page = mark_remote_paused((WEB_ROOT / "index.html").read_text(encoding="utf-8"))
     if scheduling.SCHEDULED_RUNS:
         return page.replace("<!-- scheduling:begin -->", "").replace("<!-- scheduling:end -->", "")
     return SCHEDULING_MARKUP.sub("", page)
+
+
+def mark_remote_paused(page: str) -> str:
+    """While Remote Control is paused, mark the page root so the page hides every part of it and never asks for it.
+
+    The page's scripts look up the remote elements at load, so they stay in the markup and the mark hides them.
+    """
+    if not remote_control.PAUSED:
+        return page
+    return page.replace('<html lang="en">', '<html lang="en" data-remote-paused>', 1)
 
 
 @app.get("/")
@@ -7462,6 +7493,16 @@ def pin_task(task_id: str) -> Response:
     if task is None:
         return jsonify({"ok": False, "error": error}), 404 if error == "task not found" else 500
     return jsonify({"ok": True, "task_id": task_id, "pinned": bool(task.get("pinned"))})
+
+
+@app.post("/tasks/<task_id>/read")
+@require_auth
+def read_task(task_id: str) -> Response:
+    """Clear the unread mark a scheduled run left on a chat, without moving it in the recent list."""
+    task, error = save_task_fields(task_id, unread=False)
+    if task is None:
+        return jsonify({"ok": False, "error": error}), 404 if error == "task not found" else 500
+    return jsonify({"ok": True, "task_id": task_id, "unread": False})
 
 
 @app.post("/tasks/<task_id>/title")
@@ -8119,6 +8160,9 @@ def remote_control_summary() -> dict[str, Any]:
 @require_auth
 def get_remote_control() -> Response:
     """Return the remote-control state: on or off, connected or not, machine name, pairing code, recent log."""
+    if remote_control.PAUSED:
+        # The page shows the pause line and stops asking; no Core address check runs for a feature that cannot start.
+        return jsonify({"ok": True, "paused": True, "remote_control": remote_control_supervisor.paused()})
     state = dict(remote_control_supervisor.snapshot())
     state["core_address"] = core_address.snapshot(read_options())
     state["read_tools"] = "Read-only entity tools are offered while remote control is on; no Core API token is needed."
@@ -8257,6 +8301,9 @@ def change_remote_control(action: str) -> Response | tuple[Response, int]:
     admin, refusal = ingress_admin()
     if admin is None:
         return jsonify({"ok": False, "error": refusal}), 403
+    if remote_control.PAUSED:
+        return jsonify({"ok": False, "paused": True, "error": remote_control.PAUSED_MESSAGE,
+                        "remote_control": remote_control_supervisor.paused()}), 409
     if action == "name":
         return rename_remote_control()
     if action == "start":
@@ -8380,61 +8427,6 @@ def restart_remote_control() -> None:
     if remote_control_supervisor.enabled():
         remote_control_supervisor.stop()
         remote_control_supervisor.start()
-
-
-@app.get("/browser-permissions")
-@require_auth
-@require_ingress
-def browser_permissions_list():
-    """Let the human Ingress UI inspect remembered browser permissions."""
-    try:
-        return jsonify({"ok": True, "permissions": verification.permissions.list()})
-    except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc), "unreadable": True}), 503
-
-
-@app.delete("/browser-permissions")
-@require_auth
-@require_ingress
-def browser_permissions_clear():
-    """Remove every saved exception, which also recovers from an unreadable permissions file."""
-    try:
-        verification.permissions.clear()
-        return jsonify({"ok": True})
-    except (OSError, ValueError):
-        return jsonify({"ok": False, "error": "Could not save browser permissions. Try again."}), 503
-
-
-@app.delete("/browser-permissions/<permission_id>")
-@require_auth
-@require_ingress
-def browser_permissions_revoke(permission_id: str):
-    """Revoke one saved exception from Ingress; API tokens cannot grant or revoke."""
-    try:
-        verification.permissions.revoke(permission_id)
-        return jsonify({"ok": True})
-    except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
-    except OSError:
-        return jsonify({"ok": False, "error": "Could not save browser permissions. Try again."}), 503
-
-
-@app.post("/tasks/<task_id>/browser-permissions")
-@require_auth
-@require_ingress
-def browser_permissions_approve(task_id: str):
-    """Approve a selected batch and retry only its dashboard capture, through Ingress."""
-    if (request.content_length or 0) > 8192:
-        return jsonify({"ok": False, "error": "Browser permission request is too large"}), 413
-    try:
-        result = verification.request_retry(task_id, request.get_json(silent=True))
-        return jsonify({"ok": True, **result}), 202
-    except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
-    except RuntimeError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 409
-    except OSError:
-        return jsonify({"ok": False, "error": "Could not save browser permissions. Try again."}), 503
 
 
 @app.post("/tasks/<task_id>/reply")
@@ -8726,7 +8718,7 @@ def main() -> None:
     threading.Thread(target=account_access_loop, daemon=True).start()
     # The GitHub access check: at start, then hourly; it never runs a model.
     threading.Thread(target=github_service.loop, daemon=True, name="github-access").start()
-    # Remote control runs again only if the owner left it on.
+    # Remote control runs again only if the owner left it on, and not while it is paused (remote_control.PAUSED).
     remote_control_supervisor.resume()
     threading.Thread(target=stdin_reader, daemon=True).start()
     # The live Codex process starts now when the owner left warm_start on and a sign-in exists, so the first
