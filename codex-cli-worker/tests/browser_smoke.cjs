@@ -980,9 +980,24 @@ async function effortSaved(page, label) {
       };
       return blocks.map((node) => {
         const rect = node.getBoundingClientRect();
-        return { top: rect.top, bottom: rect.bottom, left: firstCharacter(node) };
+        return { top: rect.top, bottom: rect.bottom, left: firstCharacter(node), margin: parseFloat(getComputedStyle(node).marginBottom) };
       });
     });
+    // The upper bound (N1 of CX-REPLY-ALIGNc): step groups sit between these blocks, so the gap itself varies; what
+    // is compared with a paragraph gap is the space each narration block leaves below itself. The answer is last.
+    const paragraphGap = await page.evaluate(() => {
+      const sample = document.createElement("div");
+      sample.className = "message markdown";
+      sample.style.cssText = "position: fixed; visibility: hidden; top: 0; left: 0";
+      sample.innerHTML = "<p>First paragraph.</p><p>Second paragraph.</p>";
+      document.body.append(sample);
+      const margin = parseFloat(getComputedStyle(sample.firstElementChild).marginBottom);
+      sample.remove();
+      return margin;
+    });
+    assert.ok(paragraphGap > 0, "no paragraph gap to compare with");
+    for (const [n, block] of narration.slice(0, -1).entries())
+      assert.ok(block.margin <= paragraphGap + 2, `narration block ${n} leaves ${block.margin} px below it; a paragraph leaves ${paragraphGap} px`);
     assert.ok(narration.length >= 3, `${narration.length - 1} narration blocks above the answer`);
     for (let n = 1; n < narration.length; n++) {
       const gap = narration[n].top - narration[n - 1].bottom;
@@ -1003,28 +1018,6 @@ async function effortSaved(page, label) {
       saved.turns.at(-1).execution_settings,
       saved.chat_settings,
     );
-    // A narration gap must be one normal paragraph gap, including its upper bound.
-    const replyGaps = await page.evaluate(() => {
-      const exchange = [...document.querySelectorAll("#messages .exchange")].at(-1);
-      const blocks = [...exchange.querySelectorAll("#activity-text > .message"), exchange.querySelector(".answer > .message")];
-      const sample = document.createElement("div");
-      sample.className = "message markdown";
-      sample.style.cssText = "position: fixed; visibility: hidden; top: 0; left: 0";
-      for (const text of ["First paragraph.", "Second paragraph."]) {
-        const p = document.createElement("p");
-        p.textContent = text;
-        sample.append(p);
-      }
-      exchange.append(sample);
-      const reference = sample.children[1].getBoundingClientRect().top - sample.children[0].getBoundingClientRect().bottom;
-      sample.remove();
-      return {reference, gaps: blocks.slice(1).map((block, index) =>
-        block.getBoundingClientRect().top - blocks[index].getBoundingClientRect().bottom)};
-    });
-    assert.ok(replyGaps.gaps.length >= 2, "expected both narration gaps");
-    for (const gap of replyGaps.gaps)
-      assert.ok(Math.abs(gap - replyGaps.reference) <= 2,
-        `narration gap ${gap} px differs from paragraph gap ${replyGaps.reference} px`);
     await openPicker(page);
     await page.locator("#effort-slider").press("End");
     await effortSaved(page, "Ultra");
@@ -2041,9 +2034,10 @@ async function effortSaved(page, label) {
     await require("./browser_slash.cjs")(browser, output, errors);
     await require("./browser_file_link.cjs")(browser, output, errors);
     await require("./browser_answer_bleed.cjs")(browser, output, errors);
+    await require("./browser_reply_layout.cjs")(browser, output, errors);
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: queued messages (wait behind a working chat, edit, remove, start in order), choices under a question (pick one, draft kept, late answer refused), attached images (pick, reject, remove, send, render, batch stays with its chat, send waits for decoding), chat actions (pin, rename, delete, long press), generated image attachments, Markdown formatting (sent messages, answers, untrusted text, slow or long text, narrow screens), saved model/reasoning choices, model compatibility, the model a chat runs on by name, quota bars, the line about the Codex integration, keyboard/reset controls, history, pagination, continuation, new chats, drafts, reopening the last chat, safe text, settings, text size (three sizes, kept per device, phone and iPad), slash commands (list, filter, tap, keys, run not sent), file links in answers (card, download, refused paths), narration kept out of the answer (inside the closed list, aligned with it at four widths), resize, mobile and dark mode. Screenshots: " +
+      "PASS: queued messages (wait behind a working chat, edit, remove, start in order), choices under a question (pick one, draft kept, late answer refused), attached images (pick, reject, remove, send, render, batch stays with its chat, send waits for decoding), chat actions (pin, rename, delete, long press), generated image attachments, Markdown formatting (sent messages, answers, untrusted text, slow or long text, narrow screens), saved model/reasoning choices, model compatibility, the model a chat runs on by name, quota bars, the line about the Codex integration, keyboard/reset controls, history, pagination, continuation, new chats, drafts, reopening the last chat, safe text, settings, text size (three sizes, kept per device, phone and iPad), slash commands (list, filter, tap, keys, run not sent), file links in answers (card, download, refused paths), narration kept out of the answer (inside the closed list, aligned with it at four widths), reply layout (five transcript-shaped examples at four widths: narration count, edges, gaps), resize, mobile and dark mode. Screenshots: " +
         output,
     );
   } finally {
