@@ -3,6 +3,10 @@
 ## 0.4.0 (unreleased)
 
 ### What's new
+- **Update banners.** The chat page says **Version X is installed. Restart Home Assistant to finish.** while Home
+  Assistant still runs an older copy of the integration (or none, after the first install), and **Update available:
+  version X** with a link to the app's Info page when Supervisor offers a newer app. Each banner can be dismissed for
+  its version. The app reads both facts from Home Assistant and Supervisor; it installs and restarts nothing.
 - The app includes openpyxl so Codex can read and create Excel workbooks offline.
 - **New chats start on the account's default model and level.** With the model option on `default`, a chat runs on
   the model Codex's model list marks as the account's default, at the reasoning level Codex gives it, instead of a
@@ -168,6 +172,13 @@
 - The add-on Configuration page now uses plain option names and one short description for each option (25 words or fewer). A test keeps names free of code words and descriptions short.
 
 ### Fixed
+- **ChatGPT app tools ask you instead of failing in Default.** When Codex used a tool of an app connected to your
+  ChatGPT account, such as GitHub to open a draft pull request, the chat page declined the request in Default and
+  showed an error, while the same request worked in Full access and Auto-review. Now Default shows the usual
+  permission card: the app, the tool and every argument. **Allow once** runs that one call; **Deny** declines it.
+  Read only still declines app tools, because they act outside the sandbox. The app log has one line for each tool
+  request that you allow or deny and for each question that the page declines, with names only and no arguments.
+- Chat replies preserve math delimiters. Equations in a sentence appear as inline code, and display equations on their own lines appear in code blocks.
 - **Replies line up and are spaced.** A reply's text started one space to the right of its "Worked for" line and of
   the lines Codex writes along the way ("I'll look for …", "I found …"). Those lines also touched each other and the
   answer, so they read as part of it. Now all of them start at the left edge, and each line Codex writes along the way
@@ -177,7 +188,12 @@
   chose the default again, because Codex keeps a thread's model unless a message names another one. Each message now
   names its model. A message on the default names the default model that Codex shows in its status, when the app
   knows that model. Until then, for example in the first moments after a start, the chat keeps its last model.
-- The chat shows the final answer once. Interim messages still appear in order above it.
+- The chat shows the final answer once. Interim messages still appear in order before it.
+- **The answer starts right under its "Worked for" line.** The lines Codex writes along the way ("I'll look for …")
+  stayed between the closed line and the answer after the exchange ended, so they read as part of the answer. They
+  still show while Codex works. When the exchange ends, they move into the closed list, between the groups of steps,
+  as in the desktop app. Open the list to read them; they start at the same left edge as the answer. An earlier
+  exchange shows its own lines the same way when you open its list.
 - **Share masks three more shapes.** A password value whose first word another rule already masked (an `sk-` key, a
   token) no longer keeps the rest of its line, and a quoted password that runs on to the next line is masked whole.
   A very long run of the secret word itself (`password-password-...`) is masked about three times faster.
