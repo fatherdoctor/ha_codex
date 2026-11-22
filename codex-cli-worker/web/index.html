@@ -69,7 +69,7 @@
             <span class="status-dot" aria-hidden="true"></span
             ><span class="foot-label">GitHub · <span id="github-status-summary">Loading…</span></span>
           </button>
-          <button id="remote-status-row" class="foot-row" type="button" data-state="loading" data-section="app-pairing-section">
+          <button id="remote-status-row" data-remote class="foot-row" type="button" data-state="loading" data-section="app-pairing-section">
             <span class="status-dot" aria-hidden="true"></span
             ><span class="foot-label">Remote · <span id="remote-status-summary">Loading…</span></span>
           </button>
@@ -443,7 +443,7 @@
         <button type="button" id="full-access-confirm">Turn on Full access</button>
       </div>
     </dialog>
-    <dialog id="connection-dialog" class="studio-sheet" aria-labelledby="connection-title"><div class="dialog-header"><button id="connection-back" class="icon icon-back" type="button" aria-label="Back to Settings"></button><h2 id="connection-title">Remote connection</h2><button class="icon icon-close" data-close="connection-dialog" aria-label="Close remote connection"></button></div><div id="connection-content"></div><p id="connection-result" role="alert"></p></dialog>
+    <dialog id="connection-dialog" data-remote class="studio-sheet" aria-labelledby="connection-title"><div class="dialog-header"><button id="connection-back" class="icon icon-back" type="button" aria-label="Back to Settings"></button><h2 id="connection-title">Remote connection</h2><button class="icon icon-close" data-close="connection-dialog" aria-label="Close remote connection"></button></div><div id="connection-content"></div><p id="connection-result" role="alert"></p></dialog>
     <dialog id="workspace-dialog" class="studio-sheet" aria-labelledby="workspace-title"><div class="dialog-header"><h2 id="workspace-title">Workspace rules</h2><button class="icon icon-close" data-close="workspace-dialog" aria-label="Close workspace rules"></button></div><div id="workspace-content"><label for="agents">AGENTS.md</label
       ><textarea id="agents" rows="12" spellcheck="false"></textarea
       ><button id="save-agents">Save instructions</button></div><p id="workspace-result" role="status"></p></dialog>
@@ -507,7 +507,7 @@
           </details>
           <p id="github-result" role="alert"></p>
         </section>
-        <section id="app-pairing-section" aria-labelledby="app-pairing-title">
+        <section id="app-pairing-section" data-remote aria-labelledby="app-pairing-title">
           <h4 id="app-pairing-title">ChatGPT app pairing</h4>
           <p id="app-pairing-status" class="muted" role="status">Loading…</p>
           <p class="muted">The pairing code and its QR code open in their own window. The worker does not know how long a pairing code lasts, so no countdown shows. If the app refuses a code, get a new one. Turn off stops the ChatGPT app from reaching this Home Assistant until you turn it on again.</p>
@@ -550,7 +550,7 @@
               >
         </fieldset>
       </section>
-      <section id="remote-control-section" data-own-dialog>
+      <section id="remote-control-section" data-remote data-own-dialog>
         <h3>Remote control from the ChatGPT app</h3>
         <p class="muted">Lets the ChatGPT app work on this Home Assistant. Off until you turn it on.</p>
         <p id="remote-control-status" class="muted" role="status">Loading…</p>
@@ -610,7 +610,7 @@
       </section>
       <a id="addon-configuration" class="ha-row ha-nav-row" target="_top"
          aria-label="Add-on configuration" aria-describedby="addon-configuration-description"
-        ><span><strong>Add-on configuration</strong><span id="addon-configuration-description" class="ha-row-description">Model, sandbox, logs to keep, the remote control name and the other options.</span></span
+        ><span><strong>Add-on configuration</strong><span id="addon-configuration-description" class="ha-row-description">Model, sandbox, logs to keep<span data-remote>, the remote control name</span> and the other options.</span></span
         ><span class="ha-nav-chevron" aria-hidden="true"></span></a>
       <p id="settings-result" role="status"></p>
     </dialog>
