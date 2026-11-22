@@ -3,6 +3,12 @@
 ## 0.4.0 (unreleased)
 
 ### What's new
+- **A schedule wakes the chat it was made in.** Each run of a schedule made from a chat is that chat's next
+  message: Codex continues the same conversation, and the chat moves to the top of the list with a dot until you open
+  it. Earlier, each run started a new chat. The run keeps the schedule's permissions and model, never a wider mode
+  set on the chat. A deleted or archived chat gets a new chat named for the schedule, which later runs continue; a
+  schedule made in Settings still starts a new chat for each run. The run log is copied once into a new shape at
+  start, and a rollback still reads it.
 - The app includes openpyxl so Codex can read and create Excel workbooks offline.
 - **New chats start on the account's default model and level.** With the model option on `default`, a chat runs on
   the model Codex's model list marks as the account's default, at the reasoning level Codex gives it, instead of a

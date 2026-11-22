@@ -981,6 +981,7 @@ function renderRow(chat, queued = null) {
   row.classList.toggle("current", chat.task_id === state.id);
   row.classList.toggle("menu-open", chat.task_id === menu.id);
   row.classList.toggle("queued", Boolean(queued));
+  row.classList.toggle("unread", Boolean(chat.unread) && !queued);
   const main = textNode("button", "", "row-main");
   main.type = "button";
   main.dataset.taskId = chat.task_id;
@@ -991,6 +992,13 @@ function renderRow(chat, queued = null) {
   else if (chat.pinned) heading.append(pinIcon());
   else heading.append(chatIcon());
   heading.append(textNode("span", title));
+  if (chat.unread && !queued) {
+    // A scheduled run answered here since the owner last opened the chat.
+    const dot = textNode("span", "", "unread-dot");
+    dot.setAttribute("role", "img");
+    dot.setAttribute("aria-label", "New scheduled run");
+    heading.append(dot);
+  }
   main.append(heading);
   main.append(
     textNode(
@@ -1134,6 +1142,7 @@ async function loadList(older = false) {
   if (!state.archived)
     noteAttention("approvals", state.chats.filter((chat) => chat.permission_required).map((chat) => chat.task_id));
   if (hadSelected && !merged.has(state.id)) await selectChat(null);
+  markRead(state.id);
   renderList();
   // Approval panels in the open chat depend on whether any chat is working.
   if (activeChanged && state.task) renderTask();
@@ -2455,6 +2464,7 @@ async function selectChat(id, restoring = false, keepSidebar = false) {
   resizeInput();
   showError(null);
   if (!keepSidebar) sidebar(false);
+  markRead(id);
   renderList();
   controls();
   if (!id) {
@@ -2706,6 +2716,16 @@ $("chat-menu").addEventListener("click", async (event) => {
   else if (action === "share") openShare(id);
   else document.dispatchEvent(new CustomEvent("thread-action", {detail: {action, id}}));
 });
+/**
+ * Clear the unread mark a scheduled run left on the open chat, while the page is in view.
+ * A failed request leaves nothing to undo: the next list refresh shows the mark again.
+ */
+function markRead(id) {
+  const chat = id && chatById(id);
+  if (!chat?.unread || document.hidden) return;
+  chat.unread = false;
+  api(`tasks/${encodeURIComponent(id)}/read`, {}).catch(() => {});
+}
 /** Pin or unpin a chat through the worker API and re-sort the list. */
 async function togglePin(id) {
   const chat = chatById(id);

@@ -2863,6 +2863,7 @@ def task_payload(
         result["summary"] = str(result["summary"])[:240]
         result["pinned"] = bool(task.get("pinned"))
         result["archived"] = bool(task.get("archived"))
+        result["unread"] = bool(task.get("unread"))
     else:
         result = copy.deepcopy(task)
         result["chat_settings"] = current_chat_settings(task.get("chat_settings", DEFAULT_CHAT_SETTINGS))
@@ -3856,9 +3857,34 @@ def notify(title: str, message: str, *, still_wanted: Callable[[], bool] | None 
 BACKGROUND_SOURCES = frozenset({'schedule', 'lead'})
 
 
+def current_turn(task: dict[str, Any]) -> dict[str, Any]:
+    """Return the chat's current exchange, or an empty dict when its exchange list does not hold it."""
+    return next((item for item in task.get('turns') or [] if item.get('turn_id') == task.get('current_turn_id')), {})
+
+
+def exchange_source(task: dict[str, Any]) -> str | None:
+    """Return the task_source of the chat's current exchange: the exchange's own, else the chat's."""
+    return current_turn(task).get('task_source') or task.get('task_source')
+
+
+def unattended_mode(task: dict[str, Any]) -> str | None:
+    """Return the mode of unattended work ('default' or 'read-only') for the chat's current exchange, or None.
+
+    A chat that a schedule started is unattended for good. A scheduled run in a
+    chat the owner made marks only its own exchange, so the owner's next message
+    runs in the chat's own mode again.
+    """
+    turn = current_turn(task)
+    if turn.get('task_source') in BACKGROUND_SOURCES:
+        return turn.get('background_mode') or task.get('background_mode') or 'default'
+    if task.get('task_source') in BACKGROUND_SOURCES:
+        return task.get('background_mode') or 'default'
+    return None
+
+
 def background_task(task_id: str) -> bool:
     with lock:
-        return tasks.get(task_id, {}).get('task_source') in BACKGROUND_SOURCES
+        return unattended_mode(tasks.get(task_id, {})) is not None
 
 
 def notify_task_outcome(task_id, status, summary, turn_id='', question='', choices=None):
@@ -5127,8 +5153,7 @@ def task_options(task_id: str) -> dict[str, Any]:
     options = dict(read_options())
     with lock:
         task = tasks.get(task_id, {})
-        if (task.get('permission_mode') == 'read-only'
-                or (task.get('task_source') in BACKGROUND_SOURCES and task.get('background_mode') == 'read-only')):
+        if task.get('permission_mode') == 'read-only' or unattended_mode(task) == 'read-only':
             options['codex_sandbox'] = 'read-only'
     return options
 
@@ -5147,7 +5172,7 @@ def task_mode_settings(task_id: str, options: dict[str, Any] | None = None) -> d
     with lock:
         task = tasks.get(task_id, {})
         mode = task.get('permission_mode') or protected_policy.DEFAULT_MODE
-        if task.get('task_source') in BACKGROUND_SOURCES:
+        if unattended_mode(task) is not None:
             mode = protected_policy.DEFAULT_MODE
     if mode == protected_policy.FULL_ACCESS_MODE and not full_access.is_on():
         mode = protected_policy.DEFAULT_MODE
@@ -6707,7 +6732,7 @@ def _run_background_task(
     """Run an exchange in its thread and always release the worker and clean up afterwards."""
     with lock:
         diagnostic_task = tasks.get(task_id, {})
-        source = "scheduled_run" if diagnostic_task.get("task_source") == "schedule" else "addon_page"
+        source = "scheduled_run" if exchange_source(diagnostic_task) == "schedule" else "addon_page"
         model = (diagnostic_task.get("chat_settings") or {}).get("model", "default")
     try:
         record_diagnostic("begin", task_id, source, model)
@@ -7351,6 +7376,16 @@ def pin_task(task_id: str) -> Response:
     if task is None:
         return jsonify({"ok": False, "error": error}), 404 if error == "task not found" else 500
     return jsonify({"ok": True, "task_id": task_id, "pinned": bool(task.get("pinned"))})
+
+
+@app.post("/tasks/<task_id>/read")
+@require_auth
+def read_task(task_id: str) -> Response:
+    """Clear the unread mark a scheduled run left on a chat, without moving it in the recent list."""
+    task, error = save_task_fields(task_id, unread=False)
+    if task is None:
+        return jsonify({"ok": False, "error": error}), 404 if error == "task not found" else 500
+    return jsonify({"ok": True, "task_id": task_id, "unread": False})
 
 
 @app.post("/tasks/<task_id>/title")

@@ -261,6 +261,17 @@ aside {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* A scheduled run answered in this chat since the owner last opened it. */
+.row-title > .unread-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.chat-row.unread .row-title {
+  font-weight: 650;
+}
 .pin-icon {
   width: 12px;
   height: 12px;
