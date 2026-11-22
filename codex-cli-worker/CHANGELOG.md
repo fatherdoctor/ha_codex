@@ -133,6 +133,11 @@
   the ChatGPT app would have asked before each change in `/config`. The `github_git` tool and the **Link** form
   under **Settings** > **GitHub** now refuse a relative path such as `.` and ask for the full path, so a path meant
   for the working folder cannot name the configuration repository in `/config`.
+- **Codex changes the app's `AGENTS.md` without a card.** `/addon_config`, the app's own folder that holds its
+  `AGENTS.md`, is now a writable place in `workspace-write` beside `/config`, `/share` and `/media`, on the chat page
+  and over the remote connection. When you ask a chat to change your workspace instructions, Codex writes the file
+  without an approval card, as the Claude Code add-on writes its own folder and as the **Settings** editor already
+  did. Before, each such write showed a card. In Read only mode a change still asks first.
 - **Earlier answers open their steps.** Every answer's **Worked for** line now opens the steps of that exchange, not
   only the latest answer's. The line starts closed; its steps load from the worker the first time it opens, and then
   the answer's checks follow. The worker already saved each exchange's steps; `GET /tasks/<task_id>/activity` takes

@@ -398,7 +398,7 @@ backup leaves the media folder out unless you include it in your backup settings
 backup larger, and they are not restored from a backup. Keep instructions you need in the app's own `AGENTS.md`
 (Settings), which the backup keeps.
 The app creates the folder at start when it is missing and never moves, empties or rewrites what is in it. What Codex
-may write without a request is `/config`, `/share`, `/media` (with `/media/.agents`), the exchange's backup folder and the chat's files folder. Other apps keep their
+may write without a request is `/config`, `/share`, `/media` (with `/media/.agents`), `/addon_config` (the app's own folder, where its `AGENTS.md` is), the exchange's backup folder and the chat's files folder. Other apps keep their
 files under `/share` and `/media` too (another assistant's folder, a clone of a repository, recordings); the sandbox
 does not stop a write there in `workspace-write`, so the starter `AGENTS.md` tells Codex to ask first, and your own
 `AGENTS.md` can say more. When the folder cannot be created, when `/media` is missing, or when any part of the path is
@@ -768,9 +768,9 @@ when one is there; the app neither writes nor moves that file. Codex reads the a
 folder's file after it, so where the two disagree, the working folder's file wins. An `AGENTS.md` left in `/config`
 is not read while Codex works from `/media/.agents/codex`. The working folder's file is in `/media`, which is
 writable, so Codex or another app with `/media` access can change it without an approval card, and the automatic
-backup does not keep it; the approval described below covers the app's file only.
+backup does not keep it.
 
-The editor under **Settings** writes the file without a question. The folder is not one of the places Codex may write on its own, so when you ask a chat to change the file, Codex asks for your approval first.
+The editor under **Settings** writes the file without a question. The app's folder is also one of the places Codex may write on its own in `workspace-write`, as the Claude Code add-on writes its own folder: when you ask a chat to change the file, Codex changes it without an approval card. In Read only mode a change still asks you first.
 
 From **0.3.4**, Codex no longer looks for the file in every message. Codex loads the file when a chat
 starts, and the page's rules tell it never to look for the file with a command. When Codex calls `exchange_info`

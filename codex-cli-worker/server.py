@@ -90,8 +90,11 @@ CODEX_WORKDIR = MEDIA_ROOT / ".agents" / "codex"
 # .agents (like .git and .codex) read-only when it sits directly in a writable root: with /media alone,
 # /media/.agents/claude and a new file in /media/.agents would need a card. A project's .agents folder holds
 # skills Codex loads; /media/.agents is not a project folder, and nothing in it is loaded as instructions.
+# /addon_config (ADDON_CONFIG_ROOT below; a test checks the two match) is the ruling of 2026-11-22: the Claude add-on writes its own
+# addon_config folder, so Codex may change the owner's AGENTS.md there without a permission card. The editor
+# under Settings already wrote it without one, and /config, which Home Assistant runs, needs no card either.
 # /data/github stays masked by codex-bwrap and is never a writable root.
-TASK_WRITABLE_ROOTS = (str(CONFIG_ROOT), "/share", str(MEDIA_ROOT), str(CODEX_WORKDIR.parent))
+TASK_WRITABLE_ROOTS = (str(CONFIG_ROOT), "/share", str(MEDIA_ROOT), str(CODEX_WORKDIR.parent), "/addon_config")
 DATA_ROOT = Path("/data")
 # Files a person attaches to a message live in their own folder in the app's data folder, and the
 # backup leaves them out (config.yaml, backup_exclude: "*/chat_uploads"). The Supervisor matches each

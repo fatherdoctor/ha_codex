@@ -1,6 +1,7 @@
 """AGENTS.md lives in the app's own addon_config folder, and Codex loads it from there."""
 import contextlib
 import io
+import json
 import os
 import tempfile
 import unittest
@@ -139,6 +140,53 @@ class AgentsHome(unittest.TestCase):
         self.assertFalse(os.path.lexists(self.legacy))
         self.assertEqual(self.link.read_text(encoding="utf-8") if self.link.exists() else "Edited in the editor\n",
                          "Edited in the editor\n")
+
+
+
+class AgentsFileWritableWithoutCard(unittest.TestCase):
+    """The owner's ruling of 2026-11-22: Codex writes the app's AGENTS.md as the Claude add-on writes its own folder.
+
+    In workspace-write, Codex's sandbox lets a write through without a permission card only inside the turn's
+    writable roots, so the check is that the app's folder is one of them, on the page and over remote control.
+    """
+
+    TASK_ID = "20261122T120000Z-0a1b2c3d"
+
+    def turn_roots(self, sandbox):
+        """The sandboxPolicy the worker sends with a message, in a temporary task root."""
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        final = Path(folder.name) / "tasks" / self.TASK_ID / "turns" / "t1" / "final.json"
+        final.parent.mkdir(parents=True)
+        proc = type("Process", (), {"stdin": io.StringIO(), "poll": lambda _: None})()
+        options = {**server.DEFAULT_OPTIONS, "codex_sandbox": sandbox}
+        with patch.object(server, "task_root", return_value=Path(folder.name) / "tasks"), \
+                patch.object(server, "task_mode_settings", return_value={
+                    "sandbox": sandbox, "approval_policy": "on-request", "approvals_reviewer": "user"}):
+            session = server.create_approval_session(self.TASK_ID, proc, "Edit my rules", final, None, {}, options)
+        return session.turn_params["sandboxPolicy"]
+
+    def covered(self, path, roots):
+        return any(path.is_relative_to(root) for root in roots)
+
+    def test_a_chat_on_the_page_writes_the_file_without_a_card(self):
+        roots = self.turn_roots("workspace-write")["writableRoots"]
+        self.assertTrue(self.covered(server.AGENTS_PATH, roots))
+        self.assertIn(str(server.ADDON_CONFIG_ROOT), roots)
+
+    def test_read_only_still_asks(self):
+        self.assertNotIn("writableRoots", self.turn_roots("read-only"))
+
+    def test_a_remote_control_chat_writes_the_file_without_a_card(self):
+        args = server.relay_writable_roots_args()
+        roots = json.loads(args[1].split("=", 1)[1])
+        self.assertTrue(self.covered(server.AGENTS_PATH, roots))
+
+    def test_the_root_is_the_app_folder_only_not_the_app_data(self):
+        """The app's private files stay out: /addon_config is a separate mount from /data and /run."""
+        roots = self.turn_roots("workspace-write")["writableRoots"]
+        for private in (server.WORKER_TOKEN_PATH, server.OPTIONS_PATH, Path("/run/s6/container_environment")):
+            self.assertFalse(self.covered(private, roots), private)
 
 
 class AgentsHomeDefaults(unittest.TestCase):
