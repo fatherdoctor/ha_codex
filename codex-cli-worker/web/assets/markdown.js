@@ -98,13 +98,23 @@ function markdownCheckbox(token) {
   box.disabled = true;
   return box;
 }
+/**
+ * Return the download card for a link or image that points at a file the chat
+ * offers, or null. `fileLink` comes from the page and knows the chat's files.
+ */
+function markdownFileCard(token, parent, fileLink) {
+  if (!fileLink || !["link", "image"].includes(token.type)) return null;
+  return parent.closest("a") ? null : fileLink(token.href);
+}
 /** Add the text-level parts of a block: emphasis, code, links, line breaks. */
-function markdownInline(tokens, parent, inCell = false) {
+function markdownInline(tokens, parent, inCell = false, fileLink = null) {
   for (const token of tokens || []) {
-    if (markdownInlineTags[token.type]) {
+    const card = markdownFileCard(token, parent, fileLink);
+    if (card) parent.append(card);
+    else if (markdownInlineTags[token.type]) {
       const node = document.createElement(markdownInlineTags[token.type]);
       parent.append(node);
-      markdownInline(token.tokens, node, inCell);
+      markdownInline(token.tokens, node, inCell, fileLink);
     } else if (token.type === "codespan") {
       const code = document.createElement("code");
       code.textContent = token.text;
@@ -120,7 +130,7 @@ function markdownInline(tokens, parent, inCell = false) {
         ? markdownLink(href, token.title)
         : document.createElement("span");
       parent.append(node);
-      markdownInline(token.tokens, node, inCell);
+      markdownInline(token.tokens, node, inCell, fileLink);
     } else if (token.type === "image") {
       // Images are never loaded from a message, because a remote one would
       // tell its server that the message was read. Offer a link instead.
@@ -131,7 +141,7 @@ function markdownInline(tokens, parent, inCell = false) {
         link.textContent = label;
         parent.append(link);
       } else parent.append(label);
-    } else if (token.tokens) markdownInline(token.tokens, parent, inCell);
+    } else if (token.tokens) markdownInline(token.tokens, parent, inCell, fileLink);
     else
       parent.append(
         ["text", "escape"].includes(token.type) ? token.text : token.raw,
@@ -139,24 +149,24 @@ function markdownInline(tokens, parent, inCell = false) {
   }
 }
 /** Build one table cell, aligned as its column asks. */
-function markdownCell(cell, tag) {
+function markdownCell(cell, tag, fileLink) {
   const node = document.createElement(tag);
   if (cell.align) node.style.textAlign = cell.align;
-  markdownInline(cell.tokens, node, true);
+  markdownInline(cell.tokens, node, true, fileLink);
   return node;
 }
 /** Add the block-level parts of a message: paragraphs, lists, code, tables. */
-function markdownBlocks(tokens, parent) {
+function markdownBlocks(tokens, parent, fileLink = null) {
   for (const token of tokens || []) {
     if (token.type === "space" || token.type === "def") continue;
     if (token.type === "paragraph") {
       const node = document.createElement("p");
-      markdownInline(token.tokens, node);
+      markdownInline(token.tokens, node, false, fileLink);
       parent.append(node);
     } else if (token.type === "heading") {
       // The page already uses h1 and h2, so message headings start below them.
       const node = document.createElement(`h${Math.min(token.depth + 2, 6)}`);
-      markdownInline(token.tokens, node);
+      markdownInline(token.tokens, node, false, fileLink);
       parent.append(node);
     } else if (token.type === "code") {
       const block = document.createElement("div");
@@ -176,7 +186,7 @@ function markdownBlocks(tokens, parent) {
       parent.append(block);
     } else if (token.type === "blockquote") {
       const node = document.createElement("blockquote");
-      markdownBlocks(token.tokens, node);
+      markdownBlocks(token.tokens, node, fileLink);
       parent.append(node);
     } else if (token.type === "list") {
       const list = document.createElement(token.ordered ? "ol" : "ul");
@@ -185,7 +195,7 @@ function markdownBlocks(tokens, parent) {
       for (const item of token.items) {
         const node = document.createElement("li");
         if (item.task) node.className = "md-task";
-        markdownBlocks(item.tokens, node);
+        markdownBlocks(item.tokens, node, fileLink);
         list.append(node);
       }
       parent.append(list);
@@ -197,19 +207,19 @@ function markdownBlocks(tokens, parent) {
       wrapper.className = "md-table";
       const table = document.createElement("table");
       const head = document.createElement("tr");
-      for (const cell of token.header) head.append(markdownCell(cell, "th"));
+      for (const cell of token.header) head.append(markdownCell(cell, "th", fileLink));
       table.createTHead().append(head);
       const body = table.createTBody();
       for (const cells of token.rows) {
         const row = document.createElement("tr");
-        for (const cell of cells) row.append(markdownCell(cell, "td"));
+        for (const cell of cells) row.append(markdownCell(cell, "td", fileLink));
         body.append(row);
       }
       wrapper.append(table);
       parent.append(wrapper);
     } else if (token.type === "hr") parent.append(document.createElement("hr"));
     // The text of a list item that has no blank lines around it.
-    else if (token.tokens) markdownInline(token.tokens, parent);
+    else if (token.tokens) markdownInline(token.tokens, parent, false, fileLink);
     else parent.append(token.text ?? token.raw);
   }
 }
@@ -230,15 +240,18 @@ function markdownTokens(text) {
   markdownCache.set(text, tokens);
   return tokens;
 }
-/** Build a message element with its text formatted as Markdown. */
-function renderMarkdown(text, className) {
+/**
+ * Build a message element with its text formatted as Markdown. `fileLink`, when
+ * given, turns a link to one of the chat's own files into a download card.
+ */
+function renderMarkdown(text, className, fileLink = null) {
   const node = document.createElement("div");
   node.className = className;
   text = String(text || "");
   const tokens = markdownTokens(text);
   if (tokens)
     try {
-      markdownBlocks(tokens, node);
+      markdownBlocks(tokens, node, fileLink);
       node.classList.add("markdown");
       return node;
     } catch (_) {
