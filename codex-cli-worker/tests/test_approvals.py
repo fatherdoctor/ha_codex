@@ -391,6 +391,9 @@ class ApprovalTests(unittest.TestCase):
         for thread, turn in [("other", "turn"), ("thread", "other")]:
             self.session.receive({"method": "item/reasoning/summaryTextDelta", "params": {
                 "threadId": thread, "turnId": turn, "itemId": "thought", "summaryIndex": 0, "delta": "wrong"}})
+        with server.lock:
+            payload = server.activity_payload_locked(server.task_activity["stream-test"])
+        self.assertEqual(payload["steps"][0]["text"], "Checking settings\nNext step")
         receive("item/completed", item={"id": "thought", "type": "reasoning",
                 "summary": ["Checking settings", "Next step"], "content": ["private-content"]})
         receive("item/reasoning/summaryTextDelta", itemId="thought", summaryIndex=0, delta="late")

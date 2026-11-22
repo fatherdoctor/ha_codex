@@ -5320,6 +5320,16 @@ def bind_chat_thread(task_id: str, thread_id: Any) -> None:
               "lower-case Codex thread id, or another chat holds the thread.", flush=True)
 
 
+def is_live_summary_update(event: dict[str, Any]) -> bool:
+    """Tell whether an event is a streamed update of a reasoning summary.
+
+    Each update holds the whole summary so far, so writing every one to codex.log would repeat the text once for each
+    delta. The completed item still writes the final text to the log one time.
+    """
+    item = event.get("item")
+    return event.get("type") == "item.updated" and isinstance(item, dict) and item.get("type") == "reasoning"
+
+
 def create_approval_session(
     task_id: str, proc: subprocess.Popen | None, prompt: str, final_file: Path,
     session_id: str | None, session_holder: dict[str, str], options: dict[str, Any],
@@ -5404,9 +5414,13 @@ def create_approval_session(
                 notify_permission_async(task_id, item, alerts[item["approval_id"]])
 
     def event(event: dict[str, Any]) -> None:
-        """Record one event in the task log and the chat's steps, without logging raw RPC requests."""
+        """Record one event in the task log and the chat's steps, without logging raw RPC requests.
+
+        A live summary update goes to the steps only (is_live_summary_update).
+        """
         event = redact_event(event)
-        write_task_log(task_id, "stdout", json.dumps(event))
+        if not is_live_summary_update(event):
+            write_task_log(task_id, "stdout", json.dumps(event))
         record_activity_event(task_id, event)
         if status_calls is not None and event.get("type") == "item.completed":
             call = status_call(event.get("item"))

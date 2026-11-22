@@ -2354,7 +2354,8 @@ function renderActivity() {
   const thinking = latestReasoning
     ? textNode("div", `Thinking: ${latestReasoning.text.replace(/\s+/g, " ").trim()}`, "activity-thinking")
     : null;
-  block.replaceChildren(...[toggle, thinking, list].filter(Boolean));
+  // Under the list, so with the list open the newest thought is next to the newest step.
+  block.replaceChildren(...[toggle, list, thinking].filter(Boolean));
   tickElapsed();
   if (nearBottom) area.scrollTop = area.scrollHeight;
 }
