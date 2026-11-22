@@ -637,6 +637,38 @@ sys.stdin.read()
 """
 
 
+@unittest.skipUnless(os.environ.get("HA_TEST_REQUIRE_CODEX") == "1", "requires the built worker image")
+class SandboxWorkbook(unittest.TestCase):
+    """The image ships spreadsheet support for the Python that Codex commands run."""
+
+    def test_openpyxl_round_trip(self) -> None:
+        create = textwrap.dedent("""
+            from openpyxl import Workbook
+
+            book = Workbook()
+            book.active["A1"] = "=SUM(1,2)"
+            book.save("example.xlsx")
+        """)
+        read = textwrap.dedent("""
+            from openpyxl import load_workbook
+
+            book = load_workbook("example.xlsx", read_only=True)
+            print(book.active["A1"].value)
+            book.close()
+        """)
+        with tempfile.TemporaryDirectory() as work:
+            # Saving a workbook needs temporary files. Reading an existing workbook does not.
+            for mode, script, expected in (("workspace-write", create, ""), ("read-only", read, "=SUM(1,2)")):
+                result = subprocess.run(
+                    [CODEX, "sandbox", "--config", f'sandbox_mode="{mode}"',
+                     "--config", "check_for_update_on_startup=false", "--", "python3", "-I", "-c", script],
+                    cwd=work, capture_output=True, text=True, timeout=30,
+                )
+                self.assertEqual(result.returncode, 0, f"{mode}: {result.stderr}")
+                self.assertEqual(result.stdout.strip(), expected, mode)
+
+
+
 class CloseWaitsForChildren(unittest.TestCase):
     """AppServer.close ends what the app-server started, so tearDown can remove the folder (CX-PROOFS-RMTREE).
 

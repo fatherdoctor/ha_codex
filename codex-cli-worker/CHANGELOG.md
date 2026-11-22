@@ -3,6 +3,24 @@
 ## 0.4.0 (unreleased)
 
 ### What's new
+- **Files Codex makes can be downloaded.** When you ask for a file such as a spreadsheet, Codex saves it in the
+  chat's own files folder and links to it, and the chat page shows the link as a card with the file's name and size
+  that downloads it, on a phone and on a desktop. Before, the link showed as plain text and nothing downloaded. Only
+  files in that folder are offered. The folder is under the app's private `/data`, not `/config`, and is deleted with
+  the chat. A file link read in the ChatGPT app's remote connection still does not download: that app cannot reach
+  files on your system. See "Files Codex makes for you" in the documentation.
+- **Update banners.** The chat page says **Version X is installed. Restart Home Assistant to finish.** while Home
+  Assistant still runs an older copy of the integration (or none, after the first install), and **Update available:
+  version X** with a link to the app's Info page when Supervisor offers a newer app. Each banner can be dismissed for
+  its version. The app reads both facts from Home Assistant and Supervisor; it installs and restarts nothing.
+- The app includes openpyxl so Codex can read and create Excel workbooks offline.
+- **New chats start on the account's default model and level.** With the model option on `default`, a chat runs on
+  the model Codex's model list marks as the account's default, at the reasoning level Codex gives it, instead of a
+  fixed GPT-6.1 Sol at Medium. Without that list it uses the model Codex's status report names, then the newest Sol
+  model the account offers, then GPT-6.2 Sol, now first in the built-in list. A `model_reasoning_effort` other than
+  the shipped `medium` still applies. The reset button in the model and reasoning panel now also sets the model back
+  to the default, not only the level.
+- **Choose the default model on the Configuration page.** Pick a built-in model, follow your account default, or enter a custom name. Existing installations keep their saved model.
 - **Model and reasoning picker like the desktop app.** The model and reasoning controls below the message box are now
   one chip: the model name, then the reasoning level in grey. Select it, or press Ctrl+Shift+M, to open a panel with the
   reasoning level, the model name and a slider with one stop per level the model offers. Select the model name to pick
@@ -98,6 +116,10 @@
   copy at `/data/agents_before_move.md`. If both places hold a file, nothing moves and the app logs a line.
 
 ### Changed
+- **Earlier answers open their steps.** Every answer's **Worked for** line now opens the steps of that exchange, not
+  only the latest answer's. The line starts closed; its steps load from the worker the first time it opens, and then
+  the answer's checks follow. The worker already saved each exchange's steps; `GET /tasks/<task_id>/activity` takes
+  `turn=<turn_id>` to read an earlier one.
 - **The phone chat list is easier to use.** A tap on a chat keeps the side bar open; a tap on the page to its right
   closes it. The selected chat shows its three-dot menu button where its date was, and the button is 44 pixels or
   larger. A long press still opens the menu. A desktop window does not change.
@@ -146,11 +168,28 @@
 - The add-on Configuration page now uses plain option names and one short description for each option (25 words or fewer). A test keeps names free of code words and descriptions short.
 
 ### Fixed
+- **ChatGPT app tools ask you instead of failing in Default.** When Codex used a tool of an app connected to your
+  ChatGPT account, such as GitHub to open a draft pull request, the chat page declined the request in Default and
+  showed an error, while the same request worked in Full access and Auto-review. Now Default shows the usual
+  permission card: the app, the tool and every argument. **Allow once** runs that one call; **Deny** declines it.
+  Read only still declines app tools, because they act outside the sandbox. The app log has one line for each tool
+  request that you allow or deny and for each question that the page declines, with names only and no arguments.
+- Chat replies preserve math delimiters. Equations in a sentence appear as inline code, and display equations on their own lines appear in code blocks.
+- **Replies line up and are spaced.** A reply's text started one space to the right of its "Worked for" line and of
+  the lines Codex writes along the way ("I'll look for …", "I found …"). Those lines also touched each other and the
+  answer, so they read as part of it. Now all of them start at the left edge, and each line Codex writes along the way
+  is a block of its own, one paragraph gap from the next one and from the answer. The pulsing dot of the working line
+  is centered on the line instead of sitting on the text baseline.
 - **A chat set back to the default model goes back to it.** Before, a chat kept the last model it ran on when you
   chose the default again, because Codex keeps a thread's model unless a message names another one. Each message now
   names its model. A message on the default names the default model that Codex shows in its status, when the app
   knows that model. Until then, for example in the first moments after a start, the chat keeps its last model.
-- The chat shows the final answer once. Interim messages still appear in order above it.
+- The chat shows the final answer once. Interim messages still appear in order before it.
+- **The answer starts right under its "Worked for" line.** The lines Codex writes along the way ("I'll look for …")
+  stayed between the closed line and the answer after the exchange ended, so they read as part of the answer. They
+  still show while Codex works. When the exchange ends, they move into the closed list, between the groups of steps,
+  as in the desktop app. Open the list to read them; they start at the same left edge as the answer. An earlier
+  exchange shows its own lines the same way when you open its list.
 - **Share masks three more shapes.** A password value whose first word another rule already masked (an `sk-` key, a
   token) no longer keeps the rest of its line, and a quoted password that runs on to the next line is masked whole.
   A very long run of the secret word itself (`password-password-...`) is masked about three times faster.

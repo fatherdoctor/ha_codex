@@ -9,6 +9,7 @@ WORKER = Path(__file__).resolve().parents[1]
 
 # option -> (feature that reads it, source file that reads it, test file that proves it)
 OPTIONS = {
+    "model_choice": ("default model drop-down", "server.py", "test_model_list.py"),
     "codex_model": ("default model for a chat", "server.py", "test_server.py"),
     "model_pin": ("the one model a chat may run on", "server.py", "test_sign_in_page.py"),
     "model_reasoning_effort": ("default reasoning effort", "server.py", "test_conversations.py"),
