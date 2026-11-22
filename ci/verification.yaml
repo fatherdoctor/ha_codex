@@ -85,9 +85,7 @@ jobs:
       - uses: actions/checkout@v6
       - name: Bundle the integration into the app image
         # The app installs this copy in /config at start (codex-cli-worker/integration/README.md).
-        run: |
-          rm -rf codex-cli-worker/integration/codex_cli
-          cp -R custom_components/codex_cli codex-cli-worker/integration/codex_cli
+        run: python3 scripts/bundle_integration.py
       - name: Build without publishing
         run: docker build --build-arg BUILD_ARCH=${{ matrix.arch }} --build-arg BUILD_VERSION=pr-test -t verification-test codex-cli-worker
       - name: Check the bundled integration matches the app version
@@ -96,6 +94,13 @@ jobs:
           bundled="$(docker run --rm --entrypoint python3 verification-test -c 'import json; print(json.load(open("/usr/share/ha_codex/integration/codex_cli/manifest.json"))["version"])')"
           test "$app" = "$bundled" || { echo "Bundled integration $bundled does not match app $app" >&2; exit 1; }
           docker run --rm --entrypoint test verification-test -f /integration_sync.py
+      - name: Check the bundled integration is the source, file for file
+        # The same version is not enough: a stale copy can carry the right version (scripts/bundle_integration.py).
+        run: |
+          cid="$(docker create verification-test)"
+          docker cp "$cid:/usr/share/ha_codex/integration/codex_cli" "$RUNNER_TEMP/bundled"
+          docker rm "$cid" >/dev/null
+          diff -r -x __pycache__ custom_components/codex_cli "$RUNNER_TEMP/bundled"
       - name: Check the image has no dashboard browser
         # Version 0.4 removed the dashboard screenshots, and with them Chromium and Playwright.
         run: docker run --rm --entrypoint sh verification-test -c '! command -v chromium-browser && ! test -e /opt/verification && ! test -e /browser.cjs'
