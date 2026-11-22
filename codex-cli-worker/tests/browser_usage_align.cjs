@@ -16,7 +16,9 @@ const signedIn = {status: 'authenticated', pending: false, codex_login: {status_
       await page.waitForFunction(() => document.getElementById('codex-status-row').dataset.state === 'ready');
       const edges = await page.evaluate(() => {
         const rect = el => el.getBoundingClientRect();
-        const dots = [...document.querySelectorAll('.foot-row .status-dot')].map(el => rect(el));
+        // A hidden row (Remote, while Remote Control is hidden in this version) has no box to align.
+        const dots = [...document.querySelectorAll('.foot-row .status-dot')].filter(el => el.checkVisibility())
+          .map(el => rect(el));
         const cog = rect(document.querySelector('#settings-button .mdi-icon'));
         const left = id => {
           const box = rect(document.getElementById(id));
@@ -28,7 +30,7 @@ const signedIn = {status: 'authenticated', pending: false, codex_login: {status_
           cogCenter: cog.left + cog.width / 2, usage: left('usage'), plan: left('usage-plan'),
         };
       });
-      assert.equal(edges.dotLefts.length, 3, `${name}: three status dots`);
+      assert.equal(edges.dotLefts.length, 2, `${name}: two status dots (Remote is hidden in this version)`);
       for (const d of edges.dotLefts) assert.ok(Math.abs(d - edges.dotLefts[0]) <= 1, `${name}: dots share one left edge`);
       assert.ok(Math.abs(edges.usage - edges.dotLefts[0]) <= 1, `${name}: 5h and 7d start at the dots' left edge`);
       assert.ok(Math.abs(edges.plan - edges.dotLefts[0]) <= 1, `${name}: plan line starts at the dots' left edge`);

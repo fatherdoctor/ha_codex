@@ -242,7 +242,7 @@ class HouseRulesTests(unittest.TestCase):
         self.assertEqual(present, server.PAGE_INSTRUCTIONS)
 
     def test_optional_starter_reference_is_plain_published_separately_text(self):
-        docs = (WORKER / "DOCS.md").read_text()
+        docs = (WORKER.parent / "docs" / "app-reference.md").read_text()
         paragraph = next(line for line in docs.splitlines() if line.startswith("**Protected policy.**"))
         self.assertIn("the Whole Home Agent starter kit (published separately)", paragraph)
         self.assertNotIn("https://", paragraph)
@@ -261,7 +261,7 @@ class HouseRulesTests(unittest.TestCase):
         self.assertIn("no bundled house rules", version)
 
     def test_reviewed_document_sections_have_one_blank_line(self):
-        docs = (WORKER / "DOCS.md").read_text()
+        docs = (WORKER.parent / "docs" / "app-reference.md").read_text()
         paragraph = next(line for line in docs.splitlines() if line.startswith("**Protected policy.**"))
         self.assertIn(paragraph + "\n\n**Who can answer.**", docs)
         changelog = (WORKER / "CHANGELOG.md").read_text()

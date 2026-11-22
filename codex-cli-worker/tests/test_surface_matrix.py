@@ -1,8 +1,8 @@
 """Which Home Assistant tools each way in to Codex gets: the chat page, the ChatGPT app and the codex_cli.start_task action.
 
-WAYS_IN is the table in DOCS.md, "Ways in". The tests build each way in's real launch arguments, start every tool
+WAYS_IN is the table in docs/app-reference.md, "Ways in". The tests build each way in's real launch arguments, start every tool
 server those arguments register, ask it for its tool list, and compare the result with the table. A change that adds,
-removes or moves a tool fails here until the table and DOCS.md say so, so a fix on one way in cannot pass as a fix on
+removes or moves a tool fails here until the table and the app reference say so, so a fix on one way in cannot pass as a fix on
 all of them.
 """
 from __future__ import annotations
@@ -22,7 +22,7 @@ from test_server import server
 import scheduling
 
 ROOT = Path(__file__).resolve().parents[2]
-DOCS = ROOT / "codex-cli-worker" / "DOCS.md"
+DOCS = ROOT / "docs" / "app-reference.md"
 CHAT_JS = ROOT / "codex-cli-worker" / "web" / "assets" / "chat.js"
 API_PATH = ROOT / "custom_components" / "codex_cli" / "api.py"
 

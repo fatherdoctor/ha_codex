@@ -12,6 +12,7 @@
 // recorded Codex event stream. Run with tests/web_fixture.py serving the page. Every code and name is synthetic.
 const {chromium} = require('playwright');
 const assert = require('node:assert/strict');
+const {unpauseRemote} = require('./remote_unpaused.cjs');
 
 const PAGE = 'http://127.0.0.1:9137/preview/';
 const VIEWPORTS = [{width: 390, height: 844}, {width: 1280, height: 800}];
@@ -56,8 +57,7 @@ const GITHUB_CONTROLS = {
   'signing in': {exact: true, names: ['Open github.com/login/device', 'code', 'Cancel']},
   'signed in': {exact: false, names: ['Read test', 'Check now', 'Disconnect']},
 };
-const SECTIONS = ['Accounts and connections', 'Full access', 'Text size', 'Scheduled runs', 'Workspace instructions',
-  'Advanced'];
+const SECTIONS = ['Accounts and connections', 'Full access', 'Text size', 'Scheduled runs', 'Workspace instructions'];
 const remoteBase = {available: true, configured_name: 'Home Assistant', machine_name: '', log: []};
 const REMOTE = {
   off: {...remoteBase, enabled: false, state: 'off'},
@@ -122,6 +122,7 @@ async function openPage(browser, viewport, {auth = AUTH['signed in'], github = G
   await page.route('**/auth/qr.svg*', route => route.fulfill({contentType: 'image/svg+xml', body: QR}));
   await page.route('**/github', route => route.fulfill({json: {ok: true, github}}));
   await page.route('**/remote-control', route => route.fulfill({json: {ok: true, remote_control: remote}}));
+  await unpauseRemote(page);
   await page.goto(PAGE);
   await page.locator('#login-status').waitFor({state: 'attached'});
   return {page, errors};
@@ -211,7 +212,7 @@ async function checkRemote(browser, viewport, state, label) {
   await page.close();
 }
 
-/** In the open chat: the final answer shows once, under the two in-between messages, which show once each and in order. */
+/** In the open chat: the final answer shows once, after the two in-between messages (inside its closed list), which show once each and in order. */
 async function assertAnswerOnce(page, label) {
   const seen = await page.locator('#messages').evaluate(list => {
     const answers = [...list.querySelectorAll('.answer .message:not(.details)')];
@@ -240,8 +241,9 @@ async function checkAnswerOnce(browser, viewport, label) {
   // The page reopens the chat it remembers. Earlier checks add chats to the fixture and push this one down the list,
   // so the check opens it this way, not from the list.
   await page.addInitScript(() => localStorage.setItem('codex-last-chat', 'preview-00'));
+  await unpauseRemote(page);
   await page.goto(PAGE);
-  await page.locator('#activity-text .interim').first().waitFor();
+  await page.locator('#activity .interim').first().waitFor({state: 'attached'});
   await page.locator('#messages .answer').first().waitFor();
   await assertAnswerOnce(page, `${label} saved chat`);
   await page.getByRole('button', {name: 'New chat', exact: false}).first().evaluate(el => el.click());
@@ -249,7 +251,7 @@ async function checkAnswerOnce(browser, viewport, label) {
   await page.locator('#message').fill(prompt);
   await page.getByRole('button', {name: 'Send message', exact: true}).click();
   await page.locator('#messages').getByText(`Preview response: ${prompt}`, {exact: true}).first().waitFor();
-  await page.locator('#activity-text .interim').first().waitFor();
+  await page.locator('#activity .interim').first().waitFor({state: 'attached'});
   await assertAnswerOnce(page, `${label} new chat`);
   assert.deepEqual(errors, [], `${label}: no script error`);
   await page.close();

@@ -35,6 +35,7 @@ backup_exclude:
 discovery:
   - codex_cli
 options:
+  model_choice: Account default
   codex_model: default
   model_reasoning_effort: medium
   reasoning_summary: concise
@@ -46,8 +47,6 @@ options:
   full_snapshot: false
   backup_retention_days: 7
   chat_retention_days: 14
-  browser_verification: true
-  browser_memory_limit_mib: 1536
   local_docs: true
   warm_start: true
   ha_url: ""
@@ -55,7 +54,8 @@ options:
   install_integration: true
   home_assistant_mcp: true
 schema:
-  codex_model: str
+  model_choice: list(Account default|gpt-6.2-sol|gpt-6-astra|gpt-6.1-sol|gpt-6.1-terra|gpt-6-sol|gpt-6-luna|gpt-5.6-sol|gpt-5.6-terra|gpt-5.6-luna|custom)
+  codex_model: str?
   model_pin: str?
   model_reasoning_effort: str
   reasoning_summary: list(concise|detailed|none)
@@ -69,8 +69,6 @@ schema:
   full_snapshot: bool
   backup_retention_days: int(1,365)
   chat_retention_days: int(1,365)
-  browser_verification: bool
-  browser_memory_limit_mib: int(512,8192)
   local_docs: bool
   warm_start: bool
   ha_url: str?

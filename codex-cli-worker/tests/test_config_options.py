@@ -9,6 +9,7 @@ WORKER = Path(__file__).resolve().parents[1]
 
 # option -> (feature that reads it, source file that reads it, test file that proves it)
 OPTIONS = {
+    "model_choice": ("default model drop-down", "server.py", "test_model_list.py"),
     "codex_model": ("default model for a chat", "server.py", "test_server.py"),
     "model_pin": ("the one model a chat may run on", "server.py", "test_sign_in_page.py"),
     "model_reasoning_effort": ("default reasoning effort", "server.py", "test_conversations.py"),
@@ -23,8 +24,6 @@ OPTIONS = {
     "full_snapshot": ("archive of the config folder before a message", "server.py", "test_backups.py"),
     "backup_retention_days": ("how long backups are kept", "server.py", "test_backups.py"),
     "chat_retention_days": ("delete chats after days without a message", "retention.py", "test_retention.py"),
-    "browser_verification": ("built-in browser for dashboard checks", "verification.py", "test_verification.py"),
-    "browser_memory_limit_mib": ("memory budget of the built-in browser", "verification.py", "test_verification.py"),
     "local_docs": ("local copy of the Home Assistant documentation", "server.py", "test_local_docs.py"),
     "warm_start": ("keep Codex running between messages", "server.py", "test_live_exchange.py"),
     "ha_url": ("address for Codex's own Home Assistant API calls", "server.py", "test_ha_url_review.py"),

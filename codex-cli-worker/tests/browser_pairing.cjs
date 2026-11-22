@@ -1,6 +1,7 @@
 // Pairing card and error refresh against a disposable fixture; codes are synthetic.
 const { chromium } = require('playwright');
 const assert = require('node:assert/strict');
+const {unpauseRemote} = require('./remote_unpaused.cjs');
 (async () => {
   const browser = await chromium.launch({headless:true});
   try {
@@ -14,7 +15,7 @@ const assert = require('node:assert/strict');
         state={...state,pairing_code:fail?'':'TEST-0000',pairing_qr:'',log:['A new pairing code is ready on this page.']};
         return r.fulfill({status:fail?409:200,json:{ok:!fail,error:fail?'Codex could not provide a new pairing code.':'',remote_control:state}});
       });
-      await page.goto('http://127.0.0.1:9137/preview/');
+      await unpauseRemote(page); await page.goto('http://127.0.0.1:9137/preview/');
       const conversations=page.getByRole('button',{name:'Open conversations',exact:true});
       if(await conversations.isVisible()) await conversations.click();
       await page.getByRole('button',{name:'Open settings',exact:true}).click();
