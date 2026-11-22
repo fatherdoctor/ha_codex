@@ -39,8 +39,8 @@ const assert = require('node:assert/strict');
         }));
         for (const row of rows) {
           seen.add(row.id);
-          // A part of Accounts or Advanced is a section of its own: it is checked as a row itself, and its box starts
-          // at the group title's text.
+          // A part of Accounts and connections is a section of its own: it is checked as a row itself, and its box
+          // starts at the group title's text.
           for (const kid of row.kids) {
             assert.ok(Math.abs(kid.left - row.titleLeft) <= 1.5,
               `${name}: ${row.id} ${kid.tag} starts at ${kid.left}, its title text at ${row.titleLeft}`);

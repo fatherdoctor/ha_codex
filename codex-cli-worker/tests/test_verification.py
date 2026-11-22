@@ -150,6 +150,10 @@ class VerificationTests(unittest.TestCase):
         request.assert_not_called()
         self.assertFalse(hasattr(self.engine, "browser"))
         self.assertFalse(hasattr(self.engine, "request_retry"))
+        # The AppArmor profile lets the app run no browser either.
+        profile = (Path(__file__).resolve().parents[1] / "apparmor.txt").read_text(encoding="utf-8").lower()
+        for name in ("chromium", "chrome", "playwright"):
+            self.assertNotIn(name, profile)
 
     def test_readback_with_save_pending_saves_the_turn_edit_first(self):
         """save_pending on a readback saves the pending edit, then reads the dashboard back; without it, nothing is saved."""
@@ -164,6 +168,18 @@ class VerificationTests(unittest.TestCase):
             calls.clear()
             self.engine.run("chat", {"operation": "dashboard_readback", "path": "/lovelace/0"})
             self.assertEqual([name for name, _ in calls], ["read"])
+
+    def test_readback_with_a_bad_path_saves_nothing(self):
+        """A path that is not a local dashboard path is refused before the pending edit is saved."""
+        for path in ("/lovelace/0?edit=1", "https://example.test/lovelace", 7, None, ["/lovelace/0"]):
+            with self.subTest(path=path), patch.object(self.engine, "save_pending_dashboard") as save, \
+                 patch.object(self.engine, "ws_read") as read:
+                result = self.engine.run("chat", {"operation": "dashboard_readback", "path": path,
+                                                  "save_pending": True})
+                self.assertEqual(result["status"], "unavailable")
+                self.assertIn("Use a local dashboard path", result["message"])
+                save.assert_not_called()
+                read.assert_not_called()
 
     def test_readback_refuses_save_pending_when_auto_save_is_off(self):
         """A refused save is reported, and the readback does not run as if the edit were saved."""

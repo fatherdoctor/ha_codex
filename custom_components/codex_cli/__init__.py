@@ -174,7 +174,8 @@ async def _async_remove_browser_user(hass: HomeAssistant) -> None:
     """Remove the dashboard screenshot user that a version before 0.4.0 created, and the file that holds its ID.
 
     Only the user whose ID that file holds is removed, and only if Home Assistant marks it as a system user with
-    the name the old version gave it, so a person's account is never touched. The file goes in every case.
+    the name the old version gave it, so a person's account is never touched; a kept user gets one log line. The
+    file goes in every case.
     """
     store = Store(hass, 1, REMOVED_BROWSER_STORE_KEY)
     data = await store.async_load()
@@ -186,6 +187,10 @@ async def _async_remove_browser_user(hass: HomeAssistant) -> None:
         await hass.auth.async_remove_user(user)
         _LOGGER.info("Removed the %s user that an earlier version created for dashboard screenshots",
                      REMOVED_BROWSER_USER_NAME)
+    elif user is not None:
+        # The file goes below, so this line is the only record of where a renamed leftover account came from.
+        _LOGGER.info("Kept user %s, which the dashboard screenshot file of an earlier version names: it is not "
+                     "a system user named %s", user.id, REMOVED_BROWSER_USER_NAME)
     await store.async_remove()
 
 

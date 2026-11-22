@@ -9,7 +9,7 @@ Start with the project documentation:
 - [README](README.md) for installation, setup, security notes, and examples.
 - [Integration documentation](custom_components/codex_cli/README.md) for entities and actions.
 - [Worker documentation](codex-cli-worker/DOCS.md) for app options and behavior.
-- [Verification guide](codex-cli-worker/VERIFICATION.md) for dashboard screenshots, permissions, and limits.
+- [Verification guide](codex-cli-worker/VERIFICATION.md) for dashboard readback, permissions, and limits.
 - [Example scripts](examples/scripts.yaml) for a starter Assist/LLM script.
 
 ## Reporting Bugs

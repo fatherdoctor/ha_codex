@@ -48,6 +48,14 @@ def public_check(entry):
     return result
 
 
+def dashboard_path(payload):
+    """Return the payload's dashboard path, /lovelace/0 when it names none; raise ValueError when it is not local."""
+    path = payload.get("path", "/lovelace/0")
+    if not isinstance(path, str) or not PATH_RE.fullmatch(path):
+        raise ValueError("Use a local dashboard path such as /lovelace/0")
+    return path
+
+
 def find_row(row, words, domain):
     """Return (other words, answer row) for one item of Core's state list, or None when it does not match or is hidden.
 
@@ -222,9 +230,11 @@ class Verification:
                     result = self.core("POST", "codex_cli/diagnostic_logs", json={"target": target})
                     entry.update(status="observed", target=target, message=result["text"], truncated=result.get("truncated", False))
                 elif operation == "dashboard_readback":
+                    # Check the path before anything is saved, so a bad path saves nothing.
+                    path = dashboard_path(payload)
                     if payload.get("save_pending") is True:
-                        self.save_pending_dashboard(task_id, payload.get("path", "/lovelace/0"))
-                    entry.update(self.dashboard_readback(payload))
+                        self.save_pending_dashboard(task_id, path)
+                    entry.update(self.dashboard_readback(path, payload.get("expected_config")))
                 else:
                     raise ValueError("Supported operations: entity, find, config_check, logs, dashboard_readback")
             except Exception as exc:
@@ -297,17 +307,13 @@ class Verification:
         return {"status": "observed", "name": name, "domain": domain, "matches": shown,
                 "total_matches": len(matches), "truncated": len(matches) > len(shown), "message": message}
 
-    def dashboard_readback(self, payload):
-        """Read a dashboard's configuration from Core and compare it with expected_config when one is given."""
-        path = payload.get("path", "/lovelace/0")
-        if not isinstance(path, str) or not PATH_RE.fullmatch(path):
-            raise ValueError("Use a local dashboard path such as /lovelace/0")
+    def dashboard_readback(self, path, expected):
+        """Read the dashboard at a checked path from Core and compare it with expected when one is given."""
         dashboard = path.strip("/").split("/")[0]
         message = {"type": "lovelace/config"}
         if dashboard != "lovelace":
             message["url_path"] = dashboard
         actual = self.ws_read(message)
-        expected = payload.get("expected_config")
         return {"status": "observed" if expected is None else "passed" if actual == expected else "failed",
                 "path": path, "message": "Fresh dashboard configuration readback" +
                 (" matches the saved configuration." if expected is not None and actual == expected else
@@ -343,7 +349,7 @@ class Verification:
             if not ok:
                 raise ValueError("Home Assistant did not accept the pending dashboard")
             config = json.loads((self.worker.CONFIG_ROOT / ref["storage_file"]).read_text())["data"]["config"]
-            check = self.dashboard_readback({"path": path, "expected_config": config})
+            check = self.dashboard_readback(path, config)
             if check["status"] != "passed":
                 raise ValueError("The pending dashboard was accepted but API readback differs")
 

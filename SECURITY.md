@@ -7,7 +7,8 @@ through the worker with its automatic Supervisor token; the app creates no Home 
 need both an administrator token and the paired worker token, and read only Core's logs. Known credential files
 are excluded from backups and snapshots, but inline secrets and old snapshots need separate care. See
 [verification security](codex-cli-worker/VERIFICATION.md). Version 0.4.0 removed the dashboard browser and its
-**Dashboard verification** user; the integration removes that user on its first start.
+**Dashboard verification** user; the integration removes that user the first time it sets up
+with the worker.
 
 SSH connections use user-managed keys and server permissions. Keys stored under
 `/data/.ssh` are accessible to Codex tasks and are excluded from app backups;

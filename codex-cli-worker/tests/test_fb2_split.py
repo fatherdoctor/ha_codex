@@ -89,7 +89,7 @@ class SettingsPage(unittest.TestCase):
         self.studio = (WEB / "assets" / "studio.js").read_text()
 
     def test_moved_and_empty_parts_are_gone(self):
-        # Advanced came back in 0.3.6 to hold Browser permissions (SettingsAccordion below).
+        # Advanced held Browser permissions from 0.3.6; 0.4 removed both (SettingsAccordion below).
         for gone in ('id="appearance-section"', 'id="diagnostic-retention"',
                      'id="save-diagnostic-retention"'):
             with self.subTest(gone=gone):
