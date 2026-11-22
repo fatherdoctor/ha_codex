@@ -22,7 +22,7 @@ const {unpauseRemote} = require('./remote_unpaused.cjs');
       // section (with its parts) in turn and measure what is open.
       await page.waitForFunction(() => [...document.querySelectorAll('#settings .settings-status')].every(s => s.textContent !== ''));
       const groups = [['accounts-section', 'chatgpt-section', 'github-section', 'app-pairing-section'], ['full-access-section'],
-        ['text-size-section'], ['scheduled-work'], ['workspace-section'], ['advanced-section', 'browser-permissions-section']];
+        ['text-size-section'], ['scheduled-work'], ['workspace-section']];
       const seen = new Set();
       for (const group of groups) {
         for (const id of group) await page.locator(`#${id} > :is(h3, h4) .settings-toggle`).click();
@@ -40,8 +40,8 @@ const {unpauseRemote} = require('./remote_unpaused.cjs');
         }));
         for (const row of rows) {
           seen.add(row.id);
-          // A part of Accounts or Advanced is a section of its own: it is checked as a row itself, and its box starts
-          // at the group title's text.
+          // A part of Accounts and connections is a section of its own: it is checked as a row itself, and its box
+          // starts at the group title's text.
           for (const kid of row.kids) {
             assert.ok(Math.abs(kid.left - row.titleLeft) <= 1.5,
               `${name}: ${row.id} ${kid.tag} starts at ${kid.left}, its title text at ${row.titleLeft}`);
@@ -49,7 +49,7 @@ const {unpauseRemote} = require('./remote_unpaused.cjs');
           }
         }
       }
-      assert.equal(seen.size, 10, `${name}: every section was measured, got ${[...seen]}`);
+      assert.equal(seen.size, groups.flat().length, `${name}: every section was measured, got ${[...seen]}`);
       assert.deepEqual(errors, []);
       await context.close();
     }

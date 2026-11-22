@@ -11,6 +11,7 @@ import sqlite3
 import threading
 import time
 import uuid
+from typing import NamedTuple
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -30,6 +31,12 @@ CHAT_ID = re.compile(r'(?:[A-Za-z0-9][A-Za-z0-9._-]{0,127})?')
 MODEL_ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,79}')
 class Busy(ValueError):
     pass
+
+
+class Placed(NamedTuple):
+    """Where the worker started a run: the chat (task id) and the exchange (turn id) in it."""
+    task_id: str
+    turn_id: str
 
 
 ACTIVE = ('reserved', 'queued', 'running', 'waiting_for_approval', 'waiting_for_input')
@@ -176,6 +183,46 @@ def validate(payload, now, zone="UTC", *, owner=False):
     return value
 
 
+# The run log. task_id is the chat the run used: a run of a schedule made in a chat continues that chat, so many
+# runs can share one. turn_id is the run's own exchange in it ('' for a run saved before version 4).
+RUNS_COLUMNS = """
+                    id TEXT PRIMARY KEY, schedule_id TEXT, task_id TEXT NOT NULL,
+                    due REAL NOT NULL, created REAL NOT NULL, status TEXT NOT NULL,
+                    error TEXT NOT NULL DEFAULT '', turn_id TEXT NOT NULL DEFAULT ''"""
+
+
+def upgrade_runs(db):
+    """Upgrade a run log of schema version 3 or earlier (0.4 and before) to version 4.
+
+    Version 3 held task_id UNIQUE, one new chat per run. SQLite cannot drop that
+    constraint in place, so the table is copied once into the version 4 shape.
+    A version 3 worker after a rollback still reads and writes the new table.
+    """
+    if 'turn_id' in {row['name'] for row in db.execute('PRAGMA table_info(runs)')}:
+        return
+    db.execute('ALTER TABLE runs RENAME TO runs_version_3')
+    db.execute(f'CREATE TABLE runs ({RUNS_COLUMNS})')
+    db.execute('INSERT INTO runs(id,schedule_id,task_id,due,created,status,error) '
+               'SELECT id,schedule_id,task_id,due,created,status,error FROM runs_version_3')
+    db.execute('DROP TABLE runs_version_3')
+
+
+def run_status(task, turn_id):
+    """Return a run's status as its chat records it.
+
+    A run that later messages followed has ended: its exchange keeps its own
+    outcome, and one the owner answered or moved past counts as completed.
+    Otherwise (the run is the current exchange, or the chat lost its exchange
+    list) the chat's status is the run's.
+    """
+    turn = next((item for item in task.get('turns') or [] if item.get('turn_id') == turn_id), None) if turn_id else None
+    if turn is not None and task.get('current_turn_id') != turn_id:
+        status = turn.get('status', 'completed')
+        return 'completed' if status in ACTIVE else status
+    pending = any(a.get('status') == 'pending' for a in task.get('approvals') or [])
+    return 'waiting_for_approval' if pending else task.get('status', 'interrupted')
+
+
 class Store:
     """Transactions protect occurrence reservation and owner approval from concurrent edits."""
     def __init__(self, path, zone="UTC"):
@@ -194,12 +241,9 @@ class Store:
                     mode TEXT NOT NULL, spec TEXT NOT NULL, approved INTEGER NOT NULL,
                     enabled INTEGER NOT NULL, next_due REAL, updated REAL NOT NULL, revision TEXT NOT NULL,
                     author TEXT NOT NULL DEFAULT 'owner', chat_id TEXT NOT NULL DEFAULT '', model TEXT);
-                CREATE TABLE IF NOT EXISTS runs (
-                    id TEXT PRIMARY KEY, schedule_id TEXT, task_id TEXT UNIQUE NOT NULL,
-                    due REAL NOT NULL, created REAL NOT NULL, status TEXT NOT NULL,
-                    error TEXT NOT NULL DEFAULT '');
+                CREATE TABLE IF NOT EXISTS runs ({RUNS_COLUMNS});
                 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-            '''
+            '''.replace('{RUNS_COLUMNS}', RUNS_COLUMNS)
             for statement in schema.split(';'):
                 if statement.strip():
                     db.execute(statement)
@@ -209,7 +253,8 @@ class Store:
             # mailbox (mailbox, mailbox_reads, mailbox_deliveries, mailbox_threads, mail_usage, lead_pending,
             # lead_threads) and the lead token's hash in settings. Nothing reads them any more. They are
             # left in place, so an older version still finds its messages after a rollback.
-            db.execute('PRAGMA user_version=3')
+            upgrade_runs(db)
+            db.execute('PRAGMA user_version=4')
         if zone is not None:
             self.set_timezone(zone, time.time())
 
@@ -335,6 +380,17 @@ class Store:
                        (schedule['next_due'], schedule['id'], schedule['revision']))
             db.execute("UPDATE runs SET status='deferred',error='Worker became busy; occurrence remains due.' WHERE id=?", (run['id'],))
 
+    def started(self, run_id, placed):
+        """Record the chat and exchange the worker started a reserved run in."""
+        with self.connect() as db:
+            db.execute("UPDATE runs SET task_id=?,turn_id=?,status='queued' WHERE id=?",
+                       (placed.task_id, placed.turn_id, run_id))
+
+    def follow_chat(self, schedule_id, old_chat, new_chat):
+        """Move a schedule to the chat that replaced its own, unless the owner changed the chat meanwhile."""
+        with self.connect() as db:
+            db.execute('UPDATE schedules SET chat_id=? WHERE id=? AND chat_id=?', (new_chat, schedule_id, old_chat))
+
     def finish(self, run_id, status, error=''):
         with self.connect() as db:
             db.execute('UPDATE runs SET status=?,error=? WHERE id=?', (status, error[:500], run_id))
@@ -359,15 +415,20 @@ class Engine:
                 if task is None:
                     self.store.finish(run['id'], 'interrupted', 'Worker restarted before this task was saved; not retried.')
                 else:
-                    pending = any(a.get('status') == 'pending' for a in task.get('approvals') or [])
-                    self.store.finish(run['id'], 'waiting_for_approval' if pending else task.get('status', 'interrupted'))
+                    self.store.finish(run['id'], run_status(task, run.get('turn_id', '')))
 
     def submit(self, run, prompt, mode, name):
+        """Start a reserved run; return the chat it runs in.
+
+        A schedule made in a chat runs in that chat. When the worker had to use a
+        new chat instead (the old one was deleted, archived or cannot go on), the
+        schedule follows the new chat, so its later runs continue there.
+        """
         schedule = run['schedule']
-        # A schedule with no model of its own starts exactly as before.
-        own_model = {'model': schedule['model']} if schedule.get('model') else {}
+        # A schedule with no model or chat of its own starts exactly as before.
+        own = {key: schedule[key] for key in ('model', 'chat_id') if schedule.get(key)}
         try:
-            self.worker.submit(run['task_id'], prompt, mode, name, schedule['id'], **own_model)
+            placed = self.worker.submit(run['task_id'], prompt, mode, name, schedule['id'], **own)
         except Busy:
             self.store.defer(run)
             raise
@@ -379,8 +440,10 @@ class Engine:
         except Exception:
             self.store.finish(run['id'], 'failed', 'Could not start the ordinary task. Not retried.')
             raise
-        self.store.finish(run['id'], 'queued')
-        return run['task_id']
+        self.store.started(run['id'], placed)
+        if own.get('chat_id') and placed.task_id != own['chat_id']:
+            self.store.follow_chat(schedule['id'], own['chat_id'], placed.task_id)
+        return placed.task_id
 
     def tick(self, now=None):
         if not self.tick_lock.acquire(blocking=False):

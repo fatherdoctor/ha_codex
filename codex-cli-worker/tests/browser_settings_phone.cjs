@@ -187,8 +187,6 @@ async function openThemedSections(target) {
         {title: 'Text size', status: 'Normal', attention: false},
         {title: 'Scheduled runs', status: 'Paused: time zone unavailable', attention: true},
         {title: 'Workspace instructions', status: 'AGENTS.md', attention: false},
-        {title: 'Advanced', status: 'Browser permissions: none remembered', attention: false},
-        {title: 'Browser permissions', status: 'None remembered', attention: false},
       ]);
       assert.equal(await page.locator('#remote-control-section .settings-toggle').count(), 0, 'own dialog stays open');
       await page.screenshot({path: path.join(SHOTS, `settings-collapsed-${colorScheme}-400.png`)});

@@ -28,7 +28,6 @@ profile codex_cli_worker flags=(attach_disconnected,mediate_deleted) {
   /lib/** mr,
   /usr/lib/** mr,
   /usr/local/lib/** mr,
-  /usr/lib/chromium/** rixm,
   /usr/share/** r,
   /etc/** r,
   # full_access.py writes Codex's managed requirements at start and on each change; nothing else in /etc.
