@@ -1084,6 +1084,23 @@ h1 {
   padding-left: 2px;
   border-left: 2px solid var(--line);
 }
+/* A group of several steps opens from a one-line heading that sums it up. */
+.step-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0 4px 10px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: calc(13px * var(--text-scale));
+  text-align: left;
+  cursor: pointer;
+}
+.step-group-head:hover {
+  color: var(--text);
+}
 .activity-steps > .message.interim {
   margin: 12px 0;
 }
@@ -1117,12 +1134,19 @@ h1 {
 .step-message .step-text {
   color: var(--text);
 }
+/* A command shows on one line, as in the desktop app; all of it once its output is open (CX-WORKLOG-GROUPS). */
 .step-command .step-text {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: calc(12px * var(--text-scale));
   color: var(--text);
-  max-height: 7.5em;
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
+}
+.step-command.output-open .step-text {
+  white-space: pre-wrap;
+  max-height: 7.5em;
+  overflow: auto;
 }
 .step-file_change .step-text {
   color: var(--text);
@@ -2269,6 +2293,7 @@ dialog :is(h3, h4):has(> .settings-toggle) {
  */
 .settings-title::before,
 .activity-chevron::before,
+.step-group-chevron::before,
 details.disclosure > summary::before {
   content: "";
   display: inline-block;
@@ -2282,6 +2307,7 @@ details.disclosure > summary::before {
 }
 .settings-toggle[aria-expanded="true"] .settings-title::before,
 .activity-toggle[aria-expanded="true"] .activity-chevron::before,
+.step-group-head[aria-expanded="true"] .step-group-chevron::before,
 details.disclosure[open] > summary::before {
   -webkit-mask-image: var(--mdi-chevron-down);
   mask-image: var(--mdi-chevron-down);

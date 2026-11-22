@@ -3,6 +3,7 @@
 ## 0.4.0 (unreleased)
 
 ### What's new
+- **Work log groups.** In the steps under an answer, each run of two or more steps folds under a one-line heading that sums it up, such as "Ran 3 commands, edited a file", as in the desktop app. Groups start open while Codex works and closed when it is done. Commands show on one line until you open their output. The checks stay outside the groups.
 - **Shorter Documentation tab.** The app's Documentation tab (`DOCS.md`) is now a short guide: install and sign in, the four permission modes, where files go, and how to get help (about 380 words, down from about 25,900). The full text moved to `docs/app-reference.md`, and the Info tab (`README.md`) keeps five sections: Quick Start, Requirements, Features, Setup and Using ChatGPT for Home Assistant.
 - **Files Codex makes can be downloaded.** When you ask for a file such as a spreadsheet, Codex saves it in the
   chat's own files folder and links to it, and the chat page shows the link as a card with the file's name and size
