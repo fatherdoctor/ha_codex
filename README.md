@@ -21,9 +21,9 @@ on a test Home Assistant first.
   administrator can answer. The other [permission modes](#permission-modes) ask less or more.
 - Codex is told to save the earlier copy of a file before it changes it, and the chat lists the copies it saved. A
   copy can be missing, and `secrets.yaml` and the files under `.storage` (dashboards kept there too) are never
-  copied, so keep your own Home Assistant backups ([Backups](codex-cli-worker/DOCS.md#backups)).
+  copied, so keep your own Home Assistant backups ([Backups](docs/app-reference.md#backups)).
 - After a change to YAML, the app asks Home Assistant to check the configuration, unless you turned that option off
-  or Home Assistant cannot run the check. The chat says which ([Validation](codex-cli-worker/DOCS.md#validation)).
+  or Home Assistant cannot run the check. The chat says which ([Validation](docs/app-reference.md#validation)).
 - The Codex program is pinned and never updates itself.
 
 ## Quick start
@@ -100,7 +100,7 @@ The app's own install of the integration (steps 2 to 4) needs nothing else.
   repository that holds `codex_cli.zip`, and a version can have an image and no such release. Let the app install the
   integration, or copy the folder by hand.
 
-Every app option is in [codex-cli-worker/DOCS.md](codex-cli-worker/DOCS.md).
+Every app option is in [docs/app-reference.md](docs/app-reference.md).
 
 Put rules for your house in the app's `AGENTS.md`, kept in its own `addon_config` folder and not in `/config`. The chat has an editor for it under **Settings** > **Workspace instructions** >
 **Workspace rules**. Codex uses its defaults and your workspace instructions; the app bundles no house rules. A new
@@ -189,8 +189,8 @@ What the safeguards do not do:
 
 The app asks for no host networking, Docker access or elevated Supervisor roles, and it keeps AppArmor on. Your
 `/config` folder is mounted for writing, because editing it is the purpose of the app. More detail:
-[Security Model](codex-cli-worker/DOCS.md#security-model), [Sandbox](codex-cli-worker/DOCS.md#sandbox) and
-[Backups](codex-cli-worker/DOCS.md#backups).
+[Security Model](docs/app-reference.md#security-model), [Sandbox](docs/app-reference.md#sandbox) and
+[Backups](docs/app-reference.md#backups).
 
 ## Sign-in
 
@@ -198,7 +198,7 @@ Codex uses your ChatGPT account.
 
 1. In ChatGPT, open **Settings** > **Security** and turn on **Enable device code authorization for Codex**. In a
    managed workspace, an administrator may need to allow device-code sign-in; see
-   [Codex Sign-In](codex-cli-worker/DOCS.md#codex-sign-in).
+   [Codex Sign-In](docs/app-reference.md#codex-sign-in).
 2. In the chat, open **Settings** and choose **Sign in**.
 3. Open the link, or scan the QR code (on a phone, under **Show QR code**), and enter the one-time code. The code stays on screen, with the time it still
    works, until the sign-in ends or you cancel it. If it runs out, choose **Get a new code**.
@@ -210,7 +210,7 @@ report when a sign-in will end, so the app shows no countdown. Sign out any time
 ## Scheduled runs
 
 Open a chat's menu and choose **Schedule**. You save a name, a prompt, a model and a trigger: hourly, daily, weekly,
-or a custom interval, cron rule or single time, in your Home Assistant time zone. Each run starts a new chat.
+or a custom interval, cron rule or single time, in your Home Assistant time zone. A run continues the chat you scheduled.
 **Settings** > **Scheduled runs** lists every schedule.
 
 - A schedule you save is approved when you save it. Codex can only propose one; it stays off until an administrator
@@ -218,7 +218,7 @@ or a custom interval, cron rule or single time, in your Home Assistant time zone
 - A scheduled run asks for permission like any other run and waits for you in its chat.
 - Limits: 100 approved schedules, 24 runs per schedule per UTC day, and 64 scheduled runs per UTC day.
 
-Details: [Scheduled runs](codex-cli-worker/DOCS.md#scheduled-runs).
+Details: [Scheduled runs](docs/app-reference.md#scheduled-runs).
 
 ## Using it from Assist and automations
 
@@ -281,7 +281,7 @@ This is a pre-release. Install it on a test Home Assistant first, not on one tha
 To report a problem, use the [bug report form](https://github.com/fatherdoctor/ha_codex/issues/new?template=bug_report.yml).
 Include the app, integration and Home Assistant versions, the steps that cause it, the app log lines around the time,
 and the integration diagnostics file. Remove tokens, device codes, private URLs and personal configuration before you
-post. Steps to collect logs: [Reporting a bug](codex-cli-worker/DOCS.md#reporting-a-bug).
+post. Steps to collect logs: [Reporting a bug](docs/app-reference.md#reporting-a-bug).
 
 There is no public beta. Each version is tested on a Home Assistant OS test machine before it is released. To report a
 security problem, use the **Report a vulnerability** button on the Security tab. See [SECURITY.md](SECURITY.md).

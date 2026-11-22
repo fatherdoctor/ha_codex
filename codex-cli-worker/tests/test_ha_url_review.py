@@ -51,7 +51,7 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(result['total'],1);self.assertLess(len(json.dumps(result)),65536)
 
     def test_f3_upstream_history_and_option_label_are_preserved(self):
-        docs=(ROOT/'DOCS.md').read_text()
+        docs=(ROOT.parent/'docs/app-reference.md').read_text()
         self.assertIn('From **0.1.68**, a task that has `HA_TOKEN` also gets `HA_URL`,',docs)
         self.assertIn('From **0.1.81.2**',docs)
         paragraph=next(x for x in docs.split('\n\n') if x.startswith('From **0.1.68**'))
@@ -89,7 +89,7 @@ class ReviewTests(unittest.TestCase):
             supervisor._loop()
 
     def test_f7_ssl_override_preserves_certificate_verification_guidance(self):
-        docs=(ROOT/'DOCS.md').read_text()
+        docs=(ROOT.parent/'docs/app-reference.md').read_text()
         self.assertIn('certificate hostname',docs);self.assertIn('Never disable TLS verification',docs)
 
     def test_f8_design_note_has_no_private_mail_filename(self):

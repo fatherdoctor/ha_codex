@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import requests
 
 from test_server import server
+from remote_unpaused import setUpModule, tearDownModule  # noqa: F401  (Remote Control is paused)
 
 WEB = Path(__file__).resolve().parents[1] / "web"
 

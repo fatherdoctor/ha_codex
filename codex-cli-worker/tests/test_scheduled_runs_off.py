@@ -64,7 +64,7 @@ class DocsTests(unittest.TestCase):
     ROOT = Path(server.__file__).resolve().parent.parent
 
     def test_the_docs_describe_scheduled_runs(self):
-        docs = (self.ROOT / 'codex-cli-worker' / 'DOCS.md').read_text(encoding='utf-8')
+        docs = (self.ROOT / 'docs' / 'app-reference.md').read_text(encoding='utf-8')
         self.assertIn('\n## Scheduled runs\n', docs)
         self.assertIn('choose **Schedule**', docs)
         self.assertIn('`propose_schedule` and `list_schedules`', docs)
@@ -72,11 +72,11 @@ class DocsTests(unittest.TestCase):
     def test_the_readme_describes_scheduled_runs_and_links_the_section(self):
         readme = (self.ROOT / 'README.md').read_text(encoding='utf-8')
         self.assertIn('\n## Scheduled runs\n', readme)
-        self.assertIn('codex-cli-worker/DOCS.md#scheduled-runs', readme)
+        self.assertIn('docs/app-reference.md#scheduled-runs', readme)
         self.assertIn('(#scheduled-runs)', readme)
 
     def test_the_documents_name_no_lead_channel_or_mailbox_for_schedules(self):
-        for name in ('README.md', 'codex-cli-worker/DOCS.md'):
+        for name in ('README.md', 'docs/app-reference.md', 'codex-cli-worker/DOCS.md'):
             text = (self.ROOT / name).read_text(encoding='utf-8')
             self.assertNotIn('the-lead-agent-channel-and-mailbox', text)
             self.assertNotIn('scheduled-runs-and-the-lead-agent-channel', text)
