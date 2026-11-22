@@ -172,7 +172,12 @@
   chose the default again, because Codex keeps a thread's model unless a message names another one. Each message now
   names its model. A message on the default names the default model that Codex shows in its status, when the app
   knows that model. Until then, for example in the first moments after a start, the chat keeps its last model.
-- The chat shows the final answer once. Interim messages still appear in order above it.
+- The chat shows the final answer once. Interim messages still appear in order before it.
+- **The answer starts right under its "Worked for" line.** The lines Codex writes along the way ("I'll look for …")
+  stayed between the closed line and the answer after the exchange ended, so they read as part of the answer. They
+  still show while Codex works. When the exchange ends, they move into the closed list, between the groups of steps,
+  as in the desktop app. Open the list to read them; they start at the same left edge as the answer. An earlier
+  exchange shows its own lines the same way when you open its list.
 - **Share masks three more shapes.** A password value whose first word another rule already masked (an `sk-` key, a
   token) no longer keeps the rest of its line, and a quoted password that runs on to the next line is masked whole.
   A very long run of the secret word itself (`password-password-...`) is masked about three times faster.
