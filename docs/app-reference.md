@@ -335,6 +335,8 @@ A thread that this page did not start has no page rules: a thread started in the
 
 From 0.3.3 the page asks for no output format, so the thread stores Codex's answer as plain text, as the app shows it. The page's status, question and choices come from the `ask_owner` and `report_failure` tool calls (see [Human Input](#human-input)).
 
+The page asks Codex to lead with the answer, use tables for comparisons, list sources separately, and link to files it creates.
+
 In the ChatGPT app the `exchange_info` tool is not available. The rules tell Codex to make no backup copy there and to say so in its answer. The worker's protections do not depend on these rules: approvals, the sandbox and the policy stay the same.
 
 ## Backups

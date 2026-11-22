@@ -10,6 +10,9 @@
   schedule made in Settings still starts a new chat for each run. The run log is copied once into a new shape at
   start, and a rollback still reads it.
 - **Shorter Documentation tab.** The app's Documentation tab (`DOCS.md`) is now a short guide: install and sign in, the four permission modes, where files go, and how to get help (about 380 words, down from about 25,900). The full text moved to `docs/app-reference.md`, and the Info tab (`README.md`) keeps five sections: Quick Start, Requirements, Features, Setup and Using ChatGPT for Home Assistant.
+- **Answers lead with the answer.** The chat page asks Codex to start with one bold line that gives the answer,
+  use a table to compare several items, list sources apart from the text, and link to files it made. A chat started
+  before this version gets the guidance after its next compaction.
 - **Files Codex makes can be downloaded.** When you ask for a file such as a spreadsheet, Codex saves it in the
   chat's own files folder and links to it, and the chat page shows the link as a card with the file's name and size
   that downloads it, on a phone and on a desktop. Before, the link showed as plain text and nothing downloaded. Only
