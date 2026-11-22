@@ -5168,7 +5168,7 @@ def shell_exclude_args() -> list[str]:
     return ["--config", "shell_environment_policy.exclude=" + json.dumps(list(SHELL_EXCLUDED_ENV))]
 
 
-# Each tool is bounded by its own rules (see DOCS.md): a proposal stays disabled until the
+# Each tool is bounded by its own rules (see docs/app-reference.md): a proposal stays disabled until the
 # owner approves it on the page, and the list leaves out each schedule's chat and model.
 # Without an approval mode, Codex asks for each call, and the chat page cannot show that request.
 SCHEDULING_TOOLS = ('propose_schedule', 'list_schedules')
