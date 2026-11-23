@@ -16,7 +16,11 @@ const waiting = {
   expires_at: '2026-11-16T13:15:00Z', codex_login: {status_ok: false, has_auth_file: false, message: ''},
 };
 const signedOut = {status: 'idle', pending: false, codex_login: {status_ok: false, has_auth_file: false, message: ''}};
-const signedIn = {status: 'idle', pending: false, codex_login: {status_ok: true, has_auth_file: true, message: 'Signed in using ChatGPT.'}};
+const signedIn = {status: 'idle', pending: false, codex_login: {status_ok: true, has_auth_file: true,
+  message: 'Signed in using ChatGPT.', server_check: 'ok', server_checked_at: '2026-11-16T13:15:00Z'}};
+// The worker status read behind the plan and weekly quota rows; the email must never reach the page.
+const STATUS_EXTRA = {codex_usage: {status: 'ok', weekly_percent: 64, five_hour_percent: 90},
+  account_access: {state: 'unconfirmed', plan_type: 'plus', message: ACCESS, email: 'SYNTHETIC_PRIVATE_ACCOUNT'}};
 const githubBase = {
   state: 'disconnected', kind: null, account: null, client_id_source: 'built_in', repositories: [],
   expected_repositories: [], missing: [], extra: [], permissions: null, permission_problem: null, expires_at: null,
@@ -36,6 +40,11 @@ async function openSettings(browser, viewport, auth, github) {
   await page.route('**/auth/status', route => route.fulfill({json: {ok: true, auth}}));
   await page.route('**/auth/qr.svg*', route => route.fulfill({contentType: 'image/svg+xml', body: QR}));
   await page.route('**/github', route => route.fulfill({json: {ok: true, github}}));
+  await page.route('**/status', async route => {
+    if (new URL(route.request().url()).pathname.endsWith('/auth/status')) return route.fallback();
+    const response = await route.fetch();
+    return route.fulfill({response, json: {...await response.json(), ...STATUS_EXTRA}});
+  });
   await page.goto(PAGE);
   await page.locator('#login-status').waitFor({state: 'attached'});
   const conversations = page.getByRole('button', {name: 'Open conversations', exact: true});
@@ -108,18 +117,34 @@ async function checkGithubSigningIn(page, label) {
     `${label}: Cancel is the quiet kind of button`);
 }
 
+/** Signed in, the ChatGPT part lists its details like GitHub's, and never the account's email. */
+async function checkChatgptDetails(page) {
+  const details = page.locator('#chatgpt-details');
+  await details.locator('dd', {hasText: '64% left'}).waitFor();
+  const rows = await details.evaluate(dl => [...dl.querySelectorAll('dt')].map(dt => dt.textContent));
+  assert.deepEqual(rows, ['Sign-in', 'Plan', 'Last check', 'Weekly quota'], 'signed in: the ChatGPT detail rows');
+  const text = await details.innerText();
+  for (const shown of ['ChatGPT account', 'Plus', 'OpenAI accepted the sign-in'])
+    assert.ok(text.includes(shown), `signed in: the details show "${shown}"`);
+  assert.doesNotMatch(await page.locator('body').innerText(), /SYNTHETIC_PRIVATE_ACCOUNT/, 'the email shows');
+}
+
 /** The other states keep what the signing-in state hides. */
 async function checkOtherStates(browser) {
   let {page, errors} = await openSettings(browser, VIEWPORTS[1], signedOut, githubBase);
   let text = await page.locator('#chatgpt-section').innerText();
   assert.ok(text.includes('Check current availability'), 'signed out: the availability text shows');
   assert.ok(await page.locator('#login').isVisible(), 'signed out: Sign in shows');
+  assert.ok(!(await page.locator('#logout').isVisible()), 'signed out: Sign out is hidden');
+  assert.ok(!(await page.locator('#chatgpt-details').isVisible()), 'signed out: no ChatGPT details');
   assert.ok(await page.locator('#github-token summary').isVisible(), 'GitHub disconnected: the token option shows');
   assert.deepEqual(errors, []);
   await page.close();
 
   ({page, errors} = await openSettings(browser, VIEWPORTS[1], signedIn, githubConnected));
   assert.ok(await page.locator('#logout').isVisible(), 'signed in: Sign out shows');
+  assert.ok(!(await page.locator('#login').isVisible()), 'signed in: Sign in is hidden');
+  await checkChatgptDetails(page);
   assert.ok(await page.locator('#github-disconnect').isVisible(), 'GitHub connected: Disconnect shows');
   assert.ok(await page.locator('#github-details').isVisible(), 'GitHub connected: the details show');
   assert.equal(await page.locator('#chatgpt-section.signing-in, #github-section.signing-in').count(), 0,
@@ -159,7 +184,8 @@ async function run(browser) {
   }
   await checkOtherStates(browser);
   console.log('PASS: signing-in panels (ChatGPT and GitHub) at 360 and 1280 px show the link, the code with its timer, '
-    + 'the folded QR code (ChatGPT) and one Cancel; signed-out and signed-in panels keep their text and buttons');
+    + 'the folded QR code (ChatGPT) and one Cancel; signed-out and signed-in panels keep their text and buttons; Sign in '
+    + 'only while signed out, and the ChatGPT details only while signed in');
 }
 
 module.exports = run;

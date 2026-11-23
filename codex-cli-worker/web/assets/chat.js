@@ -1,6 +1,9 @@
 "use strict";
 /** Return the page element with the given id. */
 const $ = (id) => document.getElementById(id);
+// Remote Control is paused in this version: the worker marks the page root (server.mark_remote_paused), the page
+// hides every part of it and sends no remote-control request.
+const REMOTE_PAUSED = document.documentElement.hasAttribute("data-remote-paused");
 const labels = {
   queued: "Starting",
   in_queue: "In queue",
@@ -38,7 +41,6 @@ const state = {
   activity: null,
   permissionModes: new Map(),
   // Checks whose retry the owner started on this page. Their result shows open; a reload forgets them.
-  retriedChecks: new Set(),
   // Earlier answers whose "Worked for" line the owner opened. The latest answer keeps this in state.activity.
   workedOpen: new Set(),
   // The saved steps of earlier answers, by "<chat id>/<turn id>", loaded the first time their line opens.
@@ -450,6 +452,8 @@ let refreshTimer;
 let activityTimer = null;
 let usageTimer;
 let usageLoading = false;
+// The last sign-in and status reads behind the ChatGPT details in Settings; see renderChatgptDetails.
+const chatgptAccount = { auth: null, status: null };
 /**
  * Show the quota left for the five-hour and weekly limits as a figure and a
  * bar, with the reset time as a tooltip. A limit the account does not report
@@ -499,16 +503,19 @@ function shortResetLabel(value) {
   if (Number.isNaN(date.getTime())) return "";
   return date.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
 }
+/** The plan type the worker reports, capitalized ("Pro"), or "" when it reports none. */
+function planName(planType) {
+  const plan = typeof planType === "string" ? planType.trim() : "";
+  return plan && `${plan[0].toUpperCase()}${plan.slice(1)}`;
+}
 /**
  * The plan line under the quota bars, for example "Pro plan · Weekly resets
  * Mon 9:00 AM · 5h resets 2:30 PM". The plan is information only; a reset time
  * shows only for a window the read reported.
  */
 function planLine(usage, planType) {
-  const plan = typeof planType === "string" && planType.trim()
-    ? `${planType.trim()[0].toUpperCase()}${planType.trim().slice(1)} plan`
-    : "Plan unknown";
-  const parts = [plan];
+  const plan = planName(planType);
+  const parts = [plan ? `${plan} plan` : "Plan unknown"];
   for (const [key, name] of [["weekly", "Weekly"], ["five_hour", "5h"]]) {
     const reset = shortResetLabel(usage[`${key}_reset_at`]) || usage[`${key}_reset`];
     if (usage[`${key}_percent`] !== undefined && usage[`${key}_percent`] !== "" && reset)
@@ -669,6 +676,8 @@ async function loadUsage() {
       renderUsage(data.codex_usage, data.account_access?.plan_type);
       renderIntegration(data.integration);
       renderCodexAccess(data.account_access);
+      chatgptAccount.status = data;
+      renderChatgptDetails();
       // The quota check also tells the worker which model Codex picks when the add-on names none.
       // Not awaited: the quota shown must not depend on it.
       if (state.catalog) loadChatOptions(true);
@@ -676,6 +685,9 @@ async function loadUsage() {
   } catch (_) {
     renderUsage();
     renderCodexAccess({ message: "Codex access could not be checked." });
+    // A failed read drops the plan and quota rows rather than keep stale ones.
+    chatgptAccount.status = null;
+    renderChatgptDetails();
   } finally {
     usageLoading = false;
     usageTimer = setTimeout(loadUsage, 60000);
@@ -904,8 +916,6 @@ function controls() {
       "This chat's message is waiting in the queue and has not been sent yet. You can edit or remove it above.";
   else if (task?.permission_required)
     notice = "Review the permission request above to continue, or stop the task.";
-  else if (working && task?.browser_retry)
-    notice = "Retrying the dashboard inspection. You can continue this chat when it finishes.";
   else if (working)
     // A working chat shows no notice here; the in-chat "Working on your request" line says it.
     notice = "";
@@ -981,6 +991,7 @@ function renderRow(chat, queued = null) {
   row.classList.toggle("current", chat.task_id === state.id);
   row.classList.toggle("menu-open", chat.task_id === menu.id);
   row.classList.toggle("queued", Boolean(queued));
+  row.classList.toggle("unread", Boolean(chat.unread) && !queued);
   const main = textNode("button", "", "row-main");
   main.type = "button";
   main.dataset.taskId = chat.task_id;
@@ -991,6 +1002,13 @@ function renderRow(chat, queued = null) {
   else if (chat.pinned) heading.append(pinIcon());
   else heading.append(chatIcon());
   heading.append(textNode("span", title));
+  if (chat.unread && !queued) {
+    // A scheduled run answered here since the owner last opened the chat.
+    const dot = textNode("span", "", "unread-dot");
+    dot.setAttribute("role", "img");
+    dot.setAttribute("aria-label", "New scheduled run");
+    heading.append(dot);
+  }
   main.append(heading);
   main.append(
     textNode(
@@ -1134,6 +1152,7 @@ async function loadList(older = false) {
   if (!state.archived)
     noteAttention("approvals", state.chats.filter((chat) => chat.permission_required).map((chat) => chat.task_id));
   if (hadSelected && !merged.has(state.id)) await selectChat(null);
+  markRead(state.id);
   renderList();
   // Approval panels in the open chat depend on whether any chat is working.
   if (activeChanged && state.task) renderTask();
@@ -1325,14 +1344,11 @@ function tickElapsed() {
 const BAD_CHECK_STATUSES = new Set(["failed", "issues", "unavailable"]);
 /**
  * Build the collapsed checks block of an answer: one expandable row per check
- * with its result, details, and findings, then the screenshots that have not
- * expired. It stays closed under the answer, except while a batch of blocked
- * browser requests waits for the owner, a retry runs, or a retry the owner
- * started on this page has its result. The closed line counts
- * the bad results, so a failed check shows without opening the block. Returns
- * null when the turn has no checks.
+ * with its result and details. It stays closed under the answer. The closed
+ * line counts the bad results, so a failed check shows without opening the
+ * block. Returns null when the turn has no checks.
  */
-function renderVerification(turn, taskId) {
+function renderVerification(turn) {
   const checks = turn.verification || [];
   if (!checks.length) return null;
   const section = textNode("details", "", "verification disclosure");
@@ -1341,69 +1357,16 @@ function renderVerification(turn, taskId) {
   const summary = textNode("summary", bad ? `${title} · ${bad} failed` : title);
   if (bad) summary.classList.add("has-failed");
   section.append(summary);
-  if (state.task?.browser_retry?.turn_id === turn.turn_id) {
-    section.open = true;
-    const progress = textNode("p", "Retrying dashboard inspection…", "browser-permission-progress");
-    progress.setAttribute("role", "status");
-    section.append(progress);
-  }
   for (const check of checks) {
     const row = textNode("details", "", `verification-result disclosure is-${check.status}`);
-    // A retry result opens its own row. The block opens too when the owner started that retry on this page,
-    // so the result shows where they clicked; a saved chat opened later starts closed.
-    if (check.retry_of && check === checks[checks.length - 1]) {
-      row.open = true;
-      if (state.retriedChecks.has(check.retry_of)) section.open = true;
-    }
-    const label = {
-      passed: "Passed", failed: "Failed", observed: "Readback", captured: "Screenshots captured",
-      issues: "Needs review", disabled: "Disabled", unavailable: "Unverified",
-    }[check.status] || "Unverified";
+    const label = {passed: "Passed", failed: "Failed", observed: "Readback"}[check.status] || "Unverified";
     row.append(textNode("summary", `${label} · ${check.entity_id || check.path || check.target || check.operation}`));
     if (check.message) row.append(textNode("pre", check.message));
     if (check.state !== undefined) row.append(textNode("p", `State: ${check.state}${check.expected_state !== null ? ` · Expected: ${check.expected_state}` : ""}`));
     if (check.attributes && Object.keys(check.attributes).length) row.append(textNode("pre", JSON.stringify(check.attributes, null, 2)));
-    if (Array.isArray(check.findings) && check.findings.length) {
-      const groups = {
-        resource: "Resources that could not load", home_assistant: "Home Assistant errors",
-        dashboard: "Dashboard errors", policy: "Blocked actions and requests",
-        diagnostic: "Blocked diagnostic logging and notifications",
-      };
-      for (const [kind, title] of Object.entries(groups)) {
-        const findings = check.findings.filter(finding => finding.kind === kind);
-        if (!findings.length) continue;
-        row.append(textNode("h4", title));
-        for (const finding of findings) {
-          row.append(textNode("p", finding.message));
-          const views = Array.isArray(finding.viewports) ? finding.viewports.join(", ") : "";
-          row.append(textNode("small", `${finding.count > 1 ? `${finding.count} occurrences` : "1 occurrence"}${views ? ` · ${views}` : ""}`));
-        }
-      }
-      if (check.findings_omitted) row.append(textNode("p", "Additional findings were omitted because the evidence limit was reached."));
-    } else {
-      for (const error of [...(Array.isArray(check.errors) ? check.errors : []), ...(Array.isArray(check.blocked) ? check.blocked : [])]) row.append(textNode("p", error));
-    }
     if (check.checked_at) row.append(textNode("small", dateLabel(check.checked_at, true)));
-    if (check.permission_decision) {
-      const names = (check.permission_decision.approved || []).map(item => item.label).join(", ");
-      row.append(textNode("p", `${check.permission_decision.remember ? "Remembered for this dashboard" : "Allowed for this retry"}: ${names}`));
-      const kept = (check.permission_decision.carried || []).map(item => item.label).join(", ");
-      if (kept) row.append(textNode("p", `Still allowed from earlier in this exchange: ${kept}`));
-    }
-    if (check.permissions_used?.length)
-      row.append(textNode("p", `${check.permissions_used.length} user-approved browser permission(s) used.`));
-    if (check.permission_review_unavailable) row.append(textNode("p", check.permission_review_unavailable));
-    if (check.permission_store_error) row.append(textNode("p", check.permission_store_error));
-    if (check.permission_candidates_omitted)
-      row.append(textNode("p", "Some blocked requests can't be offered for approval: they were incomplete, looked like credentials, or exceeded the review limit."));
-    const review = renderBrowserPermissions(check, turn, taskId);
-    if (review) row.append(review);
-    if (review?.classList.contains("browser-permission-review")) section.open = true;
     section.append(row);
   }
-  const images = imageAttachments(turn.verification_attachments).filter(image => image.expires_at * 1000 > Date.now());
-  if (images.length) section.append(renderAttachments(taskId, images, "Dashboard verification screenshot"));
-  section.append(textNode("p", "Screenshots are evidence for visual review. State and configuration checks do not prove automation behavior.", "verification-note"));
   return section;
 }
 /**
@@ -1470,8 +1433,7 @@ function earlierStepRows(entry, hasChecks, redraw) {
  * answer's line, and opening the same list of steps and then the checks. The
  * steps load from the worker the first time the line opens. An answer with no
  * saved steps possible (an old chat) and no checks keeps the plain line, and
- * with no times either it is left out. The line opens by itself when the
- * checks block wants attention (a browser permission review or a retry result).
+ * with no times either it is left out.
  */
 function renderWorked(turn, checks, taskId) {
   const label = workedLabel(turn);
@@ -1485,7 +1447,7 @@ function renderWorked(turn, checks, taskId) {
   const entry = saved ? earlierSteps(taskId, turn.turn_id) : null;
   const fill = () => {
     const rows = entry ? earlierStepRows(entry, Boolean(checks), fill) : [];
-    list.replaceChildren(...groupWorkLog([...rows, ...(checks ? [checks] : [])]));
+    list.replaceChildren(...groupWorkLog([...rows, ...(checks ? [checks] : [])], entry?.open ?? new Set(), fill));
   };
   const show = open => {
     if (open) state.workedOpen.add(turn.turn_id);
@@ -1519,165 +1481,6 @@ function failedChecksLine(count, openChecks) {
   );
   line.onclick = openChecks;
   return line;
-}
-/** Let the owner review a batch of complete requests without interrupting capture. */
-function renderBrowserPermissions(check, turn, taskId) {
-  const candidates = check.permission_candidates || [];
-  if (!candidates.length || !check.check_id) return null;
-  if ((turn.verification || []).some(item => item.retry_of === check.check_id))
-    return textNode("p", "This batch was reviewed in a later inspection.", "muted");
-  if (check.permission_review) {
-    const retrying = state.task?.browser_retry?.source_check_id === check.check_id;
-    return textNode("p", retrying ? "Retrying with the approved requests…"
-      : "This batch was already approved. If no retry result is available, start a new inspection.", "muted");
-  }
-  if (turn.turn_id !== state.task?.current_turn_id) return null;
-  if (state.task?.cancellation_requested)
-    return textNode("p", "This exchange was stopped, so its requests can't be approved. Start a new inspection to review them.", "muted");
-  const panel = textNode("div", "", "browser-permission-review");
-  panel.append(textNode("h4", "Review blocked browser requests"));
-  panel.append(textNode("p", "Select requests you trust. Unreviewed handlers may have side effects. Known device controls, writes, sign-in changes, URL signing and camera signaling stay blocked."));
-  const fields = document.createElement("fieldset");
-  fields.append(textNode("legend", `Additional access for ${check.path}`));
-  const boxes = [];
-  const selectLabel = textNode("label", "", "browser-permission-choice");
-  const selectAll = document.createElement("input");
-  selectAll.type = "checkbox";
-  selectLabel.append(selectAll, textNode("span", "Select all requests"));
-  fields.append(selectLabel);
-  for (const candidate of candidates) {
-    const item = textNode("div", "", "browser-permission-request");
-    const label = textNode("label", "", "browser-permission-choice");
-    const box = document.createElement("input");
-    box.type = "checkbox";
-    box.value = candidate.id;
-    boxes.push(box);
-    label.append(box, textNode("span", candidate.label));
-    const details = textNode("details", "", "browser-permission-details disclosure");
-    details.append(textNode("summary", "Request details"), textNode("pre", candidate.description));
-    item.append(label, details);
-    fields.append(item);
-  }
-  const rememberLabel = textNode("label", "", "browser-permission-choice browser-permission-remember");
-  const remember = document.createElement("input");
-  remember.type = "checkbox";
-  rememberLabel.append(remember, textNode("span", "Remember for this dashboard"));
-  fields.append(rememberLabel);
-  const actions = textNode("div", "", "browser-permission-actions");
-  const allow = textNode("button", "Allow selected and retry");
-  allow.type = "button";
-  const keep = textNode("button", "Keep blocked", "subtle");
-  keep.type = "button";
-  keep.onclick = () => {
-    const result = panel.closest(".verification-result");
-    result.open = false;
-    result.querySelector("summary").focus();
-  };
-  actions.append(allow, keep);
-  const feedback = textNode("p", "", "browser-permission-feedback");
-  feedback.setAttribute("role", "status");
-  // The worker accepts a batch only while no task or inspection runs in any chat.
-  const busy = Boolean(state.task?.browser_retry) || Boolean(state.active) ||
-    ["queued", "running", "in_queue"].includes(state.task?.status);
-  fields.disabled = busy;
-  const update = () => {
-    const selected = boxes.filter(box => box.checked).length;
-    selectAll.checked = selected === boxes.length;
-    selectAll.indeterminate = selected > 0 && selected < boxes.length;
-    allow.disabled = busy || !selected;
-  };
-  selectAll.onchange = () => { for (const box of boxes) box.checked = selectAll.checked; update(); };
-  for (const box of boxes) box.onchange = update;
-  update();
-  allow.onclick = async () => {
-    const generation = state.generation;
-    fields.disabled = allow.disabled = keep.disabled = true;
-    feedback.textContent = "Starting a fresh inspection…";
-    state.retriedChecks.add(check.check_id);
-    try {
-      await api(`tasks/${encodeURIComponent(taskId)}/browser-permissions`, {
-        turn_id: turn.turn_id, check_id: check.check_id,
-        candidate_ids: boxes.filter(box => box.checked).map(box => box.value), remember: remember.checked,
-      });
-      if (state.id === taskId && state.generation === generation) {
-        await fetchSelected(true);
-        clearTimeout(refreshTimer);
-        refreshTimer = setTimeout(refresh, 1000);
-      }
-    } catch (error) {
-      if (!panel.isConnected) return;
-      feedback.textContent = String(error.message || error);
-      fields.disabled = busy;
-      keep.disabled = false;
-      update();
-    }
-  };
-  panel.append(fields, actions, feedback);
-  if (busy) feedback.textContent = "Wait for running tasks and inspections to finish before approving this batch.";
-  return panel;
-}
-
-let browserPermissionLoad = 0;
-/** List saved exceptions in Settings, with an explicit revoke action for each. */
-async function loadBrowserPermissions() {
-  const load = ++browserPermissionLoad;
-  const area = $("browser-permissions");
-  area.textContent = "Loading saved permissions…";
-  try {
-    const { permissions } = await api("browser-permissions");
-    if (load !== browserPermissionLoad) return;
-    area.replaceChildren();
-    if (!permissions.length) area.append(textNode("p", "No browser permissions remembered.", "muted"));
-    const remembered = permissions.length ? `${permissions.length} remembered` : "None remembered";
-    setSectionStatus("browser-permissions-section", remembered);
-    setSectionStatus("advanced-section", `Browser permissions: ${remembered.toLowerCase()}`);
-    for (const permission of permissions) {
-      const row = textNode("div", "", "saved-browser-permission");
-      const info = textNode("div", "", "saved-browser-permission-info");
-      info.append(textNode("strong", permission.label), textNode("p", permission.path));
-      const details = textNode("details", "", "browser-permission-details disclosure");
-      details.append(textNode("summary", "Request details"), textNode("pre", permission.description));
-      info.append(details);
-      const revoke = textNode("button", "Revoke", "subtle");
-      revoke.type = "button";
-      revoke.setAttribute("aria-label", `Revoke ${permission.label} for ${permission.path}`);
-      revoke.onclick = async () => {
-        revoke.disabled = true;
-        try {
-          await api(`browser-permissions/${encodeURIComponent(permission.id)}`, undefined, "DELETE");
-          await loadBrowserPermissions();
-          const next = area.querySelector("button");
-          if (next) next.focus();
-          else { area.tabIndex = -1; area.focus(); }
-          $("settings-result").textContent = "Browser permission revoked.";
-        } catch (error) { revoke.disabled = false; settingsError(error); }
-      };
-      row.append(info, revoke);
-      area.append(row);
-    }
-  } catch (error) {
-    if (load !== browserPermissionLoad) return;
-    area.replaceChildren(textNode("p", String(error.message || error)));
-    setSectionStatus("browser-permissions-section", "Could not be read", true);
-    // Advanced is closed by default, so its header carries the problem too.
-    setSectionStatus("advanced-section", "Browser permissions could not be read", true);
-    // An unreadable permissions file can only be replaced, never edited here.
-    if (error.status === 503) {
-      const clear = textNode("button", "Remove all saved permissions", "subtle");
-      clear.type = "button";
-      clear.onclick = async () => {
-        clear.disabled = true;
-        try {
-          await api("browser-permissions", undefined, "DELETE");
-          await loadBrowserPermissions();
-          area.tabIndex = -1;
-          area.focus();
-          $("settings-result").textContent = "Saved browser permissions removed.";
-        } catch (failure) { clear.disabled = false; settingsError(failure); }
-      };
-      area.append(clear);
-    }
-  }
 }
 /**
  * Whether the question needs its own line: from 0.3.3 the answer text already holds it (ask_owner),
@@ -1716,7 +1519,6 @@ function renderTask(force = false) {
     queued && [queued.queue_id, queued.message, queued.prompt_attachments],
     state.edit?.id,
     state.catalog?.backup_retention_days,
-    task.browser_retry,
     // Approval panels depend on whether any chat is working.
     state.active,
   ]);
@@ -1774,7 +1576,7 @@ function renderTask(force = false) {
       turn.summary || turn.details || turn.question || attachments.length || turn.verification?.length;
     if (hasAnswer) {
       // The steps and checks sit closed behind one "Worked for" line above the answer, as in the desktop app.
-      const evidence = renderVerification(turn, task.task_id);
+      const evidence = renderVerification(turn);
       let openChecks = null;
       if (latest) {
         state.latestChecks = evidence;
@@ -2314,7 +2116,6 @@ function renderActivity() {
     block.replaceChildren(textNode("p", worked, "worked-line"));
     return;
   }
-  // A checks block that asks for the owner (a browser permission review, a retry result) opens the line.
   // While Codex works the steps start closed under the waiting line; a tap holds only until the turn ends.
   if (!running && activity.tappedWhileRunning) {
     activity.expanded = null;
@@ -2346,8 +2147,16 @@ function renderActivity() {
   list.id = "activity-steps";
   list.hidden = !expanded;
   const nodes = entries.map(entry => workLogNode(entry, activity.open, renderActivity));
-  list.append(...groupWorkLog(checks ? [...nodes, checks] : nodes));
-  block.replaceChildren(toggle, list);
+  list.append(...groupWorkLog(checks ? [...nodes, checks] : nodes, activity.open, renderActivity, running));
+  const latestReasoning = running
+    ? [...steps].reverse().find(step => step.kind === "reasoning" &&
+        typeof step.text === "string" && step.text.trim())
+    : null;
+  const thinking = latestReasoning
+    ? textNode("div", `Thinking: ${latestReasoning.text.replace(/\s+/g, " ").trim()}`, "activity-thinking")
+    : null;
+  // Under the list, so with the list open the newest thought is next to the newest step.
+  block.replaceChildren(...[toggle, list, thinking].filter(Boolean));
   tickElapsed();
   if (nearBottom) area.scrollTop = area.scrollHeight;
 }
@@ -2378,26 +2187,87 @@ function workLogNode(entry, open, redraw) {
   return renderStep(entry, open, redraw);
 }
 /**
- * Put each run of step rows (and the checks after them) in an indented group,
- * and leave the text messages between the groups, so a message starts where
- * the answer starts, as in the desktop app.
+ * Put each run of step rows in an indented group, and leave the text messages
+ * between the groups, so a message starts where the answer starts, as in the
+ * desktop app. A group of two or more rows gets a heading that sums it up
+ * ("Ran 3 commands, edited a file"); see stepGroup. Anything that is neither a
+ * message nor a step row (the checks block) stands outside the groups, so a
+ * check that asks for the owner is never folded away.
  */
-function groupWorkLog(nodes) {
+function groupWorkLog(nodes, open, redraw, running = false) {
   const out = [];
-  let group = null;
+  let rows = [];
+  const flush = () => {
+    if (rows.length) out.push(stepGroup(rows, open, redraw, running));
+    rows = [];
+  };
   for (const node of nodes) {
-    if (node.classList.contains("interim")) {
-      out.push(node);
-      group = null;
+    if (node.classList.contains("step")) {
+      rows.push(node);
       continue;
     }
-    if (!group) {
-      group = textNode("div", "", "step-group");
-      out.push(group);
-    }
-    group.append(node);
+    flush();
+    out.push(node);
   }
+  flush();
   return out;
+}
+// What a group heading says for each kind of step, for one and for several (CX-WORKLOG-GROUPS).
+const STEP_GROUP_WORDS = {
+  command: ["ran a command", n => `ran ${n} commands`],
+  file_change: ["edited a file", n => `made ${n} file edits`],
+  web_search: ["searched the web", n => `searched the web ${n} times`],
+  tool_call: ["used a tool", n => `used ${n} tools`],
+  reasoning: ["thought", () => "thought"],
+  plan: ["updated the plan", () => "updated the plan"],
+  error: ["hit an error", n => `hit ${n} errors`],
+  phase: ["got ready", () => "got ready"],
+};
+/** Sum up a group's rows in one line, kinds in the order they first ran, and say how many failed. */
+function stepGroupLabel(rows) {
+  const counts = new Map();
+  for (const row of rows) {
+    const kind = STEP_GROUP_WORDS[row.dataset.kind] ? row.dataset.kind : "other";
+    counts.set(kind, (counts.get(kind) || 0) + 1);
+  }
+  const parts = [...counts].map(([kind, n]) => {
+    if (kind === "other") return n === 1 ? "1 other step" : `${n} other steps`;
+    const [one, many] = STEP_GROUP_WORDS[kind];
+    return n === 1 ? one : many(n);
+  });
+  const text = parts.join(", ");
+  const failed = rows.filter(row => row.classList.contains("is-failed")).length;
+  return text[0].toUpperCase() + text.slice(1) + (failed ? ` · ${failed} failed` : "");
+}
+/**
+ * Build one group of step rows. One row needs no heading. Several rows get a
+ * heading button: the group starts closed once the exchange is over and open
+ * while Codex works, so the owner can follow along; a tap is remembered in
+ * `open` under the group's first step index ("g+3" open, "g-3" closed), which
+ * keeps it through the redraws while Codex works.
+ */
+function stepGroup(rows, open, redraw, running) {
+  const group = textNode("div", "", "step-group");
+  if (rows.length < 2) {
+    group.append(...rows);
+    return group;
+  }
+  const key = rows[0].dataset.index;
+  const shown = open.has(`g+${key}`) || (running && !open.has(`g-${key}`));
+  const head = textNode("button", "", "step-group-head");
+  head.type = "button";
+  head.setAttribute("aria-expanded", String(shown));
+  head.append(textNode("span", "", "step-group-chevron"), textNode("span", stepGroupLabel(rows)));
+  head.onclick = () => {
+    open.delete(`g+${key}`);
+    open.delete(`g-${key}`);
+    open.add(`g${shown ? "-" : "+"}${key}`);
+    redraw();
+  };
+  for (const row of rows) row.hidden = !shown;
+  group.classList.add("has-head");
+  group.append(head, ...rows);
+  return group;
 }
 /**
  * Build one row of the step list: icon, text, and a line with a failed
@@ -2407,9 +2277,14 @@ function groupWorkLog(nodes) {
  */
 function renderStep(step, open, redraw) {
   const row = textNode("div", "", `step step-${step.kind} is-${step.status}`);
+  row.dataset.kind = step.kind;
+  row.dataset.index = String(step.index);
   row.append(textNode("span", stepIcons[step.kind] || "•", "step-icon"));
   const body = textNode("div", "", "step-body");
-  body.append(textNode("div", step.text, "step-text"));
+  const text = textNode("div", step.text, "step-text");
+  // A command shows on one line (CSS); the whole of it shows on hover and once its output is open.
+  if (step.kind === "command") text.title = step.text;
+  body.append(text);
   const meta = [];
   if (step.kind === "command" && step.exit_code)
     meta.push(`exit ${step.exit_code}`);
@@ -2438,7 +2313,10 @@ function renderStep(step, open, redraw) {
       redraw();
     };
     footer.append(button);
-    if (shown) body.append(textNode("pre", step.output, "step-output"));
+    if (shown) {
+      row.classList.add("output-open");
+      body.append(textNode("pre", step.output, "step-output"));
+    }
   }
   if (footer.childElementCount) body.insertBefore(footer, body.children[1] || null);
   row.append(body);
@@ -2529,6 +2407,7 @@ async function selectChat(id, restoring = false, keepSidebar = false) {
   resizeInput();
   showError(null);
   if (!keepSidebar) sidebar(false);
+  markRead(id);
   renderList();
   controls();
   if (!id) {
@@ -2780,6 +2659,16 @@ $("chat-menu").addEventListener("click", async (event) => {
   else if (action === "share") openShare(id);
   else document.dispatchEvent(new CustomEvent("thread-action", {detail: {action, id}}));
 });
+/**
+ * Clear the unread mark a scheduled run left on the open chat, while the page is in view.
+ * A failed request leaves nothing to undo: the next list refresh shows the mark again.
+ */
+function markRead(id) {
+  const chat = id && chatById(id);
+  if (!chat?.unread || document.hidden) return;
+  chat.unread = false;
+  api(`tasks/${encodeURIComponent(id)}/read`, {}).catch(() => {});
+}
 /** Pin or unpin a chat through the worker API and re-sort the list. */
 async function togglePin(id) {
   const chat = chatById(id);
@@ -3321,18 +3210,16 @@ $("divider").addEventListener("keydown", (event) => {
 window.addEventListener("resize", () => {
   if (innerWidth > 700) setWidth($("divider").getAttribute("aria-valuenow"));
 });
-/**
- * Slash commands. Messages go to Codex as plain text through the app server,
- * which does not read the TUI's slash commands, so "/new" sent as a message
- * would only reach the model as words. The page runs these commands itself
- * instead: typing "/" at the start of the message box lists them, filtered as
- * you type, and a tap, or Enter or Tab on the highlighted one, runs it.
- * A command is listed only while the page can run it (Stop only while a
- * chat is working, Rename only with a chat open).
- * There is no /fast command, and the picker has no lightning (fast mode)
- * toggle: the Codex CLI has no setting for fast mode yet. Both return in 0.6
- * with a working toggle (CX-04-FB-MODEL).
- */
+// Version 0.5 sends slash-prefixed messages through the regular composer.
+const SLASH_COMMANDS_ENABLED = false;
+if (!SLASH_COMMANDS_ENABLED) {
+  const message = $("message");
+  message.removeAttribute("aria-autocomplete");
+  message.removeAttribute("aria-controls");
+  message.removeAttribute("aria-expanded");
+}
+
+/** Page shortcuts and their availability when slash commands are enabled. */
 const SLASH_COMMANDS = [
   {
     name: "new",
@@ -3392,8 +3279,8 @@ const SLASH_COMMANDS = [
     name: "connection",
     icon: "⇄",
     description: "Open the remote connection and its status",
-    // Listed until Settings has shown that remote control cannot run here.
-    available: () => state.remoteAvailable !== false,
+    // Listed until Settings has shown that remote control cannot run here, and never while it is paused.
+    available: () => !REMOTE_PAUSED && state.remoteAvailable !== false,
     run: () => openConnection(),
   },
   {
@@ -3475,6 +3362,7 @@ function slashMatches(value) {
 }
 /** Return the runnable command a whole message names exactly, if any. */
 function slashCommand(value) {
+  if (!SLASH_COMMANDS_ENABLED) return null;
   const typed = /^\/(\S+)$/.exec(value.trim());
   if (!typed) return null;
   const word = typed[1].toLowerCase();
@@ -3494,6 +3382,7 @@ function slashIcon(glyph) {
 }
 /** Show or hide the command list for the message box's current text. */
 function renderSlash() {
+  if (!SLASH_COMMANDS_ENABLED) return;
   const value = $("message").value;
   if (slash.dismissed !== null && slash.dismissed !== value)
     slash.dismissed = null;
@@ -3609,9 +3498,9 @@ $("message").addEventListener("focus", () => {
  */
 function collapseSettingsSections() {
   // Sections marked data-own-dialog move to a dialog of their own (studio.js) and stay open there.
-  // The parts of Accounts and connections and of Advanced collapse too, inside them, each under its own header.
+  // The parts of Accounts and connections collapse too, inside it, each under its own header.
   const sections = document.querySelectorAll(
-    "#settings > section:not([data-own-dialog]), #accounts-section > section, #advanced-section > section",
+    "#settings > section:not([data-own-dialog]), #accounts-section > section",
   );
   sections.forEach((section, index) => {
     const heading = section.querySelector(":scope > h3, :scope > h4");
@@ -3862,6 +3751,43 @@ async function loadLogin() {
   }
   renderLogin(auth);
 }
+/*
+ * The ChatGPT sign-in details under its status line, like GitHub's: the sign-in
+ * method the Codex CLI reports, the plan, OpenAI's last answer and the weekly
+ * quota left. Two reads feed it (auth/status and status), so each keeps its last
+ * answer here. A row shows only what the worker reported; no account name or
+ * email is shown, because the worker does not send one.
+ */
+/** The sign-in method in the Codex CLI's "login status" line, or "" when it names none. */
+function chatgptSignInMethod(message) {
+  if (/\bChatGPT\b/i.test(message || "")) return "ChatGPT account";
+  if (/\bAPI key\b/i.test(message || "")) return "API key";
+  return "";
+}
+/** The rows of the ChatGPT details list while signed in; none while signed out. */
+function chatgptDetailRows(auth, status) {
+  if (!auth) return [];
+  const rows = [];
+  const method = chatgptSignInMethod(auth.codex_login?.message);
+  if (method) rows.push(["Sign-in", method]);
+  const plan = planName(status?.account_access?.plan_type);
+  if (plan) rows.push(["Plan", plan]);
+  // While signed in, OpenAI's last answer can only be "ok": a refusal signs the page out.
+  const checked = auth.codex_login?.server_check === "ok" && dateLabel(auth.codex_login.server_checked_at, true);
+  rows.push(["Last check", checked ? `${checked}: OpenAI accepted the sign-in` : "Not checked yet"]);
+  // The worker sends the quota left as a number or a numeric string; any other value shows no row.
+  const raw = status?.codex_usage?.weekly_percent;
+  const weekly = typeof raw === "number" || (typeof raw === "string" && raw.trim()) ? Number(raw) : NaN;
+  if (Number.isFinite(weekly) && weekly >= 0 && weekly <= 100) rows.push(["Weekly quota", `${weekly}% left`]);
+  return rows;
+}
+/** Put the ChatGPT details rows on the Settings page. */
+function renderChatgptDetails() {
+  const rows = chatgptDetailRows(chatgptAccount.auth, chatgptAccount.status);
+  const details = $("chatgpt-details");
+  details.replaceChildren(...rows.flatMap(([term, value]) => [textNode("dt", term), textNode("dd", value)]));
+  details.hidden = !rows.length;
+}
 /** The ChatGPT account header in a few words. */
 function chatgptSectionStatus({ signedIn, pending, failed, lapsed }) {
   if (signedIn) return "Signed in";
@@ -3919,7 +3845,11 @@ function renderLogin(auth) {
   } else if (pending) {
     followCodeTime("chatgpt", auth.expires_in);
   }
-  for (const id of ["login", "banner-login"]) $(id).hidden = pending;
+  // Sign in shows only while signed out with no code waiting; Sign out only while a sign-in, even a lapsed one, is saved.
+  for (const id of ["login", "banner-login"]) $(id).hidden = pending || signedIn;
+  $("logout").hidden = !signedIn && !auth.codex_login?.has_auth_file;
+  chatgptAccount.auth = signedIn ? auth : null;
+  renderChatgptDetails();
   // While a sign-in waits, the section shows only the card and Cancel (CSS hides the rest).
   $("chatgpt-section").classList.toggle("signing-in", pending);
   for (const id of ["login-cancel", "banner-cancel"]) $(id).hidden = !pending;
@@ -4265,6 +4195,7 @@ let remoteCardKey = "";
  */
 async function loadRemoteControl() {
   clearTimeout(remoteTimer);
+  if (REMOTE_PAUSED) return;
   const { remote_control: rc } = await api("remote-control");
   renderRemoteControl(rc);
   if ($("settings").open)
@@ -4485,7 +4416,6 @@ $("settings-button").onclick = async () => {
     loadLogin(),
     loadGithub(),
     loadRemoteControl(),
-    loadBrowserPermissions(),
     loadAddonConfiguration(),
   ]);
   for (const result of results)
@@ -4532,7 +4462,7 @@ async function refresh() {
       showError(error);
     }
   }
-  refreshTimer = setTimeout(refresh, state.task?.browser_retry ? 1000 : state.active ? 3000 : 12000);
+  refreshTimer = setTimeout(refresh, state.active ? 3000 : 12000);
 }
 sidebar(false);
 controls();

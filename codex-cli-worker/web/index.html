@@ -69,7 +69,7 @@
             <span class="status-dot" aria-hidden="true"></span
             ><span class="foot-label">GitHub · <span id="github-status-summary">Loading…</span></span>
           </button>
-          <button id="remote-status-row" class="foot-row" type="button" data-state="loading" data-section="app-pairing-section">
+          <button id="remote-status-row" data-remote class="foot-row" type="button" data-state="loading" data-section="app-pairing-section">
             <span class="status-dot" aria-hidden="true"></span
             ><span class="foot-label">Remote · <span id="remote-status-summary">Loading…</span></span>
           </button>
@@ -205,7 +205,7 @@
                   hidden
                 />
                 <button id="permission-button" type="button" class="permission-pill" aria-haspopup="dialog"
-                  ><span id="permission-label">Default permissions</span
+                  ><span id="permission-label">Ask for approval</span
                   ><svg class="picker-chevron" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z" /></svg
                 ></button>
                 <div id="plus-menu" class="picker-popover" role="menu" aria-label="Add to message" hidden>
@@ -412,7 +412,7 @@
         <p id="schedule-format-note" class="muted"></p>
         <details id="schedule-advanced" class="disclosure">
           <summary>Advanced settings</summary>
-          <label for="schedule-mode">Permissions</label><select id="schedule-mode"><option value="default">Default</option><option value="read-only">Read only</option></select>
+          <label for="schedule-mode">Permissions</label><select id="schedule-mode"><option value="default">Ask for approval</option><option value="read-only">Read only</option></select>
           <p class="muted">Each run starts a new chat. A permission request waits in that chat; it is never allowed automatically.</p>
           <p class="muted">Up to 24 runs per schedule and 64 scheduled runs per UTC day. The assistant runs one task at a time.</p>
           <div id="schedule-saved" hidden>
@@ -427,12 +427,12 @@
     </dialog>
     <!-- scheduling:end -->
     <dialog id="permissions-dialog" class="studio-sheet" aria-labelledby="permissions-title">
-      <div class="dialog-header"><h2 id="permissions-title">Permissions</h2><button class="icon icon-close" data-close="permissions-dialog" aria-label="Close permissions"></button></div>
+      <div class="dialog-header"><h2 id="permissions-title">How should ChatGPT actions be approved?</h2><button class="icon icon-close" data-close="permissions-dialog" aria-label="Close permissions"></button></div>
       <p class="muted">Choose how this chat starts its next turn. These are the four modes of the ChatGPT app, with Codex's own settings.</p>
-      <button class="permission-option" data-mode="default"><strong>Default permissions</strong><span>Codex works in the sandbox and asks you before a change it needs permission for.</span></button>
-      <button class="permission-option" data-mode="auto-review"><strong>Auto-review</strong><span>As Default, but Codex's own reviewer allows or denies each request. It does not ask you.</span></button>
-      <button class="permission-option" data-mode="read-only"><strong>Read only</strong><span>Codex reads in a read-only sandbox and asks you before any change.</span></button>
+      <button class="permission-option" data-mode="default"><strong>Ask for approval</strong><span>Codex works in the sandbox and asks you before a change it needs permission for.</span></button>
+      <button class="permission-option" data-mode="auto-review"><strong>Approve for me</strong><span>As Ask for approval, but Codex's own reviewer allows or denies each request. It does not ask you.</span></button>
       <button class="permission-option" data-mode="full-access" disabled><strong>Full access</strong><span id="full-access-option-text">Off. An administrator can turn it on in Settings.</span></button>
+      <button class="permission-option" data-mode="read-only"><strong>Read only</strong><span>Codex reads in a read-only sandbox and asks you before any change.</span></button>
       <p id="permission-result" role="status"></p>
     </dialog>
     <dialog id="full-access-dialog" aria-labelledby="full-access-title">
@@ -443,7 +443,7 @@
         <button type="button" id="full-access-confirm">Turn on Full access</button>
       </div>
     </dialog>
-    <dialog id="connection-dialog" class="studio-sheet" aria-labelledby="connection-title"><div class="dialog-header"><button id="connection-back" class="icon icon-back" type="button" aria-label="Back to Settings"></button><h2 id="connection-title">Remote connection</h2><button class="icon icon-close" data-close="connection-dialog" aria-label="Close remote connection"></button></div><div id="connection-content"></div><p id="connection-result" role="alert"></p></dialog>
+    <dialog id="connection-dialog" data-remote class="studio-sheet" aria-labelledby="connection-title"><div class="dialog-header"><button id="connection-back" class="icon icon-back" type="button" aria-label="Back to Settings"></button><h2 id="connection-title">Remote connection</h2><button class="icon icon-close" data-close="connection-dialog" aria-label="Close remote connection"></button></div><div id="connection-content"></div><p id="connection-result" role="alert"></p></dialog>
     <dialog id="workspace-dialog" class="studio-sheet" aria-labelledby="workspace-title"><div class="dialog-header"><h2 id="workspace-title">Workspace rules</h2><button class="icon icon-close" data-close="workspace-dialog" aria-label="Close workspace rules"></button></div><div id="workspace-content"><label for="agents">AGENTS.md</label
       ><textarea id="agents" rows="12" spellcheck="false"></textarea
       ><button id="save-agents">Save instructions</button></div><p id="workspace-result" role="status"></p></dialog>
@@ -458,6 +458,7 @@
           <h4>ChatGPT account</h4>
           <p id="login-status" class="muted signin-hide">Loading account status…</p>
           <p id="codex-access" class="muted signin-hide" hidden></p>
+          <dl id="chatgpt-details" class="account-details signin-hide" hidden></dl>
           <p id="login-requirement" class="muted signin-hide">A ChatGPT account with Codex access is required. As of November 13, 2026, OpenAI includes Codex across plans, including Free and Go; limits and workspace access vary. <a href="https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan" target="_blank" rel="noopener noreferrer">Check current availability</a>.</p>
           <div id="login-card"></div>
           <div class="settings-actions">
@@ -507,7 +508,7 @@
           </details>
           <p id="github-result" role="alert"></p>
         </section>
-        <section id="app-pairing-section" aria-labelledby="app-pairing-title">
+        <section id="app-pairing-section" data-remote aria-labelledby="app-pairing-title">
           <h4 id="app-pairing-title">ChatGPT app pairing</h4>
           <p id="app-pairing-status" class="muted" role="status">Loading…</p>
           <p class="muted">The pairing code and its QR code open in their own window. The worker does not know how long a pairing code lasts, so no countdown shows. If the app refuses a code, get a new one. Turn off stops the ChatGPT app from reaching this Home Assistant until you turn it on again.</p>
@@ -550,7 +551,7 @@
               >
         </fieldset>
       </section>
-      <section id="remote-control-section" data-own-dialog>
+      <section id="remote-control-section" data-remote data-own-dialog>
         <h3>Remote control from the ChatGPT app</h3>
         <p class="muted">Lets the ChatGPT app work on this Home Assistant. Off until you turn it on.</p>
         <p id="remote-control-status" class="muted" role="status">Loading…</p>
@@ -608,17 +609,9 @@
         </p>
         <button id="workspace-open" class="subtle">Workspace rules</button>
       </section>
-      <section id="advanced-section" aria-labelledby="advanced-title">
-        <h3 id="advanced-title">Advanced</h3>
-        <section id="browser-permissions-section" aria-labelledby="browser-permissions-title">
-          <h4 id="browser-permissions-title">Browser permissions</h4>
-          <p class="muted">Requests you chose to remember for a dashboard. Revoking a permission stops captures using saved access.</p>
-          <div id="browser-permissions"></div>
-        </section>
-      </section>
       <a id="addon-configuration" class="ha-row ha-nav-row" target="_top"
          aria-label="Add-on configuration" aria-describedby="addon-configuration-description"
-        ><span><strong>Add-on configuration</strong><span id="addon-configuration-description" class="ha-row-description">Model, sandbox, logs to keep, the remote control name and the other options.</span></span
+        ><span><strong>Add-on configuration</strong><span id="addon-configuration-description" class="ha-row-description">Model, sandbox, logs to keep<span data-remote>, the remote control name</span> and the other options.</span></span
         ><span class="ha-nav-chevron" aria-hidden="true"></span></a>
       <p id="settings-result" role="status"></p>
     </dialog>

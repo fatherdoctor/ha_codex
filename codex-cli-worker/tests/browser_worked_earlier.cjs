@@ -49,8 +49,21 @@ async function checkWidth(browser, width, height) {
   assert.equal(turnFetches.length, 0, `${label}: nothing is fetched before the line opens`);
 
   await toggle.click();
-  await first.locator('.activity-steps .step').first().waitFor();
+  // A group of several steps opens from its own heading (CX-WORKLOG-GROUPS); a single step shows as a row.
+  await first.locator('.activity-steps .step-group-head, .activity-steps .step-group > .step').first().waitFor();
   assert.equal(await toggle.getAttribute('aria-expanded'), 'true', `${label}: the line opens`);
+  const heads = first.locator('.activity-steps .step-group-head');
+  const headCount = await heads.count();
+  assert.ok(headCount > 0, `${label}: the fixture's steps make at least one group with a heading`);
+  for (let i = 0; i < headCount; i++) {
+    const head = heads.nth(i);
+    assert.equal(await head.getAttribute('aria-expanded'), 'false', `${label}: a finished group starts closed`);
+    assert.match(await head.textContent(), /^[A-Z]/, `${label}: the heading sums up the group`);
+    assert.equal(await head.locator('xpath=..').locator('.step:visible').count(), 0, `${label}: its rows are folded`);
+    await head.click();
+    assert.equal(await heads.nth(i).getAttribute('aria-expanded'), 'true', `${label}: a tap opens the group`);
+  }
+  assert.equal(await first.locator('.activity-steps .step:not(:visible)').count(), 0, `${label}: every row shows`);
   const steps = await first.locator('.activity-steps .step').count();
   assert.equal(steps, latestSteps, `${label}: the earlier list shows the same steps it showed as the latest`);
   assert.equal(turnFetches.length, 1, `${label}: one fetch`);
@@ -73,10 +86,26 @@ async function checkWidth(browser, width, height) {
   assert.equal(await again.getAttribute('aria-expanded'), 'true', `${label}: stays open after a redraw`);
   assert.ok((await page.locator('.exchange').nth(0).locator('.activity-steps .step').count()) > 0,
     `${label}: steps still show after a redraw`);
+  assert.equal(await page.locator('.exchange').nth(0).locator('.step-group-head[aria-expanded="false"]').count(), 0,
+    `${label}: opened groups stay open after a redraw`);
   assert.equal(turnFetches.length, 1, `${label}: no second fetch`);
   await again.click();
   assert.equal(await page.locator('.exchange').nth(0).locator('.activity-steps').isVisible(), false,
     `${label}: closes again`);
+  const words = await page.evaluate(() => {
+    const row = (kind, failed) => {
+      const node = document.createElement('div');
+      node.className = `step step-${kind} is-${failed ? 'failed' : 'done'}`;
+      node.dataset.kind = kind;
+      return node;
+    };
+    return [
+      stepGroupLabel([row('command'), row('file_change'), row('command', true), row('web_search'), row('mystery')]),
+      stepGroupLabel([row('file_change'), row('file_change')]),
+    ];
+  });
+  assert.deepEqual(words, ['Ran 2 commands, edited a file, searched the web, 1 other step · 1 failed', 'Made 2 file edits'],
+    `${label}: the heading counts each kind in the order it first ran`);
   assert.deepEqual(errors, [], `${label}: no page errors`);
   await context.close();
 }

@@ -29,11 +29,9 @@ STATUS = {
 async def _set_up(hass, entry, client):
     """Run the entry's setup with a stand-in worker and no entity platforms."""
     worker = SimpleNamespace(base_url="http://worker", api_token="paired-worker")
-    broker = SimpleNamespace(setup=AsyncMock(), close=lambda: None)
     with (
         patch.object(integration, "async_discover_worker", return_value=worker),
         patch.object(integration, "CodexCliApiClient", return_value=client),
-        patch.object(integration, "BrowserSessions", return_value=broker),
         patch.object(hass.config_entries, "async_forward_entry_setups", return_value=None),
     ):
         context = current_entry.set(entry)

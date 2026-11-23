@@ -1,4 +1,4 @@
-"""Action, browser-session and discovery boundaries during entry transitions."""
+"""Action, Core log view and discovery boundaries during entry transitions."""
 import importlib.util
 import sys
 from pathlib import Path
@@ -20,7 +20,7 @@ integration = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = integration
 spec.loader.exec_module(integration)
 discovery = sys.modules["quality_ha_test.discovery"]
-auth = sys.modules["quality_ha_test.browser_auth"]
+core_logs = sys.modules["quality_ha_test.core_logs"]
 
 CALLS = [
     ("start_task", {"prompt": "fixture"}), ("start_login", {}),
@@ -39,12 +39,10 @@ def add_entry(hass, state=ConfigEntryState.SETUP_IN_PROGRESS):
     return entry
 
 
-def runtime(client=None, broker=None):
-    """Allow the same guard regression to run before the broker field is added."""
-    kwargs = {"client": client if client is not None else AsyncMock(), "coordinator": AsyncMock()}
-    if "browser_sessions" in integration.CodexCliRuntimeData.__dataclass_fields__:
-        kwargs["browser_sessions"] = broker
-    return integration.CodexCliRuntimeData(**kwargs)
+def runtime(client=None, worker_token="fixture-pairing"):
+    """Runtime data with a stand-in client and coordinator."""
+    return integration.CodexCliRuntimeData(client=client if client is not None else AsyncMock(),
+                                           coordinator=AsyncMock(), worker_token=worker_token)
 
 
 @pytest.mark.parametrize("state", NOT_LOADED)
@@ -74,23 +72,20 @@ async def test_loaded_action_passes_default_force(hass, force):
 
 
 @pytest.mark.parametrize("state", NOT_LOADED)
-async def test_browser_view_refuses_nonloaded_entry_and_legacy_global(hass, state):
-    """Old global sessions cannot bypass the entry's state."""
+async def test_core_log_view_refuses_nonloaded_entry(hass, state):
+    """An entry that is not loaded cannot authorize a Core log read, even with its worker token."""
     entry = add_entry(hass, state)
-    broker = auth.BrowserSessions(hass, "fixture-pairing")
-    entry.runtime_data = runtime(broker=broker)
-    hass.data.setdefault("codex_cli", {})["browser_sessions"] = broker
+    entry.runtime_data = runtime()
     request = {KEY_HASS_USER: SimpleNamespace(is_admin=True)}
     with pytest.raises(web.HTTPServiceUnavailable):
-        auth.BrowserSessionView(hass).broker(request, {"worker_token": "fixture-pairing"})
+        core_logs.DiagnosticView(hass).check_caller(request, {"worker_token": "fixture-pairing"})
 
 
-@pytest.mark.parametrize("failure", [None, "refresh", "broker", "platforms"])
+@pytest.mark.parametrize("failure", [None, "refresh", "platforms"])
 async def test_setup_publishes_after_refresh_and_cleans_failed_setup(hass, failure):
     """Failures leave no runtime or owned listeners, including platform forwarding."""
     entry = add_entry(hass)
     integration._async_register_services(hass)
-    broker = SimpleNamespace(setup=AsyncMock(), close=Mock())
     remove_poll = Mock()
     remove_choices = Mock()
     coordinator = SimpleNamespace(async_add_listener=Mock(return_value=remove_poll))
@@ -102,25 +97,19 @@ async def test_setup_publishes_after_refresh_and_cleans_failed_setup(hass, failu
         if failure == "refresh":
             raise ConfigEntryNotReady("fixture refresh")
 
-    async def setup_broker():
-        if failure == "broker":
-            raise RuntimeError("fixture broker")
-
     async def forward(*args):
-        assert entry.runtime_data.browser_sessions is broker
+        assert entry.runtime_data.worker_token == "fixture-pairing"
         with pytest.raises(ServiceValidationError):
             integration._first_runtime(hass)
         if failure == "platforms":
             raise RuntimeError("fixture platforms")
 
     coordinator.async_config_entry_first_refresh = refresh
-    broker.setup.side_effect = setup_broker
     worker = discovery.WorkerConnection("http://worker", "fixture-pairing")
     with (
         patch.object(integration, "async_discover_worker", return_value=worker),
         patch.object(integration, "CodexCliApiClient", return_value=AsyncMock()),
         patch.object(integration, "CodexCliCoordinator", return_value=coordinator),
-        patch.object(integration, "BrowserSessions", return_value=broker),
         patch.object(integration, "async_listen_for_choices", return_value=remove_choices),
         patch.object(hass.config_entries, "async_forward_entry_setups", side_effect=forward),
     ):
@@ -131,16 +120,12 @@ async def test_setup_publishes_after_refresh_and_cleans_failed_setup(hass, failu
                     await integration.async_setup_entry(hass, entry)
                 assert getattr(entry, "runtime_data", None) is None
                 assert not entry.update_listeners
-                if failure != "refresh":
-                    broker.close.assert_called_once()
                 if failure == "platforms":
                     remove_poll.assert_called_once()
                     remove_choices.assert_called_once()
             else:
                 assert await integration.async_setup_entry(hass, entry)
-                assert "browser_sessions" not in hass.data.get("codex_cli", {})
                 await entry._async_process_on_unload(hass)
-                broker.close.assert_called_once()
                 remove_poll.assert_called_once()
                 remove_choices.assert_called_once()
                 assert entry.runtime_data is None
@@ -148,43 +133,36 @@ async def test_setup_publishes_after_refresh_and_cleans_failed_setup(hass, failu
             current_entry.reset(context)
 
 
-async def test_real_broker_unload_and_reload_revoke_old_session(hass):
-    """The view follows the loaded entry and cannot reuse a retired broker or pairing."""
+async def test_core_log_view_follows_unload_and_reload(hass):
+    """The view accepts only the loaded entry's worker token: none after unload, the new one after a reload."""
     entry = add_entry(hass)
     client = AsyncMock()
     client.status.return_value = {"codex_login": {"status_ok": True}}
     worker = discovery.WorkerConnection("http://worker", "fixture-first")
     request = {KEY_HASS_USER: SimpleNamespace(is_admin=True)}
-    view = auth.BrowserSessionView(hass)
+    view = core_logs.DiagnosticView(hass)
     with (
         patch.object(integration, "async_discover_worker", return_value=worker) as find,
         patch.object(integration, "CodexCliApiClient", return_value=client),
         patch.object(hass.config_entries, "async_forward_entry_setups", return_value=None),
         patch.object(hass.config_entries, "async_unload_platforms", return_value=True),
-        patch.object(auth, "get_supervisor_network_url", return_value="http://worker"),
     ):
         context = current_entry.set(entry)
         try:
             assert await integration.async_setup_entry(hass, entry)
             entry._async_set_state(hass, ConfigEntryState.LOADED, None)
-            first = entry.runtime_data.browser_sessions
-            assert view.broker(request, {"worker_token": "fixture-first"}) is first
-            session = await first.issue()
+            view.check_caller(request, {"worker_token": "fixture-first"})
             assert await integration.async_unload_entry(hass, entry)
-            assert first.closed and not first.sessions
-            assert hass.auth.async_validate_access_token(session["access_token"]) is None
             with pytest.raises(web.HTTPServiceUnavailable):
-                view.broker(request, {"worker_token": "fixture-first"})
+                view.check_caller(request, {"worker_token": "fixture-first"})
             await entry._async_process_on_unload(hass)
             entry._async_set_state(hass, ConfigEntryState.SETUP_IN_PROGRESS, None)
             find.return_value = discovery.WorkerConnection("http://worker", "fixture-second")
             assert await integration.async_setup_entry(hass, entry)
             entry._async_set_state(hass, ConfigEntryState.LOADED, None)
-            second = entry.runtime_data.browser_sessions
-            assert second is not first and not second.closed
-            assert view.broker(request, {"worker_token": "fixture-second"}) is second
+            view.check_caller(request, {"worker_token": "fixture-second"})
             with pytest.raises(web.HTTPForbidden):
-                view.broker(request, {"worker_token": "fixture-first"})
+                view.check_caller(request, {"worker_token": "fixture-first"})
             assert await integration.async_unload_entry(hass, entry)
             await entry._async_process_on_unload(hass)
         finally:
@@ -209,12 +187,10 @@ async def test_actual_discovery_to_setup_preserves_auth_failure(hass, errors, ex
         patch.object(discovery, "_async_provision_worker_token", new_callable=AsyncMock),
         patch.object(discovery, "_candidate_urls_from_addon", return_value=["http://one", "http://two"]),
         patch.object(discovery, "CodexCliApiClient", return_value=client),
-        patch.object(integration, "BrowserSessions") as broker,
     ):
         with pytest.raises(expected):
             await integration.async_setup_entry(hass, entry)
         assert getattr(entry, "runtime_data", None) is None
-        broker.assert_not_called()
 
 
 async def test_discovery_accepts_later_success_after_auth_rejection(hass):
