@@ -124,7 +124,8 @@ async function testPagePolls(page) {
   // The remote-control state is read again only while Settings is open.
   assert.equal(await page.evaluate(() => polls.remote.waiting), false);
   await page.locator("#settings-button").click();
-  await page.waitForFunction(() => polls.remote.waiting && polls.login.waiting);
+  // While Remote Control is paused, loadRemoteControl reads nothing, so polls.remote schedules no repeat.
+  await page.waitForFunction(() => polls.login.waiting && polls.remote.waiting === !REMOTE_PAUSED);
   await page.locator("#close-settings").click();
   // The dialog's close event arrives a moment after the click.
   await page.waitForFunction(() => !polls.remote.waiting && !polls.login.waiting);

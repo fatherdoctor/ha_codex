@@ -23,8 +23,7 @@ const GAP_TOLERANCE = 2;
 /** Put the fixture in the open chat as a finished exchange with its narration inside the open step list. */
 async function showFixture(page, fixture) {
   await page.evaluate((data) => {
-    clearTimeout(activityTimer);
-    activityTimer = null;
+    polls.activity.stop();
     const turn = (id, message, summary) => ({
       turn_id: id, message, summary, status: "completed",
       created_at: "2026-01-01T12:00:00Z", started_at: "2026-01-01T12:00:00Z", completed_at: "2026-01-01T12:00:09Z",
