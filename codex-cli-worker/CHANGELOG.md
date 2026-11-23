@@ -3,6 +3,11 @@
 ## 0.4.0 (unreleased)
 
 ### What's new
+- **The starter instructions cover memory and the app's sensors.** A new install's starter `AGENTS.md` tells Codex
+  to keep facts that last between chats in a `memory` folder of its working folder, one fact per file with an index
+  it reads at the start of each chat, and never a secret. It also says that the Codex device holds the app's own
+  entities (sign-in, usage limits, running chats, the last chat, permission prompts). An install that already has an
+  `AGENTS.md` keeps its own file; copy the new sections from `starter_agents.md` into the editor to get them.
 - **Git commits identify Codex.** New commits use ChatGPT Codex as the default author and committer. You can configure the name and email for the app or for an individual repository.
 - **A schedule wakes the chat it was made in.** Each run of a schedule made from a chat is that chat's next
   message: Codex continues the same conversation, and the chat moves to the top of the list with a dot until you open

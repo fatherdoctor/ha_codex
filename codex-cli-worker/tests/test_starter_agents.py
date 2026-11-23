@@ -200,6 +200,19 @@ class StarterAgentsText(unittest.TestCase):
             with self.subTest(word=word):
                 self.assertIn(word, section)
 
+    def test_it_tells_codex_how_to_keep_a_memory(self):
+        section = self.text.split("## Memory", 1)[1].split("\n## ", 1)[0]
+        for words in ("one fact per file", "`memory/MEMORY.md`", "Read the index when a chat starts",
+                      "update a file rather than add a second", "delete wrong facts", "No secrets", "never commit"):
+            with self.subTest(words=words):
+                self.assertIn(words, " ".join(section.split()))
+
+    def test_it_points_codex_at_the_apps_own_entities(self):
+        section = self.text.split("## This app's sensors", 1)[1].split("\n## ", 1)[0]
+        for words in ("Codex device", "sign-in", "usage limits", "permission prompts"):
+            with self.subTest(words=words):
+                self.assertIn(words, " ".join(section.split()))
+
     def test_it_does_not_ask_for_backup_copies_inside_the_config_folder(self):
         # The worker gives each message its own backup folder and tells Codex to leave no other copies in /config.
         self.assertNotRegex(self.text, r"(?i)\.bak|\.orig|backup cop|make a backup|backup before")
