@@ -199,6 +199,10 @@
 - The add-on Configuration page now uses plain option names and one short description for each option (25 words or fewer). A test keeps names free of code words and descriptions short.
 
 ### Fixed
+- **Settings shows the ChatGPT sign-in like GitHub's.** While ChatGPT is signed in, **Settings** > **ChatGPT account**
+  no longer shows **Sign in**, and it lists the sign-in method, the plan, when OpenAI last accepted the sign-in and
+  the weekly quota left, each only when the app knows it. **Sign out** shows only while a sign-in is saved. The page
+  shows no account name or email for ChatGPT, because the app does not read one.
 - **ChatGPT app tools ask you instead of failing in Default.** When Codex used a tool of an app connected to your
   ChatGPT account, such as GitHub to open a draft pull request, the chat page declined the request in Default and
   showed an error, while the same request worked in Full access and Auto-review. Now Default shows the usual

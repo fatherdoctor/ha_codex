@@ -1151,7 +1151,9 @@ or two such as Ready, Off or Not signed in; the 5-hour and weekly quota with a l
 times; and **Settings**. Select Codex, GitHub or Remote to open Settings at that part of Accounts and connections;
 **Manage remote connection** there opens the window that pairs the ChatGPT app. A row that needs you shows an amber
 dot, and a row whose state could not be read shows a red dot and Unavailable. The ChatGPT account part says whether
-a turn has confirmed Codex access with the current sign-in.
+a turn has confirmed Codex access with the current sign-in. While signed in, it also lists the sign-in method, the
+plan, when OpenAI last accepted the sign-in and the weekly quota left, each only when the app knows it, and it shows
+**Sign out** instead of **Sign in**. It shows no account name or email.
 
 While something needs you, the Settings cog becomes a warning symbol, and on a phone the conversations button
 shows the same symbol. It is yellow while an approval or a schedule proposal waits. It is red when ChatGPT is not
