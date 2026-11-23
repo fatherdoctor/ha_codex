@@ -172,7 +172,11 @@ async function signIn(browser, size, scheme) {
   await expandSection(page, 'chatgpt-section');
   const card = page.locator('#login-card');
   await card.locator('.signin-code').waitFor();
-  await card.locator('.signin-qr').evaluate(image => image.complete || new Promise(done => { image.onload = done; }));
+  // A QR image that failed to load (the fixture answers 500 without the qrcode package) is still
+  // "complete", with no pixels; a shot of it shows a blank square, so stop instead.
+  const qrWidth = await card.locator('.signin-qr').evaluate(image => (image.complete ? Promise.resolve()
+    : new Promise(done => { image.onload = done; image.onerror = done; })).then(() => image.naturalWidth));
+  if (!qrWidth) throw new Error('The sign-in QR code did not load; install the qrcode package (see SCREENSHOTS.md).');
   // Cover the sample code with a plain block and blur the QR code past reading; both are samples, but a
   // reader cannot tell that from the picture.
   await page.addStyleTag({content:
