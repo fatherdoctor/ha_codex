@@ -28,7 +28,7 @@ WORKER = Path(__file__).resolve().parents[1]
 
 
 class SecretFilePathTests(unittest.TestCase):
-    """Which paths under /config count as secret files."""
+    """Which paths under /homeassistant count as secret files."""
 
     def test_every_secrets_file_and_everything_under_storage_is_secret(self):
         for rel in ("secrets.yaml", "secrets.yml", "packages/secrets.yaml", ".storage/auth",
@@ -285,10 +285,10 @@ class SandboxTests(unittest.TestCase):
         real.chmod(0o755)
         self.wrapper = self.root / "bwrap"
         source = (WORKER / "codex-bwrap").read_text(encoding="utf-8")
-        self.assertIn('READ_ONLY_DIRS="/config/.storage"', source)
+        self.assertIn('READ_ONLY_DIRS="/homeassistant/.storage"', source)
         self.wrapper.write_text(
             source.replace("REAL_BWRAP=/opt/codex-sandbox/bwrap.real", f"REAL_BWRAP={real}")
-            .replace("/config/", f"{self.root}/config/"),
+            .replace("/homeassistant/", f"{self.root}/config/"),
             encoding="utf-8",
         )
         self.wrapper.chmod(0o755)
@@ -309,7 +309,7 @@ class SandboxTests(unittest.TestCase):
         storage = str(self.storage)
         read_only = before.index(storage)
         self.assertEqual(before[read_only - 1:read_only + 2], ["--ro-bind", storage, storage])
-        # After Codex's own writable bind of /config, so that bind cannot make it writable again.
+        # After Codex's own writable bind of /homeassistant, so that bind cannot make it writable again.
         self.assertGreater(read_only, before.index(f"{self.root}/config", before.index("--bind")))
         # Before the masks of the hidden files inside it, so they stay hidden.
         self.assertLess(read_only, before.index(str(self.storage / "auth")))

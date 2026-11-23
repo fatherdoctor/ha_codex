@@ -254,7 +254,7 @@ class SessionTests(unittest.TestCase):
         return {"method": method, "params": {
             "threadId": thread, "turnId": turn, "startedAtMs": 1, "reviewId": "review-1", "targetItemId": "item",
             "review": {"status": "inProgress", "riskLevel": None, "userAuthorization": None, "rationale": None, **review},
-            "action": {"type": "command", "source": "shell", "command": "ls", "cwd": "/config"}}}
+            "action": {"type": "command", "source": "shell", "command": "ls", "cwd": "/homeassistant"}}}
 
     def auto_review_session(self):
         settings = {"approvalPolicy": "on-request", "approvalsReviewer": "auto_review"}

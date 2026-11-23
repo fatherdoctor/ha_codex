@@ -16,7 +16,7 @@ LONG_AGO = 10 * server.INTEGRATION_CONTACT_SECONDS
 
 
 class IntegrationStatusTests(unittest.TestCase):
-    """The state of the Codex integration, from its files in /config and its calls to the worker."""
+    """The state of the Codex integration, from its files in /homeassistant and its calls to the worker."""
 
     def setUp(self):
         """Point the worker at an empty configuration folder, started long ago and never called by the integration."""
@@ -50,7 +50,7 @@ class IntegrationStatusTests(unittest.TestCase):
         return server.integration_status()["state"]
 
     def test_without_the_files_the_integration_is_not_installed(self):
-        """No manifest in /config means not installed, right away, even while the worker is still starting."""
+        """No manifest in /homeassistant means not installed, right away, even while the worker is still starting."""
         server.integration_state["started"] = time.monotonic()
         self.assertEqual(
             server.integration_status(),

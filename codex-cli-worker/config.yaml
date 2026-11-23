@@ -18,7 +18,7 @@ arch:
 map:
   - type: homeassistant_config
     read_only: false
-    path: /config
+    path: /homeassistant
   - type: addon_config
     read_only: false
     path: /addon_config

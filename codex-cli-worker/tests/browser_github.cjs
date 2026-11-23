@@ -182,7 +182,7 @@ function status(state, extra = {}) {
       await page.locator('#github-clone').click();
       await page.waitForFunction(() => document.querySelector('#github-result').textContent === 'Cloned into /share/house.');
       assert.deepEqual(posts.at(-1), {name: 'repos/clone', body: {repository: 'synthetic-owner/house', folder: 'house'}});
-      for (const path of ['/share/existing', '/config/existing']) {
+      for (const path of ['/share/existing', '/homeassistant/existing']) {
         await page.locator('#github-link-path').fill(path);
         await page.locator('#github-link').click();
         await page.waitForFunction(text => document.querySelector('#github-result').textContent === text,

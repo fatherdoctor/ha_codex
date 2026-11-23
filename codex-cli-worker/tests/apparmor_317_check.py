@@ -125,7 +125,7 @@ def check_child(name, parent, directory, mode=None):
         if not mode:
             assert all(code == 13 for code in results.values()), 'A visible direct proc view must fail with EACCES'
         if mode:
-            marker = Path('/config/owner-marker')
+            marker = Path('/homeassistant/owner-marker')
             assert marker.stat().st_uid == marker.stat().st_gid == 1000
             assert marker.read_text() == 'synthetic-owner'
             try:
@@ -190,7 +190,7 @@ def fixture(name, directory, plain):
         assert observed['nnp'] == '1'
         print(json.dumps({'tty': tty, **observed}), flush=True)
     # The real pinned passive app-server must also execute workspace-write
-    # against a 0600 root-owned /config file. No remote-control/account enable.
+    # against a 0600 root-owned /homeassistant file. No remote-control/account enable.
     sys.path.insert(0, str(BINDIR / 'fixture-worker'))
     import remote_control as rc
     from relay_diagnostics import exec_probe_command
@@ -215,19 +215,19 @@ def fixture(name, directory, plain):
             else:
                 raise AssertionError('Synthetic passive worker CLI did not start')
             for mode, policy in (('read-only', {'type': 'readOnly'}),
-                                 ('workspace-write', {'type': 'workspaceWrite', 'writableRoots': ['/config'], 'networkAccess': False})):
+                                 ('workspace-write', {'type': 'workspaceWrite', 'writableRoots': ['/homeassistant'], 'networkAccess': False})):
                 for tty in (False, True):
-                    Path('/config/owner-marker').write_text('synthetic-owner')
+                    Path('/homeassistant/owner-marker').write_text('synthetic-owner')
                     command = [sys.executable, '-I', str(Path(__file__).resolve()), 'child', name,
                                str(server.pid), str(directory), mode]
-                    params = {'command': command, 'cwd': '/config', 'sandboxPolicy': policy, 'timeoutMs': 10000}
+                    params = {'command': command, 'cwd': '/homeassistant', 'sandboxPolicy': policy, 'timeoutMs': 10000}
                     if tty:
                         params.update(tty=True, processId='mapped-' + mode)
                     result = exec_probe_command(socket, params)
                     assert result.get('exitCode') == 0, 'Pinned command/exec failed: ' + result.get('stderr', '')[-2000:]
                     observed = json.loads(result['stdout'])
                     assert observed['uid'] == observed['gid'] == 1000
-                    assert Path('/config/owner-marker').read_text() == ('workspace-write' if mode == 'workspace-write' else 'synthetic-owner')
+                    assert Path('/homeassistant/owner-marker').read_text() == ('workspace-write' if mode == 'workspace-write' else 'synthetic-owner')
                     print(json.dumps({'protocol': 'pinned-command/exec', 'mode': mode, 'tty': tty, **observed}), flush=True)
         finally:
             if server.poll() is None:
@@ -243,7 +243,7 @@ def enforce(stage, worker):
     assert os.geteuid() == 0, 'Loaded-policy test requires disposable-runner root'
     assert Path('/sys/kernel/security/apparmor/profiles').is_file(), 'AppArmor enforcement interface unavailable; no skip'
     assert not BINDIR.exists(), 'Do not overwrite an existing sandbox installation'
-    assert not Path('/config').exists() and not Path('/data').exists(), 'Do not touch existing worker data'
+    assert not Path('/homeassistant').exists() and not Path('/data').exists(), 'Do not touch existing worker data'
     common, profiles = compile_profiles(stage, worker)
     existing = Path('/sys/kernel/security/apparmor/profiles').read_text()
     assert not any(name in existing for name in NAMES), 'Do not replace an existing profile'
@@ -251,10 +251,10 @@ def enforce(stage, worker):
     owned = [BINDIR]
     loaded = []
     try:
-        for directory in (Path('/config'), Path('/data')):
+        for directory in (Path('/homeassistant'), Path('/data')):
             directory.mkdir(mode=0o700)
             owned.append(directory)
-        marker = Path('/config/owner-marker')
+        marker = Path('/homeassistant/owner-marker')
         marker.write_text('synthetic-owner')
         marker.chmod(0o600)
         for src, dst in [('codex-bwrap', 'bwrap'), ('codex-bwrap-probe.py', 'codex-bwrap-probe.py'), ('relay-launcher', 'relay-launcher'), ('relay-tool-launcher', 'bwrap.real')]:

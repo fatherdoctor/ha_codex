@@ -670,7 +670,7 @@ async function effortSaved(page, label) {
     assert.equal(await page.locator("#activity .step").count(), 3);
     assert.equal(
       await page.locator("#activity .step-command .step-text").textContent(),
-      "cat /config/automations.yaml",
+      "cat /homeassistant/automations.yaml",
     );
     await page.getByRole("button", { name: "Show output" }).click();
     await page.locator("#activity .step-output").waitFor();
@@ -1156,7 +1156,7 @@ async function effortSaved(page, label) {
       "<i>code</i> **stays** as typed",
       "```",
       "",
-      "[script](javascript:window.untrustedRan=true) [file](/config/automations.yaml)",
+      "[script](javascript:window.untrustedRan=true) [file](/homeassistant/automations.yaml)",
       "![remote image](https://example.invalid/pixel.png)",
       "<b>raw</b> <script>window.untrustedRan=true</script>",
       "[site](https://www.home-assistant.io/)",

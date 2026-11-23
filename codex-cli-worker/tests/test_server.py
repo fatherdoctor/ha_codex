@@ -305,7 +305,7 @@ STATUS_PANEL = """\
 ╭────────────────────────────────────────────╮
 │ >_ OpenAI Codex (v0.160.0)                 │
 │ model:     loading   /model to change      │
-│ directory: /config                         │
+│ directory: /homeassistant                         │
 ╰────────────────────────────────────────────╯
 /status
 
@@ -316,7 +316,7 @@ STATUS_PANEL = """\
 
   Model:           GPT-6.1-Sol (reasoning low, summaries auto)
   Model provider:  openai
-  Directory:       /config
+  Directory:       /homeassistant
   Permissions:     Custom (workspace with network access, Ask for approval)
   Agents.md:       <none>
 
@@ -665,7 +665,7 @@ class HealthRouteTests(unittest.TestCase):
                 return_value={"status_ok": True, "message": "logged in"},
             ),
             patch.object(server, "auth_status_payload", return_value={"status": "authenticated"}),
-            patch.object(server, "task_root", return_value=Path("/config/codex_tasks")),
+            patch.object(server, "task_root", return_value=Path("/homeassistant/codex_tasks")),
         ):
             response = server.app.test_client().get(
                 "/health",

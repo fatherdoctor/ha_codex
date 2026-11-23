@@ -50,10 +50,10 @@ class ActivityStepTests(unittest.TestCase):
         events = [
             item("reasoning", "item_0", text="**Checking the automation**"),
             item("agent_message", "item_1", text="I'll read the automation first."),
-            command("item_2", "/bin/sh -lc 'cat /config/automations.yaml'", output="x" * 5000),
-            command("item_3", "/bin/sh -lc \"rg -n foo /config\"", output="", exit_code=1),
+            command("item_2", "/bin/sh -lc 'cat /homeassistant/automations.yaml'", output="x" * 5000),
+            command("item_3", "/bin/sh -lc \"rg -n foo /homeassistant\"", output="", exit_code=1),
             item("file_change", "item_4", status="completed",
-                 changes=[{"path": "/config/automations.yaml", "kind": "update"}, {"path": "/config/new.yaml", "kind": "add"}]),
+                 changes=[{"path": "/homeassistant/automations.yaml", "kind": "update"}, {"path": "/homeassistant/new.yaml", "kind": "add"}]),
             item("web_search", "item_5", query="", action={"type": "other"}),
             item("mcp_tool_call", "item_6", server="codex_apps", tool="github.get_repo", status="completed", error=None),
             item("todo_list", "item_7", items=[{"text": "Read config", "completed": True}, {"text": "Edit", "completed": False}]),
@@ -72,11 +72,11 @@ class ActivityStepTests(unittest.TestCase):
         reasoning, message, cat, rg, edit, search, tool, plan = payload["steps"]
         self.assertEqual(reasoning["text"], "Checking the automation")
         self.assertEqual(message["text"], "I'll read the automation first.")
-        self.assertEqual(cat["text"], "cat /config/automations.yaml")
+        self.assertEqual(cat["text"], "cat /homeassistant/automations.yaml")
         self.assertTrue(cat["output_truncated"])
         self.assertEqual(len(cat["output"]), server.ACTIVITY_OUTPUT_MAX + 1)
         self.assertEqual(cat["status"], "done")
-        self.assertEqual(rg["text"], "rg -n foo /config")
+        self.assertEqual(rg["text"], "rg -n foo /homeassistant")
         self.assertEqual((rg["status"], rg["exit_code"]), ("failed", 1))
         self.assertEqual(edit["text"], "Edited automations.yaml, Added new.yaml")
         self.assertEqual(edit["files"], [{"path": "automations.yaml", "kind": "update"}, {"path": "new.yaml", "kind": "add"}])
@@ -101,8 +101,8 @@ class ActivityStepTests(unittest.TestCase):
 
     def test_file_change_reads_as_made_only_once_it_was_made(self):
         """A change that waits, as for permission, or that was refused is not reported as done."""
-        changes = [{"path": "/config/automations.yaml", "kind": "update"}, {"path": "/config/old.yaml", "kind": "delete"},
-                   {"path": "/config/new.yaml", "kind": "add"}, {"path": "/config/moved.yaml", "kind": "other"}]
+        changes = [{"path": "/homeassistant/automations.yaml", "kind": "update"}, {"path": "/homeassistant/old.yaml", "kind": "delete"},
+                   {"path": "/homeassistant/new.yaml", "kind": "add"}, {"path": "/homeassistant/moved.yaml", "kind": "other"}]
         server.record_activity_event("t", {"type": "item.started", "item": {
             "id": "item_1", "type": "file_change", "status": "in_progress", "changes": changes}})
         waiting = self.steps()["steps"][0]
