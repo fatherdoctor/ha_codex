@@ -6,7 +6,8 @@
 - **Git commits identify Codex.** New commits use ChatGPT Codex as the default author and committer. You can configure the name and email for the app or for an individual repository.
 - **A schedule wakes the chat it was made in.** Each run of a schedule made from a chat is that chat's next
   message: Codex continues the same conversation, and the chat moves to the top of the list with a dot until you open
-  it. Earlier, each run started a new chat. The run keeps the schedule's permissions and model, never a wider mode
+  it. Earlier, each run started a new chat. A schedule that Codex proposes in a chat belongs to that chat too, once
+  you approve it. The run keeps the schedule's permissions and model, never a wider mode
   set on the chat. A deleted or archived chat gets a new chat named for the schedule, which later runs continue; a
   schedule made in Settings still starts a new chat for each run. The run log is copied once into a new shape at
   start, and a rollback still reads it.
