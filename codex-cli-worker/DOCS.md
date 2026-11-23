@@ -21,8 +21,8 @@ Each chat uses one of four modes. Pick it with the **Permissions** button.
 
 | Mode | What happens |
 |---|---|
-| Default permissions | Codex edits files in your configuration folder. It asks you before anything that needs more access. |
-| Auto-review | Like Default, but Codex's own reviewer answers the requests instead of you. |
+| Ask for approval | Codex edits files in your configuration folder. It asks you before anything that needs more access. |
+| Approve for me | Like Ask for approval, but Codex's own reviewer answers the requests instead of you. |
 | Read only | Codex reads files. Any change asks you first. |
 | Full access | No sandbox and no questions. Off until an administrator turns it on in **Settings**. |
 
