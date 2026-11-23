@@ -26,8 +26,8 @@ about GitHub into the chat.
 2. In the chat, choose **Settings** > **Accounts and connections** > **GitHub**, then **Connect GitHub**. The card
    shows a code in large letters and a link to `github.com/login/device`.
 3. Open the link, type the code and approve the App. The card checks every few seconds and shows your account and
-   the repositories it reaches as soon as GitHub confirms. The code works for 15 minutes. After that, choose
-   **Connect GitHub** again for a new one.
+   the repositories it reaches as soon as GitHub confirms. The code works for as long as GitHub says (15 minutes if
+   GitHub gives no time). After that, choose **Connect GitHub** again for a new one.
 
 If your organization does not allow the App, choose **Use a token instead**. On github.com, make a fine-grained
 token (**Settings** > **Developer settings** > **Fine-grained tokens**) for **one** repository, with **Contents:
@@ -38,8 +38,9 @@ What to know:
 
 - The app keeps the sign-in in its own private storage. Codex never holds your token: it asks the app to run git for
   it.
-- **Clone** in the card copies a connected repository to `/share/<repository>`. **Link** points a git folder you
-  already have under `/share` or `/config` at a connected repository. You can also ask Codex in the chat.
+- **Clone** in the card copies a connected repository to `/share/<repository>`; you can type another folder name.
+  **Link** points a git folder you already have under `/share` or `/config` at a connected repository. You can also
+  ask Codex in the chat.
 - GitHub refuses a push that changes `.github/workflows/` with this access. Change workflow files on GitHub or on
   another computer.
 - **Disconnect** only makes this app forget the sign-in. To revoke it, use the link the card shows on GitHub.
@@ -61,17 +62,20 @@ Each chat uses one of four modes. Pick it with the **Permissions** button.
 
 You can change the mode in the middle of a chat. The next message runs in the new mode, and Codex is told of the change.
 
-A request shows a card with the full command or change and two buttons, **Allow once** and **Deny**. Only a Home
-Assistant administrator can answer. Read each card before you allow it.
+A request shows a card with the command or change and two buttons, **Allow once** and **Deny**. Only a Home
+Assistant administrator can answer. Read each card before you allow it. If the card cannot show enough detail to
+allow it, deny it and ask Codex for a smaller or clearer action.
 More: [Sandbox](https://github.com/fatherdoctor/ha_codex/blob/main/docs/app-reference.md#sandbox).
 
 ## Your files
 
 - Your Home Assistant configuration is at `/config`, and `/share` is shared with other apps.
+- A file that Codex makes for you goes in the chat's files folder. When Codex links to it, the chat shows a card you
+  can download.
 - Rules for your house go in **Settings** > **Workspace instructions**, the app's `AGENTS.md`. A new install gets a
   short starter file once. It is yours to change or delete.
-- Chats and the files you attach to a message (PNG, JPEG, GIF or WebP) stay in the app's private storage, not in
-  `/config`. Attachments are removed after 7 days or with the chat.
+- Chats and the files you attach to a message (images, and documents such as PDF, text, YAML or CSV) stay in the
+  app's private storage, not in `/config`. Attachments are removed after 7 days or with the chat.
 - Keep your own Home Assistant backups. The app's saved copies of changed files can be missing, and `secrets.yaml`
   and `.storage` are never copied.
 
@@ -86,9 +90,10 @@ cannot resume it, the run starts a new chat.
 
 - Codex can **propose** a schedule, but a proposal stays off until an administrator approves it under **Settings** >
   **Scheduled runs**.
-- A scheduled run still asks before a step that needs more access. Open its chat to answer with **Allow once** or
-  **Deny**. The run waits for your answer only until its **Time limit for a task** (one hour by default) ends. Then
-  the run stops, and the step it asked about does not run.
+- A scheduled run uses its schedule's permissions, **Ask for approval** or **Read only**, never the chat's. So it still
+  asks before a step that needs more access, also in a chat set to Full access or Approve for me. Open its chat to
+  answer with **Allow once** or **Deny**. The run waits for your answer only until its **Time limit for a task** (one
+  hour by default) ends. Then the run stops, and the step it asked about does not run.
 - Times follow your Home Assistant time zone. A run waits while another chat is working.
 
 More: [Scheduled runs](https://github.com/fatherdoctor/ha_codex/blob/main/docs/app-reference.md#scheduled-runs).
@@ -102,7 +107,8 @@ More: [Scheduled runs](https://github.com/fatherdoctor/ha_codex/blob/main/docs/a
 - **Keep backups for days** on the **Configuration** tab sets how long the copies stay (7 by default).
 - **Delete chats after (days without a message)** removes a chat nobody has used for that long (14 by default).
   Pinned chats stay. Near the end, the chat shows the day it will go.
-- **Full backup before every message** also archives your configuration before each message. It is off by default
+- **Full backup before every message** also archives your configuration before each message, except `secrets.yaml`,
+  `.storage` and the files the change check skips (such as the database, logs, media and images). It is off by default
   because it makes every message wait.
 
 More: [Backups](https://github.com/fatherdoctor/ha_codex/blob/main/docs/app-reference.md#backups).
@@ -111,7 +117,8 @@ More: [Backups](https://github.com/fatherdoctor/ha_codex/blob/main/docs/app-refe
 
 On the **Configuration** tab, **Model** sets the model for new chats. **Account default** lets Codex choose for your
 account. A chat can also pick its own model and reasoning level with the model button. Which models you see depends
-on your account.
+on your account. If an administrator sets **Model pin**, every run must use that model: a message on another model
+does not run, and the chat says so.
 
 The sidebar of the chat shows how much of your ChatGPT usage is left, for 5 hours and for 7 days, with the time it
 resets. Plans differ, so some accounts show only the weekly figure.

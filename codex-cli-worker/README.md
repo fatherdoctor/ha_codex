@@ -16,8 +16,8 @@ the **Ask for approval** and **Read only** modes, the chat asks you first when a
 3. Choose **Open Web UI** and sign in with your ChatGPT account.
 4. Describe what you want in the message box.
 
-The first two steps are the same for every app. Step 3 needs a ChatGPT account that has Codex access; the
-[Documentation](DOCS.md) tab walks through the sign-in, one click at a time.
+The first two steps install the app and its matching Codex integration. Step 3 needs a ChatGPT account that has
+Codex access; the [Documentation](DOCS.md) tab walks through the sign-in, one click at a time.
 
 ## Requirements
 
@@ -27,7 +27,8 @@ The first two steps are the same for every app. Step 3 needs a ChatGPT account t
 
 ## Features
 
-- A chat with saved conversations, image attachments and four permission modes.
+- A chat with saved conversations, attachments (images, and documents such as PDF or text files) and four
+  permission modes.
 - Codex edits your configuration folder. In **Ask for approval** and **Read only**, it asks before a step that needs
   more access, and only an administrator can answer. In **Approve for me**, Codex's own reviewer answers instead, and
   **Full access** asks nothing.
@@ -35,7 +36,8 @@ The first two steps are the same for every app. Step 3 needs a ChatGPT account t
 - The app keeps a local copy of the Home Assistant documentation, and can read state history and statistics.
 - Scheduled runs: ask Codex to repeat a chat on a timetable. Codex can propose a schedule, but it stays off until an
   administrator approves it.
-- Files that Codex makes for you, such as a report or an export, appear in the chat as a card you can download.
+- Files that Codex makes for you, such as a report or an export: when Codex saves one in the chat's files folder and
+  links to it, the chat shows a card you can download.
 - Your usage of the ChatGPT account is shown in the chat's sidebar, so you can see how much is left.
 
 ## GitHub
@@ -66,7 +68,8 @@ Some other things to try:
 ## Staying safe
 
 - Keep your own Home Assistant backups. The app's saved copies of changed files are a safety net, not a replacement.
-- Read each permission card before you allow it. The card shows the full command or change.
+- Read each permission card before you allow it. If the card cannot show enough detail to allow it, deny it and ask
+  Codex for a smaller or clearer action.
 - Full access has no sandbox and no questions, so it is off until an administrator turns it on.
 
 ## Get help
