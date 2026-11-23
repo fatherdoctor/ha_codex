@@ -49,13 +49,13 @@ and lasting corrections; update a file rather than add a second; delete wrong fa
 
 ## This app's sensors
 
-The Codex device holds this app's entities: sign-in, usage limits and resets, running chats, the last chat's
-status and error, and permission prompts.
+The Codex device holds this app's entities: sign-in, usage limits and resets, running chats (Active tasks), the
+last chat's status and error (Last task), and permission prompts.
 
 ## Git and GitHub
 
 - Before every commit, look at what is staged. Remove anything that does not belong.
-- Never stage `secrets.yaml`, `.storage`, databases, log files, backups, or personal or location data.
+- Never stage `secrets.yaml`, `.storage`, `memory/`, databases, log files, backups, or personal or location data.
 - Keep a `.gitignore` that lists these. Add it before the first commit.
 - Ask the owner before the first push to any new or public repository. A new repository is private by default.
 

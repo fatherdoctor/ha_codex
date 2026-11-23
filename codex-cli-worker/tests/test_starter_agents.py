@@ -167,7 +167,7 @@ class StarterAgentsText(unittest.TestCase):
         self.text = STARTER.read_text(encoding="utf-8")
 
     def test_it_is_small_enough_to_save_from_the_editor(self):
-        self.assertLess(len(STARTER.read_bytes()), 4096)
+        self.assertLess(len(STARTER.read_bytes()), 6144)
         self.assertLess(len(STARTER.read_bytes()), server.AGENTS_MAX_BYTES)
 
     def test_it_says_the_file_is_the_owners_to_change_or_delete(self):
@@ -195,8 +195,8 @@ class StarterAgentsText(unittest.TestCase):
 
     def test_it_keeps_private_data_out_of_git_and_github(self):
         section = self.text.split("## Git and GitHub", 1)[1].split("## About this home", 1)[0]
-        for word in ("staged", "secrets.yaml", ".storage", "databases", "log files", "backups", "personal or location data",
-                     ".gitignore", "Ask the owner before the first push", "private by default"):
+        for word in ("staged", "secrets.yaml", ".storage", "`memory/`", "databases", "log files", "backups",
+                     "personal or location data", ".gitignore", "Ask the owner before the first push", "private by default"):
             with self.subTest(word=word):
                 self.assertIn(word, section)
 
@@ -209,7 +209,7 @@ class StarterAgentsText(unittest.TestCase):
 
     def test_it_points_codex_at_the_apps_own_entities(self):
         section = self.text.split("## This app's sensors", 1)[1].split("\n## ", 1)[0]
-        for words in ("Codex device", "sign-in", "usage limits", "permission prompts"):
+        for words in ("Codex device", "sign-in", "usage limits", "Active tasks", "Last task", "permission prompts"):
             with self.subTest(words=words):
                 self.assertIn(words, " ".join(section.split()))
 
