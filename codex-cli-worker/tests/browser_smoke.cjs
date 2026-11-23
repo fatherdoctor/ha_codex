@@ -1120,8 +1120,16 @@ function pngBuffer(width = 8, height = 6) {
     await page.locator("#queued-edit").fill("Discarded edit");
     await page.locator("#queued-edit").press("Escape");
     assert.equal(await queuedBubble.textContent(), typo);
-    await page.getByRole("button", { name: "Edit", exact: true }).click();
-    await page.locator("#queued-edit").fill(corrected);
+    // Select the text before the first frame, as fill can do when the editor opens.
+    await page
+      .getByRole("button", { name: "Edit", exact: true })
+      .evaluate(async (button) => {
+        button.click();
+        document.querySelector("#queued-edit").select();
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      });
+    await page.keyboard.insertText(corrected);
+    assert.equal(await page.locator("#queued-edit").inputValue(), corrected);
     await page.locator("#queued-edit").press("Enter");
     await page.waitForFunction(
       (text) =>

@@ -1601,7 +1601,7 @@ function renderTask(force = false) {
     }
     area.append(exchange);
   }
-  if (queued) area.append(renderQueued(task.task_id, queued));
+  if (queued) renderQueued(area, task.task_id, queued);
   renderActivity();
   area.scrollTop = force || nearBottom || newApproval ? area.scrollHeight : oldScroll;
   controls();
@@ -1747,7 +1747,7 @@ async function sendChoice(turnId, index) {
  * Show a message that waits in the queue: outlined rather than filled, so it
  * reads as not sent yet, with controls to edit or remove it.
  */
-function renderQueued(taskId, entry) {
+function renderQueued(area, taskId, entry) {
   const exchange = textNode("section", "", "exchange queued");
   const label = textNode("p", "", "queued-label");
   label.append(queueIcon(), textNode("span", "In queue · not sent yet"));
@@ -1763,7 +1763,6 @@ function renderQueued(taskId, entry) {
     // A loading image pushes the edit and remove buttons down; keep them in view.
     for (const img of images.querySelectorAll("img"))
       img.addEventListener("load", () => {
-        const area = $("messages");
         if (
           area.scrollHeight - area.scrollTop - area.clientHeight <
           img.height + 100
@@ -1774,6 +1773,8 @@ function renderQueued(taskId, entry) {
   }
   const edit = state.edit?.id === entry.queue_id ? state.edit : null;
   const actions = textNode("div", "", "queued-actions");
+  exchange.append(actions);
+  area.append(exchange);
   const button = (text, className, onclick) => {
     const node = textNode("button", text, className);
     node.type = "button";
@@ -1814,20 +1815,17 @@ function renderQueued(taskId, entry) {
         saveEdit();
       }
     });
-    exchange.append(input);
+    exchange.insertBefore(input, actions);
     button("Cancel", "subtle", cancelEdit);
     const save = button("Save", "", saveEdit);
     save.id = "queued-save";
     save.disabled = Boolean(edit.saving) || !edit.text.trim();
-    // Size and focus the box once it is in the page.
-    requestAnimationFrame(() => {
-      if (!input.isConnected) return;
-      resize();
-      input.focus();
-      input.setSelectionRange(input.value.length, input.value.length);
-    });
+    // Set the caret before the user can select or replace the text.
+    resize();
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
   } else {
-    exchange.append(renderMarkdown(entry.message, "message user queued"));
+    exchange.insertBefore(renderMarkdown(entry.message, "message user queued"), actions);
     const note = textNode("span", queueNote(entry), "queued-note");
     note.id = "queued-note";
     actions.append(note);
@@ -1835,8 +1833,6 @@ function renderQueued(taskId, entry) {
     button("Remove", "subtle danger", () => removeQueued(entry)).id =
       "queued-remove";
   }
-  exchange.append(actions);
-  return exchange;
 }
 /** Open the editor for a waiting message, starting from its current text. */
 function startEdit(entry) {
