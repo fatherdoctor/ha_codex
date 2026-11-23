@@ -452,6 +452,8 @@ let refreshTimer;
 let activityTimer = null;
 let usageTimer;
 let usageLoading = false;
+// The last sign-in and status reads behind the ChatGPT details in Settings; see renderChatgptDetails.
+const chatgptAccount = { auth: null, status: null };
 /**
  * Show the quota left for the five-hour and weekly limits as a figure and a
  * bar, with the reset time as a tooltip. A limit the account does not report
@@ -501,16 +503,19 @@ function shortResetLabel(value) {
   if (Number.isNaN(date.getTime())) return "";
   return date.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
 }
+/** The plan type the worker reports, capitalized ("Pro"), or "" when it reports none. */
+function planName(planType) {
+  const plan = typeof planType === "string" ? planType.trim() : "";
+  return plan && `${plan[0].toUpperCase()}${plan.slice(1)}`;
+}
 /**
  * The plan line under the quota bars, for example "Pro plan · Weekly resets
  * Mon 9:00 AM · 5h resets 2:30 PM". The plan is information only; a reset time
  * shows only for a window the read reported.
  */
 function planLine(usage, planType) {
-  const plan = typeof planType === "string" && planType.trim()
-    ? `${planType.trim()[0].toUpperCase()}${planType.trim().slice(1)} plan`
-    : "Plan unknown";
-  const parts = [plan];
+  const plan = planName(planType);
+  const parts = [plan ? `${plan} plan` : "Plan unknown"];
   for (const [key, name] of [["weekly", "Weekly"], ["five_hour", "5h"]]) {
     const reset = shortResetLabel(usage[`${key}_reset_at`]) || usage[`${key}_reset`];
     if (usage[`${key}_percent`] !== undefined && usage[`${key}_percent`] !== "" && reset)
@@ -671,6 +676,8 @@ async function loadUsage() {
       renderUsage(data.codex_usage, data.account_access?.plan_type);
       renderIntegration(data.integration);
       renderCodexAccess(data.account_access);
+      chatgptAccount.status = data;
+      renderChatgptDetails();
       // The quota check also tells the worker which model Codex picks when the add-on names none.
       // Not awaited: the quota shown must not depend on it.
       if (state.catalog) loadChatOptions(true);
@@ -678,6 +685,9 @@ async function loadUsage() {
   } catch (_) {
     renderUsage();
     renderCodexAccess({ message: "Codex access could not be checked." });
+    // A failed read drops the plan and quota rows rather than keep stale ones.
+    chatgptAccount.status = null;
+    renderChatgptDetails();
   } finally {
     usageLoading = false;
     usageTimer = setTimeout(loadUsage, 60000);
@@ -1437,7 +1447,7 @@ function renderWorked(turn, checks, taskId) {
   const entry = saved ? earlierSteps(taskId, turn.turn_id) : null;
   const fill = () => {
     const rows = entry ? earlierStepRows(entry, Boolean(checks), fill) : [];
-    list.replaceChildren(...groupWorkLog([...rows, ...(checks ? [checks] : [])]));
+    list.replaceChildren(...groupWorkLog([...rows, ...(checks ? [checks] : [])], entry?.open ?? new Set(), fill));
   };
   const show = open => {
     if (open) state.workedOpen.add(turn.turn_id);
@@ -2137,8 +2147,16 @@ function renderActivity() {
   list.id = "activity-steps";
   list.hidden = !expanded;
   const nodes = entries.map(entry => workLogNode(entry, activity.open, renderActivity));
-  list.append(...groupWorkLog(checks ? [...nodes, checks] : nodes));
-  block.replaceChildren(toggle, list);
+  list.append(...groupWorkLog(checks ? [...nodes, checks] : nodes, activity.open, renderActivity, running));
+  const latestReasoning = running
+    ? [...steps].reverse().find(step => step.kind === "reasoning" &&
+        typeof step.text === "string" && step.text.trim())
+    : null;
+  const thinking = latestReasoning
+    ? textNode("div", `Thinking: ${latestReasoning.text.replace(/\s+/g, " ").trim()}`, "activity-thinking")
+    : null;
+  // Under the list, so with the list open the newest thought is next to the newest step.
+  block.replaceChildren(...[toggle, list, thinking].filter(Boolean));
   tickElapsed();
   if (nearBottom) area.scrollTop = area.scrollHeight;
 }
@@ -2169,26 +2187,87 @@ function workLogNode(entry, open, redraw) {
   return renderStep(entry, open, redraw);
 }
 /**
- * Put each run of step rows (and the checks after them) in an indented group,
- * and leave the text messages between the groups, so a message starts where
- * the answer starts, as in the desktop app.
+ * Put each run of step rows in an indented group, and leave the text messages
+ * between the groups, so a message starts where the answer starts, as in the
+ * desktop app. A group of two or more rows gets a heading that sums it up
+ * ("Ran 3 commands, edited a file"); see stepGroup. Anything that is neither a
+ * message nor a step row (the checks block) stands outside the groups, so a
+ * check that asks for the owner is never folded away.
  */
-function groupWorkLog(nodes) {
+function groupWorkLog(nodes, open, redraw, running = false) {
   const out = [];
-  let group = null;
+  let rows = [];
+  const flush = () => {
+    if (rows.length) out.push(stepGroup(rows, open, redraw, running));
+    rows = [];
+  };
   for (const node of nodes) {
-    if (node.classList.contains("interim")) {
-      out.push(node);
-      group = null;
+    if (node.classList.contains("step")) {
+      rows.push(node);
       continue;
     }
-    if (!group) {
-      group = textNode("div", "", "step-group");
-      out.push(group);
-    }
-    group.append(node);
+    flush();
+    out.push(node);
   }
+  flush();
   return out;
+}
+// What a group heading says for each kind of step, for one and for several (CX-WORKLOG-GROUPS).
+const STEP_GROUP_WORDS = {
+  command: ["ran a command", n => `ran ${n} commands`],
+  file_change: ["edited a file", n => `made ${n} file edits`],
+  web_search: ["searched the web", n => `searched the web ${n} times`],
+  tool_call: ["used a tool", n => `used ${n} tools`],
+  reasoning: ["thought", () => "thought"],
+  plan: ["updated the plan", () => "updated the plan"],
+  error: ["hit an error", n => `hit ${n} errors`],
+  phase: ["got ready", () => "got ready"],
+};
+/** Sum up a group's rows in one line, kinds in the order they first ran, and say how many failed. */
+function stepGroupLabel(rows) {
+  const counts = new Map();
+  for (const row of rows) {
+    const kind = STEP_GROUP_WORDS[row.dataset.kind] ? row.dataset.kind : "other";
+    counts.set(kind, (counts.get(kind) || 0) + 1);
+  }
+  const parts = [...counts].map(([kind, n]) => {
+    if (kind === "other") return n === 1 ? "1 other step" : `${n} other steps`;
+    const [one, many] = STEP_GROUP_WORDS[kind];
+    return n === 1 ? one : many(n);
+  });
+  const text = parts.join(", ");
+  const failed = rows.filter(row => row.classList.contains("is-failed")).length;
+  return text[0].toUpperCase() + text.slice(1) + (failed ? ` · ${failed} failed` : "");
+}
+/**
+ * Build one group of step rows. One row needs no heading. Several rows get a
+ * heading button: the group starts closed once the exchange is over and open
+ * while Codex works, so the owner can follow along; a tap is remembered in
+ * `open` under the group's first step index ("g+3" open, "g-3" closed), which
+ * keeps it through the redraws while Codex works.
+ */
+function stepGroup(rows, open, redraw, running) {
+  const group = textNode("div", "", "step-group");
+  if (rows.length < 2) {
+    group.append(...rows);
+    return group;
+  }
+  const key = rows[0].dataset.index;
+  const shown = open.has(`g+${key}`) || (running && !open.has(`g-${key}`));
+  const head = textNode("button", "", "step-group-head");
+  head.type = "button";
+  head.setAttribute("aria-expanded", String(shown));
+  head.append(textNode("span", "", "step-group-chevron"), textNode("span", stepGroupLabel(rows)));
+  head.onclick = () => {
+    open.delete(`g+${key}`);
+    open.delete(`g-${key}`);
+    open.add(`g${shown ? "-" : "+"}${key}`);
+    redraw();
+  };
+  for (const row of rows) row.hidden = !shown;
+  group.classList.add("has-head");
+  group.append(head, ...rows);
+  return group;
 }
 /**
  * Build one row of the step list: icon, text, and a line with a failed
@@ -2198,9 +2277,14 @@ function groupWorkLog(nodes) {
  */
 function renderStep(step, open, redraw) {
   const row = textNode("div", "", `step step-${step.kind} is-${step.status}`);
+  row.dataset.kind = step.kind;
+  row.dataset.index = String(step.index);
   row.append(textNode("span", stepIcons[step.kind] || "•", "step-icon"));
   const body = textNode("div", "", "step-body");
-  body.append(textNode("div", step.text, "step-text"));
+  const text = textNode("div", step.text, "step-text");
+  // A command shows on one line (CSS); the whole of it shows on hover and once its output is open.
+  if (step.kind === "command") text.title = step.text;
+  body.append(text);
   const meta = [];
   if (step.kind === "command" && step.exit_code)
     meta.push(`exit ${step.exit_code}`);
@@ -2229,7 +2313,10 @@ function renderStep(step, open, redraw) {
       redraw();
     };
     footer.append(button);
-    if (shown) body.append(textNode("pre", step.output, "step-output"));
+    if (shown) {
+      row.classList.add("output-open");
+      body.append(textNode("pre", step.output, "step-output"));
+    }
   }
   if (footer.childElementCount) body.insertBefore(footer, body.children[1] || null);
   row.append(body);
@@ -3664,6 +3751,43 @@ async function loadLogin() {
   }
   renderLogin(auth);
 }
+/*
+ * The ChatGPT sign-in details under its status line, like GitHub's: the sign-in
+ * method the Codex CLI reports, the plan, OpenAI's last answer and the weekly
+ * quota left. Two reads feed it (auth/status and status), so each keeps its last
+ * answer here. A row shows only what the worker reported; no account name or
+ * email is shown, because the worker does not send one.
+ */
+/** The sign-in method in the Codex CLI's "login status" line, or "" when it names none. */
+function chatgptSignInMethod(message) {
+  if (/\bChatGPT\b/i.test(message || "")) return "ChatGPT account";
+  if (/\bAPI key\b/i.test(message || "")) return "API key";
+  return "";
+}
+/** The rows of the ChatGPT details list while signed in; none while signed out. */
+function chatgptDetailRows(auth, status) {
+  if (!auth) return [];
+  const rows = [];
+  const method = chatgptSignInMethod(auth.codex_login?.message);
+  if (method) rows.push(["Sign-in", method]);
+  const plan = planName(status?.account_access?.plan_type);
+  if (plan) rows.push(["Plan", plan]);
+  // While signed in, OpenAI's last answer can only be "ok": a refusal signs the page out.
+  const checked = auth.codex_login?.server_check === "ok" && dateLabel(auth.codex_login.server_checked_at, true);
+  rows.push(["Last check", checked ? `${checked}: OpenAI accepted the sign-in` : "Not checked yet"]);
+  // The worker sends the quota left as a number or a numeric string; any other value shows no row.
+  const raw = status?.codex_usage?.weekly_percent;
+  const weekly = typeof raw === "number" || (typeof raw === "string" && raw.trim()) ? Number(raw) : NaN;
+  if (Number.isFinite(weekly) && weekly >= 0 && weekly <= 100) rows.push(["Weekly quota", `${weekly}% left`]);
+  return rows;
+}
+/** Put the ChatGPT details rows on the Settings page. */
+function renderChatgptDetails() {
+  const rows = chatgptDetailRows(chatgptAccount.auth, chatgptAccount.status);
+  const details = $("chatgpt-details");
+  details.replaceChildren(...rows.flatMap(([term, value]) => [textNode("dt", term), textNode("dd", value)]));
+  details.hidden = !rows.length;
+}
 /** The ChatGPT account header in a few words. */
 function chatgptSectionStatus({ signedIn, pending, failed, lapsed }) {
   if (signedIn) return "Signed in";
@@ -3721,7 +3845,11 @@ function renderLogin(auth) {
   } else if (pending) {
     followCodeTime("chatgpt", auth.expires_in);
   }
-  for (const id of ["login", "banner-login"]) $(id).hidden = pending;
+  // Sign in shows only while signed out with no code waiting; Sign out only while a sign-in, even a lapsed one, is saved.
+  for (const id of ["login", "banner-login"]) $(id).hidden = pending || signedIn;
+  $("logout").hidden = !signedIn && !auth.codex_login?.has_auth_file;
+  chatgptAccount.auth = signedIn ? auth : null;
+  renderChatgptDetails();
   // While a sign-in waits, the section shows only the card and Cancel (CSS hides the rest).
   $("chatgpt-section").classList.toggle("signing-in", pending);
   for (const id of ["login-cancel", "banner-cancel"]) $(id).hidden = !pending;

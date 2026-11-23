@@ -64,6 +64,14 @@ class OwnerFieldStoreTests(unittest.TestCase):
                     self.store.save(proposal(**field), owner=False, author=author, now=NOW)
         self.assertEqual(self.store.schedules(), [])
 
+    def test_the_run_of_a_codex_proposal_continues_the_chat_it_was_made_in(self):
+        value = self.store.save(proposal(), owner=False, author='codex', now=NOW, made_in=CHAT)
+        self.assertEqual(value['chat_id'], CHAT)
+        self.store.action(value['id'], 'approve', NOW, value['revision'])
+        worker = RecordingWorker()
+        scheduling.Engine(self.store, worker).tick(NOW + 3600)
+        self.assertEqual(worker.extra, {'chat_id': CHAT})
+
     def test_a_chat_or_model_that_is_not_a_plain_id_is_refused(self):
         bad_chats = (None, 7, ['x'], '../tasks', 'a b', '-leading', 'x' * 129, 'chat\n')
         bad_models = (7, ['x'], '', 'a b', '../model', 'x' * 81, 'model\n')
@@ -132,6 +140,13 @@ class OwnerFieldApiTests(unittest.TestCase):
         self.assertEqual(run['status'], 'failed')
         self.assertEqual(run['error'], server.model_pin_message(MODEL, OTHER_MODEL) + ' Not retried.')
         self.assertNotIn(run['task_id'], server.tasks)
+
+    def test_a_codex_proposal_keeps_the_chat_whose_exchange_sent_it(self):
+        self.add_chat()
+        server.tasks[CHAT].update(status='running', current_turn_id='synthetic-turn')
+        thread = fixtures.open_exchange(self, CHAT)
+        self.service.dispatch({'operation': 'propose_schedule', 'arguments': proposal(), 'thread_id': thread})
+        self.assertEqual(self.service.engine().store.schedules()[0]['chat_id'], CHAT)
 
     def test_codex_cannot_read_the_chat_and_the_model(self):
         self.add_chat()

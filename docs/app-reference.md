@@ -72,7 +72,7 @@ controls a device, calls a service, restarts Home Assistant or edits a dashboard
   as a card with the tool's arguments in full and what the call does, the same as for the `call` tool
   ([Changes to the house: the `call` tool](#changes-to-the-house-the-call-tool)). Allow once runs that one call;
   Codex asks again before the next one. Your permission mode decides who answers, as for the `call` tool: in
-  Default and Read only, Codex asks you; in Auto-review, Codex's reviewer can allow the call without asking you;
+  Ask for approval and Read only, Codex asks you; in Approve for me, Codex's reviewer can allow the call without asking you;
   in Full access, the call runs without a question ([Permission modes](#permission-modes)).
 - A card can show **Allow once** only when it shows the whole call. A write longer than 32,000 characters
   shows Allow turned off. A whole dashboard of ordinary size can be that long: about 70 small cards reach
@@ -268,7 +268,7 @@ The worker treats the legacy `gpt-5.3-codex` value as `default`. The retired `gp
 
 The bundled models also support `max`, and most support `ultra`. The chat page shows the levels each model supports; see [Per-conversation model and reasoning](#per-conversation-model-and-reasoning). The worker maps `minimal` to `medium`, including when the model is `default`. See the [Codex models guide](https://learn.chatgpt.com/docs/models) for current availability.
 
-`reasoning_summary` controls the reasoning summaries shown in the activity list under your latest message. It is passed with each app-server turn. Summaries must be requested for them to appear, so the default is `concise`. This setting changes the reported summaries, not the selected reasoning effort.
+`reasoning_summary` controls the reasoning summaries shown in the activity list under your latest message. It is passed with each app-server turn. Summaries must be requested for them to appear, so the default is `concise`. This setting changes the reported summaries, not the selected reasoning effort. The newest summary also shows as the live **Thinking:** line while Codex works.
 
 - `concise`: short headlines such as "Checking the automation". This is the default.
 - `detailed`: asks for fuller summaries; current models still mostly return headlines.
@@ -327,11 +327,13 @@ The chat shows the outcome under the answer: a passing check as a short confirma
 
 ## What a chat thread holds
 
-A conversation from the chat page is a Codex thread, and the ChatGPT app shows the same thread when remote control is on. From 0.3.3 the page sends its fixed rules as Codex developer instructions when it starts a thread. The thread's first message is your own text, so the app shows your words as the message and as the title, not the page's rules.
+A conversation from the chat page is a Codex thread, and the ChatGPT app shows the same thread when remote control is on. From 0.3.3 the page sends its fixed rules as Codex developer instructions when it starts a thread. The thread's first message is your own text, so the app shows your words as the message and as the title, not the page's rules. Two short notes from the page can come in front of your words, and the app shows them with your message: the rules pointer described below, and a permissions line.
 
-Details that change from one message to the next are not part of the rules: the backup folder, the chat's files folder (see [Files Codex makes for you](#files-codex-makes-for-you)), the documents and images you attached, and the notes on direct API calls (the `HA_TOKEN` option), the local documentation and GitHub. Codex reads them from the `exchange_info` tool before its first command, file change or tool call in a message, and when your message can refer to a file, a document or something it cannot see in the chat, such as "Summarize this" with a document attached. A message that Codex can answer from what it knows and from the chat, such as a greeting or a one-number reply, needs no tool call, so it gets its answer in one step. Codex keeps the developer instructions a thread started with, so an update of this app changes the rules of a new thread; an older thread keeps its rules until Codex compacts it.
+Details that change from one message to the next are not part of the rules: the backup folder, the chat's files folder (see [Files Codex makes for you](#files-codex-makes-for-you)), the documents and images you attached, and the notes on direct API calls (the `HA_TOKEN` option), the local documentation and GitHub. Codex reads them from the `exchange_info` tool before its first command, file change or tool call in a message, and when your message can refer to a file, a document or something it cannot see in the chat, such as "Summarize this" with a document attached. The `permissions` entry of `exchange_info` names the sandbox and approval policy that the current message runs with. A message that Codex can answer from what it knows and from the chat, such as a greeting or a one-number reply, needs no tool call, so it gets its answer in one step. Codex keeps the developer instructions a thread started with, so an update of this app changes the rules of a new thread; an older thread keeps its rules until Codex compacts it.
 
 A thread that this page did not start has no page rules: a thread started in the ChatGPT app, or one started by 0.3.2 or earlier. A message from the page on such a thread starts with a one-line note that tells Codex to call `exchange_info`, which then also returns the rules. A thread from 0.3.2 or earlier also keeps that version's instructions in its history, so it can still answer in the app with the page's JSON format. The page still reads such a JSON answer.
+
+Codex learns a thread's sandbox when the thread starts. When you change the chat's permission mode later, the next message starts with one line that gives the new sandbox and approval policy, and says that it replaces any mode named earlier in the chat. The page records what it told a thread once Codex's turn has started, so a message that fails to start gives the line again on the next one. A thread that the page has no record for (one from the ChatGPT app, or from an earlier version of this app) gets the line once. The ChatGPT app shows that line in front of your words on the first message after a change.
 
 From 0.3.3 the page asks for no output format, so the thread stores Codex's answer as plain text, as the app shows it. The page's status, question and choices come from the `ask_owner` and `report_failure` tool calls (see [Human Input](#human-input)).
 
@@ -347,7 +349,7 @@ From **0.1.63**, the worker no longer archives the whole configuration folder be
 
 - When a change fails validation (below), the task details point to the saved copy of each affected file, or say that it has none.
 - Secret files are never copied: every `secrets.yaml` and every file under `.storage`, where Home Assistant keeps sign-ins, tokens and integration credentials beside dashboards. The full snapshot leaves them out, Codex is told not to copy them, and the worker deletes such a copy when the message ends, in every permission mode. A message that you stop loses the copies at once; a message that a restart cuts off loses them at the next backup cleanup, when the app starts or within the hour. A permission card for a change to one of these files shows the change while it waits for your answer; after the answer, or when the request expires, the chat's record keeps the file's path but not the changed lines. To undo a change to one of them, use a Home Assistant backup.
-- In a sandbox (Default, Auto-review and Read only), `/config/.storage` is read-only and `/config/secrets.yaml` is hidden. A `secrets.yaml` in another folder, such as `esphome/secrets.yaml`, gets no copy (above) but is not hidden: a sandboxed command can read and change it without a request. Codex can change these files only through a permission request. In Default, you see that request as a card and decide. In Auto-review, Codex's reviewer decides, and in Full access nobody is asked: no app-side check can stop a change there, because Codex runs without the sandbox.
+- In a sandbox (Ask for approval, Approve for me and Read only), `/config/.storage` is read-only and `/config/secrets.yaml` is hidden. A `secrets.yaml` in another folder, such as `esphome/secrets.yaml`, gets no copy (above) but is not hidden: a sandboxed command can read and change it without a request. Codex can change these files only through a permission request. In Ask for approval, you see that request as a card and decide. In Approve for me, Codex's reviewer decides, and in Full access nobody is asked: no app-side check can stop a change there, because Codex runs without the sandbox.
 
 Codex needs to be able to write to the backup folder. In `workspace-write` mode the app adds that one exchange's backup folder to the sandbox's writable places, beside `/config` and `/share` and the chat's files folder (see [Files Codex makes for you](#files-codex-makes-for-you)); the rest of `/data` stays read-only to Codex, and the private files the sandbox hides stay hidden. In `read-only` mode Codex is given no backup folder; any explicitly approved writes still need a separate recovery plan. A per-file copy depends on Codex following the instruction; if a file was changed without one, restore it from a Home Assistant backup.
 
@@ -370,7 +372,7 @@ The app's `codex_sandbox` option takes only these two values. An older setting t
 
 **Protected policy.** The sandbox modes the `codex_sandbox` option may name come from `/usr/share/ha_codex/policy.json` inside the app image, outside `/config` and sandbox writable roots. A value it does not list stops startup and each task. The app adds no command check of its own: Codex's approval mode and the sandbox, with its private-file masks, are the protection (0.3.6). No house rules are bundled or copied into Codex's home. Codex uses its defaults and the owner's `AGENTS.md` (in the app's own folder, see [AGENTS.md and HA_TOKEN](#agentsmd-and-ha_token)), whose existing editor and reading path remain available. Owners who want house practices can use the Whole Home Agent starter kit (published separately) and choose their own instructions. Native approval remains specific to the displayed request; read each action before allowing it.
 
-**Who can answer.** Only a signed-in Home Assistant administrator can answer **Allow once** or **Deny**, on the Codex page. This holds in Default and Read only. In Auto-review, Codex's reviewer answers, and in Full access nobody is asked, whoever sent the message (see "Permission modes"). The worker checks the user Home Assistant names for the page against its user list and records who answered on the request. The integration's API token cannot answer permission requests, and the integration's actions refuse callers who are not administrators. An automation or script that runs on its own may call the actions; one that a user who is not an administrator starts carries that user, and its call is refused too.
+**Who can answer.** Only a signed-in Home Assistant administrator can answer **Allow once** or **Deny**, on the Codex page. This holds in Ask for approval and Read only. In Approve for me, Codex's reviewer answers, and in Full access nobody is asked, whoever sent the message (see "Permission modes"). The worker checks the user Home Assistant names for the page against its user list and records who answered on the request. The integration's API token cannot answer permission requests, and the integration's actions refuse callers who are not administrators. An automation or script that runs on its own may call the actions; one that a user who is not an administrator starts carries that user, and its call is refused too.
 
 A command allowed once runs outside the sandbox. The card does not refuse any command or path by name, so read each command before you allow it.
 
@@ -384,7 +386,7 @@ The worker exposes the Codex version and a structured sandbox preflight in its a
 
 In `workspace-write` and `read-only`, the worker uses Codex's live approval protocol with the approval policy `on-request`. When Codex requests access for a command or file change, the chat shows **Permission needed**, the reason, the command and working folder or the file paths, rename destinations, and diff, and **Allow once** and **Deny** buttons. Review the action, then choose a button. When Codex asks before it runs the Home Assistant tool (`call` of the `home_assistant_call` server), the card shows the tool name and every argument it will send, such as the action, its target and the full text of a message, in plain words and as JSON. The plain words name each entity, area, device, floor and label of the target. A request that the card cannot show in full, because it is too long or a known credential in it is hidden, has **Allow once** turned off: deny it. **Allow once** on a tool request allows that one call; Codex asks again before the next one. Typing a reply or answering a follow-up question does not grant sandbox access. Open the app chat to answer permission requests, including tasks started by the integration or a notification.
 
-ChatGPT apps are services, such as GitHub or a calendar, that you connect to your ChatGPT account. Codex can use their tools through that account. These tools act in the app's own service, outside this Home Assistant and outside the sandbox. In Default, Codex asks before each such call, and the chat shows the same card: the app, the tool, the question Codex asks and every argument. In Read only, the page declines each app tool request and says so in the chat. In Auto-review, Codex's reviewer answers instead of you; in Full access, Codex does not ask. The app log records each tool request that you allow or deny, and each question that the page declines, by name only, without its arguments.
+ChatGPT apps are services, such as GitHub or a calendar, that you connect to your ChatGPT account. Codex can use their tools through that account. These tools act in the app's own service, outside this Home Assistant and outside the sandbox. In Ask for approval, Codex asks before each such call that can change something, and the chat shows the same card: the app, the tool, the question Codex asks and every argument. A tool that the app marks read-only runs without a question. An app or tool name that holds a hidden value shows as "a ChatGPT app" or "tool". In Read only, the page declines each app tool request and says so in the chat. In Approve for me, Codex's reviewer answers instead of you; in Full access, Codex does not ask. The app log records each tool request that you allow or deny, and each question that the page declines, by name only, without its arguments.
 
 When a request starts waiting, the worker sends a **Codex needs permission** notification through `notify_service`, or a persistent notification when none is set. It carries the reason Codex gave and the task, not the command or the diff, and has no buttons: the decision is made in the chat, where the complete action is shown. A notification that Home Assistant has not received by the time the request is answered or expires is not sent, so it cannot replace a later notification about the task's question.
 
@@ -446,10 +448,10 @@ that moves can still show its old state there. The answer names the entity that 
 not answer these reads, the answer can come up to 40 seconds late; the call itself is sent once.
 
 A chat holds no key for the app's tools (0.4). Each tool request carries the chat's thread id, which Codex adds
-to every tool call, and the worker answers it only while that chat's exchange runs. In Read only, Default and
-Auto-review a command cannot connect to the tool sockets at all: the sandbox has no network, and Codex denies the
+to every tool call, and the worker answers it only while that chat's exchange runs. In Read only, Ask for approval and
+Approve for me a command cannot connect to the tool sockets at all: the sandbox has no network, and Codex denies the
 connection. A command that runs outside the sandbox - one you approve when Codex asks to run it with more access,
-one that Codex's reviewer approves in Auto-review, or any command in Full access - can reach the sockets, and can
+one that Codex's reviewer approves in Approve for me, or any command in Full access - can reach the sockets, and can
 then do what the tools can do. That approval is the protection, as it is for the command itself.
 
 Remote control holds no key either (0.4). Its call tool and its read tool each have a socket of their own, so
@@ -490,8 +492,8 @@ version, see [Remote control from the ChatGPT app](#remote-control-from-the-chat
 
 - `codex_cli.start_task` starts the same kind of task as the chat page, so it gets the same tools.
 - Each `call` and each `home_assistant_mcp` tool that changes something needs an answer, on the chat page or in
-  the ChatGPT app ([Changes to the house: the `call` tool](#changes-to-the-house-the-call-tool)). In Default and
-  Read only, Codex asks you; in Auto-review, Codex's reviewer can allow it without asking you; in Full access, it
+  the ChatGPT app ([Changes to the house: the `call` tool](#changes-to-the-house-the-call-tool)). In Ask for approval and
+  Read only, Codex asks you; in Approve for me, Codex's reviewer can allow it without asking you; in Full access, it
   runs without a question ([Permission modes](#permission-modes)). The
   `home_assistant_mcp` tools are there only while [Enable Home Assistant MCP](#home-assistant-mcp) is on.
 - File edits and shell commands use Codex's own tools on every way in, and the [sandbox](#sandbox) applies on every
@@ -642,9 +644,11 @@ Sign-in uses your ChatGPT account and its Codex allowance. Availability and usag
 
 ## GitHub sign-in
 
+When Codex makes a new Git commit, its default author and committer are `ChatGPT Codex <noreply@openai.com>`. To change the defaults, open the app’s **Configuration** page, show unused optional settings, set **Git commit name** or **Git commit email**, then save and restart the app. A blank field uses its built-in default. A repository’s own `user.name` and `user.email` take precedence for commits made in that checkout. Changing the options affects future commits.
+
 Release 0.3 lets the assistant fetch, pull, push, clone and link the GitHub repositories you choose. You do every step with a button in the app page: **Settings > Accounts and connections > GitHub**, just below **ChatGPT account**. No step needs a shell, and nothing about GitHub is typed into chat.
 
-The app keeps the sign-in in its own private folder, `/data/github`. That folder is hidden in every Codex sandbox, so a task cannot read it. Codex never holds the token. It calls one tool, `github_git`, and the app runs git for it. Every push goes through the kit's push guard first.
+The app keeps the sign-in in its own private folder, `/data/github`. That folder is hidden in every Codex sandbox, so a task in Read only, Ask for approval or Approve for me cannot read it. Full access runs Codex with no sandbox, so a command there can read the sign-in. In the other modes Codex does not hold the token: it calls one tool, `github_git`, and the app runs git for it. Every push goes through the kit's push guard first.
 
 ### Connect
 
@@ -718,7 +722,9 @@ none. The text is `starter_agents.md` in the app's source. It tells Codex what `
 rules. Four of them matter most: change the home only on the owner's word, keep secrets secret, keep the old version
 of a changed file, and check the configuration before a restart. A short section after the rules lists three safeguard
 defaults (secrets, protected places, backups) and says that they are defaults the owner can change, not locks in
-the app. The app never replaces a file that is already there,
+the app. Two more sections tell Codex how to keep a memory across chats (one fact per file in a `memory` folder of
+its working folder, with an index `memory/MEMORY.md` it reads at the start of each chat, and never a secret) and say
+that the Codex device holds this app's own entities. The app never replaces a file that is already there,
 a link included. It writes the starter once: when you delete the file, it stays deleted while the app keeps
 its data, and an update of an app that has started before writes nothing. The rules are instructions to Codex and not a safeguard; the sandbox, the
 command check and the approval cards work the same with or without them. To get the starter on an older install,
@@ -959,7 +965,7 @@ The authenticated worker API exposes `GET /chat-options` for choices and default
 
 ### Live activity
 
-From **0.1.53**, the chat shows what Codex is doing while it works on your latest message. Steps appear under the message as Codex reports them: reasoning headlines, progress notes, the commands it runs, the files it edits, web searches, and tool calls. A failed command or an error is highlighted. When a run is stopped or fails, the list ends with a **Stopped** or **Failed** row. The list is expanded while the run lasts. When it finishes, it closes to one gray line above the answer, **Worked for** and the exchange's total time, which opens the steps and the answer's checks. The text Codex writes along the way ("I'll look for …") shows above the list while Codex works; when the exchange ends, it moves into the list, between the groups of steps, so the answer starts right under the closed line. An earlier exchange keeps the same closed line: it opens that exchange's saved steps, then its checks. Its steps load from the worker the first time you open the line; a chat from before **0.4.0** that saved no steps for an exchange says so. When a check failed, a short **1 check failed** line stays under the answer and opens the checks. A permission request you have answered shrinks to one line, such as **Allowed once: ls /config**, that opens to its details. Codex's plan shows as one to-do step that is updated in place as Codex works through it; a plan update that does not have the expected form, or that has more than 50 entries, is ignored.
+From **0.1.53**, the chat shows what Codex is doing while it works on your latest message. Steps appear under the message as Codex reports them: reasoning headlines, progress notes, the commands it runs, the files it edits, web searches, and tool calls. A failed command or an error is highlighted. When a run is stopped or fails, the list ends with a **Stopped** or **Failed** row. The list is expanded while the run lasts. When it finishes, it closes to one gray line above the answer, **Worked for** and the exchange's total time, which opens the steps and the answer's checks. The text Codex writes along the way ("I'll look for …") shows above the list while Codex works; when the exchange ends, it moves into the list, between the groups of steps, so the answer starts right under the closed line. From **0.4.0**, each run of two or more steps between those texts folds under one heading that sums it up, such as **Ran 3 commands, edited a file** (with **· 1 failed** when a step failed); a tap opens it. The groups start open while Codex works and closed once the exchange is over. A command shows on one line; hover over it to read all of it, or open its output. The checks always stay outside the groups. An earlier exchange keeps the same closed line: it opens that exchange's saved steps, then its checks. Its steps load from the worker the first time you open the line; a chat from before **0.4.0** that saved no steps for an exchange says so. When a check failed, a short **1 check failed** line stays under the answer and opens the checks. A permission request you have answered shrinks to one line, such as **Allowed once: ls /config**, that opens to its details. Codex's plan shows as one to-do step that is updated in place as Codex works through it; a plan update that does not have the expected form, or that has more than 50 entries, is ignored. While Codex works, one gray **Thinking:** line under the steps shows its newest reasoning summary and is replaced as the summary streams in; the line goes away when the exchange ends. With `reasoning_summary` set to `none`, Codex sends no summaries and the line does not appear.
 
 From **0.1.63**, the list starts as soon as a message is accepted. The worker reports its own steps alongside those of Codex: recording the state of the configuration files, saving a full snapshot when that option is on, starting Codex, waiting for its first response, and checking the changes afterwards. The heading shows how long the exchange has been running, and its dot pulses for as long as the run lasts.
 
@@ -1001,7 +1007,7 @@ When you ask for a file, such as a spreadsheet, a report or an export, Codex sav
 folder, `/data/codex_tasks/<task_id>/files/`, and links to it in its answer. The chat page shows that link as a card
 with the file's name and size; select it to download the file. The page and the worker offer only files in that
 folder: a link to any other path, to a hidden file (a name that starts with a dot) or to a symbolic link stays plain
-text. Codex can write in this folder in the **Default**, **Auto-review** and **Full access** modes; in **Read only**
+text. Codex can write in this folder in the **Ask for approval**, **Approve for me** and **Full access** modes; in **Read only**
 it asks you first, and the file is saved only after your **Allow once**. The folder is not under `/config`, so its files are not part of the change review, the
 configuration check or the backups of `/config`. It is deleted with the chat. Up to 200 files are listed for the page.
 
@@ -1062,11 +1068,11 @@ The plain relay route still creates a user namespace and maps to the fixed non-r
 
 ## Scheduled runs
 
-To schedule a chat, open its menu in the chat list and choose **Schedule**. The schedule editor opens with the chat's title as the name and its first message as the prompt. Choose a **Model**, or leave **Add-on default**, and a **Trigger**: **Hourly**, **Daily** at a time, **Weekly** on a day and time, or **Custom**. Custom holds the other timings: every N minutes or hours, a cron line, or one date and time. **Advanced settings** holds the permissions, **Default** or **Read only**. Default follows the app's configured sandbox; Read only narrows that mode. **Create schedule** authorizes the exact prompt and timing you submitted. If the `model_pin` option later names a different model than the schedule, its runs fail and each one says so in the run list; edit the schedule and choose the pinned model or **Add-on default**.
+To schedule a chat, open its menu in the chat list and choose **Schedule**. The schedule editor opens with the chat's title as the name and its first message as the prompt. Choose a **Model**, or leave **Add-on default**, and a **Trigger**: **Hourly**, **Daily** at a time, **Weekly** on a day and time, or **Custom**. Custom holds the other timings: every N minutes or hours, a cron line, or one date and time. **Advanced settings** holds the permissions, **Ask for approval** or **Read only**. Ask for approval follows the app's configured sandbox; Read only narrows that mode. **Create schedule** authorizes the exact prompt and timing you submitted. If the `model_pin` option later names a different model than the schedule, its runs fail and each one says so in the run list; edit the schedule and choose the pinned model or **Add-on default**.
 
-Each run wakes the chat you scheduled: the run is its next message, Codex continues the same conversation with everything said before, and the chat moves to the top of the list with a dot until you open it. A repeating schedule uses that chat every time. A run waits while the chat or any other chat is still working, and starts when it ends. The run keeps the schedule's permissions and model, not the chat's: a chat set to Full access or Auto-review runs its scheduled message in Default, and a chat set to Read only keeps Read only. Your next message in the chat uses the chat's own settings again. If the chat was deleted or archived, or its conversation can no longer continue, the run starts a new chat named for the schedule, and later runs continue that new chat. A schedule made in **Settings** belongs to no chat, so each of its runs starts a new chat. **Schedule** in the menu of the chat you scheduled, or of any chat a run started, opens that schedule again. There, **Advanced settings** also shows its state, its recent runs, **Pause** or **Resume**, and **Delete schedule**. A chat's menu opens one schedule: the newest one made from that chat.
+Each run wakes the chat you scheduled: the run is its next message, Codex continues the same conversation with everything said before, and the chat moves to the top of the list with a dot until you open it. A repeating schedule uses that chat every time. A run waits while the chat or any other chat is still working, and starts when it ends. The run keeps the schedule's permissions and model, not the chat's: a chat set to Full access or Approve for me runs its scheduled message in Ask for approval, and a chat set to Read only keeps Read only. Your next message in the chat uses the chat's own settings again. If the chat was deleted or archived, or its conversation can no longer continue, the run starts a new chat named for the schedule, and later runs continue that new chat. A schedule made in **Settings** belongs to no chat, so each of its runs starts a new chat. **Schedule** in the menu of the chat you scheduled, or of any chat a run started, opens that schedule again. There, **Advanced settings** also shows its state, its recent runs, **Pause** or **Resume**, and **Delete schedule**. A chat's menu opens one schedule: the newest one made from that chat.
 
-**Settings → Scheduled runs** lists every schedule, also one whose chat was deleted and one saved by an earlier version, which belongs to no chat. **Edit** opens the same editor. Codex can propose a schedule; the proposal stays off until an administrator reviews and approves it there, with **Approve this proposal** or by saving it in the editor. Codex can edit or delete only its own unapproved proposals; an approved schedule is owner-only. If a proposal changes while you review it, refresh before approving it. Proposals whose prompt contains masked credentials cannot be approved or prefilled for editing; create a replacement with a complete prompt.
+**Settings → Scheduled runs** lists every schedule, also one whose chat was deleted and one saved by an earlier version, which belongs to no chat. **Edit** opens the same editor. Codex can propose a schedule; it belongs to the chat Codex proposed it in, as a schedule made from that chat's menu does. The proposal stays off until an administrator reviews and approves it there, with **Approve this proposal** or by saving it in the editor. Codex can edit or delete only its own unapproved proposals; an approved schedule is owner-only. If a proposal changes while you review it, refresh before approving it. Proposals whose prompt contains masked credentials cannot be approved or prefilled for editing; create a replacement with a complete prompt.
 
 Intervals accept whole minutes or hours, with a minimum of one minute. Hourly is an interval of one hour, counted from the time you save. Daily and Weekly are cron lines at the time you chose. One-off entry and displayed dates use Home Assistant’s configured IANA time zone, named under the trigger. Cron follows that local wall time across daylight-saving changes: missing minutes are skipped and repeated minutes run once, at the first occurrence. One-off nonexistent local times are refused; repeated times use their first occurrence. Entry and scheduled dispatch pause if the Home Assistant time zone is unavailable. Explicit API timestamps with an offset remain absolute instants. Cron uses five numeric local fields: minute, hour, day of month, month and weekday. Lists, ranges and steps are supported. Sunday is 0 or 7. When neither day field starts with a wildcard, either can match. A leading wildcard, including a step such as `*/2`, keeps the other day field restrictive. The next occurrence must be within 366 days. A cron schedule disables after its last occurrence if no next occurrence lies within that horizon; edit it to enable it again. One-off schedules disable after their occurrence is reserved. Pause, resume, edit or delete schedules from the editor or the list; deleting a schedule stops future runs, not a task already in progress. Cancel a running task in its chat.
 
@@ -1149,7 +1155,9 @@ or two such as Ready, Off or Not signed in; the 5-hour and weekly quota with a l
 times; and **Settings**. Select Codex, GitHub or Remote to open Settings at that part of Accounts and connections;
 **Manage remote connection** there opens the window that pairs the ChatGPT app. A row that needs you shows an amber
 dot, and a row whose state could not be read shows a red dot and Unavailable. The ChatGPT account part says whether
-a turn has confirmed Codex access with the current sign-in.
+a turn has confirmed Codex access with the current sign-in. While signed in, it also lists the sign-in method, the
+plan, when OpenAI last accepted the sign-in and the weekly quota left, each only when the app knows it, and it shows
+**Sign out** instead of **Sign in**. It shows no account name or email.
 
 While something needs you, the Settings cog becomes a warning symbol, and on a phone the conversations button
 shows the same symbol. It is yellow while an approval or a schedule proposal waits. It is red when ChatGPT is not
@@ -1189,24 +1197,24 @@ own to any of them.
 
 | Mode | Codex settings | A change that needs permission |
 |---|---|---|
-| Default permissions | sandbox `workspace-write`, `approval_policy = "on-request"`, `approvals_reviewer = "user"` | Codex asks you |
-| Auto-review | as Default, with `approvals_reviewer = "auto_review"` | Codex's reviewer allows or denies it; it does not ask you |
+| Ask for approval | sandbox `workspace-write`, `approval_policy = "on-request"`, `approvals_reviewer = "user"` | Codex asks you |
+| Approve for me | as Ask for approval, with `approvals_reviewer = "auto_review"` | Codex's reviewer allows or denies it; it does not ask you |
 | Read only | sandbox `read-only`, `on-request`, `user` | Codex asks you |
 | Full access | sandbox `danger-full-access`, `approval_policy = "never"` | runs without a question |
 
-- The app's `codex_sandbox` option stays the limit: when it is `read-only`, Default and Auto-review chats run in
+- The app's `codex_sandbox` option stays the limit: when it is `read-only`, Ask for approval and Approve for me chats run in
   the read-only sandbox too. Full access does not follow that option: an administrator confirmed its warning, so
   it runs without the sandbox. With the option at `read-only`, a Full access chat also saves no per-file backups.
 - Read only limits files and commands. A Home Assistant tool call is not a file or a command, so a device change
   in a Read only chat still happens only after you answer yes on Codex's request.
-- In Auto-review the chat shows each review: "Auto-review is checking a command", then whether it allowed it, the
+- In Approve for me the chat shows each review: "Auto-review is checking a command", then whether it allowed it, the
   risk level and the reviewer's reason. The reviewer also answers for locks and messages; that is Codex's model.
 - **Full access** is off until an administrator turns it on in **Settings > Full access** and confirms a warning.
-  While it is on, **Full access** shows in bold in a chat's Permissions menu. Turning it off returns every chat set to Full access to Default. While Full
+  While it is on, **Full access** shows in bold in a chat's Permissions menu. Turning it off returns every chat set to Full access to Ask for approval. While Full
   access is on, a ChatGPT app thread can also ask for it; the app never sees those threads, so such a thread can
   mix the settings (for example "never ask" with `workspace-write`). No mix reaches further than Full access itself.
-  A turn that is running when the switch goes off finishes in Full access; the chat's next turn runs in Default.
-- Scheduled runs use Default or Read only only.
+  A turn that is running when the switch goes off finishes in Full access; the chat's next turn runs in Ask for approval.
+- Scheduled runs use Ask for approval or Read only only.
 - A queued message keeps the choice submitted with it. Camera and Plan mode are not offered in this build.
 
 A chat's menu holds Rename, Pin, Share, Archive and Delete ([Managing chats](#managing-chats)). The Status

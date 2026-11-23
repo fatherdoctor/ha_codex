@@ -149,17 +149,17 @@ flowchart LR
 5. You read the summary. If you do not like it, ask Codex to undo it, or restore the saved earlier copy if the chat
    lists one.
 
-Screenshots of these screens are listed in [screenshots/SCREENSHOTS.md](screenshots/SCREENSHOTS.md).
+Screenshots of these screens are in [screenshots/SCREENSHOTS.md](screenshots/SCREENSHOTS.md).
 
 ## Permission modes
 
-Each chat picks one of the four modes of the ChatGPT app: Default, Auto-review, Read only or Full access. Each mode is
+Each chat picks one of the four modes of the ChatGPT app: Ask for approval, Approve for me, Read only or Full access. Each mode is
 only Codex's own settings.
 
 | Mode | What Codex can do without asking |
 |---|---|
-| Default | Edit files in your configuration folder. Shell networking and a write outside your configuration folder and `/share` need your permission. |
-| Auto-review | As Default, but Codex's own reviewer answers each request instead of you. |
+| Ask for approval | Edit files in your configuration folder. Shell networking and a write outside your configuration folder and `/share` need your permission. |
+| Approve for me | As Ask for approval, but Codex's own reviewer answers each request instead of you. |
 | Read only | Read files. A write, a device change or shell networking needs your permission for that one action. |
 | Full access | Everything, without a sandbox and without asking. Off until an administrator turns it on in Settings. |
 

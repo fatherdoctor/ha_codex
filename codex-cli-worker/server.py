@@ -21,6 +21,7 @@ import stat
 import sys
 import subprocess
 import tarfile
+import tempfile
 import threading
 import time
 import uuid
@@ -1190,10 +1191,24 @@ FINAL_RESPONSE_SCHEMA = {
 }
 
 
+def write_git_identity_defaults(options: dict[str, Any]) -> None:
+    """Give Git a system-level fallback. Each checkout can still set its own name and email."""
+    name = str(options.get("git_author_name") or "").strip() or "ChatGPT Codex"
+    email = str(options.get("git_author_email") or "").strip() or "noreply@openai.com"
+    destination = DATA_ROOT / "codex-git-defaults"
+    # Let Git quote option values. Replace the complete file so a restart cannot leave half an identity.
+    with tempfile.TemporaryDirectory(dir=DATA_ROOT) as folder:
+        config = Path(folder) / "gitconfig"
+        for key, value in (("include.path", "/etc/gitconfig"), ("user.name", name), ("user.email", email)):
+            subprocess.run(["git", "config", "--file", str(config), "--", key, value], check=True)
+        config.replace(destination)
+
+
 def ensure_runtime_files() -> None:
     """Create the worker's folders, make an API token if there is none, and write Codex's config."""
     CODEX_HOME.mkdir(parents=True, exist_ok=True)
     DATA_ROOT.mkdir(parents=True, exist_ok=True)
+    write_git_identity_defaults(read_options())
     remote_control.prepare_control_parent(DATA_ROOT)
     task_root().mkdir(parents=True, exist_ok=True)
     # The GitHub sign-in's private folder: 0700, masked in every sandbox (codex-bwrap).
@@ -4893,6 +4908,10 @@ def codex_env() -> dict[str, str]:
         env.pop(key, None)
     env["CODEX_HOME"] = str(CODEX_HOME)
     env["HOME"] = str(DATA_ROOT)
+    # Direct author variables override even a repository's own identity.
+    for key in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
+        env.pop(key, None)
+    env["GIT_CONFIG_SYSTEM"] = str(DATA_ROOT / "codex-git-defaults")
     options = read_options()
     token = str(options.get("HA_TOKEN") or "").strip()
     if token:
@@ -5084,13 +5103,40 @@ def chat_files_note(task_id: str) -> str:
             f"example [report.xlsx]({folder}/report.xlsx). Only a link into that folder becomes a download.")
 
 
-def exchange_info(task_id: str, backup_dir: Path | None, include_rules: bool = False) -> dict[str, str]:
+# Put in front of a page message when the chat's permissions differ from the ones Codex was last told. Codex learns
+# a thread's sandbox when the thread starts; a later turn runs with the new settings (create_approval_session), but
+# without this line Codex keeps naming the mode the chat started in.
+PERMISSIONS_CHANGED = ("[Home Assistant page] This chat's permissions changed. From this message on: {note} "
+                       "This replaces any sandbox or permission mode named earlier in this chat.")
+
+
+def permissions_note(settings: dict[str, str]) -> str:
+    """Say what this message's Codex settings (task_mode_settings) let Codex do, in Codex's own setting names."""
+    sandbox, approval = settings["sandbox"], settings["approval_policy"]
+    if sandbox == "danger-full-access":
+        what = "there is no sandbox, and no command waits for approval."
+    elif sandbox == "read-only":
+        who = "the automatic reviewer's" if settings["approvals_reviewer"] == "auto_review" else "the person's"
+        what = (f"the sandbox lets you read but not change files; a command that changes anything needs {who} "
+                "approval first.")
+    elif settings["approvals_reviewer"] == "auto_review":
+        what = ("you can change files inside the sandbox; an automatic reviewer approves or refuses each command "
+                "that needs more.")
+    else:
+        what = "you can change files inside the sandbox; a command that needs more asks the person for approval."
+    return f"sandbox {sandbox}, approval policy {approval}: {what}"
+
+
+def exchange_info(task_id: str, backup_dir: Path | None, include_rules: bool = False,
+                  permissions: str = "") -> dict[str, str]:
     """Return what Codex needs to know about this message only, for the exchange_info tool.
 
     The fixed rules are included for a thread that did not get them when it started.
+    permissions is permissions_note() of the settings this message runs with.
     """
     info = {
         "task_id": task_id,
+        "permissions": permissions,
         "backups": backup_instructions(backup_dir).strip()
         or "This message has no backup folder. Make no backup copies.",
         "owner_instructions": owner_instructions_note(),
@@ -5105,12 +5151,16 @@ def exchange_info(task_id: str, backup_dir: Path | None, include_rules: bool = F
     return {key: value for key, value in info.items() if value}
 
 
-def page_message(user_prompt: str, reply: str | None = None, point_to_rules: bool = False) -> str:
+def page_message(user_prompt: str, reply: str | None = None, point_to_rules: bool = False,
+                 changed_permissions: str = "") -> str:
     """Return the text of this message as the thread stores it: the user's words only.
 
-    A thread without the page's rules gets a one-line pointer to exchange_info in front.
+    A thread without the page's rules gets a one-line pointer to exchange_info in front. changed_permissions,
+    when set, is permissions_note() of new settings, and puts one PERMISSIONS_CHANGED line in front.
     """
     text = reply if reply is not None else user_prompt
+    if changed_permissions:
+        text = f"{PERMISSIONS_CHANGED.format(note=changed_permissions)}\n\n{text}"
     return f"{RULES_POINTER}\n\n{text}" if point_to_rules else text
 
 
@@ -5342,6 +5392,16 @@ def bind_chat_thread(task_id: str, thread_id: Any) -> None:
               "lower-case Codex thread id, or another chat holds the thread.", flush=True)
 
 
+def is_live_summary_update(event: dict[str, Any]) -> bool:
+    """Tell whether an event is a streamed update of a reasoning summary.
+
+    Each update holds the whole summary so far, so writing every one to codex.log would repeat the text once for each
+    delta. The completed item still writes the final text to the log one time.
+    """
+    item = event.get("item")
+    return event.get("type") == "item.updated" and isinstance(item, dict) and item.get("type") == "reasoning"
+
+
 def create_approval_session(
     task_id: str, proc: subprocess.Popen | None, prompt: str, final_file: Path,
     session_id: str | None, session_holder: dict[str, str], options: dict[str, Any],
@@ -5426,9 +5486,13 @@ def create_approval_session(
                 notify_permission_async(task_id, item, alerts[item["approval_id"]])
 
     def event(event: dict[str, Any]) -> None:
-        """Record one event in the task log and the chat's steps, without logging raw RPC requests."""
+        """Record one event in the task log and the chat's steps, without logging raw RPC requests.
+
+        A live summary update goes to the steps only (is_live_summary_update).
+        """
         event = redact_event(event)
-        write_task_log(task_id, "stdout", json.dumps(event))
+        if not is_live_summary_update(event):
+            write_task_log(task_id, "stdout", json.dumps(event))
         record_activity_event(task_id, event)
         if status_calls is not None and event.get("type") == "item.completed":
             call = status_call(event.get("item"))
@@ -6215,14 +6279,23 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     prepare_ha_docs()
     # A thread this page starts gets PAGE_INSTRUCTIONS from its first turn. Any other thread (started in the
     # ChatGPT app, or by 0.3.2 or earlier) gets a pointer in the message, and exchange_info carries the rules for it.
+    # A new thread learns its sandbox when it starts. A resumed thread is told in the message when its permissions
+    # differ from the ones it was last told; with no record (a thread from the ChatGPT app, or from an earlier version
+    # of this app) it is told once.
+    permissions = permissions_note(task_mode_settings(task_id, options))
     with lock:
-        has_page_instructions = bool(tasks.get(task_id, {}).get("page_instructions"))
+        task = tasks.get(task_id, {})
+        has_page_instructions = bool(task.get("page_instructions"))
+        told_permissions = task.get("told_permissions")
     point_to_rules = bool(session_id) and not has_page_instructions
-    ha_data.set_exchange_info(task_id, exchange_info(task_id, backup_dir, include_rules=point_to_rules))
+    changed_permissions = permissions if session_id and told_permissions != permissions else ""
+    ha_data.set_exchange_info(task_id, exchange_info(task_id, backup_dir, include_rules=point_to_rules,
+                                                     permissions=permissions))
     if not session_id:
         update_task(task_id, page_instructions=True)
     try:
-        prompt_file.write_text(page_message(prompt, reply=reply, point_to_rules=point_to_rules), encoding="utf-8")
+        prompt_file.write_text(page_message(prompt, reply=reply, point_to_rules=point_to_rules,
+                                            changed_permissions=changed_permissions), encoding="utf-8")
     except OSError as exc:
         fail_task_launch(
             task_id,
@@ -6363,6 +6436,11 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
             stdout_thread.join(timeout=5)
             stderr_thread.join(timeout=5)
 
+    # Record what Codex was told only once its turn started: after a failed start or a cancel before the turn,
+    # Codex never read the message, so the next message must carry the permissions line again. A repeated line does
+    # no harm; a lost one leaves Codex naming the old mode. (update_task changes nothing after a cancel.)
+    if approval_session.turn_id:
+        update_task(task_id, told_permissions=permissions)
     if task_cancellation_requested(task_id):
         return
     if lifecycle_error is not None and not approval_session.turn_id:

@@ -384,6 +384,28 @@ class AppToolCardTests(unittest.TestCase):
         self.assertEqual(record["confirmation"]["what"],
                          "Let a ChatGPT app run its tool tool, with the arguments shown below.")
 
+    def test_a_title_or_app_name_with_a_hidden_value_reads_as_generic_words_on_the_card_and_in_the_log(self):
+        self.ask(message="Allow the app to add a comment?",
+                 meta={"tool_title": "hidden-secret", "connector_name": "hidden-secret"})
+        record = self.record()
+        self.assertEqual((record["tool"], record["app"]), ("codex_apps.tool", ""))
+        self.assertNotIn("hidden-secret", json.dumps(record))
+        log = self.decide("allow")
+        self.assertEqual(log, "Tool call codex_apps.tool allowed by the owner.\n")
+
+    def test_a_tool_name_with_a_hidden_value_reads_as_the_generic_word(self):
+        self.ask(message='Allow GitHub to run tool "hidden-secret"?')
+        record = self.record()
+        self.assertEqual(record["tool"], "codex_apps.tool")
+        self.assertNotIn("hidden-secret", json.dumps(record))
+        self.assertEqual(self.decide("deny"), "Tool call codex_apps.tool denied by the owner.\n")
+
+    def test_a_title_with_a_period_and_spaces_makes_one_sentence_in_the_log(self):
+        self.ask(message="Allow the app to do this?", meta={"tool_title": "x denied by the owner. Tool call y"})
+        self.assertEqual(self.record()["tool"], "codex_apps.x denied by the owner. Tool call y")
+        log = self.decide("allow")
+        self.assertEqual(log, "Tool call codex_apps.x_denied_by_the_owner._Tool_call_y allowed by the owner.\n")
+
     def test_a_question_with_hidden_text_can_only_be_denied(self):
         self.ask(message='Allow GitHub hidden-secret to run tool "create_pull_request"?')
         self.assertFalse(self.record()["can_allow"])
