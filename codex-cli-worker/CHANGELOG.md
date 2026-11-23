@@ -264,6 +264,10 @@
 - The new Codex host (see "Under the hood") is not connected. Every message still starts its own Codex process.
 
 ### Under the hood
+- One copy step for the bundled integration: `scripts/bundle_integration.py` replaces the copy the app image carries
+  with `custom_components/codex_cli`, and `--check` refuses a missing or stale copy, file by file. A build that reused
+  an old copy could ship an older integration under the same version number. The staged workflows use the script, and
+  `ci/verification.yaml` also compares the integration inside the built image with the source.
 - A new browser check, `browser_owner_view.cjs`, opens the page at 390 and 1280 px wide. It checks that Settings
   shows its sections in order and fits the window. It checks the main controls of the ChatGPT and GitHub panels
   signed out, while signing in and signed in, and the Remote connection window off and on. It also checks that a
