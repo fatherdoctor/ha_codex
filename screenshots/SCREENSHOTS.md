@@ -37,6 +37,7 @@ Each row shows one screen: light and dark on a desktop, then light and dark on a
 
 <p><img src="sign-in-light-desktop.png" alt="Sign-in, light, desktop" width="360"> <img src="sign-in-dark-desktop.png" alt="Sign-in, dark, desktop" width="360"></p>
 <p><img src="sign-in-light-phone.png" alt="Sign-in, light, phone" width="180"> <img src="sign-in-dark-phone.png" alt="Sign-in, dark, phone" width="180"></p>
+
 ## Not taken yet
 
 These screens belong to Home Assistant, not to the add-on page, so the test fixture cannot show them. They are taken
