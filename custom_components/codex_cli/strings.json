@@ -63,6 +63,9 @@
       },
       "signed_in": {
         "name": "Signed in"
+      },
+      "github_connected": {
+        "name": "GitHub connected"
       }
     }
   },
@@ -74,6 +77,10 @@
     "codex_not_signed_in": {
       "title": "Codex is not signed in",
       "description": "The Codex worker is reachable, but it is not signed in to ChatGPT, or its sign-in has expired or been revoked. Open the Codex panel in the sidebar and press Sign in: the page shows a code and a QR code for the ChatGPT sign-in page. You can also start the sign-in with the `codex_cli.start_login` action. This repair clears itself once the sign-in works."
+    },
+    "github_access_lost": {
+      "title": "The Codex add-on's GitHub sign-in needs attention",
+      "description": "The GitHub sign-in of the Codex add-on ({account}) {state}: {reason}. Until it works again, the assistant cannot fetch, pull or push your GitHub repositories. Open the Codex panel in the sidebar, then Settings, GitHub. There you can run Check now, accept a new set of repositories, or connect again. This repair clears itself once the check is OK or the sign-in is disconnected."
     }
   },
   "services": {

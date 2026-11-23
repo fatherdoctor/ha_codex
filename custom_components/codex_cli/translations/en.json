@@ -63,6 +63,9 @@
       },
       "signed_in": {
         "name": "Signed in"
+      },
+      "github_connected": {
+        "name": "GitHub connected"
       }
     }
   },
