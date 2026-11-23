@@ -83,6 +83,10 @@ textarea:focus-visible,
 [hidden] {
   display: none !important;
 }
+/* Remote Control is paused in this version: the worker marks the page root and every part of it is hidden. */
+[data-remote-paused] [data-remote] {
+  display: none !important;
+}
 .icon {
   background: transparent;
   color: var(--muted);
@@ -260,6 +264,17 @@ aside {
 .row-title > span {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* A scheduled run answered in this chat since the owner last opened it. */
+.row-title > .unread-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.chat-row.unread .row-title {
+  font-weight: 650;
 }
 .pin-icon {
   width: 12px;
@@ -782,6 +797,7 @@ h1 {
 }
 .markdown table {
   border-collapse: collapse;
+  width: 100%;
   font-size: calc(13px * var(--text-scale));
   line-height: 1.6;
   /* Columns keep whole words; a table that is too wide scrolls sideways. */
@@ -790,23 +806,25 @@ h1 {
 .markdown th,
 .markdown td {
   padding: 6px 12px;
-  border: 1px solid var(--line);
+  border: 0;
   text-align: left;
   vertical-align: top;
 }
 .markdown th {
-  background: var(--surface);
+  color: var(--muted);
   font-weight: 600;
+}
+.markdown thead th,
+.markdown tbody tr:not(:last-child) td {
+  border-bottom: 1px solid var(--line);
 }
 /* The bubble of a sent message already has the surface colour. */
 .message.user :not(pre) > code,
-.message.user .md-code,
-.message.user th {
+.message.user .md-code {
   background: var(--bg);
 }
 .message.user.queued :not(pre) > code,
-.message.user.queued .md-code,
-.message.user.queued th {
+.message.user.queued .md-code {
   background: var(--surface);
 }
 .check {
@@ -847,94 +865,6 @@ h1 {
   font-size: calc(10px * var(--text-scale));
   margin-top: 15px;
   line-height: 1.5;
-}
-.browser-permission-review {
-  margin-top: 20px;
-  padding-top: 16px;
-  border-top: 1px solid var(--line);
-}
-.browser-permission-review > p {
-  line-height: 1.6;
-  max-width: 70ch;
-}
-.browser-permission-review fieldset {
-  min-width: 0;
-  margin: 16px 0;
-  padding: 0;
-  border: 0;
-}
-.browser-permission-review legend {
-  margin-bottom: 10px;
-  font-size: calc(12px * var(--text-scale));
-  color: var(--muted);
-  overflow-wrap: anywhere;
-}
-.browser-permission-choice {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  min-height: 44px;
-  cursor: pointer;
-  overflow-wrap: anywhere;
-}
-.browser-permission-choice input {
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  accent-color: var(--accent);
-}
-.browser-permission-choice input:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
-}
-.browser-permission-request {
-  padding: 8px 0;
-  border-top: 1px solid var(--line);
-}
-.browser-permission-details {
-  margin: 4px 0 8px 28px;
-}
-.browser-permission-details summary {
-  cursor: pointer;
-  font-size: calc(12px * var(--text-scale));
-}
-.browser-permission-details pre {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  max-height: 220px;
-  overflow: auto;
-}
-.browser-permission-remember {
-  margin-top: 16px;
-}
-.browser-permission-actions {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.browser-permission-actions button,
-.saved-browser-permission button {
-  min-height: 44px;
-}
-.browser-permission-feedback,
-.browser-permission-progress {
-  font-size: calc(12px * var(--text-scale));
-  line-height: 1.6;
-}
-.saved-browser-permission {
-  display: flex;
-  gap: 16px;
-  align-items: flex-start;
-  justify-content: space-between;
-  padding: 16px 0;
-  border-bottom: 1px solid var(--line);
-}
-.saved-browser-permission-info {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.saved-browser-permission-info p {
-  margin: 6px 0;
 }
 .attachments {
   display: flex;
@@ -1081,8 +1011,32 @@ h1 {
   padding-left: 2px;
   border-left: 2px solid var(--line);
 }
+/* A group of several steps opens from a one-line heading that sums it up. */
+.step-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0 4px 10px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: calc(13px * var(--text-scale));
+  text-align: left;
+  cursor: pointer;
+}
+.step-group-head:hover {
+  color: var(--text);
+}
 .activity-steps > .message.interim {
   margin: 12px 0;
+}
+.activity-thinking {
+  color: var(--muted);
+  font-size: calc(12px * var(--text-scale));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .step {
   display: flex;
@@ -1114,12 +1068,19 @@ h1 {
 .step-message .step-text {
   color: var(--text);
 }
+/* A command shows on one line, as in the desktop app; all of it once its output is open (CX-WORKLOG-GROUPS). */
 .step-command .step-text {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: calc(12px * var(--text-scale));
   color: var(--text);
-  max-height: 7.5em;
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
+}
+.step-command.output-open .step-text {
+  white-space: pre-wrap;
+  max-height: 7.5em;
+  overflow: auto;
 }
 .step-file_change .step-text {
   color: var(--text);
@@ -1909,7 +1870,6 @@ dialog :is(h3, h4):has(> .settings-toggle) {
 .verification-result summary { cursor: pointer; font-size: calc(13px * var(--text-scale)); }
 .verification-result pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: calc(12px * var(--text-scale)); max-height: 260px; overflow: auto; }
 .verification-result.is-failed, .verification-result.is-issues { border-color: #d18a48; }
-.verification-note { font-size: calc(12px * var(--text-scale)); opacity: .7; }
 .text-size-options {
   border: 0;
   margin: 0;
@@ -2236,7 +2196,8 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   line-height: 0;
 }
 
-/* GitHub sign-in card: beside the ChatGPT account, same code style. */
+/* The ChatGPT and GitHub sign-in details: the same term and value grid. */
+.account-details,
 .github-details {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
@@ -2244,9 +2205,11 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   margin: 8px 0;
   font-size: calc(12px * var(--text-scale));
 }
+.account-details dt,
 .github-details dt {
   color: var(--muted);
 }
+.account-details dd,
 .github-details dd {
   margin: 0;
   overflow-wrap: anywhere;
@@ -2296,6 +2259,7 @@ dialog :is(h3, h4):has(> .settings-toggle) {
  */
 .settings-title::before,
 .activity-chevron::before,
+.step-group-chevron::before,
 details.disclosure > summary::before {
   content: "";
   display: inline-block;
@@ -2309,6 +2273,7 @@ details.disclosure > summary::before {
 }
 .settings-toggle[aria-expanded="true"] .settings-title::before,
 .activity-toggle[aria-expanded="true"] .activity-chevron::before,
+.step-group-head[aria-expanded="true"] .step-group-chevron::before,
 details.disclosure[open] > summary::before {
   -webkit-mask-image: var(--mdi-chevron-down);
   mask-image: var(--mdi-chevron-down);

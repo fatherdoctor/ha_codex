@@ -37,8 +37,8 @@ the version.
 | `codex-cli-worker/web/` | the chat page (plain JavaScript and CSS, no build step) |
 | `codex-cli-worker/tests/` | every test: `test_*.py`, the Home Assistant tests in `ha/`, browser checks `browser_*.cjs` |
 | `custom_components/codex_cli/` | the integration; `manifest.json` holds its version |
-| `scripts/` | `build_hacs_release.py`, `fork_release.py` (tag after a lab pass, rollback) |
-| `docs/` | `updates-and-rollback.md`, design notes under `design/` and `designs/` |
+| `scripts/` | `build_hacs_release.py`, `fork_release.py` (tag after a lab pass, rollback), `check_unreferenced_images.py` |
+| `docs/` | `app-reference.md`, `updates-and-rollback.md`, design notes under `design/` |
 | `ci/` | workflow files staged for the maintainer to copy into `.github/workflows/` |
 | `examples/`, `screenshots/` | the example script; the screenshots, which `screenshots/SCREENSHOTS.md` says how to retake |
 
@@ -101,6 +101,6 @@ When one is:
 - `CONTRIBUTING.md` - test setup in full, manual checks, what a pull request holds.
 - `SECURITY.md` - reporting a vulnerability, and what the app can reach.
 - `docs/updates-and-rollback.md` - how a release reaches an install, the lab pass, rollback.
-- `codex-cli-worker/DOCS.md`, `VERIFICATION.md` and `SANDBOX_TESTING.md` (same folder) - options, the
-  verification tools and the sandbox checks.
+- `codex-cli-worker/DOCS.md` (the short guide), `docs/app-reference.md` (the detail behind it), and `VERIFICATION.md`
+  and `SANDBOX_TESTING.md` in `codex-cli-worker/` - options, the verification tools and the sandbox checks.
 - `codex-cli-worker/CHANGELOG.md` - what each version changed.

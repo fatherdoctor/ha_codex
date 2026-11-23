@@ -21,6 +21,7 @@ import stat
 import sys
 import subprocess
 import tarfile
+import tempfile
 import threading
 import time
 import uuid
@@ -41,7 +42,7 @@ from flask import Flask, Response, jsonify, request, send_file
 
 # Also support the existing importlib-based test harness.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from verification import DEFAULT_BROWSER_MEMORY_LIMIT_MIB, Verification, public_check
+from verification import Verification, public_check
 from approvals import APPROVAL_GONE
 from safety_block import SafetyBlockSession as AppServerSession
 import codex_host
@@ -178,8 +179,6 @@ DEFAULT_OPTIONS = {
     "full_snapshot": False,
     "backup_retention_days": 7,
     "chat_retention_days": retention.DEFAULT_DAYS,
-    "browser_verification": True,
-    "browser_memory_limit_mib": DEFAULT_BROWSER_MEMORY_LIMIT_MIB,
     "local_docs": True,
     "warm_start": True,
     "ha_url": "",
@@ -1225,10 +1224,24 @@ FINAL_RESPONSE_SCHEMA = {
 }
 
 
+def write_git_identity_defaults(options: dict[str, Any]) -> None:
+    """Give Git a system-level fallback. Each checkout can still set its own name and email."""
+    name = str(options.get("git_author_name") or "").strip() or "ChatGPT Codex"
+    email = str(options.get("git_author_email") or "").strip() or "noreply@openai.com"
+    destination = DATA_ROOT / "codex-git-defaults"
+    # Let Git quote option values. Replace the complete file so a restart cannot leave half an identity.
+    with tempfile.TemporaryDirectory(dir=DATA_ROOT) as folder:
+        config = Path(folder) / "gitconfig"
+        for key, value in (("include.path", "/etc/gitconfig"), ("user.name", name), ("user.email", email)):
+            subprocess.run(["git", "config", "--file", str(config), "--", key, value], check=True)
+        config.replace(destination)
+
+
 def ensure_runtime_files() -> None:
     """Create the worker's folders, make an API token if there is none, and write Codex's config."""
     CODEX_HOME.mkdir(parents=True, exist_ok=True)
     DATA_ROOT.mkdir(parents=True, exist_ok=True)
+    write_git_identity_defaults(read_options())
     remote_control.prepare_control_parent(DATA_ROOT)
     task_root().mkdir(parents=True, exist_ok=True)
     # The GitHub sign-in's private folder: 0700, masked in every sandbox (codex-bwrap).
@@ -2905,8 +2918,8 @@ def task_payload(
 ) -> dict[str, Any]:
     """Return a task as the API sends it: a short summary for lists, or the full record with its turns.
 
-    Exact blocked browser requests are part of the human Ingress review only;
-    with `private` False, each verification check carries their labels instead.
+    A dashboard check saved by a version before 0.4.0 can hold exact blocked browser requests; with `private`
+    False, each verification check carries only their labels.
     """
     if summary:
         fields = ("task_id", "title", "status", "created_at", "updated_at", "summary", "question")
@@ -2914,12 +2927,12 @@ def task_payload(
         result["summary"] = str(result["summary"])[:240]
         result["pinned"] = bool(task.get("pinned"))
         result["archived"] = bool(task.get("archived"))
+        result["unread"] = bool(task.get("unread"))
     else:
         result = copy.deepcopy(task)
         result["chat_settings"] = current_chat_settings(task.get("chat_settings", DEFAULT_CHAT_SETTINGS))
         result["turns"] = task_turns(task)
         result["history_incomplete"] = task.get("history_incomplete", "turns" not in task)
-        result["browser_retry"] = verification.retry_status(task.get("task_id"))
         if not private:
             for record in [result, *result["turns"]]:
                 if isinstance(record.get("verification"), list):
@@ -3986,9 +3999,34 @@ def notify(title: str, message: str, *, still_wanted: Callable[[], bool] | None 
 BACKGROUND_SOURCES = frozenset({'schedule', 'lead'})
 
 
+def current_turn(task: dict[str, Any]) -> dict[str, Any]:
+    """Return the chat's current exchange, or an empty dict when its exchange list does not hold it."""
+    return next((item for item in task.get('turns') or [] if item.get('turn_id') == task.get('current_turn_id')), {})
+
+
+def exchange_source(task: dict[str, Any]) -> str | None:
+    """Return the task_source of the chat's current exchange: the exchange's own, else the chat's."""
+    return current_turn(task).get('task_source') or task.get('task_source')
+
+
+def unattended_mode(task: dict[str, Any]) -> str | None:
+    """Return the mode of unattended work ('default' or 'read-only') for the chat's current exchange, or None.
+
+    A chat that a schedule started is unattended for good. A scheduled run in a
+    chat the owner made marks only its own exchange, so the owner's next message
+    runs in the chat's own mode again.
+    """
+    turn = current_turn(task)
+    if turn.get('task_source') in BACKGROUND_SOURCES:
+        return turn.get('background_mode') or task.get('background_mode') or 'default'
+    if task.get('task_source') in BACKGROUND_SOURCES:
+        return task.get('background_mode') or 'default'
+    return None
+
+
 def background_task(task_id: str) -> bool:
     with lock:
-        return tasks.get(task_id, {}).get('task_source') in BACKGROUND_SOURCES
+        return unattended_mode(tasks.get(task_id, {})) is not None
 
 
 def notify_task_outcome(task_id, status, summary, turn_id='', question='', choices=None):
@@ -4920,6 +4958,10 @@ def codex_env() -> dict[str, str]:
         env.pop(key, None)
     env["CODEX_HOME"] = str(CODEX_HOME)
     env["HOME"] = str(DATA_ROOT)
+    # Direct author variables override even a repository's own identity.
+    for key in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
+        env.pop(key, None)
+    env["GIT_CONFIG_SYSTEM"] = str(DATA_ROOT / "codex-git-defaults")
     options = read_options()
     token = str(options.get("HA_TOKEN") or "").strip()
     if token:
@@ -5050,6 +5092,7 @@ A message that you can answer from what you know and from this chat, for example
 Do not wait for terminal input. In sandboxed modes, request a native command or file-change approval when an authorized task requires access outside the sandbox. The worker shows the action to the user and delivers their Allow once or Deny decision to the pending request. Never bypass a denial or request permanent permission rules.
 
 Answer in plain text; Markdown is fine. When the person asks for a file such as a spreadsheet or a report, save it in the folder that exchange_info's files text names and link to it there with its full path: the chat page shows that link as a download card, and a link to any other file is not one. Answer a greeting, a test message or a question directly. Do not describe this worker, and do not report that an optional instruction file is absent. Never answer with a JSON object, also in a thread whose earlier answers were JSON objects. Only a turn with an output schema is answered with the object that the schema asks for.
+Start the final answer with one bold lead line that gives the answer. Use a table when comparing several items. List sources apart from the body, not inline. Give files you made as links.
 For other decisions or verification, call the home_assistant_data ask_owner tool with one concise question, then end your turn and write the same question as your answer. If you are asking whether to go ahead with a change, say in your answer exactly what you would change. When the answer is one of a few options, also give up to three choices in the call and in your answer, each a few words of plain text, for example "Go ahead" and "Don't change anything". The user answers by picking one or by typing something else, and the answer arrives as the next message.
 If the task cannot be done, call the home_assistant_data report_failure tool with the reason, then end your turn and explain the reason in your answer.
 If these tools are not available, ask your question or explain the failure in your answer only.
@@ -5061,11 +5104,10 @@ Use the home_assistant MCP verify tool for authenticated Home Assistant checks, 
   {"operation":"entity","entity_id":"light.kitchen","expected_state":"on","attributes":["brightness"]}
   {"operation":"config_check"}
   {"operation":"logs"}
-  {"operation":"dashboard","path":"/lovelace/0"}
   {"operation":"dashboard_readback","path":"/lovelace/0"}
 The MCP tool runs through the worker outside the shell network sandbox. Use it for supported verification instead of shell socket commands. If the user's task needs a different API or shell networking in a sandboxed mode, request approval for that specific command. Approval does not supply API credentials. Logs are limited to Core.
-Use fresh entity readback after any user-authorized reload or change. These read tools do not perform reloads or device actions; the home_assistant_call call tool does, and only when the user asked for the change. A matching state does not prove automation behavior. Dashboard inspection is observational, blocks writes, and captures desktop/mobile screenshots. Inspect the returned image_paths with your image viewer before making visual claims. Record any unavailable checks or blocked resources in your answer. Treat policy blocks as limits of this inspection; they do not establish writes or dashboard or tablet faults. Explain each remaining block using its reported reason and approval availability. Common built-in state/numeric-state conditions and passive knob rotation subscriptions are allowed automatically. Browser Mod needs separate support, and browser approvals cannot change Home Assistant account permissions. Assess other errors separately. Relevant changed storage dashboards are also checked after the worker saves them. For YAML dashboards and specific affected views, explicitly request the dashboard path. Do not expose credentials or try to obtain the user's login. Verification evidence is attached to this exchange automatically.
-After an authorized storage-dashboard edit, add "save_pending":true to the dashboard request to have the worker save that turn's pending dashboard edit and verify API readback before capturing it. This requires auto_save_lovelace to be enabled. Without save_pending, the browser inspects only the dashboard currently loaded in Home Assistant.
+Use fresh entity readback after any user-authorized reload or change. These read tools do not perform reloads or device actions; the home_assistant_call call tool does, and only when the user asked for the change. A matching state does not prove automation behavior. Do not expose credentials or try to obtain the user's login. Verification results are attached to this exchange automatically.
+To change a dashboard, make the change, read its configuration back with dashboard_readback, and report what changed. After a storage-dashboard edit, add "save_pending":true to the dashboard_readback request to have the worker save that turn's pending edit first and compare the readback with it. This requires auto_save_lovelace to be enabled. Without save_pending, the readback reads the dashboard currently loaded in Home Assistant, and the worker saves the edit when the turn ends. No tool renders or screenshots a dashboard.
 
 For a device command such as "set the kitchen ceiling to 50%", make one home_assistant_call call with the service, the name the user gave and the data, for example {"service":"light.turn_on","name":"kitchen ceiling","data":{"brightness_pct":50}} (Codex asks the owner before each call). The worker sends it only when exactly one entity of the service's domain has that name, and its answer reads the new state back, so no find and no second read are needed. If the answer is not_sent with candidates, ask the owner which one and call again with that target.entity_id; if no entity fits, look with home_assistant.verify find (fewer words, another domain) once, then ask. Do not search files under /config or .storage or run shell commands to find an entity, and read /addon_config/AGENTS.md first only when exchange_info says to.
 Before changing an entity whose entity_id you already have, look up its state with home_assistant.verify (operation entity, exact entity_id) instead of a sandboxed REST call.
@@ -5111,13 +5153,40 @@ def chat_files_note(task_id: str) -> str:
             f"example [report.xlsx]({folder}/report.xlsx). Only a link into that folder becomes a download.")
 
 
-def exchange_info(task_id: str, backup_dir: Path | None, include_rules: bool = False) -> dict[str, str]:
+# Put in front of a page message when the chat's permissions differ from the ones Codex was last told. Codex learns
+# a thread's sandbox when the thread starts; a later turn runs with the new settings (create_approval_session), but
+# without this line Codex keeps naming the mode the chat started in.
+PERMISSIONS_CHANGED = ("[Home Assistant page] This chat's permissions changed. From this message on: {note} "
+                       "This replaces any sandbox or permission mode named earlier in this chat.")
+
+
+def permissions_note(settings: dict[str, str]) -> str:
+    """Say what this message's Codex settings (task_mode_settings) let Codex do, in Codex's own setting names."""
+    sandbox, approval = settings["sandbox"], settings["approval_policy"]
+    if sandbox == "danger-full-access":
+        what = "there is no sandbox, and no command waits for approval."
+    elif sandbox == "read-only":
+        who = "the automatic reviewer's" if settings["approvals_reviewer"] == "auto_review" else "the person's"
+        what = (f"the sandbox lets you read but not change files; a command that changes anything needs {who} "
+                "approval first.")
+    elif settings["approvals_reviewer"] == "auto_review":
+        what = ("you can change files inside the sandbox; an automatic reviewer approves or refuses each command "
+                "that needs more.")
+    else:
+        what = "you can change files inside the sandbox; a command that needs more asks the person for approval."
+    return f"sandbox {sandbox}, approval policy {approval}: {what}"
+
+
+def exchange_info(task_id: str, backup_dir: Path | None, include_rules: bool = False,
+                  permissions: str = "") -> dict[str, str]:
     """Return what Codex needs to know about this message only, for the exchange_info tool.
 
     The fixed rules are included for a thread that did not get them when it started.
+    permissions is permissions_note() of the settings this message runs with.
     """
     info = {
         "task_id": task_id,
+        "permissions": permissions,
         "backups": backup_instructions(backup_dir).strip()
         or "This message has no backup folder. Make no backup copies.",
         "owner_instructions": owner_instructions_note(),
@@ -5132,12 +5201,16 @@ def exchange_info(task_id: str, backup_dir: Path | None, include_rules: bool = F
     return {key: value for key, value in info.items() if value}
 
 
-def page_message(user_prompt: str, reply: str | None = None, point_to_rules: bool = False) -> str:
+def page_message(user_prompt: str, reply: str | None = None, point_to_rules: bool = False,
+                 changed_permissions: str = "") -> str:
     """Return the text of this message as the thread stores it: the user's words only.
 
-    A thread without the page's rules gets a one-line pointer to exchange_info in front.
+    A thread without the page's rules gets a one-line pointer to exchange_info in front. changed_permissions,
+    when set, is permissions_note() of new settings, and puts one PERMISSIONS_CHANGED line in front.
     """
     text = reply if reply is not None else user_prompt
+    if changed_permissions:
+        text = f"{PERMISSIONS_CHANGED.format(note=changed_permissions)}\n\n{text}"
     return f"{RULES_POINTER}\n\n{text}" if point_to_rules else text
 
 
@@ -5218,7 +5291,7 @@ def shell_exclude_args() -> list[str]:
     return ["--config", "shell_environment_policy.exclude=" + json.dumps(list(SHELL_EXCLUDED_ENV))]
 
 
-# Each tool is bounded by its own rules (see DOCS.md): a proposal stays disabled until the
+# Each tool is bounded by its own rules (see docs/app-reference.md): a proposal stays disabled until the
 # owner approves it on the page, and the list leaves out each schedule's chat and model.
 # Without an approval mode, Codex asks for each call, and the chat page cannot show that request.
 SCHEDULING_TOOLS = ('propose_schedule', 'list_schedules')
@@ -5267,8 +5340,7 @@ def task_options(task_id: str) -> dict[str, Any]:
     options = dict(read_options())
     with lock:
         task = tasks.get(task_id, {})
-        if (task.get('permission_mode') == 'read-only'
-                or (task.get('task_source') in BACKGROUND_SOURCES and task.get('background_mode') == 'read-only')):
+        if task.get('permission_mode') == 'read-only' or unattended_mode(task) == 'read-only':
             options['codex_sandbox'] = 'read-only'
     return options
 
@@ -5287,7 +5359,7 @@ def task_mode_settings(task_id: str, options: dict[str, Any] | None = None) -> d
     with lock:
         task = tasks.get(task_id, {})
         mode = task.get('permission_mode') or protected_policy.DEFAULT_MODE
-        if task.get('task_source') in BACKGROUND_SOURCES:
+        if unattended_mode(task) is not None:
             mode = protected_policy.DEFAULT_MODE
     if mode == protected_policy.FULL_ACCESS_MODE and not full_access.is_on():
         mode = protected_policy.DEFAULT_MODE
@@ -5368,6 +5440,16 @@ def bind_chat_thread(task_id: str, thread_id: Any) -> None:
     if not tool_threads.CHATS.bind(task_id, thread_id):
         print(f"Tool requests of thread {str(thread_id)[:64]!r} are not bound to task {task_id}: the id is not a "
               "lower-case Codex thread id, or another chat holds the thread.", flush=True)
+
+
+def is_live_summary_update(event: dict[str, Any]) -> bool:
+    """Tell whether an event is a streamed update of a reasoning summary.
+
+    Each update holds the whole summary so far, so writing every one to codex.log would repeat the text once for each
+    delta. The completed item still writes the final text to the log one time.
+    """
+    item = event.get("item")
+    return event.get("type") == "item.updated" and isinstance(item, dict) and item.get("type") == "reasoning"
 
 
 def create_approval_session(
@@ -5454,9 +5536,13 @@ def create_approval_session(
                 notify_permission_async(task_id, item, alerts[item["approval_id"]])
 
     def event(event: dict[str, Any]) -> None:
-        """Record one event in the task log and the chat's steps, without logging raw RPC requests."""
+        """Record one event in the task log and the chat's steps, without logging raw RPC requests.
+
+        A live summary update goes to the steps only (is_live_summary_update).
+        """
         event = redact_event(event)
-        write_task_log(task_id, "stdout", json.dumps(event))
+        if not is_live_summary_update(event):
+            write_task_log(task_id, "stdout", json.dumps(event))
         record_activity_event(task_id, event)
         if status_calls is not None and event.get("type") == "item.completed":
             call = status_call(event.get("item"))
@@ -6256,14 +6342,23 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     prepare_ha_docs()
     # A thread this page starts gets PAGE_INSTRUCTIONS from its first turn. Any other thread (started in the
     # ChatGPT app, or by 0.3.2 or earlier) gets a pointer in the message, and exchange_info carries the rules for it.
+    # A new thread learns its sandbox when it starts. A resumed thread is told in the message when its permissions
+    # differ from the ones it was last told; with no record (a thread from the ChatGPT app, or from an earlier version
+    # of this app) it is told once.
+    permissions = permissions_note(task_mode_settings(task_id, options))
     with lock:
-        has_page_instructions = bool(tasks.get(task_id, {}).get("page_instructions"))
+        task = tasks.get(task_id, {})
+        has_page_instructions = bool(task.get("page_instructions"))
+        told_permissions = task.get("told_permissions")
     point_to_rules = bool(session_id) and not has_page_instructions
-    ha_data.set_exchange_info(task_id, exchange_info(task_id, backup_dir, include_rules=point_to_rules))
+    changed_permissions = permissions if session_id and told_permissions != permissions else ""
+    ha_data.set_exchange_info(task_id, exchange_info(task_id, backup_dir, include_rules=point_to_rules,
+                                                     permissions=permissions))
     if not session_id:
         update_task(task_id, page_instructions=True)
     try:
-        prompt_file.write_text(page_message(prompt, reply=reply, point_to_rules=point_to_rules), encoding="utf-8")
+        prompt_file.write_text(page_message(prompt, reply=reply, point_to_rules=point_to_rules,
+                                            changed_permissions=changed_permissions), encoding="utf-8")
     except OSError as exc:
         fail_task_launch(
             task_id,
@@ -6404,6 +6499,11 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
             stdout_thread.join(timeout=5)
             stderr_thread.join(timeout=5)
 
+    # Record what Codex was told only once its turn started: after a failed start or a cancel before the turn,
+    # Codex never read the message, so the next message must carry the permissions line again. A repeated line does
+    # no harm; a lost one leaves Codex naming the old mode. (update_task changes nothing after a cancel.)
+    if approval_session.turn_id:
+        update_task(task_id, told_permissions=permissions)
     if task_cancellation_requested(task_id):
         return
     if lifecycle_error is not None and not approval_session.turn_id:
@@ -6862,7 +6962,7 @@ def _run_background_task(
     """Run an exchange in its thread and always release the worker and clean up afterwards."""
     with lock:
         diagnostic_task = tasks.get(task_id, {})
-        source = "scheduled_run" if diagnostic_task.get("task_source") == "schedule" else "addon_page"
+        source = "scheduled_run" if exchange_source(diagnostic_task) == "schedule" else "addon_page"
         model = (diagnostic_task.get("chat_settings") or {}).get("model", "default")
     try:
         record_diagnostic("begin", task_id, source, model)
@@ -7169,10 +7269,20 @@ SCHEDULING_MARKUP = re.compile(r"[ \t]*<!-- scheduling:begin -->.*?<!-- scheduli
 
 def render_index() -> str:
     """Return the chat page; while scheduled runs are off, without the markup that belongs to them."""
-    page = (WEB_ROOT / "index.html").read_text(encoding="utf-8")
+    page = mark_remote_paused((WEB_ROOT / "index.html").read_text(encoding="utf-8"))
     if scheduling.SCHEDULED_RUNS:
         return page.replace("<!-- scheduling:begin -->", "").replace("<!-- scheduling:end -->", "")
     return SCHEDULING_MARKUP.sub("", page)
+
+
+def mark_remote_paused(page: str) -> str:
+    """While Remote Control is paused, mark the page root so the page hides every part of it and never asks for it.
+
+    The page's scripts look up the remote elements at load, so they stay in the markup and the mark hides them.
+    """
+    if not remote_control.PAUSED:
+        return page
+    return page.replace('<html lang="en">', '<html lang="en" data-remote-paused>', 1)
 
 
 @app.get("/")
@@ -7508,6 +7618,16 @@ def pin_task(task_id: str) -> Response:
     if task is None:
         return jsonify({"ok": False, "error": error}), 404 if error == "task not found" else 500
     return jsonify({"ok": True, "task_id": task_id, "pinned": bool(task.get("pinned"))})
+
+
+@app.post("/tasks/<task_id>/read")
+@require_auth
+def read_task(task_id: str) -> Response:
+    """Clear the unread mark a scheduled run left on a chat, without moving it in the recent list."""
+    task, error = save_task_fields(task_id, unread=False)
+    if task is None:
+        return jsonify({"ok": False, "error": error}), 404 if error == "task not found" else 500
+    return jsonify({"ok": True, "task_id": task_id, "unread": False})
 
 
 @app.post("/tasks/<task_id>/title")
@@ -8165,6 +8285,9 @@ def remote_control_summary() -> dict[str, Any]:
 @require_auth
 def get_remote_control() -> Response:
     """Return the remote-control state: on or off, connected or not, machine name, pairing code, recent log."""
+    if remote_control.PAUSED:
+        # The page shows the pause line and stops asking; no Core address check runs for a feature that cannot start.
+        return jsonify({"ok": True, "paused": True, "remote_control": remote_control_supervisor.paused()})
     state = dict(remote_control_supervisor.snapshot())
     state["core_address"] = core_address.snapshot(read_options())
     state["read_tools"] = "Read-only entity tools are offered while remote control is on; no Core API token is needed."
@@ -8303,6 +8426,9 @@ def change_remote_control(action: str) -> Response | tuple[Response, int]:
     admin, refusal = ingress_admin()
     if admin is None:
         return jsonify({"ok": False, "error": refusal}), 403
+    if remote_control.PAUSED:
+        return jsonify({"ok": False, "paused": True, "error": remote_control.PAUSED_MESSAGE,
+                        "remote_control": remote_control_supervisor.paused()}), 409
     if action == "name":
         return rename_remote_control()
     if action == "start":
@@ -8426,61 +8552,6 @@ def restart_remote_control() -> None:
     if remote_control_supervisor.enabled():
         remote_control_supervisor.stop()
         remote_control_supervisor.start()
-
-
-@app.get("/browser-permissions")
-@require_auth
-@require_ingress
-def browser_permissions_list():
-    """Let the human Ingress UI inspect remembered browser permissions."""
-    try:
-        return jsonify({"ok": True, "permissions": verification.permissions.list()})
-    except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc), "unreadable": True}), 503
-
-
-@app.delete("/browser-permissions")
-@require_auth
-@require_ingress
-def browser_permissions_clear():
-    """Remove every saved exception, which also recovers from an unreadable permissions file."""
-    try:
-        verification.permissions.clear()
-        return jsonify({"ok": True})
-    except (OSError, ValueError):
-        return jsonify({"ok": False, "error": "Could not save browser permissions. Try again."}), 503
-
-
-@app.delete("/browser-permissions/<permission_id>")
-@require_auth
-@require_ingress
-def browser_permissions_revoke(permission_id: str):
-    """Revoke one saved exception from Ingress; API tokens cannot grant or revoke."""
-    try:
-        verification.permissions.revoke(permission_id)
-        return jsonify({"ok": True})
-    except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
-    except OSError:
-        return jsonify({"ok": False, "error": "Could not save browser permissions. Try again."}), 503
-
-
-@app.post("/tasks/<task_id>/browser-permissions")
-@require_auth
-@require_ingress
-def browser_permissions_approve(task_id: str):
-    """Approve a selected batch and retry only its dashboard capture, through Ingress."""
-    if (request.content_length or 0) > 8192:
-        return jsonify({"ok": False, "error": "Browser permission request is too large"}), 413
-    try:
-        result = verification.request_retry(task_id, request.get_json(silent=True))
-        return jsonify({"ok": True, **result}), 202
-    except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
-    except RuntimeError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 409
-    except OSError:
-        return jsonify({"ok": False, "error": "Could not save browser permissions. Try again."}), 503
 
 
 @app.post("/tasks/<task_id>/reply")
@@ -8772,7 +8843,7 @@ def main() -> None:
     threading.Thread(target=account_access_loop, daemon=True).start()
     # The GitHub access check: at start, then hourly; it never runs a model.
     threading.Thread(target=github_service.loop, daemon=True, name="github-access").start()
-    # Remote control runs again only if the owner left it on.
+    # Remote control runs again only if the owner left it on, and not while it is paused (remote_control.PAUSED).
     remote_control_supervisor.resume()
     threading.Thread(target=stdin_reader, daemon=True).start()
     # The live Codex process starts now when the owner left warm_start on and a sign-in exists, so the first

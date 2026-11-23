@@ -655,14 +655,14 @@ class PageTests(unittest.TestCase):
         start = html.index('id="permissions-dialog"')
         dialog = html[start:html.index("</dialog>", start)]
         modes = [part.split('"', 1)[0] for part in dialog.split('data-mode="')[1:]]
-        self.assertEqual(modes, ["default", "auto-review", "read-only", "full-access"])
+        self.assertEqual(modes, ["default", "auto-review", "full-access", "read-only"])
         self.assertNotIn("Coming", dialog)
         self.assertIn("It does not ask you.", dialog)
         self.assertNotIn("Administrators only", dialog)
 
     def test_the_button_names_each_mode(self):
         script = (ROOT / "web" / "assets" / "studio.js").read_text(encoding="utf-8")
-        for name in ('"auto-review": "Auto-review"', '"full-access": "Full access"'):
+        for name in ('"auto-review": "Approve for me"', '"full-access": "Full access"'):
             self.assertIn(name, script)
 
 

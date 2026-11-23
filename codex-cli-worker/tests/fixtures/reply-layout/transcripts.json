@@ -1,0 +1,45 @@
+[
+  {
+    "id": "34",
+    "prompt": "Compare the top five parks and make a workbook with formulas and charts.",
+    "interim": [
+      "I'll look for the spreadsheet skill and check the official counts for both years.",
+      "I found the spreadsheet skill and the ranking. I'll use the statistical reports for the year-over-year comparison."
+    ],
+    "answer": "**The most visited park grew fastest** among the five sites. Recreation visits rose **3.80%**, from 4,121,807 to 4,278,413. See the statistical reports.\n\nDownload the workbook. It includes both years' visit counts, formulas, two charts, and source links.\n\nI used the spreadsheet skill as a guide. I checked all five formulas and both charts. The workbook was not opened in the spreadsheet app."
+  },
+  {
+    "id": "35",
+    "prompt": "Find a before-and-after study of an intersection replaced by a roundabout. Give a short answer.",
+    "interim": [
+      "I'll look for the research skill and search for a place that published crash counts before and after the switch."
+    ],
+    "answer": "**The study reported fewer crashes per year** after a four-way stop became a single-lane roundabout. The city reported an average of five crashes per year before construction and two total in the roughly two years after opening. See the crash figures.\n\nCurved approaches slow drivers. The project also rebuilt the approach roads, and the comparison does not account for changes in traffic volume.\n\nThe research skill was unavailable, so I searched the original sources directly."
+  },
+  {
+    "id": "38",
+    "prompt": "Compare four race finals if each winning time is adjusted by 0.05 seconds.",
+    "interim": [
+      "I'll find the official results and compare the adjusted times."
+    ],
+    "answer": "**The adjusted times change two results.** No race becomes a tie.\n\nI added 0.05 seconds to each winning time and compared it with the unchanged runner-up time.\n\n| Games | Winner and adjusted time | Runner-up | Result |\n| --- | --- | --- | --- |\n| 2012 | Runner A, 9.63 + 0.05 = **9.68 s** | Runner B, 9.75 s | A wins by **0.07 s** |\n| 2016 | Runner A, 9.81 + 0.05 = **9.86 s** | Runner C, 9.89 s | A wins by **0.03 s** |\n| 2020 | Runner D, 9.80 + 0.05 = **9.85 s** | Runner E, 9.84 s | E wins by **0.01 s** |\n| 2024 | Runner F, 9.784 + 0.050 = **9.834 s** | Runner G, 9.789 s | G wins by **0.045 s** |\n\nThe closest finish looked tied to the hundredth. The official photo-finish times show the smaller difference."
+  },
+  {
+    "id": "40",
+    "prompt": "One washer, one dryer, and three loads. Give the earliest finish and a proof.",
+    "interim": [],
+    "answer": "The earliest you can finish is **110 minutes (1 hour 50 minutes)**.\n\n| Load | Washer | Dryer |\n| --- | --- | --- |\n| Sheets | 0–15 min | 15–45 min |\n| Jeans | 15–40 min | 45–90 min |\n| Towels | 40–80 min | 90–110 min |\n\nThe dryer can start no earlier than minute 15. It then needs 95 minutes for all three loads, one at a time. So every schedule takes at least 110 minutes. This schedule reaches that bound."
+  },
+  {
+    "id": "45",
+    "prompt": "Turn the light back off.",
+    "earlier": {
+      "message": "Set the light to full brightness.",
+      "summary": "The light is on at full brightness."
+    },
+    "interim": [
+      "I'll turn off the light."
+    ],
+    "answer": "The light is off."
+  }
+]

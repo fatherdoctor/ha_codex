@@ -356,6 +356,37 @@ class ActivityApiTests(unittest.TestCase):
                          [("plan", "☑ Read the automation\n☐ Call the API with [redacted]"), ("command", "ls")])
         self.assertEqual(steps[0]["index"], first[0]["index"])
 
+    def test_streamed_reasoning_summary_writes_one_log_line_for_its_item(self):
+        """Live summary updates reach the step, but codex.log holds the reasoning item only once, when it completes."""
+        task_id = self.create()
+        turn_id = server.tasks[task_id]["current_turn_id"]
+        server.update_task(task_id, status="running")
+        server.start_activity(task_id, turn_id)
+        stdin = type("Transport", (io.StringIO,), {"close": lambda self: None})()
+        proc = type("Process", (), {"stdin": stdin, "poll": lambda _: None})()
+        session = server.create_approval_session(
+            task_id, proc, "Review", self.root / "final.json", None, {}, server.DEFAULT_OPTIONS)
+        session.thread_id, session.turn_id = "thread", "turn"
+        log = server.get_task_dir(task_id) / "codex.log"
+
+        def receive(method, **fields):
+            session.receive({"method": method, "params": {"threadId": "thread", "turnId": "turn", **fields}})
+
+        def reasoning_lines():
+            text = log.read_text(encoding="utf-8") if log.exists() else ""
+            return [line for line in text.splitlines() if '"reasoning"' in line]
+
+        receive("item/started", item={"id": "thought", "type": "reasoning", "summary": []})
+        started = len(reasoning_lines())
+        for _ in range(100):
+            receive("item/reasoning/summaryTextDelta", itemId="thought", summaryIndex=0, delta="word")
+        self.assertEqual(self.get(task_id).json["steps"][0]["text"], "word" * 100)
+        self.assertEqual(len(reasoning_lines()), started)
+        receive("item/completed", item={"id": "thought", "type": "reasoning", "summary": ["word" * 100]})
+        lines = reasoning_lines()
+        self.assertEqual(len(lines), started + 1)
+        self.assertEqual(sum(line.count("word") for line in lines), 100)
+
     def test_deleting_a_chat_forgets_its_steps(self):
         """Deleting a chat also drops the steps held in memory for it."""
         task_id = self.create()

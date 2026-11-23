@@ -11,6 +11,7 @@ from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import remote_control as rc
 import test_remote_control as base
+from remote_unpaused import setUpModule, tearDownModule  # noqa: F401  (Remote Control is paused)
 
 # Synthetic fixture value only; tests never request a real relay pairing code.
 FIXTURE_CODE = 'TEST-0000'
