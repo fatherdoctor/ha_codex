@@ -143,9 +143,9 @@
   part of its path is a link, Codex works from `/config` as before and the log says why. An `AGENTS.md` that you put
   in the working folder is read as the working folder's instructions, after the app's own `AGENTS.md`. The starter
   `AGENTS.md` of a new install says to ask before changing files in other apps' folders under `/share` and `/media`.
-  The remote connection for the ChatGPT app starts its Codex in the same working folder and now has the same
-  writable folders as the chat page: before, it could write only its start folder without a request, so a chat from
-  the ChatGPT app would have asked before each change in `/config`. The `github_git` tool and the **Link** form
+  The remote connection for the ChatGPT app starts its Codex in the same working folder. A chat from the ChatGPT app may write
+  `/config` without a request, as in 0.4, and may now also write `/share` and `/media` without a request, the same
+  as a chat on the page. The `github_git` tool and the **Link** form
   under **Settings** > **GitHub** now refuse a relative path such as `.` and ask for the full path, so a path meant
   for the working folder cannot name the configuration repository in `/config`.
 - **Dashboard changes without screenshots.** Codex changes a dashboard, reads its configuration back and reports
