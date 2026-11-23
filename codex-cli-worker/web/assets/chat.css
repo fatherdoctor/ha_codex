@@ -2142,7 +2142,8 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   line-height: 0;
 }
 
-/* GitHub sign-in card: beside the ChatGPT account, same code style. */
+/* The ChatGPT and GitHub sign-in details: the same term and value grid. */
+.account-details,
 .github-details {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
@@ -2150,9 +2151,11 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   margin: 8px 0;
   font-size: calc(12px * var(--text-scale));
 }
+.account-details dt,
 .github-details dt {
   color: var(--muted);
 }
+.account-details dd,
 .github-details dd {
   margin: 0;
   overflow-wrap: anywhere;

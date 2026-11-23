@@ -452,6 +452,8 @@ let refreshTimer;
 let activityTimer = null;
 let usageTimer;
 let usageLoading = false;
+// The last sign-in and status reads behind the ChatGPT details in Settings; see renderChatgptDetails.
+const chatgptAccount = { auth: null, status: null };
 /**
  * Show the quota left for the five-hour and weekly limits as a figure and a
  * bar, with the reset time as a tooltip. A limit the account does not report
@@ -501,16 +503,19 @@ function shortResetLabel(value) {
   if (Number.isNaN(date.getTime())) return "";
   return date.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
 }
+/** The plan type the worker reports, capitalized ("Pro"), or "" when it reports none. */
+function planName(planType) {
+  const plan = typeof planType === "string" ? planType.trim() : "";
+  return plan && `${plan[0].toUpperCase()}${plan.slice(1)}`;
+}
 /**
  * The plan line under the quota bars, for example "Pro plan · Weekly resets
  * Mon 9:00 AM · 5h resets 2:30 PM". The plan is information only; a reset time
  * shows only for a window the read reported.
  */
 function planLine(usage, planType) {
-  const plan = typeof planType === "string" && planType.trim()
-    ? `${planType.trim()[0].toUpperCase()}${planType.trim().slice(1)} plan`
-    : "Plan unknown";
-  const parts = [plan];
+  const plan = planName(planType);
+  const parts = [plan ? `${plan} plan` : "Plan unknown"];
   for (const [key, name] of [["weekly", "Weekly"], ["five_hour", "5h"]]) {
     const reset = shortResetLabel(usage[`${key}_reset_at`]) || usage[`${key}_reset`];
     if (usage[`${key}_percent`] !== undefined && usage[`${key}_percent`] !== "" && reset)
@@ -671,6 +676,8 @@ async function loadUsage() {
       renderUsage(data.codex_usage, data.account_access?.plan_type);
       renderIntegration(data.integration);
       renderCodexAccess(data.account_access);
+      chatgptAccount.status = data;
+      renderChatgptDetails();
       // The quota check also tells the worker which model Codex picks when the add-on names none.
       // Not awaited: the quota shown must not depend on it.
       if (state.catalog) loadChatOptions(true);
@@ -678,6 +685,9 @@ async function loadUsage() {
   } catch (_) {
     renderUsage();
     renderCodexAccess({ message: "Codex access could not be checked." });
+    // A failed read drops the plan and quota rows rather than keep stale ones.
+    chatgptAccount.status = null;
+    renderChatgptDetails();
   } finally {
     usageLoading = false;
     usageTimer = setTimeout(loadUsage, 60000);
@@ -3672,6 +3682,43 @@ async function loadLogin() {
   }
   renderLogin(auth);
 }
+/*
+ * The ChatGPT sign-in details under its status line, like GitHub's: the sign-in
+ * method the Codex CLI reports, the plan, OpenAI's last answer and the weekly
+ * quota left. Two reads feed it (auth/status and status), so each keeps its last
+ * answer here. A row shows only what the worker reported; no account name or
+ * email is shown, because the worker does not send one.
+ */
+/** The sign-in method in the Codex CLI's "login status" line, or "" when it names none. */
+function chatgptSignInMethod(message) {
+  if (/\bChatGPT\b/i.test(message || "")) return "ChatGPT account";
+  if (/\bAPI key\b/i.test(message || "")) return "API key";
+  return "";
+}
+/** The rows of the ChatGPT details list while signed in; none while signed out. */
+function chatgptDetailRows(auth, status) {
+  if (!auth) return [];
+  const rows = [];
+  const method = chatgptSignInMethod(auth.codex_login?.message);
+  if (method) rows.push(["Sign-in", method]);
+  const plan = planName(status?.account_access?.plan_type);
+  if (plan) rows.push(["Plan", plan]);
+  // While signed in, OpenAI's last answer can only be "ok": a refusal signs the page out.
+  const checked = auth.codex_login?.server_check === "ok" && dateLabel(auth.codex_login.server_checked_at, true);
+  rows.push(["Last check", checked ? `${checked}: OpenAI accepted the sign-in` : "Not checked yet"]);
+  // The worker sends the quota left as a number or a numeric string; any other value shows no row.
+  const raw = status?.codex_usage?.weekly_percent;
+  const weekly = typeof raw === "number" || (typeof raw === "string" && raw.trim()) ? Number(raw) : NaN;
+  if (Number.isFinite(weekly) && weekly >= 0 && weekly <= 100) rows.push(["Weekly quota", `${weekly}% left`]);
+  return rows;
+}
+/** Put the ChatGPT details rows on the Settings page. */
+function renderChatgptDetails() {
+  const rows = chatgptDetailRows(chatgptAccount.auth, chatgptAccount.status);
+  const details = $("chatgpt-details");
+  details.replaceChildren(...rows.flatMap(([term, value]) => [textNode("dt", term), textNode("dd", value)]));
+  details.hidden = !rows.length;
+}
 /** The ChatGPT account header in a few words. */
 function chatgptSectionStatus({ signedIn, pending, failed, lapsed }) {
   if (signedIn) return "Signed in";
@@ -3729,7 +3776,11 @@ function renderLogin(auth) {
   } else if (pending) {
     followCodeTime("chatgpt", auth.expires_in);
   }
-  for (const id of ["login", "banner-login"]) $(id).hidden = pending;
+  // Sign in shows only while signed out with no code waiting; Sign out only while a sign-in, even a lapsed one, is saved.
+  for (const id of ["login", "banner-login"]) $(id).hidden = pending || signedIn;
+  $("logout").hidden = !signedIn && !auth.codex_login?.has_auth_file;
+  chatgptAccount.auth = signedIn ? auth : null;
+  renderChatgptDetails();
   // While a sign-in waits, the section shows only the card and Cancel (CSS hides the rest).
   $("chatgpt-section").classList.toggle("signing-in", pending);
   for (const id of ["login-cancel", "banner-cancel"]) $(id).hidden = !pending;
