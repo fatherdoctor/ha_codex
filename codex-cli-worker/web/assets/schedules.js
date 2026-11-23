@@ -234,7 +234,7 @@
       const list = el("schedule-list"); list.replaceChildren();
       for (const schedule of data.schedules) {
         const item = node("div", "");
-        item.append(node("strong", schedule.name), node("p", `${schedule.approved ? schedule.enabled ? "On" : "Paused" : "Needs your approval"} · ${describe(schedule.spec)} · ${schedule.mode === "read-only" ? "Read only" : "Default"} · ${when(schedule.next_due)}`, "muted"));
+        item.append(node("strong", schedule.name), node("p", `${schedule.approved ? schedule.enabled ? "On" : "Paused" : "Needs your approval"} · ${describe(schedule.spec)} · ${schedule.mode === "read-only" ? "Read only" : "Ask for approval"} · ${when(schedule.next_due)}`, "muted"));
         const prompt = node("details", "", "disclosure"); prompt.append(node("summary", "Review prompt"), node("pre", schedule.prompt)); item.append(prompt);
         const actions = node("div", "", "settings-actions");
         const editButton = button("Edit", () => openEditor(schedule));
