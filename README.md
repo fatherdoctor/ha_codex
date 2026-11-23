@@ -149,7 +149,7 @@ flowchart LR
 5. You read the summary. If you do not like it, ask Codex to undo it, or restore the saved earlier copy if the chat
    lists one.
 
-Screenshots of these screens are listed in [screenshots/SCREENSHOTS.md](screenshots/SCREENSHOTS.md).
+Screenshots of these screens are in [screenshots/SCREENSHOTS.md](screenshots/SCREENSHOTS.md).
 
 ## Permission modes
 

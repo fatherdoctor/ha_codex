@@ -360,6 +360,11 @@ These are draft checks for the installed release. They do not report a live-syst
 - The new Codex host (see "Under the hood") is not connected. Every message still starts its own Codex process.
 
 ### Under the hood
+- The repository holds only files the app, its tests or its documents use. Seven pictures kept only as a record of
+  earlier pull requests and a stale 0.3 design note are removed. The README screenshots are retaken from the current
+  page, and `screenshots/SCREENSHOTS.md` shows them. `scripts/check_unreferenced_images.py` fails the test suite on
+  an image that no file uses; the app and integration icons are allowed by name, because Home Assistant finds them
+  by their place.
 - One copy step for the bundled integration: `scripts/bundle_integration.py` replaces the copy the app image carries
   with `custom_components/codex_cli`, and `--check` refuses a missing or stale copy, file by file. A build that reused
   an old copy could ship an older integration under the same version number. The staged workflows use the script, and
