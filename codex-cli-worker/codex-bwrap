@@ -3,16 +3,12 @@ set -eu
 
 REAL_BWRAP=/opt/codex-sandbox/bwrap.real
 # Never shown to a sandboxed command: the container environment s6 keeps (it holds the Supervisor
-# token), Home Assistant's secrets and sign-in store, the app's own options and API token, and the
-# app's GitHub sign-in (the worker does git for Codex through the github_git tool).
-# Codex never needs them; `!secret` values resolve inside Home Assistant.
+# token), the app's own options and API token, its schedule database, and its GitHub sign-in (the
+# worker does git for Codex through the github_git tool). These tokens could answer the app's own
+# permission cards or reach Home Assistant around them. Nothing in /config is hidden: like the Claude
+# add-on, the app leaves secrets.yaml and .storage to the owner's AGENTS.md.
 HIDDEN_DIRS="/run/s6 /data/remote_control_control /data/github"
-HIDDEN_FILES="/config/secrets.yaml /config/.storage/auth /config/.storage/auth_provider.homeassistant /data/options.json /data/worker_api_token /data/schedules.sqlite3 /data/schedules.sqlite3-journal /data/schedules.sqlite3-wal /data/schedules.sqlite3-shm"
-# Readable but never writable in a sandbox: Home Assistant's storage folder, which holds sign-ins,
-# tokens and integration credentials beside dashboards. A sandboxed write there fails, so Codex can
-# change such a file only after the person approves the change on a permission card (the owner's rule
-# for secret files). secrets.yaml is hidden above, so a write to it fails the same way.
-READ_ONLY_DIRS="/config/.storage"
+HIDDEN_FILES="/data/options.json /data/worker_api_token /data/schedules.sqlite3 /data/schedules.sqlite3-journal /data/schedules.sqlite3-wal /data/schedules.sqlite3-shm"
 
 if [ "${1:-}" = "--version" ]; then
   exec "$REAL_BWRAP" "$@"
@@ -59,17 +55,13 @@ if is_codex_proc_probe "$@"; then
   exec /usr/bin/python3 /opt/codex-sandbox/codex-bwrap-probe.py "$@"
 fi
 
-# Hide those paths, and bind the read-only folders read-only, in every real sandbox. The masks go just
-# before the first `--`, after Codex's own binds, so a later bind of / or /config cannot uncover them.
-# Only paths that exist are masked, so no empty file is ever created in their place.
+# Hide those paths in every real sandbox. The masks go just before the first `--`, after Codex's own
+# binds, so a later bind of / or /config cannot uncover them. Only paths that exist are masked, so no
+# empty file is ever created in their place.
 masked=0
 for arg do
   shift
   if [ "$masked" = 0 ] && [ "$arg" = "--" ]; then
-    # Read-only binds first, so the hidden files inside them are masked over the read-only copy.
-    for kept in $READ_ONLY_DIRS; do
-      if [ -d "$kept" ] && [ ! -L "$kept" ]; then set -- "$@" --ro-bind "$kept" "$kept"; fi
-    done
     for hidden in $HIDDEN_DIRS; do
       if [ -d "$hidden" ]; then set -- "$@" --tmpfs "$hidden"; fi
     done

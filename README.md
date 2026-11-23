@@ -172,8 +172,9 @@ and **Deny**. Only a Home Assistant administrator can answer it.
 Codex's own permission modes and the sandbox are the protection, as in the Claude add-on. The app adds no command
 check of its own.
 
-- **The sandbox.** Commands run with their own user, mount, process and network space. The sandbox hides
-  `secrets.yaml`, Home Assistant's sign-in store and the app's own private files.
+- **The sandbox.** Commands run with their own user, mount, process and network space. The sandbox hides the app's
+  own private files. It hides nothing in `/config`, as in the Claude add-on: `secrets.yaml` and `.storage` are left
+  to your `AGENTS.md`.
 - **Complete cards.** A command or file change that is incomplete, too large or redacted can be denied but never
   allowed: its card has no **Allow once** button.
 - **A protected policy.** The allowed modes come from a file inside the app image. Options and chats cannot loosen it.

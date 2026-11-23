@@ -349,7 +349,7 @@ From **0.1.63**, the worker no longer archives the whole configuration folder be
 
 - When a change fails validation (below), the task details point to the saved copy of each affected file, or say that it has none.
 - Secret files are never copied: every `secrets.yaml` and every file under `.storage`, where Home Assistant keeps sign-ins, tokens and integration credentials beside dashboards. The full snapshot leaves them out, Codex is told not to copy them, and the worker deletes such a copy when the message ends, in every permission mode. A message that you stop loses the copies at once; a message that a restart cuts off loses them at the next backup cleanup, when the app starts or within the hour. A permission card for a change to one of these files shows the change while it waits for your answer; after the answer, or when the request expires, the chat's record keeps the file's path but not the changed lines. To undo a change to one of them, use a Home Assistant backup.
-- In a sandbox (Ask for approval, Approve for me and Read only), `/config/.storage` is read-only and `/config/secrets.yaml` is hidden. A `secrets.yaml` in another folder, such as `esphome/secrets.yaml`, gets no copy (above) but is not hidden: a sandboxed command can read and change it without a request. Codex can change these files only through a permission request. In Ask for approval, you see that request as a card and decide. In Approve for me, Codex's reviewer decides, and in Full access nobody is asked: no app-side check can stop a change there, because Codex runs without the sandbox.
+- In a sandbox (Ask for approval, Approve for me and Read only), secret files are not hidden, as in the Claude add-on: Codex can read `secrets.yaml` and every file under `.storage`, the sign-in files `auth` and `auth_provider.homeassistant` included, and in `workspace-write` change them without a request. What Codex reads goes into the chat and to the model provider. The starter `AGENTS.md` keeps the rules instead: rule 2 says to open secret files only when the owner asks and never to paste them into the chat, and rule 5 says not to edit `.storage` files while Home Assistant runs, because Home Assistant keeps them in memory and writes over a changed file, and to use the API or the settings pages instead. To keep these files back, say so in your own `AGENTS.md`.
 
 Codex needs to be able to write to the backup folder. In `workspace-write` mode the app adds that one exchange's backup folder to the sandbox's writable places, beside `/config`, `/share`, `/media`, the app's own folder `/addon_config` and the chat's files folder (see [Files Codex makes for you](#files-codex-makes-for-you)); the rest of `/data` stays read-only to Codex, and the private files the sandbox hides stay hidden. In `read-only` mode Codex is given no backup folder; any explicitly approved writes still need a separate recovery plan. A per-file copy depends on Codex following the instruction; if a file was changed without one, restore it from a Home Assistant backup.
 
@@ -379,7 +379,11 @@ folder, where its `AGENTS.md` is), the exchange's backup folder and the chat's f
 files under `/share` and `/media` too (another assistant's folder, a clone of a repository, recordings); the sandbox
 does not stop a write there in `workspace-write`, so the starter `AGENTS.md` tells Codex to ask first, and your own
 `AGENTS.md` can say more. When the folder cannot be created, when `/media` is missing, or when any part of the path is
-a link, Codex works from `/config` as before and the app's log says why. The app does not check that `/media` is
+a link, Codex works from `/config` as before and the app's log says why, naming the link. A link at `/media/.agents`
+itself does more: Codex keeps that folder read-only and cannot do so through a link, so it refuses to build its
+sandbox, and every command in Ask for approval and Approve for me fails until you remove the link. Read only still
+works. The log line says so. A link named
+`.agents`, `.git` or `.codex` directly in `/config` or `/share` has the same effect. The app does not check that `/media` is
 the media folder of Home Assistant: the app's configuration maps it, and without that map the working folder would be
 lost at each update.
 
