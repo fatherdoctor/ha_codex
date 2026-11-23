@@ -65,6 +65,8 @@ dialog::backdrop { background: #0006; }
 .permission-option strong { font-weight: 400; }
 /* Full access is bold in the menu only while the owner's switch has it on. */
 body[data-full-access="on"] .permission-option[data-mode="full-access"] strong { font-weight: 700; }
+/* Full access is a warning in the menu, as it is on the button once chosen. */
+.permission-option[data-mode="full-access"] strong { color: var(--error); }
 .permission-option span { color: var(--muted); font-size: calc(12px * var(--text-scale)); line-height: 1.6; margin-top: 5px; }
 .permission-option[aria-pressed="true"] { border-color: var(--accent); background: var(--hover); }
 /* The chosen permission mode: mdiCheck (chat.css) in the primary color after its name. */
