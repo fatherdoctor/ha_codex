@@ -792,7 +792,7 @@ async function effortSaved(page, label) {
     await page.mouse.click(outside.x + 4, outside.y + outside.height / 2);
     assert.equal(await page.locator("#effort-popover").isHidden(), true);
     assert.equal(await page.locator("#picker-open-label").isVisible(), false);
-    // One menu at a time: opening the picker, by any route, closes the add menu, the command list
+    // One menu at a time: opening the picker, by any route, closes the add menu
     // and the permissions pop-up, and opening one of those closes the picker.
     await page.locator("#attach").click();
     assert.equal(await page.locator("#plus-menu").isVisible(), true);
@@ -808,10 +808,10 @@ async function effortSaved(page, label) {
     await page.keyboard.press("Escape");
     await page.locator("#message").fill("");
     await page.locator("#message").pressSequentially("/");
-    await page.locator("#slash-popover").waitFor();
+    assert.equal(await page.locator("#slash-popover").isHidden(), true);
     await page.keyboard.press("Control+Shift+M");
     await page.locator("#effort-popover").waitFor();
-    assert.equal(await page.locator("#slash-popover").isHidden(), true, "Ctrl+Shift+M closes the command list");
+    assert.equal(await page.locator("#message").inputValue(), "/");
     await page.keyboard.press("Escape");
     await page.locator("#message").fill("");
     await page.locator("#permission-button").click();
@@ -980,9 +980,15 @@ async function effortSaved(page, label) {
       };
       return blocks.map((node) => {
         const rect = node.getBoundingClientRect();
-        return { top: rect.top, bottom: rect.bottom, left: firstCharacter(node) };
+        return { top: rect.top, bottom: rect.bottom, left: firstCharacter(node), margin: parseFloat(getComputedStyle(node).marginBottom) };
       });
     });
+    // The upper bound (N1 of CX-REPLY-ALIGNc): step groups sit between these blocks, so the gap itself varies; what
+    // is compared with a paragraph gap is the space each narration block leaves below itself. The answer is last.
+    const paragraphGap = await require("./browser_reply_layout.cjs").paragraphGap(page);
+    assert.ok(paragraphGap > 0, "no paragraph gap to compare with");
+    for (const [n, block] of narration.slice(0, -1).entries())
+      assert.ok(block.margin <= paragraphGap + 2, `narration block ${n} leaves ${block.margin} px below it; a paragraph leaves ${paragraphGap} px`);
     assert.ok(narration.length >= 3, `${narration.length - 1} narration blocks above the answer`);
     for (let n = 1; n < narration.length; n++) {
       const gap = narration[n].top - narration[n - 1].bottom;
@@ -1970,24 +1976,23 @@ async function effortSaved(page, label) {
       await phone.evaluate(() => { const probe = document.createElement("span"); probe.style.color = "var(--error)";
         document.body.append(probe); const color = getComputedStyle(probe).color; probe.remove(); return color; }));
     assert.ok(await closedLine.evaluate(node => node.getBoundingClientRect().height) <= 24);
-    assert.equal(await phone.locator(".verification-note").isVisible(), false);
+    assert.equal(await phone.locator(".verification-result").first().isVisible(), false);
     await phone.locator(".verification > summary").click();
-    assert.equal(await phone.locator(".verification-note").isVisible(), true);
+    assert.equal(await phone.locator(".verification-result").first().isVisible(), true);
     assert.equal(await phone.locator(".verification-result").count(), 2);
     await phone.locator(".verification-result").nth(1).locator("summary").click();
-    assert.equal(await phone.locator(".verification").getByText("Custom element does not exist: sample-card", {exact:true}).isVisible(), true);
-    assert.equal(await phone.locator(".verification").getByText("Custom element does not exist: sample-card", {exact:true}).count(), 1);
-    assert.equal(await phone.locator(".verification").getByText("Blocked diagnostic logging and notifications", {exact:true}).isVisible(), true);
-    assert.equal(await phone.locator(".verification").getByText("4 occurrences · desktop, mobile", {exact:true}).isVisible(), true);
-    assert.equal(await phone.locator(".verification img").count(), 1);
-    assert.equal(await phone.locator(".verification img").evaluate(img => img.complete && img.naturalWidth > 0), true);
+    assert.equal(await phone.locator(".verification-result").nth(1).locator("summary").textContent(), "Failed · /lovelace/energy");
+    assert.equal(await phone.locator(".verification").getByText("Fresh dashboard configuration readback differs from the saved configuration.", {exact:true}).isVisible(), true);
+    // No dashboard is rendered: no screenshot and no screenshot note in the checks.
+    assert.equal(await phone.locator(".verification img").count(), 0);
+    assert.equal(await phone.locator(".verification").getByText(/screenshot/i).count(), 0);
     await phone.screenshot({path: path.join(output, "verification-mobile.png"), fullPage: true});
     // From a closed "Worked for" line, the failed-check line opens the line and the checks in one tap.
     await phone.locator("#activity > .activity-toggle").click();
     await phone.locator(".verification").evaluate(node => { node.open = false; });
     assert.equal(await phone.locator(".verification > summary").isVisible(), false);
     await failedLine.click();
-    assert.equal(await phone.locator(".verification-note").isVisible(), true);
+    assert.equal(await phone.locator(".verification-result").first().isVisible(), true);
     assert.equal(
       await phone.locator("#messages .user-attachments img").count(),
       1,
@@ -2016,12 +2021,14 @@ async function effortSaved(page, label) {
     await webview.close();
     await require("./browser_approvals.cjs")(browser, output, errors);
     await require("./browser_text_size.cjs")(browser, output, errors);
-    await require("./browser_slash.cjs")(browser, output, errors);
+    await require("./browser_slash.cjs")(browser, errors);
     await require("./browser_file_link.cjs")(browser, output, errors);
     await require("./browser_answer_bleed.cjs")(browser, output, errors);
+    await require("./browser_thinking.cjs")(browser, output, errors);
+    await require("./browser_reply_layout.cjs")(browser, output, errors);
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: queued messages (wait behind a working chat, edit, remove, start in order), choices under a question (pick one, draft kept, late answer refused), attached images (pick, reject, remove, send, render, batch stays with its chat, send waits for decoding), chat actions (pin, rename, delete, long press), generated image attachments, Markdown formatting (sent messages, answers, untrusted text, slow or long text, narrow screens), saved model/reasoning choices, model compatibility, the model a chat runs on by name, quota bars, the line about the Codex integration, keyboard/reset controls, history, pagination, continuation, new chats, drafts, reopening the last chat, safe text, settings, text size (three sizes, kept per device, phone and iPad), slash commands (list, filter, tap, keys, run not sent), file links in answers (card, download, refused paths), narration kept out of the answer (inside the closed list, aligned with it at four widths), resize, mobile and dark mode. Screenshots: " +
+      "PASS: queued messages (wait behind a working chat, edit, remove, start in order), choices under a question (pick one, draft kept, late answer refused), attached images (pick, reject, remove, send, render, batch stays with its chat, send waits for decoding), chat actions (pin, rename, delete, long press), generated image attachments, Markdown formatting (sent messages, answers, untrusted text, slow or long text, narrow screens), saved model/reasoning choices, model compatibility, the model a chat runs on by name, quota bars, the line about the Codex integration, keyboard/reset controls, history, pagination, continuation, new chats, drafts, reopening the last chat, safe text, settings, text size (three sizes, kept per device, phone and iPad), slash-prefixed messages (Enter and Send), file links in answers (card, download, refused paths), narration kept out of the answer (inside the closed list, aligned with it at four widths), the live Thinking line (newest summary, replaced as it streams, under the steps, gone at the end), reply layout (five transcript-shaped examples at four widths: narration count, edges, gaps), resize, mobile and dark mode. Screenshots: " +
         output,
     );
   } finally {

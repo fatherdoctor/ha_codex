@@ -44,6 +44,14 @@ More: [Sandbox](https://github.com/fatherdoctor/ha_codex/blob/main/docs/app-refe
 
 More: [Backups](https://github.com/fatherdoctor/ha_codex/blob/main/docs/app-reference.md#backups).
 
+## Upgrading from a version before 0.4.0
+
+Version 0.4.0 removed the built-in dashboard browser and its screenshots, the **Dashboard verification** Home
+Assistant user it signed in as, and the **Enable built-in browser** and **Browser memory limit (MiB)** options. To
+change a dashboard, Codex now reads its configuration back. The integration removes the old user on its first
+start. Restart Home Assistant after the update.
+More: [Upgrading from an earlier version](https://github.com/fatherdoctor/ha_codex/blob/main/codex-cli-worker/VERIFICATION.md#upgrading-from-an-earlier-version).
+
 ## Get help
 
 Open the app's **Log** tab, download the integration diagnostics (**Devices & services** > Codex > three-dot menu),

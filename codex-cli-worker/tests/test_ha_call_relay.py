@@ -30,6 +30,7 @@ from test_ha_call import WORKER_TOKEN, FakeHomeAssistant, call_worker
 import ha_call
 import remote_control as rc
 from ha_call import RELAY_TASK, RelayCall
+from remote_unpaused import setUpModule, tearDownModule  # noqa: F401  (Remote Control is paused)
 
 ROOT = Path(__file__).resolve().parents[1]
 CALL_PREFIX = "mcp_servers.home_assistant_call."

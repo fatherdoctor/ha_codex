@@ -30,8 +30,8 @@ class RecordingWorker(fixtures.FakeWorker):
     """Records the extra arguments a run was started with."""
 
     def submit(self, task_id, prompt, mode, name, schedule_id, **extra):
-        super().submit(task_id, prompt, mode, name, schedule_id)
         self.extra = extra
+        return super().submit(task_id, prompt, mode, name, schedule_id)
 
 
 class OwnerFieldStoreTests(unittest.TestCase):

@@ -51,6 +51,9 @@ CODEX_APPS_SERVER = "codex_apps"
 _APP_TOOL_QUESTION = re.compile(r'Allow .{1,64} to run tool "([A-Za-z0-9_.-]{1,128})"\?')
 # An app or tool title is shown only when it is a short plain name; anything else reads as the generic word.
 _PLAIN_TITLE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 _.()-]{0,63}")
+# The log line names a tool in the characters of the first-form tool name only, so a title with spaces and a period
+# cannot add a second sentence to the line.
+_NOT_LOG_NAME = re.compile(r"[^A-Za-z0-9_.-]")
 
 
 def _elicitation_refusal(params: dict[str, Any]) -> str:
@@ -409,6 +412,8 @@ class AppServerSession:
         self._pending_files: dict[str, str] = {}
         self._records: list[dict[str, Any]] = []
         self._file_changes: dict[str, list[dict[str, Any]]] = {}
+        # Only requested summary text is retained, and only while its item is live.
+        self._reasoning_summaries: dict[str, list[str]] = {}
         self._final_text = ""
 
     def _write(self, message: dict[str, Any]) -> None:
@@ -506,6 +511,7 @@ class AppServerSession:
                     pass
             self._pending.clear()
             self._pending_files.clear()
+            self._reasoning_summaries.clear()
             for record in self._records:
                 if record["status"] == "pending":
                     record["status"] = "expired"
@@ -554,11 +560,11 @@ class AppServerSession:
         if kind == "tool":
             # Shown in full or not allowed: the arguments Codex will send, as JSON, after credentials are hidden.
             server, tool = self._tool_card(params)
-            record["tool"] = f"{server}.{tool}"
             if server == CODEX_APPS_SERVER:
-                record["app"] = plain_title(params["_meta"].get("connector_name"))
-                # Codex's own sentence, not model text; still redacted and clipped like every shown value.
+                tool, record["app"] = self._app_names(tool, params["_meta"].get("connector_name"))
+                # Codex's own sentence, not model text; still redacted and clipped like the arguments.
                 record["question"], clipped = self._display(params.get("message"))
+            record["tool"] = f"{server}.{tool}"
             arguments = params["_meta"].get("tool_params")
             record["arguments"], arguments_clipped = self._display(
                 json.dumps(arguments, indent=2, sort_keys=True, ensure_ascii=False))
@@ -606,6 +612,11 @@ class AppServerSession:
             self._pending_files[record["approval_id"]] = str(params.get("itemId"))
         # Persist the reviewable request before it can receive a decision.
         self.on_approvals(copy.deepcopy(self._records))
+
+    def _app_names(self, tool: str, connector_name: Any) -> tuple[str, str]:
+        """The tool and app names that an app card and its log line show; a name that redaction changes is generic."""
+        app = plain_title(connector_name)
+        return (tool if self.redact(tool) == tool else "tool"), (app if self.redact(app) == app else "")
 
     def _tool_card(self, params: dict[str, Any]) -> tuple[str, str] | None:
         """Return (server, tool) when this tool question gets a page card in this chat, else None.
@@ -672,7 +683,7 @@ class AppServerSession:
                     outcome = record["status"] + " by the owner"
                     if record["status"] == "expired":
                         outcome = "expired: the owner's decision did not reach Codex"
-                    print(f"Tool call {record['tool']} {outcome}.", flush=True)
+                    print(f"Tool call {_NOT_LOG_NAME.sub('_', record['tool'])} {outcome}.", flush=True)
 
     def receive(self, message: dict[str, Any]) -> None:
         """Dispatch a server message without treating model prose as permission."""
@@ -723,6 +734,9 @@ class AppServerSession:
                     self.on_event({"type": "turn.started"})
             elif params.get("threadId") == self.thread_id and params.get("turnId") == self.turn_id and method in {"item/started", "item/completed"}:
                 self._item(method, params["item"])
+            elif (self.turn_id and params.get("threadId") == self.thread_id and params.get("turnId") == self.turn_id
+                  and method == "item/reasoning/summaryTextDelta"):
+                self._reasoning_delta(params)
             elif method in AUTO_REVIEW_EVENTS and params.get("threadId") == self.thread_id and params.get("turnId") == self.turn_id:
                 self.on_event(auto_review_event(method, params, self.redact))
             elif (method == "turn/plan/updated" and self.turn_id
@@ -843,6 +857,23 @@ class AppServerSession:
         return (method == "item/completed" and item.get("tool") == "spawnAgent"
                 and item.get("senderThreadId") == self.thread_id)
 
+    def _reasoning_delta(self, params: dict[str, Any]) -> None:
+        """Update a live summary part without exposing the separate reasoning content."""
+        item_id, index, delta = params.get("itemId"), params.get("summaryIndex"), params.get("delta")
+        if (not isinstance(item_id, str) or item_id not in self._reasoning_summaries
+                or type(index) is not int or not 0 <= index < REQUEST_LIMIT or not isinstance(delta, str)):
+            return
+        parts = self._reasoning_summaries[item_id]
+        while len(parts) <= index:
+            parts.append("")
+        remaining = max(0, DISPLAY_LIMIT - sum(len(part) for part in parts))
+        if not delta or not remaining:
+            return
+        parts[index] += delta[:remaining]
+        self.on_event({"type": "item.updated", "item": {
+            "id": item_id, "type": "reasoning", "status": "in_progress", "text": "\n".join(parts),
+        }})
+
     def _item(self, method: str, item: dict[str, Any]) -> None:
         """Translate app-server items into the worker's existing activity format."""
         kind = item.get("type")
@@ -870,6 +901,10 @@ class AppServerSession:
                 self._file_changes.pop(str(item["id"]), None)
             event_item["changes"] = [{"path": c["path"], "kind": c["kind"], "move_path": c["move_path"]} for c in changes]
         elif kind == "reasoning":
+            if method == "item/started" and len(self._reasoning_summaries) < REQUEST_LIMIT:
+                self._reasoning_summaries[str(item["id"])] = []
+            elif method == "item/completed":
+                self._reasoning_summaries.pop(str(item["id"]), None)
             event_item = {"id": item["id"], "type": "reasoning", "text": "\n".join(item.get("summary") or [])}
         elif kind == "agentMessage" and method == "item/completed":
             if item.get("phase") != "commentary":

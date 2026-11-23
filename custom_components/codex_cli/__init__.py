@@ -41,8 +41,7 @@ from .const import (
 from .coordinator import CodexCliCoordinator, async_delete_repair_issues
 from .discovery import async_discover_worker
 from .notification_actions import async_listen_for_choices
-from .browser_auth import STORAGE_KEY, BrowserSessions, BrowserSessionView, DiagnosticView, loaded_runtime_data
-from .kiosk import KioskScreenshotsView
+from .core_logs import DiagnosticView, loaded_runtime_data
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -69,6 +68,10 @@ LIST_TASKS_SCHEMA = vol.Schema({
 START_LOGIN_SCHEMA = vol.Schema({vol.Optional(ATTR_FORCE, default=False): bool})
 # The key of the mailbox sensor that version 0.4 removed; installs before 0.4 have this entity.
 REMOVED_MAILBOX_SENSOR_KEY = "mailbox_unread_lead"
+# The read-only system user that versions before 0.4.0 created for dashboard screenshots, and the file that holds
+# its ID. Version 0.4.0 removed the screenshots; setup removes this user. Remove this step after version 0.5.
+REMOVED_BROWSER_USER_NAME = "Dashboard verification"
+REMOVED_BROWSER_STORE_KEY = f"{DOMAIN}.browser_identity"
 
 
 @dataclass(slots=True)
@@ -77,15 +80,14 @@ class CodexCliRuntimeData:
 
     client: CodexCliApiClient
     coordinator: CodexCliCoordinator
-    browser_sessions: BrowserSessions
+    # The paired worker's token, which the Core log view compares with the token in each request.
+    worker_token: str
 
 
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     """Set up the Codex CLI integration."""
     _async_register_services(hass)
-    hass.http.register_view(BrowserSessionView(hass))
     hass.http.register_view(DiagnosticView(hass))
-    hass.http.register_view(KioskScreenshotsView(hass))
     return True
 
 
@@ -101,18 +103,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     _async_update_discovered_entry(hass, entry, worker.base_url)
     await _async_remove_mailbox_leftovers(hass, entry)
+    await _async_remove_browser_user(hass)
     client = CodexCliApiClient(session, worker.base_url, worker.api_token)
     coordinator = CodexCliCoordinator(hass, client)
     await coordinator.async_config_entry_first_refresh()
 
-    broker = BrowserSessions(hass, worker.api_token)
     # Setup can fail before Core owns the unload callbacks. Close all acquired
     # resources on failure, and transfer their cleanup to the entry on success.
     with ExitStack() as cleanup:
-        cleanup.callback(broker.close)
-        await broker.setup()
         entry.runtime_data = CodexCliRuntimeData(
-            client=client, coordinator=coordinator, browser_sessions=broker
+            client=client, coordinator=coordinator, worker_token=worker.api_token
         )
         cleanup.callback(setattr, entry, "runtime_data", None)
         cleanup.callback(entry.add_update_listener(_async_update_listener))
@@ -129,25 +129,15 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a Codex CLI config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        # Revoke browser sessions here, before Core marks the entry not loaded. The cleanup stack that setup hands
-        # to entry.async_on_unload closes the broker again (closing twice is harmless): it also covers a failed setup.
-        runtime_data = getattr(entry, "runtime_data", None)
-        if isinstance(runtime_data, CodexCliRuntimeData):
-            runtime_data.browser_sessions.close()
         entry.runtime_data = None
         async_delete_repair_issues(hass)
     return unload_ok
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Remove the integration-owned identity, its credentials and its repair issues on uninstall."""
+    """Remove the repair issues, and a browser user that a version before 0.4.0 left, on uninstall."""
     async_delete_repair_issues(hass)
-    store = Store(hass, 1, STORAGE_KEY)
-    data = await store.async_load() or {}
-    user = await hass.auth.async_get_user(data.get("user_id", ""))
-    if user and user.system_generated:
-        await hass.auth.async_remove_user(user)
-    await store.async_remove()
+    await _async_remove_browser_user(hass)
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -178,6 +168,30 @@ async def _async_remove_mailbox_leftovers(hass: HomeAssistant, entry: ConfigEntr
         # A file left behind is harmless, since nothing reads it any more.
         # Do not let it stop the setup.
         _LOGGER.warning("Could not remove the old mailbox file %s: %s", store.path, err)
+
+
+async def _async_remove_browser_user(hass: HomeAssistant) -> None:
+    """Remove the dashboard screenshot user that a version before 0.4.0 created, and the file that holds its ID.
+
+    Only the user whose ID that file holds is removed, and only if Home Assistant marks it as a system user with
+    the name the old version gave it, so a person's account is never touched; a kept user gets one log line. The
+    file goes in every case.
+    """
+    store = Store(hass, 1, REMOVED_BROWSER_STORE_KEY)
+    data = await store.async_load()
+    if data is None:
+        return
+    user_id = data.get("user_id") if isinstance(data, dict) else None
+    user = await hass.auth.async_get_user(user_id) if isinstance(user_id, str) else None
+    if user is not None and user.system_generated and user.name == REMOVED_BROWSER_USER_NAME:
+        await hass.auth.async_remove_user(user)
+        _LOGGER.info("Removed the %s user that an earlier version created for dashboard screenshots",
+                     REMOVED_BROWSER_USER_NAME)
+    elif user is not None:
+        # The file goes below, so this line is the only record of where a renamed leftover account came from.
+        _LOGGER.info("Kept user %s, which the dashboard screenshot file of an earlier version names: it is not "
+                     "a system user named %s", user.id, REMOVED_BROWSER_USER_NAME)
+    await store.async_remove()
 
 
 def _first_runtime(hass: HomeAssistant) -> CodexCliRuntimeData:
