@@ -1,6 +1,7 @@
 // Remote-control status warnings against a disposable worker fixture, never a relay.
 const { chromium } = require('playwright');
 const assert = require('node:assert/strict');
+const {unpauseRemote} = require('./remote_unpaused.cjs');
 (async () => {
   const browser = await chromium.launch({headless:true});
   try {
@@ -15,7 +16,7 @@ const assert = require('node:assert/strict');
       log:['Managed policy: a relay request may fall back to read-only.'],
     };
     await page.route('**/remote-control', route => route.fulfill({json:{ok:true,remote_control:state}}));
-    await page.goto('http://127.0.0.1:9137/preview/');
+    await unpauseRemote(page); await page.goto('http://127.0.0.1:9137/preview/');
     await page.getByRole('button',{name:'Open conversations',exact:true}).click();
     await page.getByRole('button',{name:'Open settings',exact:true}).click();
     if(await page.locator('#accounts-section > h3 .settings-toggle').getAttribute('aria-expanded')!=='true')await page.locator('#accounts-section > h3 .settings-toggle').click();if(await page.locator('#app-pairing-section .settings-toggle').getAttribute('aria-expanded')!=='true')await page.locator('#app-pairing-section .settings-toggle').click();await page.getByRole('button',{name:'Manage remote connection',exact:true}).click();

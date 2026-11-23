@@ -153,13 +153,13 @@ Screenshots of these screens are listed in [screenshots/SCREENSHOTS.md](screensh
 
 ## Permission modes
 
-Each chat picks one of the four modes of the ChatGPT app: Default, Auto-review, Read only or Full access. Each mode is
+Each chat picks one of the four modes of the ChatGPT app: Ask for approval, Approve for me, Read only or Full access. Each mode is
 only Codex's own settings.
 
 | Mode | What Codex can do without asking |
 |---|---|
-| Default | Edit files in your configuration folder. Shell networking and a write outside your configuration folder and `/share` need your permission. |
-| Auto-review | As Default, but Codex's own reviewer answers each request instead of you. |
+| Ask for approval | Edit files in your configuration folder. Shell networking and a write outside your configuration folder and `/share` need your permission. |
+| Approve for me | As Ask for approval, but Codex's own reviewer answers each request instead of you. |
 | Read only | Read files. A write, a device change or shell networking needs your permission for that one action. |
 | Full access | Everything, without a sandbox and without asking. Off until an administrator turns it on in Settings. |
 
@@ -210,7 +210,7 @@ report when a sign-in will end, so the app shows no countdown. Sign out any time
 ## Scheduled runs
 
 Open a chat's menu and choose **Schedule**. You save a name, a prompt, a model and a trigger: hourly, daily, weekly,
-or a custom interval, cron rule or single time, in your Home Assistant time zone. Each run starts a new chat.
+or a custom interval, cron rule or single time, in your Home Assistant time zone. A run continues the chat you scheduled.
 **Settings** > **Scheduled runs** lists every schedule.
 
 - A schedule you save is approved when you save it. Codex can only propose one; it stays off until an administrator
