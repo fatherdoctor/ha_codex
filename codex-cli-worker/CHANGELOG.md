@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1 (unreleased)
+
+- **Memory note.** The starter instructions now tell Codex to keep personal details, not only secrets, out of its
+  memory files: PINs, tokens, passwords, phone numbers and addresses.
+
 ## 0.5.0 (draft)
 
 This draft summarizes changes since the 0.3.6 tag, through release branch commit `0bcdccd87d4d`.
