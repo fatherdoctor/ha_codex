@@ -173,7 +173,7 @@ class Service:
             if not isinstance(args, dict):
                 raise ValueError('Arguments must be an object.')
             if operation == 'propose_schedule':
-                item = store.save(args, owner=False, author='codex', now=time.time())
+                item = store.save(args, owner=False, author='codex', now=time.time(), made_in=task_id)
                 return {'ok': True, 'schedule_id': item['id'], 'approved': False, 'enabled': False,
                         'message': 'Waiting for owner approval on the Codex page.'}
             if operation == 'list_schedules':

@@ -297,8 +297,16 @@ class Store:
         with self.connect() as db:
             return [self.schedule(row) for row in db.execute('SELECT * FROM schedules ORDER BY updated DESC, id')]
 
-    def save(self, payload, *, owner, now, schedule_id=None, author=None):
+    def save(self, payload, *, owner, now, schedule_id=None, author=None, made_in=None):
+        """Save a schedule; made_in is the chat a Codex proposal came from.
+
+        The worker sets made_in from the exchange that sent the proposal, never
+        from Codex's arguments, so the run of a proposal continues that chat as
+        a schedule the owner makes in a chat does.
+        """
         value = validate(payload, now, self.timezone, owner=owner)
+        if made_in is not None:
+            value['chat_id'] = made_in
         author = 'owner' if owner else author
         if author not in ('owner', 'codex'):
             raise ValueError('Invalid schedule author.')

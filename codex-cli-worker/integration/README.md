@@ -7,9 +7,10 @@ The integration's source is `custom_components/codex_cli` at the top of the repo
 here: the build copies it in just before `docker build`, as the build and verification workflows do:
 
 ```sh
-rm -rf codex-cli-worker/integration/codex_cli
-cp -R custom_components/codex_cli codex-cli-worker/integration/codex_cli
+python3 scripts/bundle_integration.py
 ```
 
-An image built without that step has no bundled integration; the app then installs nothing and logs
-`no_bundle` at start.
+Run it before every build by hand too. An image built without that step has no bundled integration; the app then
+installs nothing and logs `no_bundle` at start. An image built from an old copy is worse: it carries a stale
+integration with the same version number, and the app installs that copy in `/config`. To check a copy without
+changing it, run `python3 scripts/bundle_integration.py --check` (exit 1 lists each missing, extra or changed file).
