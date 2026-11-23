@@ -51,6 +51,9 @@ CODEX_APPS_SERVER = "codex_apps"
 _APP_TOOL_QUESTION = re.compile(r'Allow .{1,64} to run tool "([A-Za-z0-9_.-]{1,128})"\?')
 # An app or tool title is shown only when it is a short plain name; anything else reads as the generic word.
 _PLAIN_TITLE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 _.()-]{0,63}")
+# The log line names a tool in the characters of the first-form tool name only, so a title with spaces and a period
+# cannot add a second sentence to the line.
+_NOT_LOG_NAME = re.compile(r"[^A-Za-z0-9_.-]")
 
 
 def _elicitation_refusal(params: dict[str, Any]) -> str:
@@ -557,11 +560,11 @@ class AppServerSession:
         if kind == "tool":
             # Shown in full or not allowed: the arguments Codex will send, as JSON, after credentials are hidden.
             server, tool = self._tool_card(params)
-            record["tool"] = f"{server}.{tool}"
             if server == CODEX_APPS_SERVER:
-                record["app"] = plain_title(params["_meta"].get("connector_name"))
-                # Codex's own sentence, not model text; still redacted and clipped like every shown value.
+                tool, record["app"] = self._app_names(tool, params["_meta"].get("connector_name"))
+                # Codex's own sentence, not model text; still redacted and clipped like the arguments.
                 record["question"], clipped = self._display(params.get("message"))
+            record["tool"] = f"{server}.{tool}"
             arguments = params["_meta"].get("tool_params")
             record["arguments"], arguments_clipped = self._display(
                 json.dumps(arguments, indent=2, sort_keys=True, ensure_ascii=False))
@@ -609,6 +612,11 @@ class AppServerSession:
             self._pending_files[record["approval_id"]] = str(params.get("itemId"))
         # Persist the reviewable request before it can receive a decision.
         self.on_approvals(copy.deepcopy(self._records))
+
+    def _app_names(self, tool: str, connector_name: Any) -> tuple[str, str]:
+        """The tool and app names that an app card and its log line show; a name that redaction changes is generic."""
+        app = plain_title(connector_name)
+        return (tool if self.redact(tool) == tool else "tool"), (app if self.redact(app) == app else "")
 
     def _tool_card(self, params: dict[str, Any]) -> tuple[str, str] | None:
         """Return (server, tool) when this tool question gets a page card in this chat, else None.
@@ -675,7 +683,7 @@ class AppServerSession:
                     outcome = record["status"] + " by the owner"
                     if record["status"] == "expired":
                         outcome = "expired: the owner's decision did not reach Codex"
-                    print(f"Tool call {record['tool']} {outcome}.", flush=True)
+                    print(f"Tool call {_NOT_LOG_NAME.sub('_', record['tool'])} {outcome}.", flush=True)
 
     def receive(self, message: dict[str, Any]) -> None:
         """Dispatch a server message without treating model prose as permission."""

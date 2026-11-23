@@ -205,6 +205,11 @@
   permission card: the app, the tool and every argument. **Allow once** runs that one call; **Deny** declines it.
   Read only still declines app tools, because they act outside the sandbox. The app log has one line for each tool
   request that you allow or deny and for each question that the page declines, with names only and no arguments.
+- **App and tool names on a permission card are redacted.** The name of a ChatGPT app and of its tool went to the
+  card and the app log without the redaction every other shown value gets. Now a name that holds a hidden value
+  shows as "a ChatGPT app" or "tool", and the log line writes a tool title without spaces, so it stays one sentence.
+  The documentation also says that Codex asks only before an app tool that can change something; a tool that the
+  app marks read-only runs without a question.
 - Chat replies preserve math delimiters. Equations in a sentence appear as inline code, and display equations on their own lines appear in code blocks.
 - **Replies line up and are spaced.** A reply's text started one space to the right of its "Worked for" line and of
   the lines Codex writes along the way ("I'll look for …", "I found …"). Those lines also touched each other and the
