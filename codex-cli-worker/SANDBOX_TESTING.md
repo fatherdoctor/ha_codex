@@ -232,6 +232,8 @@ Both should exit successfully. Then run the original issue's read-only inspectio
 
 Nothing in `/config` is hidden or read-only in the sandbox: `secrets.yaml` and all of `/config/.storage` follow the owner's `AGENTS.md`, as in the Claude add-on. In `workspace-write`, verify that a new test file under `/config/.storage` is written with no permission card. Then verify that a sandboxed command can read `/config/secrets.yaml` and `/config/.storage/auth` (they are not empty), and do not write to either file. Only the app's own files stay hidden: verify that `/data/options.json` reads as empty.
 
+A link at `/media/.agents`: on the test machine only, move `/media/.agents` aside and make `/media/.agents` a link to an empty test folder. Restart the app. The app's log must name the link and say that Codex cannot run commands in Ask for approval or Approve for me until it is removed. In `workspace-write`, send one message that runs a command (for example `pwd`), and record what the chat shows: the command is expected to fail because Codex cannot build its sandbox. Then remove the link, move the folder back, restart the app, and check that `pwd` prints `/media/.agents/codex` again.
+
 Repeat the basic checks on a host where fresh `/proc` mounting succeeds. A successful `/bin/true` check alone is not proof that all write restrictions are enforced.
 
 ## Removing the workaround

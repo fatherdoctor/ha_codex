@@ -240,7 +240,9 @@ These are draft checks for the installed release. They do not report a live-syst
   own, because Codex's sandbox otherwise keeps a folder named `.agents` read-only. Every hidden file of
   the sandbox stays the same, and the approval cards are unchanged. The app creates the folder at start when it is
   missing and never moves or empties it; it does not create `/media`. When the folder cannot be created, when `/media` is missing, or when any
-  part of its path is a link, Codex works from `/config` as before and the log says why. An `AGENTS.md` that you put
+  part of its path is a link, Codex works from `/config` as before and the log says why, naming the link. A link at
+  `/media/.agents` itself also stops Codex from building its sandbox, so commands fail in Ask for approval and Approve
+  for me until you remove the link; Read only still works, and the log line says so. An `AGENTS.md` that you put
   in the working folder is read as the working folder's instructions, after the app's own `AGENTS.md`. The starter
   `AGENTS.md` of a new install says to ask before changing files in other apps' folders under `/share` and `/media`.
   The remote connection for the ChatGPT app starts its Codex in the same working folder. A chat from the ChatGPT app may write

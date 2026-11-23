@@ -378,7 +378,11 @@ may write without a request is `/config`, `/share`, `/media` (with `/media/.agen
 files under `/share` and `/media` too (another assistant's folder, a clone of a repository, recordings); the sandbox
 does not stop a write there in `workspace-write`, so the starter `AGENTS.md` tells Codex to ask first, and your own
 `AGENTS.md` can say more. When the folder cannot be created, when `/media` is missing, or when any part of the path is
-a link, Codex works from `/config` as before and the app's log says why. The app does not check that `/media` is
+a link, Codex works from `/config` as before and the app's log says why, naming the link. A link at `/media/.agents`
+itself does more: Codex keeps that folder read-only and cannot do so through a link, so it refuses to build its
+sandbox, and every command in Ask for approval and Approve for me fails until you remove the link. Read only still
+works. The log line says so. A link named
+`.agents`, `.git` or `.codex` directly in `/config` or `/share` has the same effect. The app does not check that `/media` is
 the media folder of Home Assistant: the app's configuration maps it, and without that map the working folder would be
 lost at each update.
 

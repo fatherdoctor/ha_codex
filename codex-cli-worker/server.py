@@ -1216,17 +1216,46 @@ def ensure_codex_workdir() -> None:
             print(f"Cannot create {CODEX_WORKDIR}; Codex works from {CONFIG_ROOT}: {err}", flush=True)
             return
     if codex_workdir() != str(CODEX_WORKDIR):
-        print(f"{CODEX_WORKDIR} is missing or has a link in its path; Codex works from {CONFIG_ROOT}.", flush=True)
+        print(workdir_fallback_line(), flush=True)
+
+
+def workdir_fallback_line() -> str:
+    """The start's log line when Codex works from /config: the link in the path, or that the folder is missing."""
+    link = _first_link_below_media()
+    if link is None:
+        return f"{CODEX_WORKDIR} is missing or is not a plain folder; Codex works from {CONFIG_ROOT}."
+    line = f"{CODEX_WORKDIR} has a link in its path, at {link}; Codex works from {CONFIG_ROOT}."
+    if link == CODEX_WORKDIR.parent:
+        # Codex keeps a folder named .agents read-only inside a writable root. When that name is a link (to
+        # anything, or to nothing) it refuses to build the workspace-write sandbox ("crosses writable symlink"), so
+        # every command in Ask for approval and Approve for me fails. Read only still runs. Only the owner can remove
+        # the link.
+        line += (f" Until the link {link} is removed, Codex cannot run commands in Ask for approval or Approve for"
+                 " me; Read only still works.")
+    return line
+
+
+def _first_link_below_media() -> Path | None:
+    """The first part of the path from /media down to CODEX_WORKDIR that is a link, or None."""
+    return next((folder for folder in _folders_below_media() if folder.is_symlink()), None)
 
 
 def _make_workdir_below_media() -> None:
     """Make each missing folder from /media down to CODEX_WORKDIR; stop at the first link."""
-    folder = MEDIA_ROOT
-    for part in CODEX_WORKDIR.relative_to(MEDIA_ROOT).parts:
-        folder = folder / part
+    for folder in _folders_below_media():
         if folder.is_symlink():
             return
         folder.mkdir(exist_ok=True)
+
+
+def _folders_below_media() -> list[Path]:
+    """Each folder from /media down to CODEX_WORKDIR, /media itself left out: /media/.agents, then its codex."""
+    folders = []
+    folder = MEDIA_ROOT
+    for part in CODEX_WORKDIR.relative_to(MEDIA_ROOT).parts:
+        folder = folder / part
+        folders.append(folder)
+    return folders
 
 
 def codex_workdir() -> str:
