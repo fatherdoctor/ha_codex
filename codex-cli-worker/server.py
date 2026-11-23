@@ -5103,13 +5103,38 @@ def chat_files_note(task_id: str) -> str:
             f"example [report.xlsx]({folder}/report.xlsx). Only a link into that folder becomes a download.")
 
 
-def exchange_info(task_id: str, backup_dir: Path | None, include_rules: bool = False) -> dict[str, str]:
+# Put in front of a page message when the chat's permissions differ from the ones Codex was last told. Codex learns
+# a thread's sandbox when the thread starts; a later turn runs with the new settings (create_approval_session), but
+# without this line Codex keeps naming the mode the chat started in.
+PERMISSIONS_CHANGED = ("[Home Assistant page] This chat's permissions changed. From this message on: {note} "
+                       "This replaces any sandbox or permission mode named earlier in this chat.")
+
+
+def permissions_note(settings: dict[str, str]) -> str:
+    """Say what this message's Codex settings (task_mode_settings) let Codex do, in Codex's own setting names."""
+    sandbox, approval = settings["sandbox"], settings["approval_policy"]
+    if sandbox == "danger-full-access":
+        what = "there is no sandbox, and no command waits for approval."
+    elif sandbox == "read-only":
+        what = "the sandbox lets you read but not change files; a command that changes anything needs approval first."
+    elif settings["approvals_reviewer"] == "auto_review":
+        what = ("you can change files inside the sandbox; an automatic reviewer approves or refuses each command "
+                "that needs more.")
+    else:
+        what = "you can change files inside the sandbox; a command that needs more asks the person for approval."
+    return f"sandbox {sandbox}, approval policy {approval}: {what}"
+
+
+def exchange_info(task_id: str, backup_dir: Path | None, include_rules: bool = False,
+                  permissions: str = "") -> dict[str, str]:
     """Return what Codex needs to know about this message only, for the exchange_info tool.
 
     The fixed rules are included for a thread that did not get them when it started.
+    permissions is permissions_note() of the settings this message runs with.
     """
     info = {
         "task_id": task_id,
+        "permissions": permissions,
         "backups": backup_instructions(backup_dir).strip()
         or "This message has no backup folder. Make no backup copies.",
         "owner_instructions": owner_instructions_note(),
@@ -5124,12 +5149,16 @@ def exchange_info(task_id: str, backup_dir: Path | None, include_rules: bool = F
     return {key: value for key, value in info.items() if value}
 
 
-def page_message(user_prompt: str, reply: str | None = None, point_to_rules: bool = False) -> str:
+def page_message(user_prompt: str, reply: str | None = None, point_to_rules: bool = False,
+                 changed_permissions: str = "") -> str:
     """Return the text of this message as the thread stores it: the user's words only.
 
-    A thread without the page's rules gets a one-line pointer to exchange_info in front.
+    A thread without the page's rules gets a one-line pointer to exchange_info in front. changed_permissions,
+    when set, is permissions_note() of new settings, and puts one PERMISSIONS_CHANGED line in front.
     """
     text = reply if reply is not None else user_prompt
+    if changed_permissions:
+        text = f"{PERMISSIONS_CHANGED.format(note=changed_permissions)}\n\n{text}"
     return f"{RULES_POINTER}\n\n{text}" if point_to_rules else text
 
 
@@ -6248,14 +6277,23 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     prepare_ha_docs()
     # A thread this page starts gets PAGE_INSTRUCTIONS from its first turn. Any other thread (started in the
     # ChatGPT app, or by 0.3.2 or earlier) gets a pointer in the message, and exchange_info carries the rules for it.
+    # A new thread learns its sandbox when it starts. A resumed thread is told in the message when its permissions
+    # differ from the ones it was last told; with no record (a thread from the ChatGPT app, or from an earlier version
+    # of this app) it is told once.
+    permissions = permissions_note(task_mode_settings(task_id, options))
     with lock:
-        has_page_instructions = bool(tasks.get(task_id, {}).get("page_instructions"))
+        task = tasks.get(task_id, {})
+        has_page_instructions = bool(task.get("page_instructions"))
+        told_permissions = task.get("told_permissions")
     point_to_rules = bool(session_id) and not has_page_instructions
-    ha_data.set_exchange_info(task_id, exchange_info(task_id, backup_dir, include_rules=point_to_rules))
+    changed_permissions = permissions if session_id and told_permissions != permissions else ""
+    ha_data.set_exchange_info(task_id, exchange_info(task_id, backup_dir, include_rules=point_to_rules,
+                                                     permissions=permissions))
     if not session_id:
         update_task(task_id, page_instructions=True)
     try:
-        prompt_file.write_text(page_message(prompt, reply=reply, point_to_rules=point_to_rules), encoding="utf-8")
+        prompt_file.write_text(page_message(prompt, reply=reply, point_to_rules=point_to_rules,
+                                            changed_permissions=changed_permissions), encoding="utf-8")
     except OSError as exc:
         fail_task_launch(
             task_id,
@@ -6265,6 +6303,7 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
             detail_prefix="Could not write the Codex task prompt",
         )
         return
+    update_task(task_id, told_permissions=permissions)
     if task_cancellation_requested(task_id):
         return
     pin_error = model_pin_error(latest_execution(task_id, options), options)

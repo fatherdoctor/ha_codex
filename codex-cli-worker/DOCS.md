@@ -26,6 +26,8 @@ Each chat uses one of four modes. Pick it with the **Permissions** button.
 | Read only | Codex reads files. Any change asks you first. |
 | Full access | No sandbox and no questions. Off until an administrator turns it on in **Settings**. |
 
+You can change the mode in the middle of a chat. The next message runs in the new mode, and Codex is told of the change.
+
 A request shows a card with the full command or change and two buttons, **Allow once** and **Deny**. Only a Home
 Assistant administrator can answer. Read each card before you allow it.
 More: [Sandbox](https://github.com/fatherdoctor/ha_codex/blob/main/docs/app-reference.md#sandbox).

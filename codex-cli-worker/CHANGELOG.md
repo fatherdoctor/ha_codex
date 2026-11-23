@@ -201,6 +201,10 @@
 - The add-on Configuration page now uses plain option names and one short description for each option (25 words or fewer). A test keeps names free of code words and descriptions short.
 
 ### Fixed
+- **Codex knows when a chat's permissions change.** A chat started in Read only and then switched to Full access ran
+  the next message with full access, but Codex still said it was read-only and would not try a change. Now the next
+  message starts with one line that gives the new permissions, and the exchange_info tool names them on every message.
+  A thread from the ChatGPT app or from an earlier version gets the line once.
 - **ChatGPT app tools ask you instead of failing in Default.** When Codex used a tool of an app connected to your
   ChatGPT account, such as GitHub to open a draft pull request, the chat page declined the request in Default and
   showed an error, while the same request worked in Full access and Auto-review. Now Default shows the usual

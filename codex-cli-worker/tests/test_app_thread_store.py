@@ -172,10 +172,49 @@ class ExchangeRecordTests(unittest.TestCase):
         server.update_task(task_id, session_id=attachments.SESSION_ID)
         self.assertNotIn("page_instructions", server.tasks[task_id])
         info, message = self.run_and_record_plain(task_id, session_id=attachments.SESSION_ID, reply="Check the porch light")
-        self.assertEqual(message, server.RULES_POINTER + "\n\nCheck the porch light")
+        # Its permissions are told once too: what the app set for the thread is not known here.
+        changed = server.PERMISSIONS_CHANGED.format(note=info["permissions"])
+        self.assertEqual(message, server.RULES_POINTER + "\n\n" + changed + "\n\nCheck the porch light")
         self.assertEqual(info["rules"], server.PAGE_INSTRUCTIONS)
         # A resume never marks the thread: only a thread this page starts gets the rules at its first turn.
         self.assertNotIn("page_instructions", server.tasks[task_id])
+
+    def test_a_chat_switched_to_full_access_is_told_once_on_its_next_message(self):
+        """A chat that started in Read only and is switched to Full access is told so on the next message only."""
+        task_id = self.create(OWNER_TEXT)
+        server.update_task(task_id, permission_mode="read-only")
+        info, message = self.run_and_record_plain(task_id)
+        self.assertEqual(message, "Draw a sheep")
+        self.assertIn("sandbox read-only", info["permissions"])
+        server.update_task(task_id, permission_mode="full-access")
+        with patch.object(server.full_access, "is_on", return_value=True):
+            info, message = self.run_and_record_plain(task_id, session_id=attachments.SESSION_ID, reply="Fix the porch")
+            full = server.permissions_note(server.protected_policy.mode_settings("full-access"))
+            self.assertEqual(message, server.PERMISSIONS_CHANGED.format(note=full) + "\n\nFix the porch")
+            self.assertEqual(info["permissions"], full)
+            self.assertIn("sandbox danger-full-access", full)
+            _, message = self.run_and_record_plain(task_id, session_id=attachments.SESSION_ID, reply="And the gate")
+        self.assertEqual(message, "And the gate")
+
+    def test_full_access_with_the_switch_off_tells_codex_the_mode_it_really_runs_in(self):
+        """The owner's switch off makes a Full access chat run in Default; Codex is told Default, not Full access."""
+        task_id = self.create(OWNER_TEXT)
+        server.update_task(task_id, permission_mode="read-only")
+        self.run_and_record_plain(task_id)
+        server.update_task(task_id, permission_mode="full-access")
+        with patch.object(server.full_access, "is_on", return_value=False):
+            info, message = self.run_and_record_plain(task_id, session_id=attachments.SESSION_ID, reply="Fix it")
+        self.assertIn("sandbox workspace-write, approval policy on-request", info["permissions"])
+        self.assertTrue(message.startswith(server.PERMISSIONS_CHANGED.format(note=info["permissions"])))
+
+    def test_a_resumed_thread_with_no_record_is_told_its_permissions_once(self):
+        """A thread from the ChatGPT app or an earlier version has no record of what it was told."""
+        task_id = self.create(OWNER_TEXT)
+        server.update_task(task_id, session_id=attachments.SESSION_ID, page_instructions=True)
+        info, message = self.run_and_record_plain(task_id, session_id=attachments.SESSION_ID, reply="Check the porch")
+        self.assertEqual(message, server.PERMISSIONS_CHANGED.format(note=info["permissions"]) + "\n\nCheck the porch")
+        _, message = self.run_and_record_plain(task_id, session_id=attachments.SESSION_ID, reply="And the gate")
+        self.assertEqual(message, "And the gate")
 
     def test_the_rules_are_the_threads_developer_instructions(self):
         """Every thread this page starts gets the fixed rules through the app-server thread settings."""
