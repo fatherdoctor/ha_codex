@@ -648,7 +648,7 @@ When Codex makes a new Git commit, its default author and committer are `ChatGPT
 
 Release 0.3 lets the assistant fetch, pull, push, clone and link the GitHub repositories you choose. You do every step with a button in the app page: **Settings > Accounts and connections > GitHub**, just below **ChatGPT account**. No step needs a shell, and nothing about GitHub is typed into chat.
 
-The app keeps the sign-in in its own private folder, `/data/github`. That folder is hidden in every Codex sandbox, so a task cannot read it. Codex never holds the token. It calls one tool, `github_git`, and the app runs git for it. Every push goes through the kit's push guard first.
+The app keeps the sign-in in its own private folder, `/data/github`. That folder is hidden in every Codex sandbox, so a task in Read only, Ask for approval or Approve for me cannot read it. Full access runs Codex with no sandbox, so a command there can read the sign-in. In the other modes Codex does not hold the token: it calls one tool, `github_git`, and the app runs git for it. Every push goes through the kit's push guard first.
 
 ### Connect
 
