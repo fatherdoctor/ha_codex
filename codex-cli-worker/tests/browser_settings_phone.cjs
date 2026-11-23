@@ -120,19 +120,18 @@ const themeLook = target => target.evaluate(() => {
   };
   return {
     font: getComputedStyle(document.body).fontFamily,
-    // A list field takes the same font as the page (the mailbox list of Scheduled runs).
-    selectFont: css('#schedule-mail-reader', 'font-family'),
-    // A text field and a text button of Scheduled runs (the schedule's own fields moved to the schedule editor).
-    fieldFill: css('#schedule-mail-due', 'background-color'),
-    fieldLine: css('#schedule-mail-due', 'border-bottom-color'),
-    fieldHeight: document.querySelector('#schedule-mail-due').getBoundingClientRect().height,
+    // A list field takes the same font as the page (the model list of the schedule editor).
+    selectFont: css('#schedule-model', 'font-family'),
+    // A text field and a text button of the schedule editor.
+    fieldFill: css('#schedule-name', 'background-color'),
+    fieldLine: css('#schedule-name', 'border-bottom-color'),
     // The Add-on configuration row at the foot of Settings: a name and a description line.
     rowHeight: document.querySelector('.ha-row').getBoundingClientRect().height,
     // The form's submit button, the filled kind next to the text button below.
     filled: css('#schedule-form button[type=submit]', 'background-color'),
     filledText: css('#schedule-form button[type=submit]', 'color'),
-    textButton: css('#schedule-mail-reset', 'color'),
-    textButtonFill: css('#schedule-mail-reset', 'background-color'),
+    textButton: css('#schedule-delete', 'color'),
+    textButtonFill: css('#schedule-delete', 'background-color'),
     // Every close button of Settings and its dialogs is the mdiClose icon, with no text glyph.
     closeIcons: [...document.querySelectorAll('#close-settings, dialog.studio-sheet .dialog-header .icon')].map(b =>
       `${b.textContent.trim() === ''} ${getComputedStyle(b, '::before').maskImage.includes('svg') || getComputedStyle(b, '::before').webkitMaskImage.includes('svg')}`),
@@ -168,10 +167,13 @@ async function openThemedSections(target) {
       await page.goto('http://127.0.0.1:9137/preview/');
       await openSettings();
       // Each section fills its header status when its data arrives.
-      await page.waitForFunction(() => [...document.querySelectorAll('#settings .settings-status')].every(s => s.textContent !== ''));
+      // Remote Control is hidden in this version (browser_remote_paused.cjs): its part has no status and is left out.
+      await page.waitForFunction(() => [...document.querySelectorAll('#settings .settings-status')]
+        .filter(s => !s.closest('[data-remote]')).every(s => s.textContent !== ''));
 
       // Every section starts collapsed, with its title and status in the header.
-      const headers = await page.evaluate(() => [...document.querySelectorAll('#settings .settings-toggle')].map(t => ({
+      const headers = await page.evaluate(() => [...document.querySelectorAll('#settings .settings-toggle')]
+        .filter(t => !t.closest('[data-remote]')).map(t => ({
         title: t.querySelector('.settings-title').textContent, status: t.querySelector('.settings-status').textContent,
         open: t.getAttribute('aria-expanded'), attention: t.closest('section').classList.contains('needs-attention')})));
       assert.ok(headers.every(h => h.open === 'false'), 'every section starts collapsed');
@@ -181,14 +183,10 @@ async function openThemedSections(target) {
         {title: 'Accounts and connections', status: 'ChatGPT signing in: enter the code', attention: true},
         {title: 'ChatGPT account', status: 'Signing in: enter the code', attention: true},
         {title: 'GitHub', status: 'Connected as synthetic-owner, 1 repository', attention: false},
-        {title: 'ChatGPT app pairing', status: 'Off', attention: false},
         {title: 'Full access', status: 'Off', attention: false},
         {title: 'Text size', status: 'Normal', attention: false},
-        {title: 'Commands', status: '9 commands', attention: false},
         {title: 'Scheduled runs', status: 'Paused: time zone unavailable', attention: true},
         {title: 'Workspace instructions', status: 'AGENTS.md', attention: false},
-        {title: 'Advanced', status: 'Browser permissions: none remembered', attention: false},
-        {title: 'Browser permissions', status: 'None remembered', attention: false},
       ]);
       assert.equal(await page.locator('#remote-control-section .settings-toggle').count(), 0, 'own dialog stays open');
       await page.screenshot({path: path.join(SHOTS, `settings-collapsed-${colorScheme}-400.png`)});
@@ -196,13 +194,13 @@ async function openThemedSections(target) {
       const collapsedSize = await windowSize(page);
       await checkLayout(page);
 
-      // Open Accounts and connections, then its three parts: the code shows its countdown, and the button rows
-      // fit the phone. The app pairing part has its own collapsed header, like the other two.
+      // Open Accounts and connections, then its two visible parts: the code shows its countdown, and the button rows
+      // fit the phone. The app pairing part is hidden with Remote Control in this version.
       await page.locator('#accounts-section > h3 .settings-toggle').click();
       assert.equal(await page.getByRole('button', {name: 'Manage remote connection', exact: true}).isVisible(), false);
-      for (const id of ['chatgpt-section', 'github-section', 'app-pairing-section'])
+      for (const id of ['chatgpt-section', 'github-section'])
         await page.locator(`#${id} .settings-toggle`).click();
-      assert.equal(await page.getByRole('button', {name: 'Manage remote connection', exact: true}).isVisible(), true);
+      assert.equal(await page.getByRole('button', {name: 'Manage remote connection', exact: true}).isVisible(), false);
       // The window keeps its size and scrolls inside.
       assert.deepEqual(await windowSize(page), collapsedSize);
       assert.equal(await page.locator('#settings').evaluate(d => d.scrollHeight > d.clientHeight), true);
@@ -245,11 +243,13 @@ async function openThemedSections(target) {
       await page.route('**/github', route => route.fulfill({json: {ok: true, github}}));
       await page.goto('http://127.0.0.1:9137/preview/');
       await page.getByRole('button', {name: 'Open settings', exact: true}).click();
-      await page.waitForFunction(() => [...document.querySelectorAll('#settings .settings-status')].every(s => s.textContent !== ''));
+      // Remote Control is hidden in this version (browser_remote_paused.cjs): its part has no status and is left out.
+      await page.waitForFunction(() => [...document.querySelectorAll('#settings .settings-status')]
+        .filter(s => !s.closest('[data-remote]')).every(s => s.textContent !== ''));
       const size = await windowSize(page);
       await checkLayout(page);
       await page.screenshot({path: path.join(SHOTS, `settings-collapsed-${colorScheme}-1280.png`)});
-      for (const id of ['accounts-section', 'app-pairing-section', 'workspace-section']) {
+      for (const id of ['accounts-section', 'github-section', 'workspace-section']) {
         await page.locator(`#${id} > :is(h3, h4) .settings-toggle`).click();
         assert.deepEqual(await windowSize(page), size, `the window keeps its size after ${id} opens`);
       }
@@ -269,7 +269,6 @@ async function openThemedSections(target) {
       const look = await themeLook(page);
       assert.match(look.font, /^Inter,/, 'the page font with no Home Assistant font');
       assert.equal(look.selectFont, look.font, 'a list field takes the page font');
-      assert.equal(look.fieldHeight, 56, 'a filled field is 56 px high');
       assert.ok(look.rowHeight >= 72, `a two-line settings row is 72 px or more: ${look.rowHeight}`);
       assert.equal(look.filled, 'rgb(0, 154, 199)', 'the filled button takes the page accent');
       assert.equal(look.filledText, 'rgb(255, 255, 255)');
@@ -348,6 +347,10 @@ async function openThemedSections(target) {
     await page.waitForFunction(() => /expires in/.test(document.querySelector('#signin-banner .signin-expiry')?.textContent || ''));
     assert.deepEqual(posts, ['cancel', 'start']);
     await page.close();
+    // The sign-in cards on smaller phones: they scroll to the link, and the QR code starts folded.
+    await require('./browser_signin_phone.cjs')(browser);
+    // The signing-in state of those cards shows the link, the code and Cancel only.
+    await require('./browser_signin_state.cjs')(browser);
     console.log(`PASS: settings at 400 px in light and dark: collapsed sections with status headers, button rows that fit, code countdown, expiry and a new code; at 400 and 1280 px one window size, one arrow size and even spacing; the Home Assistant look with and without a host theme, and a dropped theme variable falls back. Screenshots: ${SHOTS}`);
   } finally {
     await browser.close();

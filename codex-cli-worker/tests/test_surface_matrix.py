@@ -1,8 +1,8 @@
 """Which Home Assistant tools each way in to Codex gets: the chat page, the ChatGPT app and the codex_cli.start_task action.
 
-WAYS_IN is the table in DOCS.md, "Ways in". The tests build each way in's real launch arguments, start every tool
+WAYS_IN is the table in docs/app-reference.md, "Ways in". The tests build each way in's real launch arguments, start every tool
 server those arguments register, ask it for its tool list, and compare the result with the table. A change that adds,
-removes or moves a tool fails here until the table and DOCS.md say so, so a fix on one way in cannot pass as a fix on
+removes or moves a tool fails here until the table and the app reference say so, so a fix on one way in cannot pass as a fix on
 all of them.
 """
 from __future__ import annotations
@@ -19,42 +19,64 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from test_server import server
+import scheduling
 
 ROOT = Path(__file__).resolve().parents[2]
-DOCS = ROOT / "codex-cli-worker" / "DOCS.md"
+DOCS = ROOT / "docs" / "app-reference.md"
 CHAT_JS = ROOT / "codex-cli-worker" / "web" / "assets" / "chat.js"
 API_PATH = ROOT / "custom_components" / "codex_cli" / "api.py"
 
 PAGE, APP, SERVICE = "Chat page", "ChatGPT app", "codex_cli.start_task"
 NONE = ()
 
+# The read tools of the bundled Home Assistant MCP server (option home_assistant_mcp, on by default), by kind.
+MCP = "home_assistant_mcp."
+MCP_FIND = tuple(MCP + tool for tool in (
+    "get_entity", "list_entities", "get_entities_by_area", "search_entities_tool", "domain_summary_tool",
+    "system_overview", "get_version"))
+MCP_HISTORY = tuple(MCP + tool for tool in ("get_history", "get_history_range", "get_statistics",
+                                            "get_statistics_range"))
+MCP_SETUP = tuple(MCP + tool for tool in ("list_automations", "list_dashboards", "get_dashboard_config",
+                                          "list_view_sections", "list_dashboard_backups", "get_error_log"))
+
+# The tools of the same server that change something: Codex asks before each call ("prompt").
+MCP_CONTROL = tuple(MCP + tool for tool in ("entity_action", "call_service_tool", "restart_ha"))
+MCP_DASHBOARD = tuple(MCP + tool for tool in (
+    "set_dashboard_config", "add_card", "update_card", "remove_card", "move_card", "add_view", "remove_view",
+    "update_view", "restore_dashboard"))
+
 # Each request kind and the tools that serve it on each way in. An empty tuple means not available.
 WAYS_IN = {
     "Read an entity's state or find an entity": {
-        PAGE: ("home_assistant.verify",), APP: ("home_assistant_relay.read",), SERVICE: ("home_assistant.verify",)},
+        PAGE: ("home_assistant.verify", *MCP_FIND), APP: ("home_assistant_relay.read", *MCP_FIND),
+        SERVICE: ("home_assistant.verify", *MCP_FIND)},
     "Read history or long-term statistics": {
-        PAGE: ("home_assistant_data.history", "home_assistant_data.statistics"), APP: NONE,
-        SERVICE: ("home_assistant_data.history", "home_assistant_data.statistics")},
+        PAGE: ("home_assistant_data.history", "home_assistant_data.statistics", *MCP_HISTORY), APP: MCP_HISTORY,
+        SERVICE: ("home_assistant_data.history", "home_assistant_data.statistics", *MCP_HISTORY)},
+    "Read automations, dashboards or the error log": {PAGE: MCP_SETUP, APP: MCP_SETUP, SERVICE: MCP_SETUP},
     "Control a device or call a service": {
-        PAGE: ("home_assistant_call.call",), APP: ("home_assistant_call.call",), SERVICE: ("home_assistant_call.call",)},
+        PAGE: ("home_assistant_call.call", *MCP_CONTROL), APP: ("home_assistant_call.call", *MCP_CONTROL),
+        SERVICE: ("home_assistant_call.call", *MCP_CONTROL)},
+    "Change a dashboard": {PAGE: MCP_DASHBOARD, APP: MCP_DASHBOARD, SERVICE: MCP_DASHBOARD},
     "Send a notification": {
         PAGE: ("home_assistant_call.call",), APP: ("home_assistant_call.call",), SERVICE: ("home_assistant_call.call",)},
     "Ask the owner a question or report the turn's state": {
         PAGE: ("home_assistant_data.ask_owner", "home_assistant_data.report_failure", "home_assistant_data.exchange_info"),
         APP: NONE,
         SERVICE: ("home_assistant_data.ask_owner", "home_assistant_data.report_failure", "home_assistant_data.exchange_info")},
-    "Propose a schedule or use the mailbox": {
-        PAGE: ("codex_scheduling.propose_schedule", "codex_scheduling.list_schedules",
-               "codex_scheduling.read_mailbox", "codex_scheduling.post_mailbox"),
-        APP: NONE,
-        SERVICE: ("codex_scheduling.propose_schedule", "codex_scheduling.list_schedules",
-                  "codex_scheduling.read_mailbox", "codex_scheduling.post_mailbox")},
     "Work with a GitHub repository": {
         PAGE: ("codex_github.github_git",), APP: NONE, SERVICE: ("codex_github.github_git",)},
 }
 
-# The one tool that changes the house: Codex asks for it each time, so only a launch that can ask gets it.
+WAYS_IN["Propose a schedule"] = {
+    PAGE: ("codex_scheduling.propose_schedule", "codex_scheduling.list_schedules"),
+    APP: NONE,
+    SERVICE: ("codex_scheduling.propose_schedule", "codex_scheduling.list_schedules")}
+
+# The app's own tool that changes the house: Codex asks for it each time, so only a launch that can ask gets it.
 CALL_TOOL = "home_assistant_call.call"
+# Every tool Codex asks about before each call ("prompt"); every other tool is approved ahead.
+ASKING_TOOLS = {CALL_TOOL, *MCP_CONTROL, *MCP_DASHBOARD}
 
 CONFIG = re.compile(r"mcp_servers\.([a-z_]+)\.(.+?)=(.*)", re.S)
 
@@ -84,12 +106,25 @@ def listed_tools(settings: dict) -> list[str]:
     return [tool["name"] for tool in listing["result"]["tools"]]
 
 
+def offered_tools(settings: dict) -> list[str]:
+    """The tools Codex offers from one server: its tools/list answer, cut to enabled_tools when the server has one.
+
+    hass-mcp runs only in the image (/opt/hass-mcp), so for it the enabled_tools list stands in for its answer;
+    test_ha_mcp_option.py checks that list against every tool of the pinned version.
+    """
+    if settings.get("args") == [server.hass_mcp.LAUNCHER]:
+        return list(settings["enabled_tools"])
+    tools = listed_tools(settings)
+    allowed = settings.get("enabled_tools")
+    return tools if allowed is None else [tool for tool in tools if tool in allowed]
+
+
 def tools_of(args: list[str]) -> set[str]:
     """Every tool a launch makes available: server.tool, for each enabled server, each tool it lists."""
     tools = set()
     for name, settings in registered_servers(args).items():
         if settings.get("enabled") is not False:
-            tools.update(f"{name}.{tool}" for tool in listed_tools(settings))
+            tools.update(f"{name}.{tool}" for tool in offered_tools(settings))
     return tools
 
 
@@ -98,16 +133,8 @@ def table_tools(way: str) -> set[str]:
 
 
 def page_args() -> list[str]:
-    """The arguments of a chat page turn; the run picks one of these two launches by the approval option."""
+    """The arguments of a chat page turn; a scheduled run starts with the same ones (tests/test_sched_parity.py)."""
     return server.build_app_server_args()
-
-
-def exec_args(task: dict | None = None) -> list[str]:
-    """The arguments of a `codex exec` turn for the given task, or for a new chat with default settings."""
-    task = task or {"task_id": "t", "turns": [], "chat_settings": server.DEFAULT_CHAT_SETTINGS}
-    task_id = task["task_id"]
-    with patch.object(server, "tasks", {task_id: task}), patch.object(server, "read_options", return_value={}):
-        return server.build_codex_args(task_id, Path("prompt"), Path("final"), None)
 
 
 def app_args() -> list[str]:
@@ -169,37 +196,32 @@ class WaysInTests(unittest.TestCase):
     def test_the_chatgpt_app_gets_exactly_the_tools_in_the_table(self):
         self.assertEqual(self.app, table_tools(APP))
 
-    def test_the_app_asks_for_the_call_tool_each_time_and_approves_only_its_read_tool(self):
-        """In the app as on the page, the call tool asks each time ("prompt") and the read tool is approved ahead."""
+    def test_the_app_asks_for_each_change_and_approves_only_the_read_tools(self):
+        """In the app as on the page, every tool that changes something asks each time ("prompt"); reads are approved ahead."""
         for name, settings in registered_servers(app_args()).items():
-            for tool in listed_tools(settings):
+            for tool in offered_tools(settings):
                 with self.subTest(tool=f"{name}.{tool}"):
-                    expected = "prompt" if f"{name}.{tool}" == CALL_TOOL else "approve"
+                    expected = "prompt" if f"{name}.{tool}" in ASKING_TOOLS else "approve"
                     self.assertEqual(settings.get(f"tools.{tool}.approval_mode"), expected)
 
-    def test_both_page_launches_register_the_same_tools(self):
-        """A turn runs through app-server or exec by an option, never by way in; both give the same read tools.
-
-        The exec launch has no live permission requests, so it never gets the call tool.
-        """
-        self.assertEqual(tools_of(exec_args()), self.page - {CALL_TOOL})
-
-    def test_every_page_tool_is_preapproved_except_the_call_tool(self):
-        """A read tool is approved ahead; the call tool asks each time ("prompt"), so the person is the gate."""
+    def test_every_page_tool_is_preapproved_except_the_tools_that_change_something(self):
+        """A read tool is approved ahead; a tool that changes something asks each time ("prompt"), so the person is the gate."""
         for name, settings in registered_servers(page_args()).items():
-            for tool in listed_tools(settings):
+            for tool in offered_tools(settings):
                 with self.subTest(tool=f"{name}.{tool}"):
-                    expected = "prompt" if f"{name}.{tool}" == CALL_TOOL else "approve"
+                    expected = "prompt" if f"{name}.{tool}" in ASKING_TOOLS else "approve"
                     self.assertEqual(settings.get(f"tools.{tool}.approval_mode"), expected)
 
     def test_a_task_from_the_service_action_launches_with_the_page_tools(self):
-        """The task that the service's request opens on /tasks gets the page's tools on either launch.
+        """The task that the service's request opens on /tasks is a page task, so it gets the page's tools.
 
-        run_task picks the launch by the approval option, not by the caller: build_app_server_args takes no task,
-        and build_codex_args is built here from the task that the request really opened.
+        Every task starts with the same launch. The request that the service sends opens a task that is not a
+        scheduled run, so it also runs in its own permission mode and notifies like a chat on the page.
         """
         task = task_started_by_service("Turn on a light")
-        self.assertEqual(tools_of(exec_args(task)), self.page - {CALL_TOOL})
+        self.assertNotIn(task.get("task_source"), {"schedule", "lead"})
+        with patch.object(server, "tasks", {task["task_id"]: task}):
+            self.assertFalse(server.background_task(task["task_id"]))
         self.assertEqual(tools_of(page_args()), self.page)
 
     def test_the_service_action_starts_the_same_task_as_the_page(self):

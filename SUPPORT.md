@@ -1,6 +1,6 @@
 # Support
 
-Thank you for using Codex for Home Assistant. I maintain this project with help from community reports and contributions.
+Thank you for using Codex for Home Assistant. The Backshop maintains this project with help from community reports and contributions.
 
 ## Getting Help
 
@@ -8,8 +8,8 @@ Start with the project documentation:
 
 - [README](README.md) for installation, setup, security notes, and examples.
 - [Integration documentation](custom_components/codex_cli/README.md) for entities and actions.
-- [Worker documentation](codex-cli-worker/DOCS.md) for app options and behavior.
-- [Verification guide](codex-cli-worker/VERIFICATION.md) for dashboard screenshots, permissions, and limits.
+- [Worker documentation](codex-cli-worker/DOCS.md) for the short guide, and [the app reference](docs/app-reference.md) for options and behavior.
+- [Verification guide](codex-cli-worker/VERIFICATION.md) for dashboard readback, permissions, and limits.
 - [Example scripts](examples/scripts.yaml) for a starter Assist/LLM script.
 
 ## Reporting Bugs
@@ -39,4 +39,4 @@ If you believe you found a security vulnerability, do not open a public issue wi
 
 ## Scope of Support
 
-I cannot guarantee an immediate reply. Please keep backups of your Home Assistant configuration and review changes Codex makes before relying on them.
+A reply can take some days. Please keep backups of your Home Assistant configuration and review changes Codex makes before relying on them.

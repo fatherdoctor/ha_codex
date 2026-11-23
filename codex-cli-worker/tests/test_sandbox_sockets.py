@@ -1,0 +1,450 @@
+"""Proof P8 of the long-lived Codex design: a command in Codex's sandbox cannot reach the worker's sockets.
+
+The worker serves its tools on Unix sockets under /data (server.py, the `.serve(DATA_ROOT / ...)` lines). Today a
+key in each tool program's environment proves that a request comes from a tool program. The design drops the
+keys and relies on Codex's sandbox instead: with no network, the sandbox denies `connect` and `sendto`, also on
+a Unix socket. This test runs that claim on the pinned Codex CLI, for every socket the worker serves:
+
+- Read only, Default and Auto-review: a shell command cannot connect to any socket, and no socket accepts.
+- Full access (no sandbox): the command can connect, when the managed requirements allow the mode at all.
+- An escalated command (review F1): in Default and Auto-review, a command may ask to run outside the sandbox
+  (`require_escalated`). The test approves it, as a person or Codex's reviewer could, and records what it can
+  reach. Outside the sandbox there is no seccomp filter, so the expected answer is "every socket". This is the
+  case that needs the owner's answer before the keys go (D-CX-KEYS); the test makes it visible and keeps it so.
+- A control: the same probe run directly, outside Codex, reaches every socket, so a refusal above is the
+  sandbox and not a broken probe.
+
+It runs in the Verification checks container job, and by hand with HA_TEST_CODEX (SANDBOX_TESTING.md). It skips
+without the pinned CLI, except where HA_TEST_REQUIRE_CODEX=1 (the container job) makes that a failure, so a later
+move of the Codex pin must run it again.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import json
+import os
+import re
+import shlex
+import socketserver
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import unittest
+from pathlib import Path
+from typing import Any
+from unittest import mock
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import test_live_proofs
+from test_live_proofs import (
+    CODEX,
+    THREAD,
+    WORKER,
+    AppServer,
+    ScriptedModel,
+    allow_local_sockets,
+    needs_cli,
+)
+
+REQUIREMENTS = Path("/etc/codex/requirements.toml")
+
+
+def worker_socket_names() -> list[str]:
+    """Return the file name of every socket the worker serves, read from server.py's start-up lines."""
+    source = (WORKER / "server.py").read_text(encoding="utf-8")
+    names = re.findall(r'\.serve\(DATA_ROOT / "([^"]+\.sock)"\)', source)
+    # The ChatGPT app's call socket is a named constant, because relay_env hands its path to the call bridge.
+    assert "relay_call.serve(RELAY_CALL_SOCKET)" in source
+    names += re.findall(r'^RELAY_CALL_SOCKET = DATA_ROOT / "([^"]+\.sock)"$', source, re.MULTILINE)
+    assert len(names) >= 7, names
+    return names
+
+
+PROBE = r'''
+import errno, json, socket, sys
+result = {}
+for path in sys.argv[1:]:
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        client.connect(path)
+        client.sendall(b'{"probe": true}\n')
+        result[path] = "connected"
+    except OSError as error:
+        result[path] = errno.errorcode.get(error.errno, str(error.errno))
+    finally:
+        client.close()
+print("PROBE " + json.dumps(result))
+'''
+
+
+class Listener(socketserver.ThreadingUnixStreamServer):
+    """A stream socket at one of the worker's paths that counts each connection it accepts."""
+
+    def __init__(self, path: Path) -> None:
+        # Several handler threads add to the count at once, and `+=` on an attribute is not atomic.
+        self._count = 0
+        self._count_lock = threading.Lock()
+        outer = self
+
+        class Handler(socketserver.BaseRequestHandler):
+            """Count the connection, read the probe's line, then close it.
+
+            The probe writes one line after it connects. A close before that write makes the write fail with
+            EPIPE, and the probe would report a connection that was accepted as not connected.
+            """
+
+            def handle(self) -> None:
+                with outer._count_lock:
+                    outer._count += 1
+                self.request.settimeout(10)
+                with contextlib.suppress(OSError), self.request.makefile("rb") as stream:
+                    stream.readline()
+
+        super().__init__(str(path), Handler)
+        threading.Thread(target=self.serve_forever, daemon=True).start()
+
+    @property
+    def accepted(self) -> int:
+        """Return the connections whose handler has run so far."""
+        with self._count_lock:
+            return self._count
+
+
+def settled_count(listeners: list[Listener], reach: int | None = None, timeout: float = 5.0,
+                  quiet: float = 0.2) -> int:
+    """Return the connections all listeners accepted, once the count has caught up with the probe.
+
+    A Unix socket connect completes in the kernel's backlog before the server thread calls accept(), so the probe
+    can connect, write and exit before a handler has counted its connection. Reading the count right after the probe
+    then reads too few. With `reach`, wait until the count reaches it; without, wait until it has not changed for
+    `quiet` seconds. Either wait ends after `timeout` seconds, and the caller's assertion then reports the count.
+    """
+    deadline = time.monotonic() + timeout
+    count = sum(listener.accepted for listener in listeners)
+    unchanged_since = time.monotonic()
+    while time.monotonic() < deadline:
+        if reach is not None and count >= reach:
+            break
+        if reach is None and time.monotonic() - unchanged_since >= quiet:
+            break
+        time.sleep(0.01)
+        latest = sum(listener.accepted for listener in listeners)
+        if latest != count:
+            count, unchanged_since = latest, time.monotonic()
+    return count
+
+
+class SlowAcceptListener(Listener):
+    """A listener whose handler starts late, as on a loaded runner: the probe exits before any handler counts."""
+
+    def process_request(self, request: Any, client_address: Any) -> None:
+        time.sleep(0.3)
+        super().process_request(request, client_address)
+
+
+class ListenerReadsTheProbe(unittest.TestCase):
+    """A connection the stand-in accepted always reads as connected, even when the probe writes late.
+
+    On slow runners the listener used to close a connection before the probe wrote its line, and the probe then
+    failed with EPIPE. Here the probe waits between connect and write, which made it fail every time before the
+    listener read the line. No Codex CLI is needed.
+    """
+
+    def test_a_slow_probe_still_reads_as_connected(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ha-socket-listener-") as folder:
+            paths = [Path(folder) / f"stand-in-{number}.sock" for number in range(3)]
+            listeners = [Listener(path) for path in paths]
+            slow_probe = PROBE.replace("client.connect(path)\n",
+                                       "client.connect(path)\n        __import__('time').sleep(0.05)\n")
+            self.assertNotEqual(slow_probe, PROBE)
+            try:
+                output = subprocess.run([sys.executable, "-c", slow_probe, *map(str, paths)], capture_output=True,
+                                        text=True, timeout=30, check=True).stdout
+            finally:
+                for listener in listeners:
+                    listener.shutdown()
+                    listener.server_close()
+        result = json.loads(output.split("PROBE ", 1)[1])
+        self.assertEqual(result, {str(path): "connected" for path in paths})
+        self.assertEqual(settled_count(listeners, reach=len(paths)), len(paths))
+
+    def test_the_count_waits_for_handlers_that_start_after_the_probe_exits(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ha-socket-listener-") as folder:
+            paths = [Path(folder) / f"stand-in-{number}.sock" for number in range(3)]
+            listeners = [SlowAcceptListener(path) for path in paths]
+            try:
+                output = subprocess.run([sys.executable, "-c", PROBE, *map(str, paths)], capture_output=True,
+                                        text=True, timeout=30, check=True).stdout
+                result = json.loads(output.split("PROBE ", 1)[1])
+                self.assertEqual(result, {str(path): "connected" for path in paths})
+                self.assertEqual(settled_count(listeners, reach=len(paths)), len(paths))
+                # With no number to reach, the wait still sees every late handler before the count goes quiet.
+                self.assertEqual(settled_count(listeners), len(paths))
+            finally:
+                for listener in listeners:
+                    listener.shutdown()
+                    listener.server_close()
+
+
+def full_access_allowed() -> bool:
+    """Return False when the image's managed requirements leave out the full-access sandbox."""
+    if not REQUIREMENTS.is_file():
+        return True
+    return "danger-full-access" in REQUIREMENTS.read_text(encoding="utf-8")
+
+
+@needs_cli
+class SandboxSockets(unittest.TestCase):
+    """P8: run one probe command through Codex in each mode and read what it reached."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        allow_local_sockets()
+        cache = Path.home() / ".cache"
+        cache.mkdir(exist_ok=True)
+        cls.temporary = tempfile.TemporaryDirectory(prefix="ha-sandbox-sockets-", dir=cache)
+        cls.root = Path(cls.temporary.name)
+        (cls.root / "workspace").mkdir()
+        data = cls.root / "data"
+        data.mkdir()
+        cls.listeners = {name: Listener(data / name) for name in worker_socket_names()}
+        cls.paths = [str(data / name) for name in cls.listeners]
+        probe = cls.root / "probe.py"
+        probe.write_text(PROBE, encoding="utf-8")
+        cls.command = " ".join(shlex.quote(part) for part in [sys.executable, str(probe), *cls.paths])
+        cls.model = ScriptedModel()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        for listener in cls.listeners.values():
+            listener.shutdown()
+            listener.server_close()
+        cls.model.close()
+        cls.temporary.cleanup()
+
+    def setUp(self) -> None:
+        # The class's servers live through every test; their accepted sockets need the block lifted each time.
+        allow_local_sockets()
+
+    def accepted(self, reach: int | None = None) -> int:
+        """Return the connections all listeners accepted, once the count has settled (see settled_count)."""
+        return settled_count(list(self.listeners.values()), reach)
+
+    def run_probe(self, label: str, thread: dict[str, Any], turn: dict[str, Any],
+                  escalate: bool = False) -> tuple[dict[str, str] | None, list[str]]:
+        """Run the probe as one shell command in a turn; return what it printed and the requests Codex sent."""
+        app = AppServer(self.root, self.model)
+        try:
+            app.initialize()
+            params = {**THREAD, "cwd": str(self.root / "workspace"), **thread}
+            thread_id = app.request("thread/start", params)["thread"]["id"]
+            name = "p8" + re.sub(r"\W", "", label)
+            step: dict[str, Any] = {"shell": self.command}
+            if escalate:
+                step.update(sandbox_permissions="require_escalated", justification="Run the socket probe once")
+            self.model.scripts[name] = [step, {"final": label}]
+            done = app.turn(thread_id, f"[script:{name}] probe", **turn)
+            self.assertEqual(done["params"]["turn"]["status"], "completed", (label, done))
+            outputs = [item for item in self.model.requests_for(name)[-1]["input"]
+                       if str(item.get("type", "")).endswith("_output")]
+            text = json.dumps(outputs)
+            # Kept for the failure message: when the probe printed nothing, Codex's own output says why.
+            self.probe_output = text
+            match = re.search(r"PROBE (\{.*?\})", text.replace('\\"', '"'))
+            return (json.loads(match.group(1)) if match else None), [method for method, _ in app.requests_seen]
+        finally:
+            app.close()
+
+    def sandboxed(self, label: str, thread: dict[str, Any], turn: dict[str, Any]) -> None:
+        """Assert that the probe ran in one sandbox mode and that the sandbox refused every socket with EPERM.
+
+        A probe that printed nothing did not run, which proves nothing about the sandbox, so it fails the test.
+        """
+        before = self.accepted()
+        result, _requests = self.run_probe(label, thread, turn)
+        self.assertIsNotNone(result, f"{label}: the probe printed nothing, so it did not run in the sandbox. "
+                                     f"Codex returned: {self.probe_output[:2000]}")
+        self.assertEqual(set(result), set(self.paths), (label, result))
+        self.assertEqual(set(result.values()), {"EPERM"}, (label, result))
+        self.assertEqual(self.accepted(), before, f"{label}: a socket accepted a connection")
+        print(f"\nP8 {label}: the sandbox refused all {len(self.paths)} sockets with EPERM.")
+
+    def workspace_policy(self) -> dict[str, Any]:
+        """Return the workspaceWrite policy the worker sends, with the test's folder as the writable root."""
+        return {"type": "workspaceWrite", "networkAccess": False, "writableRoots": [str(self.root / "workspace")]}
+
+    def test_control_the_probe_reaches_every_socket_outside_codex(self) -> None:
+        before = self.accepted()
+        output = subprocess.run(self.command, shell=True, capture_output=True, text=True, timeout=30, check=True).stdout
+        result = json.loads(output.split("PROBE ", 1)[1])
+        self.assertEqual(set(result.values()), {"connected"}, result)
+        self.assertEqual(self.accepted(before + len(self.paths)) - before, len(self.paths))
+
+    def test_read_only_reaches_no_socket(self) -> None:
+        self.sandboxed("Read only", {"sandbox": "read-only"},
+                       {"sandboxPolicy": {"type": "readOnly", "networkAccess": False},
+                        "approvalPolicy": "on-request", "approvalsReviewer": "user"})
+
+    def test_default_reaches_no_socket(self) -> None:
+        self.sandboxed("Default", {"sandbox": "workspace-write"},
+                       {"sandboxPolicy": self.workspace_policy(), "approvalPolicy": "on-request",
+                        "approvalsReviewer": "user"})
+
+    def test_auto_review_reaches_no_socket(self) -> None:
+        self.sandboxed("Auto-review", {"sandbox": "workspace-write", "approvalsReviewer": "auto_review"},
+                       {"sandboxPolicy": self.workspace_policy(), "approvalPolicy": "on-request",
+                        "approvalsReviewer": "auto_review"})
+
+    @unittest.skipUnless(full_access_allowed(), "the managed requirements leave out the full-access sandbox")
+    def test_full_access_reaches_every_socket(self) -> None:
+        before = self.accepted()
+        result, _requests = self.run_probe("Full access", {"sandbox": "danger-full-access",
+                                                           "approvalPolicy": "never"},
+                                           {"sandboxPolicy": {"type": "dangerFullAccess"},
+                                            "approvalPolicy": "never"})
+        self.assertIsNotNone(result)
+        self.assertEqual(set(result.values()), {"connected"}, result)
+        self.assertEqual(self.accepted(before + len(self.paths)) - before, len(self.paths))
+        print(f"\nP8 Full access: the probe reached all {len(self.paths)} sockets, as expected with no sandbox.")
+
+    def test_escalated_command_in_default_reaches_every_socket(self) -> None:
+        """Review F1: an approved escalated command runs outside the sandbox. Recorded for D-CX-KEYS."""
+        before = self.accepted()
+        result, requests = self.run_probe("Default escalated", {"sandbox": "workspace-write"},
+                                          {"sandboxPolicy": self.workspace_policy(),
+                                           "approvalPolicy": "on-request", "approvalsReviewer": "user"},
+                                          escalate=True)
+        self.assertIn("item/commandExecution/requestApproval", requests)
+        self.assertIsNotNone(result, "the approved escalated command printed nothing")
+        self.assertEqual(set(result.values()), {"connected"}, result)
+        self.assertEqual(self.accepted(before + len(self.paths)) - before, len(self.paths))
+        print(f"\nP8 Default, escalated and approved by the person: the command reached all {len(self.paths)} "
+              "sockets. Without the keys, an approved escalated command can call any tool socket (D-CX-KEYS).")
+
+    def escalated_auto_review(self, outcome: str) -> tuple[dict[str, str] | None, int]:
+        """Run the escalated probe in Auto-review with the reviewer's answer set; return its output and reach."""
+        before = self.accepted()
+        reviews = len(self.model.reviews)
+        self.model.review_outcome = outcome
+        try:
+            result, requests = self.run_probe(f"Auto-review escalated {outcome}",
+                                              {"sandbox": "workspace-write", "approvalsReviewer": "auto_review"},
+                                              {"sandboxPolicy": self.workspace_policy(),
+                                               "approvalPolicy": "on-request", "approvalsReviewer": "auto_review"},
+                                              escalate=True)
+        finally:
+            self.model.review_outcome = "deny"
+        # Codex's reviewer decides; the person is not asked.
+        self.assertGreater(len(self.model.reviews), reviews, "Codex's reviewer was not asked")
+        self.assertNotIn("item/commandExecution/requestApproval", requests)
+        # An allowed probe is expected to reach every socket, so wait for that many; a denied one for the quiet.
+        reach = before + len(self.paths) if outcome == "allow" else None
+        return result, self.accepted(reach) - before
+
+    def test_escalated_command_in_auto_review_allowed_by_the_reviewer(self) -> None:
+        """Review F1: in Auto-review, Codex's reviewer decides the escalation. Recorded for D-CX-KEYS."""
+        result, reached = self.escalated_auto_review("allow")
+        self.assertIsNotNone(result, "the allowed escalated command printed nothing")
+        self.assertEqual(set(result.values()), {"connected"}, result)
+        self.assertEqual(reached, len(self.paths))
+        print(f"\nP8 Auto-review, escalated and allowed by Codex's reviewer: the command reached all "
+              f"{len(self.paths)} sockets, with no person asked (D-CX-KEYS).")
+
+    def test_escalated_command_in_auto_review_denied_by_the_reviewer(self) -> None:
+        result, reached = self.escalated_auto_review("deny")
+        self.assertIsNone(result, "a denied escalated command ran")
+        self.assertEqual(reached, 0)
+
+
+def relay_bwrap() -> str | None:
+    """Return the Bubblewrap that starts the relay: the image's relay-bwrap, else the one in the Codex package."""
+    packaged = Path(CODEX).resolve().parents[1] / "codex-resources" / "bwrap"
+    for candidate in ("/opt/codex-sandbox/relay-bwrap", str(packaged)):
+        if os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
+# Ubuntu's own kernel switch (Ubuntu 23.10 and later, so GitHub's ubuntu-24.04 runners). With it on, a user namespace
+# made by a process without capabilities, as Codex's sandbox inside the relay is, gets no capabilities, so Bubblewrap
+# cannot set up the sandbox's loopback ("loopback: Failed RTM_NEWADDR: Operation not permitted") and no command runs.
+# Home Assistant OS has no such switch. Turning it off only gives the nested sandbox more power, so a probe that is
+# still refused there proves at least as much as one refused with the switch on.
+USERNS_SWITCH = Path("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")
+
+
+@contextlib.contextmanager
+def unrestricted_user_namespaces():
+    """Turn Ubuntu's user namespace restriction off while the block runs, and put back what was there."""
+    try:
+        before = USERNS_SWITCH.read_text(encoding="ascii").strip()
+    except FileNotFoundError:
+        yield  # Not an Ubuntu kernel: nothing to turn off.
+        return
+    if before != "0":
+        # Fails with PermissionError outside a privileged container; the container job runs with --privileged.
+        USERNS_SWITCH.write_text("0", encoding="ascii")
+    try:
+        yield
+    finally:
+        if before != "0":
+            USERNS_SWITCH.write_text(before, encoding="ascii")
+
+
+@unittest.skipIf(relay_bwrap() is None and not os.environ.get("HA_TEST_REQUIRE_CODEX"), "no Bubblewrap for the relay")
+class RelaySandboxSockets(SandboxSockets):
+    """P8 for remote control: the same probes, with Codex started the way the relay starts it.
+
+    The relay runs `codex app-server --remote-control` inside its own Bubblewrap: a new user namespace with uid
+    and gid 1000, its own host name, and every capability dropped (remote_control.build_command). Codex then
+    starts each command in its own sandbox inside that namespace. This class proves that the nested sandbox
+    still refuses every socket, so the relay's keys can go on the same terms as the chat's (D-CX-KEYS).
+
+    The relay launcher in front of Bubblewrap is left out: it enters the relay's AppArmor label and drops
+    capabilities, and both only take abilities away, so they cannot turn a refused connect into an accepted one.
+    The modes are the ones the managed requirements allow the ChatGPT app: Read only, Default and Auto-review,
+    and Full access only while the owner's switch is on.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        import remote_control
+
+        super().setUpClass()
+        bwrap = relay_bwrap()
+        assert bwrap is not None, "the container job needs /opt/codex-sandbox/relay-bwrap"
+        command = remote_control.build_command(CODEX, "Home Assistant")
+        assert command[:2] == [remote_control.RELAY_LAUNCHER, remote_control.RELAY_BWRAP], command
+        assert command[-2:] == ["--", CODEX], command
+        cls.relay_run = cls.root / "relay-run"
+        cls.relay_run.write_text("#!/bin/sh\nexec " + " ".join(shlex.quote(part) for part in [bwrap, *command[2:-1]])
+                                 + ' "$@"\n', encoding="utf-8")
+        launcher = cls.root / "relay-codex"
+        launcher.write_text(f'#!/bin/sh\nexec {shlex.quote(str(cls.relay_run))} {shlex.quote(CODEX)} "$@"\n',
+                            encoding="utf-8")
+        for script in (cls.relay_run, launcher):
+            script.chmod(0o755)
+        # AppServer reads the binary from test_live_proofs.CODEX when it starts a process.
+        cls.relay_codex = mock.patch.object(test_live_proofs, "CODEX", str(launcher))
+        cls.userns = contextlib.ExitStack()
+        cls.userns.enter_context(unrestricted_user_namespaces())
+        cls.relay_codex.start()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.userns.close()
+        cls.relay_codex.stop()
+        super().tearDownClass()
+
+    def test_control_the_relay_start_enters_its_namespace(self) -> None:
+        """A control: the relay's start runs a program as uid 1000 under the relay's host name."""
+        output = subprocess.run([str(self.relay_run), "sh", "-c", "id -u; hostname"], capture_output=True,
+                                text=True, timeout=30, check=True).stdout
+        self.assertEqual(output.splitlines(), ["1000", "Home Assistant"])
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

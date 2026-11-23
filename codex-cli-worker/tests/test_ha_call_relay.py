@@ -1,7 +1,7 @@
-"""The home_assistant_call tool in the ChatGPT app: how the relay starts it, its key, and the exact request.
+"""The home_assistant_call tool in the ChatGPT app: how the relay starts it, its own socket, and the exact request.
 
-The relay (remote control) is one long Codex process. It gets the call tool with its own key for
-the whole run, and the tool is not approved ahead, so Codex asks the person in the app before each
+The relay (remote control) is one long Codex process. Its call tool talks to the app's own socket, which
+holds no key (D-CX-KEYS) and answers only while the relay runs, and the tool is not approved ahead, so Codex asks the person in the app before each
 call. The tests run the tool as the relay's command line starts it, against a fake Home Assistant
 that records each request (plan CX-SIMPLE, step C, and CX-TEST-E2E.f). The fake stands in for
 requests.post, so no test opens a network socket.
@@ -29,7 +29,8 @@ from test_server import server  # First: it puts the worker's folder on sys.path
 from test_ha_call import WORKER_TOKEN, FakeHomeAssistant, call_worker
 import ha_call
 import remote_control as rc
-from ha_call import RELAY_TASK, HomeAssistantCall
+from ha_call import RELAY_TASK, RelayCall
+from remote_unpaused import setUpModule, tearDownModule  # noqa: F401  (Remote Control is paused)
 
 ROOT = Path(__file__).resolve().parents[1]
 CALL_PREFIX = "mcp_servers.home_assistant_call."
@@ -88,18 +89,17 @@ LIGHT_OFF = {"service": "light.turn_off", "target": {"entity_id": "light.kitchen
 LIGHT_OFF_SENT = [("/api/services/light/turn_off", f"Bearer {WORKER_TOKEN}", {"entity_id": "light.kitchen_ceiling"})]
 
 
-class RelayKeyTests(unittest.TestCase):
-    """The relay's key holds while the relay runs, and only the latest launch's key holds."""
+class RelaySocketTests(unittest.TestCase):
+    """A request on the app's socket is the relay's while the relay runs, whatever thread id it holds."""
 
     def setUp(self):
         self.fake = fake_home_assistant(self)
         self.running = True
-        # No page chat runs: the relay key must not depend on one.
-        self.calls = HomeAssistantCall(call_worker(status="completed"), relay_running=lambda: self.running)
-        self.key = self.calls.begin(RELAY_TASK)
+        # No page chat runs: the app's calls must not depend on one.
+        self.calls = RelayCall(call_worker(status="completed"), relay_running=lambda: self.running)
 
-    def call(self, key=None):
-        return self.calls.dispatch({"capability": self.key if key is None else key, "arguments": LIGHT_OFF})
+    def call(self, thread="019a0000-0000-7000-8000-00000000abcd"):
+        return self.calls.dispatch({"thread_id": thread, "arguments": LIGHT_OFF})
 
     def test_a_running_relay_sends_the_exact_request(self):
         result = self.call()
@@ -111,17 +111,10 @@ class RelayKeyTests(unittest.TestCase):
         self.assertEqual(self.call()["status"], "unavailable")
         self.assertEqual(self.fake.requests, [])
 
-    def test_a_new_launch_replaces_the_old_key(self):
-        old = self.key
-        self.calls.begin(RELAY_TASK)
-        self.assertEqual(self.call(key=old)["status"], "unavailable")
-        self.assertEqual(self.fake.requests, [])
-
-    def test_the_relay_key_is_not_a_page_chats_key(self):
-        page_key = self.calls.begin("t1")
-        self.calls.end("t1")
-        self.assertEqual(self.call(key=page_key)["status"], "unavailable")
-        self.assertEqual(self.call()["status"], "ok")
+    def test_the_thread_id_is_not_read(self):
+        for thread in (None, "", "not-a-thread"):
+            with self.subTest(thread=thread):
+                self.assertEqual(self.calls.task_for({"thread_id": thread, "arguments": {}}), RELAY_TASK)
 
     def test_a_page_chat_id_never_takes_the_relay_name(self):
         # Page chat ids start with a UTC date, so no chat can be named like the relay.
@@ -139,9 +132,9 @@ class RelayLaunchTests(unittest.TestCase):
         with patch.object(server, "read_options", return_value={}):
             return supervisor._command("app-server", "--listen", "unix:///tmp/x.sock", "--remote-control")
 
-    def test_the_relay_registers_the_call_tool_with_its_own_key(self):
+    def test_the_relay_registers_the_call_tool_with_its_own_socket(self):
         settings = server_settings(self.command(), "home_assistant_call")
-        self.assertEqual(settings["env_vars"], ["HA_CALL_CAPABILITY"])
+        self.assertEqual(settings["env_vars"], ["HA_CALL_SOCKET"])
         self.assertTrue(settings["args"][0].endswith("ha_call_mcp.py"))
         self.assertTrue(settings["required"])
 
@@ -153,45 +146,46 @@ class RelayLaunchTests(unittest.TestCase):
             self.assertNotIn('"approve"', value)
         self.assertEqual([value for value in configured(self.command()) if "default_tools_approval_mode" in value], [])
 
-    def test_the_read_tool_keeps_its_own_key(self):
+    def test_the_read_tool_gets_no_key(self):
         read = server_settings(self.command(), "home_assistant_relay")
-        self.assertEqual(read["env_vars"], ["HA_RELAY_CAPABILITY"])
+        self.assertNotIn("env_vars", read)
         self.assertEqual(read["tools.read.approval_mode"], "approve")
 
-    def test_the_relay_keeps_the_tool_keys_out_of_shell_commands(self):
+    def test_the_relay_keeps_the_hass_mcp_token_out_of_shell_commands(self):
+        # No tool key is left; the exclude still keeps HA_MCP_CAPABILITY (hass_mcp.py) from every command.
         self.assertIn('shell_environment_policy.exclude=["HA_*_CAPABILITY"]', configured(self.command()))
 
-    def test_each_launch_gets_a_live_call_key_that_replaces_the_one_before(self):
+    def test_a_launch_points_the_call_bridge_at_the_apps_socket_and_holds_no_key(self):
         # relay_env is the launch environment only (Supervisor._loop, just before the process starts).
-        with patch.object(server, "refresh_core_address"), \
-                patch.object(server, "relay_process_state", side_effect=live_relay), \
-                patch.object(server, "read_options", return_value={}):
-            first = rc.remote_env(server.relay_env())
-            second = rc.remote_env(server.relay_env())
-            self.assertIsNone(server.ha_call.task_for(first["HA_CALL_CAPABILITY"]))
-            self.assertEqual(server.ha_call.task_for(second["HA_CALL_CAPABILITY"]), RELAY_TASK)
-        self.assertNotEqual(second["HA_CALL_CAPABILITY"], second["HA_RELAY_CAPABILITY"])
-        self.assertNotIn("HA_CALL_SOCKET", second)
-
-    def test_a_probe_environment_holds_no_tool_key(self):
-        environment = rc.remote_env(server.relay_probe_env())
+        with patch.object(server, "refresh_core_address"), patch.object(server, "read_options", return_value={}):
+            environment = rc.remote_env(server.relay_env())
+        self.assertEqual(environment["HA_CALL_SOCKET"], str(server.RELAY_CALL_SOCKET))
+        self.assertNotEqual(server.RELAY_CALL_SOCKET.name, "ha-call.sock")
         self.assertEqual([name for name in environment if name.endswith("_CAPABILITY")], [])
 
-    def test_the_app_supervisor_makes_keys_only_for_a_launch(self):
+    def test_the_chat_socket_never_answers_for_the_relay(self):
+        with patch.object(server, "relay_process_state", side_effect=live_relay):
+            self.assertEqual(server.relay_call.task_for({"arguments": {}}), RELAY_TASK)
+            self.assertIsNone(server.ha_call.task_for({"arguments": {}}))
+            self.assertIsNone(server.ha_call.task_for({"thread_id": "relay-thread", "arguments": {}}))
+
+    def test_a_probe_environment_holds_no_tool_key_or_socket(self):
+        environment = rc.remote_env(server.relay_probe_env())
+        self.assertEqual([name for name in environment if name.endswith("_CAPABILITY")], [])
+        self.assertNotIn("HA_CALL_SOCKET", environment)
+
+    def test_the_app_supervisor_makes_a_launch_environment_only_for_a_launch(self):
         supervisor = server.remote_control_supervisor
         with patch.object(server, "relay_env", return_value={"from": "launch"}), \
                 patch.object(server, "relay_probe_env", return_value={"from": "probe"}):
             self.assertEqual(supervisor.launch_env_factory(), {"from": "launch"})
             self.assertEqual(supervisor.env_factory(), {"from": "probe"})
 
-    def test_the_key_stops_when_the_relay_stops(self):
-        with patch.object(server, "refresh_core_address"), patch.object(server, "read_options", return_value={}):
-            key = server.relay_env()["HA_CALL_CAPABILITY"]
-            stopped = ((None, False), (SimpleNamespace(poll=lambda: None), True),
-                       (SimpleNamespace(poll=lambda: 1), False))
-            for state in stopped:
-                with self.subTest(state=state), patch.object(server, "relay_process_state", return_value=state):
-                    self.assertIsNone(server.ha_call.task_for(key))
+    def test_the_apps_calls_stop_when_the_relay_stops(self):
+        stopped = ((None, False), (SimpleNamespace(poll=lambda: None), True), (SimpleNamespace(poll=lambda: 1), False))
+        for state in stopped:
+            with self.subTest(state=state), patch.object(server, "relay_process_state", return_value=state):
+                self.assertIsNone(server.relay_call.task_for({"arguments": {}}))
 
 
 class ManagedConfigTests(unittest.TestCase):
@@ -248,14 +242,16 @@ class RelayToolEndToEndTests(unittest.TestCase):
                         patch.object(server, "relay_process_state", side_effect=live_relay)):
             patcher.start()
             self.addCleanup(patcher.stop)
-        socket_server = server.ha_call.serve(self.socket)
+        socket_server = server.relay_call.serve(self.socket)
         self.addCleanup(socket_server.server_close)
         self.addCleanup(socket_server.shutdown)
         settings = server_settings(server.relay_tool_args(), "home_assistant_call")
         environment = rc.remote_env(server.relay_env())
         # Codex gives a bridge a short fixed list plus its env_vars (Step 0 record, part 5); nothing else.
-        self.bridge_env = {"PATH": os.environ.get("PATH", ""), "HA_CALL_SOCKET": str(self.socket),
-                           **{name: environment[name] for name in settings["env_vars"]}}
+        self.assertEqual(settings["env_vars"], ["HA_CALL_SOCKET"])
+        self.assertEqual(environment["HA_CALL_SOCKET"], str(server.RELAY_CALL_SOCKET))
+        # The test serves the app's socket under a temporary folder in place of /data.
+        self.bridge_env = {"PATH": os.environ.get("PATH", ""), "HA_CALL_SOCKET": str(self.socket)}
         self.bridge_command = [settings["command"], *settings["args"]]
 
     def run_bridge(self, *requests):
@@ -287,12 +283,14 @@ class RelayToolEndToEndTests(unittest.TestCase):
         self.assertEqual(results[0]["status"], "unavailable")
         self.assertEqual(self.fake.requests, [])
 
-    def test_a_wrong_key_or_the_read_tools_key_sends_nothing(self):
-        read_key = rc.remote_env(server.relay_env())["HA_RELAY_CAPABILITY"]
-        for key in ("", "guessed", read_key):
-            with self.subTest(key=key[:4]):
-                self.bridge_env["HA_CALL_CAPABILITY"] = key
-                self.assertEqual(self.run_bridge({"service": "light.turn_off"})[0]["status"], "unavailable")
+    def test_the_relays_bridge_on_the_chat_socket_sends_nothing(self):
+        # Without the app's socket the bridge falls back to a chat's, where the relay's thread names no chat.
+        chat_socket = self.socket.with_name("chat.sock")
+        chat_server = server.ha_call.serve(chat_socket)
+        self.addCleanup(chat_server.server_close)
+        self.addCleanup(chat_server.shutdown)
+        self.bridge_env["HA_CALL_SOCKET"] = str(chat_socket)
+        self.assertEqual(self.run_bridge({"service": "light.turn_off"})[0]["status"], "unavailable")
         self.assertEqual(self.fake.requests, [])
 
 
@@ -318,7 +316,7 @@ class FakeRelayProcess:
 
 
 class RepeatedStartTests(unittest.TestCase):
-    """Review C2: a probe never gets the keys, and a second Start leaves the running relay and both its keys."""
+    """Review C2: a probe never starts a read session, and a second Start leaves the running relay and its tools."""
 
     def setUp(self):
         self.fake = fake_home_assistant(self)
@@ -354,7 +352,7 @@ class RepeatedStartTests(unittest.TestCase):
             time.sleep(0.01)
         self.assertIs(self.supervisor.proc, self.process)
 
-    def test_start_twice_launches_once_and_the_first_keys_still_hold(self):
+    def test_start_twice_launches_once_and_the_first_launch_still_works(self):
         self.supervisor.start()
         self.wait_for_launch()
         launch = self.popen.call_args.kwargs["env"]
@@ -363,20 +361,21 @@ class RepeatedStartTests(unittest.TestCase):
         probe_environments = [call.kwargs["env"] for call in self.namespace_probe.call_args_list]
         self.assertGreaterEqual(len(probe_environments), 1)  # the namespace check before the launch
         for environment in probe_environments:
-            self.assertNotIn("HA_CALL_CAPABILITY", environment)
-            self.assertNotIn("HA_RELAY_CAPABILITY", environment)
-        result = server.ha_call.dispatch({"capability": launch["HA_CALL_CAPABILITY"], "arguments": LIGHT_OFF})
+            self.assertNotIn("HA_CALL_SOCKET", environment)
+        self.assertEqual(launch["HA_CALL_SOCKET"], str(server.RELAY_CALL_SOCKET))
+        session = server.relay_reads.launch_session
+        result = server.relay_call.dispatch({"thread_id": "relay-thread", "arguments": LIGHT_OFF})
         self.assertEqual(result["status"], "ok")
         self.assertEqual(sent(self.fake), LIGHT_OFF_SENT)
-        self.assertTrue(server.relay_reads.active(launch["HA_RELAY_CAPABILITY"]))
+        self.assertTrue(server.relay_reads.active(session))
 
-    def test_the_keys_stop_when_the_relay_ends(self):
+    def test_the_apps_tools_stop_when_the_relay_ends(self):
         self.supervisor.start()
         self.wait_for_launch()
-        launch = self.popen.call_args.kwargs["env"]
+        session = server.relay_reads.launch_session
         self.end_relay()
-        self.assertIsNone(server.ha_call.task_for(launch["HA_CALL_CAPABILITY"]))
-        self.assertFalse(server.relay_reads.active(launch["HA_RELAY_CAPABILITY"]))
+        self.assertIsNone(server.relay_call.task_for({"arguments": LIGHT_OFF}))
+        self.assertFalse(server.relay_reads.active(session))
         self.assertEqual(self.fake.requests, [])
 
 

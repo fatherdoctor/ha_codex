@@ -20,13 +20,9 @@ const assert = require('node:assert/strict');
           await page.locator('#settings[open]').waitFor();
 
           assert.equal(await page.locator('#appearance-section').count(), 0, 'the empty Appearance section is removed');
-          // Advanced is the last section, folded, and holds Browser permissions as a part of its own.
+          // The dashboard browser is gone (0.4), and with it the Advanced section that held Browser permissions.
           const toggle = id => page.locator(`#${id} > :is(h3, h4) > .settings-toggle`);
-          assert.equal(await page.locator('#settings > section').last().getAttribute('id'), 'advanced-section');
-          assert.equal(await toggle('advanced-section').getAttribute('aria-expanded'), 'false', 'Advanced starts folded');
-          assert.equal(await page.locator('#browser-permissions-section').isVisible(), false);
-          await page.waitForFunction(() => document.querySelector('#advanced-section .settings-status').textContent !== '');
-          assert.match(await page.locator('#advanced-section > h3 .settings-status').textContent(), /^Browser permissions: /);
+          assert.equal(await page.locator('#advanced-section, #browser-permissions-section').count(), 0);
           // One top-level section is open at a time. Opening a part opens its section and closes the others.
           const expanded = () => page.evaluate(() => [...document.querySelectorAll('#settings > section')]
             .filter(section => section.querySelector(':scope > :is(h3, h4) > .settings-toggle')?.getAttribute('aria-expanded') === 'true')
@@ -34,14 +30,12 @@ const assert = require('node:assert/strict');
           await toggle('accounts-section').click();
           await toggle('github-section').click();
           assert.deepEqual(await expanded(), ['accounts-section']);
-          await toggle('scheduled-work').click();
-          assert.deepEqual(await expanded(), ['scheduled-work'], 'opening Scheduled runs closes Accounts and connections');
+          // Scheduled runs is on the page only while they are switched on (the fixture starts with them off).
+          const otherSection = await page.locator('#scheduled-work').count() ? 'scheduled-work' : 'workspace-section';
+          await toggle(otherSection).click();
+          assert.deepEqual(await expanded(), [otherSection], `opening ${otherSection} closes Accounts and connections`);
           assert.equal(await page.locator('#accounts-section > .settings-body').isVisible(), false);
-          await toggle('advanced-section').click();
-          assert.deepEqual(await expanded(), ['advanced-section']);
-          await toggle('browser-permissions-section').click();
-          assert.equal(await page.locator('#browser-permissions').isVisible(), true, 'Browser permissions opens inside Advanced');
-          await toggle('advanced-section').click();
+          await toggle(otherSection).click();
           assert.deepEqual(await expanded(), [], 'a second tap closes the open section');
           // A part keeps its own state while its section is closed: GitHub is still open when Accounts opens again.
           await toggle('accounts-section').click();
@@ -49,8 +43,6 @@ const assert = require('node:assert/strict');
           assert.deepEqual(await expanded(), ['accounts-section']);
           assert.equal(await page.locator('#diagnostic-retention, #save-diagnostic-retention').count(), 0,
             'the log limit is set on the Configuration tab only');
-          assert.equal(await page.locator('#remote-control-name-form').count(), 0,
-            'the remote-control name is set on the Configuration tab only');
           assert.equal(await page.locator('#workspace-section #workspace-open').count(), 1,
             'Workspace instructions contains the Workspace rules button');
           // The fixture has no Supervisor, so the lookup answers null: the row is not a link and says where to go.

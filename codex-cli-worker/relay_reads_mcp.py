@@ -25,7 +25,7 @@ TOOL = {'name': 'read', 'description': 'Read entity ids and current states throu
 def read(arguments):
     if not isinstance(arguments, dict) or set(arguments) - set(TOOL['inputSchema']['properties']):
         raise ReadRequestError('Unsupported read arguments.')
-    raw = json.dumps({'capability': os.environ.get('HA_RELAY_CAPABILITY', ''), 'arguments': arguments}).encode() + b'\n'
+    raw = json.dumps({'arguments': arguments}).encode() + b'\n'
     if len(raw) > 16384:
         raise ReadRequestError('Read request is too large.')
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:

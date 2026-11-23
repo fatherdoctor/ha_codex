@@ -30,11 +30,9 @@
 button, a { -webkit-tap-highlight-color: transparent; }
 button, input, textarea, select { border-radius: 10px; }
 .brand { padding-bottom: 24px; }
-.brand-icon { color: var(--accent); }
 .new-chat { background: transparent; box-shadow: none; }
 .new-chat:hover { background: var(--hover); }
 main { min-width: 0; background: var(--bg); }
-.text-button { padding: 3px 0; background: transparent; color: var(--accent); font-size: calc(12px * var(--text-scale)); white-space: nowrap; }
 .phone-thread-tools { display: none; }
 .messages { padding: 28px max(24px, calc((100% - 860px) / 2)); min-height: 0; }
 .welcome { min-height: 0; max-width: 850px; margin: 0 auto; padding: 16vh 20px 30px; text-align: center; }
@@ -45,12 +43,12 @@ main { min-width: 0; background: var(--bg); }
 #message { min-height: 0; background: transparent; padding: 2px 3px 6px; font-size: calc(15px * var(--text-scale)); }
 .compose-bottom { align-items: center; gap: 8px; }
 .compose-tools { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; }
-#attach { background: transparent; color: var(--text); width: 32px; height: 32px; padding: 0; font-size: calc(26px * var(--text-scale)); flex-shrink: 0; }
+#attach { background: transparent; color: var(--text); width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+#attach svg { width: 22px; height: 22px; display: block; }
 /* The chevron is the same icon as the effort picker's, centered on the label rather than set on its baseline. */
 .permission-pill { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: 20px; padding: 7px 8px 7px 10px; font-size: calc(12px * var(--text-scale)); white-space: nowrap; }
 #chat-picker { margin-left: auto; min-width: 0; }
-.picker-pill { border: 0; background: transparent; }
-#model-button, #effort-button { font-size: calc(12px * var(--text-scale)); }
+.picker-pill { border: 0; background: transparent; font-size: calc(12px * var(--text-scale)); }
 #send { background: var(--accent); color: var(--text-light-primary-color, #212121); border-radius: 50%; width: 34px; height: 34px; padding: 0; }
 #plus-menu { left: 0; bottom: 50px; width: 210px; padding: 8px; }
 #plus-menu button { display: block; width: 100%; background: transparent; color: var(--text); text-align: left; }
@@ -64,6 +62,11 @@ dialog::backdrop { background: #0006; }
 .studio-sheet .dialog-header h2 { font-size: calc(20px * var(--text-scale)); overflow-wrap: anywhere; }
 .permission-option { display: block; width: 100%; padding: 16px; text-align: left; background: transparent; color: var(--text); border: 1px solid var(--line); margin: 10px 0; }
 .permission-option strong, .permission-option span { display: block; }
+.permission-option strong { font-weight: 400; }
+/* Full access is bold in the menu only while the owner's switch has it on. */
+body[data-full-access="on"] .permission-option[data-mode="full-access"] strong { font-weight: 700; }
+/* Full access is a warning in the menu, as it is on the button once chosen. */
+.permission-option[data-mode="full-access"] strong { color: var(--error); }
 .permission-option span { color: var(--muted); font-size: calc(12px * var(--text-scale)); line-height: 1.6; margin-top: 5px; }
 .permission-option[aria-pressed="true"] { border-color: var(--accent); background: var(--hover); }
 /* The chosen permission mode: mdiCheck (chat.css) in the primary color after its name. */
@@ -92,7 +95,7 @@ dialog::backdrop { background: #0006; }
   .compose-tools { flex-wrap: wrap; }
 }
 @media (max-width: 700px) {
-  .phone-thread-tools { display: flex; align-items: center; padding: 4px 12px; gap: 6px; }
+  .phone-thread-tools { display: flex; align-items: center; padding: 4px 12px 4px 0; gap: 6px; }
   #phone-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(12px * var(--text-scale)); }
   .phone-thread-tools .icon { padding: 7px; }
   .welcome { padding: 13vh 16px 20px; }
@@ -103,9 +106,18 @@ dialog::backdrop { background: #0006; }
   .compose-tools { gap: 4px; flex-wrap: nowrap; }
   #chat-picker { margin-left: auto; flex-shrink: 1; }
   .permission-pill { padding: 6px 8px; font-size: calc(11px * var(--text-scale)); }
-  #model-button, #effort-button { padding: 4px 5px; font-size: calc(11px * var(--text-scale)); }
-  #model-button { max-width: 82px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .picker-pill { min-width: 0; }
-  .compose-tools #attach { width: 26px; }
+  .picker-pill { min-width: 0; padding: 4px 5px; gap: 4px; font-size: calc(11px * var(--text-scale)); }
+  #picker-model { max-width: 82px; }
+  .compose-tools #attach { width: 28px; height: 28px; }
   .studio-sheet, #settings { padding: 20px; width: calc(100vw - 20px); max-height: 90dvh; border-radius: 18px; }
 }
+
+/* The permissions control opens a small pop-up right above its button (placed by studio.js), not a sheet. */
+#permissions-dialog.studio-sheet {
+  position: fixed; margin: 0; inset: auto auto 0 0; padding: 6px; border-radius: 18px; max-height: min(420px, 70dvh);
+  overflow-y: auto; box-shadow: 0 5px 22px #00000026, 0 1px 4px #00000014; background: var(--bg); z-index: 20;
+}
+#permissions-dialog .dialog-header, #permissions-dialog > p.muted { display: none; }
+#permissions-dialog .permission-option { padding: 10px; border-radius: 12px; border-color: transparent; }
+#permissions-dialog .permission-option[aria-pressed="true"] { border-color: var(--accent); }
+#permissions-dialog #permission-result:empty { display: none; }

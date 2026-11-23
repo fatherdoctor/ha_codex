@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from app_folders import isolated_app_folders
 from test_server import server
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,7 +25,8 @@ class StarterAgentsWrite(unittest.TestCase):
         self.agents.parent.mkdir()
         self.codex_config = self.root / "codex-home" / "config.toml"
         self.codex_config.parent.mkdir()
-        patches = patch.multiple(server, AGENTS_PATH=self.agents, CODEX_CONFIG_PATH=self.codex_config)
+        patches = patch.multiple(server, AGENTS_PATH=self.agents, CODEX_CONFIG_PATH=self.codex_config,
+                                 LEGACY_AGENTS_PATH=self.root / "config-none" / "AGENTS.md")
         patches.start()
         self.addCleanup(patches.stop)
 
@@ -97,7 +99,9 @@ class StarterAgentsWrite(unittest.TestCase):
         self.assertFalse(self.agents.exists())
 
     def test_a_config_folder_that_cannot_be_written_does_not_stop_the_start(self):
-        with patch.object(server, "AGENTS_PATH", self.root / "no-such-folder" / "AGENTS.md"):
+        blocker = self.root / "not-a-folder"
+        blocker.write_text("a file where the folder should be", encoding="utf-8")
+        with patch.object(server, "AGENTS_PATH", blocker / "sub" / "AGENTS.md"):
             self.assertFalse(self.write())
         self.assertIn("Could not write the starter", self.log.getvalue())
 
@@ -109,6 +113,12 @@ class StarterAgentsWrite(unittest.TestCase):
 
 class StarterAgentsAtStartup(unittest.TestCase):
     """Where main() calls the write, and what the image ships."""
+
+    def setUp(self):
+        # main() moves and deletes files under /data, /config and /addon_config; here it does so in a temporary copy.
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.addCleanup(isolated_app_folders(server, Path(folder.name)).close)
 
     def test_main_offers_the_starter_before_it_writes_the_codex_config(self):
         calls = []
@@ -124,6 +134,7 @@ class StarterAgentsAtStartup(unittest.TestCase):
             patch.object(server, "read_options", return_value={}),
             patch.object(server.protected_policy, "policy_problem", return_value=""),
             patch.object(server, "make_worker_undumpable", return_value=True),
+            patch.object(server, "migrate_agents_file"),
             patch.object(server, "write_starter_agents_file", side_effect=lambda: calls.append("starter")),
             patch.object(server, "ensure_runtime_files", side_effect=prepare),
             self.assertRaises(StopHere),
@@ -156,7 +167,7 @@ class StarterAgentsText(unittest.TestCase):
         self.text = STARTER.read_text(encoding="utf-8")
 
     def test_it_is_small_enough_to_save_from_the_editor(self):
-        self.assertLess(len(STARTER.read_bytes()), 4096)
+        self.assertLess(len(STARTER.read_bytes()), 6144)
         self.assertLess(len(STARTER.read_bytes()), server.AGENTS_MAX_BYTES)
 
     def test_it_says_the_file_is_the_owners_to_change_or_delete(self):
@@ -168,9 +179,43 @@ class StarterAgentsText(unittest.TestCase):
             with self.subTest(rule=heading):
                 self.assertIn(heading, self.text)
 
+    def test_it_has_the_safeguard_defaults_and_says_they_are_not_locks(self):
+        section = self.text.split("## Safeguards: defaults the owner can change", 1)[1].split("## About this home", 1)[0]
+        self.assertIn("not locks in the app", section)
+        # Showing the Home Assistant log is daily work: the secrets line must not list logs as a thing to keep back.
+        self.assertNotRegex(section, r"(?i)logs and|, logs")
+        # The app enforces only the sandbox and the permission mode; the bracket must not claim a wider refusal.
+        self.assertNotIn("refuses git work", section)
+        # The owner, not Codex, may change the rules; Codex reads "you" as itself.
+        self.assertIn("The owner can edit or delete any of them", " ".join(section.split()))
+        self.assertNotRegex(section, r"(?im)defaults that you set|^edit or delete")
+        for word in ("secrets.yaml", ".storage", "/config/.git/hooks", "/share/HomeAssistant", "Backups:", "rule 3"):
+            with self.subTest(word=word):
+                self.assertIn(word, section)
+
+    def test_it_keeps_private_data_out_of_git_and_github(self):
+        section = self.text.split("## Git and GitHub", 1)[1].split("## About this home", 1)[0]
+        for word in ("staged", "secrets.yaml", ".storage", "`memory/`", "databases", "log files", "backups",
+                     "personal or location data", ".gitignore", "Ask the owner before the first push", "private by default"):
+            with self.subTest(word=word):
+                self.assertIn(word, section)
+
+    def test_it_tells_codex_how_to_keep_a_memory(self):
+        section = self.text.split("## Memory", 1)[1].split("\n## ", 1)[0]
+        for words in ("one fact per file", "`memory/MEMORY.md`", "Read the index when a chat starts",
+                      "update a file rather than add a second", "delete wrong facts", "No secrets", "never commit"):
+            with self.subTest(words=words):
+                self.assertIn(words, " ".join(section.split()))
+
+    def test_it_points_codex_at_the_apps_own_entities(self):
+        section = self.text.split("## This app's sensors", 1)[1].split("\n## ", 1)[0]
+        for words in ("Codex device", "sign-in", "usage limits", "Active tasks", "Last task", "permission prompts"):
+            with self.subTest(words=words):
+                self.assertIn(words, " ".join(section.split()))
+
     def test_it_does_not_ask_for_backup_copies_inside_the_config_folder(self):
         # The worker gives each message its own backup folder and tells Codex to leave no other copies in /config.
-        self.assertNotRegex(self.text, r"\.bak|\.orig|backup cop")
+        self.assertNotRegex(self.text, r"(?i)\.bak|\.orig|backup cop|make a backup|backup before")
 
     def test_it_names_no_real_home(self):
         # No address, phone number, web address, mail address or entity id: only Home Assistant's own file names.
@@ -183,7 +228,7 @@ class StarterAgentsText(unittest.TestCase):
         for path in (ROOT.parent / "README.md", ROOT / "README.md"):
             with self.subTest(path=str(path.relative_to(ROOT.parent))):
                 self.assertIn("gets a short starter file there once", " ".join(path.read_text(encoding="utf-8").split()))
-        self.assertIn("**Starter instructions.**", (ROOT / "DOCS.md").read_text(encoding="utf-8"))
+        self.assertIn("**Starter instructions.**", (ROOT.parent / "docs" / "app-reference.md").read_text(encoding="utf-8"))
         self.assertIn("server.py: write_starter_agents_file", (ROOT.parent / "AUDITING.md").read_text(encoding="utf-8"))
 
     def test_it_is_plain_ascii_with_one_final_newline(self):

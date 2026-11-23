@@ -8,9 +8,13 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 from contextlib import ExitStack
 from test_server import server
+import tool_threads
 from approvals import COMMAND_APPROVAL
 from interaction_diagnostics import InteractionRecorder, RollingDiagnostics
 from relay_reads import RelayReads, ReadError
+
+THREAD = '11111111-2222-4333-8444-555555555555'
+
 
 class RuntimeDiagnosticsTests(unittest.TestCase):
 
@@ -24,7 +28,7 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
         self.addCleanup(p.stop)
 
     def test_background_sources_finish_and_exceptions_are_recorded_without_prompt(self):
-        for source, expected in (('page', 'addon_page'), ('schedule', 'scheduled_run'), ('lead', 'lead_channel')):
+        for source, expected in (('page', 'addon_page'), ('schedule', 'scheduled_run'), ('lead', 'addon_page')):
             task = {'task_source': source, 'status': 'running', 'chat_settings': {'model': 'gpt-6.1-sol'}}
 
             def run(*args):
@@ -48,7 +52,7 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
             with ExitStack() as stack:
                 for name, value in {'tasks': {'sample': task}, 'running_processes': {}, 'approval_sessions': {}}.items():
                     stack.enter_context(patch.object(server, name, value))
-                for name in ('finish_phase', 'append_activity_step', 'note_edited_files', 'finish_activity', 'remove_run_artifacts', 'start_next_queued', 'cleanup_backups'):
+                for name in ('finish_phase', 'append_activity_step', 'finish_activity', 'remove_run_artifacts', 'start_next_queued', 'cleanup_backups'):
                     stack.enter_context(patch.object(server, name))
                 stack.enter_context(patch.object(server.verification, 'end'))
                 stack.enter_context(patch.object(server.ha_data, 'end'))
@@ -132,15 +136,13 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
             fetch=lambda *_: {'entity_id': 'light.synthetic', 'state': 'PRIVATE_STATE_CANARY', 'attributes': {}},
             observer=server.record_relay_read,
         )
-        engine.environment({})
+        engine.new_launch()
         result = engine.dispatch({
-            'capability': engine.capability,
             'arguments': {'operation': 'state', 'entity_id': 'light.synthetic'},
         })
         self.assertEqual(result['state'], 'PRIVATE_STATE_CANARY')
         with self.assertRaises(ReadError):
             engine.dispatch({
-                'capability': engine.capability,
                 # This credential-shaped entity identifier must be refused by the read engine.
                 'arguments': {'operation': 'state', 'entity_id': 'sensor.private_token_canary'},
             })
@@ -154,10 +156,10 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
         self.assertIn('credential', [e.get('rule') for e in rows[0]['events']])
         self.assertNotIn('CANARY', json.dumps(rows))
         self.assertNotIn('light.synthetic', json.dumps(rows))
-        # A failing observer exception must not alter a successful read.
+        # A failing observer exception must not alter a successful read (of a new launch: the first one ended).
         engine.observer = Mock(side_effect=OSError('PRIVATE_CANARY'))
+        engine.new_launch()
         self.assertEqual(engine.dispatch({
-            'capability': engine.capability,
             'arguments': {'operation': 'state', 'entity_id': 'light.synthetic'},
         })['state'], 'PRIVATE_STATE_CANARY')
 
@@ -192,7 +194,6 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
                 'sample',
                 'stderr',
                 io.StringIO('PRIVATE_PERSON_CANARY\n' + message + '\nPRIVATE_SECRET_CANARY\n'),
-                {},
             )
         self.recorder.finish('sample', 'failed')
         row = self.store.export()['interactions'][0]
@@ -205,12 +206,14 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
         worker = data_worker()
         worker.diagnostics = self.recorder
         engine = HomeAssistantData(worker, self.store.path.parent / 'exports')
-        capability = engine.begin('chat')
+        engine.begin('chat')
         self.addCleanup(engine.end, 'chat')
+        tool_threads.CHATS.bind('chat', THREAD)
+        self.addCleanup(tool_threads.CHATS.release, 'chat')
         self.recorder.begin('chat', 'addon_page')
         payload = {
             'operation': 'history',
-            'capability': capability,
+            'thread_id': THREAD,
             'entity_ids': ['sensor.synthetic'],
             'start_time': START,
             'end_time': END,

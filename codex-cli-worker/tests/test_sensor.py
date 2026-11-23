@@ -53,6 +53,11 @@ def _load_sensor_module() -> types.ModuleType:
 
         DIAGNOSTIC = "diagnostic"
 
+    class DeviceEntryType:
+        """Stand-in with the device entry type the sensors' device uses."""
+
+        SERVICE = "service"
+
     package_name = "codex_sensor_test_package"
     module_name = f"{package_name}.sensor"
     package = types.ModuleType(package_name)
@@ -83,6 +88,8 @@ def _load_sensor_module() -> types.ModuleType:
     core.HomeAssistant = type("HomeAssistant", (), {})
 
     helpers = types.ModuleType("homeassistant.helpers")
+    device_registry = types.ModuleType("homeassistant.helpers.device_registry")
+    device_registry.DeviceEntryType = DeviceEntryType
     entity_platform = types.ModuleType("homeassistant.helpers.entity_platform")
     entity_platform.AddEntitiesCallback = object
     update_coordinator = types.ModuleType("homeassistant.helpers.update_coordinator")
@@ -99,6 +106,7 @@ def _load_sensor_module() -> types.ModuleType:
         "homeassistant.const": ha_const,
         "homeassistant.core": core,
         "homeassistant.helpers": helpers,
+        "homeassistant.helpers.device_registry": device_registry,
         "homeassistant.helpers.entity_platform": entity_platform,
         "homeassistant.helpers.update_coordinator": update_coordinator,
     }

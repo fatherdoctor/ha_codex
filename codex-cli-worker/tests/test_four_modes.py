@@ -19,12 +19,14 @@ sys.path.insert(0, str(ROOT))
 import approvals
 import full_access
 import ha_call
+import tool_threads
 import policy
 import remote_control as rc
 import test_approvals as approval_tests
 import test_attachments as attachments
 import test_cx_pair_f as admin
 import test_ha_call as ha_calls
+from app_folders import isolated_app_folders
 from test_server import server
 
 SHIPPED = ROOT / "gate" / "requirements.toml"
@@ -127,6 +129,7 @@ class LaunchTests(unittest.TestCase):
     def setUp(self):
         self.setUp_base()
         self.server = server
+        self.stack.enter_context(isolated_app_folders(server, self.root / "app"))  # the interaction log and others
         self.stack.enter_context(patch.object(full_access, "SETTING_PATH", self.root / "full_access.json"))
         (self.root / "etc").mkdir()
         self.stack.enter_context(patch.object(full_access, "REQUIREMENTS_PATH", self.root / "etc" / "requirements.toml"))
@@ -503,7 +506,7 @@ class StandInCodex:
         self.asked = None
 
     def run(self, arguments):
-        return self.calls.dispatch({"capability": self.key, "arguments": arguments})
+        return self.calls.dispatch({"thread_id": ha_calls.THREAD, "arguments": arguments})
 
     def call(self, arguments, review_status=None):
         """Ask to run the tool. Return the tool's result when it ran now, else None."""
@@ -555,6 +558,8 @@ class DeviceCallContractTests(unittest.TestCase):
         self.stack.enter_context(patch.object(ha_call, "fetch_states", lambda path, token: {
             "entity_id": path[8:], "state": "off", "attributes": {}}))
         self.calls = ha_call.HomeAssistantCall(ha_calls.call_worker())
+        tool_threads.CHATS.bind("t1", ha_calls.THREAD)
+        self.addCleanup(tool_threads.CHATS.release, "t1")
         self.key = self.calls.begin("t1")
         prefix = "mcp_servers.home_assistant_call.tools.call.approval_mode="
         modes = [value.removeprefix(prefix) for value in server.call_mcp_args() if value.startswith(prefix)]
@@ -650,14 +655,14 @@ class PageTests(unittest.TestCase):
         start = html.index('id="permissions-dialog"')
         dialog = html[start:html.index("</dialog>", start)]
         modes = [part.split('"', 1)[0] for part in dialog.split('data-mode="')[1:]]
-        self.assertEqual(modes, ["default", "auto-review", "read-only", "full-access"])
+        self.assertEqual(modes, ["default", "auto-review", "full-access", "read-only"])
         self.assertNotIn("Coming", dialog)
         self.assertIn("It does not ask you.", dialog)
         self.assertNotIn("Administrators only", dialog)
 
     def test_the_button_names_each_mode(self):
         script = (ROOT / "web" / "assets" / "studio.js").read_text(encoding="utf-8")
-        for name in ('"auto-review": "Auto-review"', '"full-access": "Full access"'):
+        for name in ('"auto-review": "Approve for me"', '"full-access": "Full access"'):
             self.assertIn(name, script)
 
 

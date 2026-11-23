@@ -25,6 +25,8 @@ class IntegrationStatusTests(unittest.TestCase):
         root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
         self.manifest = root / "custom_components" / "codex_cli" / "manifest.json"
         self.stack.enter_context(patch.object(server, "INTEGRATION_MANIFEST_PATH", self.manifest))
+        # The chat page reads the schedule store under DATA_ROOT; keep it off the real /data.
+        self.stack.enter_context(patch.object(server, "DATA_ROOT", root / "data"))
         self.stack.enter_context(
             patch.dict(server.integration_state, {"started": time.monotonic() - LONG_AGO, "seen": None})
         )

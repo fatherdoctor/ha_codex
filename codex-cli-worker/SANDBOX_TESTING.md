@@ -1,6 +1,6 @@
 # Sandbox compatibility workaround and verification
 
-This worker includes a temporary workaround for [upstream Codex issue #44329](https://github.com/openai/codex/issues/44329), reported here as [issue #9](https://github.com/moryoav/home-assistant-codex/issues/9).
+This worker includes a temporary workaround for [upstream Codex issue #44329](https://github.com/openai/codex/issues/44329), reported in the project this one started from as [issue #9](https://github.com/moryoav/home-assistant-codex/issues/9).
 
 ## Scope
 
@@ -36,6 +36,50 @@ The fake-Bubblewrap tests cover both true-command paths, recognized error reason
 
 These tests do not prove HAOS/AppArmor compatibility or filesystem isolation on the affected host.
 
+### The worker's sockets and the sandbox (live proof)
+
+`codex-cli-worker/tests/test_sandbox_sockets.py` runs the pinned Codex CLI with a local stand-in model and
+asks it to run one probe command. The probe tries to connect to a stream socket at the path of each socket the
+worker serves (the `.serve(DATA_ROOT / ...)` lines in `server.py`; a new socket joins the test by itself).
+
+| Mode | What the test expects |
+|---|---|
+| Read only, Default, Auto-review | the probe gets `EPERM` for every socket, and no socket accepts a connection |
+| Full access | the probe reaches every socket (skipped where the managed requirements leave the mode out) |
+| Default, an escalated command the person approves | the probe runs outside the sandbox and reaches every socket |
+| Auto-review, an escalated command Codex's reviewer allows | the same, and the person is not asked |
+| Auto-review, an escalated command the reviewer denies | the probe does not run |
+| No Codex (the control) | the probe reaches every socket |
+
+The first row is the protection that lets a tool request be trusted without a key: with no network, Codex's
+seccomp filter denies `connect` on a Unix socket too. The two escalated rows are what an approved command
+outside the sandbox can reach; the test keeps them visible, so a reader of the permission model finds them
+here and not only in the code.
+
+The class `RelaySandboxSockets` runs every row again with Codex started the way Remote Control starts it: inside
+the relay's Bubblewrap (`remote_control.build_command`: a new user namespace as uid and gid 1000, the relay's host
+name, every capability dropped), so each command runs in Codex's sandbox nested in that namespace. The answers are
+the same as for a chat. A control checks that the start really enters the namespace. The relay launcher in front of
+Bubblewrap is left out: it enters an AppArmor label and drops capabilities, and both only take abilities away. The
+test uses the image's `/opt/codex-sandbox/relay-bwrap`, else the `bwrap` in the Codex package. On a kernel with
+Ubuntu's `kernel.apparmor_restrict_unprivileged_userns` on (GitHub's Ubuntu 24.04 runners), the nested sandbox gets
+no capabilities in its user namespace and cannot set up its loopback, so no command runs; the class turns the switch
+off for its own run and puts it back after. Home Assistant OS has no such switch, and turning it off only gives the
+sandbox more power, so a refused probe proves at least as much. Outside a privileged container the class cannot
+change the switch and fails at start.
+
+It runs in the Verification checks container job. By hand, with the pinned package unpacked anywhere:
+
+```sh
+HA_TEST_CODEX=/path/to/codex-package/bin/codex python -m unittest codex-cli-worker/tests/test_sandbox_sockets.py -v
+```
+
+It needs Python 3.12 or later with the worker's test packages, no account and no network. Without the pinned
+CLI each test is skipped. The container job sets `HA_TEST_REQUIRE_CODEX=1`, which turns a missing or
+wrong-version CLI into a failure, so a move of the Codex pin must also move `PINNED_VERSION` in
+`test_live_proofs.py` (`test_fork_pins.py` checks that the two agree). Under `pytest`, the Home Assistant test
+plugin blocks sockets; these tests allow only 127.0.0.1 and Unix sockets for themselves.
+
 ### HAOS parser and policy ABI
 
 HAOS 16–18.5 pins AppArmor 3.1.7. The profile declares `abi <abi/3.0>,` so
@@ -62,7 +106,7 @@ proc views. A same-label positive control proves the synthetic marker was
 readable before the stack. Removing only the stack permission must make the
 guard refuse execution. Missing enforcement support fails the job; it never
 silently skips. The job removes only its own profiles and fixture files.
-This is loaded-policy evidence; the lead must still perform the HAOS version
+This is loaded-policy evidence; the maintainer must still perform the HAOS version
 update and enrolled phone acceptance below.
 
 Both relay paths map outside root to UID/GID 1000 inside their outer user
@@ -91,14 +135,13 @@ and NNP, then execs the fixed native `bwrap.exec`. A refused or missing stack fa
 it never starts native Bubblewrap under only the relay label. The chat tool path retains
 its existing profile. The public mask/proc wrapper is unchanged.
 
-**Install a version update before testing an AppArmor change.** On the lab's Supervisor,
-`ha apps rebuild` does not reload the profile. A same-version rebuild does not reload it. The release/lead must use a bumped candidate
-version and an add-on version update, then confirm the os-agent profile-load record. Do not
-count a rebuild against a stale loaded profile as a test of this policy. This card changes
-no version itself. The HAOS worker container is `app_local_codex_cli_worker`, not an `addon_`
+**Install a version update before testing an AppArmor change.** On the test machine's Supervisor,
+`ha apps rebuild` does not reload the profile. A same-version rebuild does not reload it. Use a candidate
+with a higher version and an add-on version update, then confirm the os-agent profile-load record. Do not
+count a rebuild against a stale loaded profile as a test of this policy. The HAOS worker container is `app_local_codex_cli_worker`, not an `addon_`
 prefix. If the existing SSH add-on has no Docker CLI/socket, stop that step and report
 not run; do not disable its protection or add an unreviewed endpoint to get around it.
-No `aa-exec` or source tests are needed in the image. From the lead's SSH add-on shell, select the
+No `aa-exec` or source tests are needed in the image. From the maintainer's SSH add-on shell, select the
 candidate worker container (not a host-wide profile change) and run:
 
 ```sh
@@ -164,7 +207,7 @@ Supervisor rewrites the root declaration only. The stack target is computed from
 kernel's current relay label; the permission pattern uses AppArmor's `profile_name` expansion.
 The image does not use a hard-coded local/repository prefix or an unconfined transition.
 
-The lead must additionally use the real phone relay to deny an escalation, allow a fresh one once,
+The maintainer must additionally use the real phone relay to deny an escalation, allow a fresh one once,
 verify the ordinary sandboxed read and Core API call using configured variables, and repeat after
 an add-on image update: the app should reconnect with the same enrollment and no new pairing code.
 The key is relay URL + account + stable initialize client name `ha_codex`, not the display/UTS name.
@@ -199,7 +242,7 @@ Once the pinned upstream CLI recognizes both proc error formats, remove the wrap
 On HAOS's kernel features, ABI 3.0 enables network_v8 mediation for both chat
 and relay tool labels. Those labels retain Unix sockets and raw netlink only;
 AF_INET/AF_INET6/packet socket creation in sandboxed commands is refused.
-Approved escalations retain the existing parent/relay policy. The lead must
+Approved escalations retain the existing parent/relay policy. The maintainer must
 run one ordinary chat-page sandboxed shell read plus the history MCP tool on
 HAOS after a profile reload. Runner tests do not substitute for that acceptance.
 
@@ -212,5 +255,5 @@ errno 13. The pinned command/exec rows can instead hide that pid in Codex's pid
 namespace, where errno 2 is not evidence of ptrace enforcement. Ubuntu runner
 kernel features, including its socket mediation, differ from HAOS. N10 now
 requires EACCES (13) on every direct-row proc read. Pinned command/exec rows
-retain accepted denials 1, 2 and 13. The named lead exception permits only this
+retain accepted denials 1, 2 and 13. The named maintainer exception permits only this
 assertion in the existing CI helper; loaded-policy CI proves it on real profiles.

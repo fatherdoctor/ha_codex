@@ -12,8 +12,31 @@ Each screenshot exists in four versions: `light` and `dark` color scheme, `deskt
 | `chat` | The chat page with one saved conversation open: a question about an automation and the answer that explains the change. |
 | `confirm` | A command that waits for one confirmation: what changes, where, the effect, the working folder, the command, and **Allow once** and **Deny**. The phone versions start lower in the card, so that both buttons are in view. |
 | `schedule-proposal` | **Settings** > **Scheduled runs**: a schedule that an agent proposed, which stays off until you approve it, and an approved schedule. |
-| `mailbox` | **Settings** > **Local mailbox**: a message from the lead agent and the owner's reply. |
 | `sign-in` | **Settings** > **ChatGPT account** while a sign-in waits for its code. The code and the QR code are blurred. |
+
+## The screenshots
+
+Each row shows one screen: light and dark on a desktop, then light and dark on a phone.
+
+### Chat
+
+<p><img src="chat-light-desktop.png" alt="Chat, light, desktop" width="360"> <img src="chat-dark-desktop.png" alt="Chat, dark, desktop" width="360"></p>
+<p><img src="chat-light-phone.png" alt="Chat, light, phone" width="180"> <img src="chat-dark-phone.png" alt="Chat, dark, phone" width="180"></p>
+
+### Confirmation
+
+<p><img src="confirm-light-desktop.png" alt="Confirmation, light, desktop" width="360"> <img src="confirm-dark-desktop.png" alt="Confirmation, dark, desktop" width="360"></p>
+<p><img src="confirm-light-phone.png" alt="Confirmation, light, phone" width="180"> <img src="confirm-dark-phone.png" alt="Confirmation, dark, phone" width="180"></p>
+
+### Scheduled runs
+
+<p><img src="schedule-proposal-light-desktop.png" alt="Scheduled runs, light, desktop" width="360"> <img src="schedule-proposal-dark-desktop.png" alt="Scheduled runs, dark, desktop" width="360"></p>
+<p><img src="schedule-proposal-light-phone.png" alt="Scheduled runs, light, phone" width="180"> <img src="schedule-proposal-dark-phone.png" alt="Scheduled runs, dark, phone" width="180"></p>
+
+### Sign-in
+
+<p><img src="sign-in-light-desktop.png" alt="Sign-in, light, desktop" width="360"> <img src="sign-in-dark-desktop.png" alt="Sign-in, dark, desktop" width="360"></p>
+<p><img src="sign-in-light-phone.png" alt="Sign-in, light, phone" width="180"> <img src="sign-in-dark-phone.png" alt="Sign-in, dark, phone" width="180"></p>
 
 ## Not taken yet
 
@@ -48,3 +71,7 @@ kill %1
 ```
 
 The script writes to `screenshots/`. Set `SCREENSHOT_DIR` to write somewhere else.
+
+Every image in the repository must be used by a file, as this page uses the ones above.
+`python scripts/check_unreferenced_images.py` lists any image that no file uses, and the test suite runs it.
+Pictures made only for a pull request belong in the pull request, not in this folder.

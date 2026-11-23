@@ -16,6 +16,8 @@ async function testApprovals(browser, output, errors) {
   await approvalPage.locator("#message").fill("Request permission to read sensor history");
   await approvalPage.getByRole("button", {name: "Send message", exact: true}).click();
   await approvalPage.getByRole("button", {name: "Allow once", exact: true}).waitFor();
+  // CX-04-FB-THINK: the step list starts closed, and the waiting request stays visible outside it.
+  assert.equal(await approvalPage.locator("#activity-steps").isHidden(), true);
   // CX-FB4-APPROVE: the waiting request is the last child of the latest exchange, below the working lines.
   assert.equal(await approvalPage.locator(".exchange:last-child > :last-child").evaluate(el => el.classList.contains("permission-card")), true);
   const pendingBox = await approvalPage.locator(".permission-card").boundingBox();
@@ -125,6 +127,26 @@ async function testApprovals(browser, output, errors) {
   assert.match(await approvalPage.locator(".permission-card").textContent(), /cannot be allowed here/);
   await approvalPage.getByRole("button", {name: "Deny", exact: true}).click();
   await approvalPage.locator(".permission-card strong").filter({hasText: /^Denied$/}).waitFor();
+  // CX-TOOL-CARD-ANY: a tool of a ChatGPT app gets the same card, on a desktop and on a phone.
+  for (const viewport of [{width: 1440, height: 950}, {width: 390, height: 844}]) {
+    // The chat starts at desktop width, where the side bar and its New chat button show; then the screen narrows.
+    await approvalPage.setViewportSize({width: 1440, height: 950});
+    await approvalPage.locator("#new-chat").click();
+    await approvalPage.locator("#message").fill("Request permission to use a ChatGPT app");
+    await approvalPage.setViewportSize(viewport);
+    if (await approvalPage.locator("body").evaluate(body => body.classList.contains("sidebar-open")))
+      await approvalPage.locator("#close-sidebar").click();
+    await approvalPage.getByRole("button", {name: "Send message", exact: true}).click();
+    await approvalPage.getByRole("button", {name: "Allow once", exact: true}).waitFor();
+    const appCard = approvalPage.locator(".permission-card");
+    assert.match(await appCard.textContent(), /Tool: codex_apps\.create_pull_request/);
+    assert.match(await appCard.textContent(), /Let GitHub run its tool create_pull_request/);
+    assert.equal(JSON.parse(await approvalPage.locator(".permission-command").textContent()).draft, true);
+    const cardBox = await appCard.boundingBox();
+    assert.ok(cardBox.x >= 0 && cardBox.x + cardBox.width <= viewport.width + 1, "the card fits the screen");
+    await approvalPage.getByRole("button", {name: "Allow once", exact: true}).click();
+    await approvalPage.locator(".permission-card strong").filter({hasText: /^Allowed once$/}).waitFor();
+  }
   await approvalPage.close();
 }
 module.exports = testApprovals;

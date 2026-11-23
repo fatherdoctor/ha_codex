@@ -9,6 +9,7 @@ from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
 
+from app_server_fixture import StubAppServer
 from test_server import server
 
 
@@ -83,6 +84,20 @@ class ActivityStepTests(unittest.TestCase):
         self.assertEqual(tool["text"], "codex_apps · github.get_repo")
         self.assertEqual(plan["text"], "☑ Read config\n☐ Edit")
         self.assertEqual(reasoning["id"], "item_0")
+
+    def test_plain_text_final_answer_is_not_an_activity_message(self):
+        """The final answer belongs to the reply, even if commentary used the same words."""
+        for event in (
+            item("agent_message", "first", phase="commentary", text="Checking the automation."),
+            item("agent_message", "second", phase="commentary", text="The automation is valid."),
+            item("agent_message", "answer", phase="final_answer", text="The automation is valid."),
+        ):
+            server.record_activity_event("t", event)
+        messages = self.steps()["steps"]
+        self.assertEqual([(step["id"], step["text"]) for step in messages], [
+            ("first", "Checking the automation."), ("second", "The automation is valid."),
+        ])
+        self.assertEqual([step["phase"] for step in messages], ["commentary", "commentary"])
 
     def test_file_change_reads_as_made_only_once_it_was_made(self):
         """A change that waits, as for permission, or that was refused is not reported as done."""
@@ -224,6 +239,46 @@ class ActivityApiTests(unittest.TestCase):
         self.assertNotEqual(fresh["turn_id"], turn_id)
         self.assertEqual(fresh["steps"], [])
 
+    def test_an_earlier_turn_returns_its_own_saved_steps(self):
+        """With `turn`, an earlier answer gets its saved steps; only a turn id of this chat is read."""
+        task_id = self.create()
+        first = server.tasks[task_id]["current_turn_id"]
+        server.update_task(task_id, status="running")
+        server.start_activity(task_id, first)
+        server.record_activity_event(task_id, command("c1", "/bin/sh -lc 'ls'"))
+        server.update_task(task_id, status="completed", session_id=self.session_id, summary="Done",
+                           completed_at=server.utc_now())
+        server.finish_activity(task_id)
+        server.active_task_runners.discard(task_id)
+        response = self.client.post(f"/tasks/{task_id}/continue", json={"message": "Go on"}, headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        second = server.tasks[task_id]["current_turn_id"]
+        server.update_task(task_id, status="running")
+        server.start_activity(task_id, second)
+        server.record_activity_event(task_id, item("reasoning", "r0", text="Looking again"))
+
+        def get_turn(turn_id, after=0):
+            return self.client.get(f"/tasks/{task_id}/activity?turn={turn_id}&after={after}", headers=self.headers)
+
+        earlier = get_turn(first).json
+        self.assertEqual((earlier["turn_id"], earlier["running"]), (first, False))
+        self.assertEqual([step["text"] for step in earlier["steps"]], ["ls"])
+        self.assertEqual(get_turn(first, after=earlier["seq"]).json["steps"], [])
+        live = get_turn(second).json
+        self.assertTrue(live["running"])
+        self.assertEqual([step["text"] for step in live["steps"]], ["Looking again"])
+        self.assertEqual([step["text"] for step in self.get(task_id).json["steps"]], ["Looking again"])
+        other = "0" * 32
+        for wanted in ("../" + first, first.upper(), first[:-1], "legacy", other, ""):
+            with self.subTest(turn=wanted):
+                self.assertEqual(get_turn(wanted).status_code, 404)
+        # An id of the right form that belongs to this chat but saved no steps reads as no steps.
+        server.tasks[task_id]["turns"][0]["turn_id"] = other
+        self.assertEqual(get_turn(other).json["steps"], [])
+        # A turn id that is not of the turn id form is never made into a path, even when the chat lists it.
+        server.tasks[task_id]["turns"][0]["turn_id"] = "../escape"
+        self.assertEqual(get_turn("../escape").status_code, 404)
+
     def test_failed_run_records_its_summary(self):
         """A failed run stores an outcome step that carries the task's failure summary."""
         task_id = self.create()
@@ -301,6 +356,37 @@ class ActivityApiTests(unittest.TestCase):
                          [("plan", "☑ Read the automation\n☐ Call the API with [redacted]"), ("command", "ls")])
         self.assertEqual(steps[0]["index"], first[0]["index"])
 
+    def test_streamed_reasoning_summary_writes_one_log_line_for_its_item(self):
+        """Live summary updates reach the step, but codex.log holds the reasoning item only once, when it completes."""
+        task_id = self.create()
+        turn_id = server.tasks[task_id]["current_turn_id"]
+        server.update_task(task_id, status="running")
+        server.start_activity(task_id, turn_id)
+        stdin = type("Transport", (io.StringIO,), {"close": lambda self: None})()
+        proc = type("Process", (), {"stdin": stdin, "poll": lambda _: None})()
+        session = server.create_approval_session(
+            task_id, proc, "Review", self.root / "final.json", None, {}, server.DEFAULT_OPTIONS)
+        session.thread_id, session.turn_id = "thread", "turn"
+        log = server.get_task_dir(task_id) / "codex.log"
+
+        def receive(method, **fields):
+            session.receive({"method": method, "params": {"threadId": "thread", "turnId": "turn", **fields}})
+
+        def reasoning_lines():
+            text = log.read_text(encoding="utf-8") if log.exists() else ""
+            return [line for line in text.splitlines() if '"reasoning"' in line]
+
+        receive("item/started", item={"id": "thought", "type": "reasoning", "summary": []})
+        started = len(reasoning_lines())
+        for _ in range(100):
+            receive("item/reasoning/summaryTextDelta", itemId="thought", summaryIndex=0, delta="word")
+        self.assertEqual(self.get(task_id).json["steps"][0]["text"], "word" * 100)
+        self.assertEqual(len(reasoning_lines()), started)
+        receive("item/completed", item={"id": "thought", "type": "reasoning", "summary": ["word" * 100]})
+        lines = reasoning_lines()
+        self.assertEqual(len(lines), started + 1)
+        self.assertEqual(sum(line.count("word") for line in lines), 100)
+
     def test_deleting_a_chat_forgets_its_steps(self):
         """Deleting a chat also drops the steps held in memory for it."""
         task_id = self.create()
@@ -320,13 +406,12 @@ class ReasoningSummaryOptionTests(unittest.TestCase):
         for configured, expected in (("detailed", "detailed"), ("none", "none"), (None, "concise"), ("auto", "concise"), ("  Concise ", "concise")):
             with self.subTest(configured=configured):
                 self.assertEqual(server.reasoning_summary({"reasoning_summary": configured}), expected)
-        with (
-            patch.object(server, "tasks", {"t": {"task_id": "t", "turns": [], "chat_settings": server.DEFAULT_CHAT_SETTINGS}}),
-            patch.object(server, "read_options", return_value={"reasoning_summary": "detailed"}),
-        ):
-            args = server.build_codex_args("t", Path("p"), Path("f"), None)
-        self.assertIn('model_reasoning_summary="detailed"', args)
-        self.assertIn('model_reasoning_effort="medium"', args)
+        with patch.object(server, "tasks", {"t": {"task_id": "t", "turns": [], "chat_settings": server.DEFAULT_CHAT_SETTINGS}}):
+            session = server.create_approval_session(
+                "t", StubAppServer("thread"), "Prompt", Path("final"), None, {}, {"reasoning_summary": "detailed"},
+            )
+        self.assertEqual(session.turn_params["summary"], "detailed")
+        self.assertEqual(session.turn_params["effort"], "medium")
 
 
 if __name__ == "__main__":

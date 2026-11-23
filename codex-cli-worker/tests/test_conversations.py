@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import copy
-import io
 import json
 import re
 import tempfile
@@ -11,6 +10,7 @@ from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
 
+from app_server_fixture import StubAppServer
 from test_server import server
 
 
@@ -27,6 +27,8 @@ class ConversationTests(unittest.TestCase):
         self.stack.enter_context(patch.object(server, "task_root", return_value=self.root / "tasks"))
         self.stack.enter_context(patch.object(server, "TASK_STATE_FILE", self.root / "index.json"))
         self.stack.enter_context(patch.object(server, "CODEX_HOME", self.root / "codex"))
+        # Listing chats reads the schedule store under DATA_ROOT; keep it off the real /data.
+        self.stack.enter_context(patch.object(server, "DATA_ROOT", self.root / "data"))
         self.stack.enter_context(patch.object(server, "api_token", return_value="test-token"))
         self.runner = self.stack.enter_context(patch.object(server, "start_background_task"))
         self.client = server.app.test_client()
@@ -85,15 +87,22 @@ class ConversationTests(unittest.TestCase):
                 self.assertEqual(server.tasks[task_id]["status"], "queued")
                 self.finish(task_id)
 
+    def codex_session(self, task_id, session_id=None):
+        """Return the approval session the worker would make for this chat, without starting it."""
+        return server.create_approval_session(
+            task_id, StubAppServer(session_id or self.session_id), "Prompt", self.root / "final",
+            session_id, {}, server.read_options(),
+        )
+
     def test_model_settings_persist_and_apply_to_new_and_resumed_runs(self):
         """A chat's model and reasoning level are saved, survive a restart, and reach Codex on new and resumed runs."""
         settings = {"model": "gpt-6.1-terra", "reasoning_effort": "ultra"}
         response = self.post("/tasks", {"prompt": "Review", "chat_settings": settings})
         self.assertEqual(response.status_code, 200)
         task_id = response.json["task_id"]
-        args = server.build_codex_args(task_id, self.root / "prompt", self.root / "final", None)
-        self.assertEqual(args[args.index("--model") + 1], "gpt-6.1-terra")
-        self.assertIn('model_reasoning_effort="ultra"', args)
+        session = self.codex_session(task_id)
+        self.assertEqual(session.thread_params["model"], "gpt-6.1-terra")
+        self.assertEqual(session.turn_params["effort"], "ultra")
         self.finish(task_id)
         first = copy.deepcopy(server.tasks[task_id]["turns"][0])
         settings = {"model": "gpt-5.6-luna", "reasoning_effort": "max"}
@@ -106,10 +115,10 @@ class ConversationTests(unittest.TestCase):
         task = self.client.get(f"/tasks/{task_id}", headers=self.headers).json["task"]
         self.assertEqual(task["chat_settings"], settings)
         self.assertEqual(self.post(f"/tasks/{task_id}/continue", {"message": "Next"}).status_code, 200)
-        args = server.build_codex_args(task_id, self.root / "prompt", self.root / "final", self.session_id)
-        self.assertEqual(args[args.index("--model") + 1], "gpt-5.6-luna")
-        self.assertIn('model_reasoning_effort="max"', args)
-        self.assertEqual(args[-3:], ["resume", self.session_id, "-"])
+        session = self.codex_session(task_id, self.session_id)
+        self.assertEqual(session.thread_params["model"], "gpt-5.6-luna")
+        self.assertEqual(session.turn_params["effort"], "max")
+        self.assertEqual(session.thread_params["threadId"], self.session_id)
         self.assertEqual(server.tasks[task_id]["turns"][0], first)
 
     def test_settings_inherit_defaults_without_leaking_between_chats(self):
@@ -120,8 +129,8 @@ class ConversationTests(unittest.TestCase):
             self.assertEqual(server.tasks[task_id]["turns"][0]["execution_settings"], {"model": "gpt-5.6-sol", "reasoning_effort": "high"})
             # An option edit after queuing must not change the queued run.
             options["codex_model"] = "gpt-5.6-terra"
-            args = server.build_codex_args(task_id, self.root / "p", self.root / "f", None)
-            self.assertEqual(args[args.index("--model") + 1], "gpt-5.6-sol")
+            session = self.codex_session(task_id)
+            self.assertEqual(session.thread_params["model"], "gpt-5.6-sol")
             self.finish(task_id)
             self.post(f"/tasks/{task_id}/settings", {"chat_settings": {"model": "gpt-6-astra", "reasoning_effort": "max"}})
             other = self.create("Separate chat")
@@ -145,8 +154,8 @@ class ConversationTests(unittest.TestCase):
         self.assertEqual(self.post(f"/tasks/{task_id}/continue", {"message": "Next"}).status_code, 200)
         self.assertEqual(server.tasks[task_id]["turns"][-1]["execution_settings"], bumped)
         self.assertEqual(server.tasks[task_id]["chat_settings"], bumped)
-        args = server.build_codex_args(task_id, self.root / "prompt", self.root / "final", self.session_id)
-        self.assertEqual(args[args.index("--model") + 1], "gpt-5.6-sol")
+        session = self.codex_session(task_id, self.session_id)
+        self.assertEqual(session.thread_params["model"], "gpt-5.6-sol")
         self.finish(task_id)
         # A page that was open during the update still sends the old model.
         response = self.post(f"/tasks/{task_id}/continue", {"message": "Again", "chat_settings": {"model": "gpt-5.5"}})
@@ -181,8 +190,8 @@ class ConversationTests(unittest.TestCase):
             with self.subTest(model=model), patch.object(server, "read_options", return_value=options):
                 task_id = self.create()
                 self.assertEqual(server.tasks[task_id]["turns"][0]["execution_settings"]["reasoning_effort"], "medium")
-                args = server.build_codex_args(task_id, self.root / "prompt", self.root / "final", None)
-                self.assertIn('model_reasoning_effort="medium"', args)
+                session = self.codex_session(task_id)
+                self.assertEqual(session.turn_params["effort"], "medium")
                 self.finish(task_id)
 
     def test_invalid_settings_are_rejected_without_mutation(self):
@@ -216,7 +225,7 @@ class ConversationTests(unittest.TestCase):
         task_id = self.create()
         self.assertEqual(self.post(f"/tasks/{task_id}/settings", {"chat_settings": {}}).status_code, 409)
         catalog = self.client.get("/chat-options", headers=self.headers).json
-        self.assertEqual(len(catalog["models"]), 8)
+        self.assertEqual(len(catalog["models"]), 9)
         efforts = {model["id"]: model["efforts"] for model in catalog["models"]}
         self.assertEqual(efforts["gpt-6.1-sol"], ["low", "medium", "high", "xhigh", "max", "ultra"])
         self.assertEqual(efforts["gpt-6.1-terra"], ["low", "medium", "high", "xhigh", "max", "ultra"])
@@ -256,7 +265,7 @@ class ConversationTests(unittest.TestCase):
                 task_id = response.json["task_id"]
                 self.assertEqual(server.tasks[task_id]["turns"][0]["execution_settings"],
                                  {"model": "default", "reasoning_effort": highest})
-                self.assertNotIn("--model", server.build_codex_args(task_id, self.root / "prompt", self.root / "final", None))
+                self.assertNotIn("model", self.codex_session(task_id).thread_params)
                 self.finish(task_id)
         # A model named in the add-on options is the one, whatever the CLI would pick.
         with (patch.object(server, "read_options", return_value={"codex_model": "gpt-6-sol"}),
@@ -427,36 +436,19 @@ class ConversationTests(unittest.TestCase):
         output_dirs = []
         manifests = [{}, {"first.yaml": {"sha256": "one"}}, {"first.yaml": {"sha256": "one"}}, {"first.yaml": {"sha256": "one"}, "second.yaml": {"sha256": "two"}}]
 
-        class FakeProcess:
-            """A stand-in for the Codex process that reports the session and writes a completed answer."""
+        def codex(*_args, **_kwargs):
+            output_dirs.append(server.get_run_dir(task_id))
+            return StubAppServer(self.session_id, {"status": "completed", "summary": "Saved response"})
 
-            def __init__(self, args, **kwargs):
-                """Prepare the event stream with the session id and note where the final answer goes."""
-                self.stdin = io.StringIO()
-                self.stdout = io.StringIO(json.dumps({"type": "thread.started", "thread_id": self_session}) + "\n")
-                self.stderr = io.StringIO("")
-                self.returncode = 0
-                self.output = Path(args[args.index("--output-last-message") + 1])
-                output_dirs.append(self.output.parent)
-            def poll(self):
-                """Report that the process has exited."""
-                return 0
-            def wait(self, timeout=None):
-                """Write the final answer and report a clean exit."""
-                self.output.write_text(json.dumps({"status": "completed", "summary": "Saved response", "details": "", "question": ""}))
-                return 0
-
-        self_session = self.session_id
         with (
             patch.object(server, "CONFIG_ROOT", self.root),
             patch.object(server, "build_manifest", side_effect=manifests),
             patch.object(server, "sandbox_readiness", return_value={"required": True, "ready": True}),
             patch.object(server, "read_options", return_value={"task_timeout_seconds": 30, "auto_save_lovelace": False}),
             patch.object(server, "validate_changed_files", return_value=[]),
-            patch.object(server.subprocess, "Popen", side_effect=FakeProcess),
+            patch.object(server.subprocess, "Popen", side_effect=codex),
             patch.object(server, "fire_ha_event", return_value=(True, "")),
             patch.object(server, "notify"), patch.object(server, "refresh_usage_status_async"),
-            patch.object(server, "uses_user_approvals", return_value=False),
         ):
             server.run_task(task_id, "Review my automation")
             server.active_task_runners.discard(task_id)
@@ -583,7 +575,7 @@ class ConversationTests(unittest.TestCase):
         self.assertIn(b'assets/chat.js', response.data)
         # The Markdown parser is bundled, so the chat never loads a script from another server.
         scripts = re.findall(rb'<script src="([^"]+)"', response.data)
-        self.assertEqual(scripts, [b"assets/text-size.js", b"assets/vendor/marked.umd.js", b"assets/markdown.js", b"assets/chat.js", b"assets/studio.js", b"assets/schedules.js", b"assets/full_access.js"])
+        self.assertEqual(scripts, [b"assets/text-size.js", b"assets/vendor/marked.umd.js", b"assets/markdown.js", b"assets/chat.js", b"assets/studio.js", b"assets/schedules.js", b"assets/full_access.js", b"assets/update_banner.js"])
         for name in ("text-size.js", "chat.js", "chat.css", "studio.js", "studio.css", "markdown.js", "vendor/marked.umd.js", "vendor/marked.LICENSE.md"):
             with self.client.get("/assets/" + name) as asset:
                 self.assertEqual(asset.status_code, 200)

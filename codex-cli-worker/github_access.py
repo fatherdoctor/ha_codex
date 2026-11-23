@@ -9,7 +9,6 @@ Nothing here runs a model. Only state names and HTTP status codes are logged, ne
 """
 from __future__ import annotations
 
-import hmac
 import json
 import os
 import re
@@ -45,7 +44,6 @@ GUARD_PATH = "/usr/share/ha_codex/push_guard.py"
 ASKPASS_PATH = "/usr/local/bin/codex-github-askpass"
 CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 CA_DIR = "/etc/ssl/certs"
-ALLOW_MARK = "guard: allow"
 OPERATIONS = ("repos", "fetch", "pull", "push", "clone", "link")
 BAD_STATES = ("near_expiry", "expired", "revoked", "access_changed", "failed")
 STATE_WORDS = {
@@ -1086,9 +1084,9 @@ class GitHubService:
 
     # -- the github_git tool -------------------------------------------------------------------------------
     def dispatch(self, payload: Any) -> dict[str, Any]:
-        if not isinstance(payload, dict) or set(payload) != {"operation", "arguments", "capability"}:
-            raise GitHubError("A GitHub request needs exactly operation, arguments and capability.")
-        task_id = self.find_task(payload["capability"])
+        if not isinstance(payload, dict) or set(payload) != {"operation", "arguments", "thread_id"}:
+            raise GitHubError("A GitHub request needs exactly operation, arguments and thread_id.")
+        task_id = self.find_task(payload["thread_id"])
         if not task_id:
             raise GitHubError("This exchange has ended.")
         operation, args = payload["operation"], payload["arguments"]
@@ -1263,11 +1261,6 @@ def register(worker, service: GitHubService) -> GitHubService:
     return service
 
 
-def find_task_by_capability(ha_data, capability: Any) -> str | None:
-    """The running exchange that holds this capability, the same check the scheduling tools use."""
-    if not isinstance(capability, str) or not capability or not capability.isascii():
-        return None
-    with ha_data.lock:
-        task_id = next((key for key, value in ha_data.capabilities.items()
-                        if hmac.compare_digest(value, capability)), None)
-    return task_id if task_id and ha_data.active(task_id, capability) else None
+def find_task_by_thread(ha_data, thread_id: Any) -> str | None:
+    """The chat whose running exchange the thread id names, the same check the scheduling tools use."""
+    return ha_data.exchange_for(thread_id)[0]
