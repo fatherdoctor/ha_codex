@@ -71,7 +71,32 @@ class CodexWorkdirTests(unittest.TestCase):
         self.assertEqual(list(elsewhere.iterdir()), [], "nothing is made through the link")
         self.assertEqual(server.codex_workdir(), str(self.config))
         printed.assert_called_once()
-        self.assertIn("has a link in its path", printed.call_args.args[0])
+        line = printed.call_args.args[0]
+        self.assertIn(f"has a link in its path, at {self.media / '.agents'};", line)
+        # Codex cannot build its sandbox past a link named .agents: the line says so, and how to end it.
+        self.assertIn(f"Until the link {self.media / '.agents'} is removed, Codex cannot run commands", line)
+        self.assertIn("Read only still works.", line)
+
+    def test_a_link_at_the_last_part_is_named_and_leaves_the_sandbox_alone(self) -> None:
+        """A link at /media/.agents/codex is named in the line; it does not stop the sandbox, so no warning."""
+        elsewhere = self.root / "elsewhere"
+        elsewhere.mkdir()
+        self.workdir.parent.mkdir(parents=True)
+        self.workdir.symlink_to(elsewhere, target_is_directory=True)
+        with patch("builtins.print") as printed:
+            server.ensure_codex_workdir()
+        printed.assert_called_once()
+        line = printed.call_args.args[0]
+        self.assertIn(f"has a link in its path, at {self.workdir};", line)
+        self.assertNotIn("Until the link", line)
+
+    def test_a_link_to_nothing_higher_in_the_path_is_named_too(self) -> None:
+        """A broken link at /media/.agents still stops the sandbox, so the line warns about it as well."""
+        (self.media / ".agents").symlink_to(self.root / "missing", target_is_directory=True)
+        with patch("builtins.print") as printed:
+            server.ensure_codex_workdir()
+        self.assertEqual(server.codex_workdir(), str(self.config))
+        self.assertIn(f"Until the link {self.media / '.agents'} is removed", printed.call_args.args[0])
 
     def test_a_link_higher_in_the_path_to_a_folder_with_codex_is_refused(self) -> None:
         """A link at /media/.agents to a folder that already holds codex/ is refused, not only a link at codex."""
@@ -91,6 +116,7 @@ class CodexWorkdirTests(unittest.TestCase):
         self.assertFalse(self.media.exists())
         self.assertEqual(server.codex_workdir(), str(self.config))
         printed.assert_called_once()
+        self.assertIn("is missing or is not a plain folder", printed.call_args.args[0])
 
     def test_the_folder_is_inside_a_writable_root(self) -> None:
         """Writing in the working folder needs no approval: it is under one of the task's writable roots."""
