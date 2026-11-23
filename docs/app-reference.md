@@ -351,7 +351,7 @@ From **0.1.63**, the worker no longer archives the whole configuration folder be
 - Secret files are never copied: every `secrets.yaml` and every file under `.storage`, where Home Assistant keeps sign-ins, tokens and integration credentials beside dashboards. The full snapshot leaves them out, Codex is told not to copy them, and the worker deletes such a copy when the message ends, in every permission mode. A message that you stop loses the copies at once; a message that a restart cuts off loses them at the next backup cleanup, when the app starts or within the hour. A permission card for a change to one of these files shows the change while it waits for your answer; after the answer, or when the request expires, the chat's record keeps the file's path but not the changed lines. To undo a change to one of them, use a Home Assistant backup.
 - In a sandbox (Ask for approval, Approve for me and Read only), `/config/.storage` is read-only and `/config/secrets.yaml` is hidden. A `secrets.yaml` in another folder, such as `esphome/secrets.yaml`, gets no copy (above) but is not hidden: a sandboxed command can read and change it without a request. Codex can change these files only through a permission request. In Ask for approval, you see that request as a card and decide. In Approve for me, Codex's reviewer decides, and in Full access nobody is asked: no app-side check can stop a change there, because Codex runs without the sandbox.
 
-Codex needs to be able to write to the backup folder. In `workspace-write` mode the app adds that one exchange's backup folder to the sandbox's writable places, beside `/config`, `/share` and `/media` and the chat's files folder (see [Files Codex makes for you](#files-codex-makes-for-you)); the rest of `/data` stays read-only to Codex, and the private files the sandbox hides stay hidden. In `read-only` mode Codex is given no backup folder; any explicitly approved writes still need a separate recovery plan. A per-file copy depends on Codex following the instruction; if a file was changed without one, restore it from a Home Assistant backup.
+Codex needs to be able to write to the backup folder. In `workspace-write` mode the app adds that one exchange's backup folder to the sandbox's writable places, beside `/config`, `/share`, `/media`, the app's own folder `/addon_config` and the chat's files folder (see [Files Codex makes for you](#files-codex-makes-for-you)); the rest of `/data` stays read-only to Codex, and the private files the sandbox hides stay hidden. In `read-only` mode Codex is given no backup folder; any explicitly approved writes still need a separate recovery plan. A per-file copy depends on Codex following the instruction; if a file was changed without one, restore it from a Home Assistant backup.
 
 **Full snapshot (optional).** Turn on **Full snapshot before every message** (`full_snapshot`) to archive tracked files, excluding secret files (every `secrets.yaml` and every file under `.storage`), to `snapshot-before.tar.gz` in the exchange's folder before Codex starts. When a change fails validation, the worker can then take a missing per-file copy from that archive when a matching file is available. The exclusions below still apply, so this is not a complete Home Assistant backup. Creating the archive adds a wait before every message that grows with the amount of tracked data.
 
@@ -366,7 +366,7 @@ Codex needs to be able to write to the backup folder. In `workspace-write` mode 
 ## Sandbox
 
 - `read-only`: Codex can inspect files. Writes and shell networking require permission for the specific action.
-- `workspace-write`: Codex can edit the mounted `/config` workspace, the shared `/share` folder and the `/media` folder, the same `/share` and `/media` access the Claude add-on has, and can save files for you in the chat's own files folder under `/data`. Shell networking and writes elsewhere require permission. This remains the default setting.
+- `workspace-write`: Codex can edit the mounted `/config` workspace, the shared `/share` folder and the `/media` folder, the same `/share` and `/media` access the Claude add-on has, and the app's own folder `/addon_config`, where its `AGENTS.md` is, and can save files for you in the chat's own files folder under `/data`. Shell networking and writes elsewhere require permission. This remains the default setting.
 
 **Working folder.** Codex starts each chat in `/media/.agents/codex`, its own folder for notes, scratch files and
 drafts, so they stay out of Home Assistant's configuration. The working folder is in `/media` because the automatic
@@ -374,7 +374,8 @@ backup leaves the media folder out unless you include it in your backup settings
 backup larger, and they are not restored from a backup. Keep instructions you need in the app's own `AGENTS.md`
 (Settings), which the backup keeps.
 The app creates the folder at start when it is missing and never moves, empties or rewrites what is in it. What Codex
-may write without a request is `/config`, `/share`, `/media` (with `/media/.agents`), the exchange's backup folder and the chat's files folder. Other apps keep their
+may write without a request is `/config`, `/share`, `/media` (with `/media/.agents`), `/addon_config` (the app's own
+folder, where its `AGENTS.md` is), the exchange's backup folder and the chat's files folder. Other apps keep their
 files under `/share` and `/media` too (another assistant's folder, a clone of a repository, recordings); the sandbox
 does not stop a write there in `workspace-write`, so the starter `AGENTS.md` tells Codex to ask first, and your own
 `AGENTS.md` can say more. When the folder cannot be created, when `/media` is missing, or when any part of the path is
@@ -758,9 +759,9 @@ when one is there; the app neither writes nor moves that file. Codex reads the a
 folder's file after it, so where the two disagree, the working folder's file wins. An `AGENTS.md` left in `/config`
 is not read while Codex works from `/media/.agents/codex`. The working folder's file is in `/media`, which is
 writable, so Codex or another app with `/media` access can change it without an approval card, and the automatic
-backup does not keep it; the approval described below covers the app's file only.
+backup does not keep it.
 
-The editor under **Settings** writes the file without a question. The folder is not one of the places Codex may write on its own, so when you ask a chat to change the file, Codex asks for your approval first.
+The editor under **Settings** writes the file without a question. The app's folder is also one of the places Codex may write on its own in `workspace-write`, as the Claude Code add-on writes its own folder: when you ask a chat to change the file, Codex changes it without an approval card. In Read only mode a change still asks you first.
 
 From **0.3.4**, Codex no longer looks for the file in every message. Codex loads the file when a chat
 starts, and the page's rules tell it never to look for the file with a command. When Codex calls `exchange_info`
