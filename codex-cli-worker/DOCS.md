@@ -81,12 +81,14 @@ More: [Backups](https://github.com/fatherdoctor/ha_codex/blob/main/docs/app-refe
 
 A scheduled run sends a chat's message again on a timetable, such as every morning at 7. Open a chat's menu and choose
 **Schedule**, pick **Hourly**, **Daily**, **Weekly** or **Custom**, and choose **Create schedule**. Each run is the
-next message in that chat, so Codex remembers everything said before.
+next message in that chat, so Codex remembers everything said before. If the chat was deleted or archived, or Codex
+cannot resume it, the run starts a new chat.
 
 - Codex can **propose** a schedule, but a proposal stays off until an administrator approves it under **Settings** >
   **Scheduled runs**.
 - A scheduled run still asks before a step that needs more access. Open its chat to answer with **Allow once** or
-  **Deny**. The run waits until you do.
+  **Deny**. The run waits for your answer only until its **Time limit for a task** (one hour by default) ends. Then
+  the run stops, and the step it asked about does not run.
 - Times follow your Home Assistant time zone. A run waits while another chat is working.
 
 More: [Scheduled runs](https://github.com/fatherdoctor/ha_codex/blob/main/docs/app-reference.md#scheduled-runs).

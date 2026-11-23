@@ -1,8 +1,8 @@
 # Codex for Home Assistant
 
 Ask OpenAI's Codex, in a chat inside Home Assistant, to explain your setup or change its configuration. Codex reads
-your configuration folder, edits it, checks the YAML it changed and tells you what it did. You stay in control: when
-a step needs more access than Codex has, the chat asks you first.
+your configuration folder, edits it, checks the YAML it changed and tells you what it did. You stay in control: in
+the **Ask for approval** and **Read only** modes, the chat asks you first when a step needs more access.
 
 ![The chat page with a saved conversation: a question about an automation and Codex's answer](https://raw.githubusercontent.com/fatherdoctor/ha_codex/main/screenshots/chat-light-desktop.png)
 
@@ -28,7 +28,9 @@ The first two steps are the same for every app. Step 3 needs a ChatGPT account t
 ## Features
 
 - A chat with saved conversations, image attachments and four permission modes.
-- Codex edits your configuration folder and asks before a step that needs more access. Only an administrator can answer.
+- Codex edits your configuration folder. In **Ask for approval** and **Read only**, it asks before a step that needs
+  more access, and only an administrator can answer. In **Approve for me**, Codex's own reviewer answers instead, and
+  **Full access** asks nothing.
 - Codex checks changed YAML and saves the earlier copy of a file. Keep your own Home Assistant backups too.
 - The app keeps a local copy of the Home Assistant documentation, and can read state history and statistics.
 - Scheduled runs: ask Codex to repeat a chat on a timetable. Codex can propose a schedule, but it stays off until an
@@ -50,8 +52,9 @@ The other options are on the app's **Configuration** tab. More: [Documentation](
 
 ## Using ChatGPT for Home Assistant
 
-Describe what you want in plain words, such as "Turn the porch light on at sunset." Codex shows what it changed. A
-permission card appears when it needs more access: read it, then choose **Allow once** or **Deny**.
+Describe what you want in plain words, such as "Turn the porch light on at sunset." Codex shows what it changed. In
+**Ask for approval** and **Read only**, a permission card appears when it needs more access: read it, then choose
+**Allow once** or **Deny**.
 
 Some other things to try:
 
