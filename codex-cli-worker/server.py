@@ -5584,15 +5584,19 @@ def create_approval_session(
     if open_thread:
         thread_params["threadId"], proc = open_thread(thread_params)
     assert proc is not None
+    model_field = turn_model(model)
+    # The tier goes only with a named model: execution["fast"] is the Fast default of the model the worker assumed,
+    # and a turn that names none runs on Codex's own pick, which may have another default.
+    tier_field = turn_service_tier(execution) if model_field else {}
     return AppServerSession(
         proc.stdin, lock=lock, thread_params=thread_params,
         turn_params={"input": [{"type": "text", "text": prompt},
                                *({"type": "localImage", "path": str(path)} for path in prompt_attachment_paths(task_id, latest_turn))],
                      # No outputSchema: the thread stores the answer as plain text, and the status comes from
                      # the ask_owner and report_failure calls (apply_status_calls).
-                     **turn_model(model),
+                     **model_field,
                      "effort": execution["reasoning_effort"], "summary": reasoning_summary(options),
-                     **turn_service_tier(execution),
+                     **tier_field,
                      "sandboxPolicy": policy,
                      "approvalPolicy": settings["approval_policy"],
                      "approvalsReviewer": settings["approvals_reviewer"]},
@@ -5609,7 +5613,7 @@ def turn_model(model: str) -> dict[str, str]:
     keeps the thread's last model, so each turn names its model; a chat set back to the default gets the CLI's pick
     by name (codex_default_model: the live list's default, else /status). The pick is named only when it is a model
     the worker knows: for any other model /status gives its display text, which is not a model id. Before either named
-    a known pick, the turn names none, as before.
+    a known pick, the turn names none, as before, and no service tier either.
     """
     if model not in {"default", "gpt-5.3-codex"}:
         return {"model": model}

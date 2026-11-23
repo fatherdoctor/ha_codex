@@ -431,6 +431,15 @@ class LiveExchangeTests(unittest.TestCase):
             self.assertEqual(self.message(model="default")["status"], "completed")
         self.assertNotIn("model", self.spawned[0].methods("turn/start")[0]["params"])
 
+    def test_the_default_names_no_service_tier_before_the_cli_named_its_pick(self):
+        # fast=False is the Fast default of the model the worker assumed (the built-in default); Codex runs its own
+        # pick, which may run on Fast by default, so the turn must not name the standard tier.
+        with patch.dict(server.usage_state, {"_default_model": ""}):
+            self.assertEqual(self.message(model="default", fast=False)["status"], "completed")
+        turn = self.spawned[0].methods("turn/start")[0]["params"]
+        self.assertNotIn("model", turn)
+        self.assertNotIn("serviceTier", turn)
+
     def test_the_default_names_no_model_when_the_worker_does_not_know_the_cli_pick(self):
         # /status gives a display name, not a model id, for a model that neither model list has.
         with patch.dict(server.usage_state, {"_default_model": "Invented Display Name"}), \
