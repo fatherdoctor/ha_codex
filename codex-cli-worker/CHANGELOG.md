@@ -293,6 +293,10 @@ These are draft checks for the installed release. They do not report a live-syst
 - The add-on Configuration page now uses plain option names and one short description for each option (25 words or fewer). A test keeps names free of code words and descriptions short.
 
 ### Fixed
+- **Codex knows when a chat's permissions change.** A chat started in Read only and then switched to Full access ran
+  the next message with full access, but Codex still said it was read-only and would not try a change. Now the next
+  message starts with one line that gives the new permissions, and the exchange_info tool names them on every message.
+  A thread from the ChatGPT app or from an earlier version gets the line once.
 - **Settings shows the ChatGPT sign-in like GitHub's.** While ChatGPT is signed in, **Settings** > **ChatGPT account**
   no longer shows **Sign in**, and it lists the sign-in method, the plan, when OpenAI last accepted the sign-in and
   the weekly quota left, each only when the app knows it. **Sign out** shows only while a sign-in is saved. The page
