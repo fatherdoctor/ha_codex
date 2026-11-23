@@ -22,7 +22,8 @@ example to keep your configuration in version control. You do every step with a 
 about GitHub into the chat.
 
 1. On GitHub, install the **Codex for Home Assistant** GitHub App on the repositories you choose. GitHub's own page
-   does this, and you can change the set there later. The App asks for Contents read and write, and nothing else.
+   does this, and you can change the set there later. The App asks for Contents read and write, and GitHub adds
+   Metadata read.
 2. In the chat, choose **Settings** > **Accounts and connections** > **GitHub**, then **Connect GitHub**. The card
    shows a code in large letters and a link to `github.com/login/device`.
 3. Open the link, type the code and approve the App. The card checks every few seconds and shows your account and
@@ -36,8 +37,9 @@ Read and write** and an expiry of 90 days or less. Paste the token and the `owne
 
 What to know:
 
-- The app keeps the sign-in in its own private storage. Codex never holds your token: it asks the app to run git for
-  it.
+- The app keeps the sign-in in its own private storage. In every permission mode except Full access, Codex cannot
+  read the sign-in: it asks the app to run git for it. Full access runs Codex with no sandbox, so a command there
+  can read the app's private storage, the sign-in included.
 - **Clone** in the card copies a connected repository to `/share/<repository>`. **Link** points a git folder you
   already have under `/share` or `/config` at a connected repository. You can also ask Codex in the chat.
 - GitHub refuses a push that changes `.github/workflows/` with this access. Change workflow files on GitHub or on

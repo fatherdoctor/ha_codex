@@ -40,8 +40,9 @@ The first two steps are the same for every app. Step 3 needs a ChatGPT account t
 
 You can connect a GitHub repository to the app. Codex can then fetch, pull, push and clone it for you, for example to
 keep your configuration in version control. You connect it yourself, with a button in the app's **Settings**, and
-you choose which repositories Codex may reach. Codex never sees your GitHub token. The steps are in the
-[Documentation](DOCS.md) tab under **Connect GitHub**.
+you choose which repositories Codex may reach. In every permission mode except Full access, Codex cannot read your
+GitHub sign-in: it asks the app to run git for it. The steps are in the [Documentation](DOCS.md) tab under
+**Connect GitHub**.
 
 ## Setup
 
