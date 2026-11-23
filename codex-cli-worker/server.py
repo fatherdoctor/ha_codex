@@ -5116,7 +5116,9 @@ def permissions_note(settings: dict[str, str]) -> str:
     if sandbox == "danger-full-access":
         what = "there is no sandbox, and no command waits for approval."
     elif sandbox == "read-only":
-        what = "the sandbox lets you read but not change files; a command that changes anything needs approval first."
+        who = "the automatic reviewer's" if settings["approvals_reviewer"] == "auto_review" else "the person's"
+        what = (f"the sandbox lets you read but not change files; a command that changes anything needs {who} "
+                "approval first.")
     elif settings["approvals_reviewer"] == "auto_review":
         what = ("you can change files inside the sandbox; an automatic reviewer approves or refuses each command "
                 "that needs more.")
@@ -6303,7 +6305,6 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
             detail_prefix="Could not write the Codex task prompt",
         )
         return
-    update_task(task_id, told_permissions=permissions)
     if task_cancellation_requested(task_id):
         return
     pin_error = model_pin_error(latest_execution(task_id, options), options)
@@ -6435,6 +6436,11 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
             stdout_thread.join(timeout=5)
             stderr_thread.join(timeout=5)
 
+    # Record what Codex was told only once its turn started: after a failed start or a cancel before the turn,
+    # Codex never read the message, so the next message must carry the permissions line again. A repeated line does
+    # no harm; a lost one leaves Codex naming the old mode. (update_task changes nothing after a cancel.)
+    if approval_session.turn_id:
+        update_task(task_id, told_permissions=permissions)
     if task_cancellation_requested(task_id):
         return
     if lifecycle_error is not None and not approval_session.turn_id:

@@ -216,6 +216,34 @@ class ExchangeRecordTests(unittest.TestCase):
         _, message = self.run_and_record_plain(task_id, session_id=attachments.SESSION_ID, reply="And the gate")
         self.assertEqual(message, "And the gate")
 
+    def test_a_message_whose_turn_never_started_is_told_again_on_the_next_one(self):
+        """A failed start (here the process cannot start) means Codex never read the line, so the next message has it."""
+        task_id = self.create(OWNER_TEXT)
+        server.update_task(task_id, permission_mode="read-only")
+        self.run_and_record_plain(task_id)
+        server.update_task(task_id, permission_mode="full-access")
+        with patch.object(server.full_access, "is_on", return_value=True):
+            with patch.object(server.subprocess, "Popen", side_effect=OSError("no such file")):
+                server.run_task(task_id, "Draw a sheep", attachments.SESSION_ID, "Fix the porch")
+            server.active_task_runners.discard(task_id)
+            self.assertEqual(server.tasks[task_id]["status"], "failed")
+            info, message = self.run_and_record_plain(task_id, session_id=attachments.SESSION_ID, reply="Fix it now")
+        self.assertEqual(message, server.PERMISSIONS_CHANGED.format(note=info["permissions"]) + "\n\nFix it now")
+        self.assertIn("sandbox danger-full-access", info["permissions"])
+
+    def test_with_a_read_only_sandbox_default_and_auto_review_give_different_notes(self):
+        """The app's sandbox option at read-only: a change between Default and Auto-review still changes the note."""
+        task_id = self.create(OWNER_TEXT)
+        options = {"codex_sandbox": "read-only"}
+        server.update_task(task_id, permission_mode="default")
+        default = server.permissions_note(server.task_mode_settings(task_id, options))
+        server.update_task(task_id, permission_mode="auto-review")
+        auto = server.permissions_note(server.task_mode_settings(task_id, options))
+        self.assertIn("sandbox read-only", default)
+        self.assertIn("sandbox read-only", auto)
+        self.assertIn("the person's approval", default)
+        self.assertIn("the automatic reviewer's approval", auto)
+
     def test_the_rules_are_the_threads_developer_instructions(self):
         """Every thread this page starts gets the fixed rules through the app-server thread settings."""
         task_id = self.create(OWNER_TEXT)
