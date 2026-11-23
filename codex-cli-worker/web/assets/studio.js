@@ -210,6 +210,7 @@ function renderStudioRemote(rc) {
 document.addEventListener("remote-view", event => renderStudioRemote(event.detail));
 async function pollConnection() {
   clearTimeout(connectionTimer);
+  if (REMOTE_PAUSED) return;
   try { await loadRemoteControl(); $("connection-result").textContent = ""; }
   catch (error) {
     $("connection-result").textContent = error.message;
@@ -218,6 +219,7 @@ async function pollConnection() {
   connectionTimer = setTimeout(pollConnection, $("connection-dialog").open ? 5000 : 15000);
 }
 function openConnection() {
+  if (REMOTE_PAUSED) return;
   if ($("settings").open) $("settings").close();
   if (!$("connection-dialog").open) $("connection-dialog").showModal();
   pollConnection();

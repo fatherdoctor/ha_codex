@@ -638,6 +638,38 @@ sys.stdin.read()
 
 
 @unittest.skipUnless(os.environ.get("HA_TEST_REQUIRE_CODEX") == "1", "requires the built worker image")
+class SandboxGitIdentity(unittest.TestCase):
+    def test_git_resolves_worker_and_repository_identities_in_the_sandbox(self) -> None:
+        import server
+
+        cache = Path.home() / ".cache"
+        cache.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=cache) as folder:
+            root = Path(folder)
+            home = root / "data" / "codex-home"
+            home.mkdir(parents=True)
+            with (patch.multiple(server, DATA_ROOT=home.parent, CODEX_HOME=home),
+                  patch.object(server, "read_options", return_value={})):
+                server.write_git_identity_defaults({})
+                env = server.codex_env()
+            checkout = root / "checkout"
+            subprocess.run(["git", "init", "-q", str(checkout)], check=True)
+            # Git reports the identities it would put on a commit. This works with read-only .git metadata.
+            for identity in ("ChatGPT Codex <noreply@openai.com>", "Example Project <project@example.invalid>"):
+                if identity.startswith("Example"):
+                    subprocess.run(["git", "config", "user.name", "Example Project"], cwd=checkout, check=True)
+                    subprocess.run(["git", "config", "user.email", "project@example.invalid"], cwd=checkout, check=True)
+                result = subprocess.run(
+                    [CODEX, "sandbox", "--config", 'sandbox_mode="read-only"', "--", "sh", "-ec",
+                     "git var GIT_AUTHOR_IDENT && git var GIT_COMMITTER_IDENT"],
+                    cwd=checkout, env=env, text=True, capture_output=True, timeout=30,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                identities = [line.rsplit(" ", 2)[0] for line in result.stdout.splitlines()]
+                self.assertEqual(identities, [identity, identity])
+
+
+@unittest.skipUnless(os.environ.get("HA_TEST_REQUIRE_CODEX") == "1", "requires the built worker image")
 class SandboxWorkbook(unittest.TestCase):
     """The image ships spreadsheet support for the Python that Codex commands run."""
 

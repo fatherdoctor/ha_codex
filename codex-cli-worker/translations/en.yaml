@@ -23,6 +23,12 @@ configuration:
   github_client_id:
     name: GitHub sign-in app ID
     description: The public ID of the GitHub app used to sign in. Change it only if you use your own GitHub app.
+  git_author_name:
+    name: Git commit name
+    description: Name to record on new commits made by Codex. Leave blank to use ChatGPT Codex.
+  git_author_email:
+    name: Git commit email
+    description: Email to record on new commits made by Codex. Leave blank to use noreply@openai.com.
   task_timeout_seconds:
     name: Time limit for a task
     description: How many seconds one task may run before the app stops it.
@@ -47,12 +53,6 @@ configuration:
   ha_url:
     name: Home Assistant API URL
     description: The address Codex gets as HA_URL to call Home Assistant. Set it only if the automatic address does not work.
-  browser_verification:
-    name: Built-in browser
-    description: Let Codex open dashboards and take screenshots. The browser uses memory while it runs. Turn it off if memory is short.
-  browser_memory_limit_mib:
-    name: Browser memory limit (MiB)
-    description: The most memory the browser may use for screenshots, from 512 to 8192. The default is 1536.
   local_docs:
     name: Local Home Assistant documentation
     description: Download the official documentation, about 25 MB, so Codex can search it without the web. Turn it off to stop the download.
@@ -64,7 +64,7 @@ configuration:
     description: An optional token for Codex to call Home Assistant, with the rights of the token's user. Codex keeps its read and call tools without it.
   remote_control_name:
     name: Remote control machine name
-    description: The name this Home Assistant shows in the ChatGPT app. It applies after a restart. Settings can also set it while remote control is off.
+    description: The name this Home Assistant shows in the ChatGPT app. Remote Control is hidden in this version; the name is kept for when it returns.
   interactions_to_keep:
     name: Interactions to keep
     description: How many recent interactions the app keeps for downloaded diagnostics, from 10 to 100. Leave it empty to keep your current number.

@@ -46,6 +46,17 @@ class SwitchTests(unittest.TestCase):
         source = Path(server.__file__).read_text(encoding='utf-8')
         self.assertIn('@@SCHEDULING_PARAGRAPH@@', source)
 
+    def test_answer_format_guidance_is_present_with_scheduling_on_and_off(self):
+        for enabled in (True, False):
+            with self.subTest(scheduled_runs=enabled), patch.object(scheduling, 'SCHEDULED_RUNS', enabled):
+                rules = server.build_page_instructions()
+                self.assertIn('one bold lead line that gives the answer', rules)
+                self.assertIn('Use a table when comparing several items.', rules)
+                self.assertIn('List sources apart from the body, not inline.', rules)
+                self.assertIn('Give files you made as links.', rules)
+                self.assertEqual('Use the codex_scheduling tools' in rules, enabled)
+                self.assertNotIn('@@SCHEDULING_PARAGRAPH@@', rules)
+
 
 class DocsTests(unittest.TestCase):
     """DOCS.md and README.md describe scheduled runs as available."""
