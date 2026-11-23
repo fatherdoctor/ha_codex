@@ -3,6 +3,7 @@
 ## 0.4.0 (unreleased)
 
 ### What's new
+- **Work log groups.** In the steps under an answer, each run of two or more steps folds under a one-line heading that sums it up, such as "Ran 3 commands, edited a file", as in the desktop app. Groups start open while Codex works and closed when it is done. Commands show on one line until you open their output. The checks stay outside the groups.
 - **Permission labels match the ChatGPT desktop app.** The modes read **Ask for approval** (was Default), **Approve for me**
   (was Auto-review), **Full access** in the warning color, and **Read only** last. The stored values do not change.
 - **Git commits identify Codex.** New commits use ChatGPT Codex as the default author and committer. You can configure the name and email for the app or for an individual repository.

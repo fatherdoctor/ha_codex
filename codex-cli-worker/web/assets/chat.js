@@ -1447,7 +1447,7 @@ function renderWorked(turn, checks, taskId) {
   const entry = saved ? earlierSteps(taskId, turn.turn_id) : null;
   const fill = () => {
     const rows = entry ? earlierStepRows(entry, Boolean(checks), fill) : [];
-    list.replaceChildren(...groupWorkLog([...rows, ...(checks ? [checks] : [])]));
+    list.replaceChildren(...groupWorkLog([...rows, ...(checks ? [checks] : [])], entry?.open ?? new Set(), fill));
   };
   const show = open => {
     if (open) state.workedOpen.add(turn.turn_id);
@@ -2147,7 +2147,7 @@ function renderActivity() {
   list.id = "activity-steps";
   list.hidden = !expanded;
   const nodes = entries.map(entry => workLogNode(entry, activity.open, renderActivity));
-  list.append(...groupWorkLog(checks ? [...nodes, checks] : nodes));
+  list.append(...groupWorkLog(checks ? [...nodes, checks] : nodes, activity.open, renderActivity, running));
   const latestReasoning = running
     ? [...steps].reverse().find(step => step.kind === "reasoning" &&
         typeof step.text === "string" && step.text.trim())
@@ -2187,26 +2187,87 @@ function workLogNode(entry, open, redraw) {
   return renderStep(entry, open, redraw);
 }
 /**
- * Put each run of step rows (and the checks after them) in an indented group,
- * and leave the text messages between the groups, so a message starts where
- * the answer starts, as in the desktop app.
+ * Put each run of step rows in an indented group, and leave the text messages
+ * between the groups, so a message starts where the answer starts, as in the
+ * desktop app. A group of two or more rows gets a heading that sums it up
+ * ("Ran 3 commands, edited a file"); see stepGroup. Anything that is neither a
+ * message nor a step row (the checks block) stands outside the groups, so a
+ * check that asks for the owner is never folded away.
  */
-function groupWorkLog(nodes) {
+function groupWorkLog(nodes, open, redraw, running = false) {
   const out = [];
-  let group = null;
+  let rows = [];
+  const flush = () => {
+    if (rows.length) out.push(stepGroup(rows, open, redraw, running));
+    rows = [];
+  };
   for (const node of nodes) {
-    if (node.classList.contains("interim")) {
-      out.push(node);
-      group = null;
+    if (node.classList.contains("step")) {
+      rows.push(node);
       continue;
     }
-    if (!group) {
-      group = textNode("div", "", "step-group");
-      out.push(group);
-    }
-    group.append(node);
+    flush();
+    out.push(node);
   }
+  flush();
   return out;
+}
+// What a group heading says for each kind of step, for one and for several (CX-WORKLOG-GROUPS).
+const STEP_GROUP_WORDS = {
+  command: ["ran a command", n => `ran ${n} commands`],
+  file_change: ["edited a file", n => `made ${n} file edits`],
+  web_search: ["searched the web", n => `searched the web ${n} times`],
+  tool_call: ["used a tool", n => `used ${n} tools`],
+  reasoning: ["thought", () => "thought"],
+  plan: ["updated the plan", () => "updated the plan"],
+  error: ["hit an error", n => `hit ${n} errors`],
+  phase: ["got ready", () => "got ready"],
+};
+/** Sum up a group's rows in one line, kinds in the order they first ran, and say how many failed. */
+function stepGroupLabel(rows) {
+  const counts = new Map();
+  for (const row of rows) {
+    const kind = STEP_GROUP_WORDS[row.dataset.kind] ? row.dataset.kind : "other";
+    counts.set(kind, (counts.get(kind) || 0) + 1);
+  }
+  const parts = [...counts].map(([kind, n]) => {
+    if (kind === "other") return n === 1 ? "1 other step" : `${n} other steps`;
+    const [one, many] = STEP_GROUP_WORDS[kind];
+    return n === 1 ? one : many(n);
+  });
+  const text = parts.join(", ");
+  const failed = rows.filter(row => row.classList.contains("is-failed")).length;
+  return text[0].toUpperCase() + text.slice(1) + (failed ? ` · ${failed} failed` : "");
+}
+/**
+ * Build one group of step rows. One row needs no heading. Several rows get a
+ * heading button: the group starts closed once the exchange is over and open
+ * while Codex works, so the owner can follow along; a tap is remembered in
+ * `open` under the group's first step index ("g+3" open, "g-3" closed), which
+ * keeps it through the redraws while Codex works.
+ */
+function stepGroup(rows, open, redraw, running) {
+  const group = textNode("div", "", "step-group");
+  if (rows.length < 2) {
+    group.append(...rows);
+    return group;
+  }
+  const key = rows[0].dataset.index;
+  const shown = open.has(`g+${key}`) || (running && !open.has(`g-${key}`));
+  const head = textNode("button", "", "step-group-head");
+  head.type = "button";
+  head.setAttribute("aria-expanded", String(shown));
+  head.append(textNode("span", "", "step-group-chevron"), textNode("span", stepGroupLabel(rows)));
+  head.onclick = () => {
+    open.delete(`g+${key}`);
+    open.delete(`g-${key}`);
+    open.add(`g${shown ? "-" : "+"}${key}`);
+    redraw();
+  };
+  for (const row of rows) row.hidden = !shown;
+  group.classList.add("has-head");
+  group.append(head, ...rows);
+  return group;
 }
 /**
  * Build one row of the step list: icon, text, and a line with a failed
@@ -2216,9 +2277,14 @@ function groupWorkLog(nodes) {
  */
 function renderStep(step, open, redraw) {
   const row = textNode("div", "", `step step-${step.kind} is-${step.status}`);
+  row.dataset.kind = step.kind;
+  row.dataset.index = String(step.index);
   row.append(textNode("span", stepIcons[step.kind] || "•", "step-icon"));
   const body = textNode("div", "", "step-body");
-  body.append(textNode("div", step.text, "step-text"));
+  const text = textNode("div", step.text, "step-text");
+  // A command shows on one line (CSS); the whole of it shows on hover and once its output is open.
+  if (step.kind === "command") text.title = step.text;
+  body.append(text);
   const meta = [];
   if (step.kind === "command" && step.exit_code)
     meta.push(`exit ${step.exit_code}`);
@@ -2247,7 +2313,10 @@ function renderStep(step, open, redraw) {
       redraw();
     };
     footer.append(button);
-    if (shown) body.append(textNode("pre", step.output, "step-output"));
+    if (shown) {
+      row.classList.add("output-open");
+      body.append(textNode("pre", step.output, "step-output"));
+    }
   }
   if (footer.childElementCount) body.insertBefore(footer, body.children[1] || null);
   row.append(body);
