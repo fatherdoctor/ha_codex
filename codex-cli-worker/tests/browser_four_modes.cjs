@@ -1,4 +1,4 @@
-// The four permission modes against web_fixture.py: the button offers them in the app's order, and Auto-review is saved and sent.
+// The four permission modes against web_fixture.py: the button offers them in the app's order, and Approve for me is saved and sent.
 const {chromium} = require('playwright');
 const assert = require('node:assert/strict');
 const base = 'http://127.0.0.1:9137/preview/';
