@@ -210,7 +210,7 @@ report when a sign-in will end, so the app shows no countdown. Sign out any time
 ## Scheduled runs
 
 Open a chat's menu and choose **Schedule**. You save a name, a prompt, a model and a trigger: hourly, daily, weekly,
-or a custom interval, cron rule or single time, in your Home Assistant time zone. Each run starts a new chat.
+or a custom interval, cron rule or single time, in your Home Assistant time zone. A run continues the chat you scheduled.
 **Settings** > **Scheduled runs** lists every schedule.
 
 - A schedule you save is approved when you save it. Codex can only propose one; it stays off until an administrator

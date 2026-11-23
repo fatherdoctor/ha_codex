@@ -3,7 +3,17 @@
 ## 0.4.0 (unreleased)
 
 ### What's new
+- **Git commits identify Codex.** New commits use ChatGPT Codex as the default author and committer. You can configure the name and email for the app or for an individual repository.
+- **A schedule wakes the chat it was made in.** Each run of a schedule made from a chat is that chat's next
+  message: Codex continues the same conversation, and the chat moves to the top of the list with a dot until you open
+  it. Earlier, each run started a new chat. The run keeps the schedule's permissions and model, never a wider mode
+  set on the chat. A deleted or archived chat gets a new chat named for the schedule, which later runs continue; a
+  schedule made in Settings still starts a new chat for each run. The run log is copied once into a new shape at
+  start, and a rollback still reads it.
 - **Shorter Documentation tab.** The app's Documentation tab (`DOCS.md`) is now a short guide: install and sign in, the four permission modes, where files go, and how to get help (about 380 words, down from about 25,900). The full text moved to `docs/app-reference.md`, and the Info tab (`README.md`) keeps five sections: Quick Start, Requirements, Features, Setup and Using ChatGPT for Home Assistant.
+- **Answers lead with the answer.** The chat page asks Codex to start with one bold line that gives the answer,
+  use a table to compare several items, list sources apart from the text, and link to files it made. A chat started
+  before this version gets the guidance after its next compaction.
 - **Files Codex makes can be downloaded.** When you ask for a file such as a spreadsheet, Codex saves it in the
   chat's own files folder and links to it, and the chat page shows the link as a card with the file's name and size
   that downloads it, on a phone and on a desktop. Before, the link showed as plain text and nothing downloaded. Only
@@ -21,6 +31,7 @@
   model the account offers, then GPT-6.2 Sol, now first in the built-in list. A `model_reasoning_effort` other than
   the shipped `medium` still applies. The reset button in the model and reasoning panel now also sets the model back
   to the default, not only the level.
+- The chat page sends messages that start with a slash directly to Codex. Use the page controls for chat actions.
 - **Choose the default model on the Configuration page.** Pick a built-in model, follow your account default, or enter a custom name. Existing installations keep their saved model.
 - **Model and reasoning picker like the desktop app.** The model and reasoning controls below the message box are now
   one chip: the model name, then the reasoning level in grey. Select it, or press Ctrl+Shift+M, to open a panel with the
@@ -71,6 +82,8 @@
 - **Steps stay closed while Codex works.** Under the "Working on your request…" line, the steps stay closed until you
   tap it. Your choice holds until the turn ends. Then the steps close under "Worked for…" as before. A permission
   request stays visible outside the closed list.
+- **Live Thinking line.** While Codex works, its latest reasoning summary appears below the steps and updates as it
+  arrives. The updates go to the chat only; the task's log keeps the finished summary once.
 - **Cleaner chat page buttons.** The plus on the attach button is now an icon centered in a round button, on a desktop
   and a phone. The **New chat** plus is a 20 px icon in the same style. The extra plus button beside the chat title on
   a phone is gone; **New chat** stays in the conversation list. The banner across the top of the page while Full
@@ -130,10 +143,27 @@
   request, so a chat from the ChatGPT app would have asked before each change in `/config`. The `github_git` tool and
   the **Link** form under **Settings** > **GitHub** now refuse a relative path such as `.` and ask for the full path,
   so a path meant for the working folder cannot name the configuration repository in `/config`.
+- **Dashboard changes without screenshots.** Codex changes a dashboard, reads its configuration back and reports
+  what changed, as the Codex CLI does. The built-in browser that opened dashboards and took desktop, mobile and
+  Fully Kiosk screenshots is removed, with the blocked-request review, **Settings > Advanced > Browser
+  permissions** and the screenshot note under the checks. The `dashboard` check is gone; `save_pending` now goes on
+  `dashboard_readback`. The **Enable built-in browser** and **Browser memory limit (MiB)** options are removed, and
+  a saved value is ignored. The image no longer includes Chromium or Playwright.
+- **The Dashboard verification user is removed.** The integration no longer creates this read-only Home Assistant
+  system user or issues it browser sessions. On its first start it removes the user an earlier version created,
+  only when its own file names a system user with that exact name, and logs one line. Restart Home Assistant after
+  the update.
 - **Earlier answers open their steps.** Every answer's **Worked for** line now opens the steps of that exchange, not
   only the latest answer's. The line starts closed; its steps load from the worker the first time it opens, and then
   the answer's checks follow. The worker already saved each exchange's steps; `GET /tasks/<task_id>/activity` takes
   `turn=<turn_id>` to read an earlier one.
+- **Remote Control is hidden in this version.** The ChatGPT app could read a chat but not reply while the app kept
+  that chat loaded between messages, so Remote Control is turned off and hidden until that is fixed. The side bar's
+  **Remote** row, the **ChatGPT app pairing** part of **Settings**, the **Remote connection** window and the
+  `connection` slash command are gone, and the page does not ask for the remote state. The remote-control process
+  does not start. Your settings are kept: the **Remote control machine name** option stays on the Configuration tab
+  and is ignored, and if you had Remote Control on, the app logs one line at start and keeps that choice for when it
+  returns. The name field from "Name your remote connection in its window" above is part of what is hidden.
 - **The phone chat list is easier to use.** A tap on a chat keeps the side bar open; a tap on the page to its right
   closes it. The selected chat shows its three-dot menu button where its date was, and the button is 44 pixels or
   larger. A long press still opens the menu. A desktop window does not change.
@@ -188,6 +218,11 @@
   permission card: the app, the tool and every argument. **Allow once** runs that one call; **Deny** declines it.
   Read only still declines app tools, because they act outside the sandbox. The app log has one line for each tool
   request that you allow or deny and for each question that the page declines, with names only and no arguments.
+- **App and tool names on a permission card are redacted.** The name of a ChatGPT app and of its tool went to the
+  card and the app log without the redaction every other shown value gets. Now a name that holds a hidden value
+  shows as "a ChatGPT app" or "tool", and the log line writes a tool title without spaces, so it stays one sentence.
+  The documentation also says that Codex asks only before an app tool that can change something; a tool that the
+  app marks read-only runs without a question.
 - Chat replies preserve math delimiters. Equations in a sentence appear as inline code, and display equations on their own lines appear in code blocks.
 - **Replies line up and are spaced.** A reply's text started one space to the right of its "Worked for" line and of
   the lines Codex writes along the way ("I'll look for …", "I found …"). Those lines also touched each other and the

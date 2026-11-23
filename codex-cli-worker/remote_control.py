@@ -38,6 +38,13 @@ from typing import Any
 
 import websocket
 
+# Remote control is paused in this version (the ChatGPT app could read a chat but not reply while this app kept it loaded). While
+# PAUSED is True the remote-control process never starts and the owner's saved choice is kept untouched, so turning
+# it back on in a later version is this one line. The tests set it to False to check the code that returns.
+PAUSED = True
+PAUSED_MESSAGE = "Remote Control is paused while we fix it. It will come back in a later version."
+PAUSED_KEPT_LOG = "Remote Control is paused in this version; your setting is kept for when it returns."
+
 CONTROL_FOLDER = "remote_control_control"
 DEFAULT_NAME = "Home Assistant"
 FALLBACK_NAME = "Home-Assistant"
@@ -292,18 +299,32 @@ class Supervisor:
 
     def resume(self) -> dict[str, Any]:
         """At app start, run remote control again if the owner left it on."""
+        if PAUSED:
+            if self.enabled():
+                print(PAUSED_KEPT_LOG, flush=True)
+            return self.paused()
         if not self.enabled():
             return self.snapshot()
         return self._launch()
 
+    def paused(self) -> dict[str, Any]:
+        """Report the paused state; the saved choice is neither read for a launch nor written."""
+        self.set_status("paused", PAUSED_MESSAGE, pairing_code="", pairing_url="")
+        return self.snapshot()
+
     def start(self) -> dict[str, Any]:
         """Turn remote control on and save the choice."""
+        if PAUSED:
+            return self.paused()
         self._name_supported = None
         self.save_enabled(True)
         return self._launch()
 
     def stop(self) -> dict[str, Any]:
         """Turn remote control off and end the process; the choice is saved before the process is asked to stop."""
+        if PAUSED:
+            # No process runs, and an owner who had it on keeps that choice for when it returns.
+            return self.paused()
         self.save_enabled(False)
         self.wake.set()
         with self.lock:
@@ -316,6 +337,8 @@ class Supervisor:
 
     def pair(self) -> tuple[bool, dict[str, Any]]:
         """Ask Codex for a new pairing code, for when the ChatGPT app has lost this machine."""
+        if PAUSED:
+            return False, {**self.paused(), "error": PAUSED_MESSAGE}
         with self.lock:
             proc, path = self.proc, self.control_socket
             self.status["pairing_code"] = ""
@@ -379,7 +402,9 @@ class Supervisor:
                 else [RELAY_LAUNCHER, "--plain", self.codex_binary, *arguments])
 
     def _launch(self) -> dict[str, Any]:
-        """Start the supervising thread unless one is already running."""
+        """Start the supervising thread unless one is already running, or report the pause."""
+        if PAUSED:
+            return self.paused()
         with self.lock:
             if self.thread is not None and self.thread.is_alive():
                 return self.snapshot()
@@ -562,6 +587,7 @@ class Supervisor:
         return {
             **status,
             "enabled": self.enabled(),
+            "paused": PAUSED,
             # Nothing of the app's own can block remote control; the page still reads these two keys.
             "available": True,
             "blocked_reason": "",

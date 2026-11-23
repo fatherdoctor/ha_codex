@@ -46,11 +46,6 @@ jobs:
         env:
           HA_BROWSER_NODE: node
         run: pytest
-      - name: Exercise browser protocol and restrictions
-        run: |
-          node codex-cli-worker/tests/browser_resources.cjs
-          node codex-cli-worker/tests/browser_permissions.cjs
-          node codex-cli-worker/tests/browser_verification.cjs
       - name: Exercise chat evidence on desktop and mobile
         run: |
           python codex-cli-worker/tests/web_fixture.py > "$RUNNER_TEMP/web-fixture.log" 2>&1 &
@@ -62,7 +57,6 @@ jobs:
           done
           node codex-cli-worker/tests/browser_smoke.cjs
           node codex-cli-worker/tests/browser_copy.cjs
-          node codex-cli-worker/tests/browser_permissions_ui.cjs
           node codex-cli-worker/tests/browser_settings_phone.cjs
           node codex-cli-worker/tests/browser_remote_name.cjs
           node codex-cli-worker/tests/browser_full_access.cjs
@@ -101,10 +95,9 @@ jobs:
           bundled="$(docker run --rm --entrypoint python3 verification-test -c 'import json; print(json.load(open("/usr/share/ha_codex/integration/codex_cli/manifest.json"))["version"])')"
           test "$app" = "$bundled" || { echo "Bundled integration $bundled does not match app $app" >&2; exit 1; }
           docker run --rm --entrypoint test verification-test -f /integration_sync.py
-      - name: Smoke test packaged Chromium
-        run: |
-          docker run --rm --entrypoint /usr/bin/chromium-browser verification-test --version
-          docker run --rm --entrypoint node verification-test -e 'const {chromium}=require("playwright-core"); (async()=>{const browser=await chromium.launch({executablePath:"/usr/bin/chromium-browser",headless:true,chromiumSandbox:false,args:["--disable-dev-shm-usage"]}); const page=await browser.newPage(); await page.setContent("<h1>Verification</h1>"); if(await page.locator("h1").innerText()!=="Verification") throw Error("Render failed"); await browser.close();})().catch(e=>{console.error(e);process.exit(1);})'
+      - name: Check the image has no dashboard browser
+        # Version 0.4 removed the dashboard screenshots, and with them Chromium and Playwright.
+        run: docker run --rm --entrypoint sh verification-test -c '! command -v chromium-browser && ! test -e /opt/verification && ! test -e /browser.cjs'
       - name: Smoke test packaged historical data tools
         run: |
           docker run --rm --workdir / --entrypoint python3 verification-test -c 'import server, ha_data, ha_data_mcp; assert {tool["name"] for tool in ha_data_mcp.TOOLS} == {"history", "statistics", "exchange_info"}; assert {tool["name"] for tool in ha_data_mcp.STATUS_TOOLS} == {"ask_owner", "report_failure"}; assert server.ha_data is not server.verification'
@@ -133,6 +126,3 @@ jobs:
         # Bubblewrap needs namespace privileges that the runner's default container profile withholds.
         run: |
           docker run --rm --privileged --entrypoint sh -v "$PWD/codex-cli-worker/tests:/tests:ro" verification-test /tests/local_docs_container.sh
-      - name: Test packaged browser with loopback and LAN HTTP origins
-        run: |
-          docker run --rm --entrypoint sh -v "$PWD/codex-cli-worker/tests:/tests:ro" verification-test -c 'npm install --prefix /tmp/test-deps ws@8.18.3 >/dev/null && NODE_PATH=/tmp/test-deps/node_modules:/opt/verification/node_modules node /tests/browser_verification.cjs'

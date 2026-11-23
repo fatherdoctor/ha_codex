@@ -4,6 +4,7 @@
 // Every account, chat and schedule here is synthetic.
 const {chromium} = require('playwright');
 const assert = require('node:assert/strict');
+const {unpauseRemote} = require('./remote_unpaused.cjs');
 
 const signedIn = {status: 'authenticated', pending: false, codex_login: {status_ok: true, message: 'Signed in'}};
 const signedOut = {status: 'idle', pending: false, codex_login: {status_ok: false, message: 'Not logged in'}};
@@ -77,6 +78,8 @@ function schedule(id, approved, revision = 'r1') {
         await page.locator('#attention-dismiss').click();
         if (phone) await page.evaluate(() => sidebar(false));
       };
+
+      await unpauseRemote(page);
 
       await page.goto('http://127.0.0.1:9137/preview/');
       await page.waitForFunction(() => document.getElementById('codex-status-row').dataset.state === 'ready');
