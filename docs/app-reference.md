@@ -382,7 +382,7 @@ lost at each update.
 
 Codex's own sandbox keeps a folder named `.agents`, `.git` or `.codex` read-only when it is directly in a writable
 place, because in a project such a folder holds instructions or skills that Codex loads. `/media/.agents` is not a
-project folder and nothing in it is loaded as instructions, so the app gives it as a writable place of its own: a
+project folder and nothing in /media/.agents outside the working folder is loaded as instructions (the working folder's own AGENTS.md is), so the app gives it as a writable place of its own: a
 write anywhere in `/media/.agents`, such as another assistant's folder beside `codex`, needs no request.
 A chat from the ChatGPT app over remote control starts in the same folder and, in `workspace-write`, may write the
 same places without a request as a chat on the page, except the exchange's backup folder and the chat's files folder.

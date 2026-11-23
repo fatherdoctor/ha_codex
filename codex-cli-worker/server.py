@@ -90,7 +90,7 @@ CODEX_WORKDIR = MEDIA_ROOT / ".agents" / "codex"
 # is there. The working folder's parent is a root of its own because Codex's sandbox keeps a folder named
 # .agents (like .git and .codex) read-only when it sits directly in a writable root: with /media alone,
 # /media/.agents/claude and a new file in /media/.agents would need a card. A project's .agents folder holds
-# skills Codex loads; /media/.agents is not a project folder, and nothing in it is loaded as instructions.
+# skills Codex loads; /media/.agents is not a project folder, and nothing in /media/.agents outside the working folder is loaded as instructions (the working folder's own AGENTS.md is).
 # /data/github stays masked by codex-bwrap and is never a writable root.
 TASK_WRITABLE_ROOTS = (str(CONFIG_ROOT), "/share", str(MEDIA_ROOT), str(CODEX_WORKDIR.parent))
 DATA_ROOT = Path("/data")
