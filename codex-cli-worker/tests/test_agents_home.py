@@ -142,7 +142,6 @@ class AgentsHome(unittest.TestCase):
                          "Edited in the editor\n")
 
 
-
 class AgentsFileWritableWithoutCard(unittest.TestCase):
     """The owner's ruling of 2026-11-22: Codex writes the app's AGENTS.md as the Claude add-on writes its own folder.
 

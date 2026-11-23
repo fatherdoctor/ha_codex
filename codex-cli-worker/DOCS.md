@@ -21,8 +21,8 @@ Each chat uses one of four modes. Pick it with the **Permissions** button.
 
 | Mode | What happens |
 |---|---|
-| Default permissions | Codex edits files in your configuration folder. It asks you before anything that needs more access. |
-| Auto-review | Like Default, but Codex's own reviewer answers the requests instead of you. |
+| Ask for approval | Codex edits files in your configuration folder. It asks you before anything that needs more access. |
+| Approve for me | Like Ask for approval, but Codex's own reviewer answers the requests instead of you. |
 | Read only | Codex reads files. Any change asks you first. |
 | Full access | No sandbox and no questions. Off until an administrator turns it on in **Settings**. |
 
@@ -34,7 +34,8 @@ More: [Sandbox](https://github.com/fatherdoctor/ha_codex/blob/main/docs/app-refe
 
 - Your Home Assistant configuration is at `/config`, and `/share` is shared with other apps.
 - Codex starts each chat in its working folder, `/media/.agents/codex`, for its notes and drafts. It may write in
-  `/config`, `/share`, `/media` and `/addon_config` (the app's own folder) without a request. The automatic backup leaves `/media` out unless you include it.
+  `/config`, `/share`, `/media` and `/addon_config` (the app's own folder) without a request. The automatic backup
+  leaves `/media` out unless you include it.
 - Rules for your house go in **Settings** > **Workspace instructions**, the app's `AGENTS.md`. A new install gets a
   short starter file once. It is yours to change or delete.
 - Chats and the files you attach to a message (PNG, JPEG, GIF or WebP) stay in the app's private storage, not in
@@ -43,6 +44,14 @@ More: [Sandbox](https://github.com/fatherdoctor/ha_codex/blob/main/docs/app-refe
   and `.storage` are never copied.
 
 More: [Backups](https://github.com/fatherdoctor/ha_codex/blob/main/docs/app-reference.md#backups).
+
+## Upgrading from a version before 0.4.0
+
+Version 0.4.0 removed the built-in dashboard browser and its screenshots, the **Dashboard verification** Home
+Assistant user it signed in as, and the **Enable built-in browser** and **Browser memory limit (MiB)** options. To
+change a dashboard, Codex now reads its configuration back. The integration removes the old user on its first
+start. Restart Home Assistant after the update.
+More: [Upgrading from an earlier version](https://github.com/fatherdoctor/ha_codex/blob/main/codex-cli-worker/VERIFICATION.md#upgrading-from-an-earlier-version).
 
 ## Get help
 
