@@ -27,8 +27,8 @@ delete it. The editor is in the chat page under Settings > Workspace instruction
    this app tells you to. In your answer, name each file you changed and say how to get the old version back.
 4. Check before a restart. After you change YAML, run the Home Assistant configuration check. If the check fails,
    fix the file or put the old version back. Never reload or restart on a failed check.
-5. Leave `/config/.storage` to Home Assistant. Change what it holds through the Home Assistant settings pages or the
-   API, not by editing the files.
+5. Leave `/config/.storage` to Home Assistant. Do not edit its files while Home Assistant runs: it writes over
+   changed files from memory. Use the API or settings pages.
 6. Make one small change at a time, and do only what the owner asked for. Suggest other improvements; do not make
    them unasked.
 7. When you are not sure what the owner means or what a change will do, stop and ask.

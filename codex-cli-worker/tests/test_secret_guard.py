@@ -3,9 +3,9 @@
 Home Assistant keeps sign-ins, tokens and integration credentials in .storage, beside
 dashboards and other state, and secrets.yaml holds the values that `!secret` names.
 The worker leaves both out of the full snapshot and deletes any copy of them in an
-exchange's backup folder, in every permission mode. In a sandbox, .storage is
-read-only and secrets.yaml is hidden, so Codex can change them only after the
-person approves the change on a permission card.
+exchange's backup folder, in every permission mode. In a sandbox, secrets.yaml
+and the sign-in files in .storage are hidden; the rest of .storage is writable
+like the rest of /config, as in the Claude add-on.
 """
 from __future__ import annotations
 
@@ -272,7 +272,7 @@ class ApprovalRecordTests(unittest.TestCase):
 
 
 class SandboxTests(unittest.TestCase):
-    """In every sandbox .storage is read-only, so a write there fails and Codex must ask for a permission card."""
+    """In every sandbox .storage stays writable under Codex's bind of /config; only its sign-in files are hidden."""
 
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
@@ -285,7 +285,6 @@ class SandboxTests(unittest.TestCase):
         real.chmod(0o755)
         self.wrapper = self.root / "bwrap"
         source = (WORKER / "codex-bwrap").read_text(encoding="utf-8")
-        self.assertIn('READ_ONLY_DIRS="/config/.storage"', source)
         self.wrapper.write_text(
             source.replace("REAL_BWRAP=/opt/codex-sandbox/bwrap.real", f"REAL_BWRAP={real}")
             .replace("/config/", f"{self.root}/config/"),
@@ -297,33 +296,22 @@ class SandboxTests(unittest.TestCase):
     def run_wrapper(self):
         args = ["--ro-bind", "/", "/", "--bind", f"{self.root}/config", f"{self.root}/config", "--", "/bin/sh", "-c", "true"]
         subprocess.run([str(self.wrapper), *args], check=True)
-        return args, self.record.read_text(encoding="utf-8").split("\n")
+        return self.record.read_text(encoding="utf-8").split("\n")
 
-    def test_storage_is_bound_read_only_after_codex_binds_and_before_the_masks(self):
+    def test_storage_gets_no_read_only_bind_and_its_sign_in_files_stay_hidden(self):
         self.storage.mkdir(parents=True)
         (self.storage / "auth").write_text("{}", encoding="utf-8")
-        (self.root / "config" / "secrets.yaml").write_text("a: b\n", encoding="utf-8")
-        args, recorded = self.run_wrapper()
-        separator = recorded.index("--")
-        before = recorded[:separator]
-        storage = str(self.storage)
-        read_only = before.index(storage)
-        self.assertEqual(before[read_only - 1:read_only + 2], ["--ro-bind", storage, storage])
-        # After Codex's own writable bind of /config, so that bind cannot make it writable again.
-        self.assertGreater(read_only, before.index(f"{self.root}/config", before.index("--bind")))
-        # Before the masks of the hidden files inside it, so they stay hidden.
-        self.assertLess(read_only, before.index(str(self.storage / "auth")))
-        self.assertIn(str(self.root / "config" / "secrets.yaml"), before)
-
-    def test_a_missing_or_linked_storage_folder_is_not_bound(self):
-        _, recorded = self.run_wrapper()
-        self.assertNotIn(str(self.storage), recorded)
-        elsewhere = self.root / "elsewhere"
-        elsewhere.mkdir()
-        self.storage.parent.mkdir(parents=True, exist_ok=True)
-        self.storage.symlink_to(elsewhere)
-        _, recorded = self.run_wrapper()
-        self.assertNotIn(str(self.storage), recorded)
+        (self.storage / "auth_provider.homeassistant").write_text("{}", encoding="utf-8")
+        (self.storage / "lovelace").write_text("{}", encoding="utf-8")
+        recorded = self.run_wrapper()
+        before = recorded[:recorded.index("--")]
+        # No bind names the folder itself, so Codex's writable bind of /config covers it.
+        self.assertNotIn(str(self.storage), before)
+        for name in ("auth", "auth_provider.homeassistant"):
+            with self.subTest(name=name):
+                hidden = before.index(str(self.storage / name))
+                self.assertEqual(before[hidden - 2:hidden + 1], ["--ro-bind", "/dev/null", str(self.storage / name)])
+        self.assertNotIn(str(self.storage / "lovelace"), before)
 
 
 if __name__ == "__main__":

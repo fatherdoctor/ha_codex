@@ -229,7 +229,7 @@ These are draft checks for the installed release. They do not report a live-syst
   automatic backup leaves them out unless you include the media folder in your backup settings. The app now maps
   Home Assistant's `/media` folder read-write, and `/media` is a writable place in `workspace-write` beside
   `/config` and `/share`, the same `/media` access the Claude add-on has. `/media/.agents` is a writable place of its
-  own, because Codex's sandbox otherwise keeps a folder named `.agents` read-only. Every hidden file and read-only folder of
+  own, because Codex's sandbox otherwise keeps a folder named `.agents` read-only. Every hidden file of
   the sandbox stays the same, and the approval cards are unchanged. The app creates the folder at start when it is
   missing and never moves or empties it; it does not create `/media`. When the folder cannot be created, when `/media` is missing, or when any
   part of its path is a link, Codex works from `/config` as before and the log says why. An `AGENTS.md` that you put
@@ -277,8 +277,11 @@ These are draft checks for the installed release. They do not report a live-syst
   behind. After you answer a permission card for a change to one of these files, the chat's record keeps the path
   but not the changed lines. This includes dashboards kept in storage: to undo a change to one, use a Home
   Assistant backup.
-- **`.storage` is read-only in the sandbox.** In Default, a change to a file under `.storage` now asks you on a
-  permission card first. In Auto-review, Codex's reviewer decides; Full access still runs without asking.
+- **`.storage` is left to Home Assistant by the starter instructions.** The sandbox keeps `.storage` writable like
+  the rest of `/config`, as the Claude add-on does; only its sign-in files `auth` and `auth_provider.homeassistant`
+  stay hidden, with `secrets.yaml`. Rule 5 of the starter `AGENTS.md` now says not to edit `.storage` files while
+  Home Assistant runs, because Home Assistant writes over a changed file from memory, and to use the API or the
+  settings pages. An `AGENTS.md` you already have is not changed; copy the rule from `starter_agents.md` if you want it.
 - **Working files out of the configuration folder.** The chats (prompts, logs, per-turn backups, attachments) are now
   in the app's private `/data/codex_tasks`, not in `/config/codex_tasks`: the file editor, Samba and a backup of the
   configuration folder no longer hold them, and the app's own backup does. The first start of this version moves each
