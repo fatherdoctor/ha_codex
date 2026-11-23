@@ -133,13 +133,13 @@ More: [Upgrading from an earlier version](https://github.com/fatherdoctor/ha_cod
 
 ## What the sandbox still keeps back
 
-In Ask for approval, Approve for me and Read only, the sandbox keeps only these limits. **Allow once** on a card gets past each
-of them for that one action.
+In Ask for approval and Approve for me, the sandbox keeps only these limits. Read only keeps them too, and also makes every file
+read-only. **Allow once** on a card gets past each of them for that one action.
 
 - **The app's own private files are hidden.** These are `/run/s6` and, in `/data`, the app's settings, its API token,
-  the remote control and GitHub sign-ins and the schedule database. The rest of `/data` is read-only. Why: these
-  tokens can answer the app's own permission cards or call Home Assistant directly, so a task that reads them could
-  get around the cards. They are the app's state, not your files.
+  the remote control and GitHub sign-ins and the schedule database. The rest of `/data` is read-only, except the
+  chat's backup and files folders. Why: these tokens can answer the app's own permission cards or call Home
+  Assistant directly, so a task that reads them could get around the cards. They are the app's state, not your files.
 - **A `.git`, `.codex` or `.agents` folder directly in `/config`, `/share` or `/media` is read-only.** For example,
   `/config/.git` needs a card, but `/share/<repository>/.git` does not. Why: this is Codex's own sandbox rule, not
   the app's. In a project, these folders hold history, settings or skills that Codex loads, so a change there could
