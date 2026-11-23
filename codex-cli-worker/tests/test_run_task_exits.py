@@ -7,6 +7,7 @@ stand-in app server, with the temporary config tree of test_backups.RunTests.
 from __future__ import annotations
 
 import functools
+import json
 import unittest
 from unittest.mock import patch
 
@@ -18,6 +19,15 @@ SESSION = "019fc242-910a-7c92-a17d-54c014e19fc4"
 ANSWER = {"status": "completed", "summary": "Renamed", "question": "", "details": "Notes"}
 # The real wait loop, checked often, so a one-second timeout or stall ends in about a second.
 QUICK_WAIT = functools.partial(server.wait_for_exchange, poll=0.05)
+
+
+class DiesBeforeTheTurn(StubAppServer):
+    """A Codex that ends its output when the worker sends initialize, before any turn starts."""
+
+    def write(self, line: str) -> int:
+        self.requests.append(json.loads(line))
+        self.close()
+        return len(line)
 
 
 class RunTaskExitTests(unittest.TestCase):
@@ -102,6 +112,10 @@ class RunTaskExitTests(unittest.TestCase):
         self.assertEqual(task["error"], "")
         self.assertEqual(self.result_events()[0]["codex_status"], "needs_input")
         server.notify.assert_called_once()
+        # The notice carries the question and every choice, so the owner can answer from it.
+        notice = " ".join(str(part) for part in server.notify.call_args.args)
+        for text in ("Rename which automation?", "Kitchen", "Hall"):
+            self.assertIn(text, notice)
         self.assert_left_no_process()
 
     # -- failed -----------------------------------------------------------------------------------------------
@@ -135,6 +149,38 @@ class RunTaskExitTests(unittest.TestCase):
         self.assertIn("invented: no such file", self.log())
         self.assertFalse((self.run_dir / "changes.json").exists())
 
+    def test_a_final_answer_file_that_cannot_be_reset_is_failed_before_codex_starts(self):
+        # A folder where the answer file goes: removing the old answer fails.
+        (self.run_dir / "final.json").mkdir(parents=True)
+        launch = self.run_exchange(StubAppServer(SESSION, ANSWER))
+        launch.assert_not_called()
+        task = self.assert_finished_failed("Could not prepare the Codex task output.")
+        self.assertIn("Could not reset the Codex final response: ", task["details"])
+        self.assertIn("worker: Could not reset the Codex final response: ", self.log())
+        self.assertFalse((self.run_dir / "changes.json").exists())
+
+    def test_a_prompt_file_that_cannot_be_written_is_failed_before_codex_starts(self):
+        # A folder where the prompt file goes: writing the message fails.
+        (self.run_dir / "prompt.txt").mkdir(parents=True)
+        launch = self.run_exchange(StubAppServer(SESSION, ANSWER))
+        launch.assert_not_called()
+        task = self.assert_finished_failed("Could not prepare the Codex task input.")
+        self.assertIn("Could not write the Codex task prompt: ", task["details"])
+        self.assertIn("worker: Could not write the Codex task prompt: ", self.log())
+        self.assertFalse((self.run_dir / "changes.json").exists())
+
+    def test_an_exchange_that_fails_before_the_turn_is_failed_with_no_review(self):
+        process = DiesBeforeTheTurn(SESSION, ANSWER)
+        launch = self.run_exchange(process)
+        launch.assert_called_once()
+        self.assertEqual([request.get("method") for request in process.requests], ["initialize"])
+        task = self.assert_finished_failed("The Codex exchange could not finish.")
+        self.assertIsNone(task["returncode"])
+        self.assertIn("Codex permission connection failed: ", task["details"])
+        self.assertIn("worker: Codex permission connection failed: ", self.log())
+        # No turn ran, so nothing could have changed: no review of changes.
+        self.assertFalse((self.run_dir / "changes.json").exists())
+
     # -- canceled ---------------------------------------------------------------------------------------------
 
     def test_a_cancel_during_the_turn_leaves_the_cancelled_state_untouched(self):
@@ -152,6 +198,37 @@ class RunTaskExitTests(unittest.TestCase):
         self.assertEqual(task["changes"], {"added": [], "changed": [], "deleted": []})
         self.assertEqual(self.result_events(), [])
         self.assertFalse((self.run_dir / "changes.json").exists())
+        server.notify.assert_not_called()
+        self.assert_left_no_process()
+
+    def test_a_cancel_during_the_review_leaves_the_cancelled_state_and_no_result(self):
+        real_assess = server.assess_changes
+
+        def cancel_then_assess(*args, **kwargs):
+            self.assertTrue(server.request_task_cancellation(self.task_id)[0])
+            return real_assess(*args, **kwargs)
+
+        with patch.object(server, "assess_changes", side_effect=cancel_then_assess):
+            self.run_exchange(StubAppServer(SESSION, ANSWER))
+        task = self.task()
+        self.assertEqual(task["status"], "cancelled")
+        self.assertEqual(task["summary"], server.CANCELLED_TASK_SUMMARY)
+        # The list of changes was written before the review began; the cancel stops the run after it.
+        self.assertTrue((self.run_dir / "changes.json").exists())
+        self.assertEqual(self.result_events(), [])
+        server.notify.assert_not_called()
+        self.assert_left_no_process()
+
+    def test_a_cancel_after_the_last_check_is_kept_by_the_refused_final_update(self):
+        # The image collection runs after the last cancel check: only the refused final update stops the run.
+        def cancel_then_collect(*_args):
+            self.assertTrue(server.request_task_cancellation(self.task_id)[0])
+            return []
+
+        with patch.object(server, "collect_generated_images", side_effect=cancel_then_collect):
+            self.run_exchange(StubAppServer(SESSION, ANSWER))
+        self.assertEqual(self.task()["status"], "cancelled")
+        self.assertEqual(self.result_events(), [])
         server.notify.assert_not_called()
         self.assert_left_no_process()
 
