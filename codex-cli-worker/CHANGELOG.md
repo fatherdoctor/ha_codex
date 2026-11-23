@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.0 (unreleased)
+
+- A new test file, `tests/test_run_task_exits.py`, runs one whole exchange for each way a run can end: an answer, a
+  question, a failure Codex reports, a turn that ends in an error, a Codex that cannot start or that stops before its
+  turn, an answer or prompt file that cannot be prepared, a cancel before, during or right after the start, during
+  the review of changes or at the final update, a timeout, a stall, and a run that the policy, the sandbox check or
+  the model pin refuses. Each test checks the state, the log line, the result event and the notice that the run
+  leaves. No behavior changes; the tests guard the next step, which splits the run function into smaller parts.
+
 ## 0.5.0 (draft)
 
 This draft summarizes changes since the 0.3.6 tag, through release branch commit `0bcdccd87d4d`.
