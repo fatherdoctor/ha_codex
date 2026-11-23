@@ -224,6 +224,22 @@ These are draft checks for the installed release. They do not report a live-syst
   copy at `/data/agents_before_move.md`. If both places hold a file, nothing moves and the app logs a line.
 
 ### Changed
+- **Codex works from `/media/.agents/codex`.** Codex's working folder is now `/media/.agents/codex` instead of
+  `/config`, so its notes, scratch files and drafts no longer land in Home Assistant's configuration, and the
+  automatic backup leaves them out unless you include the media folder in your backup settings. The app now maps
+  Home Assistant's `/media` folder read-write, and `/media` is a writable place in `workspace-write` beside
+  `/config` and `/share`, the same `/media` access the Claude add-on has. `/media/.agents` is a writable place of its
+  own, because Codex's sandbox otherwise keeps a folder named `.agents` read-only. Every hidden file and read-only folder of
+  the sandbox stays the same, and the approval cards are unchanged. The app creates the folder at start when it is
+  missing and never moves or empties it; it does not create `/media`. When the folder cannot be created, when `/media` is missing, or when any
+  part of its path is a link, Codex works from `/config` as before and the log says why. An `AGENTS.md` that you put
+  in the working folder is read as the working folder's instructions, after the app's own `AGENTS.md`. The starter
+  `AGENTS.md` of a new install says to ask before changing files in other apps' folders under `/share` and `/media`.
+  The remote connection for the ChatGPT app starts its Codex in the same working folder. A chat from the ChatGPT app may write
+  `/config` without a request, as in 0.4, and may now also write `/share` and `/media` without a request, the same
+  as a chat on the page. The `github_git` tool and the **Link** form
+  under **Settings** > **GitHub** now refuse a relative path such as `.` and ask for the full path, so a path meant
+  for the working folder cannot name the configuration repository in `/config`.
 - **Dashboard changes without screenshots.** Codex changes a dashboard, reads its configuration back and reports
   what changed, as the Codex CLI does. The built-in browser that opened dashboards and took desktop, mobile and
   Fully Kiosk screenshots is removed, with the blocked-request review, **Settings > Advanced > Browser
