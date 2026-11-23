@@ -3,9 +3,9 @@
 Home Assistant keeps sign-ins, tokens and integration credentials in .storage, beside
 dashboards and other state, and secrets.yaml holds the values that `!secret` names.
 The worker leaves both out of the full snapshot and deletes any copy of them in an
-exchange's backup folder, in every permission mode. In a sandbox, secrets.yaml
-and the sign-in files in .storage are hidden; the rest of .storage is writable
-like the rest of /config, as in the Claude add-on.
+exchange's backup folder, in every permission mode. In a sandbox both are
+readable and writable like the rest of /config, as in the Claude add-on; the
+starter AGENTS.md tells Codex when to leave them alone.
 """
 from __future__ import annotations
 
@@ -272,7 +272,7 @@ class ApprovalRecordTests(unittest.TestCase):
 
 
 class SandboxTests(unittest.TestCase):
-    """In every sandbox .storage stays writable under Codex's bind of /config; only its sign-in files are hidden."""
+    """In every sandbox secrets.yaml and all of .storage stay readable and writable under Codex's bind of /config."""
 
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
@@ -298,20 +298,17 @@ class SandboxTests(unittest.TestCase):
         subprocess.run([str(self.wrapper), *args], check=True)
         return self.record.read_text(encoding="utf-8").split("\n")
 
-    def test_storage_gets_no_read_only_bind_and_its_sign_in_files_stay_hidden(self):
+    def test_no_bind_or_mask_names_secrets_or_storage(self):
         self.storage.mkdir(parents=True)
-        (self.storage / "auth").write_text("{}", encoding="utf-8")
-        (self.storage / "auth_provider.homeassistant").write_text("{}", encoding="utf-8")
-        (self.storage / "lovelace").write_text("{}", encoding="utf-8")
+        for name in ("auth", "auth_provider.homeassistant", "lovelace"):
+            (self.storage / name).write_text("{}", encoding="utf-8")
+        (self.root / "config" / "secrets.yaml").write_text("a: b\n", encoding="utf-8")
         recorded = self.run_wrapper()
         before = recorded[:recorded.index("--")]
-        # No bind names the folder itself, so Codex's writable bind of /config covers it.
-        self.assertNotIn(str(self.storage), before)
-        for name in ("auth", "auth_provider.homeassistant"):
-            with self.subTest(name=name):
-                hidden = before.index(str(self.storage / name))
-                self.assertEqual(before[hidden - 2:hidden + 1], ["--ro-bind", "/dev/null", str(self.storage / name)])
-        self.assertNotIn(str(self.storage / "lovelace"), before)
+        for path in (self.storage, self.storage / "auth", self.storage / "auth_provider.homeassistant",
+                     self.storage / "lovelace", self.root / "config" / "secrets.yaml"):
+            with self.subTest(path=path.name):
+                self.assertNotIn(str(path), before)
 
 
 if __name__ == "__main__":

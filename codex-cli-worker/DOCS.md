@@ -77,8 +77,8 @@ More: [Sandbox](https://github.com/fatherdoctor/ha_codex/blob/main/docs/app-refe
 - Chats and the files you attach to a message (PNG, JPEG, GIF or WebP) stay in the app's private storage, not in
   `/config`. Attachments are removed after 7 days or with the chat.
 - Keep your own Home Assistant backups. The app's saved copies of changed files can be missing, and `secrets.yaml`
-  and `.storage` are never copied. `.storage` is writable like the rest of `/config`; the starter `AGENTS.md` tells
-  Codex to leave it to Home Assistant.
+  and `.storage` are never copied. Codex can read and change both, like the rest of `/config`; the starter
+  `AGENTS.md` tells it when to leave them alone.
 
 More: [Backups](https://github.com/fatherdoctor/ha_codex/blob/main/docs/app-reference.md#backups).
 
