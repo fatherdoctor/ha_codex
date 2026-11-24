@@ -13,6 +13,8 @@ BRIDGES = (
     "scheduling_mcp", "verification_mcp",
 )
 WORKER = Path(__file__).resolve().parents[1]
+if str(WORKER) not in sys.path:
+    sys.path.insert(0, str(WORKER))
 
 
 def line(value):
