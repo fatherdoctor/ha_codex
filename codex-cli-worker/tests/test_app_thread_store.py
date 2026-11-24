@@ -77,8 +77,9 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(thread["method"], "thread/resume")
         self.assertEqual(thread["params"]["threadId"], "thread")
         self.assertEqual(thread["params"]["developerInstructions"], server.PAGE_INSTRUCTIONS)
-        # A chat from before 0.6 resumes in the new folder and is told what its old /config/ paths mean (CX-HA-PATH).
-        self.assertEqual(thread["params"]["cwd"], server.CONFIG_ROOT.as_posix())
+        # A chat from before 0.6 resumes in Codex's working folder and is told what its old /config/ paths mean
+        # (CX-HA-PATH).
+        self.assertEqual(thread["params"]["cwd"], server.codex_workdir())
         self.assertIn(server.old_config_note(), thread["params"]["developerInstructions"])
         self.assertEqual(turn["params"]["input"], [{"type": "text", "text": OWNER_TEXT}])
 
@@ -89,7 +90,7 @@ class FixedTextTests(unittest.TestCase):
     def test_the_rules_map_an_old_config_path_and_keep_home_assistants_own_yaml(self):
         """Since 0.6 the folder is /homeassistant; /config/ in Home Assistant's own YAML stays (CX-HA-PATH)."""
         text = server.PAGE_INSTRUCTIONS
-        self.assertIn("Workspace: /homeassistant\n", text)
+        self.assertIn("Home Assistant configuration: /homeassistant\n", text)
         self.assertIn("Home Assistant's configuration folder is /homeassistant. /config does not exist here; a path "
                       "in this chat or in the owner's text that starts with /config/ means the same file under "
                       "/homeassistant/. Inside Home Assistant's own YAML, /config/ is Home Assistant's own path and "
@@ -99,7 +100,7 @@ class FixedTextTests(unittest.TestCase):
     def test_the_rules_name_no_per_message_detail(self):
         """No task id, backup folder, attachment, token note, documentation date, GitHub note or user message."""
         text = server.PAGE_INSTRUCTIONS
-        for changing in ("Task id", "codex_tasks", "copy it to", "The user attached", "HA_URL", "stored locally",
+        for changing in ("Task id", "codex_tasks", "copy it to", "The user attached", "$HA_URL/api", "stored locally",
                          "github_git", "Current user message"):
             self.assertNotIn(changing, text)
         self.assertIn("call the home_assistant_data exchange_info tool once", text)
@@ -267,6 +268,18 @@ class ExchangeRecordTests(unittest.TestCase):
             task_id, attachments.StubAppServer(attachments.SESSION_ID), "Prompt", Path("final"), None, {},
             {"codex_sandbox": "workspace-write"})
         self.assertEqual(session.thread_params["developerInstructions"], server.build_page_instructions())
+
+    def test_codex_starts_in_its_working_folder_and_keeps_config_writable(self):
+        """The thread starts in its working folder; /homeassistant, /share and /media are the writable roots."""
+        task_id = self.create(OWNER_TEXT)
+        workdir = Path(self.enterContext(tempfile.TemporaryDirectory())) / "codex"
+        workdir.mkdir()
+        with patch.object(server, "CODEX_WORKDIR", workdir):
+            session = server.create_approval_session(
+                task_id, attachments.StubAppServer(attachments.SESSION_ID), "Prompt", Path("final"), None, {},
+                {"codex_sandbox": "workspace-write"})
+        self.assertEqual(session.thread_params["cwd"], str(workdir))
+        self.assertEqual(session.turn_params["sandboxPolicy"]["writableRoots"][:4], ["/homeassistant", "/share", "/media", "/media/.agents"])
 
     def run_and_record_plain(self, task_id, session_id=None, reply=None):
         """Run one exchange through run_codex's fake process and return exchange_info's details and the message."""

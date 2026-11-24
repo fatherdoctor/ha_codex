@@ -1,6 +1,6 @@
 // The signing-in state of the ChatGPT and GitHub panels in Settings: only the sign-in link, the code with its timer
-// and (ChatGPT) the folded QR code show, then one quiet Cancel. No Sign out, no Codex availability paragraph and no
-// "confirmed access" line while signing in; the signed-out and signed-in states keep them. Runs at phone width and
+// and (ChatGPT) the folded QR code show, then one quiet Cancel. No Sign out, no Codex requirement paragraph and no
+// account-access line while signing in; the signed-out and signed-in states keep them. Runs at phone width and
 // on a desktop. browser_settings_phone.cjs runs this file; it also runs alone. Run with tests/web_fixture.py
 // serving the page. Every code, name and address is synthetic.
 const {chromium} = require('playwright');
@@ -9,7 +9,8 @@ const assert = require('node:assert/strict');
 const PAGE = 'http://127.0.0.1:9137/preview/';
 const VIEWPORTS = [{width: 360, height: 640}, {width: 1280, height: 800}];
 const QR = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="#fff"/></svg>';
-const ACCESS = 'A successful turn confirmed Codex access with the current sign-in.';
+// The worker names an account-access line only when a sign-in is needed (account_access.py).
+const ACCESS = 'Sign in with a ChatGPT account that has Codex access.';
 const waiting = {
   status: 'waiting_for_user', pending: true, process_running: true, login_id: 'L1', user_code: 'TEST-0000',
   verification_url: 'https://auth.openai.com/codex/device', qr_path: 'auth/qr.svg?login=L1', expires_in: 900,
@@ -102,15 +103,15 @@ async function checkGithubSigningIn(page, label) {
   await page.locator('#github-flow .signin-code').waitFor();
   const names = await page.locator('#github-section').evaluate(root => [...root.querySelectorAll(
     '#github-status, #github-details, #github-repositories, #github-flow a, #github-flow .signin-code, ' +
-    '#github-token, #github-local, #github-connect, #github-cancel, #github-test, #github-check, ' +
-    '#github-accept, #github-disconnect, #github-test-result, p.muted')]
+    '#github-token, #github-local, #github-connect, #github-cancel, ' +
+    '#github-accept, #github-disconnect, p.muted')]
     .filter(element => element.getClientRects().length > 0)
     .map(element => element.id || element.className || element.tagName.toLowerCase()));
   assert.deepEqual(names, ['signin-link', 'signin-code', 'muted signin-expiry', 'github-cancel'],
     `${label}: GitHub panel shows the link, the code and Cancel, in that order`);
   assert.ok(await page.locator('#github-flow .signin-expiry').isVisible(), `${label}: the code timer shows`);
   const text = await page.locator('#github-section').innerText();
-  for (const gone of ['Disconnect', 'Use a token instead', 'Lets the assistant'])
+  for (const gone of ['Sign out', 'Use a token instead', 'Lets the assistant'])
     assert.ok(!text.includes(gone), `${label}: "${gone}" shows while signing in`);
   await assertLinkLabelShows(page, '#github-flow a.signin-link', `${label} Settings GitHub`);
   assert.equal(await page.locator('#github-cancel').evaluate(b => b.classList.contains('subtle')), true,
@@ -133,7 +134,8 @@ async function checkChatgptDetails(page) {
 async function checkOtherStates(browser) {
   let {page, errors} = await openSettings(browser, VIEWPORTS[1], signedOut, githubBase);
   let text = await page.locator('#chatgpt-section').innerText();
-  assert.ok(text.includes('Check current availability'), 'signed out: the availability text shows');
+  assert.ok(text.includes('A ChatGPT account with Codex access is required.'), 'signed out: the requirement shows');
+  assert.ok(!/Free and Go|availability/.test(text), 'signed out: no account-type availability text');
   assert.ok(await page.locator('#login').isVisible(), 'signed out: Sign in shows');
   assert.ok(!(await page.locator('#logout').isVisible()), 'signed out: Sign out is hidden');
   assert.ok(!(await page.locator('#chatgpt-details').isVisible()), 'signed out: no ChatGPT details');
@@ -145,7 +147,7 @@ async function checkOtherStates(browser) {
   assert.ok(await page.locator('#logout').isVisible(), 'signed in: Sign out shows');
   assert.ok(!(await page.locator('#login').isVisible()), 'signed in: Sign in is hidden');
   await checkChatgptDetails(page);
-  assert.ok(await page.locator('#github-disconnect').isVisible(), 'GitHub connected: Disconnect shows');
+  assert.ok(await page.locator('#github-disconnect').isVisible(), 'GitHub connected: Sign out shows');
   assert.ok(await page.locator('#github-details').isVisible(), 'GitHub connected: the details show');
   assert.equal(await page.locator('#chatgpt-section.signing-in, #github-section.signing-in').count(), 0,
     'no panel is in the signing-in state');
@@ -154,13 +156,13 @@ async function checkOtherStates(browser) {
   assert.deepEqual(errors, []);
   await page.close();
 
-  // Connect again while connected: the new sign-in shows alone, without Disconnect or the old details.
+  // Sign in while connected: the new sign-in shows alone, without Sign out or the old details.
   ({page, errors} = await openSettings(browser, VIEWPORTS[0],  signedIn,
     {...githubConnected, flow: githubWaiting.flow}));
   await page.locator('#github-flow .signin-code').waitFor();
-  assert.ok(!(await page.locator('#github-disconnect').isVisible()), 'connect again: Disconnect is hidden');
+  assert.ok(!(await page.locator('#github-disconnect').isVisible()), 'sign in again: Sign out is hidden');
   assert.ok(!(await page.locator('#github-details').isVisible()), 'connect again: the details are hidden');
-  for (const id of ['github-test', 'github-check', 'github-test-result', 'github-repositories', 'github-local'])
+  for (const id of ['github-repositories', 'github-local'])
     assert.ok(!(await page.locator(`#${id}`).isVisible()), `connect again: #${id} is hidden`);
   assert.ok(await page.locator('#github-cancel').isVisible(), 'connect again: Cancel shows');
   assert.deepEqual(errors, []);

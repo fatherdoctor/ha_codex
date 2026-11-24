@@ -349,9 +349,9 @@ From **0.1.63**, the worker no longer archives the whole configuration folder be
 
 - When a change fails validation (below), the task details point to the saved copy of each affected file, or say that it has none.
 - Secret files are never copied: every `secrets.yaml` and every file under `.storage`, where Home Assistant keeps sign-ins, tokens and integration credentials beside dashboards. The full snapshot leaves them out, Codex is told not to copy them, and the worker deletes such a copy when the message ends, in every permission mode. A message that you stop loses the copies at once; a message that a restart cuts off loses them at the next backup cleanup, when the app starts or within the hour. A permission card for a change to one of these files shows the change while it waits for your answer; after the answer, or when the request expires, the chat's record keeps the file's path but not the changed lines. To undo a change to one of them, use a Home Assistant backup.
-- In a sandbox (Ask for approval, Approve for me and Read only), `/homeassistant/.storage` is read-only and `/homeassistant/secrets.yaml` is hidden. A `secrets.yaml` in another folder, such as `esphome/secrets.yaml`, gets no copy (above) but is not hidden: a sandboxed command can read and change it without a request. Codex can change these files only through a permission request. In Ask for approval, you see that request as a card and decide. In Approve for me, Codex's reviewer decides, and in Full access nobody is asked: no app-side check can stop a change there, because Codex runs without the sandbox.
+- In a sandbox (Ask for approval, Approve for me and Read only), secret files are not hidden, as in the Claude add-on: Codex can read `secrets.yaml` and every file under `.storage`, the sign-in files `auth` and `auth_provider.homeassistant` included, and in `workspace-write` change them without a request. What Codex reads goes into the chat and to the model provider. The starter `AGENTS.md` keeps the rules instead: rule 2 says to open secret files only when the owner asks and never to paste them into the chat, and rule 5 says not to edit `.storage` files while Home Assistant runs, because Home Assistant keeps them in memory and writes over a changed file, and to use the API or the settings pages instead. To keep these files back, say so in your own `AGENTS.md`.
 
-Codex needs to be able to write to the backup folder. In `workspace-write` mode the app adds that one exchange's backup folder to the sandbox's writable places, beside `/homeassistant` and `/share` and the chat's files folder (see [Files Codex makes for you](#files-codex-makes-for-you)); the rest of `/data` stays read-only to Codex, and the private files the sandbox hides stay hidden. In `read-only` mode Codex is given no backup folder; any explicitly approved writes still need a separate recovery plan. A per-file copy depends on Codex following the instruction; if a file was changed without one, restore it from a Home Assistant backup.
+Codex needs to be able to write to the backup folder. In `workspace-write` mode the app adds that one exchange's backup folder to the sandbox's writable places, beside `/homeassistant`, `/share`, `/media`, the app's own folder `/addon_config` and the chat's files folder (see [Files Codex makes for you](#files-codex-makes-for-you)); the rest of `/data` stays read-only to Codex, and the private files the sandbox hides stay hidden. In `read-only` mode Codex is given no backup folder; any explicitly approved writes still need a separate recovery plan. A per-file copy depends on Codex following the instruction; if a file was changed without one, restore it from a Home Assistant backup.
 
 **Full snapshot (optional).** Turn on **Full snapshot before every message** (`full_snapshot`) to archive tracked files, excluding secret files (every `secrets.yaml` and every file under `.storage`), to `snapshot-before.tar.gz` in the exchange's folder before Codex starts. When a change fails validation, the worker can then take a missing per-file copy from that archive when a matching file is available. The exclusions below still apply, so this is not a complete Home Assistant backup. Creating the archive adds a wait before every message that grows with the amount of tracked data.
 
@@ -366,7 +366,33 @@ Codex needs to be able to write to the backup folder. In `workspace-write` mode 
 ## Sandbox
 
 - `read-only`: Codex can inspect files. Writes and shell networking require permission for the specific action.
-- `workspace-write`: Codex can edit the mounted `/homeassistant` workspace and the shared `/share` folder, the same `/share` access the Claude add-on has, and can save files for you in the chat's own files folder under `/data`. Shell networking and writes elsewhere require permission. This remains the default setting.
+- `workspace-write`: Codex can edit the mounted `/homeassistant` workspace, the shared `/share` folder and the `/media` folder, the same `/share` and `/media` access the Claude add-on has, and the app's own folder `/addon_config`, where its `AGENTS.md` is, and can save files for you in the chat's own files folder under `/data`. Shell networking and writes elsewhere require permission. This remains the default setting.
+
+**Working folder.** Codex starts each chat in `/media/.agents/codex`, its own folder for notes, scratch files and
+drafts, so they stay out of Home Assistant's configuration. The working folder is in `/media` because the automatic
+backup leaves the media folder out unless you include it in your backup settings: scratch files do not make each
+backup larger, and they are not restored from a backup. Keep instructions you need in the app's own `AGENTS.md`
+(Settings), which the backup keeps.
+The app creates the folder at start when it is missing and never moves, empties or rewrites what is in it. What Codex
+may write without a request is `/homeassistant`, `/share`, `/media` (with `/media/.agents`), `/addon_config` (the app's own
+folder, where its `AGENTS.md` is), the exchange's backup folder and the chat's files folder. Other apps keep their
+files under `/share` and `/media` too (another assistant's folder, a clone of a repository, recordings); the sandbox
+does not stop a write there in `workspace-write`, so the starter `AGENTS.md` tells Codex to ask first, and your own
+`AGENTS.md` can say more. When the folder cannot be created, when `/media` is missing, or when any part of the path is
+a link, Codex works from `/homeassistant` as before and the app's log says why, naming the link. A link at `/media/.agents`
+itself does more: Codex keeps that folder read-only and cannot do so through a link, so it refuses to build its
+sandbox, and every command in Ask for approval and Approve for me fails until you remove the link. Read only still
+works. The log line says so. A link named
+`.agents`, `.git` or `.codex` directly in `/homeassistant` or `/share` has the same effect. The app does not check that `/media` is
+the media folder of Home Assistant: the app's configuration maps it, and without that map the working folder would be
+lost at each update.
+
+Codex's own sandbox keeps a folder named `.agents`, `.git` or `.codex` read-only when it is directly in a writable
+place, because in a project such a folder holds instructions or skills that Codex loads. `/media/.agents` is not a
+project folder and nothing in /media/.agents outside the working folder is loaded as instructions (the working folder's own AGENTS.md is), so the app gives it as a writable place of its own: a
+write anywhere in `/media/.agents`, such as another assistant's folder beside `codex`, needs no request.
+A chat from the ChatGPT app over remote control starts in the same folder and, in `workspace-write`, may write the
+same places without a request as a chat on the page, except the exchange's backup folder and the chat's files folder.
 
 The app's `codex_sandbox` option takes only these two values. An older setting that names `danger-full-access` stops the app at startup with a log line saying so. A chat can still run without the sandbox in the Full access permission mode, which the owner turns on in Settings (see "Permission modes" below).
 
@@ -422,6 +448,12 @@ checks these things first, in every mode:
   socket, a request while remote control is off sends nothing.
 - The service must be `domain.service`. `entity_id`, `device_id`, `area_id`, `floor_id` and `label_id` go in
   `target`, the other fields in `data`. A request in any other form sends nothing.
+
+Some actions only answer with data, for example `calendar.get_events` or `weather.get_forecasts`. From **0.5.1**,
+when Home Assistant refuses such a call because the request did not ask for the answer, the worker sends the same
+call once more with `?return_response`. Home Assistant refuses before the action runs, so the action runs once. The
+answer gives Codex the data in `response`. Data larger than 20,000 bytes of JSON is cut: the answer then holds the
+first part as text, `response_cut` and a note. Before 0.5.1, Codex got only the error.
 
 The tool refuses no service by name. Your answer to Codex's question is the only gate, so read the service before
 you allow it. A call can reach the Supervisor: a `hassio` service, `update.install` on an update entity (an app,
@@ -610,7 +642,7 @@ is not evidence that the requested permissions were granted.
 - **One supervised process.** The app runs `codex app-server --listen unix://<private socket> --remote-control` in the foreground and starts it again, with a growing delay, if it exits. **Turn off** stops it.
 - **Machine name.** The ChatGPT app lists this machine as **Home Assistant** unless you change the **Remote control machine name** option on the app's Configuration tab, or in **Settings** > **Remote connection** while remote control is off (the field there saves the same option; the page showed the name only in 0.3.5 and 0.3.6). The name from the Configuration tab takes effect when the app restarts; the name saved on the page takes effect the next time you turn remote control on. Pairing is kept with the Codex sign-in, so the app should show the new name the next time remote control connects; if it still shows the old name, choose **New pairing code**. Codex has no name setting, so the app starts it with that name as its host name inside a private namespace. If the private name namespace is unavailable, the page explains that Codex is using its existing host name.
 - **Pairing.** The manual code is shown as large text. A QR for the app link appears only when an app-link code is available; otherwise type the manual code or request a new code. Pairing is kept in the app's private storage with the Codex sign-in, so a restart does not ask for it again. **New pairing code** asks Codex for a fresh one when the ChatGPT app has lost this machine.
-- **Automatic Core address and first-run reads.** Relay commands receive the discovered or explicitly overridden `HA_URL`; an owner-configured `HA_TOKEN` remains optional. The separate observational read tool needs no hand-made token. While **Enable Home Assistant MCP** is on (the default), the relay process holds the app's Supervisor token for its whole run, to start the Home Assistant MCP server; with the option off, the relay gets no Supervisor token. The commands Codex runs in the sandbox do not see that token, but a command that runs outside the sandbox can read it ([Home Assistant MCP](#home-assistant-mcp)). Relay processes never receive a chat turn's private MCP capabilities; from **0.3.6** they get the `call` tool with a key of their own, kept out of the commands Codex runs. Never print credentials; approval does not create them.
+- **Automatic Core address and first-run reads.** Relay commands receive the discovered or explicitly overridden `HA_URL` only together with an owner-configured `HA_TOKEN`, which remains optional (from **0.5.1**; before, they got `HA_URL` without it). The separate observational read tool needs no hand-made token. While **Enable Home Assistant MCP** is on (the default), the relay process holds the app's Supervisor token for its whole run, to start the Home Assistant MCP server; with the option off, the relay gets no Supervisor token. The commands Codex runs in the sandbox do not see that token, but a command that runs outside the sandbox can read it ([Home Assistant MCP](#home-assistant-mcp)). Relay processes never receive a chat turn's private MCP capabilities; from **0.3.6** they get the `call` tool with a key of their own, kept out of the commands Codex runs. Never print credentials; approval does not create them.
 - **No command check of its own (0.3.6).** Commands from the ChatGPT app do not pass through this app's Allow and Deny buttons. They are held by Codex's own approval flow on the phone, the sandbox mode of the thread, and Codex's managed requirements (`/etc/codex/requirements.toml`, read-only): the values of the four permission modes and no hooks (the full-access sandbox and the `never` policy only while the Full access switch is on), so a hook planted in `/homeassistant` or Codex's home never runs. The managed config (`/etc/codex/managed_config.toml`, read-only) holds one setting: the commands Codex runs never see the tools' keys (`HA_*_CAPABILITY`), whatever a client sends with a thread. The app ships no hook, no command-prefix rules, no rule-load self-test and no config watch, so **Turn on** is always available.
   - The phone uses Codex's own approval card, not this page's buttons: review what will change, where and the effect, then allow or deny that request. An allowed command runs outside the sandbox.
   - A valid owner `allow` rule in a Codex `.rules` file can let a matching command run outside the sandbox without a request. The app does not read or block owner rules.
@@ -666,18 +698,17 @@ If you cannot install the App (for example, an organization forbids third-party 
 
 ### The card
 
-- **Add repositories**, under the list of repositories, opens the App installation's **Configure** page on GitHub. The sign-in reaches only the repositories that the App is installed on, so the header can say **1 repository**. Add a repository on that page, then press **Check now** and **Accept this access**. The link is the address GitHub gives for the installation, and the card shows it only for an App sign-in on `github.com`. A token reaches its one repository and has no such link.
-- **Read test** reads each connected repository once and shows the result.
-- **Check now** runs the access check at once (see below).
+- **Add repositories**, under the list of repositories, opens the App installation's **Configure** page on GitHub. The sign-in reaches only the repositories that the App is installed on, so the header can say **1 repository**. Add a repository on that page, then press **Accept this access** when it appears. The link is the address GitHub gives for the installation, and the card shows it only for an App sign-in on `github.com`. A token reaches its one repository and has no such link.
+- **Sign in** starts a new GitHub App sign-in while one is saved; the saved one stays until the new one finishes.
 - **Accept this access** appears when the repositories changed on GitHub but the access is still exactly Contents read and write. It makes the current set the one the check expects. If the access itself changed, change it back on GitHub instead.
-- **Disconnect** forgets the sign-in on this box. It cannot revoke it on GitHub, because that needs a secret the app does not carry. So the card then shows the link to revoke it: `https://github.com/settings/apps/authorizations` for the App, `https://github.com/settings/tokens` for a token. Disconnect waits while a task runs.
+- **Sign out** forgets the sign-in on this box. It cannot revoke it on GitHub, because that needs a secret the app does not carry. So the card then shows the link to revoke it: `https://github.com/settings/apps/authorizations` for the App, `https://github.com/settings/tokens` for a token. Sign out waits while a task runs.
 - **Repositories on this box**: **Clone** copies a connected repository into a new folder directly under `/share`; the folder name starts as the repository's name, so a clone goes to `/share/<repository>`. **Link** points an existing git folder under `/share` or `/homeassistant` at a connected repository (it sets `origin`). Release 0.3 maps Home Assistant's `/share` folder read-write into the app for this. Neither writes a credential into the repository, so git on this box reaches GitHub with the sign-in only through the app. A list of the git folders on this box, with menus, comes in 0.3.1.
 
 You can also ask the assistant in chat to clone or link a connected repository. It uses the same `github_git` tool.
 
 ### The `github_git` tool
 
-Codex can call `repos`, `fetch`, `pull`, `push`, `clone` and `link`, for connected repositories only and only during a chat or scheduled run. Every operation is available in every sandbox mode (0.3.6). A pull fetches only; the assistant then fast-forwards the work tree in its own shell (`git merge --ff-only`), so the app never checks files out into a folder a task can change. A push never forces, deletes or pushes tags.
+Codex can call `repos`, `fetch`, `pull`, `push`, `clone` and `link`, for connected repositories only and only during a chat or scheduled run. Every operation is available in every sandbox mode (0.3.6). A pull fetches only; the assistant then fast-forwards the work tree in its own shell (`git merge --ff-only`), so the app never checks files out into a folder a task can change. A push never forces, deletes or pushes tags. `fetch`, `pull`, `push` and `link` take the full path of the work tree, starting with `/` (for example `/share/house_repo` or `/homeassistant`); the app refuses a relative path such as `.`, because Codex starts in `/media/.agents/codex` and a relative path could name a different repository than the one Codex means. The **Link** form under **Settings** > **GitHub** uses the same check.
 
 Limits of a push:
 
@@ -687,13 +718,13 @@ Limits of a push:
 
 ### Monitoring
 
-The app checks the sign-in at start, every hour, and when you press **Check now**. The states are: OK, expires within 7 days, expired, revoked, access changed (repositories missing or added, or access other than Contents read and write), and cannot be checked (GitHub unreachable three times in a row).
+The app checks the sign-in at start, and every hour. The states are: OK, expires within 7 days, expired, revoked, access changed (repositories missing or added, or access other than Contents read and write), and cannot be checked (GitHub unreachable three times in a row).
 
 When the state changes, and only then:
 
 - The app fires the Home Assistant event `codex_cli_github_access` with the state, the previous state, the reason, the account login, the missing and added repositories, the permission problem and the expiry. It never sends a token or a code. The integration fires the same event, with `source: integration`, when it sees the change, so an automation still works if the app's own call failed. An automation can route it to your notify service.
 - The app sends one notification through its `notify_service` option, or a persistent notification (`codex_cli_github`) without one.
-- The integration raises one repair (`github_access_lost`). It is an error for expired, revoked and cannot be checked, and a warning for expires soon and access changed. Its text fits the state and the kind of sign-in: for expires soon it says that GitHub still works and gives the date, and for a token it names **Use a token instead**, because **Connect again** starts an App sign-in. It clears when the check is OK or you disconnect. If you never connected, there is no repair.
+- The integration raises one repair (`github_access_lost`). It is an error for expired, revoked and cannot be checked, and a warning for expires soon and access changed. Its text fits the state and the kind of sign-in: for expires soon it says that GitHub still works and gives the date, and for a token it names **Use a token instead**, because **Sign in** starts an App sign-in. It clears when the check is OK or you disconnect. If you never connected, there is no repair.
 - A banner above the chat offers **Open GitHub settings**.
 
 ### When GitHub stops working
@@ -702,13 +733,13 @@ Open **Settings > Accounts and connections > GitHub** in the app page. The card 
 
 - **Not connected to GitHub:** No sign-in is saved, or the app was restored from a backup. Press **Connect GitHub** to connect the App. If you use a fine-grained token, open **Use a token instead**.
 - **Connecting:** The App is waiting for you to finish on GitHub. Follow the link on the card. If the code expires, press **Get a new code**. To start over while it is waiting, press **Cancel**, then **Connect GitHub**.
-- **Connected to GitHub:** The access check is OK. If a repository operation still fails, press **Read test** to check the connected repositories.
-- **GitHub still works, but this sign-in (or token) expires within 7 days:** The assistant can still use GitHub. Before the date, press **Connect again** for the App, or create a new fine-grained token and open **Use a token instead** for a token.
-- **The GitHub sign-in expired** or **This GitHub token expired:** The saved sign-in is past its expiry. For the App, press **Connect again**. For a token, create a new one on GitHub, then open **Use a token instead**.
-- **GitHub no longer accepts this sign-in (or token):** GitHub refused the saved sign-in (revoked). For the App, press **Connect again**; if GitHub still refuses it, restore the App's repository access on GitHub. For a token, create a new one, then open **Use a token instead**.
-- **The new GitHub sign-in failed:** A **Connect again** did not finish. The card gives GitHub's reason, and the previous sign-in stays as it was.
-- **The GitHub sign-in reaches different repositories or access than you connected:** GitHub reports a changed repository list or permissions. Check the list and access shown on the card. If the repository change is intended and **Accept this access** is available, press it. If you did not intend the repository change, restore the repository selection for the App on GitHub. Then press **Check now**. If permissions changed, restore Contents read and write on GitHub, then press **Check now**.
-- **The GitHub sign-in cannot be checked:** GitHub could not be reached repeatedly, or the check found another error. Check the last-check reason and your connection, then press **Check now**.
+- **Connected to GitHub:** The access check is OK. If a repository operation still fails, check that the repository is in the list on the card.
+- **GitHub still works, but this sign-in (or token) expires within 7 days:** The assistant can still use GitHub. Before the date, press **Sign in** for the App, or create a new fine-grained token and open **Use a token instead** for a token.
+- **The GitHub sign-in expired** or **This GitHub token expired:** The saved sign-in is past its expiry. For the App, press **Sign in**. For a token, create a new one on GitHub, then open **Use a token instead**.
+- **GitHub no longer accepts this sign-in (or token):** GitHub refused the saved sign-in (revoked). For the App, press **Sign in**; if GitHub still refuses it, restore the App's repository access on GitHub. For a token, create a new one, then open **Use a token instead**.
+- **The new GitHub sign-in failed:** A new **Sign in** did not finish. The card gives GitHub's reason, and the previous sign-in stays as it was.
+- **The GitHub sign-in reaches different repositories or access than you connected:** GitHub reports a changed repository list or permissions. Check the list and access shown on the card. If the repository change is intended and **Accept this access** is available, press it. If you did not intend the repository change, restore the repository selection for the App on GitHub. The next hourly check sees the change. If permissions changed, restore Contents read and write on GitHub; the next hourly check sees that too.
+- **The GitHub sign-in cannot be checked:** GitHub could not be reached repeatedly, or the check found another error. Check the last-check reason and your connection. The app tries again every hour; **Sign in** makes a new sign-in at once.
 
 ### Backups
 
@@ -723,17 +754,24 @@ none. The text is `starter_agents.md` in the app's source. It tells Codex what `
 rules. Four of them matter most: change the home only on the owner's word, keep secrets secret, keep the old version
 of a changed file, and check the configuration before a restart. A short section after the rules lists three safeguard
 defaults (secrets, protected places, backups) and says that they are defaults the owner can change, not locks in
-the app. Two more sections tell Codex how to keep a memory across chats (one fact per file in a `memory` folder of
-its working folder, with an index `memory/MEMORY.md` it reads at the start of each chat, and never a secret) and say
+the app. Two more sections tell Codex how to keep a memory across chats (one fact per file in `/config/memory/`,
+with an index `/config/memory/MEMORY.md` it reads at the start of each chat, and never a secret) and say
 that the Codex device holds this app's own entities. The app never replaces a file that is already there,
 a link included. It writes the starter once: when you delete the file, it stays deleted while the app keeps
 its data, and an update of an app that has started before writes nothing. The rules are instructions to Codex and not a safeguard; the sandbox, the
 command check and the approval cards work the same with or without them. To get the starter on an older install,
 copy the text from `starter_agents.md` into the editor.
 
-**Where the file lives (0.4).** The file is `AGENTS.md` in the app's own `addon_config` folder: `/addon_configs/<app folder>/AGENTS.md` on the host and `/addon_config/AGENTS.md` inside the app. It is not in the top level of `/homeassistant`. Codex loads it as its global instructions through a link the app keeps at `$CODEX_HOME/AGENTS.md` (`/data/codex-home/AGENTS.md`), where Codex looks for global instructions ([Codex: AGENTS.md guide](https://developers.openai.com/codex/guides/agents-md)). On the first start of this version, an `AGENTS.md` that an older version left in `/homeassistant` is **moved** into the app's folder, after a backup copy at `/data/agents_before_move.md`. It is moved and not copied because Codex works in `/homeassistant` and would read both. If both places already hold a file, the app moves nothing, logs a line, and leaves the one in `/homeassistant` for you to merge or delete. The folder is part of the app's backup like its other data.
+**Where the file lives (0.4).** The file is `AGENTS.md` in the app's own `addon_config` folder: `/addon_configs/<app folder>/AGENTS.md` on the host and `/addon_config/AGENTS.md` inside the app. It is not in the top level of `/homeassistant`. Codex loads it as its global instructions through a link the app keeps at `$CODEX_HOME/AGENTS.md` (`/data/codex-home/AGENTS.md`), where Codex looks for global instructions ([Codex: AGENTS.md guide](https://developers.openai.com/codex/guides/agents-md)). On the first start of this version, an `AGENTS.md` that an older version left in `/homeassistant` is **moved** into the app's folder, after a backup copy at `/data/agents_before_move.md`. It is moved and not copied because Codex then worked in that folder and would have read both. If both places already hold a file, the app moves nothing, logs a line, and leaves the one in `/homeassistant` for you to merge or delete. The folder is part of the app's backup like its other data.
 
-The editor under **Settings** writes the file without a question. The folder is not one of the places Codex may write on its own, so when you ask a chat to change the file, Codex asks for your approval first.
+**A second file in the working folder.** Codex also reads an `AGENTS.md` in its working folder, `/media/.agents/codex/AGENTS.md`,
+when one is there; the app neither writes nor moves that file. Codex reads the app's file first and the working
+folder's file after it, so where the two disagree, the working folder's file wins. An `AGENTS.md` left in `/homeassistant`
+is not read while Codex works from `/media/.agents/codex`. The working folder's file is in `/media`, which is
+writable, so Codex or another app with `/media` access can change it without an approval card, and the automatic
+backup does not keep it.
+
+The editor under **Settings** writes the file without a question. The app's folder is also one of the places Codex may write on its own in `workspace-write`, as the Claude Code add-on writes its own folder: when you ask a chat to change the file, Codex changes it without an approval card. In Read only mode a change still asks you first.
 
 From **0.3.4**, Codex no longer looks for the file in every message. Codex loads the file when a chat
 starts, and the page's rules tell it never to look for the file with a command. When Codex calls `exchange_info`
@@ -756,7 +794,7 @@ The manifest grants `hassio_api: true` with the default Supervisor role and no `
 
 With SSL, set the Home Assistant API URL override to the configured certificate hostname and port. Never disable TLS verification or use insecure client flags to bypass a hostname or certificate error. Discovery does not turn verification off.
 
-`HA_URL` is passed to Codex even without `HA_TOKEN`. If discovery is unavailable or malformed and there is no valid override, the value stays unavailable and is omitted from the environment; neither the worker nor the instructions invent a port. Settings reports that state. A later launch refreshes discovery. The app's own authenticated API calls continue through its Supervisor Core proxy, which does not accept an owner Core token. None of these changes grants shell networking: an unsupported direct API read needs native approval for that command and a separately configured credential.
+From **0.5.1**, `HA_URL` is passed to Codex only together with `HA_TOKEN`; before, Codex got it even without `HA_TOKEN`. Home Assistant counts a call without a token as a failed login and, after a few, bans the app's address, so the address is no longer offered without the token, and the instructions tell Codex never to call Home Assistant's API itself except with that token. If discovery is unavailable or malformed and there is no valid override, the value stays unavailable and is omitted from the environment; neither the worker nor the instructions invent a port. Settings reports that state. A later launch refreshes discovery. The app's own authenticated API calls continue through its Supervisor Core proxy, which does not accept an owner Core token. None of these changes grants shell networking: an unsupported direct API read needs native approval for that command and a separately configured credential.
 
 These calls come from Codex's shell. In `workspace-write` and `read-only`, Codex must request permission for the specific command that needs networking. What Codex can do with the token is whatever the token's user may do, including reloading configuration and restarting Home Assistant.
 
@@ -1155,8 +1193,8 @@ bottom: **Codex** (the ChatGPT sign-in), **GitHub** and **Remote** (the ChatGPT 
 or two such as Ready, Off or Not signed in; the 5-hour and weekly quota with a line for the plan type and the reset
 times; and **Settings**. Select Codex, GitHub or Remote to open Settings at that part of Accounts and connections;
 **Manage remote connection** there opens the window that pairs the ChatGPT app. A row that needs you shows an amber
-dot, and a row whose state could not be read shows a red dot and Unavailable. The ChatGPT account part says whether
-a turn has confirmed Codex access with the current sign-in. While signed in, it also lists the sign-in method, the
+dot, and a row whose state could not be read shows a red dot and Unavailable. The ChatGPT account part shows a line about
+Codex access only when you must sign in. While signed in, it also lists the sign-in method, the
 plan, when OpenAI last accepted the sign-in and the weekly quota left, each only when the app knows it, and it shows
 **Sign out** instead of **Sign in**. It shows no account name or email.
 
@@ -1268,7 +1306,7 @@ state, and clears on a good sign-in or a successful task using the same credenti
 nothing. The passive readers recognize explicit revoked-token markers and the pinned refresh-token expired, reused and invalidated codes and their exact user-facing messages; generic HTTP errors, quota exhaustion and plan names do not imply missing access. No distinct
 task-level entitlement error was verified, so no entitlement mapping is added. Task sign-in failures now use
 the same explicit rejection signals as passive checks, plus the exact observed revocation phrase
-`workspace routing discovery unauthorized (401)`; generic task HTTP failures do not raise the Repair. Status explicitly says when passive reads cannot confirm Codex access.
+`workspace routing discovery unauthorized (401)`; generic task HTTP failures do not raise the Repair. The page shows no line about confirmed or unconfirmed access; it names only a sign-in to do.
 
 Passive usage failures treat generic HTTP 401/403, rate exhaustion and network errors as unknown, not expired sign-in. Only explicit Codex sign-in rejection signals can raise the sign-in Repair. Status exposes fixed usage-error messages with `rate_limits_error_category` (`unavailable`, `sign_in_rejected` or `missing_window`); raw upstream errors and failed-read excerpts are omitted, including older cached failures.
 A real successful turn can confirm access for its current sign-in; changing credentials invalidates that

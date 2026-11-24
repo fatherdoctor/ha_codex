@@ -2,6 +2,8 @@
 //
 // Start a fresh fixture first (python codex-cli-worker/tests/web_fixture.py). Run this file once against it,
 // then once more against a fixture started with CODEX_FIXTURE_SIGN_IN=pending for the sign-in shots.
+// Before the first shot the script saves sample workspace rules through the page's own save, so that no shot
+// shows the "No workspace instructions yet" warning of a new install.
 // Files go to SCREENSHOT_DIR (default: screenshots/ at the repository root) under stable names that
 // screenshots/SCREENSHOTS.md lists.
 const {chromium} = require('playwright');
@@ -40,6 +42,20 @@ async function sampleScheduling(page) {
   });
 }
 
+// Sample workspace rules: with an AGENTS.md in place the page shows no "No workspace instructions yet" warning.
+const sampleRules = '# Rules for this home\n\n- Ask before you change an automation.\n- Check the configuration after each change.\n';
+
+/** Save the sample workspace rules in the fixture, through the same request as the Settings editor. */
+async function seedWorkspaceRules(browser) {
+  const page = await browser.newPage();
+  await page.goto(base);
+  const status = await page.evaluate(async content => (await fetch('agents', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({content}),
+  })).status, sampleRules);
+  assert.equal(status, 200, `saving the sample workspace rules returned HTTP ${status}`);
+  await page.close();
+}
+
 /** Open a page at one size and color scheme, with the sidebar closed on a phone. */
 async function openPage(browser, size, scheme, chatId = null) {
   const page = await browser.newPage({viewport: sizes[size], colorScheme: scheme});
@@ -47,8 +63,12 @@ async function openPage(browser, size, scheme, chatId = null) {
   if (chatId) await page.addInitScript(id => localStorage.setItem('codex-last-chat', id), chatId);
   page.on('pageerror', error => pageErrors.push(error.message));
   await sampleScheduling(page);
+  // The page asks for the workspace rules after it loads; wait for that answer so the warning check below is real.
+  const rulesRead = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/agents'));
   await page.goto(base);
   await page.locator('.chat-row').first().waitFor();
+  await rulesRead;
+  assert.ok(await page.locator('#agents-hint').isHidden(), 'the "No workspace instructions yet" warning shows');
   return page;
 }
 
@@ -102,6 +122,44 @@ async function chat(browser, size, scheme) {
   await page.locator('.message.user').first().evaluate(node => node.scrollIntoView({block: 'start'}));
   await page.screenshot({path: path.join(output, `chat-${scheme}-${size}.png`), animations: 'disabled'});
   return page;
+}
+
+/** The Info tab's three pictures: the chat list, the usage area, and the message box below a reply. */
+async function info(browser, size, scheme) {
+  const page = await openPage(browser, size, scheme, 'preview-04');
+  await page.getByText('Done.', {exact: true}).first().waitFor();
+  await openConversations(page);
+  await page.waitForFunction(() => document.querySelector('#sidebar').getBoundingClientRect().left >= 0);
+  // The sample schedule proposal raises the "Schedule proposal waiting" warning; dismiss it, as a person would, so
+  // the usage picture shows the usage rows and not that warning.
+  const dismiss = page.locator('#attention-dismiss');
+  await dismiss.waitFor();
+  await dismiss.click();
+  await dismiss.waitFor({state: 'hidden'});
+  // The pointer stays where the button was, over Settings; move it off, so no row shows its hover color.
+  await page.mouse.move(0, 0);
+  await shootBetween(page, page.locator('#new-chat'), page.locator('.chats-card'), page.locator('#sidebar'),
+    `info-chats-${scheme}-${size}.png`);
+  const footer = page.locator('.sidebar-footer');
+  await shootBetween(page, footer, footer, page.locator('#sidebar'), `info-usage-${scheme}-${size}.png`);
+  await closeSidebarOnPhone(page, size);
+  // The end of the answer, then the message box: what a reply looks like and where the next question goes.
+  await page.locator('#messages').evaluate(node => { node.scrollTop = node.scrollHeight; });
+  await shootBetween(page, page.getByText('Next steps', {exact: true}), page.locator('#composer'),
+    page.locator('.compose-area'), `info-reply-${scheme}-${size}.png`);
+  return page;
+}
+
+/** Screenshot, at the width of `frame`, the area from the top of `first` to the bottom of `last`. */
+async function shootBetween(page, first, last, frame, file) {
+  const top = await first.boundingBox();
+  const bottom = await last.boundingBox();
+  const sides = await frame.boundingBox();
+  assert.ok(top && bottom && sides, `nothing to capture for ${file}`);
+  const clip = {x: Math.max(sides.x, 0), y: Math.max(top.y - 12, 0), width: sides.width};
+  clip.height = Math.min(bottom.y + bottom.height + 12, page.viewportSize().height) - clip.y;
+  assert.ok(clip.height > 0 && clip.x + clip.width <= page.viewportSize().width, `${file} does not fit the window`);
+  await page.screenshot({path: path.join(output, file), clip, animations: 'disabled'});
 }
 
 /** A command waiting for one confirmation: what runs, where, and why, with Allow once and Deny. */
@@ -190,8 +248,9 @@ async function signIn(browser, size, scheme) {
 (async () => {
   fs.mkdirSync(output, {recursive: true});
   const browser = await chromium.launch({headless: true});
-  const shots = signInMode ? [signIn] : [chat, confirm, settings];
+  const shots = signInMode ? [signIn] : [chat, info, confirm, settings];
   try {
+    await seedWorkspaceRules(browser);
     for (const shoot of shots)
       for (const scheme of ['light', 'dark'])
         for (const size of Object.keys(sizes)) {
@@ -200,5 +259,5 @@ async function signIn(browser, size, scheme) {
         }
   } finally { await browser.close(); }
   assert.deepEqual(pageErrors, []);
-  console.log(`Saved the ${signInMode ? 'sign-in' : 'chat, confirmation and Settings'} screenshots to ${output}`);
+  console.log(`Saved the ${signInMode ? 'sign-in' : 'chat, Info tab, confirmation and Settings'} screenshots to ${output}`);
 })().catch(error => { console.error(error); process.exitCode = 1; });

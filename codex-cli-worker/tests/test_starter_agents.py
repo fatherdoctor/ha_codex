@@ -179,6 +179,19 @@ class StarterAgentsText(unittest.TestCase):
             with self.subTest(rule=heading):
                 self.assertIn(heading, self.text)
 
+    def test_it_says_when_to_open_secret_files(self):
+        # The sandbox no longer hides secrets.yaml or the sign-in files, so this rule is what keeps them out of chat.
+        rule = " ".join(self.text.split("2. Keep secrets secret.", 1)[1].split("\n3. ", 1)[0].split())
+        self.assertIn("Open secret files only when the owner asks", rule)
+        self.assertIn("never paste them into chat", rule)
+
+    def test_it_says_why_storage_is_left_to_home_assistant(self):
+        # The sandbox no longer keeps .storage read-only, so this rule is what keeps Codex out of it.
+        rule = " ".join(self.text.split("5. Leave `/config/.storage` to Home Assistant.", 1)[1].split("\n6. ", 1)[0].split())
+        self.assertIn("Do not edit its files while Home Assistant runs", rule)
+        self.assertIn("writes over changed files from memory", rule)
+        self.assertIn("the API", rule)
+
     def test_it_has_the_safeguard_defaults_and_says_they_are_not_locks(self):
         section = self.text.split("## Safeguards: defaults the owner can change", 1)[1].split("## About this home", 1)[0]
         self.assertIn("not locks in the app", section)
@@ -202,7 +215,8 @@ class StarterAgentsText(unittest.TestCase):
 
     def test_it_tells_codex_how_to_keep_a_memory(self):
         section = self.text.split("## Memory", 1)[1].split("\n## ", 1)[0]
-        for words in ("one fact per file", "`memory/MEMORY.md`", "Read the index when a chat starts",
+        for words in ("`/config/memory/`:", "one fact per file", "`/config/memory/MEMORY.md`",
+                      "Read the index when a chat starts",
                       "update a file rather than add a second", "delete wrong facts", "No secrets", "never commit"):
             with self.subTest(words=words):
                 self.assertIn(words, " ".join(section.split()))

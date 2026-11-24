@@ -491,6 +491,15 @@ class GitRunnerTests(GitRunnerCase):
             with self.subTest(path=path), self.assertRaises(gh.GitHubError):
                 self.runner.prepare(path)
 
+    def test_a_relative_path_is_refused_not_read_against_config(self):
+        """Codex starts in /media/.agents/codex, so "." or "house" read against /homeassistant could name the wrong repository."""
+        git(self.config, "init", "-q")
+        for path in (".", "house", "./house"):
+            with self.subTest(path=path), self.assertRaises(gh.GitHubError) as refused:
+                self.runner.prepare(path)
+            self.assertIn("starting with /", str(refused.exception))
+        self.assertEqual(self.runner.prepare(str(self.repo))[0], self.repo.resolve())
+
     def test_a_git_file_pointing_elsewhere_is_refused(self):
         linked = self.config / "linked"
         linked.mkdir()

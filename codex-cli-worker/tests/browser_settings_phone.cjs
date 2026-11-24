@@ -43,7 +43,7 @@ async function checkButtonRows(page) {
       }),
     }));
   });
-  assert.ok(rows.some(row => row.buttons.length >= 4), 'the GitHub row with four buttons is checked');
+  assert.ok(rows.some(row => row.buttons.length >= 2), 'the GitHub row with Sign in and Sign out is checked');
   for (const row of rows) {
     const byLine = new Map();
     for (const button of row.buttons) {

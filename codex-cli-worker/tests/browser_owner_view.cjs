@@ -55,7 +55,7 @@ const CHATGPT_CONTROLS = {
 const GITHUB_CONTROLS = {
   'signed out': {exact: false, names: ['Connect GitHub']},
   'signing in': {exact: true, names: ['Open github.com/login/device', 'code', 'Cancel']},
-  'signed in': {exact: false, names: ['Read test', 'Check now', 'Disconnect']},
+  'signed in': {exact: false, names: ['Sign in', 'Sign out']},
 };
 const SECTIONS = ['Accounts and connections', 'Full access', 'Text size', 'Scheduled runs', 'Workspace instructions'];
 const remoteBase = {available: true, configured_name: 'Home Assistant', machine_name: '', log: []};
