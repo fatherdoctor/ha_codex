@@ -49,13 +49,16 @@ class AttachmentTests(unittest.TestCase):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
-        for name, value in (("tasks", {}), ("active_task_runners", set()), ("running_processes", {})):
+        self.stack.enter_context(patch.dict(server.tasks, clear=True))
+        for name, value in (("active_task_runners", set()), ("running_processes", {})):
             self.stack.enter_context(patch.object(server, name, value))
         self.stack.enter_context(patch.object(server, "task_root", return_value=self.root / "tasks"))
         self.stack.enter_context(patch.object(server, "TASK_STATE_FILE", self.root / "index.json"))
         self.stack.enter_context(patch.object(server, "ATTACHMENTS_ROOT", self.root / "chat_uploads"))
         self.stack.enter_context(patch.object(server, "CODEX_HOME", self.root / "codex"))
         self.stack.enter_context(patch.object(server, "CONFIG_ROOT", self.root / "config"))
+        # Listing chats reads the schedule store under DATA_ROOT; keep it off the real /data.
+        self.stack.enter_context(patch.object(server, "DATA_ROOT", self.root / "data"))
         self.stack.enter_context(patch.object(server, "api_token", return_value="test-token"))
         self.stack.enter_context(patch.object(server, "start_background_task"))
         self.stack.enter_context(patch.object(server, "sandbox_readiness", return_value={"required": True, "ready": True}))
@@ -311,7 +314,7 @@ class AttachmentTests(unittest.TestCase):
         return {"name": name, "data": base64.b64encode(data).decode()}
 
     def test_uploads_live_outside_the_task_folder(self):
-        """A photo is stored under the app's data folder, never under the task folder in /config."""
+        """A photo is stored under the app's data folder, never under the task folder in /homeassistant."""
         response = self.client.post("/tasks", json={"prompt": "Look", "attachments": [self.upload("a.png", png_bytes())]},
                                     headers=self.headers)
         task_id = response.json["task_id"]
@@ -372,7 +375,7 @@ class AttachmentTests(unittest.TestCase):
         self.assertEqual(record["store"], "data")
 
     def test_a_chat_that_appears_at_a_later_start_gets_its_uploads_moved(self):
-        """A chat that moves out of /config only at the second start still has its old uploads moved then."""
+        """A chat that moves out of /homeassistant only at the second start still has its old uploads moved then."""
         self.assertEqual(server.migrate_attachments(), 0)
         legacy, record = self.legacy_upload("c" * 32)
         self.assertEqual(server.migrate_attachments(), 1)

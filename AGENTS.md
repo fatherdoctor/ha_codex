@@ -39,8 +39,8 @@ the version.
 | `codex-cli-worker/web/` | the chat page (plain JavaScript and CSS, no build step) |
 | `codex-cli-worker/tests/` | every test: `test_*.py`, the Home Assistant tests in `ha/`, browser checks `browser_*.cjs` |
 | `custom_components/codex_cli/` | the integration; `manifest.json` holds its version |
-| `scripts/` | `build_hacs_release.py`, `fork_release.py` (tag after a lab pass, rollback), `code_checks.py` (file size, globals by name) |
-| `docs/` | `updates-and-rollback.md`, design notes under `design/` and `designs/` |
+| `scripts/` | `build_hacs_release.py`, `fork_release.py` (tag after a lab pass, rollback), `check_unreferenced_images.py`, `code_checks.py` (file size, globals by name) |
+| `docs/` | `app-reference.md`, `updates-and-rollback.md`, design notes under `design/` |
 | `ci/` | workflow files staged for the maintainer to copy into `.github/workflows/` |
 | `examples/`, `screenshots/` | the example script; the screenshots, which `screenshots/SCREENSHOTS.md` says how to retake |
 
@@ -56,7 +56,7 @@ the version.
 - A pull request follows `.github/pull_request_template.md` and stays a draft until it is ready for review.
 - Every pull request gets an independent adversarial review before it merges; each finding is fixed, or declined
   in writing with the reason.
-- A change to permissions, approvals, sign-in, the sandbox, remote control or writes under `/config` states its
+- A change to permissions, approvals, sign-in, the sandbox, remote control or writes under `/homeassistant` states its
   safety reasoning in the pull request and comes with tests that fail without it.
 - Keep the pins: the base image by digest, the packaged Codex CLI by version and checksum, no self-update
   (`codex-cli-worker/tests/test_fork_pins.py` checks them). Moving a pin is its own pull request.
@@ -119,6 +119,6 @@ When one is:
 - `CONTRIBUTING.md` - test setup in full, manual checks, what a pull request holds.
 - `SECURITY.md` - reporting a vulnerability, and what the app can reach.
 - `docs/updates-and-rollback.md` - how a release reaches an install, the lab pass, rollback.
-- `codex-cli-worker/DOCS.md`, `VERIFICATION.md` and `SANDBOX_TESTING.md` (same folder) - options, the
-  verification tools and the sandbox checks.
+- `codex-cli-worker/DOCS.md` (the short guide), `docs/app-reference.md` (the detail behind it), and `VERIFICATION.md`
+  and `SANDBOX_TESTING.md` in `codex-cli-worker/` - options, the verification tools and the sandbox checks.
 - `codex-cli-worker/CHANGELOG.md` - what each version changed.

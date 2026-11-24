@@ -250,7 +250,9 @@ class AssessChangesTests(unittest.TestCase):
             "success": False, "message": "Not saved: the file failed validation.",
         }])
         self.assertEqual({entry["path"] for entry in result["recovery_files"]}, {".storage/lovelace.home", "scripts.yaml"})
-        self.assertTrue((self.run_dir / "backups" / ".storage" / "lovelace.home").is_file())
+        # A dashboard's storage file holds secrets like the rest of .storage, so it gets no readable copy.
+        self.assertFalse((self.run_dir / "backups" / ".storage" / "lovelace.home").exists())
+        self.assertIn({"path": ".storage/lovelace.home", "copy": "", "reason": "excluded_credentials"}, result["recovery_files"])
 
     def test_storage_only_changes_skip_the_check_but_save_dashboards(self):
         """A change to dashboard storage alone skips the check and still saves the dashboard."""
@@ -355,7 +357,8 @@ class TerminalOutcomeResetTests(unittest.TestCase):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
-        for name, value in (("tasks", {}), ("active_task_runners", set()), ("running_processes", {})):
+        self.stack.enter_context(patch.dict(server.tasks, clear=True))
+        for name, value in (("active_task_runners", set()), ("running_processes", {})):
             self.stack.enter_context(patch.object(server, name, value))
         self.stack.enter_context(patch.object(server, "task_root", return_value=root / "tasks"))
         self.stack.enter_context(patch.object(server, "TASK_STATE_FILE", root / "index.json"))

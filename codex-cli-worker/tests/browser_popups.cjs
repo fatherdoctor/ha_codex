@@ -1,7 +1,7 @@
 // Pop-ups on the chat page, against web_fixture.py (synthetic chats only), at a phone and a PC width.
 // 1. The permissions control opens a small pop-up directly above its button, inside the viewport.
 // 2. A press outside closes it; so does Escape; pressing the button again toggles it.
-// 3. A press outside closes the model pop-up, the add menu and the Settings dialog.
+// 3. A press outside closes the model and reasoning panel, the model list, the add menu and the Settings dialog.
 // 4. A press on the dim area behind a dialog closes it, unless a field in it was changed (then it stays open).
 const {chromium} = require('playwright');
 const assert = require('node:assert/strict');
@@ -46,10 +46,20 @@ const base = 'http://127.0.0.1:9137/preview/';
       assert.equal(await isShown('plus-menu'), true, `${label}: add menu opens`);
       await page.mouse.click(blank.x, blank.y);
       assert.equal(await isShown('plus-menu'), false, `${label}: outside press closes the add menu`);
-      await page.locator('#model-button').click();
-      assert.equal(await isShown('model-popover'), true, `${label}: model pop-up opens`);
+      await page.locator('#picker-button').click();
+      assert.equal(await isShown('effort-popover'), true, `${label}: model and reasoning panel opens`);
+      const chip = await page.locator('#picker-button').boundingBox();
+      const panel = await page.locator('#effort-popover').boundingBox();
+      assert.ok(panel.x >= 0 && panel.x + panel.width <= width, `${label}: the panel is inside the viewport`);
+      if (width > 700)
+        assert.ok(Math.abs(panel.x + panel.width - (chip.x + chip.width)) <= 4, `${label}: the panel's right edge is on the chip's`);
       await page.mouse.click(blank.x, blank.y);
-      assert.equal(await isShown('model-popover'), false, `${label}: outside press closes the model pop-up`);
+      assert.equal(await isShown('effort-popover'), false, `${label}: outside press closes the model and reasoning panel`);
+      await page.locator('#picker-button').click();
+      await page.locator('#effort-model').click();
+      assert.equal(await isShown('model-popover'), true, `${label}: model list opens`);
+      await page.mouse.click(blank.x, blank.y);
+      assert.equal(await isShown('model-popover'), false, `${label}: outside press closes the model list`);
 
       // 4. Dialogs: the dim area closes; a changed field keeps the dialog open.
       await page.evaluate(() => document.getElementById('settings-button').click());

@@ -21,7 +21,6 @@ class WorkerConnection:
 
     base_url: str
     api_token: str
-    addon_slug: str | None = None
 
 
 def _add_candidate(candidates: list[str], base_url: str) -> None:
@@ -141,17 +140,13 @@ async def async_discover_worker(hass: HomeAssistant, session: ClientSession) -> 
     last_error: CodexCliApiError | None = None
     auth_error: CodexCliAuthError | None = None
     for addon in workers:
-        options = addon.get("options") if isinstance(addon.get("options"), dict) else {}
-        addon_slug = str(addon.get("slug") or "")
-        if addon_slug:
-            api_token = secrets.token_urlsafe(32)
-            try:
-                await _async_provision_worker_token(hass, addon_slug, api_token)
-            except CodexCliApiError as exc:
-                last_error = exc
-                continue
-        else:
-            api_token = str(options.get("api_token") or "")
+        # _async_worker_addons keeps only apps with a slug, so each one can be given a new token.
+        api_token = secrets.token_urlsafe(32)
+        try:
+            await _async_provision_worker_token(hass, str(addon["slug"]), api_token)
+        except CodexCliApiError as exc:
+            last_error = exc
+            continue
 
         for base_url in _candidate_urls_from_addon(addon):
             client = CodexCliApiClient(session, base_url, api_token)
@@ -164,11 +159,7 @@ async def async_discover_worker(hass: HomeAssistant, session: ClientSession) -> 
             except CodexCliApiError as exc:
                 last_error = exc
                 continue
-            return WorkerConnection(
-                base_url=base_url,
-                api_token=api_token,
-                addon_slug=str(addon.get("slug") or "") or None,
-            )
+            return WorkerConnection(base_url=base_url, api_token=api_token)
 
     # A reachable worker's rejection must survive failures at alternate URLs.
     # A successful candidate above still takes precedence over any rejection.

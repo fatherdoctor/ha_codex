@@ -136,7 +136,10 @@ async def test_user_error_then_retry(
 async def test_hassio_discovery_failure_keeps_confirm_form(
     hass: HomeAssistant, discovery: AsyncMock, error: type[Exception], error_key: str
 ) -> None:
-    """A failed confirm after Supervisor discovery shows the error and adds no entry."""
+    """A failed confirm after Supervisor discovery shows the error and adds no entry.
+
+    Confirming again once the worker answers adds the entry from the same form.
+    """
     discovery.side_effect = error("synthetic discovery failure")
     result = await _start_flow(hass, config_entries.SOURCE_HASSIO)
     assert result["type"] is FlowResultType.FORM
@@ -144,6 +147,16 @@ async def test_hassio_discovery_failure_keeps_confirm_form(
     assert result["errors"] == {"base": error_key}
     assert hass.config_entries.async_entries(DOMAIN) == []
     discovery.assert_awaited_once()
+
+    discovery.side_effect = None
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+    await hass.async_block_till_done()
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"] == WORKER_DATA
+    assert result["result"].unique_id == DOMAIN
+    assert result["title"] == "Codex"
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+    assert discovery.await_count == 2
 
 
 @pytest.mark.parametrize(

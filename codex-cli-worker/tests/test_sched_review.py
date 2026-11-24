@@ -56,7 +56,7 @@ class ReviewStoreTests(unittest.TestCase):
         self.assertEqual(journal.stat().st_mode & 0o777, 0o600)
         with self.store.connect() as db:
             self.assertEqual(db.execute('PRAGMA journal_mode').fetchone()[0], 'persist')
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 3)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 4)
 
     def test_a_new_file_has_the_author_chat_and_model_columns_in_the_same_order(self):
         """The columns that older versions added later are in the table from the start, in the order they were added."""

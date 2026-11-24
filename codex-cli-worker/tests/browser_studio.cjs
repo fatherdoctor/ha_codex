@@ -46,7 +46,7 @@ fs.mkdirSync(output,{recursive:true});
    }
 
    assert.equal(await page.locator('#greeting').isVisible(),true);
-   assert.equal(await page.locator('#permission-button').getAttribute('aria-label'),'Default permissions');
+   assert.equal(await page.locator('#permission-button').getAttribute('aria-label'),'Ask for approval');
    const compose=await page.locator('#composer').boundingBox();
    assert.ok(compose.y+compose.height<=page.viewportSize().height && compose.y>page.viewportSize().height/2);
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);

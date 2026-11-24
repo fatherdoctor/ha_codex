@@ -109,7 +109,7 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
                     'threadId': 'synthetic-thread',
                     'turnId': 'synthetic-turn',
                     'command': 'echo sample',
-                    'cwd': '/config',
+                    'cwd': '/homeassistant',
                     # The approval explanation is private prose, not an exported rule.
                     'reason': 'PRIVATE_REASON_CANARY',
                 },
@@ -136,15 +136,13 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
             fetch=lambda *_: {'entity_id': 'light.synthetic', 'state': 'PRIVATE_STATE_CANARY', 'attributes': {}},
             observer=server.record_relay_read,
         )
-        engine.environment({})
+        engine.new_launch()
         result = engine.dispatch({
-            'capability': engine.capability,
             'arguments': {'operation': 'state', 'entity_id': 'light.synthetic'},
         })
         self.assertEqual(result['state'], 'PRIVATE_STATE_CANARY')
         with self.assertRaises(ReadError):
             engine.dispatch({
-                'capability': engine.capability,
                 # This credential-shaped entity identifier must be refused by the read engine.
                 'arguments': {'operation': 'state', 'entity_id': 'sensor.private_token_canary'},
             })
@@ -158,10 +156,10 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
         self.assertIn('credential', [e.get('rule') for e in rows[0]['events']])
         self.assertNotIn('CANARY', json.dumps(rows))
         self.assertNotIn('light.synthetic', json.dumps(rows))
-        # A failing observer exception must not alter a successful read.
+        # A failing observer exception must not alter a successful read (of a new launch: the first one ended).
         engine.observer = Mock(side_effect=OSError('PRIVATE_CANARY'))
+        engine.new_launch()
         self.assertEqual(engine.dispatch({
-            'capability': engine.capability,
             'arguments': {'operation': 'state', 'entity_id': 'light.synthetic'},
         })['state'], 'PRIVATE_STATE_CANARY')
 

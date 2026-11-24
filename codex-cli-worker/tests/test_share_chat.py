@@ -21,8 +21,9 @@ from test_server import server
 # both halves; no rule can tell such a split from two words), and secrets with no label or known shape (a
 # password written in a sentence, a name, an address), which the dialog and DOCS.md tell the owner to look for.
 # A known limit of the fixed lengths: a key word longer than 32 characters, or more than eight words around the
-# secret word, is not read as a key. After the G and T cases this corpus is the contract: a new shape is a new
-# case here, added in its own change.
+# secret word, is not read as a key. A quoted value may hold one line break; with no closing quote by the end of the
+# next line, only the first line is masked. After the G and T cases this corpus is the contract: a new shape is a new
+# case here, added in its own change (the P cases were the first).
 SYNTHETIC_JWT = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzeW50aGV0aWMifQ.c3ludGhldGljLXNpZ25hdHVyZS12YWx1ZQ"
 SYNTHETIC_SUPERVISOR = "synthetic-supervisor-token-value-0123456789"
 SHARE_MASK_CORPUS = [
@@ -76,6 +77,19 @@ SHARE_MASK_CORPUS = [
     ("T1", "time", "a-" * 50_000 + "done", "done", "kept"),
     ("T2", "time", "-".join(f"id{n:04d}" for n in range(16_000)), "id15999", "kept"),
     ("T3", "time", "x." * 50_000 + "y", "x.x.x.y", "kept"),
+    # P cases: the corpus card after 0.3 (CX-FB6.cp). P1 to P3: a value whose first word another rule already
+    # masked keeps no tail. P4 and P5: a quoted value over two lines. P6 and P7: a run of the secret word itself,
+    # which took more than 1 s at 100,000 characters. P8 to P10 look close to these and must stay as they are.
+    ("P1", "masked start", "password: [redacted] tailZ7", "tailZ7", "masked"),
+    ("P2", "masked start", "secret: sk-" + "S" * 24 + " tail9", "tail9", "masked"),
+    ("P3", "masked start", "mqtt_password: harc_" + "C" * 43 + " tailQ3", "tailQ3", "masked"),
+    ("P4", "line ends", 'password: "multi\nline9"', "line9", "masked"),
+    ("P5", "line ends", "wifi_password: 'first half\r\nsecondHalf4'", "secondHalf4", "masked"),
+    ("P6", "time", "password-" * 11_112, "password-password", "kept"),
+    ("P7", "time", "pin-" * 25_000 + "pin: synthRunEnd6", "synthRunEnd6", "masked"),
+    ("P8", "allow", 'password: "synthOk1"\nThe next line stays readable.', "The next line stays readable.", "kept"),
+    ("P9", "allow", '{"password": "[redacted]", "user": "visible_user"}', "visible_user", "kept"),
+    ("P10", "allow", 'password: "synthOk2"\n\nA new paragraph with a "quote" in it.', 'A new paragraph with a "quote"', "kept"),
 ]
 # The longest time one Share file may spend in the mask for one case of the corpus.
 SHARE_MASK_TIME_LIMIT = 1.0
@@ -115,7 +129,8 @@ class ShareChatTests(unittest.TestCase):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
-        for name, value in (("tasks", {}), ("task_activity", {}), ("active_task_runners", set()), ("running_processes", {})):
+        self.stack.enter_context(patch.dict(server.tasks, clear=True))
+        for name, value in (("task_activity", {}), ("active_task_runners", set()), ("running_processes", {})):
             self.stack.enter_context(patch.object(server, name, value))
         self.stack.enter_context(patch.object(server, "task_root", return_value=self.root / "tasks"))
         self.stack.enter_context(patch.object(server, "TASK_STATE_FILE", self.root / "index.json"))

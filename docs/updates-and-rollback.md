@@ -143,6 +143,12 @@ anything (conversations, queue, settings, sign-in) must say so in its changelog 
 such a bullet; check by hand that the older build copes, then run it again with `--accept-stored-data`. If it does
 not, use the second way.
 
+From 0.6 the app maps Home Assistant's configuration folder at `/homeassistant` instead of `/config`. A rollback to
+0.5 maps `/config` again and works: the chats, backups and the change review keep paths relative to the folder, and
+0.5 ignores the marker of the one-time path scan (`/data/config-path-scan.json`). Text that the owner changed to
+`/homeassistant/...` (workspace instructions, the working folder's notes, scheduled prompts) does not work in 0.5;
+change it back to `/config/...` after the rollback.
+
 ### The second way: restore the backup
 
 If the roll-forward cannot be used (the stored data changed, or the install cannot reach the update), restore the

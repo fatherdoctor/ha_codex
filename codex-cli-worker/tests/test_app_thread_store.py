@@ -34,7 +34,10 @@ class ProtocolTests(unittest.TestCase):
         """A running task and a fake app-server transport that keeps what the worker writes."""
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        for name, value in (("tasks", {}), ("running_processes", {})):
+        patcher = patch.dict(server.tasks, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        for name, value in (("running_processes", {}),):
             patcher = patch.object(server, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -74,11 +77,24 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(thread["method"], "thread/resume")
         self.assertEqual(thread["params"]["threadId"], "thread")
         self.assertEqual(thread["params"]["developerInstructions"], server.PAGE_INSTRUCTIONS)
+        # A chat from before 0.6 resumes in the new folder and is told what its old /config/ paths mean (CX-HA-PATH).
+        self.assertEqual(thread["params"]["cwd"], server.CONFIG_ROOT.as_posix())
+        self.assertIn(server.old_config_note(), thread["params"]["developerInstructions"])
         self.assertEqual(turn["params"]["input"], [{"type": "text", "text": OWNER_TEXT}])
 
 
 class FixedTextTests(unittest.TestCase):
     """The fixed rules hold nothing that changes from one message to the next."""
+
+    def test_the_rules_map_an_old_config_path_and_keep_home_assistants_own_yaml(self):
+        """Since 0.6 the folder is /homeassistant; /config/ in Home Assistant's own YAML stays (CX-HA-PATH)."""
+        text = server.PAGE_INSTRUCTIONS
+        self.assertIn("Workspace: /homeassistant\n", text)
+        self.assertIn("Home Assistant's configuration folder is /homeassistant. /config does not exist here; a path "
+                      "in this chat or in the owner's text that starts with /config/ means the same file under "
+                      "/homeassistant/. Inside Home Assistant's own YAML, /config/ is Home Assistant's own path and "
+                      "stays as it is.", text)
+        self.assertNotIn("@@", text)
 
     def test_the_rules_name_no_per_message_detail(self):
         """No task id, backup folder, attachment, token note, documentation date, GitHub note or user message."""
@@ -89,6 +105,49 @@ class FixedTextTests(unittest.TestCase):
         self.assertIn("call the home_assistant_data exchange_info tool once", text)
         self.assertIn("If exchange_info is not available, make no backup copy, and say in your answer that this "
                       "change has no backup.", text)
+
+    def test_a_plain_message_needs_no_tool_call(self):
+        """A greeting or a one-number reply is answered directly: no forced exchange_info call, no file check.
+
+        Codex loads the owner's AGENTS.md through the CODEX_HOME link when a chat starts, so the rules never send
+        the model to the shell to look for it.
+        """
+        text = server.PAGE_INSTRUCTIONS
+        self.assertNotIn("At the start of each message", text)
+        self.assertNotIn("check for the file yourself", text)
+        self.assertIn("needs no tool call and no command: answer it directly", text)
+        self.assertIn("Codex has already loaded that file into this chat when the chat started, so never run a "
+                      "command to look for it or to read it.", text)
+
+    def test_any_command_file_change_or_tool_call_still_gets_this_message_details_first(self):
+        """A message that acts (a Home Assistant call, a file edit, a command) still calls exchange_info first.
+
+        Only the two status tools are exempt.
+        """
+        text = server.PAGE_INSTRUCTIONS
+        self.assertIn("before your first command, file change or tool call in a message (ask_owner and "
+                      "report_failure excepted), and when the message can refer to a file", text)
+        self.assertIn("call the home_assistant_data exchange_info tool once.", text)
+        self.assertIn("Follow its backups text before you change, move, or delete a file under /homeassistant.", text)
+
+    def test_a_message_about_a_document_calls_exchange_info_without_the_word_attached(self):
+        """Only exchange_info names an attached document (images go in the turn input), so "Summarize this" with a
+        document must call it: the rule follows what the message can refer to, not the word "attached"."""
+        text = server.PAGE_INSTRUCTIONS
+        self.assertNotIn("when the user says they attached or uploaded a file", text)
+        self.assertIn("when the message can refer to a file, a document or something that you cannot see in this "
+                      "chat (only exchange_info names the documents the user attached), call the home_assistant_data "
+                      "exchange_info tool once.", text)
+
+    def test_the_exchange_info_tool_description_agrees_with_the_page_rules(self):
+        """Codex reads the tool description with the page rules on every message, so both give the same order."""
+        tool = next(tool for tool in ha_data_mcp.TOOLS if tool["name"] == "exchange_info")
+        description = tool["description"]
+        self.assertNotIn("at the start of each message", description.lower())
+        self.assertIn("Call it once in a message before your first command, file change or other tool call", description)
+        self.assertIn("when the message can refer to a file, a document or something you cannot see in this chat",
+                      description)
+        self.assertIn("A message you can answer from what you know and from the chat needs no call.", description)
 
     def test_the_tool_needs_no_approval_and_the_app_thread_rules_point_to_it(self):
         """exchange_info is approved like history; the remote-control rules tell an app thread to call it on the page."""
@@ -129,10 +188,77 @@ class ExchangeRecordTests(unittest.TestCase):
         server.update_task(task_id, session_id=attachments.SESSION_ID)
         self.assertNotIn("page_instructions", server.tasks[task_id])
         info, message = self.run_and_record_plain(task_id, session_id=attachments.SESSION_ID, reply="Check the porch light")
-        self.assertEqual(message, server.RULES_POINTER + "\n\nCheck the porch light")
-        self.assertEqual(info["rules"], server.PAGE_INSTRUCTIONS)
+        # Its permissions are told once too: what the app set for the thread is not known here.
+        changed = server.PERMISSIONS_CHANGED.format(note=info["permissions"])
+        self.assertEqual(message, server.RULES_POINTER + "\n\n" + changed + "\n\nCheck the porch light")
+        self.assertEqual(info["rules"], server.build_page_instructions())
         # A resume never marks the thread: only a thread this page starts gets the rules at its first turn.
         self.assertNotIn("page_instructions", server.tasks[task_id])
+
+    def test_a_chat_switched_to_full_access_is_told_once_on_its_next_message(self):
+        """A chat that started in Read only and is switched to Full access is told so on the next message only."""
+        task_id = self.create(OWNER_TEXT)
+        server.update_task(task_id, permission_mode="read-only")
+        info, message = self.run_and_record_plain(task_id)
+        self.assertEqual(message, "Draw a sheep")
+        self.assertIn("sandbox read-only", info["permissions"])
+        server.update_task(task_id, permission_mode="full-access")
+        with patch.object(server.full_access, "is_on", return_value=True):
+            info, message = self.run_and_record_plain(task_id, session_id=attachments.SESSION_ID, reply="Fix the porch")
+            full = server.permissions_note(server.protected_policy.mode_settings("full-access"))
+            self.assertEqual(message, server.PERMISSIONS_CHANGED.format(note=full) + "\n\nFix the porch")
+            self.assertEqual(info["permissions"], full)
+            self.assertIn("sandbox danger-full-access", full)
+            _, message = self.run_and_record_plain(task_id, session_id=attachments.SESSION_ID, reply="And the gate")
+        self.assertEqual(message, "And the gate")
+
+    def test_full_access_with_the_switch_off_tells_codex_the_mode_it_really_runs_in(self):
+        """The owner's switch off makes a Full access chat run in Default; Codex is told Default, not Full access."""
+        task_id = self.create(OWNER_TEXT)
+        server.update_task(task_id, permission_mode="read-only")
+        self.run_and_record_plain(task_id)
+        server.update_task(task_id, permission_mode="full-access")
+        with patch.object(server.full_access, "is_on", return_value=False):
+            info, message = self.run_and_record_plain(task_id, session_id=attachments.SESSION_ID, reply="Fix it")
+        self.assertIn("sandbox workspace-write, approval policy on-request", info["permissions"])
+        self.assertTrue(message.startswith(server.PERMISSIONS_CHANGED.format(note=info["permissions"])))
+
+    def test_a_resumed_thread_with_no_record_is_told_its_permissions_once(self):
+        """A thread from the ChatGPT app or an earlier version has no record of what it was told."""
+        task_id = self.create(OWNER_TEXT)
+        server.update_task(task_id, session_id=attachments.SESSION_ID, page_instructions=True)
+        info, message = self.run_and_record_plain(task_id, session_id=attachments.SESSION_ID, reply="Check the porch")
+        self.assertEqual(message, server.PERMISSIONS_CHANGED.format(note=info["permissions"]) + "\n\nCheck the porch")
+        _, message = self.run_and_record_plain(task_id, session_id=attachments.SESSION_ID, reply="And the gate")
+        self.assertEqual(message, "And the gate")
+
+    def test_a_message_whose_turn_never_started_is_told_again_on_the_next_one(self):
+        """A failed start (here the process cannot start) means Codex never read the line, so the next message has it."""
+        task_id = self.create(OWNER_TEXT)
+        server.update_task(task_id, permission_mode="read-only")
+        self.run_and_record_plain(task_id)
+        server.update_task(task_id, permission_mode="full-access")
+        with patch.object(server.full_access, "is_on", return_value=True):
+            with patch.object(server.subprocess, "Popen", side_effect=OSError("no such file")):
+                server.run_task(task_id, "Draw a sheep", attachments.SESSION_ID, "Fix the porch")
+            server.active_task_runners.discard(task_id)
+            self.assertEqual(server.tasks[task_id]["status"], "failed")
+            info, message = self.run_and_record_plain(task_id, session_id=attachments.SESSION_ID, reply="Fix it now")
+        self.assertEqual(message, server.PERMISSIONS_CHANGED.format(note=info["permissions"]) + "\n\nFix it now")
+        self.assertIn("sandbox danger-full-access", info["permissions"])
+
+    def test_with_a_read_only_sandbox_default_and_auto_review_give_different_notes(self):
+        """The app's sandbox option at read-only: a change between Default and Auto-review still changes the note."""
+        task_id = self.create(OWNER_TEXT)
+        options = {"codex_sandbox": "read-only"}
+        server.update_task(task_id, permission_mode="default")
+        default = server.permissions_note(server.task_mode_settings(task_id, options))
+        server.update_task(task_id, permission_mode="auto-review")
+        auto = server.permissions_note(server.task_mode_settings(task_id, options))
+        self.assertIn("sandbox read-only", default)
+        self.assertIn("sandbox read-only", auto)
+        self.assertIn("the person's approval", default)
+        self.assertIn("the automatic reviewer's approval", auto)
 
     def test_the_rules_are_the_threads_developer_instructions(self):
         """Every thread this page starts gets the fixed rules through the app-server thread settings."""
@@ -140,7 +266,7 @@ class ExchangeRecordTests(unittest.TestCase):
         session = server.create_approval_session(
             task_id, attachments.StubAppServer(attachments.SESSION_ID), "Prompt", Path("final"), None, {},
             {"codex_sandbox": "workspace-write"})
-        self.assertEqual(session.thread_params["developerInstructions"], server.PAGE_INSTRUCTIONS)
+        self.assertEqual(session.thread_params["developerInstructions"], server.build_page_instructions())
 
     def run_and_record_plain(self, task_id, session_id=None, reply=None):
         """Run one exchange through run_codex's fake process and return exchange_info's details and the message."""
@@ -166,7 +292,7 @@ class ExchangeInfoToolTests(unittest.TestCase):
         tool_threads.CHATS.bind("chat", data.THREAD)
         self.addCleanup(tool_threads.CHATS.release, "chat")
         self.capability = self.engine.begin("chat")
-        self.engine.set_exchange_info("chat", {"task_id": "chat", "backups": "Copy files to /config/backup-a."})
+        self.engine.set_exchange_info("chat", {"task_id": "chat", "backups": "Copy files to /homeassistant/backup-a."})
 
     def call(self, **fields):
         """Send one exchange_info request as the MCP bridge does."""
@@ -176,14 +302,14 @@ class ExchangeInfoToolTests(unittest.TestCase):
         """The reply holds the recorded details, reads no Home Assistant data and uses no query budget."""
         result = self.call()
         self.assertEqual(result, {"status": "observed", "operation": "exchange_info", "task_id": "chat",
-                                  "backups": "Copy files to /config/backup-a."})
+                                  "backups": "Copy files to /homeassistant/backup-a."})
         self.worker.ha_token.assert_not_called()
         self.assertEqual(self.engine.queries["chat"], 0)
 
     def test_arguments_and_a_wrong_thread_or_ended_exchange_are_refused(self):
         """Arguments are refused; a wrong thread and an ended or released exchange get nothing."""
         with self.assertRaises(DataError):
-            self.call(path="/config")
+            self.call(path="/homeassistant")
         for thread in ("not-a-thread", "", None, "99999999-2222-4333-8444-555555555555"):
             with self.assertRaises(DataError):
                 self.engine.dispatch({"operation": "exchange_info", "thread_id": thread})
@@ -453,14 +579,14 @@ class StatusRunTests(unittest.TestCase):
 
         return Process()
 
-    def run_exchange(self, items, final_text, *, validation_errors=()):
+    def run_exchange(self, items, final_text, *, validation_errors=(), message="Tidy up my automations"):
         """Run one page exchange and return the stored task."""
         proc = self.process(items, final_text)
         self.stack.enter_context(patch.object(server.subprocess, "Popen", return_value=proc))
         self.stack.enter_context(patch.object(server, "assess_changes", return_value={
             "validation_errors": list(validation_errors), "recovery_files": [], "lovelace_results": [],
             "config_check": {"result": "invalid" if validation_errors else "skipped", "errors": "", "warnings": ""}}))
-        server.run_task("task", "Tidy up my automations")
+        server.run_task("task", message)
         return server.tasks["task"]
 
     def mcp_item(self, call):
@@ -475,6 +601,21 @@ class StatusRunTests(unittest.TestCase):
         self.assertEqual((task["question"], task["choices"], task["details"], task["error"]), ("", [], "", ""))
         turn_start = next(message for message in self.sent if message.get("method") == "turn/start")
         self.assertNotIn("outputSchema", turn_start["params"])
+
+    def test_a_plain_message_with_no_tool_call_still_has_its_details_ready_and_its_own_words_as_input(self):
+        """A plain question answered with no tool call: the worker set this message's details once, before the turn,
+        so a call would get them, and the turn input is the user's words only."""
+        recorded = []
+        keep = server.ha_data.set_exchange_info
+        self.stack.enter_context(patch.object(server.ha_data, "set_exchange_info",
+                                              side_effect=lambda *a: (recorded.append(a), keep(*a))))
+        task = self.run_exchange([], "4", message="How many lights are on in the kitchen?")
+        self.assertEqual((task["status"], task["summary"], task["error"]), ("completed", "4", ""))
+        self.assertEqual([item[0] for item in recorded], ["task"])
+        self.assertIn("backups", recorded[0][1])
+        turn_start = next(message for message in self.sent if message.get("method") == "turn/start")
+        self.assertEqual(turn_start["params"]["input"][0],
+                         {"type": "text", "text": "How many lights are on in the kitchen?"})
 
     def test_needs_input_comes_from_ask_owner_with_its_choices(self):
         """ask_owner sets the question and the choices; the answer text stays the summary."""

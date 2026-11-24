@@ -127,7 +127,7 @@ class SignInStateTests(unittest.TestCase):
         """The task's own log is read, since the HTTP error lands on Codex's stderr."""
         tasks = tempfile.TemporaryDirectory()
         self.addCleanup(tasks.cleanup)
-        with patch.object(server, "get_task_dir", return_value=Path(tasks.name)):
+        with patch.object(server.store, "task_dir", return_value=Path(tasks.name)):
             self.assertFalse(server.task_failed_on_sign_in("t1", "Codex finished without a final answer."))
             self.assertEqual(server.sign_in_server_state()["result"], "unchecked")
             (Path(tasks.name) / "codex.log").write_text(
@@ -144,7 +144,7 @@ class SignInStateTests(unittest.TestCase):
         (Path(tasks.name) / "codex.log").write_text(
             f"[t] stdout: {json.dumps(event)}\n"
             "[t] worker: No activity from Codex for 600 seconds; stopping the task.\n", encoding="utf-8")
-        with patch.object(server, "get_task_dir", return_value=Path(tasks.name)):
+        with patch.object(server.store, "task_dir", return_value=Path(tasks.name)):
             self.assertFalse(server.task_failed_on_sign_in("t1", "Codex stopped: no activity."))
         self.assertEqual(server.sign_in_server_state()["result"], "unchecked")
 
@@ -154,7 +154,7 @@ class SignInStateTests(unittest.TestCase):
         (Path(tasks.name) / "codex.log").write_text(
             "[t] stdout: {}\n[t] stderr: request failed\n  workspace routing discovery unauthorized (401)\n",
             encoding="utf-8")
-        with patch.object(server, "get_task_dir", return_value=Path(tasks.name)):
+        with patch.object(server.store, "task_dir", return_value=Path(tasks.name)):
             self.assertTrue(server.task_failed_on_sign_in("t1"))
         self.assertEqual(server.sign_in_server_state()["result"], "rejected")
 
@@ -164,7 +164,7 @@ class SignInStateTests(unittest.TestCase):
         self.addCleanup(tasks.cleanup)
         (Path(tasks.name) / "codex.log").write_text(
             "[t] stderr: ERROR workspace routing discovery unauthorized (401)\n", encoding="utf-8")
-        with patch.object(server, "get_task_dir", return_value=Path(tasks.name)):
+        with patch.object(server.store, "task_dir", return_value=Path(tasks.name)):
             server.note_task_sign_in("t1")
             (self.home / "auth.json").write_text('{"tokens": "a newer placeholder"}', encoding="utf-8")
             self.assertTrue(server.task_failed_on_sign_in("t1"))
@@ -176,7 +176,7 @@ class SignInStateTests(unittest.TestCase):
         self.addCleanup(tasks.cleanup)
         (Path(tasks.name) / "codex.log").write_text(
             "[t] stderr: ERROR workspace routing discovery unauthorized (401)\n", encoding="utf-8")
-        with patch.object(server, "get_task_dir", return_value=Path(tasks.name)):
+        with patch.object(server.store, "task_dir", return_value=Path(tasks.name)):
             server.note_task_sign_in("t1")
             self.assertTrue(server.task_failed_on_sign_in("t1"))
         self.assertEqual(server.sign_in_server_state()["result"], "rejected")
