@@ -234,7 +234,8 @@ After an update from 0.5 to 0.6 (the move of the configuration folder, CX-HA-PAT
 chat fails with "No such file"; `pwd` in Read only prints the working folder; a write under `/homeassistant` in
 `workspace-write` needs no permission card; a request to change a `/config/...` path in Home Assistant's own YAML
 keeps `/config/`; and with a planted `/config/` line in the workspace instructions the first start logs its count and
-shows one notification, and the second start shows none.
+shows one notification, and the second start shows none. A start whose notification could not be sent writes no
+marker, so the next start scans and notifies again.
 
 Repeat the basic checks on a host where fresh `/proc` mounting succeeds. A successful `/bin/true` check alone is not proof that all write restrictions are enforced.
 
