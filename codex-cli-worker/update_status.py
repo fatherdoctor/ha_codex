@@ -2,7 +2,7 @@
 
 Both facts are read, never guessed:
 
-- Restart needed: the integration on disk (/config/custom_components/codex_cli) has a version that Home Assistant
+- Restart needed: the integration on disk (/homeassistant/custom_components/codex_cli) has a version that Home Assistant
   has not loaded. Home Assistant reads a custom integration's manifest once, when it first loads the integration,
   and keeps it until the next restart. Its WebSocket command manifest/get answers with that loaded manifest, or
   with not_found when the integration was not there at the last start (the first install). So after the app writes

@@ -1,8 +1,8 @@
 """The protected permission policy: what the worker allows, read from a file Codex cannot edit.
 
-The policy ships inside the app image (read-only, outside /config and outside
+The policy ships inside the app image (read-only, outside /homeassistant and outside
 every sandbox's writable roots). The worker reads it at startup and before
-every exchange. Nothing in /config, the app options or a chat message can
+every exchange. Nothing in /homeassistant, the app options or a chat message can
 loosen it: a setting the policy does not allow stops the worker at startup and
 refuses each task with a "needs support" state.
 
