@@ -270,7 +270,9 @@ These are draft checks for the installed release. They do not report a live-syst
   Codex access only when you must sign in, and no longer lists which plans include Codex. The GitHub buttons are
   **Sign in** and **Sign out**; **Read test** and **Check now** are gone (the app still checks every hour). A schedule
   no longer has **Review prompt** (**Edit** shows the prompt). The workspace rules window is named **Workspace rules
-  (Codex AGENTS.md)** and has **Cancel**. Thinking lines before an answer have more space between them.
+  (Codex AGENTS.md)** and has **Cancel**. Thinking lines before an answer have more space between them. While Codex
+  works, the four rows of its running reply (the steps line, the Thinking line, the progress text and the
+  **Working** line) have clear space between them; a finished reply keeps its layout.
 - **Codex changes the app's `AGENTS.md` without a card.** `/addon_config`, the app's own folder that holds its
   `AGENTS.md`, is now a writable place in `workspace-write` beside `/config`, `/share` and `/media`, on the chat page
   and over the remote connection. When you ask a chat to change your workspace instructions, Codex writes the file
