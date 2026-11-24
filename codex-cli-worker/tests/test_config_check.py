@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from test_server import server
+import ha_client
 
 
 LWP_COOKIE_JAR = (
@@ -132,7 +133,6 @@ class CheckConfigApiTests(unittest.TestCase):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         self.stack.enter_context(patch.object(server, "ha_token", return_value="supervisor-token"))
-        self.stack.enter_context(patch.object(server, "ha_token_source", return_value="supervisor"))
 
     def test_valid_invalid_and_unavailable_results(self):
         """Home Assistant's reply becomes valid, invalid, or unavailable, and anything but valid carries errors."""
@@ -146,7 +146,7 @@ class CheckConfigApiTests(unittest.TestCase):
         ]
         for response, (result, errors, warnings) in cases:
             with self.subTest(result=result, errors=errors):
-                with patch.object(server.requests, "post", return_value=response) as post:
+                with patch.object(ha_client.requests, "request", return_value=response) as post:
                     outcome = server.check_home_assistant_config()
                 self.assertEqual(outcome["result"], result)
                 self.assertEqual(outcome["warnings"], warnings)
@@ -154,12 +154,13 @@ class CheckConfigApiTests(unittest.TestCase):
                     self.assertEqual(outcome["errors"], errors)
                 else:
                     self.assertTrue(outcome["errors"])
-                self.assertEqual(post.call_args.args[0], "http://supervisor/core/api/config/core/check_config")
+                post.assert_called_once()
+                self.assertEqual(post.call_args.args, ("POST", "http://supervisor/core/api/config/core/check_config"))
                 self.assertEqual(post.call_args.kwargs["timeout"], server.CONFIG_CHECK_TIMEOUT)
 
     def test_connection_failure_and_missing_token(self):
         """A failed connection or a missing token makes the check unavailable instead of raising."""
-        with patch.object(server.requests, "post", side_effect=OSError("unreachable")):
+        with patch.object(ha_client.requests, "request", side_effect=OSError("unreachable")):
             outcome = server.check_home_assistant_config()
         self.assertEqual(outcome["result"], "unavailable")
         self.assertIn("unreachable", outcome["errors"])

@@ -28,7 +28,7 @@ OPTIONS = {
     "chat_retention_days": ("delete chats after days without a message", "retention.py", "test_retention.py"),
     "local_docs": ("local copy of the Home Assistant documentation", "server.py", "test_local_docs.py"),
     "warm_start": ("keep Codex running between messages", "server.py", "test_live_exchange.py"),
-    "ha_url": ("address for Codex's own Home Assistant API calls", "server.py", "test_ha_url_review.py"),
+    "ha_url": ("address for Codex's own Home Assistant API calls", "core_address.py", "test_ha_url_review.py"),
     "HA_TOKEN": ("token for Codex's own Home Assistant API calls", "server.py", "test_ha_data.py"),
     "remote_control_name": ("machine name in the ChatGPT app", "server.py", "test_remote_name_and_first_reply.py"),
     "interactions_to_keep": ("records kept for Download diagnostics", "server.py", "test_interaction_diagnostics_fix.py"),

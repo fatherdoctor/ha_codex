@@ -139,7 +139,7 @@ class VerificationTests(unittest.TestCase):
             '{"type":"auth_required"}', '{"type":"auth_ok"}',
             '{"id":1,"type":"result","success":true,"result":{"views":[]}}',
         ]
-        with patch("verification.websocket.create_connection", return_value=ws), patch.object(server, "ha_token", return_value="supervisor-secret"):
+        with patch("ha_client.websocket.create_connection", return_value=ws), patch.object(server, "ha_token", return_value="supervisor-secret"):
             self.assertEqual(self.engine.ws_read({"type": "lovelace/config"}), {"views": []})
         self.assertEqual(json.loads(ws.send.call_args_list[0].args[0]), {"type": "auth", "access_token": "supervisor-secret"})
         ws.close.assert_called_once()
@@ -245,9 +245,6 @@ class VerificationTests(unittest.TestCase):
                 with self.subTest(ha_url=value), patch.dict(self.options, {"HA_TOKEN": " token ", "ha_url": value}):
                     environment = server.codex_env()
                     self.assertEqual((environment["HA_TOKEN"], environment["HA_URL"]), ("token", expected))
-        # The worker's own calls keep going through the Supervisor proxy with its token.
-        with patch.dict(os.environ, {"SUPERVISOR_TOKEN": "private"}), patch.dict(self.options, {"ha_url": "https://ha.example.test"}):
-            self.assertEqual(server.ha_base_url(), "http://supervisor/core")
 
     def test_pending_dashboard_cannot_save_unrelated_or_unvalidated_files(self):
         """Refuse to save a pending dashboard in read-only mode, with auto-save off, or without a turn baseline."""
@@ -261,11 +258,6 @@ class VerificationTests(unittest.TestCase):
         self.options["auto_save_lovelace"] = True
         with self.assertRaisesRegex(ValueError, "baseline"):
             self.engine.save_pending_dashboard("chat", "/lovelace/0")
-
-    def test_supervisor_websocket_uses_its_websocket_proxy(self):
-        """Use the Supervisor's WebSocket proxy when the token comes from the Supervisor."""
-        with patch.object(server, "ha_token_source", return_value="supervisor"):
-            self.assertEqual(server.ha_ws_url(), "ws://supervisor/core/websocket")
 
     def test_default_storage_dashboard_is_discovered(self):
         """Find the default dashboard in .storage/lovelace when that file changed."""

@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from test_server import dismiss_wait_notice_async, server
+import ha_client
 
 TASK_ID = "20261117T180000Z-1a2b3c4d"
 TURN_ID = "0123456789abcdef0123456789abcdef"
@@ -38,11 +39,14 @@ class WaitNoticeTests(unittest.TestCase):
         self.stack.enter_context(patch.object(server, "TASK_STATE_FILE", root / "index.json"))
         self.stack.enter_context(patch.object(server, "read_options", return_value={}))
         self.calls = []
-        self.stack.enter_context(patch.object(
-            server, "call_ha_service", side_effect=lambda service, data: self.calls.append((service, data)) or (True, "ok"),
-        ))
+        self.patch_service(lambda service, data: self.calls.append((service, data)) or (True, "ok"))
         # Dismissals run on their own thread in the worker; here they run at once, so the order is certain.
         self.stack.enter_context(patch.object(server, "dismiss_wait_notice_async", side_effect=server.dismiss_wait_notice))
+
+    def patch_service(self, side_effect):
+        """Answer service calls with side_effect, both the worker's own and those of the notice helpers in ha_client."""
+        for module in (server, ha_client):
+            self.stack.enter_context(patch.object(module, "call_ha_service", side_effect=side_effect))
 
     def created(self):
         """The notification ids of the persistent notifications created so far."""
@@ -178,9 +182,7 @@ class WaitNoticeTests(unittest.TestCase):
     def test_the_dismissal_runs_on_its_own_thread(self):
         """The worker's dismissal starts a thread that dismisses the notice; the caller does not wait for it."""
         done = threading.Event()
-        self.stack.enter_context(patch.object(
-            server, "call_ha_service", side_effect=lambda service, data: done.set() or (True, "ok"),
-        ))
+        self.patch_service(lambda service, data: done.set() or (True, "ok"))
         dismiss_wait_notice_async(TASK_ID)
         self.assertTrue(done.wait(5))
 
@@ -206,7 +208,7 @@ class WaitNoticeTests(unittest.TestCase):
             return False, "timeout"
 
         server.update_task(TASK_ID, status="waiting_for_input", current_turn_id=TURN_ID, question="Keep both?")
-        self.stack.enter_context(patch.object(server, "call_ha_service", side_effect=push_fails_after_the_answer))
+        self.patch_service(push_fails_after_the_answer)
         for choices in (["Yes", "No"], []):
             server.tasks[TASK_ID]["status"] = "waiting_for_input"
             with patch.object(server, "read_options", return_value={"notify_service": PHONE}):

@@ -33,10 +33,9 @@ from http.cookiejar import LWPCookieJar, LoadError
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Any, BinaryIO, Callable, NamedTuple, TextIO
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlparse
 
 import requests
-import websocket
 import yaml
 from flask import Flask, Response, jsonify, request, send_file
 
@@ -47,6 +46,10 @@ from approvals import APPROVAL_GONE
 from safety_block import SafetyBlockSession as AppServerSession
 import codex_host
 import full_access
+import ha_client
+from ha_client import (
+    call_ha_service, create_persistent_notification, dismiss_persistent_notification, fire_ha_event, ha_token,
+)
 import policy as protected_policy
 from ha_data import HomeAssistantData
 from ha_call import HomeAssistantCall, RelayCall
@@ -3334,39 +3337,34 @@ def check_home_assistant_config() -> dict[str, str]:
     """
     token = ha_token()
     if not token:
-        return {"result": "unavailable", "errors": "No Home Assistant token available", "warnings": ""}
-    url = ha_api_url("config/core/check_config")
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    attempts = [url]
-    if ha_token_source() == "supervisor" and not url.startswith("http://supervisor/core/api/"):
-        attempts.insert(0, "http://supervisor/core/api/config/core/check_config")
-    problems: list[str] = []
-    for attempt_url in attempts:
-        try:
-            response = requests.post(attempt_url, headers=headers, timeout=CONFIG_CHECK_TIMEOUT)
-        except Exception as exc:
-            problems.append(f"{attempt_url}: {exc}")
-            continue
-        if response.status_code >= 400:
-            problems.append(f"{attempt_url}: HTTP {response.status_code}: {response.text[:300]}")
-            continue
-        try:
-            data = response.json()
-        except ValueError:
-            problems.append(f"{attempt_url}: response was not JSON")
-            continue
-        if not isinstance(data, dict):
-            problems.append(f"{attempt_url}: unexpected response")
-            continue
-        result = str(data.get("result") or "")
-        errors = redact(clean_cli_text(str(data.get("errors") or "")).strip())[:CONFIG_CHECK_TEXT_MAX]
-        warnings = redact(clean_cli_text(str(data.get("warnings") or "")).strip())[:CONFIG_CHECK_TEXT_MAX]
-        if result == "valid":
-            return {"result": "valid", "errors": "", "warnings": warnings}
-        if result == "invalid":
-            return {"result": "invalid", "errors": errors or "Home Assistant reported an invalid configuration.", "warnings": warnings}
-        problems.append(f"{attempt_url}: unexpected result {result!r}")
-    return {"result": "unavailable", "errors": redact("; ".join(problems)), "warnings": ""}
+        return config_check_unavailable(ha_client.NO_TOKEN)
+    path = "config/core/check_config"
+    url = ha_client.api_url(path)
+    try:
+        response = ha_client.rest(token, "POST", path, timeout=CONFIG_CHECK_TIMEOUT)
+    except Exception as exc:
+        return config_check_unavailable(f"{url}: {exc}")
+    if response.status_code >= 400:
+        return config_check_unavailable(f"{url}: HTTP {response.status_code}: {response.text[:300]}")
+    try:
+        data = response.json()
+    except ValueError:
+        return config_check_unavailable(f"{url}: response was not JSON")
+    if not isinstance(data, dict):
+        return config_check_unavailable(f"{url}: unexpected response")
+    result = str(data.get("result") or "")
+    errors = redact(clean_cli_text(str(data.get("errors") or "")).strip())[:CONFIG_CHECK_TEXT_MAX]
+    warnings = redact(clean_cli_text(str(data.get("warnings") or "")).strip())[:CONFIG_CHECK_TEXT_MAX]
+    if result == "valid":
+        return {"result": "valid", "errors": "", "warnings": warnings}
+    if result == "invalid":
+        return {"result": "invalid", "errors": errors or "Home Assistant reported an invalid configuration.", "warnings": warnings}
+    return config_check_unavailable(f"{url}: unexpected result {result!r}")
+
+
+def config_check_unavailable(problem: str) -> dict[str, str]:
+    """The configuration check result when the check could not run, with the redacted reason."""
+    return {"result": "unavailable", "errors": redact(problem), "warnings": ""}
 
 
 def files_in_validation_errors(validation_errors: list[str]) -> list[str]:
@@ -3758,114 +3756,6 @@ def read_lovelace_registry() -> dict[str, dict[str, Any]]:
         return {}
 
 
-def ha_token() -> str:
-    """Return the Supervisor token the worker uses for Home Assistant, or an empty string when there is none."""
-    return str(os.environ.get("SUPERVISOR_TOKEN") or "")
-
-
-def ha_token_source() -> str:
-    """Return where the Home Assistant token comes from: "supervisor", or "none" when there is no token."""
-    if os.environ.get("SUPERVISOR_TOKEN"):
-        return "supervisor"
-    return "none"
-
-
-def create_persistent_notification(title: str, message: str, notification_id: str) -> bool:
-    """Create or replace a persistent notification in Home Assistant, logging a failure; return whether it was sent."""
-    ok, detail = call_ha_service(
-        "persistent_notification.create",
-        {"title": title, "message": message, "notification_id": notification_id},
-    )
-    if not ok:
-        print(f"Persistent notification failed: {detail}", flush=True)
-    return bool(ok)
-
-
-def dismiss_persistent_notification(notification_id: str) -> None:
-    """Dismiss a persistent notification in Home Assistant."""
-    call_ha_service("persistent_notification.dismiss", {"notification_id": notification_id})
-
-
-def ha_base_url() -> str:
-    """Return Home Assistant's base URL: the Supervisor proxy when its token is used, otherwise the ha_url option."""
-    if ha_token_source() == "supervisor":
-        return "http://supervisor/core"
-    return str(read_options().get("ha_url") or DEFAULT_OPTIONS["ha_url"]).rstrip("/")
-
-
-def ha_api_url(path: str) -> str:
-    """Return the Home Assistant REST API URL for a path, given with or without a leading slash or api/ prefix."""
-    base = ha_base_url().rstrip("/")
-    if path.startswith("/"):
-        path = path[1:]
-    if base.endswith("/api"):
-        return f"{base}/{path.removeprefix('api/')}"
-    return f"{base}/api/{path.removeprefix('api/')}"
-
-
-def ha_ws_url() -> str:
-    """Return the URL of Home Assistant's WebSocket API."""
-    if ha_token_source() == "supervisor":
-        return "ws://supervisor/core/websocket"
-    parsed = urlparse(ha_api_url("websocket"))
-    scheme = "wss" if parsed.scheme == "https" else "ws"
-    return urlunparse(parsed._replace(scheme=scheme))
-
-
-def call_ha_service(service: str, data: dict[str, Any]) -> tuple[bool, str]:
-    """Call a Home Assistant service, named as domain.service, and return whether it worked and the error text if not."""
-    token = ha_token()
-    if not token:
-        return False, "No Home Assistant token available"
-    if "." not in service:
-        return False, f"Invalid service name: {service}"
-    domain, name = service.split(".", 1)
-    url = ha_api_url(f"services/{domain}/{name}")
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    attempts = [url]
-    if ha_token_source() == "supervisor" and not url.startswith("http://supervisor/core/api/"):
-        attempts.insert(0, f"http://supervisor/core/api/services/{domain}/{name}")
-
-    errors: list[str] = []
-    for attempt_url in attempts:
-        try:
-            response = requests.post(
-                attempt_url,
-                headers=headers,
-                json=data,
-                timeout=15,
-            )
-            if response.status_code < 400:
-                return True, "ok"
-            errors.append(f"{attempt_url}: HTTP {response.status_code}: {response.text[:300]}")
-        except Exception as exc:
-            errors.append(f"{attempt_url}: {exc}")
-    return False, "; ".join(errors)
-
-
-def fire_ha_event(event_type: str, data: dict[str, Any]) -> tuple[bool, str]:
-    """Fire an event on Home Assistant's event bus and return whether it worked and the error text if not."""
-    token = ha_token()
-    if not token:
-        return False, "No Home Assistant token available"
-    url = ha_api_url(f"events/{event_type}")
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    attempts = [url]
-    if ha_token_source() == "supervisor" and not url.startswith("http://supervisor/core/api/"):
-        attempts.insert(0, f"http://supervisor/core/api/events/{event_type}")
-
-    errors: list[str] = []
-    for attempt_url in attempts:
-        try:
-            response = requests.post(attempt_url, headers=headers, json=data, timeout=15)
-            if response.status_code < 400:
-                return True, "ok"
-            errors.append(f"{attempt_url}: HTTP {response.status_code}: {response.text[:300]}")
-        except Exception as exc:
-            errors.append(f"{attempt_url}: {exc}")
-    return False, "; ".join(errors)
-
-
 # Every notification replaces the same persistent notification, so the last one delivered is the
 # one the user sees. They are delivered one at a time, in the order they were asked for.
 notification_lock = threading.RLock()
@@ -4087,36 +3977,17 @@ def save_lovelace_dashboard(ref: dict[str, str]) -> tuple[bool, str]:
     if ref.get("url_path"):
         payload["url_path"] = ref["url_path"]
 
-    ws = None
     try:
-        ws = websocket.create_connection(
-            ha_ws_url(),
-            timeout=20,
-            header=[f"Authorization: Bearer {token}"],
-        )
-        first = json.loads(ws.recv())
-        if first.get("type") == "auth_required":
-            ws.send(json.dumps({"type": "auth", "access_token": token}))
-            auth = json.loads(ws.recv())
-            if auth.get("type") != "auth_ok":
-                return False, f"WebSocket auth failed: {auth}"
-        msg_id = 1
-        ws.send(json.dumps({"id": msg_id, "type": "lovelace/config/save", **payload}))
-        while True:
-            response = json.loads(ws.recv())
-            if response.get("id") != msg_id:
-                continue
-            if response.get("success"):
-                return True, "saved"
-            return False, json.dumps(response.get("error", response))[:500]
+        ha_client.ws(token, [{"type": "lovelace/config/save", **payload}], ha_client.WsLimits(timeout=20))
+    except ha_client.WsError as exc:
+        if exc.kind == "auth":
+            return False, f"WebSocket auth failed: {exc.reply}"
+        if exc.kind == "failed" and exc.reply is not None:
+            return False, json.dumps(exc.reply.get("error", exc.reply))[:500]
+        return False, f"WebSocket {exc.kind}"
     except Exception as exc:
         return False, str(exc)
-    finally:
-        if ws is not None:
-            try:
-                ws.close()
-            except Exception:
-                pass
+    return True, "saved"
 
 
 # `codex login status` only reads the local auth.json, so a sign-in that OpenAI has revoked
@@ -8085,32 +7956,17 @@ def lookup_ha_users() -> list[dict[str, Any]]:
     token = ha_token()
     if not token:
         raise RuntimeError("no Home Assistant credential")
-    ws = None
     try:
-        ws = websocket.create_connection(ha_ws_url(), timeout=10, header=[f"Authorization: Bearer {token}"])
-        first = json.loads(ws.recv())
-        if first.get("type") == "auth_required":
-            ws.send(json.dumps({"type": "auth", "access_token": token}))
-            if json.loads(ws.recv()).get("type") != "auth_ok":
-                raise RuntimeError("Home Assistant refused the credential")
-        ws.send(json.dumps({"id": 1, "type": "config/auth/list"}))
-        while True:
-            response = json.loads(ws.recv())
-            if response.get("id") != 1:
-                continue
-            if not response.get("success") or not isinstance(response.get("result"), list):
-                raise RuntimeError("Home Assistant did not return its user list")
-            return response["result"]
-    except RuntimeError:
-        raise
+        users = ha_client.ws(token, [{"type": "config/auth/list"}], ha_client.WsLimits(timeout=10))[0]
+    except ha_client.WsError as exc:
+        if exc.kind == "auth":
+            raise RuntimeError("Home Assistant refused the credential") from None
+        raise RuntimeError("Home Assistant did not return its user list") from None
     except Exception as exc:
         raise RuntimeError(str(exc)) from None
-    finally:
-        if ws is not None:
-            try:
-                ws.close()
-            except Exception:
-                pass
+    if not isinstance(users, list):
+        raise RuntimeError("Home Assistant did not return its user list")
+    return users
 
 
 UNVERIFIED_ACCOUNT = "Home Assistant could not verify your account. Reopen Codex through Home Assistant, then try again."
@@ -8723,7 +8579,7 @@ def schedule_timezone():
         try:
             with requests.Session() as client:
                 client.trust_env = False
-                with client.get(ha_api_url('config'), headers={'Authorization': 'Bearer ' + token},
+                with client.get(ha_client.api_url('config'), headers={'Authorization': 'Bearer ' + token},
                                 timeout=(3, 5), allow_redirects=False, stream=True) as response:
                     if response.status_code != 200:
                         raise ValueError()

@@ -8,13 +8,13 @@ import secrets
 import socketserver
 import threading
 import time
-from contextlib import AbstractContextManager, closing
+from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any, Protocol
 
 import requests
-import websocket
 
+import ha_client
 from relay_reads import PRIVATE, ReadError, fetch_states, password_state
 import tool_threads
 
@@ -23,6 +23,16 @@ MAX_FIND_MATCHES = 10
 ENTITY_RE = re.compile(r"[a-z0-9_]+\.[a-z0-9_]+")
 DOMAIN_RE = re.compile(r"[a-z_][a-z0-9_]*")
 PATH_RE = re.compile(r"/[a-zA-Z0-9_-]+(?:/[a-zA-Z0-9_-]+)?/?")
+# A dashboard read: 15 seconds a frame, 1 MiB a frame, 20 frames for the reply.
+DASHBOARD_LIMITS = ha_client.WsLimits(timeout=15, max_frame_bytes=1024 * 1024, max_frames=20)
+DASHBOARD_ERRORS = {
+    "auth": "Home Assistant WebSocket authentication failed",
+    "timeout": "Home Assistant did not return a result",
+    "too_large": "Dashboard response exceeds the verification limit",
+    "invalid": "Home Assistant returned an invalid dashboard reply",
+    "failed": "Home Assistant could not read this dashboard",
+    "no_result": "Home Assistant did not return a result",
+}
 
 
 class VerificationWorker(Protocol):
@@ -189,7 +199,7 @@ class Verification:
         if path.startswith("codex_cli/"):
             kwargs["json"] = {**kwargs.get("json", {}), "worker_token": self.worker.api_token()}
         # The automatic token belongs to the Supervisor proxy, never a supplied URL.
-        url = "http://supervisor/core/api/" + path
+        url = ha_client.api_url(path)
         with requests.request(method, url, headers=headers, timeout=20,
                               allow_redirects=False, stream=True, **kwargs) as response:
             if response.status_code != 200:
@@ -206,25 +216,10 @@ class Verification:
 
         Raises ValueError when authentication fails, a reply exceeds 1 MiB, or no successful result arrives.
         """
-        token = self.worker.ha_token()
-        with closing(websocket.create_connection("ws://supervisor/core/websocket", timeout=15)) as ws:
-            first = json.loads(ws.recv())
-            if first.get("type") == "auth_required":
-                ws.send(json.dumps({"type": "auth", "access_token": token}))
-                first = json.loads(ws.recv())
-            if first.get("type") != "auth_ok":
-                raise ValueError("Home Assistant WebSocket authentication failed")
-            ws.send(json.dumps({"id": 1, **message}))
-            for _ in range(20):
-                raw = ws.recv()
-                if len(raw) > 1024 * 1024:
-                    raise ValueError("Dashboard response exceeds the verification limit")
-                result = json.loads(raw)
-                if result.get("id") == 1:
-                    if not result.get("success"):
-                        raise ValueError("Home Assistant could not read this dashboard")
-                    return result["result"]
-        raise ValueError("Home Assistant did not return a result")
+        try:
+            return ha_client.ws(self.worker.ha_token(), [message], DASHBOARD_LIMITS)[0]
+        except ha_client.WsError as exc:
+            raise ValueError(DASHBOARD_ERRORS[exc.kind]) from None
 
     def run(self, task_id: str, payload: dict[str, Any], capability: str | None = None) -> dict[str, Any]:
         """Run one check for the task's current turn and add its redacted result to the turn's verification list.
