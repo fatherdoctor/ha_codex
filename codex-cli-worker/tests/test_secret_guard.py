@@ -257,7 +257,7 @@ class ApprovalRecordTests(unittest.TestCase):
                  "diff": "-token: invented\n+token: changed\n"}]}
             index.write_text(json.dumps({"chat": {"task_id": "chat", "status": "completed", "approvals": [card]}}),
                              encoding="utf-8")
-            with patch.object(server, "tasks", {}), patch.object(server, "task_root", return_value=Path(temp) / "tasks"), \
+            with patch.dict(server.tasks, {}, clear=True), patch.object(server, "task_root", return_value=Path(temp) / "tasks"), \
                     patch.object(server, "TASK_STATE_FILE", index):
                 server.load_task_index()
                 self.assertEqual(server.tasks["chat"]["approvals"][0]["status"], "expired")

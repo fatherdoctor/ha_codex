@@ -173,7 +173,7 @@ class Migration(Sandbox):
     def test_the_moved_chats_load_at_start(self):
         self.old_chat(self.config / "codex_tasks", "chat-a")
         server.migrate_task_folders({})
-        with patch.object(server, "tasks", {}), patch.object(server, "TASK_STATE_FILE", self.data / "index.json"):
+        with patch.dict(server.tasks, {}, clear=True), patch.object(server, "TASK_STATE_FILE", self.data / "index.json"):
             server.load_task_index()
             self.assertIn("chat-a", server.tasks)
 

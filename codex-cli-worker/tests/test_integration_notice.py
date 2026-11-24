@@ -173,7 +173,7 @@ class IntegrationStatusTests(unittest.TestCase):
     def test_any_authenticated_route_counts_as_a_call(self):
         """The integration is in touch whichever route it calls, such as listing tasks for an action."""
         self.install()
-        with patch.object(server, "tasks", {}):
+        with patch.dict(server.tasks, {}, clear=True):
             self.assertEqual(self.client.get("/tasks", headers={"Authorization": "Bearer test-token"}).status_code, 200)
         self.assertEqual(self.state(), "ok")
 

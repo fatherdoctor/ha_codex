@@ -34,7 +34,10 @@ class ProtocolTests(unittest.TestCase):
         """A running task and a fake app-server transport that keeps what the worker writes."""
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        for name, value in (("tasks", {}), ("running_processes", {})):
+        patcher = patch.dict(server.tasks, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        for name, value in (("running_processes", {}),):
             patcher = patch.object(server, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)

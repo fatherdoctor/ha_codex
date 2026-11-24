@@ -119,7 +119,8 @@ class ServerTests(unittest.TestCase):
         root = Path(stack.enter_context(tempfile.TemporaryDirectory()))
         stack.enter_context(isolated_app_folders(server, root / "app"))
         self.root = root / "tasks"
-        for name, value in (("tasks", {}), ("task_activity", {}), ("active_task_runners", set()), ("message_queue", [])):
+        stack.enter_context(patch.dict(server.tasks, clear=True))
+        for name, value in (("task_activity", {}), ("active_task_runners", set()), ("message_queue", [])):
             stack.enter_context(patch.object(server, name, value))
         stack.enter_context(patch.object(server, "task_root", return_value=self.root))
         stack.enter_context(patch.object(server, "TASK_STATE_FILE", root / "index.json"))
