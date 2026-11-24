@@ -4993,6 +4993,8 @@ def codex_env() -> dict[str, str]:
     The Supervisor tokens and inherited tool capabilities are removed, HOME and
     CODEX_HOME point into the add-on's data folder, and HA_TOKEN is set only
     from the add-on option, together with HA_URL, the address it works at.
+    Without the option HA_URL is not set either: a call to it without a token
+    counts as a failed login, and Home Assistant bans the app after a few.
     """
     env = dict(os.environ)
     # The *_CAPABILITY names are no longer set for a chat; they are still removed in case a parent process has them.
@@ -5009,9 +5011,9 @@ def codex_env() -> dict[str, str]:
     token = str(options.get("HA_TOKEN") or "").strip()
     if token:
         env["HA_TOKEN"] = token
-    url = codex_ha_url(options)
-    if url:
-        env["HA_URL"] = url
+        url = codex_ha_url(options)
+        if url:
+            env["HA_URL"] = url
     return env
 
 
@@ -5112,7 +5114,7 @@ def remote_control_instructions(options: dict[str, Any]) -> str:
         "request native approval for that specific network command on your own; do not silently give up after a sandbox network denial. "
         "Keep API credentials private. A sandboxed command needing network or file access outside its sandbox must request "
         "native approval for that specific action. Never bypass a denial or request permanent permission rules. "
-        "Native approval does not supply credentials. If HA_URL is unset, report address discovery unavailable instead of guessing a port. "
+        "Native approval does not supply credentials. HA_URL is set only with a configured HA_TOKEN; when it is unset, use the tools instead of guessing a port. "
         "Never call HA_URL or the Home Assistant REST or WebSocket API yourself, with or without a token. "
         "Use the Home Assistant tools. If they cannot do it, say so and stop. "
         "An unauthenticated call counts as a failed login and gets the app banned. "
