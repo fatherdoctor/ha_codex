@@ -142,7 +142,7 @@ class BubblewrapCompatibilityTests(unittest.TestCase):
                 self.assertEqual(record["args"], ["--cap-drop", "ALL", *args])
 
     def test_the_app_private_files_are_hidden_and_config_files_are_not(self) -> None:
-        """The app's tokens and the s6 folder are masked just before the first separator; nothing in /config is."""
+        """The app's tokens and the s6 folder are masked just before the first separator; nothing in /homeassistant is."""
         root = Path(self.directory.name)
         (root / "run" / "s6" / "container_environment").mkdir(parents=True)
         (root / "config" / ".storage").mkdir(parents=True)

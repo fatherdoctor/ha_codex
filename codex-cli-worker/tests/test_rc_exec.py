@@ -45,7 +45,7 @@ class RelayExecutionTests(unittest.TestCase):
             try:
                 sup.start()
                 self.assertTrue(wait_for(lambda: bool(calls)))
-                self.assertEqual(calls[0]['cwd'], '/config')
+                self.assertEqual(calls[0]['cwd'], '/homeassistant')
             finally:
                 sup.stop()
 

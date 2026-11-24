@@ -472,7 +472,7 @@ class GitRunnerTests(GitRunnerCase):
                 self.runner.prepare(path)
 
     def test_a_relative_path_is_refused_not_read_against_config(self):
-        """Codex starts in /media/.agents/codex, so "." or "house" read against /config could name the wrong repository."""
+        """Codex starts in /media/.agents/codex, so "." or "house" read against /homeassistant could name the wrong repository."""
         git(self.config, "init", "-q")
         for path in (".", "house", "./house"):
             with self.subTest(path=path), self.assertRaises(gh.GitHubError) as refused:
@@ -1028,15 +1028,15 @@ class DispatchTests(ServiceCase):
         self.service.runner = Runner()
         self.assertFalse(hasattr(self.service, "read_only"))
         for operation in ("fetch", "pull", "push"):
-            answer = self.service.answer(json.dumps(self.payload(operation, path="/config")).encode())
+            answer = self.service.answer(json.dumps(self.payload(operation, path="/homeassistant")).encode())
             self.assertTrue(answer["ok"], answer)
-        self.assertEqual(calls, [("fetch", "/config"), ("pull", "/config"), ("push", "/config")])
+        self.assertEqual(calls, [("fetch", "/homeassistant"), ("pull", "/homeassistant"), ("push", "/homeassistant")])
 
     def test_no_reply_ever_holds_the_token(self):
         """F9: the socket has no operation that returns the credential."""
         self.connect_app()
         replies = [self.service.answer(json.dumps(self.payload(op, **args)).encode()) for op, args in (
-            ("repos", {}), ("fetch", {"path": "/nowhere"}), ("push", {"path": "/config", "branch": "+main"}),
+            ("repos", {}), ("fetch", {"path": "/nowhere"}), ("push", {"path": "/homeassistant", "branch": "+main"}),
             ("token", {}), ("credential", {}), ("repos", {"path": "x"}))]
         replies.append(self.service.answer(b"not json"))
         self.assertNotIn(APP_TOKEN, json.dumps(replies))

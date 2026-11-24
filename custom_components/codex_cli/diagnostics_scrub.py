@@ -71,7 +71,9 @@ def path_categories(values):
         if isinstance(value, dict):
             folder = choice(value.get('folder'), FOLDERS, 'other')
             extension = choice(value.get('extension'), EXTENSIONS, 'other')
-        elif isinstance(value, str) and value.startswith('/config/') and ('..' not in Path(value).parts):
+        # The app's mount point for Home Assistant's configuration (app_paths.CONFIG_ROOT), written out: the
+        # integration has its own copy of this file and cannot import the app's modules.
+        elif isinstance(value, str) and value.startswith('/homeassistant/') and ('..' not in Path(value).parts):
             parts = Path(value).parts[2:]
             folder = choice(parts[0], FOLDERS, 'other') if len(parts) > 1 else 'root'
             extension = choice(Path(value).suffix, EXTENSIONS, 'other')

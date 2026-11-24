@@ -24,7 +24,7 @@ limits](docs/app-reference.md#ssh-connections).
 From 0.3.6 the app has no command check of its own: Codex's permission modes and the
 sandbox are the protection. A command you allow once runs outside the sandbox and can
 read private files or change the app's settings, and the app does not scan what Codex
-writes in `/config`. Read each permission card before you allow it.
+writes in `/homeassistant`. Read each permission card before you allow it.
 
 To check these protections in the code, see [AUDITING.md](AUDITING.md).
 
@@ -63,7 +63,7 @@ Please use extra care when changing or reviewing:
 - Home Assistant Ingress validation.
 - Home Assistant Supervisor or Core API calls, including the bundled Home Assistant MCP server (`hass_mcp.py`,
   `hass_mcp_launch.py`), which holds the Supervisor token and must never pass it to a command Codex runs.
-- File reads and writes under `/config`.
+- File reads and writes under `/homeassistant`.
 - Task execution, cancellation, user replies, and task logs.
 - AppArmor, container permissions, networking, mounted paths, and app/add-on configuration.
 

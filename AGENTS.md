@@ -54,7 +54,7 @@ the version.
 - A pull request follows `.github/pull_request_template.md` and stays a draft until it is ready for review.
 - Every pull request gets an independent adversarial review before it merges; each finding is fixed, or declined
   in writing with the reason.
-- A change to permissions, approvals, sign-in, the sandbox, remote control or writes under `/config` states its
+- A change to permissions, approvals, sign-in, the sandbox, remote control or writes under `/homeassistant` states its
   safety reasoning in the pull request and comes with tests that fail without it.
 - No directory restriction (a folder hidden, read-only or not writable in the sandbox) unless it has been checked
   against what the Claude Code add-on allows today; the app aims at the same file access. Say the check in the PR.

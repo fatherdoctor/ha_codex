@@ -38,6 +38,8 @@ from typing import Any
 
 import websocket
 
+from app_paths import CONFIG_ROOT
+
 # Remote control is paused in this version (the ChatGPT app could read a chat but not reply while this app kept it loaded). While
 # PAUSED is True the remote-control process never starts and the owner's saved choice is kept untouched, so turning
 # it back on in a later version is this one line. The tests set it to False to check the code that returns.
@@ -243,7 +245,7 @@ class Supervisor:
         instructions_factory: Callable[[], str] = lambda: "",
         tool_args_factory: Callable[[], list[str]] = lambda: [],
         launch_env_factory: Callable[[], dict[str, str]] | None = None,
-        workdir_factory: Callable[[], str] = lambda: "/config",
+        workdir_factory: Callable[[], str] = lambda: CONFIG_ROOT.as_posix(),
     ) -> None:
         """Keep the factories and fakes the process needs.
 

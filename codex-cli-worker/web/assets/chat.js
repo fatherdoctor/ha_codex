@@ -1731,7 +1731,7 @@ function approvalHeadline(approval) {
  * Show a native permission request as text, with its precise action and
  * scope. While it waits for the owner it is a full card with the two answers.
  * Once answered (or expired) it shrinks to one closed line, such as
- * "Allowed once: ls /config", that opens to the same details.
+ * "Allowed once: ls /homeassistant", that opens to the same details.
  */
 function renderApproval(approval, taskId, turnId, active) {
   const pending = active && approval.status === "pending";

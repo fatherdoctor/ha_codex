@@ -175,13 +175,13 @@ class SupervisorTests(unittest.TestCase):
         self.assertTrue(wait_for(lambda: self.procs))
 
     def test_the_process_starts_in_the_working_folder(self) -> None:
-        """The remote Codex starts where the chat page's Codex works, not in /config."""
+        """The remote Codex starts where the chat page's Codex works, not in /homeassistant."""
         self.sup.start()
         self.assertTrue(wait_for(lambda: self.procs))
         self.assertEqual(self.cwds, [self.workdir])
 
     def test_the_namespace_probe_runs_in_the_working_folder(self) -> None:
-        """The probe starts where the launch starts, so a missing /config cannot fail the probe alone."""
+        """The probe starts where the launch starts, so a missing /homeassistant cannot fail the probe alone."""
         probe_cwds: list[str] = []
 
         def run(cmd, **kwargs):

@@ -4,7 +4,7 @@ Home Assistant keeps sign-ins, tokens and integration credentials in .storage, b
 dashboards and other state, and secrets.yaml holds the values that `!secret` names.
 The worker leaves both out of the full snapshot and deletes any copy of them in an
 exchange's backup folder, in every permission mode. In a sandbox both are
-readable and writable like the rest of /config, as in the Claude add-on; the
+readable and writable like the rest of /homeassistant, as in the Claude add-on; the
 starter AGENTS.md tells Codex when to leave them alone.
 """
 from __future__ import annotations
@@ -28,7 +28,7 @@ WORKER = Path(__file__).resolve().parents[1]
 
 
 class SecretFilePathTests(unittest.TestCase):
-    """Which paths under /config count as secret files."""
+    """Which paths under /homeassistant count as secret files."""
 
     def test_every_secrets_file_and_everything_under_storage_is_secret(self):
         for rel in ("secrets.yaml", "secrets.yml", "packages/secrets.yaml", ".storage/auth",
@@ -272,7 +272,7 @@ class ApprovalRecordTests(unittest.TestCase):
 
 
 class SandboxTests(unittest.TestCase):
-    """In every sandbox secrets.yaml and all of .storage stay readable and writable under Codex's bind of /config."""
+    """In every sandbox secrets.yaml and all of .storage stay readable and writable under Codex's bind of /homeassistant."""
 
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
@@ -287,7 +287,7 @@ class SandboxTests(unittest.TestCase):
         source = (WORKER / "codex-bwrap").read_text(encoding="utf-8")
         self.wrapper.write_text(
             source.replace("REAL_BWRAP=/opt/codex-sandbox/bwrap.real", f"REAL_BWRAP={real}")
-            .replace("/config/", f"{self.root}/config/"),
+            .replace("/homeassistant/", f"{self.root}/config/"),
             encoding="utf-8",
         )
         self.wrapper.chmod(0o755)

@@ -22,6 +22,8 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, Callable
 
+from app_paths import CONFIG_ROOT
+
 # The Client ID of the public GitHub App "Codex for Home Assistant". It is public by design (GitHub's device
 # sign-in needs nothing else); the add-on option `github_client_id` overrides it for an owner's own App.
 # "Codex for Home Assistant", registered under fatherdoctor; no client secret or private key exists.
@@ -519,10 +521,10 @@ class DeviceFlow:
 
 
 class GitRunner:
-    """Run git for the agent with the stored credential, only in a checked repository under /config."""
+    """Run git for the agent with the stored credential, only in a checked repository under CONFIG_ROOT."""
 
     def __init__(self, token_reader: Callable[[], str | None], connected: Callable[[], list[str]],
-                 config_root: Path = Path("/config"), askpass: str = ASKPASS_PATH, guard: str = GUARD_PATH,
+                 config_root: Path = CONFIG_ROOT, askpass: str = ASKPASS_PATH, guard: str = GUARD_PATH,
                  protected: tuple[str, ...] = (".storage", ".git/hooks"), python: str = sys.executable,
                  share_root: Path = Path("/share"), protected_share: tuple[str, ...] = ("HomeAssistant",)):
         self.token_reader = token_reader
@@ -561,23 +563,23 @@ class GitRunner:
         return [(self.share_root.resolve(), self.protected_share), (self.config_root.resolve(), self.protected)]
 
     def inside(self, resolved: Path) -> Path:
-        """Refuse a resolved path outside /share and /config, or in a protected folder; return its root."""
+        """Refuse a resolved path outside /share and CONFIG_ROOT, or in a protected folder; return its root."""
         for root, protected in self.roots():
             if resolved == root or root in resolved.parents:
                 relative = resolved.relative_to(root).as_posix() if resolved != root else ""
                 if any(relative == item or relative.startswith(item + "/") for item in protected):
                     raise GitHubError("That folder is protected.")
                 return root
-        raise GitHubError("The repository must be under /share or /config.")
+        raise GitHubError("The repository must be under /share or /homeassistant.")
 
     def repository_path(self, value: Any) -> Path:
-        """A work tree under /share or /config (links resolved first) with a real .git folder, not protected.
+        """A work tree under /share or CONFIG_ROOT (links resolved first) with a real .git folder, not protected.
 
         A relative path is refused, not read against a base: Codex starts in its working folder (/media/.agents/codex),
-        so "." read against /config could name the configuration repository instead of the one Codex means.
+        so "." read against CONFIG_ROOT could name the configuration repository instead of the one Codex means.
         """
         if not isinstance(value, str) or not value or len(value) > 4096 or "\x00" in value:
-            raise GitHubError("Give the path of a git work tree under /share or /config.")
+            raise GitHubError("Give the path of a git work tree under /share or /homeassistant.")
         if not value.startswith("/"):
             raise GitHubError("Give the full path of the work tree, starting with /, for example /share/house_repo.")
         resolved = Path(os.path.realpath(value))

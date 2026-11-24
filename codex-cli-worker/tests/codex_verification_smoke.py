@@ -118,7 +118,7 @@ def main():
     binary = os.environ.get("HA_TEST_CODEX", "/usr/local/bin/codex")
     assert "0.166.0" in subprocess.check_output([binary, "--version"], text=True)
     # Private files must be outside both the workspace and writable /tmp, just
-    # like /data/ha-data is outside /config in the app container.
+    # like /data/ha-data is outside /homeassistant in the app container.
     cache = Path.home() / ".cache"
     cache.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="ha-mcp-test-", dir=cache) as root:

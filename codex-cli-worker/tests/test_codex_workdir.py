@@ -46,7 +46,7 @@ class CodexWorkdirTests(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in self.workdir.iterdir()), ["AGENTS.md"])
 
     def test_a_folder_that_cannot_be_made_falls_back_to_config(self) -> None:
-        """When /media/.agents/codex cannot be made, the start goes on and Codex works from /config as before."""
+        """When /media/.agents/codex cannot be made, the start goes on and Codex works from CONFIG_ROOT as before."""
         (self.media / ".agents").write_text("not a folder", encoding="utf-8")
         with patch("builtins.print") as printed:
             server.ensure_codex_workdir()
@@ -142,17 +142,17 @@ class CodexWorkdirTests(unittest.TestCase):
         self.assertEqual(maps, [{"type": "media", "read_only": False}])
 
     def test_the_page_rules_name_the_folder_codex_starts_in(self) -> None:
-        """The rules say where Codex works and that /config is Home Assistant's configuration.
+        """The rules say where Codex works and where Home Assistant's configuration is (CONFIG_ROOT).
 
         They name the folder itself, not the fallback, so the rules text stays the same from turn to turn.
         """
         rules = server.build_page_instructions()
         self.assertIn(f"Working folder: {self.workdir} ", rules)
-        self.assertIn("Home Assistant configuration: /config", rules)
+        self.assertIn(f"Home Assistant configuration: {server.CONFIG_ROOT}\n", rules)
         self.assertNotIn("@@WORKDIR@@", rules)
 
     def test_a_secret_named_relative_to_the_working_folder_is_still_a_secret(self) -> None:
-        """A diff of secrets.yaml is blanked whether Codex names it from /config or from its working folder."""
+        """A diff of secrets.yaml is blanked whether Codex names it from CONFIG_ROOT or from its working folder."""
         self.workdir.mkdir(parents=True)
         config = self.config.as_posix()
         for path in (f"{config}/secrets.yaml", "secrets.yaml", "../../../config/secrets.yaml",
@@ -168,18 +168,18 @@ class RemoteControlWorkdirTests(unittest.TestCase):
     """The relay's Codex starts in the working folder and may write what the chat page's Codex may write."""
 
     def test_the_app_gives_the_relay_the_working_folder(self) -> None:
-        """The one line in server.py that makes remote control start in the working folder, not the /config default."""
+        """The one line in server.py that makes remote control start in the working folder, not the CONFIG_ROOT default."""
         self.assertIs(server.remote_control_supervisor.workdir_factory, server.codex_workdir)
 
     def test_the_relay_gets_the_pages_writable_folders(self) -> None:
-        """A relay thread names no writable folders, so the process's config must; else /config asks each time."""
+        """A relay thread names no writable folders, so the process's config must; else /homeassistant asks each time."""
         with patch.object(server, "read_options", return_value={}):
             args = server.relay_tool_args()
         values = [args[i + 1] for i, flag in enumerate(args[:-1]) if flag == "--config"]
         roots = [v.split("=", 1)[1] for v in values if v.startswith("sandbox_workspace_write.writable_roots=")]
         self.assertEqual(len(roots), 1)
         self.assertEqual(json.loads(roots[0]), list(server.TASK_WRITABLE_ROOTS))
-        self.assertLessEqual({"/config", "/share"}, set(json.loads(roots[0])))
+        self.assertLessEqual({"/homeassistant", "/share"}, set(json.loads(roots[0])))
 
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@ The no-proc fallback is not identical to mounting a fresh `/proc`: it retains th
 
 ## Readiness diagnostics
 
-The worker now verifies a real Codex sandbox execution in addition to the raw Bubblewrap namespace check. It uses the selected `read-only` or `workspace-write` mode, `/config` working directory, and worker environment. The command is `/bin/true`, not an AI task. Errors and timeouts leave readiness false and block task launch; login and diagnostics remain accessible.
+The worker now verifies a real Codex sandbox execution in addition to the raw Bubblewrap namespace check. It uses the selected `read-only` or `workspace-write` mode, `/homeassistant` working directory, and worker environment. The command is `/bin/true`, not an AI task. Errors and timeouts leave readiness false and block task launch; login and diagnostics remain accessible.
 
 The execution probe has its own 20-second timeout (`CODEX_SANDBOX_PROBE_TIMEOUT_SECONDS`), separate from the 5-second raw Bubblewrap probes. It starts Node, the native CLI, and several Bubblewrap processes, so slow or busy hardware needs more time, and a timeout would otherwise block every task.
 
@@ -119,7 +119,7 @@ nested user namespace. Do not retain capabilities to work around that failure.
 
 The 3.1.7 job starts as real root, loads both Supervisor names, and checks both
 routes with the image's SHA-256-verified CLI release bundle. Real `command/exec`
-pipes and PTYs must read the root-owned `/config` fixture, refuse its write in
+pipes and PTYs must read the root-owned `/homeassistant` fixture, refuse its write in
 read-only, and allow its write in workspace-write. The inner UID/GID must be
 1000, host ownership must remain 0:0, all five capability sets must be zero,
 and NNP must remain 1. The named route must keep its private hostname without
@@ -221,18 +221,25 @@ From a shell **inside the worker container**, the basic execution checks are:
 
 ```sh
 export CODEX_HOME=/data/codex-home HOME=/data
-cd /config
+cd /homeassistant
 /usr/local/bin/codex sandbox --config 'sandbox_mode="read-only"' -- /bin/true
 /usr/local/bin/codex sandbox --config 'sandbox_mode="workspace-write"' -- /bin/true
 ```
 
 The pinned CLI (0.165.0) takes the command directly after `codex sandbox [options] --`. It has no platform subcommand: `codex sandbox linux ...` tries to run a program named `linux` and fails with `Failed to execvp linux`. Re-check this grammar, and the worker's readiness probe that uses it, whenever `CODEX_VERSION` in the Dockerfile is bumped.
 
-Both should exit successfully. Then run the original issue's read-only inspection task and confirm actual shell execution, not just an assistant reply. In a disposable test setup, use new temporary files to verify that `read-only` denies writes, `workspace-write` allows a test write under `/config`, under `/media/.agents/codex` (the working folder; a new chat's commands start there, so `pwd` prints `/media/.agents/codex`) under another folder in `/media`, and under a new file in `/media/.agents` outside `codex/` (Codex keeps a folder named `.agents` read-only when it is directly in a root, so `/media/.agents` is a root of its own; the write must succeed with no card), and a line added to `/addon_config/AGENTS.md` (the app's own folder is a root; the write must succeed with no card; put the file back as it was afterwards), and writes outside configured writable roots (for example a new test file under `/data`) are still denied. Do not use existing HA configuration or credential files for write tests. Also check normal task cancellation.
+Both should exit successfully. Then run the original issue's read-only inspection task and confirm actual shell execution, not just an assistant reply. In a disposable test setup, use new temporary files to verify that `read-only` denies writes, `workspace-write` allows a test write under `/homeassistant`, under `/media/.agents/codex` (the working folder; a new chat's commands start there, so `pwd` prints `/media/.agents/codex`) under another folder in `/media`, and under a new file in `/media/.agents` outside `codex/` (Codex keeps a folder named `.agents` read-only when it is directly in a root, so `/media/.agents` is a root of its own; the write must succeed with no card), and a line added to `/addon_config/AGENTS.md` (the app's own folder is a root; the write must succeed with no card; put the file back as it was afterwards), and writes outside configured writable roots (for example a new test file under `/data`) are still denied. Do not use existing HA configuration or credential files for write tests. Also check normal task cancellation.
 
-Nothing in `/config` is hidden or read-only in the sandbox: `secrets.yaml` and all of `/config/.storage` follow the owner's `AGENTS.md`, as in the Claude add-on. In `workspace-write`, verify that a new test file under `/config/.storage` is written with no permission card. Then verify that a sandboxed command can read `/config/secrets.yaml` and `/config/.storage/auth` (they are not empty), and do not write to either file. Only the app's own files stay hidden: verify that `/data/options.json` reads as empty.
+Nothing in `/homeassistant` is hidden or read-only in the sandbox: `secrets.yaml` and all of `/homeassistant/.storage` follow the owner's `AGENTS.md`, as in the Claude add-on. In `workspace-write`, verify that a new test file under `/homeassistant/.storage` is written with no permission card. Then verify that a sandboxed command can read `/homeassistant/secrets.yaml` and `/homeassistant/.storage/auth` (they are not empty), and do not write to either file. Only the app's own files stay hidden: verify that `/data/options.json` reads as empty.
 
 A link at `/media/.agents`: on the test machine only, move `/media/.agents` aside and make `/media/.agents` a link to an empty test folder. Restart the app. The app's log must name the link and say that Codex cannot run commands in Ask for approval or Approve for me until it is removed. In `workspace-write`, send one message that runs a command (for example `pwd`), and record what the chat shows: the command is expected to fail because Codex cannot build its sandbox. Then remove the link, move the folder back, restart the app, and check that `pwd` prints `/media/.agents/codex` again.
+
+After an update from 0.5 to 0.6 (the move of the configuration folder, CX-HA-PATH), also check: `ls /config` in a
+chat fails with "No such file"; `pwd` in Read only prints the working folder; a write under `/homeassistant` in
+`workspace-write` needs no permission card; a request to change a `/config/...` path in Home Assistant's own YAML
+keeps `/config/`; and with a planted `/config/` line in the workspace instructions the first start logs its count and
+shows one notification, and the second start shows none. A start whose notification could not be sent writes no
+marker, so the next start scans and notifies again.
 
 Repeat the basic checks on a host where fresh `/proc` mounting succeeds. A successful `/bin/true` check alone is not proof that all write restrictions are enforced.
 

@@ -11,7 +11,7 @@ import sys
 import tool_threads
 
 SOCKET = '/data/github.sock'
-PATH = {'type': 'string', 'maxLength': 4096, 'description': 'The full path of the git work tree under /share or /config, starting with /, for example /share/house_repo or /config.'}
+PATH = {'type': 'string', 'maxLength': 4096, 'description': 'The full path of the git work tree under /share or /homeassistant, starting with /, for example /share/house_repo or /homeassistant.'}
 REPOSITORY = {'type': 'string', 'maxLength': 140, 'description': 'A connected repository, owner/repository.'}
 FOLDER = {'type': 'string', 'maxLength': 120, 'description': 'For clone: one new folder name; the clone goes to /share/<folder> (default: the repository name).'}
 BRANCH = {'type': 'string', 'maxLength': 200, 'description': 'A plain branch name; the checked-out branch when left out.'}
