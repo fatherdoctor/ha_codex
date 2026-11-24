@@ -77,7 +77,9 @@ When one is:
 1. In a pull request titled `Release <version>`, set the same version in `codex-cli-worker/config.yaml` and
    `custom_components/codex_cli/manifest.json`; a version has three numbers. A beta is `<three numbers>-beta.<n>`,
    made on the `beta` branch for the test machine only
-   ([Versions](docs/updates-and-rollback.md#versions)).
+   ([Versions](docs/updates-and-rollback.md#versions)). From 0.6 the largest change sets the number: a minor
+   (0.x.0) adds a feature area or screen, removes or renames something an owner uses, moves the owner's data, or
+   changes what Codex may do; a patch (0.x.y) only fixes, tidies or explains. 0.5.1 keeps its name.
 2. The version passes on a Home Assistant OS test machine, and its lab-pass record is committed.
 3. The commit that removes `(unreleased)` from the changelog heading is the one tagged, by the maintainer, with
    `python scripts/fork_release.py tag <version> --push`; the release workflow then builds the images and the HACS ZIP.
