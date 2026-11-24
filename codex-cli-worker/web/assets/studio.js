@@ -235,7 +235,7 @@ $("app-pairing-new").onclick = () => {
   openConnection();
   $("remote-control-pair").click();
 };
-$("connection-dialog").addEventListener("close", () => clearTimeout(remoteTimer));
+$("connection-dialog").addEventListener("close", () => polls.remote.stop());
 
 // Workspace rules are loaded only when Workspace instructions in Settings opens their dedicated editor.
 $("workspace-open").onclick = async () => {

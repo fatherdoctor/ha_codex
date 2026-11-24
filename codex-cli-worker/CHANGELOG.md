@@ -13,6 +13,9 @@
   the task index and reads them at startup. No behavior changes, and the stored files keep the same form. New snapshot
   tests keep the Home Assistant event, the API record and the saved files of a completed, a waiting, a continued, a
   failed and a cancelled chat. Tests that replaced the chat list or the task file helpers now change the store instead.
+- The chat page's repeating checks (the chat list, the steps of a working chat, the quota, the two sign-ins, remote
+  control and the code countdowns) now run through one scheduler, `poll()`, and the buttons that wait for the worker
+  share one helper, `busyAction()`. Each check keeps its timing, and nothing looks different.
 
 ## 0.5.0 (draft)
 
