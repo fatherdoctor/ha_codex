@@ -51,6 +51,19 @@
   and over the remote connection. When you ask a chat to change your workspace instructions, Codex writes the file
   without an approval card, as the Claude Code add-on writes its own folder and as the **Settings** editor already
   did. Before, each such write showed a card. In Read only mode a change still asks first.
+- **Actions that answer with data now return it.** Codex's Home Assistant action tool can now run an action that
+  only answers with data, for example `calendar.get_events` or `weather.get_forecasts`. Before, Home Assistant
+  refused the call, because the tool did not ask for the answer, and Codex got only the error. Now the worker sends
+  the same call once more with `?return_response`; Home Assistant refused it before the action ran, so the action
+  runs once. Codex gets the data, cut at 20,000 bytes with a note when it is larger. Every other call is sent once,
+  as before.
+- **Codex no longer calls Home Assistant's API by itself.** When a tool could not do a task, Codex could write its
+  own script to Home Assistant's address without a token. Home Assistant counts each such call as a failed login
+  and, after a few, bans the app's address. The instructions now tell Codex never to call Home Assistant's REST or
+  WebSocket API itself, with or without a token, but to use the Home Assistant tools, and to say so and stop when
+  they cannot do it. The one exception is the API call that the **Home Assistant access token** option allows.
+  Codex now gets `HA_URL`, Home Assistant's address, only when that option is set; before, it got the address
+  without the token too.
 
 ## 0.5.0 (draft)
 
