@@ -309,7 +309,8 @@ class TheChatHoldsNoKey(unittest.TestCase):
 
     def test_run_task_puts_no_key_in_the_environment(self):
         source = Path(server.__file__).read_text(encoding="utf-8")
-        body = source[source.index("def run_task("):source.index("def _run_background_task(")]
+        # The exchange's stages (preflight, launch, run_task) sit between these two lines of server.py.
+        body = source[source.index("class Cancelled("):source.index("def _run_background_task(")]
         self.assertNotIn("_CAPABILITY", body)
         self.assertIn("env=codex_env(),", body)
 

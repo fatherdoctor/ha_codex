@@ -6101,8 +6101,8 @@ def make_live_codex(**limits: float) -> codex_host.CodexHost:
 live_codex = make_live_codex()
 
 
-class LiveExchange(NamedTuple):
-    """How an exchange on the live process ended, in the names that run_task uses after its launch."""
+class ExchangeEnd(NamedTuple):
+    """How an exchange ended, on the live process or on a process of its own: what run_task reads after the launch."""
 
     session: AppServerSession
     returncode: int
@@ -6114,7 +6114,7 @@ class LiveExchange(NamedTuple):
 def run_live_exchange(
     task_id: str, prompt: str, final_file: Path, session_id: str | None, session_holder: dict[str, str],
     options: dict[str, Any], status_calls: list[dict[str, Any]], timeout: float, stall_seconds: float,
-) -> LiveExchange | None:
+) -> ExchangeEnd | None:
     """Run one exchange as a turn of the chat's thread in the live process.
 
     Return None when the live process cannot take the exchange before turn/start is sent (switched off, signed out,
@@ -6154,7 +6154,7 @@ def run_live_exchange(
         if outcome != "finished" or error is not None or session.returncode:
             for line in live_codex.stderr_since(errors_mark):
                 write_task_log(task_id, "stderr", line)
-        return LiveExchange(session, session.returncode, outcome == "timeout", outcome == "stalled", error)
+        return ExchangeEnd(session, session.returncode, outcome == "timeout", outcome == "stalled", error)
     finally:
         live_codex.detach(task_id)
         with lock:
@@ -6194,89 +6194,112 @@ def end_live_turn(task_id: str, session: AppServerSession, outcome: str, stall_s
             write_task_log(task_id, "worker", f"Could not tidy the backup folder: {exc}")
 
 
-def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: str | None = None) -> None:
-    """Run one exchange: record the configuration, launch Codex, then check and report what it changed."""
+SANDBOX_MISSING_SUMMARY = "Codex needs support: the sandbox it must run in is not available, so this task was not started."
+
+
+class Cancelled(Exception):
+    """The owner stopped the exchange. run_task ends at once and publishes nothing: the cancel route has done that."""
+
+
+class LaunchRefused(Exception):
+    """A step before Codex runs could not prepare the exchange; run_task records it once, with fail_task_launch."""
+
+    def __init__(self, cause: Exception, summary: str = "Could not start the Codex CLI executable.",
+                 detail_prefix: str | None = None) -> None:
+        super().__init__(str(cause))
+        self.cause = cause
+        self.summary = summary
+        self.detail_prefix = detail_prefix
+
+
+def checkpoint(task_id: str) -> None:
+    """Raise Cancelled when the owner has stopped this exchange."""
     if task_cancellation_requested(task_id):
-        return
-    # A mode the protected policy refuses stops here, before the task is marked running or any
-    # baseline, snapshot or backup work is done for it.
+        raise Cancelled
+
+
+class PreparedExchange(NamedTuple):
+    """What the preflight hands to the launch and to the review of changes after it."""
+
+    task_dir: Path
+    final_file: Path
+    prompt_file: Path
+    before_manifest_path: Path
+    options: dict[str, Any]
+    permissions: str
+
+
+def check_launch_policy(task_id: str) -> None:
+    """Refuse a mode the protected policy forbids, before the task is marked running or any baseline is taken."""
     policy_problem = (protected_policy.policy_problem(read_options())
                       or protected_policy.policy_problem(task_options(task_id)))
     if policy_problem:
         record_diagnostic("event", task_id, {"kind": "gate", "rule": launch_policy_diagnostic_rule(policy_problem)})
-        fail_task_launch(
-            task_id,
-            RuntimeError(policy_problem),
-            session_id=session_id,
-            summary="Codex needs support: the sandbox it must run in is not available, so this task was not started.",
-            detail_prefix="Codex sandbox preflight failed",
-        )
-        return
-    task_dir = get_run_dir(task_id)
-    task_dir.mkdir(parents=True, exist_ok=True)
-    final_file = task_dir / ("final-resume.json" if reply else "final.json")
-    prompt_file = task_dir / ("prompt-resume.txt" if reply else "prompt.txt")
-    before_manifest_path = task_dir / BASELINE_FILE
+        raise LaunchRefused(RuntimeError(policy_problem), SANDBOX_MISSING_SUMMARY, "Codex sandbox preflight failed")
 
+
+def begin_exchange(task_id: str, session_id: str | None) -> None:
+    """Mark the task running and open its tools, its thread and its activity record."""
     update_task(task_id, status="running", started_at=utc_now(), error="")
     note_task_sign_in(task_id)
     verification.begin(task_id)
     ha_data.begin(task_id)
-    # A follow-up names its thread now; a new chat's thread is bound when Codex reports it (event below).
+    # A follow-up names its thread now; a new chat's thread is bound when Codex reports it (create_approval_session).
     if session_id:
         bind_chat_thread(task_id, session_id)
     with lock:
         current_turn_id = str(tasks.get(task_id, {}).get("current_turn_id") or "")
     start_activity(task_id, current_turn_id)
-    if task_cancellation_requested(task_id):
-        return
-    options = task_options(task_id)
-    record_diagnostic("model", task_id, latest_execution(task_id, options).get("model", "default"))
-    refresh_core_address(options)
-    if not before_manifest_path.exists():
-        try:
-            start_phase(task_id, "baseline", "Noting the current state of your configuration files")
-            manifest = record_baseline(task_id)
-            finish_phase(task_id, "baseline")
-            if options.get("full_snapshot"):
-                start_phase(task_id, "snapshot", "Saving a full snapshot of your configuration")
-                update_task(task_id, snapshot=create_snapshot(task_id, manifest))
-                finish_phase(task_id, "snapshot")
-        except Exception as exc:
-            # Otherwise the step would be closed as done when the exchange ends well.
-            finish_phase(task_id, "baseline", "snapshot", failed=True)
-            write_task_log(task_id, "worker", f"Could not record the configuration before the run: {exc}")
-            update_task(task_id, snapshot_error=str(exc))
-    if task_cancellation_requested(task_id):
-        return
-    backup_dir = codex_backup_dir(task_dir, options)
-    if backup_dir is not None:
-        try:
-            backup_dir.mkdir(parents=True, exist_ok=True)
-        except OSError as exc:
-            write_task_log(task_id, "worker", f"Could not create the backup folder: {exc}")
-            backup_dir = None
-    prepare_chat_files_dir(task_id)
 
+
+def record_before_state(task_id: str, options: dict[str, Any]) -> None:
+    """Record the configuration baseline, and a full snapshot when the owner asked for one."""
+    try:
+        start_phase(task_id, "baseline", "Noting the current state of your configuration files")
+        manifest = record_baseline(task_id)
+        finish_phase(task_id, "baseline")
+        if options.get("full_snapshot"):
+            start_phase(task_id, "snapshot", "Saving a full snapshot of your configuration")
+            update_task(task_id, snapshot=create_snapshot(task_id, manifest))
+            finish_phase(task_id, "snapshot")
+    except Exception as exc:
+        # Otherwise the step would be closed as done when the exchange ends well.
+        finish_phase(task_id, "baseline", "snapshot", failed=True)
+        write_task_log(task_id, "worker", f"Could not record the configuration before the run: {exc}")
+        update_task(task_id, snapshot_error=str(exc))
+
+
+def make_backup_dir(task_id: str, task_dir: Path, options: dict[str, Any]) -> Path | None:
+    """Create the folder Codex copies files into before it edits them; None when there is none."""
+    backup_dir = codex_backup_dir(task_dir, options)
+    if backup_dir is None:
+        return None
+    try:
+        backup_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        write_task_log(task_id, "worker", f"Could not create the backup folder: {exc}")
+        return None
+    return backup_dir
+
+
+def reset_final_file(final_file: Path) -> None:
+    """Remove the final answer of an earlier exchange, so this exchange cannot report it as its own."""
     try:
         final_file.unlink(missing_ok=True)
     except OSError as exc:
-        fail_task_launch(
-            task_id,
-            exc,
-            session_id=session_id,
-            summary="Could not prepare the Codex task output.",
-            detail_prefix="Could not reset the Codex final response",
-        )
-        return
+        raise LaunchRefused(exc, "Could not prepare the Codex task output.",
+                            "Could not reset the Codex final response") from exc
 
-    prepare_ha_docs()
+
+def write_exchange_message(task_id: str, prepared: PreparedExchange, prompt: str, reply: str | None,
+                           session_id: str | None, backup_dir: Path | None) -> None:
+    """Write the message Codex reads, and set the exchange_info that its tools return."""
     # A thread this page starts gets PAGE_INSTRUCTIONS from its first turn. Any other thread (started in the
     # ChatGPT app, or by 0.3.2 or earlier) gets a pointer in the message, and exchange_info carries the rules for it.
     # A new thread learns its sandbox when it starts. A resumed thread is told in the message when its permissions
     # differ from the ones it was last told; with no record (a thread from the ChatGPT app, or from an earlier version
     # of this app) it is told once.
-    permissions = permissions_note(task_mode_settings(task_id, options))
+    permissions = prepared.permissions
     with lock:
         task = tasks.get(task_id, {})
         has_page_instructions = bool(task.get("page_instructions"))
@@ -6288,148 +6311,200 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     if not session_id:
         update_task(task_id, page_instructions=True)
     try:
-        prompt_file.write_text(page_message(prompt, reply=reply, point_to_rules=point_to_rules,
-                                            changed_permissions=changed_permissions), encoding="utf-8")
+        prepared.prompt_file.write_text(page_message(prompt, reply=reply, point_to_rules=point_to_rules,
+                                                     changed_permissions=changed_permissions), encoding="utf-8")
     except OSError as exc:
-        fail_task_launch(
-            task_id,
-            exc,
-            session_id=session_id,
-            summary="Could not prepare the Codex task input.",
-            detail_prefix="Could not write the Codex task prompt",
-        )
-        return
-    if task_cancellation_requested(task_id):
-        return
+        raise LaunchRefused(exc, "Could not prepare the Codex task input.",
+                            "Could not write the Codex task prompt") from exc
+
+
+def check_model_pin(task_id: str, options: dict[str, Any]) -> None:
+    """Stop before Codex starts: a run on another model is an error, never a quiet fallback."""
     pin_error = model_pin_error(latest_execution(task_id, options), options)
     if pin_error:
-        # Stop before Codex starts: a run on another model is an error, never a quiet fallback.
-        fail_task_launch(
-            task_id,
-            ValueError(pin_error),
-            session_id=session_id,
-            summary="Stopped: this run asked for a model the assistant is not set up to use.",
-            detail_prefix="Model pin",
-        )
-        return
+        raise LaunchRefused(ValueError(pin_error), "Stopped: this run asked for a model the assistant is not set up to use.",
+                            "Model pin")
+
+
+def prepare_exchange(task_id: str, prompt: str, session_id: str | None, reply: str | None) -> PreparedExchange:
+    """The preflight: check the policy, mark the task running, record the configuration, write Codex's message.
+
+    The cancel checks keep their places between the steps: a cancel stops the exchange where it did before.
+    """
+    checkpoint(task_id)
+    check_launch_policy(task_id)
+    task_dir = get_run_dir(task_id)
+    task_dir.mkdir(parents=True, exist_ok=True)
+    final_file = task_dir / ("final-resume.json" if reply else "final.json")
+    prompt_file = task_dir / ("prompt-resume.txt" if reply else "prompt.txt")
+    before_manifest_path = task_dir / BASELINE_FILE
+    begin_exchange(task_id, session_id)
+    checkpoint(task_id)
+    options = task_options(task_id)
+    record_diagnostic("model", task_id, latest_execution(task_id, options).get("model", "default"))
+    refresh_core_address(options)
+    if not before_manifest_path.exists():
+        record_before_state(task_id, options)
+    checkpoint(task_id)
+    backup_dir = make_backup_dir(task_id, task_dir, options)
+    prepare_chat_files_dir(task_id)
+    reset_final_file(final_file)
+    prepare_ha_docs()
+    permissions = permissions_note(task_mode_settings(task_id, options))
+    prepared = PreparedExchange(task_dir, final_file, prompt_file, before_manifest_path, options, permissions)
+    write_exchange_message(task_id, prepared, prompt, reply, session_id, backup_dir)
+    checkpoint(task_id)
+    check_model_pin(task_id, options)
+    return prepared
+
+
+def start_launch(task_id: str) -> list[str]:
+    """Open the launch step and check the sandbox; return the command that starts Codex's app server."""
     # Every exchange runs on the app server, which carries live permission requests. The policy check at the
-    # top of run_task has already refused the modes that this transport must never be given.
+    # start of the preflight has already refused the modes that this transport must never be given.
     args = build_app_server_args()
     ha_call.begin(task_id)
-
     start_phase(task_id, "launch", "Starting Codex")
     readiness = sandbox_readiness()
-    if task_cancellation_requested(task_id):
-        return
+    checkpoint(task_id)
     if readiness["required"] and not readiness["ready"]:
-        fail_task_launch(
-            task_id,
-            RuntimeError(str(readiness["message"])),
-            session_id=session_id,
-            summary="Codex needs support: the sandbox it must run in is not available, so this task was not started.",
-            detail_prefix="Codex sandbox preflight failed",
+        raise LaunchRefused(RuntimeError(str(readiness["message"])), SANDBOX_MISSING_SUMMARY,
+                            "Codex sandbox preflight failed")
+    return args
+
+
+def start_codex_process(task_id: str, args: list[str]) -> subprocess.Popen[str]:
+    """Start a Codex process for this exchange and register it, so a cancel can stop it."""
+    write_task_log(task_id, "worker", "Starting Codex: " + " ".join(args))
+    try:
+        proc = subprocess.Popen(
+            args,
+            cwd=CONFIG_ROOT.as_posix(),
+            env=codex_env(),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
         )
-        return
-
-    timeout = int(read_options().get("task_timeout_seconds") or 3600)
-    stall_seconds = max(0, int(read_options().get("task_stall_seconds", 600) or 0))
-    session_holder: dict[str, str] = {}
-    # The turn's ask_owner and report_failure calls, read from the app server's events.
-    status_calls: list[dict[str, Any]] = []
-    # Images recorded before this run belong to earlier exchanges of the session.
-    known_image_ids = {item["id"] for item in image_generation_items(session_id or "")}
-    live = run_live_exchange(task_id, prompt_file.read_text(encoding="utf-8"), final_file, session_id,
-                             session_holder, options, status_calls, timeout, stall_seconds)
-    if live is not None:
-        approval_session, returncode, timed_out, stalled, lifecycle_error = live
-    else:
-        write_task_log(task_id, "worker", "Starting Codex: " + " ".join(args))
-        try:
-            proc = subprocess.Popen(
-                args,
-                cwd=CONFIG_ROOT.as_posix(),
-                env=codex_env(),
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,
-            )
-        except OSError as exc:
-            fail_task_launch(task_id, exc, session_id=session_id)
-            return
-        cancel_after_launch = False
-        with lock:
-            if tasks.get(task_id, {}).get("cancellation_requested"):
-                cancel_after_launch = True
-            else:
+    except OSError as exc:
+        raise LaunchRefused(exc) from exc
+    with lock:
+        cancel_after_launch = bool(tasks.get(task_id, {}).get("cancellation_requested"))
+        if not cancel_after_launch:
+            running_processes[task_id] = proc
+    if cancel_after_launch:
+        # The cancel route did not see this process: stop it here. A process that will not exit stays registered.
+        if not terminate_and_reap_process(proc):
+            with lock:
                 running_processes[task_id] = proc
-        if cancel_after_launch:
-            if not terminate_and_reap_process(proc):
-                with lock:
-                    running_processes[task_id] = proc
-            return
-        assert proc.stdin is not None
-        assert proc.stdout is not None
-        assert proc.stderr is not None
-        approval_session = create_approval_session(
-            task_id, proc, prompt_file.read_text(encoding="utf-8"), final_file, session_id, session_holder, options,
-            status_calls)
-        with lock:
-            approval_sessions[task_id] = approval_session
-        stdout_thread = threading.Thread(target=approval_session.read, args=(proc.stdout,), daemon=True)
-        stderr_thread = threading.Thread(target=reader_thread, args=(task_id, "stderr", proc.stderr), daemon=True)
-        stdout_thread.start()
-        stderr_thread.start()
+        raise Cancelled
+    return proc
 
-        timed_out = False
-        stalled = False
-        lifecycle_error: Exception | None = None
-        returncode = -1
-        process_exit_confirmed = False
+
+def run_process_exchange(task_id: str, proc: subprocess.Popen[str], session: AppServerSession, timeout: float,
+                         stall_seconds: float) -> ExchangeEnd:
+    """Run the exchange on its own Codex process, then close the session and reap the process."""
+    assert proc.stdin is not None
+    assert proc.stdout is not None
+    assert proc.stderr is not None
+    with lock:
+        approval_sessions[task_id] = session
+    stdout_thread = threading.Thread(target=session.read, args=(proc.stdout,), daemon=True)
+    stderr_thread = threading.Thread(target=reader_thread, args=(task_id, "stderr", proc.stderr), daemon=True)
+    stdout_thread.start()
+    stderr_thread.start()
+    timed_out = False
+    stalled = False
+    lifecycle_error: Exception | None = None
+    returncode = -1
+    process_exit_confirmed = False
+    try:
         try:
+            session.start()
+        except (OSError, ValueError) as exc:
+            lifecycle_error = exc
+            process_exit_confirmed = terminate_and_reap_process(proc)
+        if lifecycle_error is None:
             try:
-                approval_session.start()
-            except (OSError, ValueError) as exc:
+                outcome = wait_for_exchange(session, timeout, stall_seconds)
+                timed_out = outcome == "timeout"
+                stalled = outcome == "stalled"
+                if stalled:
+                    write_task_log(task_id, "worker", f"No activity from Codex for {stall_seconds} seconds; stopping the task.")
+                session.close()
+                returncode = session.returncode
+                if session.error:
+                    lifecycle_error = RuntimeError(session.error)
+                # The app-server is long-lived; one worker process owns one
+                # exchange, and must be reaped before the queue advances.
+                process_exit_confirmed = reap_approval_process(proc)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                process_exit_confirmed = terminate_and_reap_process(proc)
+                returncode = proc.returncode if proc.returncode is not None else -1
+            except OSError as exc:
                 lifecycle_error = exc
                 process_exit_confirmed = terminate_and_reap_process(proc)
-            if lifecycle_error is None:
-                try:
-                    outcome = wait_for_exchange(approval_session, timeout, stall_seconds)
-                    timed_out = outcome == "timeout"
-                    stalled = outcome == "stalled"
-                    if stalled:
-                        write_task_log(task_id, "worker", f"No activity from Codex for {stall_seconds} seconds; stopping the task.")
-                    approval_session.close()
-                    returncode = approval_session.returncode
-                    if approval_session.error:
-                        lifecycle_error = RuntimeError(approval_session.error)
-                    # The app-server is long-lived; one worker process owns one
-                    # exchange, and must be reaped before the queue advances.
-                    process_exit_confirmed = reap_approval_process(proc)
-                except subprocess.TimeoutExpired:
-                    timed_out = True
-                    process_exit_confirmed = terminate_and_reap_process(proc)
-                    returncode = proc.returncode if proc.returncode is not None else -1
-                except OSError as exc:
-                    lifecycle_error = exc
-                    process_exit_confirmed = terminate_and_reap_process(proc)
-        finally:
-            approval_session.close()
+    finally:
+        session.close()
+        with lock:
+            if approval_sessions.get(task_id) is session:
+                approval_sessions.pop(task_id, None)
+        try:
+            proc.stdin.close()
+        except (OSError, ValueError):
+            pass
+        if process_exit_confirmed:
             with lock:
-                if approval_sessions.get(task_id) is approval_session:
-                    approval_sessions.pop(task_id, None)
-            try:
-                proc.stdin.close()
-            except (OSError, ValueError):
-                pass
-            if process_exit_confirmed:
-                with lock:
-                    if running_processes.get(task_id) is proc:
-                        running_processes.pop(task_id, None)
-            stdout_thread.join(timeout=5)
-            stderr_thread.join(timeout=5)
+                if running_processes.get(task_id) is proc:
+                    running_processes.pop(task_id, None)
+        stdout_thread.join(timeout=5)
+        stderr_thread.join(timeout=5)
+    return ExchangeEnd(session, returncode, timed_out, stalled, lifecycle_error)
 
+
+def launch_exchange(task_id: str, args: list[str], prepared: PreparedExchange, session_id: str | None,
+                    session_holder: dict[str, str], status_calls: list[dict[str, Any]], timeout: float,
+                    stall_seconds: float) -> ExchangeEnd:
+    """The launch: run the exchange on the live Codex process when it takes it, else on a process of its own.
+
+    This is the one seam between the two start paths; the steps after it read only the ExchangeEnd.
+    """
+    message = prepared.prompt_file.read_text(encoding="utf-8")
+    ended = run_live_exchange(task_id, message, prepared.final_file, session_id, session_holder, prepared.options,
+                              status_calls, timeout, stall_seconds)
+    if ended is not None:
+        return ended
+    proc = start_codex_process(task_id, args)
+    session = create_approval_session(task_id, proc, message, prepared.final_file, session_id, session_holder,
+                                      prepared.options, status_calls)
+    return run_process_exchange(task_id, proc, session, timeout, stall_seconds)
+
+
+def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: str | None = None) -> None:
+    """Run one exchange: the preflight, the launch of Codex, then the check and report of what it changed."""
+    try:
+        prepared = prepare_exchange(task_id, prompt, session_id, reply)
+        args = start_launch(task_id)
+        timeout = int(read_options().get("task_timeout_seconds") or 3600)
+        stall_seconds = max(0, int(read_options().get("task_stall_seconds", 600) or 0))
+        session_holder: dict[str, str] = {}
+        # The turn's ask_owner and report_failure calls, read from the app server's events.
+        status_calls: list[dict[str, Any]] = []
+        # Images recorded before this run belong to earlier exchanges of the session.
+        known_image_ids = {item["id"] for item in image_generation_items(session_id or "")}
+        ended = launch_exchange(task_id, args, prepared, session_id, session_holder, status_calls, timeout,
+                                stall_seconds)
+    except Cancelled:
+        return
+    except LaunchRefused as refused:
+        fail_task_launch(task_id, refused.cause, session_id=session_id, summary=refused.summary,
+                         detail_prefix=refused.detail_prefix)
+        return
+    approval_session, returncode, timed_out, stalled, lifecycle_error = ended
+    task_dir, final_file = prepared.task_dir, prepared.final_file
+    before_manifest_path, permissions = prepared.before_manifest_path, prepared.permissions
     # Record what Codex was told only once its turn started: after a failed start or a cancel before the turn,
     # Codex never read the message, so the next message must carry the permissions line again. A repeated line does
     # no harm; a lost one leaves Codex naming the old mode. (update_task changes nothing after a cancel.)
