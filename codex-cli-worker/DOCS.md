@@ -44,8 +44,8 @@ What to know:
   already have under `/share` or `/config` at a connected repository. You can also ask Codex in the chat.
 - GitHub refuses a push that changes `.github/workflows/` with this access. Change workflow files on GitHub or on
   another computer.
-- **Disconnect** only makes this app forget the sign-in. To revoke it, use the link the card shows on GitHub.
-- A restore from a Home Assistant backup does not bring the sign-in back. Connect again.
+- **Sign out** only makes this app forget the sign-in. To revoke it, use the link the card shows on GitHub.
+- A restore from a Home Assistant backup does not bring the sign-in back. Sign in again.
 
 If the card shows a warning, it says what happened and which button to press. More:
 [GitHub sign-in](https://github.com/fatherdoctor/ha_codex/blob/main/docs/app-reference.md#github-sign-in).
@@ -71,7 +71,8 @@ More: [Sandbox](https://github.com/fatherdoctor/ha_codex/blob/main/docs/app-refe
 
 - Your Home Assistant configuration is at `/config`, and `/share` is shared with other apps.
 - Codex starts each chat in its working folder, `/media/.agents/codex`, for its notes and drafts. It may write in
-  `/config`, `/share` and `/media` without a request. The automatic backup leaves `/media` out unless you include it.
+  `/config`, `/share`, `/media` and `/addon_config` (the app's own folder) without a request. The automatic backup
+  leaves `/media` out unless you include it.
 - Rules for your house go in **Settings** > **Workspace instructions**, the app's `AGENTS.md`. A new install gets a
   short starter file once. It is yours to change or delete.
 - Chats and the files you attach to a message (PNG, JPEG, GIF or WebP) stay in the app's private storage, not in

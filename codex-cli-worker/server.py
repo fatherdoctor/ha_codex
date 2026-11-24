@@ -90,9 +90,17 @@ CODEX_WORKDIR = MEDIA_ROOT / ".agents" / "codex"
 # is there. The working folder's parent is a root of its own because Codex's sandbox keeps a folder named
 # .agents (like .git and .codex) read-only when it sits directly in a writable root: with /media alone,
 # /media/.agents/claude and a new file in /media/.agents would need a card. A project's .agents folder holds
-# skills Codex loads; /media/.agents is not a project folder, and nothing in /media/.agents outside the working folder is loaded as instructions (the working folder's own AGENTS.md is).
+# skills Codex loads; /media/.agents is not a project folder, and nothing in /media/.agents outside the working
+# folder is loaded as instructions (the working folder's own AGENTS.md is).
+# /addon_config, the app's own folder, is the ruling of 2026-11-22: the Claude add-on writes its own addon_config
+# folder, so Codex may change the owner's AGENTS.md there without a permission card. The editor under Settings
+# already wrote it without one, and /config, which Home Assistant runs, needs no card either.
 # /data/github stays masked by codex-bwrap and is never a writable root.
-TASK_WRITABLE_ROOTS = (str(CONFIG_ROOT), "/share", str(MEDIA_ROOT), str(CODEX_WORKDIR.parent))
+# The app's own folder (config.yaml maps addon_config here); AGENTS_PATH below is in it.
+ADDON_CONFIG_ROOT = Path("/addon_config")
+TASK_WRITABLE_ROOTS = (
+    str(CONFIG_ROOT), "/share", str(MEDIA_ROOT), str(CODEX_WORKDIR.parent), str(ADDON_CONFIG_ROOT),
+)
 DATA_ROOT = Path("/data")
 # Files a person attaches to a message live in their own folder in the app's data folder, and the
 # backup leaves them out (config.yaml, backup_exclude: "*/chat_uploads"). The Supervisor matches each
@@ -136,7 +144,6 @@ CODEX_BINARY = "/usr/local/bin/codex"
 # /addon_config; HA's config folder stays at /config). Codex loads them as its global instructions
 # through a link at CODEX_HOME/AGENTS.md. Versions before 0.4 kept the file at /config/AGENTS.md, where
 # Codex read it as the instructions of its working folder; it is moved out of /config once and never copied.
-ADDON_CONFIG_ROOT = Path("/addon_config")
 AGENTS_PATH = ADDON_CONFIG_ROOT / "AGENTS.md"
 LEGACY_AGENTS_PATH = CONFIG_ROOT / "AGENTS.md"
 CODEX_AGENTS_LINK = CODEX_HOME / "AGENTS.md"

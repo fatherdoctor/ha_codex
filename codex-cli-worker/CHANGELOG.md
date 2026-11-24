@@ -2,6 +2,10 @@
 
 ## 0.5.1 (unreleased)
 
+- **Memory note.** The starter instructions now tell Codex to keep personal details, not only secrets, out of its
+  memory files: PINs, tokens, passwords, phone numbers and addresses. They also name the memory folder by its full
+  path, `/config/memory/`, rather than `memory/` in the working folder, so the memory stays in the backup and in the
+  same place when the working folder changes. An install that already has its instructions file keeps its text.
 - **Codex works from `/media/.agents/codex`.** Codex's working folder is now `/media/.agents/codex` instead of
   `/config`, so its notes, scratch files and drafts no longer land in Home Assistant's configuration, and the
   automatic backup leaves them out unless you include the media folder in your backup settings. The app now maps
@@ -34,6 +38,19 @@
   either (see the entry above). Rule 5 of the starter `AGENTS.md` now says not to edit `.storage` files while Home
   Assistant runs, because Home Assistant writes over a changed file from memory, and to use the API or the settings
   pages. An `AGENTS.md` you already have is not changed; copy the rule from `starter_agents.md` if you want it.
+- **Settings polish from a box test.** The Settings scrollbar keeps its space, so text no longer reflows when a part
+  opens. The Ask for approval and Read only texts say what each mode asks. The ChatGPT account part shows a line about
+  Codex access only when you must sign in, and no longer lists which plans include Codex. The GitHub buttons are
+  **Sign in** and **Sign out**; **Read test** and **Check now** are gone (the app still checks every hour). A schedule
+  no longer has **Review prompt** (**Edit** shows the prompt). The workspace rules window is named **Workspace rules
+  (Codex AGENTS.md)** and has **Cancel**. Thinking lines before an answer have more space between them. While Codex
+  works, the four rows of its running reply (the steps line, the Thinking line, the progress text and the
+  **Working** line) have clear space between them; a finished reply keeps its layout.
+- **Codex changes the app's `AGENTS.md` without a card.** `/addon_config`, the app's own folder that holds its
+  `AGENTS.md`, is now a writable place in `workspace-write` beside `/config`, `/share` and `/media`, on the chat page
+  and over the remote connection. When you ask a chat to change your workspace instructions, Codex writes the file
+  without an approval card, as the Claude Code add-on writes its own folder and as the **Settings** editor already
+  did. Before, each such write showed a card. In Read only mode a change still asks first.
 
 ## 0.5.0 (draft)
 

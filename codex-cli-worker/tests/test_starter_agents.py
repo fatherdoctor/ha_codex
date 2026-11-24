@@ -215,7 +215,8 @@ class StarterAgentsText(unittest.TestCase):
 
     def test_it_tells_codex_how_to_keep_a_memory(self):
         section = self.text.split("## Memory", 1)[1].split("\n## ", 1)[0]
-        for words in ("one fact per file", "`memory/MEMORY.md`", "Read the index when a chat starts",
+        for words in ("`/config/memory/`:", "one fact per file", "`/config/memory/MEMORY.md`",
+                      "Read the index when a chat starts",
                       "update a file rather than add a second", "delete wrong facts", "No secrets", "never commit"):
             with self.subTest(words=words):
                 self.assertIn(words, " ".join(section.split()))

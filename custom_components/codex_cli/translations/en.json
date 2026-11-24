@@ -77,7 +77,7 @@
     },
     "github_access_lost": {
       "title": "The Codex add-on's GitHub sign-in needs attention",
-      "description": "The GitHub sign-in of the Codex add-on ({account}) {state}: {reason}. Until it works again, the assistant cannot fetch, pull or push your GitHub repositories. Open the Codex panel in the sidebar, then Settings, GitHub, and choose Connect again. If GitHub still refuses it, check on GitHub that the Codex for Home Assistant app can reach your repositories. This repair clears itself once the check is OK or the sign-in is disconnected."
+      "description": "The GitHub sign-in of the Codex add-on ({account}) {state}: {reason}. Until it works again, the assistant cannot fetch, pull or push your GitHub repositories. Open the Codex panel in the sidebar, then Settings, GitHub, and choose Sign in. If GitHub still refuses it, check on GitHub that the Codex for Home Assistant app can reach your repositories. This repair clears itself once the check is OK or the sign-in is disconnected."
     },
     "github_access_lost_token": {
       "title": "The Codex add-on's GitHub token needs attention",
@@ -85,7 +85,7 @@
     },
     "github_access_near_expiry": {
       "title": "The Codex add-on's GitHub sign-in expires soon",
-      "description": "GitHub still works. The GitHub sign-in of the Codex add-on ({account}) expires {expires}. Replace it before then: open the Codex panel in the sidebar, then Settings, GitHub, and choose Connect again. This repair clears itself once the new sign-in is checked."
+      "description": "GitHub still works. The GitHub sign-in of the Codex add-on ({account}) expires {expires}. Replace it before then: open the Codex panel in the sidebar, then Settings, GitHub, and choose Sign in. This repair clears itself once the new sign-in is checked."
     },
     "github_access_near_expiry_token": {
       "title": "The Codex add-on's GitHub token expires soon",
@@ -93,11 +93,11 @@
     },
     "github_access_changed": {
       "title": "The Codex add-on's GitHub access changed",
-      "description": "The GitHub sign-in of the Codex add-on ({account}) now reaches different repositories or access than you connected: {reason}. Until you look at it, the assistant cannot fetch, pull or push your GitHub repositories. Open the Codex panel in the sidebar, then Settings, GitHub, and read what changed. If you want the new list, accept it there. If not, change the access on GitHub, then choose Check now. This repair clears itself once the check is OK or the sign-in is disconnected."
+      "description": "The GitHub sign-in of the Codex add-on ({account}) now reaches different repositories or access than you connected: {reason}. Until you look at it, the assistant cannot fetch, pull or push your GitHub repositories. Open the Codex panel in the sidebar, then Settings, GitHub, and read what changed. If you want the new list, accept it there. If not, change the access on GitHub; the add-on checks it again within the hour. This repair clears itself once the check is OK or the sign-in is disconnected."
     },
     "github_access_check_failed": {
       "title": "The Codex add-on cannot check its GitHub sign-in",
-      "description": "The Codex add-on cannot check its GitHub sign-in ({account}): {reason}. Until a check works, the assistant cannot fetch, pull or push your GitHub repositories. The add-on tries again by itself, so if GitHub or your network is down, wait. Otherwise open the Codex panel in the sidebar, then Settings, GitHub, and choose Check now. This repair clears itself once the check is OK or the sign-in is disconnected."
+      "description": "The Codex add-on cannot check its GitHub sign-in ({account}): {reason}. Until a check works, the assistant cannot fetch, pull or push your GitHub repositories. The add-on tries again by itself every hour, so if GitHub or your network is down, wait. Otherwise open the Codex panel in the sidebar, then Settings, GitHub, and choose Sign in. This repair clears itself once the check is OK or the sign-in is disconnected."
     }
   },
   "services": {
