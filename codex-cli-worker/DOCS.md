@@ -71,7 +71,8 @@ More: [Sandbox](https://github.com/fatherdoctor/ha_codex/blob/main/docs/app-refe
 
 - Your Home Assistant configuration is at `/config`, and `/share` is shared with other apps.
 - Codex starts each chat in its working folder, `/media/.agents/codex`, for its notes and drafts. It may write in
-  `/config`, `/share` and `/media` without a request. The automatic backup leaves `/media` out unless you include it.
+  `/config`, `/share`, `/media` and `/addon_config` (the app's own folder) without a request. The automatic backup
+  leaves `/media` out unless you include it.
 - Rules for your house go in **Settings** > **Workspace instructions**, the app's `AGENTS.md`. A new install gets a
   short starter file once. It is yours to change or delete.
 - Chats and the files you attach to a message (PNG, JPEG, GIF or WebP) stay in the app's private storage, not in
