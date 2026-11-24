@@ -180,6 +180,7 @@ HA_DOCS_FOLDERS = (
 # Home Assistant Core writes its version here when it starts on a new one.
 HA_VERSION_FILE = CONFIG_ROOT / ".HA_VERSION"
 HA_DOCS_VERSION_CHECK_SECONDS = 5 * 60
+HA_DOCS_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 HA_DOCS_RETRY_INTERVAL_SECONDS = 60 * 60
 HA_DOCS_GIT_TIMEOUT_SECONDS = 300
 HA_DOCS_GIT_STALL_SECONDS = 60
@@ -4804,15 +4805,26 @@ def download_ha_docs(target: Path) -> dict[str, Any]:
     return info
 
 
+def ha_docs_copy_expired(info: dict[str, Any]) -> bool:
+    """Return whether a copy is a week old; a time that cannot be read counts as expired."""
+    try:
+        fetched = datetime.fromisoformat(info["fetched_at"])
+    except ValueError:
+        return True
+    if fetched.tzinfo is None:
+        fetched = fetched.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - fetched).total_seconds() >= HA_DOCS_MAX_AGE_SECONDS
+
+
 def ha_docs_refresh_due() -> bool:
-    """Return whether there is no copy or Home Assistant was updated since the newest one, unless a download failed recently."""
+    """Return whether there is no copy, it is a week old or Home Assistant was updated since, unless a download failed recently."""
     failed = float(ha_docs_state.get("_failed_monotonic") or 0.0)
     if failed and (time.monotonic() - failed) < HA_DOCS_RETRY_INTERVAL_SECONDS:
         return False
     info = ha_docs_info(ha_docs_sibling("staged")) or ha_docs_info(HA_DOCS_ROOT)
-    if info is None:
+    if info is None or ha_docs_copy_expired(info):
         return True
-    # A copy is kept until Home Assistant changes version. Without a readable version there is nothing to compare.
+    # Without a readable version there is nothing to compare.
     version = installed_ha_version()
     return bool(version) and version != info.get("ha_version")
 
@@ -4909,12 +4921,24 @@ def ha_docs_status() -> dict[str, Any]:
     }
 
 
+def ha_docs_version_sentence(info: dict[str, Any]) -> str:
+    """Tell Codex which Home Assistant Core version the house runs, next to the one the copy was downloaded under."""
+    installed = installed_ha_version()
+    downloaded = str(info.get("ha_version") or "")
+    if not installed:
+        return "The pages describe the newest release, which can be newer than the Home Assistant Core version of this house."
+    sentence = f"This house runs Home Assistant Core {installed}"
+    if downloaded and downloaded != installed:
+        sentence += f"; the copy was downloaded while it ran {downloaded}"
+    return sentence + ". The pages describe the newest release, which can be newer than that version."
+
+
 def ha_docs_note() -> str:
     """Point Codex at the local documentation when a complete copy is available."""
     info = ha_docs_info(HA_DOCS_ROOT) if ha_docs_enabled() else None
     if info is None:
         return ""
-    return f"""The official Home Assistant documentation is stored locally in {HA_DOCS_ROOT / "source"} (Markdown source of www.home-assistant.io, downloaded {info["fetched_at"][:10]}). Search and read these files with shell commands instead of searching the web for Home Assistant documentation:
+    return f"""The official Home Assistant documentation is stored locally in {HA_DOCS_ROOT / "source"} (Markdown source of www.home-assistant.io, downloaded {info["fetched_at"][:10]}). {ha_docs_version_sentence(info)} Search and read these files with shell commands instead of searching the web for Home Assistant documentation:
   _integrations/<domain>.markdown: setup and configuration of an integration
   _actions/<domain>.<action>.markdown, _triggers/<domain>.<trigger>.markdown, _conditions/<domain>.<condition>.markdown: one page per action, trigger, and condition
   _template_functions/<name>.markdown: template functions and filters

@@ -2,6 +2,10 @@
 
 ## 0.6.0 (unreleased)
 
+- **The local Home Assistant documentation refreshes weekly.** The copy under `/data/ha-docs` is downloaded again when
+  it is a week old, as well as after a Home Assistant Core update. A failed download is still tried again an hour
+  later. The note that points Codex at the copy now also says which Core version this house runs, and which version
+  the copy was downloaded under when they differ, so Codex knows the pages can describe a newer release.
 - **Copy a code block.** Each code block in a chat message has a **Copy** button at its top left. It puts the code on
   the clipboard and shows "Copied" for two seconds. Where the browser or app has no clipboard or refuses it, the button
   selects the code instead, so you can copy it by hand.

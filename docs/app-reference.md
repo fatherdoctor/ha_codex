@@ -116,11 +116,12 @@ When the copy is downloaded:
   the copy was downloaded under. It reads that version from a file in the
   configuration folder, so the check makes no network request. When the version
   has changed, it downloads a new copy in the background.
+- **When the copy is a week old**, even if Home Assistant has not changed
+  version. The documentation changes between Home Assistant releases too.
 - **After a failed download**, the worker keeps the existing copy and tries
   again an hour later.
 
-The copy is not refreshed on a schedule. While Home Assistant stays on the same
-version, the worker keeps the copy it has and makes no documentation requests.
+Between these, the worker makes no documentation requests.
 A new copy is put to use when the next message starts, never while a task is
 reading the old one. Until the first download finishes, tasks use web search as
 before.
@@ -128,6 +129,9 @@ before.
 Each download brings the documentation of the latest Home Assistant release. If
 you update to a version that is not the latest, the documentation can describe
 features your installation does not have yet.
+The note that points Codex at the copy also names the Core version your
+installation runs, and the version it ran when the copy was downloaded when
+those differ, so Codex knows the pages can describe a newer release.
 
 **Local Home Assistant documentation** (`local_docs`) in the app's
 **Configuration** tab is on by default. Turn it off to stop the downloads and
