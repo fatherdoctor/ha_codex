@@ -249,6 +249,8 @@ class RunTaskSignInRecoveryTests(unittest.TestCase):
             fixture.stack.enter_context(patch.dict(server.sign_in_check,
                 {'result': '', 'auth_signature': None, 'checked_at': ''}, clear=True))
             fixture.stack.enter_context(patch.object(server, 'task_sign_in_signatures', {}))
+            # The fake process answers one exchange on its own connection: the option-off start path.
+            fixture.options['warm_start'] = False
             fixture.stack.enter_context(patch.object(server, 'codex_local_login_status',
                 side_effect=lambda: {'status_ok': True, 'has_auth_file': True}))
             check = AccountAccess(server.codex_login_status, lambda: {}, server._auth_signature,

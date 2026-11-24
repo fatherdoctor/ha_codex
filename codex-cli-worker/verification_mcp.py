@@ -15,16 +15,14 @@ TOOL: dict[str, Any] = {
         "Find entities by name, or check Home Assistant configuration, fresh entity state, Core logs, or "
         "dashboard configuration. For a device command, use find with the name the user gave (and a domain "
         "such as light when it is clear) to get the entity_id; do not search files for it. "
-        "Dashboard checks capture desktop/mobile screenshots and any matching Fully Kiosk displays; "
-        "inspect their image_paths before visual claims. "
-        "Blocked requests include reasons and approval availability; a policy block does not imply a write. "
-        "save_pending saves only a dashboard edited in this turn when auto-save is enabled. "
+        "dashboard_readback reads a dashboard's saved configuration back from Home Assistant; with "
+        "save_pending it first saves a dashboard edited in this turn, when auto-save is enabled. "
         "No service calls, reloads, arbitrary URLs, or other apps' logs."
     ),
     "inputSchema": {
         "type": "object", "additionalProperties": False,
         "properties": {
-            "operation": {"type": "string", "enum": ["entity", "find", "config_check", "logs", "dashboard", "dashboard_readback"]},
+            "operation": {"type": "string", "enum": ["entity", "find", "config_check", "logs", "dashboard_readback"]},
             "entity_id": {"type": "string"}, "expected_state": {"type": "string"},
             "name": {"type": "string", "maxLength": 120,
                      "description": "For find: the words the user used for the device, for example office overhead"},

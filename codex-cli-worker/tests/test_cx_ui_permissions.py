@@ -34,8 +34,8 @@ class DashboardTurnPermissions(unittest.TestCase):
         self.external_edit()
         with patch.object(server, 'save_lovelace_dashboard', return_value=(True, 'synthetic accepted')) as save, \
              patch.object(self.engine, 'dashboard_readback', return_value={'status': 'passed'}), \
-             patch.object(self.engine, 'core', side_effect=ValueError('Synthetic browser unavailable')) as core:
-            result = self.engine.dispatch({'thread_id': fixtures.THREAD, 'operation': 'dashboard',
+             patch.object(self.engine, 'core', side_effect=ValueError('Synthetic Core unavailable')) as core:
+            result = self.engine.dispatch({'thread_id': fixtures.THREAD, 'operation': 'dashboard_readback',
                                            'path': '/lovelace/0', 'save_pending': True})
         save.assert_not_called()
         core.assert_not_called()

@@ -315,12 +315,18 @@ def worker_app_server_args(root: Path) -> tuple[list[str], list[str]]:
 
     server.build_app_server_args is the launch the chat page uses. Only the binary and each tool program's
     command change: the command becomes the relay, which then starts the same program with the same arguments.
+
+    The option home_assistant_mcp is off here: these proofs cover the worker's own tool programs, and the bundled
+    hass-mcp (installed only in the image, with a Supervisor token) cannot start on a test runner, so Codex would
+    report it failed after its 20 second start timeout. test_ha_mcp_option.py covers that server's launch.
     """
+    import hass_mcp
     import server
 
     relay = root / "relay.py"
     relay.write_text(RELAY, encoding="utf-8")
-    args = server.build_app_server_args()
+    with patch.object(hass_mcp, "enabled", lambda _options: False):
+        args = server.build_app_server_args()
     assert args[1] == "app-server", args[:2]
     args = args[2:]
     names = []
@@ -629,6 +635,70 @@ orphan = int(launcher.communicate()[0])
 (home / "pids").write_text(f"{own.pid} {orphan}")
 sys.stdin.read()
 """
+
+
+@unittest.skipUnless(os.environ.get("HA_TEST_REQUIRE_CODEX") == "1", "requires the built worker image")
+class SandboxGitIdentity(unittest.TestCase):
+    def test_git_resolves_worker_and_repository_identities_in_the_sandbox(self) -> None:
+        import server
+
+        cache = Path.home() / ".cache"
+        cache.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=cache) as folder:
+            root = Path(folder)
+            home = root / "data" / "codex-home"
+            home.mkdir(parents=True)
+            with (patch.multiple(server, DATA_ROOT=home.parent, CODEX_HOME=home),
+                  patch.object(server, "read_options", return_value={})):
+                server.write_git_identity_defaults({})
+                env = server.codex_env()
+            checkout = root / "checkout"
+            subprocess.run(["git", "init", "-q", str(checkout)], check=True)
+            # Git reports the identities it would put on a commit. This works with read-only .git metadata.
+            for identity in ("ChatGPT Codex <noreply@openai.com>", "Example Project <project@example.invalid>"):
+                if identity.startswith("Example"):
+                    subprocess.run(["git", "config", "user.name", "Example Project"], cwd=checkout, check=True)
+                    subprocess.run(["git", "config", "user.email", "project@example.invalid"], cwd=checkout, check=True)
+                result = subprocess.run(
+                    [CODEX, "sandbox", "--config", 'sandbox_mode="read-only"', "--", "sh", "-ec",
+                     "git var GIT_AUTHOR_IDENT && git var GIT_COMMITTER_IDENT"],
+                    cwd=checkout, env=env, text=True, capture_output=True, timeout=30,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                identities = [line.rsplit(" ", 2)[0] for line in result.stdout.splitlines()]
+                self.assertEqual(identities, [identity, identity])
+
+
+@unittest.skipUnless(os.environ.get("HA_TEST_REQUIRE_CODEX") == "1", "requires the built worker image")
+class SandboxWorkbook(unittest.TestCase):
+    """The image ships spreadsheet support for the Python that Codex commands run."""
+
+    def test_openpyxl_round_trip(self) -> None:
+        create = textwrap.dedent("""
+            from openpyxl import Workbook
+
+            book = Workbook()
+            book.active["A1"] = "=SUM(1,2)"
+            book.save("example.xlsx")
+        """)
+        read = textwrap.dedent("""
+            from openpyxl import load_workbook
+
+            book = load_workbook("example.xlsx", read_only=True)
+            print(book.active["A1"].value)
+            book.close()
+        """)
+        with tempfile.TemporaryDirectory() as work:
+            # Saving a workbook needs temporary files. Reading an existing workbook does not.
+            for mode, script, expected in (("workspace-write", create, ""), ("read-only", read, "=SUM(1,2)")):
+                result = subprocess.run(
+                    [CODEX, "sandbox", "--config", f'sandbox_mode="{mode}"',
+                     "--config", "check_for_update_on_startup=false", "--", "python3", "-I", "-c", script],
+                    cwd=work, capture_output=True, text=True, timeout=30,
+                )
+                self.assertEqual(result.returncode, 0, f"{mode}: {result.stderr}")
+                self.assertEqual(result.stdout.strip(), expected, mode)
+
 
 
 class CloseWaitsForChildren(unittest.TestCase):

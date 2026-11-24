@@ -86,8 +86,8 @@ class SessionIdParsingTests(unittest.TestCase):
                     final_file.write_text(json.dumps(stale_payload), encoding="utf-8")
 
                 with (
-                    patch.object(server, "get_task_dir", return_value=task_dir),
-                    patch.object(server, "save_task_index"),
+                    patch.object(server.store, "task_dir", return_value=task_dir),
+                    patch.object(server.store, "save_index"),
                     patch.object(
                         server,
                         "read_options",
@@ -305,7 +305,7 @@ STATUS_PANEL = """\
 ╭────────────────────────────────────────────╮
 │ >_ OpenAI Codex (v0.160.0)                 │
 │ model:     loading   /model to change      │
-│ directory: /config                         │
+│ directory: /homeassistant                         │
 ╰────────────────────────────────────────────╯
 /status
 
@@ -316,7 +316,7 @@ STATUS_PANEL = """\
 
   Model:           GPT-6.1-Sol (reasoning low, summaries auto)
   Model provider:  openai
-  Directory:       /config
+  Directory:       /homeassistant
   Permissions:     Custom (workspace with network access, Ask for approval)
   Agents.md:       <none>
 
@@ -531,17 +531,15 @@ class ModelSelectionTests(unittest.TestCase):
         )
 
     def test_worker_model_schema_matches_supported_choices(self) -> None:
-        """config.yaml and the worker default the model to "default", and the schema lists the accepted models."""
+        """config.yaml and the worker default the model to "default", and the schema takes any text."""
         config = server.yaml.safe_load(
             (SERVER_PATH.parent / "config.yaml").read_text(encoding="utf-8")
         )
 
         self.assertEqual(config["options"]["codex_model"], "default")
         self.assertEqual(server.DEFAULT_OPTIONS["codex_model"], "default")
-        self.assertEqual(
-            config["schema"]["codex_model"],
-            "list(default|gpt-6-astra|gpt-6.1-sol|gpt-6.1-terra|gpt-6-sol|gpt-6-luna|gpt-5.6-sol|gpt-5.6-terra|gpt-5.6-luna|gpt-5.5)",
-        )
+        # Free text: no list to keep current when Codex adds a model.
+        self.assertEqual(config["schema"]["codex_model"], "str?")
 
     def test_home_assistant_api_url_defaults_to_core(self) -> None:
         """An empty override must not invent a Core port before Supervisor discovery."""
@@ -578,19 +576,35 @@ class ModelSelectionTests(unittest.TestCase):
 
         self.assertEqual(session.thread_params["model"], "gpt-5.6-sol")
 
-    def test_retired_models_stay_accepted_and_lead_to_an_offered_model(self) -> None:
-        """Every retired model stays in the option schema, is not offered in chats, and leads to a model that is."""
-        config = server.yaml.safe_load(
-            (SERVER_PATH.parent / "config.yaml").read_text(encoding="utf-8")
-        )
-        accepted = config["schema"]["codex_model"].removeprefix("list(").removesuffix(")").split("|")
-
+    def test_retired_models_are_not_offered_and_lead_to_an_offered_model(self) -> None:
+        """Every retired model is not offered in chats, and leads to a model that is."""
         for model in server.RETIRED_MODELS:
             with self.subTest(model=model):
-                # Home Assistant does not start an app whose saved option is missing from the list.
-                self.assertIn(model, accepted)
                 self.assertNotIn(model, server.CHAT_MODEL_EFFORTS)
                 self.assertIn(server.current_model(model), server.CHAT_MODEL_EFFORTS)
+
+    def test_every_value_of_the_old_option_list_still_resolves(self) -> None:
+        """Each value the dropdown once offered keeps working as the free-text option."""
+        old_list = ("default", "gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna",
+                    "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5")
+        for model in old_list:
+            with self.subTest(model=model):
+                execution = server.resolve_chat_settings(
+                    server.DEFAULT_CHAT_SETTINGS, {"codex_model": model})
+                expected = "default" if model == "default" else server.current_model(model)
+                self.assertEqual(execution["model"], expected)
+
+    def test_free_text_model_is_trimmed_and_passed_through(self) -> None:
+        """A model name the app does not know is passed to Codex as typed, minus stray spaces; empty means default."""
+        execution = server.resolve_chat_settings(
+            server.DEFAULT_CHAT_SETTINGS, {"codex_model": "  gpt-9-new  "})
+        self.assertEqual(execution["model"], "gpt-9-new")
+        self.assertEqual(execution["reasoning_effort"], "medium")
+        for empty in ("", "   ", None):
+            with self.subTest(empty=empty):
+                execution = server.resolve_chat_settings(
+                    server.DEFAULT_CHAT_SETTINGS, {"codex_model": empty})
+                self.assertEqual(execution["model"], "default")
 
     def test_explicit_model_is_passed_to_codex(self) -> None:
         """A model named in the options is passed to app-server on new and resumed sessions."""
@@ -651,7 +665,7 @@ class HealthRouteTests(unittest.TestCase):
                 return_value={"status_ok": True, "message": "logged in"},
             ),
             patch.object(server, "auth_status_payload", return_value={"status": "authenticated"}),
-            patch.object(server, "task_root", return_value=Path("/config/codex_tasks")),
+            patch.object(server, "task_root", return_value=Path("/homeassistant/codex_tasks")),
         ):
             response = server.app.test_client().get(
                 "/health",
@@ -685,7 +699,7 @@ class TaskLaunchFailureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             task_dir = Path(temp_dir) / "task"
             with (
-                patch.object(server, "get_task_dir", return_value=task_dir),
+                patch.object(server.store, "task_dir", return_value=task_dir),
                 patch.object(server, "update_task", side_effect=lambda _task_id, **values: updates.append(values)),
                 patch.object(server, "read_options", return_value={"task_timeout_seconds": 30}),
                 patch.object(
@@ -759,8 +773,8 @@ class TaskLaunchFailureTests(unittest.TestCase):
                     return True
 
                 with (
-                    patch.object(server, "tasks", {task_id: task}),
-                    patch.object(server, "get_task_dir", return_value=task_dir),
+                    patch.dict(server.tasks, {task_id: task}, clear=True),
+                    patch.object(server.store, "task_dir", return_value=task_dir),
                     patch.object(
                         server,
                         "update_task",
@@ -837,8 +851,8 @@ class BackgroundStartFailureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             with (
-                patch.object(server, "get_task_dir", side_effect=lambda task_id: root / task_id),
-                patch.object(server, "save_task_index"),
+                patch.object(server.store, "task_dir", side_effect=lambda task_id: root / task_id),
+                patch.object(server.store, "save_index"),
                 patch.object(server, "api_token", return_value="test-token"),
                 patch.object(server.threading.Thread, "start", side_effect=RuntimeError("thread unavailable")),
                 patch.object(server, "fire_ha_event", side_effect=self.capture_event(events)),
@@ -877,9 +891,9 @@ class BackgroundStartFailureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             with (
-                patch.object(server, "get_task_dir", side_effect=lambda value: root / value),
+                patch.object(server.store, "task_dir", side_effect=lambda value: root / value),
                 patch.object(server, "session_available", return_value=True),
-                patch.object(server, "save_task_index"),
+                patch.object(server.store, "save_index"),
                 patch.object(server, "api_token", return_value="test-token"),
                 patch.object(server.threading.Thread, "start", side_effect=RuntimeError("thread unavailable")),
                 patch.object(server, "fire_ha_event", side_effect=self.capture_event(events)),
@@ -948,8 +962,8 @@ class TaskCancellationTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             with (
-                patch.object(server, "get_task_dir", return_value=Path(temp_dir) / task_id),
-                patch.object(server, "save_task_index"),
+                patch.object(server.store, "task_dir", return_value=Path(temp_dir) / task_id),
+                patch.object(server.store, "save_index"),
                 patch.object(server, "api_token", return_value="test-token"),
                 patch.object(server, "fire_ha_event", side_effect=self.capture_event(events)),
                 patch.object(server, "notify"),
@@ -981,8 +995,8 @@ class TaskCancellationTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             with (
-                patch.object(server, "get_task_dir", return_value=Path(temp_dir) / task_id),
-                patch.object(server, "save_task_index"),
+                patch.object(server.store, "task_dir", return_value=Path(temp_dir) / task_id),
+                patch.object(server.store, "save_index"),
                 patch.object(server, "api_token", return_value="test-token"),
                 patch.object(server, "page_message", return_value="prompt"),
                 patch.object(
@@ -1050,8 +1064,8 @@ class TaskCancellationTests(unittest.TestCase):
         proc = FakeProcess()
         with tempfile.TemporaryDirectory() as temp_dir:
             with (
-                patch.object(server, "get_task_dir", return_value=Path(temp_dir) / task_id),
-                patch.object(server, "save_task_index"),
+                patch.object(server.store, "task_dir", return_value=Path(temp_dir) / task_id),
+                patch.object(server.store, "save_index"),
                 patch.object(server, "api_token", return_value="test-token"),
                 patch.object(server, "page_message", return_value="prompt"),
                 patch.object(

@@ -1,8 +1,8 @@
 """The app keeps its working files in its private /data, never in Home Assistant's configuration folder.
 
 Chats (prompts, logs, per-turn backups, attachments) live in /data/codex_tasks. Versions before 0.4 kept
-them in /config/codex_tasks (or the folder the removed task_root option named) and wrote the sign-in QR
-images to /config/www/codex_cli_auth, which Home Assistant serves at /local/ without a sign-in. The first
+them in codex_tasks in Home Assistant's configuration folder (or the folder the removed task_root option named) and
+wrote the sign-in QR images to www/codex_cli_auth in that folder, which Home Assistant serves at /local/ without a sign-in. The first
 start of 0.4 moves the chats (never copies them) and deletes those images.
 """
 
@@ -28,7 +28,7 @@ def tree(root: Path) -> dict[str, str]:
 
 
 class Sandbox(unittest.TestCase):
-    """A temporary /config and /data for one test."""
+    """A temporary /homeassistant and /data for one test."""
 
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
@@ -72,7 +72,8 @@ class TaskFolder(Sandbox):
         run = (WORKER / "run.sh").read_text(encoding="utf-8")
         for line in run.splitlines():
             if "mkdir" in line:
-                self.assertNotIn("/config", line)
+                self.assertNotIn("/homeassistant", line)
+                self.assertNotRegex(line, r"\s/config\b")
         self.assertIn("/data/codex_tasks", run)
 
 
@@ -98,7 +99,7 @@ class Migration(Sandbox):
 
         def rename(source, target):
             calls.append((Path(source), Path(target)))
-            if Path(source).parent == old:  # /config and /data are different file systems on an install.
+            if Path(source).parent == old:  # /homeassistant and /data are different file systems on an install.
                 raise OSError(errno.EXDEV, "Invalid cross-device link")
             return real_rename(source, target)
 
@@ -142,6 +143,11 @@ class Migration(Sandbox):
         self.assertFalse(custom.exists())
         self.assertTrue((self.data / "codex_tasks" / "chat-b" / "task.json").is_file())
 
+    def test_a_saved_value_under_the_old_mount_point_reads_as_the_same_folder_now(self):
+        """Before 0.6 the configuration folder was /config in the container; it is CONFIG_ROOT now (CX-HA-PATH)."""
+        roots = server.old_task_roots({"task_root": "/config/codex_chats"})
+        self.assertEqual(roots, [self.config / "codex_tasks", self.config / "codex_chats"])
+
     def test_the_data_folder_itself_is_never_a_source(self):
         (self.data / "options.json").write_text("{}", encoding="utf-8")
         for saved in (str(self.data), str(self.data / "codex_tasks"), str(self.data / "codex_tasks" / "x"), "relative"):
@@ -167,7 +173,7 @@ class Migration(Sandbox):
     def test_the_moved_chats_load_at_start(self):
         self.old_chat(self.config / "codex_tasks", "chat-a")
         server.migrate_task_folders({})
-        with patch.object(server, "tasks", {}), patch.object(server, "TASK_STATE_FILE", self.data / "index.json"):
+        with patch.dict(server.tasks, {}, clear=True), patch.object(server, "TASK_STATE_FILE", self.data / "index.json"):
             server.load_task_index()
             self.assertIn("chat-a", server.tasks)
 
@@ -264,7 +270,7 @@ class StartOrder(unittest.TestCase):
                  "ensure_runtime_files", "write_full_access_requirements_at_start", "apply_interaction_limit",
                  "refresh_core_address", "codex_version_status", "sandbox_readiness",
                  # Steps a later version of main() adds around these; replaced when present so the test never
-                 # touches the real /config or /data.
+                 # touches the real /homeassistant or /data.
                  "migrate_agents_file", "link_agents_file"]
         patchers = [patch.object(server, name, side_effect=record(name)) for name in steps if hasattr(server, name)]
         # The steps above are replaced; the ones it does not name still run in a temporary copy of the folders.
@@ -335,7 +341,6 @@ class NothingInTheConfigurationFolder(Sandbox):
                 patch.object(server, "CODEX_CONFIG_PATH", home / "config.toml"), \
                 patch.object(server, "api_token", return_value="synthetic"), \
                 patch.object(server, "read_options", return_value={}), \
-                patch.object(server.protected_policy, "remove_legacy_instructions"), \
                 patch.object(server, "create_persistent_notification"):
             server.migrate_task_folders({})
             server.retire_public_sign_in_images()
@@ -354,30 +359,31 @@ class NothingInTheConfigurationFolder(Sandbox):
 
 
 class BackupFolder(Sandbox):
-    """Codex still keeps its per-turn copies: the exchange's own backup folder is its one writable root in /data."""
+    """Codex still keeps its per-turn copies. Its writable roots in /data are the exchange's own backup folder and the
+    chat's files folder (CX-FILE-LINK), nothing else."""
 
     def test_the_backup_folder_is_offered_in_workspace_write(self):
         run_dir = self.data / "codex_tasks" / "chat" / "turns" / "t1"
         folder = server.codex_backup_dir(run_dir, {"codex_sandbox": "workspace-write"})
         self.assertEqual(folder, run_dir / "backups")
-        self.assertEqual(server.backup_writable_root(run_dir), [])  # Not made yet.
+        self.assertEqual(server.private_writable_root(folder), [])  # Not made yet.
         folder.mkdir(parents=True)
-        self.assertEqual(server.backup_writable_root(run_dir), [str(folder)])
+        self.assertEqual(server.private_writable_root(folder), [str(folder)])
 
     def test_nothing_else_in_data_becomes_writable(self):
         outside = self.data / "codex-home"
         (outside / "backups").mkdir(parents=True)
-        self.assertEqual(server.backup_writable_root(outside), [])
+        self.assertEqual(server.private_writable_root(outside / "backups"), [])
         run_dir = self.data / "codex_tasks" / "chat" / "turns" / "t1"
         run_dir.mkdir(parents=True)
         (run_dir / "backups").symlink_to(self.data)
-        self.assertEqual(server.backup_writable_root(run_dir), [], "a link out of the task folder is never a root")
+        self.assertEqual(server.private_writable_root(run_dir / "backups"), [],
+                         "a link out of the task folder is never a root")
 
-    def test_the_turn_policy_adds_only_that_folder(self):
-        source = (WORKER / "server.py").read_text(encoding="utf-8")
-        self.assertIn('policy["writableRoots"] = [*TASK_WRITABLE_ROOTS, *backup_writable_root(final_file.parent)]',
-                      source)
-        self.assertEqual(server.TASK_WRITABLE_ROOTS, ("/config", "/share"))
+    def test_the_task_roots_stay_config_and_share(self):
+        # The turn's exact writableRoots in each mode are checked by behavior in test_chat_files.py
+        # (test_workspace_write_can_write_in_the_folder_only), not by comparing source lines here.
+        self.assertEqual(server.TASK_WRITABLE_ROOTS, ("/homeassistant", "/share"))
 
 
 if __name__ == "__main__":

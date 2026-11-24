@@ -48,8 +48,7 @@ main { min-width: 0; background: var(--bg); }
 /* The chevron is the same icon as the effort picker's, centered on the label rather than set on its baseline. */
 .permission-pill { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: 20px; padding: 7px 8px 7px 10px; font-size: calc(12px * var(--text-scale)); white-space: nowrap; }
 #chat-picker { margin-left: auto; min-width: 0; }
-.picker-pill { border: 0; background: transparent; }
-#model-button, #effort-button { font-size: calc(12px * var(--text-scale)); }
+.picker-pill { border: 0; background: transparent; font-size: calc(12px * var(--text-scale)); }
 #send { background: var(--accent); color: var(--text-light-primary-color, #212121); border-radius: 50%; width: 34px; height: 34px; padding: 0; }
 #plus-menu { left: 0; bottom: 50px; width: 210px; padding: 8px; }
 #plus-menu button { display: block; width: 100%; background: transparent; color: var(--text); text-align: left; }
@@ -66,6 +65,8 @@ dialog::backdrop { background: #0006; }
 .permission-option strong { font-weight: 400; }
 /* Full access is bold in the menu only while the owner's switch has it on. */
 body[data-full-access="on"] .permission-option[data-mode="full-access"] strong { font-weight: 700; }
+/* Full access is a warning in the menu, as it is on the button once chosen. */
+.permission-option[data-mode="full-access"] strong { color: var(--error); }
 .permission-option span { color: var(--muted); font-size: calc(12px * var(--text-scale)); line-height: 1.6; margin-top: 5px; }
 .permission-option[aria-pressed="true"] { border-color: var(--accent); background: var(--hover); }
 /* The chosen permission mode: mdiCheck (chat.css) in the primary color after its name. */
@@ -105,9 +106,8 @@ body[data-full-access="on"] .permission-option[data-mode="full-access"] strong {
   .compose-tools { gap: 4px; flex-wrap: nowrap; }
   #chat-picker { margin-left: auto; flex-shrink: 1; }
   .permission-pill { padding: 6px 8px; font-size: calc(11px * var(--text-scale)); }
-  #model-button, #effort-button { padding: 4px 5px; font-size: calc(11px * var(--text-scale)); }
-  #model-button { max-width: 82px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .picker-pill { min-width: 0; }
+  .picker-pill { min-width: 0; padding: 4px 5px; gap: 4px; font-size: calc(11px * var(--text-scale)); }
+  #picker-model { max-width: 82px; }
   .compose-tools #attach { width: 28px; height: 28px; }
   .studio-sheet, #settings { padding: 20px; width: calc(100vw - 20px); max-height: 90dvh; border-radius: 18px; }
 }

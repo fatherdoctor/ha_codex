@@ -10,7 +10,7 @@ from homeassistant.helpers.device_registry import DeviceEntryType
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_BASE_URL, DOMAIN
+from .const import DOMAIN
 from .coordinator import CodexCliCoordinator
 
 PARALLEL_UPDATES = 0
@@ -30,7 +30,7 @@ class CodexRunningBinarySensor(CoordinatorEntity[CodexCliCoordinator], BinarySen
     """Show whether a Codex task is running."""
 
     _attr_has_entity_name = True
-    _attr_device_class = getattr(BinarySensorDeviceClass, "RUNNING", None)
+    _attr_device_class = BinarySensorDeviceClass.RUNNING
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_translation_key = "task_running"
 
@@ -44,7 +44,6 @@ class CodexRunningBinarySensor(CoordinatorEntity[CodexCliCoordinator], BinarySen
             "name": "Codex",
             "manufacturer": "OpenAI",
             "model": "Codex for Home Assistant",
-            "configuration_url": entry.data.get(CONF_BASE_URL),
         }
 
     @property

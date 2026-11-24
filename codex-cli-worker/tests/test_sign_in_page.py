@@ -8,7 +8,6 @@ import sys
 import tempfile
 import types
 import unittest
-import unittest.mock
 from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
@@ -42,7 +41,8 @@ class _Worker(unittest.TestCase):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
-        for name, value in (("tasks", {}), ("active_task_runners", set()), ("running_processes", {}),
+        self.stack.enter_context(patch.dict(server.tasks, clear=True))
+        for name, value in (("active_task_runners", set()), ("running_processes", {}),
                             ("message_queue", []), ("auth_state", {})):
             self.stack.enter_context(patch.object(server, name, value))
         self.stack.enter_context(patch.object(server, "auth_process", None))
@@ -275,7 +275,7 @@ class ModelPinTests(_Worker):
     def test_default_resolves_to_the_pin_and_is_passed_to_codex(self):
         execution = server.resolve_chat_settings(server.DEFAULT_CHAT_SETTINGS, self.options)
         self.assertEqual(execution["model"], PIN)
-        with patch.object(server, "tasks", {"t": {"turns": [{"execution_settings": execution}]}}):
+        with patch.dict(server.tasks, {"t": {"turns": [{"execution_settings": execution}]}}, clear=True):
             session = server.create_approval_session("t", StubAppServer("thread"), "Prompt", Path("f"), None, {}, self.options)
         self.assertEqual(session.thread_params["model"], PIN)
 
@@ -292,11 +292,11 @@ class ModelPinTests(_Worker):
         self.assertEqual(server.model_pin_error({"model": PIN}, self.options), "")
         self.assertEqual(server.model_pin_error(execution, {"model_pin": "none"}), "")
 
-    def test_codex_model_option_disagreeing_with_the_pin_is_shown_not_crashed(self):
+    def test_pin_takes_priority_over_the_inherited_custom_model(self):
         self.options["codex_model"] = "gpt-6-luna"
         data = self.client.get("/chat-options", headers=self.headers).get_json()
         self.assertTrue(data["ok"])
-        self.assertIn("gpt-6-luna", data["model_error"])
+        self.assertEqual(data["model_error"], "")
         self.assertEqual([model["id"] for model in data["models"]], [PIN])
 
     def test_none_turns_the_pin_off(self):
@@ -307,10 +307,6 @@ class ModelPinTests(_Worker):
         self.assertEqual(execution["model"], "gpt-6-astra")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class OldModelPinMigrationTests(unittest.TestCase):
     """run.sh clears the pin that versions before 0.4 shipped as the default, once; a chosen value stays."""
 
@@ -318,7 +314,7 @@ class OldModelPinMigrationTests(unittest.TestCase):
 
     def test_the_old_default_is_dropped_only_while_run_sh_says_it_cleared_it(self):
         options = {"model_pin": PIN}
-        with patch.object(server, "OPTIONS_PATH", Path(tempfile.mkdtemp()) / "options.json"):
+        with tempfile.TemporaryDirectory() as tmpdir, patch.object(server, "OPTIONS_PATH", Path(tmpdir) / "options.json"):
             server.OPTIONS_PATH.write_text(json.dumps(options), encoding="utf-8")
             self.assertEqual(server.model_pin(server.read_options()), PIN)
             with patch.dict(server.os.environ, {"MODEL_PIN_CLEARED": "1"}):
@@ -334,3 +330,7 @@ class OldModelPinMigrationTests(unittest.TestCase):
         self.assertIn("bashio::log.info \"Cleared the old default model pin", self.RUN_SH)
         # The marker is written before the call, so a failure is not retried on every start.
         self.assertLess(self.RUN_SH.index(': > "${pin_marker}"'), self.RUN_SH.index("bashio::addon.option 'model_pin'"))
+
+
+if __name__ == "__main__":
+    unittest.main()

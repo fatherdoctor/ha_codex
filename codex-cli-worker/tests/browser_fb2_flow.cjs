@@ -109,7 +109,7 @@ async function checkEarlierAnswer(page) {
           turn_id: "t1", message: "First question", status: "completed", summary: "First answer",
           created_at: "2026-01-01T10:00:00+00:00", started_at: "2026-01-01T10:00:05+00:00",
           completed_at: "2026-01-01T10:01:26+00:00", verification: [failed, passed],
-          approvals: [{ approval_id: "a1", status: "denied", command: "rm /config/sample.yaml\nsecond line", scope: "Sample scope" }],
+          approvals: [{ approval_id: "a1", status: "denied", command: "rm /homeassistant/sample.yaml\nsecond line", scope: "Sample scope" }],
         },
         { turn_id: "t2", message: "Second question", status: "completed", summary: "Second answer",
           started_at: "2026-01-01T10:02:00+00:00", completed_at: "2026-01-01T10:02:09+00:00" },
@@ -127,7 +127,7 @@ async function checkEarlierAnswer(page) {
   assert.ok((await top(worked)) < (await top(first.locator(".answer"))));
   assert.equal(await first.locator(".verification").isVisible(), false);
   // The denied request is one closed line with the command's first line only.
-  assert.equal(await first.locator("details.permission-card summary").textContent(), "Denied: rm /config/sample.yaml");
+  assert.equal(await first.locator("details.permission-card summary").textContent(), "Denied: rm /homeassistant/sample.yaml");
   const failedLine = first.locator(".answer .check-failed-line");
   assert.equal(await failedLine.textContent(), "1 check failed");
   await failedLine.click();

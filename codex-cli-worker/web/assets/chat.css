@@ -2,6 +2,7 @@
   /* Material Design Icons (Apache-2.0, @mdi/js 7.4.47): mdiChevronRight and mdiChevronDown, the arrows Home Assistant uses; mdiClose and mdiCheck. */
   --mdi-chevron-right: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z'/%3E%3C/svg%3E");
   --mdi-chevron-down: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z'/%3E%3C/svg%3E");
+  --mdi-arrow-left: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z'/%3E%3C/svg%3E");
   --mdi-close: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z'/%3E%3C/svg%3E");
   --mdi-check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z'/%3E%3C/svg%3E");
   color-scheme: light;
@@ -82,6 +83,10 @@ textarea:focus-visible,
 [hidden] {
   display: none !important;
 }
+/* Remote Control is paused in this version: the worker marks the page root and every part of it is hidden. */
+[data-remote-paused] [data-remote] {
+  display: none !important;
+}
 .icon {
   background: transparent;
   color: var(--muted);
@@ -121,7 +126,6 @@ aside {
   align-items: center;
   gap: 8px;
   padding: 0 9px 25px;
-  flex-wrap: wrap;
 }
 .brand strong {
   font-size: calc(20px * var(--text-scale));
@@ -144,12 +148,13 @@ aside {
   display: block;
 }
 .tag {
-  width: 100%;
-  padding-left: 33px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   letter-spacing: 1.4px;
+  line-height: 1.25;
   font-size: calc(9px * var(--text-scale));
   color: var(--muted);
-  margin-top: -5px;
 }
 .new-chat {
   display: flex;
@@ -259,6 +264,17 @@ aside {
 .row-title > span {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* A scheduled run answered in this chat since the owner last opened it. */
+.row-title > .unread-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.chat-row.unread .row-title {
+  font-weight: 650;
 }
 .pin-icon {
   width: 12px;
@@ -486,6 +502,16 @@ h1 {
   background: var(--notice);
   border-bottom: 1px solid var(--line);
 }
+#retention-warning {
+  flex: none;
+  margin: 0;
+  padding: 9px 32px;
+  font-size: calc(12px * var(--text-scale));
+  line-height: 1.5;
+  color: var(--notice-text);
+  background: var(--notice);
+  border-bottom: 1px solid var(--line);
+}
 #integration-notice a {
   color: inherit;
   font-weight: 600;
@@ -604,9 +630,6 @@ h1 {
 .chat-row.queued {
   outline: 1px dashed var(--line);
   outline-offset: -1px;
-}
-.answer {
-  padding: 0 3px;
 }
 .answer .details {
   margin-top: 12px;
@@ -774,6 +797,7 @@ h1 {
 }
 .markdown table {
   border-collapse: collapse;
+  width: 100%;
   font-size: calc(13px * var(--text-scale));
   line-height: 1.6;
   /* Columns keep whole words; a table that is too wide scrolls sideways. */
@@ -782,23 +806,25 @@ h1 {
 .markdown th,
 .markdown td {
   padding: 6px 12px;
-  border: 1px solid var(--line);
+  border: 0;
   text-align: left;
   vertical-align: top;
 }
 .markdown th {
-  background: var(--surface);
+  color: var(--muted);
   font-weight: 600;
+}
+.markdown thead th,
+.markdown tbody tr:not(:last-child) td {
+  border-bottom: 1px solid var(--line);
 }
 /* The bubble of a sent message already has the surface colour. */
 .message.user :not(pre) > code,
-.message.user .md-code,
-.message.user th {
+.message.user .md-code {
   background: var(--bg);
 }
 .message.user.queued :not(pre) > code,
-.message.user.queued .md-code,
-.message.user.queued th {
+.message.user.queued .md-code {
   background: var(--surface);
 }
 .check {
@@ -839,94 +865,6 @@ h1 {
   font-size: calc(10px * var(--text-scale));
   margin-top: 15px;
   line-height: 1.5;
-}
-.browser-permission-review {
-  margin-top: 20px;
-  padding-top: 16px;
-  border-top: 1px solid var(--line);
-}
-.browser-permission-review > p {
-  line-height: 1.6;
-  max-width: 70ch;
-}
-.browser-permission-review fieldset {
-  min-width: 0;
-  margin: 16px 0;
-  padding: 0;
-  border: 0;
-}
-.browser-permission-review legend {
-  margin-bottom: 10px;
-  font-size: calc(12px * var(--text-scale));
-  color: var(--muted);
-  overflow-wrap: anywhere;
-}
-.browser-permission-choice {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  min-height: 44px;
-  cursor: pointer;
-  overflow-wrap: anywhere;
-}
-.browser-permission-choice input {
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  accent-color: var(--accent);
-}
-.browser-permission-choice input:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
-}
-.browser-permission-request {
-  padding: 8px 0;
-  border-top: 1px solid var(--line);
-}
-.browser-permission-details {
-  margin: 4px 0 8px 28px;
-}
-.browser-permission-details summary {
-  cursor: pointer;
-  font-size: calc(12px * var(--text-scale));
-}
-.browser-permission-details pre {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  max-height: 220px;
-  overflow: auto;
-}
-.browser-permission-remember {
-  margin-top: 16px;
-}
-.browser-permission-actions {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.browser-permission-actions button,
-.saved-browser-permission button {
-  min-height: 44px;
-}
-.browser-permission-feedback,
-.browser-permission-progress {
-  font-size: calc(12px * var(--text-scale));
-  line-height: 1.6;
-}
-.saved-browser-permission {
-  display: flex;
-  gap: 16px;
-  align-items: flex-start;
-  justify-content: space-between;
-  padding: 16px 0;
-  border-bottom: 1px solid var(--line);
-}
-.saved-browser-permission-info {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.saved-browser-permission-info p {
-  margin: 6px 0;
 }
 .attachments {
   display: flex;
@@ -1042,6 +980,10 @@ h1 {
 .activity-toggle:hover {
   color: var(--text);
 }
+/* The pulsing dot is a flex item, so the line centers it; as an inline box it sat on the text baseline. */
+.activity.running .activity-chevron {
+  display: flex;
+}
 .activity.running .activity-chevron::before {
   width: 7px;
   height: 7px;
@@ -1063,8 +1005,38 @@ h1 {
 }
 .activity-steps {
   margin: 6px 0 4px;
+}
+/* The rows sit indented behind a rule; the text messages between the groups start where the answer starts (CX-BLEED-FIX). */
+.step-group {
   padding-left: 2px;
   border-left: 2px solid var(--line);
+}
+/* A group of several steps opens from a one-line heading that sums it up. */
+.step-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0 4px 10px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: calc(13px * var(--text-scale));
+  text-align: left;
+  cursor: pointer;
+}
+.step-group-head:hover {
+  color: var(--text);
+}
+.activity-steps > .message.interim {
+  margin: 12px 0;
+}
+.activity-thinking {
+  color: var(--muted);
+  font-size: calc(12px * var(--text-scale));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .step {
   display: flex;
@@ -1096,12 +1068,19 @@ h1 {
 .step-message .step-text {
   color: var(--text);
 }
+/* A command shows on one line, as in the desktop app; all of it once its output is open (CX-WORKLOG-GROUPS). */
 .step-command .step-text {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: calc(12px * var(--text-scale));
   color: var(--text);
-  max-height: 7.5em;
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
+}
+.step-command.output-open .step-text {
+  white-space: pre-wrap;
+  max-height: 7.5em;
+  overflow: auto;
 }
 .step-file_change .step-text {
   color: var(--text);
@@ -1201,7 +1180,7 @@ textarea::placeholder {
   margin-top: 7px;
 }
 .compose-tools {
-  position: relative; /* Anchors the picker popovers, so they open from the left edge on phones. */
+  position: relative; /* Anchors the pop-ups; placePicker (chat.js) puts the picker panel right above the chip. */
   display: flex;
   align-items: center;
   gap: 2px;
@@ -1292,28 +1271,32 @@ textarea::placeholder {
   background: var(--bg);
   color: var(--text);
 }
+/* One chip, as in the ChatGPT desktop app: the model name, then the reasoning level in grey. */
 .picker-pill {
   display: flex;
   align-items: center;
+  gap: 6px;
   background: var(--surface);
+  color: var(--text);
   border-radius: 20px;
   max-width: 100%;
-}
-.picker-pill button {
-  background: transparent;
-  color: var(--text);
-  padding: 7px 4px 7px 12px;
-  font-size: calc(12px * var(--text-scale));
-  border-radius: 20px;
-  white-space: nowrap;
+  min-width: 0;
   min-height: 34px;
+  padding: 7px 10px 7px 12px;
+  font-size: calc(12px * var(--text-scale));
+  white-space: nowrap;
 }
-.picker-pill #effort-button {
+#picker-model {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#effort-label {
   color: var(--muted);
-  padding: 7px 10px 7px 3px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-shrink: 0;
+}
+.picker-pill .picker-chevron {
+  color: var(--muted);
 }
 .picker-chevron {
   width: 14px;
@@ -1378,25 +1361,80 @@ textarea::placeholder {
 }
 .effort-heading > div {
   flex: 1;
+  min-width: 0;
   text-align: center;
   padding-top: 2px;
 }
 .effort-heading label {
+  display: block;
   color: #467ced;
   font-size: calc(13px * var(--text-scale));
   font-weight: 600;
 }
-#effort-model {
-  display: block;
-  font-size: calc(11px * var(--text-scale));
+/* The lightning (Fast mode) toggle, filled while Fast is on; dimmed when the model has no Fast tier. */
+#effort-fast {
+  background: transparent;
   color: var(--muted);
-  margin-top: 3px;
+  padding: 0;
+  width: 24px;
+  flex-shrink: 0;
+}
+#effort-fast[aria-pressed="true"] {
+  color: #467ced;
+}
+#effort-fast[aria-pressed="true"] .effort-bolt {
+  fill: currentColor;
+}
+#effort-fast:disabled {
+  opacity: 0.4;
 }
 .effort-bolt {
-  color: var(--muted);
   width: 20px;
   height: 20px;
   margin: 3px 2px;
+}
+/* The chip's small bolt while the chat runs on Fast. */
+#picker-fast {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: #467ced;
+}
+#picker-fast[hidden] {
+  display: none;
+}
+#picker-fast svg {
+  width: 13px;
+  height: 13px;
+}
+/* The model name under the effort name; it opens the model list. */
+#effort-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  min-height: 28px;
+  margin-top: 1px;
+  padding: 3px 4px 3px 8px;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font-size: calc(11px * var(--text-scale));
+}
+#effort-model:hover:not(:disabled),
+#effort-model:focus-visible {
+  background: var(--surface);
+  color: var(--text);
+}
+#effort-model-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.effort-model-chevron {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
 }
 #effort-reset {
   background: transparent;
@@ -1404,6 +1442,7 @@ textarea::placeholder {
   padding: 1px 3px;
   font-size: calc(20px * var(--text-scale));
   width: 24px;
+  flex-shrink: 0;
 }
 .effort-track {
   position: relative;
@@ -1489,13 +1528,11 @@ textarea::placeholder {
   }
 }
 @media (max-width: 400px) {
-  .picker-pill button {
+  .picker-pill {
     font-size: calc(11px * var(--text-scale));
     padding-left: 9px;
-  }
-  .picker-pill #effort-button {
-    gap: 5px;
     padding-right: 8px;
+    gap: 5px;
   }
 }
 /* The arrow is an icon centered in the circle, not a text glyph that sits on the font's baseline. */
@@ -1657,15 +1694,16 @@ dialog :is(h3, h4):has(> .settings-toggle) {
 #settings > section:last-of-type {
   border-bottom: 1px solid var(--line);
 }
-/* The three parts of Accounts and connections sit inside it, indented. */
+/* The three parts of Accounts and connections sit inside it, indented to its title text (after the chevron). */
 #accounts-section section {
-  margin-left: 12px;
+  margin-left: 18px;
 }
 #accounts-section h4 .settings-toggle {
   font-size: calc(13px * var(--text-scale));
 }
 .settings-body {
-  padding: 2px 0 16px;
+  /* 18px = the chevron (16px) and its margin (2px): the body starts at the title text's left edge. */
+  padding: 2px 0 16px 18px;
 }
 .settings-body > :first-child {
   margin-top: 0;
@@ -1723,9 +1761,6 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   max-width: 220px;
   background: #fff;
   padding: 10px;
-}
-#login-card a {
-  color: var(--accent);
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -1790,7 +1825,8 @@ dialog :is(h3, h4):has(> .settings-toggle) {
     padding: 0 14px 0 0;
     gap: 9px;
   }
-  #integration-notice {
+  #integration-notice,
+  #retention-warning {
     padding: 8px 14px;
   }
   .messages {
@@ -1834,7 +1870,6 @@ dialog :is(h3, h4):has(> .settings-toggle) {
 .verification-result summary { cursor: pointer; font-size: calc(13px * var(--text-scale)); }
 .verification-result pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: calc(12px * var(--text-scale)); max-height: 260px; overflow: auto; }
 .verification-result.is-failed, .verification-result.is-issues { border-color: #d18a48; }
-.verification-note { font-size: calc(12px * var(--text-scale)); opacity: .7; }
 .text-size-options {
   border: 0;
   margin: 0;
@@ -1959,9 +1994,28 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   padding: 0.75rem 1rem;
   border: 1px solid var(--line);
   border-radius: 8px;
+  /* The window clips the chat column and nothing else scrolls it, so a tall banner (a sign-in code on
+   * a phone) stops at 60 % of the window height and scrolls inside itself. */
+  flex-shrink: 0;
+  max-height: 60vh;
+  max-height: 60dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 #agents-hint {
   margin: 0 0 10px;
+}
+/* The update banner's link to the app's Info page looks like the banner's other buttons. */
+.page-banner .banner-link {
+  display: inline-block;
+  border-radius: 9px;
+  padding: 10px 16px;
+  background: var(--text);
+  color: var(--bg);
+  text-align: center;
+  text-decoration: none;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 #remote-control-name {
   display: block;
@@ -1985,10 +2039,35 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   user-select: all;
 }
 .signin-qr {
+  display: block;
   width: min(220px, 60vw);
   height: auto;
+  margin-top: 0.5rem;
   background: #fff;
   border-radius: 4px;
+}
+.signin-qr-fold > summary {
+  cursor: pointer;
+}
+.signin-card a {
+  overflow-wrap: anywhere;
+}
+/* The sign-in link is the main button of the card, drawn like the filled buttons of Settings. */
+.signin-card a.signin-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--ha-color-fill-primary-loud-resting, var(--accent));
+  color: var(--ha-color-on-primary-loud, #fff);
+  font-weight: 500;
+  text-decoration: none;
+}
+/* While a sign-in waits, a section shows only its card and Cancel. */
+.signing-in .signin-hide {
+  display: none;
 }
 
 /*
@@ -2101,13 +2180,24 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   -webkit-mask: var(--mdi-close) center / 24px no-repeat;
   mask: var(--mdi-close) center / 24px no-repeat;
 }
-.icon.icon-close {
+.icon-back::before {
+  content: "";
+  display: block;
+  width: 24px;
+  height: 24px;
+  background: currentColor;
+  -webkit-mask: var(--mdi-arrow-left) center / 24px no-repeat;
+  mask: var(--mdi-arrow-left) center / 24px no-repeat;
+}
+.icon.icon-close,
+.icon.icon-back {
   padding: 8px;
   border-radius: 50%;
   line-height: 0;
 }
 
-/* GitHub sign-in card: beside the ChatGPT account, same code style. */
+/* The ChatGPT and GitHub sign-in details: the same term and value grid. */
+.account-details,
 .github-details {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
@@ -2115,9 +2205,11 @@ dialog :is(h3, h4):has(> .settings-toggle) {
   margin: 8px 0;
   font-size: calc(12px * var(--text-scale));
 }
+.account-details dt,
 .github-details dt {
   color: var(--muted);
 }
+.account-details dd,
 .github-details dd {
   margin: 0;
   overflow-wrap: anywhere;
@@ -2167,6 +2259,7 @@ dialog :is(h3, h4):has(> .settings-toggle) {
  */
 .settings-title::before,
 .activity-chevron::before,
+.step-group-chevron::before,
 details.disclosure > summary::before {
   content: "";
   display: inline-block;
@@ -2180,6 +2273,7 @@ details.disclosure > summary::before {
 }
 .settings-toggle[aria-expanded="true"] .settings-title::before,
 .activity-toggle[aria-expanded="true"] .activity-chevron::before,
+.step-group-head[aria-expanded="true"] .step-group-chevron::before,
 details.disclosure[open] > summary::before {
   -webkit-mask-image: var(--mdi-chevron-down);
   mask-image: var(--mdi-chevron-down);
@@ -2367,12 +2461,13 @@ main > .chat-header h1 {
   background: var(--error);
 }
 .sidebar-footer .usage {
-  padding: 6px 10px 0 28px;
+  /* 15px = the foot row's 10px padding + the status dot's 5px margin: the dots' left edge. */
+  padding: 6px 10px 0 15px;
   font-size: calc(11px * var(--text-scale));
 }
 .usage-plan,
 .sidebar-footer .usage-note {
-  margin: 4px 10px 4px 28px;
+  margin: 4px 10px 4px 15px;
   font-size: calc(11px * var(--text-scale));
   line-height: 1.4;
   color: var(--muted);
@@ -2643,7 +2738,7 @@ body.resizing {
   margin: 10px 0 8px;
   padding: 4px 0;
 }
-.activity.worked .activity-steps > .verification {
+.activity.worked .step-group > .verification {
   margin: 8px 0 4px 8px;
 }
 .check-failed-line {
@@ -2746,4 +2841,40 @@ a.ha-nav-row:focus-visible {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--bg);
+}
+/* Text messages of the running exchange, shown outside the closed step list (CX-04-SHOW-TEXT); a finished exchange keeps them in its list. */
+.activity-text:empty {
+  display: none;
+}
+/* Each one is a block of its own, one paragraph gap (as in .markdown) from the next one and from the answer. */
+.activity-text > .message {
+  margin-bottom: 12px;
+}
+/* CX-04-PHONE-LIST: at phone width the rows are 48 px (--fb2-row-height) and the menu button 44 px, and the selected chat shows its menu button in place of its date. */
+@media (max-width: 700px) {
+  .chats-card .chat-row .row-menu {
+    min-width: 44px;
+    min-height: 44px;
+    right: 0;
+    padding: 0;
+  }
+  .chats-card .chat-row.current .row-menu {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .chats-card .chat-row.current:has(.row-menu) .row-meta > span:last-child {
+    visibility: hidden;
+  }
+}
+
+/* CX-04-REMOTE-WIN: the Back control sits left of the title; the title takes the space between it and the X. */
+#connection-dialog .dialog-header h2 {
+  flex: 1;
+  min-width: 0;
+  margin-left: 4px;
+}
+#remote-control-name {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
 }
