@@ -16,6 +16,11 @@
   next run in Home Assistant's time zone (`next_run`), and Codex's rules tell it to give the owner times in that zone,
   never in UTC. The tool text no longer says that cron fields are UTC; they always followed Home Assistant's time
   zone.
+- Schedules that are on, paused or waiting for approval now come before one-time wakeups that already ran, in
+  Settings > Scheduled runs and in Codex's `list_schedules`. Codex's list stops after 120 rows (100 approved
+  schedules plus 20 proposals), so a long history of wakeups can no longer push a live schedule past the last page
+  it can read; every `next_offset` it gets is one it may ask for. The tool's `offset` range now says 0 to 120, as
+  the service does.
 - Home Assistant's configuration folder is now at `/homeassistant` inside the app, as in the Claude add-on and the
   Supervisor's default. `/config` no longer exists inside the app. Home Assistant and your files do not move. If your
   workspace instructions, your working folder's notes or a scheduled prompt say `/config/...`, change them to

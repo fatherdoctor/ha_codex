@@ -131,6 +131,9 @@ def starts_approved(owner, spec):
 # A one-time schedule that ran is off with no next run; it cannot run again until the owner edits it, so it does
 # not use up a place under MAX_SCHEDULES (otherwise every wakeup Codex ever set would fill the owner's room).
 SPENT = "enabled=0 AND next_due IS NULL AND json_extract(spec, '$.kind')='once'"
+# Codex's list_schedules pages end here. Rows that are not spent are at most this many (MAX_SCHEDULES approved
+# plus MAX_PROPOSALS), and Store.schedules() puts them first, so spent history can never push one past the end.
+LISTED = MAX_SCHEDULES + MAX_PROPOSALS
 
 
 def counted(db, approved, schedule_id=''):
@@ -323,8 +326,9 @@ class Store:
         return value
 
     def schedules(self):
+        """Return every schedule: active ones and proposals first, then spent one-time wakeups, newest first in each."""
         with self.connect() as db:
-            return [self.schedule(row) for row in db.execute('SELECT * FROM schedules ORDER BY updated DESC, id')]
+            return [self.schedule(row) for row in db.execute(f'SELECT * FROM schedules ORDER BY ({SPENT}), updated DESC, id')]
 
     def save(self, payload, *, owner, now, schedule_id=None, author=None, made_in=None):
         """Save a schedule; made_in is the chat a Codex proposal came from.
