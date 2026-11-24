@@ -14,6 +14,11 @@ tells the worker which of the two asks. This module, not the bridge, holds the c
 After a call whose target is only entity ids, the worker reads up to MAX_READBACK of them back,
 so Codex needs no second tool call.
 
+An action that only answers with data (calendar.get_events, weather.get_forecasts) is refused by Home Assistant
+with HTTP 400 unless the request asks for the answer. Home Assistant refuses it before the action runs, so the
+worker then sends the same call once more with ?return_response and gives Codex the data, cut at
+MAX_RESPONSE_BYTES.
+
 It refuses no service by name: the person's answer to Codex's request is the gate.
 """
 from __future__ import annotations
@@ -39,6 +44,11 @@ MAX_CHANGED_REPORTED = 50
 MAX_READBACK = 5
 CALL_TIMEOUT_SECONDS = 60
 CORE_SERVICES_URL = "http://supervisor/core/api/services/"
+# The data of an action that answers with data is given to Codex up to this size, as serialized JSON.
+MAX_RESPONSE_BYTES = 20000
+# Home Assistant's text when a call needs ?return_response (homeassistant/components/api/__init__.py). It answers
+# this before the action runs, so the call may be sent again with the query.
+RESPONSE_REQUIRED = "requires responses but caller did not ask for responses"
 # The task name of the ChatGPT app's remote control. A page chat's id never has this form (it starts with a
 # date). The app's calls hold while the relay process runs, not for one turn.
 RELAY_TASK = "remote-control"
@@ -100,6 +110,25 @@ def parse_request(arguments):
     if overlap:
         raise CallRefused("put " + ", ".join(sorted(overlap)) + " in target, not in data")
     return service, {**data, **target}
+
+
+def needs_response(response):
+    """Whether Home Assistant refused the call only because the action answers with data and the request did not ask."""
+    return response.status_code == 400 and RESPONSE_REQUIRED in (response.text or "")
+
+
+def response_data(data):
+    """Return the fields that give Codex an action's data: whole when small, else a cut text and a note."""
+    serialized = json.dumps(data)
+    if len(serialized) <= MAX_RESPONSE_BYTES:
+        return {"response": data}
+    cut = serialized[:MAX_RESPONSE_BYTES]
+    # The cut text travels as a JSON string, whose quotes and backslashes are escaped; keep that within the limit too.
+    while len(json.dumps(cut)) > MAX_RESPONSE_BYTES:
+        cut = cut[:MAX_RESPONSE_BYTES - (len(json.dumps(cut)) - len(cut))]
+    return {"response": cut, "response_cut": True,
+            "response_note": (f"The response was {len(serialized)} bytes and was cut at {len(cut)} bytes, so it is "
+                              "incomplete and not valid JSON. Ask for less, for example a shorter period.")}
 
 
 def changed_entities(answer):
@@ -228,15 +257,26 @@ class HomeAssistantCall:
         return rows
 
     def send(self, service, body):
-        """Send one service call to Home Assistant, once, and return the result for Codex."""
+        """Send one service call to Home Assistant and return the result for Codex.
+
+        The call is sent once. Only when Home Assistant refuses it because the action answers with data and the
+        request did not ask for it (it refuses before the action runs) is the same call sent once more, with
+        ?return_response.
+        """
         token = self.worker.ha_token()
         if not token:
             return {"status": "failed", "message": "Home Assistant authentication is unavailable"}
         domain, name = service.split(".", 1)
+        url = CORE_SERVICES_URL + f"{domain}/{name}"
+        with_response = False
         try:
-            response = requests.post(CORE_SERVICES_URL + f"{domain}/{name}", json=body,
-                                     headers={"Authorization": f"Bearer {token}"},
+            response = requests.post(url, json=body, headers={"Authorization": f"Bearer {token}"},
                                      timeout=CALL_TIMEOUT_SECONDS, allow_redirects=False)
+            if needs_response(response):
+                with_response = True
+                response = requests.post(url + "?return_response", json=body,
+                                         headers={"Authorization": f"Bearer {token}"},
+                                         timeout=CALL_TIMEOUT_SECONDS, allow_redirects=False)
         except requests.RequestException as exc:
             # The request may have reached Home Assistant; it is not sent again.
             return {"status": "failed", "message": f"No answer from Home Assistant ({type(exc).__name__})"}
@@ -244,10 +284,17 @@ class HomeAssistantCall:
             return {"status": "failed", "http_status": response.status_code,
                     "message": response.text[:500] or f"Home Assistant returned HTTP {response.status_code}"}
         try:
-            changed = changed_entities(response.json())
+            answer = response.json()
         except ValueError:
-            changed = []
-        return {"status": "ok", "service": service, "changed": changed}
+            answer = None
+        if not with_response:
+            return {"status": "ok", "service": service, "changed": changed_entities(answer)}
+        # With ?return_response Home Assistant answers {"changed_states": [...], "service_response": {...}}.
+        if isinstance(answer, dict) and ("changed_states" in answer or "service_response" in answer):
+            changed, data = changed_entities(answer.get("changed_states")), answer.get("service_response")
+        else:
+            changed, data = changed_entities(answer), answer
+        return {"status": "ok", "service": service, "changed": changed, **response_data(data)}
 
     def serve(self, path):
         """Start a Unix socket server at path, readable by the worker's user only, that answers call requests.

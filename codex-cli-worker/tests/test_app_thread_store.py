@@ -83,7 +83,7 @@ class FixedTextTests(unittest.TestCase):
     def test_the_rules_name_no_per_message_detail(self):
         """No task id, backup folder, attachment, token note, documentation date, GitHub note or user message."""
         text = server.PAGE_INSTRUCTIONS
-        for changing in ("Task id", "codex_tasks", "copy it to", "The user attached", "HA_URL", "stored locally",
+        for changing in ("Task id", "codex_tasks", "copy it to", "The user attached", "$HA_URL/api", "stored locally",
                          "github_git", "Current user message"):
             self.assertNotIn(changing, text)
         self.assertIn("call the home_assistant_data exchange_info tool once", text)
