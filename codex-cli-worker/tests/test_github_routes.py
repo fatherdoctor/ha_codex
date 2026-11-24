@@ -109,7 +109,7 @@ class GitHubRouteTests(unittest.TestCase):
             "codex_login_status", "auth_status_payload", "model_pin", "usage_status_payload",
             "integration_status", "remote_control_summary", "refresh_usage_status_async")}
         quiet["account_access"] = patch.object(server.account_access, "snapshot", return_value={})
-        quiet["tasks"] = patch.object(server, "tasks", {})
+        quiet["tasks"] = patch.dict(server.tasks, {}, clear=True)
         for item in quiet.values():
             item.start()
             self.addCleanup(item.stop)

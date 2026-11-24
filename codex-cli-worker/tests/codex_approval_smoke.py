@@ -75,7 +75,7 @@ def worker_approval_session(proc, workspace, root, mode, resume_id, approve, fin
         return True
 
     with (
-        patch.object(server, "tasks", {task_id: task}),
+        patch.dict(server.tasks, {task_id: task}, clear=True),
         patch.object(server, "running_processes", {task_id: proc}),
         patch.object(server, "api_token", return_value="fixture-worker-token"),
         patch.object(server, "update_task", side_effect=update_task),

@@ -171,19 +171,20 @@ class LiveExchangeTests(unittest.TestCase):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
-        for name in ["tasks", "running_processes", "approval_sessions", "task_activity", "admin_cache"]:
+        self.stack.enter_context(patch.dict(server.tasks, clear=True))
+        for name in ["running_processes", "approval_sessions", "task_activity", "admin_cache"]:
             self.stack.enter_context(patch.object(server, name, {}))
         self.options = {**server.DEFAULT_OPTIONS, "local_docs": False, "task_timeout_seconds": 30,
                         "config_check": False, "auto_save_lovelace": False}
         self.stack.enter_context(patch.object(server, "read_options", side_effect=lambda: dict(self.options)))
-        self.stack.enter_context(patch.object(server, "get_task_dir", return_value=self.root / "tasks" / "task"))
+        self.stack.enter_context(patch.object(server.store, "task_dir", return_value=self.root / "tasks" / "task"))
         self.stack.enter_context(patch.object(server, "task_root", return_value=self.root / "tasks"))
         self.stack.enter_context(patch.object(server, "CODEX_HOME", self.root / "codex"))
         self.agents = self.root / "AGENTS.md"
         self.agents.write_text("House rules, version 1.\n", encoding="utf-8")
         self.stack.enter_context(patch.object(server, "LEGACY_AGENTS_PATH", self.agents))
         self.stack.enter_context(patch.object(server, "api_token", return_value="test-token"))
-        self.stack.enter_context(patch.object(server, "save_task_index"))
+        self.stack.enter_context(patch.object(server.store, "save_index"))
         self.stack.enter_context(patch.object(server, "build_manifest", return_value={}))
         self.stack.enter_context(patch.object(server, "sandbox_readiness", return_value={"required": True, "ready": True}))
         self.stack.enter_context(patch.object(server, "fire_ha_event", return_value=(True, "")))
