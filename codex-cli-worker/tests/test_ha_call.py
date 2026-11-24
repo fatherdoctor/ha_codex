@@ -476,6 +476,12 @@ class ByNameTests(CallTestCase):
         # The ChatGPT app gets this tool too, without the page's verify tool, so it names none (step C).
         self.assertIn("read the state with a read tool", ha_call_mcp.TOOL["description"])
         self.assertNotIn("home_assistant.verify", ha_call_mcp.TOOL["description"])
+
+    def test_the_tool_description_claims_actions_that_answer_with_data(self):
+        description = ha_call_mcp.TOOL["description"]
+        for action in ("calendar.get_events", "weather.get_forecasts", "todo.get_items"):
+            self.assertIn(action, description)
+        self.assertIn("not home_assistant_mcp's call_service_tool", description)
         self.assertIn("returns it in response", ha_call_mcp.TOOL["description"])
 
 
