@@ -42,6 +42,15 @@ the version.
 | `ci/` | workflow files staged for the maintainer to copy into `.github/workflows/` |
 | `examples/`, `screenshots/` | the example script; the screenshots, which `screenshots/SCREENSHOTS.md` says how to retake |
 
+## Copy this
+
+Files that meet the code standard, to copy when you write something like them. Each later refactor pull request that
+lands a clean module adds one line here; code that misses the standard is never listed.
+
+- `codex-cli-worker/task_store.py` - a store that owns its state and its lock, takes what it needs from the rest of
+  the worker as arguments, and is the one place that writes its files; its tests are in
+  `codex-cli-worker/tests/test_task_store.py`.
+
 ## Rules
 
 - Work on a branch and open the pull request inside this fork, base `main`. Never push to `main`, and never open
