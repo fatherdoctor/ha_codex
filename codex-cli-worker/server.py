@@ -196,21 +196,42 @@ MODEL_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,99}")
 EFFORT_RE = re.compile(r"[a-z][a-z0-9_-]{0,19}")
 # Codex only emits reasoning items when summaries are requested; "auto" produced none.
 REASONING_SUMMARIES = {"concise", "detailed", "none"}
-# Supported choices in the bundled CLI 0.165.0 model catalog, newest Sol first, plus gpt-6.2-sol, which the account's
+
+
+class ChatModel(NamedTuple):
+    """One model the chat page offers, parsed once from Codex's `model/list` (or the built-in list).
+
+    fast is None when the model has no Fast service tier, False when Fast is offered but off unless a chat turns it
+    on, and True when Codex runs the model on Fast by default (its catalog's defaultServiceTier).
+    """
+
+    id: str
+    label: str
+    efforts: tuple[str, ...]
+    fast: bool | None = None
+
+
+# The service tier Codex names Fast ("2x speed, increased usage"). turn/start's serviceTier sets it for the turn
+# and the turns after it; JSON null sets the standard tier instead, and leaving the field out keeps the last one.
+FAST_SERVICE_TIER = "priority"
+# Supported choices in the bundled CLI 0.166.0 model catalog, newest Sol first, plus gpt-6.2-sol, which the account's
 # own list offers (the CLI's offline catalog stops at gpt-6.1-sol). Availability still depends on the signed-in
 # account; the CLI reports unavailable models normally.
+# Every one offers Fast; gpt-6-sol and gpt-6-luna run on it unless a chat turns it off. The pinned catalog stops at
+# GPT-6.1 Sol, so the GPT-6.2 Sol value is taken from GPT-6.1 Sol until the account's live list answers.
 CHAT_MODELS = (
-    ("gpt-6.2-sol", "GPT-6.2 Sol", ("low", "medium", "high", "xhigh", "max", "ultra")),
-    ("gpt-6-astra", "GPT-6 Astra", ("low", "medium", "high", "xhigh", "max", "ultra")),
-    ("gpt-6.1-sol", "GPT-6.1 Sol", ("low", "medium", "high", "xhigh", "max", "ultra")),
-    ("gpt-6.1-terra", "GPT-6.1 Terra", ("low", "medium", "high", "xhigh", "max", "ultra")),
-    ("gpt-6-sol", "GPT-6 Sol", ("low", "medium", "high", "xhigh", "max", "ultra")),
-    ("gpt-6-luna", "GPT-6 Luna", ("low", "medium", "high", "xhigh", "max")),
-    ("gpt-5.6-sol", "GPT-5.6 Sol", ("low", "medium", "high", "xhigh", "max", "ultra")),
-    ("gpt-5.6-terra", "GPT-5.6 Terra", ("low", "medium", "high", "xhigh", "max", "ultra")),
-    ("gpt-5.6-luna", "GPT-5.6 Luna", ("low", "medium", "high", "xhigh", "max")),
+    ChatModel("gpt-6.2-sol", "GPT-6.2 Sol", ("low", "medium", "high", "xhigh", "max", "ultra"), False),
+    ChatModel("gpt-6-astra", "GPT-6 Astra", ("low", "medium", "high", "xhigh", "max", "ultra"), False),
+    ChatModel("gpt-6.1-sol", "GPT-6.1 Sol", ("low", "medium", "high", "xhigh", "max", "ultra"), False),
+    ChatModel("gpt-6.1-terra", "GPT-6.1 Terra", ("low", "medium", "high", "xhigh", "max", "ultra"), False),
+    ChatModel("gpt-6-sol", "GPT-6 Sol", ("low", "medium", "high", "xhigh", "max", "ultra"), True),
+    ChatModel("gpt-6-luna", "GPT-6 Luna", ("low", "medium", "high", "xhigh", "max"), True),
+    ChatModel("gpt-5.6-sol", "GPT-5.6 Sol", ("low", "medium", "high", "xhigh", "max", "ultra"), False),
+    ChatModel("gpt-5.6-terra", "GPT-5.6 Terra", ("low", "medium", "high", "xhigh", "max", "ultra"), False),
+    ChatModel("gpt-5.6-luna", "GPT-5.6 Luna", ("low", "medium", "high", "xhigh", "max"), False),
 )
-CHAT_MODEL_EFFORTS = {model: efforts for model, _, efforts in CHAT_MODELS}
+CHAT_MODEL_EFFORTS = {model.id: model.efforts for model in CHAT_MODELS}
+CHAT_MODEL_FAST = {model.id: model.fast for model in CHAT_MODELS}
 # The account's live model list from `codex app-server` (`model/list`), read again after this many seconds.
 # Until a read succeeds, and after a failed one, the chat page offers the built-in CHAT_MODELS.
 MODEL_LIST_TTL_SECONDS = 60 * 60
@@ -225,7 +246,7 @@ model_list_state: dict[str, Any] = {
     "models": None, "default": None, "read_at": None, "tried_at": None, "reading": False}
 # The model a chat on default shows before Codex named one: the first of the built-in list (default_model has the
 # order that comes before it).
-CLI_DEFAULT_MODEL = CHAT_MODELS[0][0]
+CLI_DEFAULT_MODEL = CHAT_MODELS[0].id
 # A Sol model id and its version numbers: gpt-6.2-sol -> "6.2".
 SOL_MODEL_RE = re.compile(r"gpt-(\d+(?:\.\d+)*)-sol")
 # Models that are no longer offered, each with the next model up. An add-on option
@@ -233,7 +254,8 @@ SOL_MODEL_RE = re.compile(r"gpt-(\d+(?:\.\d+)*)-sol")
 # that is still offered. The `codex_model` option is free text, so any saved value
 # keeps starting; a retired one is replaced when it is read.
 RETIRED_MODELS = {"gpt-5.5": "gpt-5.6-sol"}
-DEFAULT_CHAT_SETTINGS = {"model": None, "reasoning_effort": None}
+# fast None follows the model: Fast when Codex runs it on Fast by default, else standard speed.
+DEFAULT_CHAT_SETTINGS = {"model": None, "reasoning_effort": None, "fast": None}
 # The `model_pin` option is empty as shipped, and empty means no pin: runs use the
 # configured model. When the owner sets it, an explicit chat choice or saved turn
 # naming any other model is refused instead of running on it.
@@ -735,10 +757,10 @@ def codex_default_model() -> str:
     return default.model if default else seen_default_model()
 
 
-def newest_sol_model(models: tuple[tuple[str, str, tuple[str, ...]], ...]) -> str:
+def newest_sol_model(models: tuple[ChatModel, ...]) -> str:
     """Return the Sol model with the highest version in a model list, or an empty string when it has none."""
     versions = {model: tuple(int(part) for part in match.group(1).split("."))
-                for model, _, _ in models if (match := SOL_MODEL_RE.fullmatch(model))}
+                for model in (entry.id for entry in models) if (match := SOL_MODEL_RE.fullmatch(model))}
     return max(versions, key=versions.__getitem__) if versions else ""
 
 
@@ -800,7 +822,8 @@ def resolve_chat_settings(settings: dict[str, Any], options: dict[str, Any]) -> 
         elif model != pin:
             raise ValueError(model_pin_message(model, pin))
     # A run on default names the CLI's pick only when the worker knows it (turn_model); its levels are those of that pick.
-    efforts = model_efforts(default_model(options) if model == "default" else model) or ("low", "medium", "high", "xhigh")
+    named = default_model(options) if model == "default" else model
+    efforts = model_efforts(named) or ("low", "medium", "high", "xhigh")
     effort = settings.get("reasoning_effort")
     if effort is not None and effort not in efforts:
         if settings.get("model"):
@@ -810,7 +833,15 @@ def resolve_chat_settings(settings: dict[str, Any], options: dict[str, Any]) -> 
         effort = "medium"
     if effort is None:
         effort = default_effort(options, model, efforts)
-    return {"model": model, "reasoning_effort": effort}
+    return {"model": model, "reasoning_effort": effort, "fast": run_fast(settings.get("fast"), model_fast(named))}
+
+
+def run_fast(choice: bool | None, offered: bool | None) -> bool | None:
+    """Return whether a turn runs on Fast: None when its model has no Fast tier, else the chat's choice or the model's
+    default. A chat that turned Fast on keeps the choice on a model without it, and gets Fast back on one that has it."""
+    if offered is None:
+        return None
+    return offered if choice is None else choice
 
 
 def default_effort(options: dict[str, Any], model: str, efforts: tuple[str, ...]) -> str:
@@ -838,13 +869,15 @@ def parse_chat_settings(payload: dict[str, Any], task: dict[str, Any] | None = N
     """
     settings = payload.get("chat_settings", (task or {}).get("chat_settings", DEFAULT_CHAT_SETTINGS))
     if not isinstance(settings, dict) or set(settings) - set(DEFAULT_CHAT_SETTINGS):
-        raise ValueError("chat_settings must contain only model and reasoning_effort.")
+        raise ValueError("chat_settings must contain only model, reasoning_effort and fast.")
     settings = {**DEFAULT_CHAT_SETTINGS, **settings}
     model, effort = current_model(settings["model"]), settings["reasoning_effort"]
     if model is not None and (not isinstance(model, str) or model_efforts(model, wait=True) is None):
         raise ValueError("Select a supported model or use the add-on default.")
     if effort is not None and (not isinstance(effort, str) or effort not in known_efforts()):
         raise ValueError("Select a supported reasoning level or use the add-on default.")
+    if settings["fast"] is not None and not isinstance(settings["fast"], bool):
+        raise ValueError("Fast mode must be on, off or the model's default.")
     # Only after the checks: replacing a retired model drops a level its replacement lacks.
     settings = current_chat_settings(settings)
     resolve_chat_settings(settings, read_options())
@@ -1798,13 +1831,22 @@ def read_codex_models(codex: str) -> list[dict[str, Any]]:
         terminate_and_reap_process(proc, terminate_timeout=3, kill_timeout=2)
 
 
-def parse_codex_models(entries: list[dict[str, Any]]) -> tuple[tuple[str, str, tuple[str, ...]], ...]:
-    """Return (id, label, levels) for each model the picker shows: not hidden, with a plain id and levels.
+def parse_fast_tier(entry: dict[str, Any]) -> bool | None:
+    """Return a `model/list` entry's Fast state as ChatModel.fast: None without the Fast tier, else its default."""
+    tiers = entry.get("serviceTiers")
+    if not isinstance(tiers, list) or not any(
+            isinstance(tier, dict) and tier.get("id") == FAST_SERVICE_TIER for tier in tiers):
+        return None
+    return entry.get("defaultServiceTier") == FAST_SERVICE_TIER
+
+
+def parse_codex_models(entries: list[dict[str, Any]]) -> tuple[ChatModel, ...]:
+    """Return a ChatModel for each model the picker shows: not hidden, with a plain id and levels.
 
     An entry with a field of the wrong type is left out, not guessed at; so is a model with no level.
     The account's default model comes first, as Codex orders its own picker.
     """
-    models: list[tuple[str, str, tuple[str, ...]]] = []
+    models: list[ChatModel] = []
     seen: set[str] = set()
     for entry in sorted(entries, key=lambda item: item.get("isDefault") is not True):
         model, label, levels = entry.get("id"), entry.get("displayName"), entry.get("supportedReasoningEfforts")
@@ -1818,7 +1860,7 @@ def parse_codex_models(entries: list[dict[str, Any]]) -> tuple[tuple[str, str, t
         if not efforts:
             continue
         label = label.strip() if isinstance(label, str) and label.strip() and label.isprintable() else model
-        models.append((model, label[:100], efforts))
+        models.append(ChatModel(model, label[:100], efforts, parse_fast_tier(entry)))
         seen.add(model)
         if len(models) >= MODEL_LIST_MAX_MODELS:
             break
@@ -1833,12 +1875,12 @@ class CodexDefault(NamedTuple):
 
 
 def parse_codex_default(entries: list[dict[str, Any]],
-                        models: tuple[tuple[str, str, tuple[str, ...]], ...]) -> CodexDefault | None:
+                        models: tuple[ChatModel, ...]) -> CodexDefault | None:
     """Return the entry marked isDefault as a CodexDefault, or None when no offered model is marked.
 
     Its level is defaultReasoningEffort when the model offers it, else medium when offered, else its first level.
     """
-    offered = {model: efforts for model, _, efforts in models}
+    offered = {model.id: model.efforts for model in models}
     for entry in entries:
         model = entry.get("id")
         if entry.get("isDefault") is True and model in offered:
@@ -1868,7 +1910,7 @@ def refresh_models() -> None:
             model_list_state.update(models=models, default=default, read_at=time.monotonic())
 
 
-def live_models(wait: bool = False) -> tuple[tuple[str, str, tuple[str, ...]], ...] | None:
+def live_models(wait: bool = False) -> tuple[ChatModel, ...] | None:
     """Return the account's live model list, or None until a read succeeded.
 
     A stale or missing list starts one read in the background, at most one at a time and not more
@@ -1900,7 +1942,7 @@ def live_default() -> CodexDefault | None:
         return model_list_state["default"]
 
 
-def chat_models() -> tuple[tuple[str, str, tuple[str, ...]], ...]:
+def chat_models() -> tuple[ChatModel, ...]:
     """Return the models the chat page offers: the live list when Codex gave one, else the built-in list."""
     return live_models() or CHAT_MODELS
 
@@ -1913,13 +1955,21 @@ def model_efforts(model: Any, wait: bool = False) -> tuple[str, ...] | None:
     """
     if not isinstance(model, str):
         return None
-    live = {entry[0]: entry[2] for entry in live_models(wait=wait and model not in CHAT_MODEL_EFFORTS) or ()}
+    live = {entry.id: entry.efforts for entry in live_models(wait=wait and model not in CHAT_MODEL_EFFORTS) or ()}
     return live.get(model) or CHAT_MODEL_EFFORTS.get(model)
+
+
+def model_fast(model: Any) -> bool | None:
+    """Return a model's ChatModel.fast: from the live list when it has the model, else from the built-in list."""
+    if not isinstance(model, str):
+        return None
+    live = {entry.id: entry.fast for entry in live_models() or ()}
+    return live[model] if model in live else CHAT_MODEL_FAST.get(model)
 
 
 def known_efforts() -> set[str]:
     """Return every level that some offered model supports."""
-    return {effort for _, _, efforts in (*CHAT_MODELS, *(live_models() or ())) for effort in efforts}
+    return {effort for model in (*CHAT_MODELS, *(live_models() or ())) for effort in model.efforts}
 
 
 def _window_reset(resets_at: Any, weekly: bool, now: datetime) -> tuple[str, str]:
@@ -5461,14 +5511,19 @@ def create_approval_session(
     if open_thread:
         thread_params["threadId"], proc = open_thread(thread_params)
     assert proc is not None
+    model_field = turn_model(model)
+    # The tier goes only with a named model: execution["fast"] is the Fast default of the model the worker assumed,
+    # and a turn that names none runs on Codex's own pick, which may have another default.
+    tier_field = turn_service_tier(execution) if model_field else {}
     return AppServerSession(
         proc.stdin, lock=lock, thread_params=thread_params,
         turn_params={"input": [{"type": "text", "text": prompt},
                                *({"type": "localImage", "path": str(path)} for path in prompt_attachment_paths(task_id, latest_turn))],
                      # No outputSchema: the thread stores the answer as plain text, and the status comes from
                      # the ask_owner and report_failure calls (apply_status_calls).
-                     **turn_model(model),
+                     **model_field,
                      "effort": execution["reasoning_effort"], "summary": reasoning_summary(options),
+                     **tier_field,
                      "sandboxPolicy": policy,
                      "approvalPolicy": settings["approval_policy"],
                      "approvalsReviewer": settings["approvals_reviewer"]},
@@ -5485,12 +5540,24 @@ def turn_model(model: str) -> dict[str, str]:
     keeps the thread's last model, so each turn names its model; a chat set back to the default gets the CLI's pick
     by name (codex_default_model: the live list's default, else /status). The pick is named only when it is a model
     the worker knows: for any other model /status gives its display text, which is not a model id. Before either named
-    a known pick, the turn names none, as before.
+    a known pick, the turn names none, as before, and no service tier either.
     """
     if model not in {"default", "gpt-5.3-codex"}:
         return {"model": model}
     seen = codex_default_model()
     return {"model": seen} if model_efforts(seen) is not None else {}
+
+
+def turn_service_tier(execution: dict[str, Any]) -> dict[str, str | None]:
+    """Return the serviceTier field of turn/start: Fast or the standard tier, named on every turn of a model with Fast.
+
+    Codex keeps a turn's tier for the turns after it, so leaving the field out would keep an earlier choice. Settings
+    saved before the field existed, and models without Fast, send nothing and keep Codex's own choice.
+    """
+    fast = execution.get("fast")
+    if fast is None:
+        return {}
+    return {"serviceTier": FAST_SERVICE_TIER if fast else None}
 
 
 # The longest plain-text answer the page keeps.
@@ -6034,8 +6101,8 @@ def make_live_codex(**limits: float) -> codex_host.CodexHost:
 live_codex = make_live_codex()
 
 
-class LiveExchange(NamedTuple):
-    """How an exchange on the live process ended, in the names that run_task uses after its launch."""
+class ExchangeEnd(NamedTuple):
+    """How an exchange ended, on the live process or on a process of its own: what run_task reads after the launch."""
 
     session: AppServerSession
     returncode: int
@@ -6047,7 +6114,7 @@ class LiveExchange(NamedTuple):
 def run_live_exchange(
     task_id: str, prompt: str, final_file: Path, session_id: str | None, session_holder: dict[str, str],
     options: dict[str, Any], status_calls: list[dict[str, Any]], timeout: float, stall_seconds: float,
-) -> LiveExchange | None:
+) -> ExchangeEnd | None:
     """Run one exchange as a turn of the chat's thread in the live process.
 
     Return None when the live process cannot take the exchange before turn/start is sent (switched off, signed out,
@@ -6087,7 +6154,7 @@ def run_live_exchange(
         if outcome != "finished" or error is not None or session.returncode:
             for line in live_codex.stderr_since(errors_mark):
                 write_task_log(task_id, "stderr", line)
-        return LiveExchange(session, session.returncode, outcome == "timeout", outcome == "stalled", error)
+        return ExchangeEnd(session, session.returncode, outcome == "timeout", outcome == "stalled", error)
     finally:
         live_codex.detach(task_id)
         with lock:
@@ -6127,89 +6194,112 @@ def end_live_turn(task_id: str, session: AppServerSession, outcome: str, stall_s
             write_task_log(task_id, "worker", f"Could not tidy the backup folder: {exc}")
 
 
-def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: str | None = None) -> None:
-    """Run one exchange: record the configuration, launch Codex, then check and report what it changed."""
+SANDBOX_MISSING_SUMMARY = "Codex needs support: the sandbox it must run in is not available, so this task was not started."
+
+
+class Cancelled(Exception):
+    """The owner stopped the exchange. run_task ends at once and publishes nothing: the cancel route has done that."""
+
+
+class LaunchRefused(Exception):
+    """A step before Codex runs could not prepare the exchange; run_task records it once, with fail_task_launch."""
+
+    def __init__(self, cause: Exception, summary: str = "Could not start the Codex CLI executable.",
+                 detail_prefix: str | None = None) -> None:
+        super().__init__(str(cause))
+        self.cause = cause
+        self.summary = summary
+        self.detail_prefix = detail_prefix
+
+
+def checkpoint(task_id: str) -> None:
+    """Raise Cancelled when the owner has stopped this exchange."""
     if task_cancellation_requested(task_id):
-        return
-    # A mode the protected policy refuses stops here, before the task is marked running or any
-    # baseline, snapshot or backup work is done for it.
+        raise Cancelled
+
+
+class PreparedExchange(NamedTuple):
+    """What the preflight hands to the launch and to the review of changes after it."""
+
+    task_dir: Path
+    final_file: Path
+    prompt_file: Path
+    before_manifest_path: Path
+    options: dict[str, Any]
+    permissions: str
+
+
+def check_launch_policy(task_id: str) -> None:
+    """Refuse a mode the protected policy forbids, before the task is marked running or any baseline is taken."""
     policy_problem = (protected_policy.policy_problem(read_options())
                       or protected_policy.policy_problem(task_options(task_id)))
     if policy_problem:
         record_diagnostic("event", task_id, {"kind": "gate", "rule": launch_policy_diagnostic_rule(policy_problem)})
-        fail_task_launch(
-            task_id,
-            RuntimeError(policy_problem),
-            session_id=session_id,
-            summary="Codex needs support: the sandbox it must run in is not available, so this task was not started.",
-            detail_prefix="Codex sandbox preflight failed",
-        )
-        return
-    task_dir = get_run_dir(task_id)
-    task_dir.mkdir(parents=True, exist_ok=True)
-    final_file = task_dir / ("final-resume.json" if reply else "final.json")
-    prompt_file = task_dir / ("prompt-resume.txt" if reply else "prompt.txt")
-    before_manifest_path = task_dir / BASELINE_FILE
+        raise LaunchRefused(RuntimeError(policy_problem), SANDBOX_MISSING_SUMMARY, "Codex sandbox preflight failed")
 
+
+def begin_exchange(task_id: str, session_id: str | None) -> None:
+    """Mark the task running and open its tools, its thread and its activity record."""
     update_task(task_id, status="running", started_at=utc_now(), error="")
     note_task_sign_in(task_id)
     verification.begin(task_id)
     ha_data.begin(task_id)
-    # A follow-up names its thread now; a new chat's thread is bound when Codex reports it (event below).
+    # A follow-up names its thread now; a new chat's thread is bound when Codex reports it (create_approval_session).
     if session_id:
         bind_chat_thread(task_id, session_id)
     with lock:
         current_turn_id = str(tasks.get(task_id, {}).get("current_turn_id") or "")
     start_activity(task_id, current_turn_id)
-    if task_cancellation_requested(task_id):
-        return
-    options = task_options(task_id)
-    record_diagnostic("model", task_id, latest_execution(task_id, options).get("model", "default"))
-    refresh_core_address(options)
-    if not before_manifest_path.exists():
-        try:
-            start_phase(task_id, "baseline", "Noting the current state of your configuration files")
-            manifest = record_baseline(task_id)
-            finish_phase(task_id, "baseline")
-            if options.get("full_snapshot"):
-                start_phase(task_id, "snapshot", "Saving a full snapshot of your configuration")
-                update_task(task_id, snapshot=create_snapshot(task_id, manifest))
-                finish_phase(task_id, "snapshot")
-        except Exception as exc:
-            # Otherwise the step would be closed as done when the exchange ends well.
-            finish_phase(task_id, "baseline", "snapshot", failed=True)
-            write_task_log(task_id, "worker", f"Could not record the configuration before the run: {exc}")
-            update_task(task_id, snapshot_error=str(exc))
-    if task_cancellation_requested(task_id):
-        return
-    backup_dir = codex_backup_dir(task_dir, options)
-    if backup_dir is not None:
-        try:
-            backup_dir.mkdir(parents=True, exist_ok=True)
-        except OSError as exc:
-            write_task_log(task_id, "worker", f"Could not create the backup folder: {exc}")
-            backup_dir = None
-    prepare_chat_files_dir(task_id)
 
+
+def record_before_state(task_id: str, options: dict[str, Any]) -> None:
+    """Record the configuration baseline, and a full snapshot when the owner asked for one."""
+    try:
+        start_phase(task_id, "baseline", "Noting the current state of your configuration files")
+        manifest = record_baseline(task_id)
+        finish_phase(task_id, "baseline")
+        if options.get("full_snapshot"):
+            start_phase(task_id, "snapshot", "Saving a full snapshot of your configuration")
+            update_task(task_id, snapshot=create_snapshot(task_id, manifest))
+            finish_phase(task_id, "snapshot")
+    except Exception as exc:
+        # Otherwise the step would be closed as done when the exchange ends well.
+        finish_phase(task_id, "baseline", "snapshot", failed=True)
+        write_task_log(task_id, "worker", f"Could not record the configuration before the run: {exc}")
+        update_task(task_id, snapshot_error=str(exc))
+
+
+def make_backup_dir(task_id: str, task_dir: Path, options: dict[str, Any]) -> Path | None:
+    """Create the folder Codex copies files into before it edits them; None when there is none."""
+    backup_dir = codex_backup_dir(task_dir, options)
+    if backup_dir is None:
+        return None
+    try:
+        backup_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        write_task_log(task_id, "worker", f"Could not create the backup folder: {exc}")
+        return None
+    return backup_dir
+
+
+def reset_final_file(final_file: Path) -> None:
+    """Remove the final answer of an earlier exchange, so this exchange cannot report it as its own."""
     try:
         final_file.unlink(missing_ok=True)
     except OSError as exc:
-        fail_task_launch(
-            task_id,
-            exc,
-            session_id=session_id,
-            summary="Could not prepare the Codex task output.",
-            detail_prefix="Could not reset the Codex final response",
-        )
-        return
+        raise LaunchRefused(exc, "Could not prepare the Codex task output.",
+                            "Could not reset the Codex final response") from exc
 
-    prepare_ha_docs()
+
+def write_exchange_message(task_id: str, prepared: PreparedExchange, prompt: str, reply: str | None,
+                           session_id: str | None, backup_dir: Path | None) -> None:
+    """Write the message Codex reads, and set the exchange_info that its tools return."""
     # A thread this page starts gets PAGE_INSTRUCTIONS from its first turn. Any other thread (started in the
     # ChatGPT app, or by 0.3.2 or earlier) gets a pointer in the message, and exchange_info carries the rules for it.
     # A new thread learns its sandbox when it starts. A resumed thread is told in the message when its permissions
     # differ from the ones it was last told; with no record (a thread from the ChatGPT app, or from an earlier version
     # of this app) it is told once.
-    permissions = permissions_note(task_mode_settings(task_id, options))
+    permissions = prepared.permissions
     with lock:
         task = tasks.get(task_id, {})
         has_page_instructions = bool(task.get("page_instructions"))
@@ -6221,148 +6311,200 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     if not session_id:
         update_task(task_id, page_instructions=True)
     try:
-        prompt_file.write_text(page_message(prompt, reply=reply, point_to_rules=point_to_rules,
-                                            changed_permissions=changed_permissions), encoding="utf-8")
+        prepared.prompt_file.write_text(page_message(prompt, reply=reply, point_to_rules=point_to_rules,
+                                                     changed_permissions=changed_permissions), encoding="utf-8")
     except OSError as exc:
-        fail_task_launch(
-            task_id,
-            exc,
-            session_id=session_id,
-            summary="Could not prepare the Codex task input.",
-            detail_prefix="Could not write the Codex task prompt",
-        )
-        return
-    if task_cancellation_requested(task_id):
-        return
+        raise LaunchRefused(exc, "Could not prepare the Codex task input.",
+                            "Could not write the Codex task prompt") from exc
+
+
+def check_model_pin(task_id: str, options: dict[str, Any]) -> None:
+    """Stop before Codex starts: a run on another model is an error, never a quiet fallback."""
     pin_error = model_pin_error(latest_execution(task_id, options), options)
     if pin_error:
-        # Stop before Codex starts: a run on another model is an error, never a quiet fallback.
-        fail_task_launch(
-            task_id,
-            ValueError(pin_error),
-            session_id=session_id,
-            summary="Stopped: this run asked for a model the assistant is not set up to use.",
-            detail_prefix="Model pin",
-        )
-        return
+        raise LaunchRefused(ValueError(pin_error), "Stopped: this run asked for a model the assistant is not set up to use.",
+                            "Model pin")
+
+
+def prepare_exchange(task_id: str, prompt: str, session_id: str | None, reply: str | None) -> PreparedExchange:
+    """The preflight: check the policy, mark the task running, record the configuration, write Codex's message.
+
+    The cancel checks keep their places between the steps: a cancel stops the exchange where it did before.
+    """
+    checkpoint(task_id)
+    check_launch_policy(task_id)
+    task_dir = get_run_dir(task_id)
+    task_dir.mkdir(parents=True, exist_ok=True)
+    final_file = task_dir / ("final-resume.json" if reply else "final.json")
+    prompt_file = task_dir / ("prompt-resume.txt" if reply else "prompt.txt")
+    before_manifest_path = task_dir / BASELINE_FILE
+    begin_exchange(task_id, session_id)
+    checkpoint(task_id)
+    options = task_options(task_id)
+    record_diagnostic("model", task_id, latest_execution(task_id, options).get("model", "default"))
+    refresh_core_address(options)
+    if not before_manifest_path.exists():
+        record_before_state(task_id, options)
+    checkpoint(task_id)
+    backup_dir = make_backup_dir(task_id, task_dir, options)
+    prepare_chat_files_dir(task_id)
+    reset_final_file(final_file)
+    prepare_ha_docs()
+    permissions = permissions_note(task_mode_settings(task_id, options))
+    prepared = PreparedExchange(task_dir, final_file, prompt_file, before_manifest_path, options, permissions)
+    write_exchange_message(task_id, prepared, prompt, reply, session_id, backup_dir)
+    checkpoint(task_id)
+    check_model_pin(task_id, options)
+    return prepared
+
+
+def start_launch(task_id: str) -> list[str]:
+    """Open the launch step and check the sandbox; return the command that starts Codex's app server."""
     # Every exchange runs on the app server, which carries live permission requests. The policy check at the
-    # top of run_task has already refused the modes that this transport must never be given.
+    # start of the preflight has already refused the modes that this transport must never be given.
     args = build_app_server_args()
     ha_call.begin(task_id)
-
     start_phase(task_id, "launch", "Starting Codex")
     readiness = sandbox_readiness()
-    if task_cancellation_requested(task_id):
-        return
+    checkpoint(task_id)
     if readiness["required"] and not readiness["ready"]:
-        fail_task_launch(
-            task_id,
-            RuntimeError(str(readiness["message"])),
-            session_id=session_id,
-            summary="Codex needs support: the sandbox it must run in is not available, so this task was not started.",
-            detail_prefix="Codex sandbox preflight failed",
+        raise LaunchRefused(RuntimeError(str(readiness["message"])), SANDBOX_MISSING_SUMMARY,
+                            "Codex sandbox preflight failed")
+    return args
+
+
+def start_codex_process(task_id: str, args: list[str]) -> subprocess.Popen[str]:
+    """Start a Codex process for this exchange and register it, so a cancel can stop it."""
+    write_task_log(task_id, "worker", "Starting Codex: " + " ".join(args))
+    try:
+        proc = subprocess.Popen(
+            args,
+            cwd=CONFIG_ROOT.as_posix(),
+            env=codex_env(),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
         )
-        return
-
-    timeout = int(read_options().get("task_timeout_seconds") or 3600)
-    stall_seconds = max(0, int(read_options().get("task_stall_seconds", 600) or 0))
-    session_holder: dict[str, str] = {}
-    # The turn's ask_owner and report_failure calls, read from the app server's events.
-    status_calls: list[dict[str, Any]] = []
-    # Images recorded before this run belong to earlier exchanges of the session.
-    known_image_ids = {item["id"] for item in image_generation_items(session_id or "")}
-    live = run_live_exchange(task_id, prompt_file.read_text(encoding="utf-8"), final_file, session_id,
-                             session_holder, options, status_calls, timeout, stall_seconds)
-    if live is not None:
-        approval_session, returncode, timed_out, stalled, lifecycle_error = live
-    else:
-        write_task_log(task_id, "worker", "Starting Codex: " + " ".join(args))
-        try:
-            proc = subprocess.Popen(
-                args,
-                cwd=CONFIG_ROOT.as_posix(),
-                env=codex_env(),
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,
-            )
-        except OSError as exc:
-            fail_task_launch(task_id, exc, session_id=session_id)
-            return
-        cancel_after_launch = False
-        with lock:
-            if tasks.get(task_id, {}).get("cancellation_requested"):
-                cancel_after_launch = True
-            else:
+    except OSError as exc:
+        raise LaunchRefused(exc) from exc
+    with lock:
+        cancel_after_launch = bool(tasks.get(task_id, {}).get("cancellation_requested"))
+        if not cancel_after_launch:
+            running_processes[task_id] = proc
+    if cancel_after_launch:
+        # The cancel route did not see this process: stop it here. A process that will not exit stays registered.
+        if not terminate_and_reap_process(proc):
+            with lock:
                 running_processes[task_id] = proc
-        if cancel_after_launch:
-            if not terminate_and_reap_process(proc):
-                with lock:
-                    running_processes[task_id] = proc
-            return
-        assert proc.stdin is not None
-        assert proc.stdout is not None
-        assert proc.stderr is not None
-        approval_session = create_approval_session(
-            task_id, proc, prompt_file.read_text(encoding="utf-8"), final_file, session_id, session_holder, options,
-            status_calls)
-        with lock:
-            approval_sessions[task_id] = approval_session
-        stdout_thread = threading.Thread(target=approval_session.read, args=(proc.stdout,), daemon=True)
-        stderr_thread = threading.Thread(target=reader_thread, args=(task_id, "stderr", proc.stderr), daemon=True)
-        stdout_thread.start()
-        stderr_thread.start()
+        raise Cancelled
+    return proc
 
-        timed_out = False
-        stalled = False
-        lifecycle_error: Exception | None = None
-        returncode = -1
-        process_exit_confirmed = False
+
+def run_process_exchange(task_id: str, proc: subprocess.Popen[str], session: AppServerSession, timeout: float,
+                         stall_seconds: float) -> ExchangeEnd:
+    """Run the exchange on its own Codex process, then close the session and reap the process."""
+    assert proc.stdin is not None
+    assert proc.stdout is not None
+    assert proc.stderr is not None
+    with lock:
+        approval_sessions[task_id] = session
+    stdout_thread = threading.Thread(target=session.read, args=(proc.stdout,), daemon=True)
+    stderr_thread = threading.Thread(target=reader_thread, args=(task_id, "stderr", proc.stderr), daemon=True)
+    stdout_thread.start()
+    stderr_thread.start()
+    timed_out = False
+    stalled = False
+    lifecycle_error: Exception | None = None
+    returncode = -1
+    process_exit_confirmed = False
+    try:
         try:
+            session.start()
+        except (OSError, ValueError) as exc:
+            lifecycle_error = exc
+            process_exit_confirmed = terminate_and_reap_process(proc)
+        if lifecycle_error is None:
             try:
-                approval_session.start()
-            except (OSError, ValueError) as exc:
+                outcome = wait_for_exchange(session, timeout, stall_seconds)
+                timed_out = outcome == "timeout"
+                stalled = outcome == "stalled"
+                if stalled:
+                    write_task_log(task_id, "worker", f"No activity from Codex for {stall_seconds} seconds; stopping the task.")
+                session.close()
+                returncode = session.returncode
+                if session.error:
+                    lifecycle_error = RuntimeError(session.error)
+                # The app-server is long-lived; one worker process owns one
+                # exchange, and must be reaped before the queue advances.
+                process_exit_confirmed = reap_approval_process(proc)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                process_exit_confirmed = terminate_and_reap_process(proc)
+                returncode = proc.returncode if proc.returncode is not None else -1
+            except OSError as exc:
                 lifecycle_error = exc
                 process_exit_confirmed = terminate_and_reap_process(proc)
-            if lifecycle_error is None:
-                try:
-                    outcome = wait_for_exchange(approval_session, timeout, stall_seconds)
-                    timed_out = outcome == "timeout"
-                    stalled = outcome == "stalled"
-                    if stalled:
-                        write_task_log(task_id, "worker", f"No activity from Codex for {stall_seconds} seconds; stopping the task.")
-                    approval_session.close()
-                    returncode = approval_session.returncode
-                    if approval_session.error:
-                        lifecycle_error = RuntimeError(approval_session.error)
-                    # The app-server is long-lived; one worker process owns one
-                    # exchange, and must be reaped before the queue advances.
-                    process_exit_confirmed = reap_approval_process(proc)
-                except subprocess.TimeoutExpired:
-                    timed_out = True
-                    process_exit_confirmed = terminate_and_reap_process(proc)
-                    returncode = proc.returncode if proc.returncode is not None else -1
-                except OSError as exc:
-                    lifecycle_error = exc
-                    process_exit_confirmed = terminate_and_reap_process(proc)
-        finally:
-            approval_session.close()
+    finally:
+        session.close()
+        with lock:
+            if approval_sessions.get(task_id) is session:
+                approval_sessions.pop(task_id, None)
+        try:
+            proc.stdin.close()
+        except (OSError, ValueError):
+            pass
+        if process_exit_confirmed:
             with lock:
-                if approval_sessions.get(task_id) is approval_session:
-                    approval_sessions.pop(task_id, None)
-            try:
-                proc.stdin.close()
-            except (OSError, ValueError):
-                pass
-            if process_exit_confirmed:
-                with lock:
-                    if running_processes.get(task_id) is proc:
-                        running_processes.pop(task_id, None)
-            stdout_thread.join(timeout=5)
-            stderr_thread.join(timeout=5)
+                if running_processes.get(task_id) is proc:
+                    running_processes.pop(task_id, None)
+        stdout_thread.join(timeout=5)
+        stderr_thread.join(timeout=5)
+    return ExchangeEnd(session, returncode, timed_out, stalled, lifecycle_error)
 
+
+def launch_exchange(task_id: str, args: list[str], prepared: PreparedExchange, session_id: str | None,
+                    session_holder: dict[str, str], status_calls: list[dict[str, Any]], timeout: float,
+                    stall_seconds: float) -> ExchangeEnd:
+    """The launch: run the exchange on the live Codex process when it takes it, else on a process of its own.
+
+    This is the one seam between the two start paths; the steps after it read only the ExchangeEnd.
+    """
+    message = prepared.prompt_file.read_text(encoding="utf-8")
+    ended = run_live_exchange(task_id, message, prepared.final_file, session_id, session_holder, prepared.options,
+                              status_calls, timeout, stall_seconds)
+    if ended is not None:
+        return ended
+    proc = start_codex_process(task_id, args)
+    session = create_approval_session(task_id, proc, message, prepared.final_file, session_id, session_holder,
+                                      prepared.options, status_calls)
+    return run_process_exchange(task_id, proc, session, timeout, stall_seconds)
+
+
+def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: str | None = None) -> None:
+    """Run one exchange: the preflight, the launch of Codex, then the check and report of what it changed."""
+    try:
+        prepared = prepare_exchange(task_id, prompt, session_id, reply)
+        args = start_launch(task_id)
+        timeout = int(read_options().get("task_timeout_seconds") or 3600)
+        stall_seconds = max(0, int(read_options().get("task_stall_seconds", 600) or 0))
+        session_holder: dict[str, str] = {}
+        # The turn's ask_owner and report_failure calls, read from the app server's events.
+        status_calls: list[dict[str, Any]] = []
+        # Images recorded before this run belong to earlier exchanges of the session.
+        known_image_ids = {item["id"] for item in image_generation_items(session_id or "")}
+        ended = launch_exchange(task_id, args, prepared, session_id, session_holder, status_calls, timeout,
+                                stall_seconds)
+    except Cancelled:
+        return
+    except LaunchRefused as refused:
+        fail_task_launch(task_id, refused.cause, session_id=session_id, summary=refused.summary,
+                         detail_prefix=refused.detail_prefix)
+        return
+    approval_session, returncode, timed_out, stalled, lifecycle_error = ended
+    task_dir, final_file = prepared.task_dir, prepared.final_file
+    before_manifest_path, permissions = prepared.before_manifest_path, prepared.permissions
     # Record what Codex was told only once its turn started: after a failed start or a cancel before the turn,
     # Codex never read the message, so the next message must carry the permissions line again. A repeated line does
     # no harm; a lost one leaves Codex naming the old mode. (update_task changes nothing after a cancel.)
@@ -7392,8 +7534,8 @@ def chat_options() -> Response:
     default = resolve_chat_settings(DEFAULT_CHAT_SETTINGS, options)
     default_id = default_model(options)
     # default_effort is the level a chat on that model runs at while it chose none (resolve_chat_settings).
-    models = [{"id": model, "label": label, "efforts": efforts,
-               "default_effort": default_effort(options, model, efforts)} for model, label, efforts in chat_models()]
+    models = [{"id": model.id, "label": model.label, "efforts": model.efforts, "fast": model.fast,
+               "default_effort": default_effort(options, model.id, model.efforts)} for model in chat_models()]
     if pin:
         models = [entry for entry in models if entry["id"] == pin]
     return jsonify({
@@ -7405,6 +7547,8 @@ def chat_options() -> Response:
         "default_model": default_id,
         "models": models,
         "default_efforts": model_efforts(default_id) or ("low", "medium", "high", "xhigh"),
+        # The add-on model's ChatModel.fast: null without Fast, else whether Codex runs it on Fast by default.
+        "default_fast": model_fast(default_id),
         # "codex" when the list is the account's own from Codex, "built-in" while the worker uses its fallback.
         "models_source": "codex" if live_models() is not None else "built-in",
         "backup_retention_days": backup_retention_days(options),

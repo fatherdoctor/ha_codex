@@ -225,6 +225,9 @@
                   title="Model and reasoning (Ctrl+Shift+M)"
                 >
                   <span id="picker-model">Model</span
+                  ><span id="picker-fast" hidden
+                    ><svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="m13 3-8 10h6l-1 8 9-11h-6l1-7Z" /></svg></span
                   ><span id="effort-label">Medium</span
                   ><span id="picker-open-label" hidden>Select effort</span
                   ><svg
@@ -244,7 +247,25 @@
                   hidden
                 >
                   <div class="effort-heading">
-                    <span class="effort-heading-spacer" aria-hidden="true"></span>
+                    <button
+                      id="effort-fast"
+                      type="button"
+                      aria-pressed="false"
+                      aria-label="Fast mode"
+                      title="Fast mode: off"
+                    >
+                      <svg
+                        class="effort-bolt"
+                        aria-hidden="true"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.4"
+                        stroke-linejoin="round"
+                      >
+                        <path d="m13 3-8 10h6l-1 8 9-11h-6l1-7Z" />
+                      </svg>
+                    </button>
                     <div>
                       <label id="effort-title" for="effort-slider">Medium</label>
                       <button
@@ -473,6 +494,7 @@
           <p class="muted signin-hide">Lets the assistant fetch, pull and push the GitHub repositories you choose. The add-on keeps the sign-in; the assistant never sees it, and every push goes through the push guard first.</p>
           <dl id="github-details" class="github-details signin-hide" hidden></dl>
           <ul id="github-repositories" class="github-repositories signin-hide" hidden></ul>
+          <p id="github-add-repositories" class="muted signin-hide" hidden>Codex reaches only the repositories that the GitHub App is installed on. <a id="github-add-repositories-link" target="_blank" rel="noopener noreferrer">Add repositories</a> on GitHub, then press Check now.</p>
           <div id="github-flow"></div>
           <div class="settings-actions">
             <button id="github-connect">Connect GitHub</button

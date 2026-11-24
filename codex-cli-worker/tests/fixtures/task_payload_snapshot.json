@@ -48,6 +48,7 @@
         "deleted": []
       },
       "chat_settings": {
+        "fast": null,
         "model": null,
         "reasoning_effort": null
       },
@@ -86,6 +87,7 @@
         "deleted": []
       },
       "chat_settings": {
+        "fast": null,
         "model": null,
         "reasoning_effort": null
       },
@@ -133,6 +135,7 @@
           "details": "",
           "error": "",
           "execution_settings": {
+            "fast": false,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -179,6 +182,7 @@
         "deleted": []
       },
       "chat_settings": {
+        "fast": null,
         "model": null,
         "reasoning_effort": null
       },
@@ -223,6 +227,7 @@
           "details": "",
           "error": "",
           "execution_settings": {
+            "fast": false,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -296,6 +301,7 @@
         "deleted": []
       },
       "chat_settings": {
+        "fast": null,
         "model": null,
         "reasoning_effort": null
       },
@@ -339,6 +345,7 @@
         "deleted": []
       },
       "chat_settings": {
+        "fast": null,
         "model": null,
         "reasoning_effort": null
       },
@@ -389,6 +396,7 @@
           "details": "Removed the copies.",
           "error": "",
           "execution_settings": {
+            "fast": false,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -439,6 +447,7 @@
         "deleted": []
       },
       "chat_settings": {
+        "fast": null,
         "model": null,
         "reasoning_effort": null
       },
@@ -486,6 +495,7 @@
           "details": "Removed the copies.",
           "error": "",
           "execution_settings": {
+            "fast": false,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -561,6 +571,7 @@
         "deleted": []
       },
       "chat_settings": {
+        "fast": null,
         "model": null,
         "reasoning_effort": null
       },
@@ -599,6 +610,7 @@
         "deleted": []
       },
       "chat_settings": {
+        "fast": null,
         "model": null,
         "reasoning_effort": null
       },
@@ -646,6 +658,7 @@
           "details": "Could not start /usr/local/bin/codex: no such file",
           "error": "Could not start /usr/local/bin/codex: no such file",
           "execution_settings": {
+            "fast": false,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -692,6 +705,7 @@
         "deleted": []
       },
       "chat_settings": {
+        "fast": null,
         "model": null,
         "reasoning_effort": null
       },
@@ -736,6 +750,7 @@
           "details": "Could not start /usr/local/bin/codex: no such file",
           "error": "Could not start /usr/local/bin/codex: no such file",
           "execution_settings": {
+            "fast": false,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -815,6 +830,7 @@
         "deleted": []
       },
       "chat_settings": {
+        "fast": null,
         "model": null,
         "reasoning_effort": null
       },
@@ -861,6 +877,7 @@
         "deleted": []
       },
       "chat_settings": {
+        "fast": null,
         "model": null,
         "reasoning_effort": null
       },
@@ -917,6 +934,7 @@
           "details": "",
           "error": "",
           "execution_settings": {
+            "fast": false,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -967,6 +985,7 @@
         "deleted": []
       },
       "chat_settings": {
+        "fast": null,
         "model": null,
         "reasoning_effort": null
       },
@@ -1020,6 +1039,7 @@
           "details": "",
           "error": "",
           "execution_settings": {
+            "fast": false,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -1143,6 +1163,7 @@
         "deleted": []
       },
       "chat_settings": {
+        "fast": null,
         "model": null,
         "reasoning_effort": null
       },
@@ -1189,6 +1210,7 @@
         "deleted": []
       },
       "chat_settings": {
+        "fast": null,
         "model": null,
         "reasoning_effort": null
       },
@@ -1247,6 +1269,7 @@
           "details": "",
           "error": "",
           "execution_settings": {
+            "fast": false,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -1286,6 +1309,7 @@
           "details": "",
           "error": "",
           "execution_settings": {
+            "fast": false,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -1338,6 +1362,7 @@
         "deleted": []
       },
       "chat_settings": {
+        "fast": null,
         "model": null,
         "reasoning_effort": null
       },
@@ -1394,6 +1419,7 @@
           "details": "",
           "error": "",
           "execution_settings": {
+            "fast": false,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -1433,6 +1459,7 @@
           "details": "",
           "error": "",
           "execution_settings": {
+            "fast": false,
             "model": "default",
             "reasoning_effort": "medium"
           },

@@ -1371,10 +1371,40 @@ textarea::placeholder {
   font-size: calc(13px * var(--text-scale));
   font-weight: 600;
 }
-/* Keeps the effort name centered while the lightning (fast mode) toggle is hidden; it returns in 0.6 with a working toggle (CX-04-FB-MODEL). */
-.effort-heading-spacer {
+/* The lightning (Fast mode) toggle, filled while Fast is on; dimmed when the model has no Fast tier. */
+#effort-fast {
+  background: transparent;
+  color: var(--muted);
+  padding: 0;
   width: 24px;
   flex-shrink: 0;
+}
+#effort-fast[aria-pressed="true"] {
+  color: #467ced;
+}
+#effort-fast[aria-pressed="true"] .effort-bolt {
+  fill: currentColor;
+}
+#effort-fast:disabled {
+  opacity: 0.4;
+}
+.effort-bolt {
+  width: 20px;
+  height: 20px;
+  margin: 3px 2px;
+}
+/* The chip's small bolt while the chat runs on Fast. */
+#picker-fast {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: #467ced;
+}
+#picker-fast[hidden] {
+  display: none;
+}
+#picker-fast svg {
+  width: 13px;
+  height: 13px;
 }
 /* The model name under the effort name; it opens the model list. */
 #effort-model {

@@ -48,6 +48,39 @@ async function testSlash(browser, errors) {
       await context.close();
     }
   }
+  await testNoFastTier(browser);
+}
+
+/**
+ * When the chat's model has no Fast tier (the worker sends fast: null), the
+ * lightning toggle is disabled with a plain tooltip and the chip shows no bolt.
+ */
+async function testNoFastTier(browser) {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 950 } });
+  try {
+    const page = await context.newPage();
+    await page.route("**/chat-options", async (route) => {
+      const response = await route.fetch();
+      const catalog = await response.json();
+      for (const model of catalog.models) model.fast = null;
+      catalog.default_fast = null;
+      await route.fulfill({ response, json: catalog });
+    });
+    await page.goto("http://127.0.0.1:9137/preview/");
+    await page.locator(".chat-row").first().waitFor({ state: "attached" });
+    await page.locator("#new-chat").evaluate((el) => el.click());
+    await page.locator("#picker-button:not([disabled])").waitFor();
+    await page.locator("#picker-button").click();
+    await page.locator("#effort-popover").waitFor();
+    assert.equal(await page.locator("#effort-fast").isDisabled(), true);
+    assert.equal(
+      await page.locator("#effort-fast").getAttribute("title"),
+      "Fast mode is not available for this model",
+    );
+    assert.equal(await page.locator("#picker-fast").isHidden(), true);
+  } finally {
+    await context.close();
+  }
 }
 
 module.exports = testSlash;
