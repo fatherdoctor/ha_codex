@@ -2,6 +2,8 @@
 
 ## 0.6.0 (unreleased)
 
+- The yellow **Settings** icon lights as soon as a chat exchange ends with a schedule proposal waiting, and when you
+  come back to the page, instead of up to a minute later. The once-a-minute read stays as the backstop.
 - **Settings > Scheduled runs** shows the name of each schedule's chat as a link. The link closes Settings and opens
   that chat. A schedule of no chat says that each run starts a new chat; a schedule whose chat is gone says that its
   next run starts a new one.

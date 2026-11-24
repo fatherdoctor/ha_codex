@@ -2463,7 +2463,10 @@ async function fetchSelected(force = false) {
     throw error;
   }
   if (generation !== state.generation || id !== state.id) return;
+  const wasWorking = ["queued", "running"].includes(state.task?.status);
   state.task = data.task;
+  // An exchange that just ended may have proposed a schedule; the Settings icon reads the schedules at once.
+  if (wasWorking && !["queued", "running"].includes(data.task.status)) document.dispatchEvent(new Event("chat-exchange-end"));
   if (!state.chatSettings.has(id))
     state.chatSettings.set(
       id,
