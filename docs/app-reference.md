@@ -666,6 +666,7 @@ If you cannot install the App (for example, an organization forbids third-party 
 
 ### The card
 
+- **Add repositories**, under the list of repositories, opens the App installation's **Configure** page on GitHub. The sign-in reaches only the repositories that the App is installed on, so the header can say **1 repository**. Add a repository on that page, then press **Check now** and **Accept this access**. The link is the address GitHub gives for the installation, and the card shows it only for an App sign-in on `github.com`. A token reaches its one repository and has no such link.
 - **Read test** reads each connected repository once and shows the result.
 - **Check now** runs the access check at once (see below).
 - **Accept this access** appears when the repositories changed on GitHub but the access is still exactly Contents read and write. It makes the current set the one the check expects. If the access itself changed, change it back on GitHub instead.

@@ -22,6 +22,9 @@
 - The chat page's repeating checks (the chat list, the steps of a working chat, the quota, the two sign-ins, remote
   control and the code countdowns) now run through one scheduler, `poll()`, and the buttons that wait for the worker
   share one helper, `busyAction()`. Each check keeps its timing, and nothing looks different.
+- The GitHub card explains its repository count: Codex reaches only the repositories that the GitHub App is installed
+  on. A new **Add repositories** link under the list opens the App's Configure page on GitHub, where you add more. The
+  link comes from GitHub's answer for the installation and shows only for an App sign-in, not for a token.
 
 ## 0.5.0 (draft)
 

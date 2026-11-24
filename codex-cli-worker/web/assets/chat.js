@@ -4061,6 +4061,11 @@ function renderGithub(github) {
   }
   list.replaceChildren(...items);
   list.hidden = !items.length;
+  // The App's Configure page on GitHub, where the owner adds repositories; a token reaches one repository by design.
+  const addUrl = connected && kind === "app" ? String(github.add_repositories_url || "") : "";
+  const addable = addUrl.startsWith("https://github.com/");
+  $("github-add-repositories-link").href = addable ? addUrl : "#";
+  $("github-add-repositories").hidden = !addable;
   const flowArea = $("github-flow");
   if (waiting) {
     const key = JSON.stringify([flow.user_code, flow.verification_uri, flow.expires_at]);
@@ -4125,6 +4130,7 @@ function githubUnavailable() {
   for (const id of ["github-connect", "github-cancel", "github-test", "github-check", "github-accept", "github-disconnect"])
     $(id).hidden = true;
   $("github-details").hidden = $("github-repositories").hidden = $("github-local").hidden = true;
+  $("github-add-repositories").hidden = true;
   $("github-token").hidden = true;
   $("github-banner").hidden = true;
   setSectionStatus("github-section", "Not available in this version");
