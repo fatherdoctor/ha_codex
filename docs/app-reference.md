@@ -449,6 +449,12 @@ checks these things first, in every mode:
 - The service must be `domain.service`. `entity_id`, `device_id`, `area_id`, `floor_id` and `label_id` go in
   `target`, the other fields in `data`. A request in any other form sends nothing.
 
+Some actions only answer with data, for example `calendar.get_events` or `weather.get_forecasts`. From **0.5.1**,
+when Home Assistant refuses such a call because the request did not ask for the answer, the worker sends the same
+call once more with `?return_response`. Home Assistant refuses before the action runs, so the action runs once. The
+answer gives Codex the data in `response`. Data larger than 20,000 bytes of JSON is cut: the answer then holds the
+first part as text, `response_cut` and a note. Before 0.5.1, Codex got only the error.
+
 The tool refuses no service by name. Your answer to Codex's question is the only gate, so read the service before
 you allow it. A call can reach the Supervisor: a `hassio` service, `update.install` on an update entity (an app,
 Home Assistant OS or Core, this app too) or `backup.create`. A call can also run code that you wrote, for example a
