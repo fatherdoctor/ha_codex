@@ -5,7 +5,8 @@
 //    no interim message shows and the answer follows the closed line and shows once.
 // 2. With the list open, the interim messages show in order between the step groups, never as step rows.
 // 3. A Markdown link in an interim message renders as a link.
-// 4. An explicit failed entity readback remains available in the completed chat.
+// 4. A check that could not confirm reads "not confirmed" (never "failed") and is not red; the rows and the
+//    closed line use the same words (CX-CHECKS-TONE).
 const {chromium} = require('playwright');
 const assert = require('node:assert/strict');
 
@@ -48,10 +49,17 @@ const base = 'http://127.0.0.1:9137/preview/';
       const link = page.locator('#activity-steps a', {hasText: 'Home Assistant docs'});
       assert.equal(await link.getAttribute('href'), 'https://www.home-assistant.io/docs/automation/', `${label}: link renders`);
       await page.locator('[data-task-id="preview-03"]').evaluate(el => el.click());
-      const failedCheck = page.getByText('1 check failed', {exact: true});
-      await failedCheck.waitFor();
-      await failedCheck.click();
-      await page.getByText('Unverified · entity', {exact: true}).waitFor();
+      const unconfirmed = page.getByText('1 check not confirmed', {exact: true});
+      await unconfirmed.waitFor();
+      assert.equal(await page.getByText('1 check failed').count(), 0, `${label}: not confirmed is not a failure`);
+      const muted = await unconfirmed.evaluate(node => getComputedStyle(node.closest('button')).color);
+      const error = await page.evaluate(() => { const probe = document.createElement('span'); probe.style.color = 'var(--error)';
+        document.body.append(probe); const color = getComputedStyle(probe).color; probe.remove(); return color; });
+      assert.notEqual(muted, error, `${label}: not confirmed is not in the error color`);
+      await unconfirmed.click();
+      await page.getByText('Not confirmed · entity', {exact: true}).waitFor();
+      assert.match(await page.locator('.verification > summary').textContent(), /· 1 not confirmed$/, `${label}: closed line`);
+      assert.equal(await page.locator('.verification > summary.has-failed').count(), 0, `${label}: closed line is not red`);
       assert.deepEqual(errors, [], `${label}: no page errors`);
       await context.close();
     }

@@ -2,6 +2,12 @@
 
 ## 0.6.0 (unreleased)
 
+- **The checks list says what it means.** A check that proves something did not work reads **Failed** and is the only
+  one in red. A check that could not confirm (Home Assistant was out of reach, or the check did not finish) now reads
+  **Not confirmed**, in a calm color, where it read **Unverified** under a red "1 failed". The closed line and the line
+  under the answer use the same words: "1 failed", "2 not confirmed", "1 check not confirmed". Readbacks of
+  read-only commands stay in the list as **Readback**: they are the evidence that a read happened.
+
 - **Settings > Scheduled runs** shows the name of each schedule's chat as a link. The link closes Settings and opens
   that chat. A schedule of no chat says that each run starts a new chat; a schedule whose chat is gone says that its
   next run starts a new one.
