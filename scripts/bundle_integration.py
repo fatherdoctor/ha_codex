@@ -3,7 +3,7 @@
 The app image carries the integration of the same release (codex-cli-worker/integration/README.md). Its only source
 is `custom_components/codex_cli`; the copy under `codex-cli-worker/integration/codex_cli` is made just before
 `docker build` and is not kept in git. A local build that skips the copy, or reuses an old one, puts a stale
-integration in the image even when both say the same version, and the app then installs that stale copy in /config.
+integration in the image even when both say the same version, and the app then installs that stale copy in /homeassistant.
 This script is the one copy step, for the workflows and for a build by hand.
 
 Usage:

@@ -98,7 +98,7 @@ def main():
 
         def preview_events(text):
             """The events, in the shape record_activity_event reads, that a short review of the config would produce."""
-            command = "/bin/sh -lc 'cat /config/automations.yaml'"
+            command = "/bin/sh -lc 'cat /homeassistant/automations.yaml'"
             return [
                 {"type": "item.completed", "item": {"id": "item_0", "type": "reasoning", "text": "**Checking the automation**"}},
                 {"type": "item.completed", "item": {"id": "item_1", "type": "agent_message", "text": "I'll read the automation before changing anything."}},
@@ -110,7 +110,7 @@ def main():
                 {"type": "item.completed", "item": {"id": "item_2b", "type": "agent_message",
                                                     "text": "The file reads fine. See the [Home Assistant docs](https://www.home-assistant.io/docs/automation/) next."}},
                 {"type": "item.completed", "item": {"id": "item_3", "type": "file_change", "status": "completed",
-                                                    "changes": [{"path": "/config/automations.yaml", "kind": "update"}]}},
+                                                    "changes": [{"path": "/homeassistant/automations.yaml", "kind": "update"}]}},
                 {"type": "item.completed", "item": {"id": "item_4", "type": "agent_message",
                                                     "text": json.dumps({"status": "completed", "summary": text, "question": "", "details": ""})}},
             ]
@@ -129,7 +129,7 @@ def main():
             (folder / "2025" / "park visits.xlsx").write_bytes(b"PK\x03\x04 invented workbook")
             (folder / ".notes.txt").write_text("hidden")
             return (f"**Done.** [Download the workbook]({folder}/2025/park%20visits.xlsx)\n\n"
-                    f"Not offered: [secrets](/config/secrets.yaml), [hidden]({folder}/.notes.txt), "
+                    f"Not offered: [secrets](/homeassistant/secrets.yaml), [hidden]({folder}/.notes.txt), "
                     f"[missing]({folder}/missing.xlsx) and [outside]({folder}/../task.json).")
 
         def finish(task_id, prompt, session_id=session_id, reply=None):
@@ -251,7 +251,7 @@ def main():
                         session.receive({"id": 0, "method": "item/fileChange/requestApproval" if file_permission else "item/commandExecution/requestApproval", "params": {
                             "threadId": session_id, "turnId": "preview-native", "itemId": "preview-command",
                             "command": command,
-                            "cwd": "/config", "reason": "Read historical sensor states from Home Assistant", "startedAtMs": 1,
+                            "cwd": "/homeassistant", "reason": "Read historical sensor states from Home Assistant", "startedAtMs": 1,
                         }})
                     answered.wait(120)
                     session.close()
@@ -378,7 +378,7 @@ def main():
             if index == 3:
                 # A YAML edit that Home Assistant rejected. Codex saved the previous
                 # version of the file, and the failed check points to it.
-                saved_copy = "/config/codex_tasks/preview-03/turns/x/backups/automations.yaml"
+                saved_copy = "/homeassistant/codex_tasks/preview-03/turns/x/backups/automations.yaml"
                 extra.update(config_check={"result": "invalid", "warnings": "",
                                            "errors": "Invalid config for 'automation' at automations.yaml, line 12: required key 'trigger' not provided"},
                              validation_errors=["Home Assistant configuration check failed: required key 'trigger' not provided"],
@@ -390,7 +390,7 @@ def main():
                                turns=[turn], current_turn_id=turn["turn_id"],
                                status="failed" if index == 3 else "completed",
                                session_id=task_session, summary=summary, question="",
-                               details="Validation errors: Home Assistant configuration check failed. Pre-change copies of the affected files are kept for 7 days at: `/config/codex_tasks/preview-03/turns/x/backups/automations.yaml`" if index == 3 else details,
+                               details="Validation errors: Home Assistant configuration check failed. Pre-change copies of the affected files are kept for 7 days at: `/homeassistant/codex_tasks/preview-03/turns/x/backups/automations.yaml`" if index == 3 else details,
                                attachments=attachments, **extra)
             server.tasks[f"preview-{index:02}"]["updated_at"] = f"2026-09-{20 - index % 19:02}T10:00:00+00:00"
             if index == 0:

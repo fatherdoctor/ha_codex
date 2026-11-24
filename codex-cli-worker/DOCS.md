@@ -41,7 +41,7 @@ What to know:
   read the sign-in: it asks the app to run git for it. Full access runs Codex with no sandbox, so a command there
   can read the app's private storage, the sign-in included.
 - **Clone** in the card copies a connected repository to `/share/<repository>`. **Link** points a git folder you
-  already have under `/share` or `/config` at a connected repository. You can also ask Codex in the chat.
+  already have under `/share` or `/homeassistant` at a connected repository. You can also ask Codex in the chat.
 - GitHub refuses a push that changes `.github/workflows/` with this access. Change workflow files on GitHub or on
   another computer.
 - **Disconnect** only makes this app forget the sign-in. To revoke it, use the link the card shows on GitHub.
@@ -69,11 +69,12 @@ More: [Sandbox](https://github.com/fatherdoctor/ha_codex/blob/main/docs/app-refe
 
 ## Your files
 
-- Your Home Assistant configuration is at `/config`, and `/share` is shared with other apps.
+- Inside the app your Home Assistant configuration is at `/homeassistant`, as in the Claude add-on (before 0.6 it was
+  `/config`; Home Assistant itself still calls it `/config`), and `/share` is shared with other apps.
 - Rules for your house go in **Settings** > **Workspace instructions**, the app's `AGENTS.md`. A new install gets a
   short starter file once. It is yours to change or delete.
 - Chats and the files you attach to a message (PNG, JPEG, GIF or WebP) stay in the app's private storage, not in
-  `/config`. Attachments are removed after 7 days or with the chat.
+  `/homeassistant`. Attachments are removed after 7 days or with the chat.
 - Keep your own Home Assistant backups. The app's saved copies of changed files can be missing, and `secrets.yaml`
   and `.storage` are never copied.
 
@@ -98,7 +99,7 @@ More: [Scheduled runs](https://github.com/fatherdoctor/ha_codex/blob/main/docs/a
 
 ## Backups and old chats
 
-- Before Codex changes, moves or deletes a file under `/config`, it copies the file. These copies are a safety net,
+- Before Codex changes, moves or deletes a file under `/homeassistant`, it copies the file. These copies are a safety net,
   not a check, and a copy can be missing. Keep your own Home Assistant backups.
 - `secrets.yaml` and everything under `.storage` are never copied. To undo a change to one of them, restore a Home
   Assistant backup.

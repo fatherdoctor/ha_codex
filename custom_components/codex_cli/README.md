@@ -7,7 +7,7 @@ Codex connects Home Assistant to the local Codex for Home Assistant app. It lets
 The Codex for Home Assistant app installs this integration for you. The steps with every detail are in the [repository README](../../README.md#installation).
 
 1. Add `https://github.com/fatherdoctor/ha_codex` as a Home Assistant app repository: **Settings** > **Apps** > **Install app** > menu > **Repositories**.
-2. Install and start the Codex for Home Assistant app. At start it copies this integration, in its own version, to `/config/custom_components/codex_cli`.
+2. Install and start the Codex for Home Assistant app. At start it copies this integration, in its own version, to `custom_components/codex_cli` in Home Assistant's configuration folder.
 3. Restart Home Assistant when the notification asks.
 4. Add **Discovered: Codex** under **Settings** > **Devices & services**.
 5. Open the app web UI and choose **Settings > Sign in** to sign in to Codex. See the [sign-in prerequisites](../../README.md#sign-in).
