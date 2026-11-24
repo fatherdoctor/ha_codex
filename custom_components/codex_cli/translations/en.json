@@ -33,7 +33,15 @@
   "entity": {
     "sensor": {
       "last_task": {
-        "name": "Last task"
+        "name": "Last task",
+        "state": {
+          "queued": "Queued",
+          "running": "Running",
+          "waiting_for_input": "Waiting for input",
+          "completed": "Completed",
+          "failed": "Failed",
+          "cancelled": "Cancelled"
+        }
       },
       "active_tasks": {
         "name": "Active tasks"
@@ -42,7 +50,12 @@
         "name": "Permission prompts"
       },
       "auth_status": {
-        "name": "Auth status"
+        "name": "Auth status",
+        "state": {
+          "logged_in": "Signed in",
+          "auth_file_present": "Saved sign-in does not work",
+          "not_logged_in": "Not signed in"
+        }
       },
       "five_hour_limit": {
         "name": "5-hour limit"

@@ -37,6 +37,7 @@ from .const import (
     SERVICE_REPLY_TASK,
     SERVICE_START_LOGIN,
     SERVICE_START_TASK,
+    TASK_ID_PATTERN,
 )
 from .coordinator import CodexCliCoordinator, async_delete_repair_issues
 from .discovery import async_discover_worker
@@ -53,11 +54,13 @@ START_TASK_SCHEMA = vol.Schema(
         vol.Required(ATTR_PROMPT): str,
     }
 )
-TASK_ID_SCHEMA = vol.Schema({vol.Required(ATTR_TASK_ID): str})
+# The ID goes into the worker URL (/tasks/<id>/...), so only the worker's own ID form passes.
+TASK_ID = vol.All(str, vol.Match(rf"^{TASK_ID_PATTERN}\Z"))
+TASK_ID_SCHEMA = vol.Schema({vol.Required(ATTR_TASK_ID): TASK_ID})
 REPLY_TASK_SCHEMA = vol.Schema(
-    {vol.Required(ATTR_TASK_ID): str, vol.Required(ATTR_REPLY): str, vol.Optional(ATTR_TURN_ID): str}
+    {vol.Required(ATTR_TASK_ID): TASK_ID, vol.Required(ATTR_REPLY): str, vol.Optional(ATTR_TURN_ID): str}
 )
-CONTINUE_TASK_SCHEMA = vol.Schema({vol.Required(ATTR_TASK_ID): str, vol.Required("message"): str})
+CONTINUE_TASK_SCHEMA = vol.Schema({vol.Required(ATTR_TASK_ID): TASK_ID, vol.Required("message"): str})
 LIST_TASKS_SCHEMA = vol.Schema({
     vol.Optional("limit"): vol.All(vol.Coerce(int), vol.Range(min=1, max=500)),
     vol.Optional("offset"): vol.All(vol.Coerce(int), vol.Range(min=0)),
@@ -115,7 +118,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             client=client, coordinator=coordinator, worker_token=worker.api_token
         )
         cleanup.callback(setattr, entry, "runtime_data", None)
-        cleanup.callback(entry.add_update_listener(_async_update_listener))
         cleanup.callback(async_listen_for_choices(hass, client, coordinator))
         # Keep contact even when every entity is disabled, while respecting
         # the config entry's setting to disable polling.
@@ -138,11 +140,6 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Remove the repair issues, and a browser user that a version before 0.4.0 left, on uninstall."""
     async_delete_repair_issues(hass)
     await _async_remove_browser_user(hass)
-
-
-async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload the config entry when options are updated."""
-    await hass.config_entries.async_reload(entry.entry_id)
 
 
 def _async_update_discovered_entry(hass: HomeAssistant, entry: ConfigEntry, base_url: str) -> None:

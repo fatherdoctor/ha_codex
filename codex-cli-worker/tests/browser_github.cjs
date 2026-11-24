@@ -7,6 +7,7 @@ const CODE = 'TEST-0000';
 const TOKEN = 'github_pat_' + 'S'.repeat(70);
 const REVOKE_APP = 'https://github.com/settings/apps/authorizations';
 const REVOKE_TOKEN = 'https://github.com/settings/tokens';
+const CONFIGURE = 'https://github.com/settings/installations/7';
 const idle = {status: 'idle', user_code: '', verification_uri: '', expires_at: null, error: ''};
 
 function status(state, extra = {}) {
@@ -19,7 +20,7 @@ function status(state, extra = {}) {
     permissions: connected ? {contents: 'write', metadata: 'read'} : null, permission_problem: null,
     expires_at: null, connected_at: connected ? '2026-11-16T12:00:00Z' : null,
     last_check: connected ? {at: '2026-11-16T13:00:00Z', state, reason: ''} : null, last_test: null,
-    revoke_url: REVOKE_APP, flow: idle, ...extra,
+    revoke_url: REVOKE_APP, add_repositories_url: connected ? CONFIGURE : '', flow: idle, ...extra,
   };
 }
 
@@ -90,6 +91,11 @@ function status(state, extra = {}) {
       await card.locator('.signin-code').waitFor();
       assert.equal(await card.locator('.signin-code').textContent(), CODE);
       assert.equal(await card.locator('a[href="https://github.com/login/device"]').count(), 1);
+      // The QR code of the same page, from the worker, folded on a phone like the ChatGPT one.
+      const qr = card.locator('img.signin-qr');
+      assert.equal(await qr.getAttribute('src'), 'github/qr.svg?flow=' + encodeURIComponent('2026-11-16T13:15:00Z'));
+      assert.equal(await qr.getAttribute('alt'), 'QR code that opens the GitHub sign-in page');
+      assert.equal(await card.locator('details.signin-qr-fold').evaluate(d => d.open), width > 700);
       assert.equal(await page.locator('#github-cancel').isVisible(), true);
       assert.match(await card.locator('.signin-expiry').textContent(), /^The code expires in \d+:\d\d\.$/);
       assert.equal(await card.locator('.settings-status').textContent(), 'Connecting: enter the code');
@@ -127,6 +133,10 @@ function status(state, extra = {}) {
       assert.match(shown, /Does not expire; revoke it on GitHub/);
       assert.match(shown, /Contents read and write, Metadata read/);
       assert.doesNotMatch(shown, /SYNTHETIC_PRIVATE_EMAIL|ghu_X/);
+      // '1 repository' is the App installation's set: one line says so and links to GitHub's page that adds more.
+      assert.equal(await page.locator('#github-add-repositories').isVisible(), true);
+      assert.equal(await page.locator('#github-add-repositories-link').getAttribute('href'), CONFIGURE);
+      assert.match(shown, /Codex reaches only the repositories that the GitHub App is installed on\. Add repositories on GitHub/);
 
       // Read test and Check now; a new repository set shows the banner and Accept.
       await page.locator('#github-test').click();
@@ -163,6 +173,7 @@ function status(state, extra = {}) {
       await page.waitForFunction(() => document.querySelector('#github-status').textContent.includes('token expired'));
       assert.match(await page.locator('#github-status').textContent(), /Create a new token on GitHub, then choose Use a token instead/);
       assert.match(await page.locator('#github-banner-text').textContent(), /Use a token instead/);
+      assert.equal(await page.locator('#github-add-repositories').isHidden(), true, 'a token has no Add repositories link');
       assert.equal(await page.locator('#github-flow').textContent(), '');
       github = status('revoked');
       await page.locator('#github-check').click();

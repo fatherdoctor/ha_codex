@@ -25,10 +25,12 @@ about GitHub into the chat.
    does this, and you can change the set there later. The App asks for Contents read and write, and GitHub adds
    Metadata read.
 2. In the chat, choose **Settings** > **Accounts and connections** > **GitHub**, then **Connect GitHub**. The card
-   shows a code in large letters and a link to `github.com/login/device`.
-3. Open the link, type the code and approve the App. The card checks every few seconds and shows your account and
+   shows a code in large letters, a link to `github.com/login/device` and a QR code of that page.
+3. Open the link, or scan the QR code with a phone, type the code and approve the App. The card checks every few seconds and shows your account and
    the repositories it reaches as soon as GitHub confirms. The code works for 15 minutes. After that, choose
    **Connect GitHub** again for a new one.
+4. Codex reaches only the repositories that the App is installed on. To add one, choose **Add repositories** under
+   the list, pick the repository on GitHub's page, then choose **Check now** and **Accept this access**.
 
 If your organization does not allow the App, choose **Use a token instead**. On github.com, make a fine-grained
 token (**Settings** > **Developer settings** > **Fine-grained tokens**) for **one** repository, with **Contents:
@@ -91,8 +93,9 @@ A scheduled run sends a chat's message again on a timetable, such as every morni
 next message in that chat, so Codex remembers everything said before. If the chat was deleted or archived, or Codex
 cannot resume it, the run starts a new chat.
 
-- Codex can **propose** a schedule, but a proposal stays off until an administrator approves it under **Settings** >
-  **Scheduled runs**.
+- Codex can **propose** a schedule. A repeating proposal stays off until an administrator approves it under
+  **Settings** > **Scheduled runs**. A one-time wakeup that Codex proposes is on at once: it runs one time, in the
+  same chat. Pause or delete it in the same place.
 - A scheduled run still asks before a step that needs more access. Open its chat to answer with **Allow once** or
   **Deny**. The run waits for your answer only until its **Time limit for a task** (one hour by default) ends. Then
   the run stops, and the step it asked about does not run.

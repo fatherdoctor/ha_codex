@@ -2,6 +2,48 @@
 
 ## 0.6.0 (unreleased)
 
+- **Settings > Scheduled runs** shows the name of each schedule's chat as a link. The link closes Settings and opens
+  that chat. A schedule of no chat says that each run starts a new chat; a schedule whose chat is gone says that its
+  next run starts a new one.
+- The integration's entities no longer show what only an administrator should see. Every Home Assistant user can
+  read an entity's attributes, and the recorder keeps them. The **Auth status** sensor no longer has the sign-in code,
+  its address or the QR address; the app page shows them, and `codex_cli.get_login_status` returns them to an
+  administrator. The **Last task** sensor no longer has the chat's `title` and `summary` (the `codex_cli_task_result`
+  event still carries them), and the usage sensors no longer have `raw_excerpt`. The question, its choices and the
+  ids an automation needs to answer stay. If an automation or card read one of the removed attributes, change it to
+  read the event or call the action.
+- **Last task** and **Auth status** are now enum sensors with translated states. **Last task** is `unknown` when there
+  is no task; it showed the word `unknown` as a state before.
+- The actions that take a `task_id` refuse an id that is not in the form the app makes, so a `/`, `?` or `#` in a
+  template can no longer send the request to a different worker route.
+- The device page has no "Visit" link any more: it pointed at the app's internal address, which no browser opens.
+- Removed from the integration, with nothing changed for an owner: `strings.json` (Home Assistant reads
+  `translations/en.json` for a custom integration), the reload on an options change (there are no options), a
+  discovery branch for an app without a slug, unused client members, and a second catch of unexpected errors that
+  the coordinator's base class already handles.
+
+- **Fast mode works.** The lightning button in the model and reasoning panel turns Fast mode on or off for a chat.
+  Codex then runs the model on its Fast service tier (about twice the speed; it uses more of your plan). The chip
+  shows a small bolt while Fast is on. A chat that never chose follows the model's own default from the Codex model
+  list, and each turn that names its model tells Codex the tier, so a choice never carries over by mistake. A turn
+  that does not yet know which model Codex picks sends no tier and leaves the choice to Codex. The button is dimmed
+  for a model without Fast.
+- A one-time wakeup that Codex proposes (a schedule with a single time) is now on when Codex saves it. It runs one
+  time, as the next message in the chat it came from, and that run still asks for permission like any other. A
+  repeating proposal still waits for an administrator's approval. A wakeup counts against the 100 approved
+  schedules until it has run; a one-time schedule that ran no longer counts, so old wakeups never fill that limit.
+  Settings > Scheduled runs shows "Set by Codex" on a wakeup. The answer Codex gets after a proposal now gives the
+  next run in Home Assistant's time zone (`next_run`), and Codex's rules tell it to give the owner times in that zone,
+  never in UTC. The tool text no longer says that cron fields are UTC; they always followed Home Assistant's time
+  zone.
+- The GitHub sign-in card in **Settings** now shows a QR code of GitHub's sign-in page, as the ChatGPT sign-in does.
+  Scan it with a phone to open the page there. On a phone-sized window it starts folded under **Show QR code**. The
+  app draws the code itself and serves it only while a GitHub sign-in waits.
+- Schedules that are on, paused or waiting for approval now come before one-time wakeups that already ran, in
+  Settings > Scheduled runs and in Codex's `list_schedules`. Codex's list stops after 120 rows (100 approved
+  schedules plus 20 proposals), so a long history of wakeups can no longer push a live schedule past the last page
+  it can read; every `next_offset` it gets is one it may ask for. The tool's `offset` range now says 0 to 120, as
+  the service does.
 - Home Assistant's configuration folder is now at `/homeassistant` inside the app, as in the Claude add-on and the
   Supervisor's default. `/config` no longer exists inside the app. Home Assistant and your files do not move. If your
   workspace instructions, your working folder's notes or a scheduled prompt say `/config/...`, change them to
@@ -19,9 +61,18 @@
   the task index and reads them at startup. No behavior changes, and the stored files keep the same form. New snapshot
   tests keep the Home Assistant event, the API record and the saved files of a completed, a waiting, a continued, a
   failed and a cancelled chat. Tests that replaced the chat list or the task file helpers now change the store instead.
+- The first half of the run function in `server.py` is now a set of small steps. The preflight (`prepare_exchange`)
+  checks the policy, marks the chat running, records the configuration and writes the message for Codex; the launch
+  (`start_launch`, `launch_exchange`) checks the sandbox and runs the exchange on the live Codex process or on a
+  process of its own, and both paths return the same result. A cancel now ends these steps through one exception
+  that is caught in one place, and each refused step through another, so the six copies of the failure report are
+  one. No step is longer than 80 lines. No behavior changes; `tests/test_run_task_exits.py` passes unchanged.
 - The chat page's repeating checks (the chat list, the steps of a working chat, the quota, the two sign-ins, remote
   control and the code countdowns) now run through one scheduler, `poll()`, and the buttons that wait for the worker
   share one helper, `busyAction()`. Each check keeps its timing, and nothing looks different.
+- The GitHub card explains its repository count: Codex reaches only the repositories that the GitHub App is installed
+  on. A new **Add repositories** link under the list opens the App's Configure page on GitHub, where you add more. The
+  link comes from GitHub's answer for the installation and shows only for an App sign-in, not for a token.
 
 ## 0.5.1 (unreleased)
 
@@ -161,7 +212,7 @@ These are draft checks for the installed release. They do not report a live-syst
   another model from **Select model**; you return to the panel. Esc or a press outside closes it. It works on a phone
   and on a desktop. The desktop app's fast mode switch is left out: the Codex CLI has no setting for it.
 - **Fast mode is hidden until it works.** The chat page shows no lightning (fast mode) toggle and no `/fast` command;
-  both return in 0.6 with a working toggle.
+  a working toggle returns in 0.6.0 (see that entry).
 - **Home Assistant MCP, on by default.** The new option **Enable Home Assistant MCP** gives Codex the tools of the
   bundled Home Assistant MCP server (hass-mcp 0.6.0, as in the Claude Code app). Codex can find entities by name, area
   or domain and read automations, dashboards, history, statistics and the error log without asking. It can also

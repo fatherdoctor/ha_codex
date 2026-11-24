@@ -215,8 +215,9 @@ Open a chat's menu and choose **Schedule**. You save a name, a prompt, a model a
 or a custom interval, cron rule or single time, in your Home Assistant time zone. A run continues the chat you scheduled.
 **Settings** > **Scheduled runs** lists every schedule.
 
-- A schedule you save is approved when you save it. Codex can only propose one; it stays off until an administrator
-  reads the full prompt and approves it.
+- A schedule you save is approved when you save it. Codex can only propose a repeating schedule; it stays off until
+  an administrator reads the full prompt and approves it. A one-time wakeup that Codex proposes runs at its time
+  without approval, in the chat it came from.
 - A scheduled run asks for permission like any other run and waits for you in its chat.
 - Limits: 100 approved schedules, 24 runs per schedule per UTC day, and 64 scheduled runs per UTC day.
 
