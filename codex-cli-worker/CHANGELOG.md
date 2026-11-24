@@ -13,6 +13,12 @@
   the task index and reads them at startup. No behavior changes, and the stored files keep the same form. New snapshot
   tests keep the Home Assistant event, the API record and the saved files of a completed, a waiting, a continued, a
   failed and a cancelled chat. Tests that replaced the chat list or the task file helpers now change the store instead.
+- The first half of the run function in `server.py` is now a set of small steps. The preflight (`prepare_exchange`)
+  checks the policy, marks the chat running, records the configuration and writes the message for Codex; the launch
+  (`start_launch`, `launch_exchange`) checks the sandbox and runs the exchange on the live Codex process or on a
+  process of its own, and both paths return the same result. A cancel now ends these steps through one exception
+  that is caught in one place, and each refused step through another, so the six copies of the failure report are
+  one. No step is longer than 80 lines. No behavior changes; `tests/test_run_task_exits.py` passes unchanged.
 
 ## 0.5.0 (draft)
 
