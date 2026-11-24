@@ -1,7 +1,6 @@
 """Task-scoped, read-only recorder access using credentials kept in the worker."""
 from __future__ import annotations
 
-from contextlib import closing
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -20,8 +19,8 @@ from typing import Any
 from urllib.parse import quote
 
 import requests
-import websocket
 
+import ha_client
 import tool_threads
 from ha_data_mcp import DEFAULT_POINTS, MAX_IDS, MAX_POINTS, MAX_RESPONSE_BYTES, PERIODS, STATISTIC_TYPES, TOOLS
 
@@ -29,6 +28,17 @@ MAX_QUERIES = 64
 MAX_SOURCE_BYTES = 1024 * 1024
 MAX_EXPORT_BYTES = 4 * 1024 * 1024
 MAX_TURN_BYTES = 32 * 1024 * 1024
+# A statistics read: 15 seconds a frame, 45 for the whole read, MAX_SOURCE_BYTES a frame, 8 frames for each reply.
+STATISTICS_LIMITS = ha_client.WsLimits(timeout=15, deadline=45, max_frame_bytes=MAX_SOURCE_BYTES, max_frames=8)
+# What the agent sees for each way a statistics read can fail; Home Assistant's own text stays out.
+STATISTICS_ERRORS = {
+    "auth": "Home Assistant WebSocket authentication failed",
+    "timeout": "Statistics query timed out",
+    "too_large": "Statistics response exceeds the query limit; use fewer IDs or a coarser period",
+    "invalid": "Home Assistant returned an invalid statistics reply",
+    "failed": "Home Assistant could not read statistics; check Recorder and the requested IDs",
+    "no_result": "Home Assistant did not return statistics",
+}
 ENTITY_RE = re.compile(r"[a-z0-9_]+\.[a-z0-9_]+")
 TIMESTAMP_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})")
 
@@ -332,7 +342,7 @@ class HomeAssistantData:
 
     def history(self, query: dict[str, Any]) -> dict[str, Any]:
         """GET the fixed REST history route, retaining only timestamped state values for requested entities."""
-        url = "http://supervisor/core/api/history/period/" + quote(query["start_time"], safe="")
+        url = ha_client.api_url("history/period/" + quote(query["start_time"], safe=""))
         params = {"filter_entity_id": ",".join(query["entity_ids"]), "end_time": query["end_time"],
                   "minimal_response": "1", "no_attributes": "1", "significant_changes_only": "0"}
         deadline = time.monotonic() + 45
@@ -372,46 +382,15 @@ class HomeAssistantData:
         return self.result("history", query, series)
 
     def ws_read(self, messages: list[dict[str, Any]]) -> list[Any]:
-        """Authenticate once and send only the two fixed recorder read commands with bounded replies."""
+        """Authenticate once and send only the two fixed recorder read commands, inside STATISTICS_LIMITS."""
         token = self.token()
         if any(message.get("type") not in {"recorder/get_statistics_metadata", "recorder/statistics_during_period"}
                for message in messages):
             raise DataError("Unsupported recorder command")
-        deadline = time.monotonic() + 45
-        with closing(websocket.create_connection("ws://supervisor/core/websocket", timeout=15)) as ws:
-            def receive():
-                """Bound every frame, including authentication, and enforce a total query deadline."""
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise DataError("Statistics query timed out")
-                ws.settimeout(min(15, remaining))
-                raw = ws.recv()
-                if len(raw.encode() if isinstance(raw, str) else raw) > MAX_SOURCE_BYTES:
-                    raise DataError("Statistics response exceeds the query limit; use fewer IDs or a coarser period")
-                reply = json.loads(raw)
-                if not isinstance(reply, dict):
-                    raise DataError("Home Assistant returned an invalid statistics reply")
-                return reply
-            first = receive()
-            if first.get("type") != "auth_required":
-                raise DataError("Home Assistant WebSocket authentication failed")
-            ws.send(json.dumps({"type": "auth", "access_token": token}))
-            if receive().get("type") != "auth_ok":
-                raise DataError("Home Assistant WebSocket authentication failed")
-            results = []
-            for request_id, message in enumerate(messages, 1):
-                ws.send(json.dumps({**message, "id": request_id}))
-                for _ in range(8):
-                    reply = receive()
-                    if reply.get("id") != request_id or reply.get("type") != "result":
-                        continue
-                    if not reply.get("success"):
-                        raise DataError("Home Assistant could not read statistics; check Recorder and the requested IDs")
-                    results.append(reply.get("result"))
-                    break
-                else:
-                    raise DataError("Home Assistant did not return statistics")
-            return results
+        try:
+            return ha_client.ws(token, messages, STATISTICS_LIMITS)
+        except ha_client.WsError as exc:
+            raise DataError(STATISTICS_ERRORS[exc.kind]) from None
 
     def statistics(self, query: dict[str, Any]) -> dict[str, Any]:
         """Read recorder metadata and statistics, preserving missing fields, units and bucket boundaries."""

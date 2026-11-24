@@ -16,7 +16,7 @@ from unittest.mock import Mock, patch
 from app_folders import isolated_app_folders
 from test_server import server
 import tool_threads
-from ha_data import HomeAssistantData, MAX_EXPORT_BYTES, MAX_QUERIES, MAX_SOURCE_BYTES, MAX_TURN_BYTES
+from ha_data import DataError, HomeAssistantData, MAX_EXPORT_BYTES, MAX_QUERIES, MAX_SOURCE_BYTES, MAX_TURN_BYTES
 from ha_data_mcp import MAX_RESPONSE_BYTES, STATISTIC_TYPES, TOOLS, respond
 
 START = "2026-01-01T00:00:00+00:00"
@@ -83,6 +83,22 @@ class HistoricalDataTests(unittest.TestCase):
         ]]
         return ws
 
+    def read_with_reply_at(self, elapsed):
+        """Run ws_read on a clock where the read starts at 100, the login comes at once and the reply at 100 + elapsed."""
+        ws = self.ws_response([], {})
+        clock = iter([100.0, 100.0, 100.0, 100.0 + elapsed])
+        with patch("ha_client.websocket.create_connection", return_value=ws), \
+                patch("ha_client.time.monotonic", side_effect=lambda: next(clock)):
+            return ws, self.engine.ws_read([{"type": "recorder/get_statistics_metadata", "statistic_ids": ["sensor.x"]}])
+
+    def test_statistics_read_stops_at_45_seconds(self):
+        """The whole read is bounded: a reply due at 45 seconds is not read, and the agent sees the timeout."""
+        ws, results = self.read_with_reply_at(44)
+        self.assertEqual(results, [[]])
+        self.assertEqual([call.args[0] for call in ws.settimeout.call_args_list], [15, 15, 1])
+        with self.assertRaisesRegex(DataError, "^Statistics query timed out$"):
+            self.read_with_reply_at(45)
+
     def test_untrusted_arguments_fail_before_network_access(self):
         """Reject unscoped queries, arbitrary operations, malformed windows and oversized work."""
         invalid = [
@@ -98,7 +114,7 @@ class HistoricalDataTests(unittest.TestCase):
             {"operation": "call_service"}, {"operation": "sql"},
             {"end_time": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()},
         ]
-        with patch("ha_data.requests.get") as rest, patch("ha_data.websocket.create_connection") as ws:
+        with patch("ha_data.requests.get") as rest, patch("ha_client.websocket.create_connection") as ws:
             for fields in invalid:
                 with self.subTest(fields=fields):
                     self.assertEqual(self.engine.dispatch(self.payload(**fields))["status"], "unavailable")
@@ -289,7 +305,7 @@ class HistoricalDataTests(unittest.TestCase):
                                     "sum": 134.6, "change": 1.2, "state": None, "last_reset": START_MS,
                                     "unrequested": "private"}], "sensor.other": [{"private": "hidden"}]}
         ws = self.ws_response(metadata, raw)
-        with patch("ha_data.websocket.create_connection", return_value=ws) as connect:
+        with patch("ha_client.websocket.create_connection", return_value=ws) as connect:
             result = self.saved_result(self.engine.dispatch(self.payload(
                 "statistics", statistic_ids=["sensor.kitchen", "sensor.empty", "external:missing"],
                 types=["mean", "sum", "change", "state", "last_reset"])))
@@ -322,7 +338,7 @@ class HistoricalDataTests(unittest.TestCase):
             with self.subTest(replies=replies):
                 ws = self.ws_response([], {})
                 ws.recv.side_effect = [json.dumps(reply) for reply in replies]
-                with patch("ha_data.websocket.create_connection", return_value=ws):
+                with patch("ha_client.websocket.create_connection", return_value=ws):
                     result = self.engine.dispatch(self.payload("statistics"))
                 self.assertEqual(result["status"], "unavailable")
                 self.assertNotIn("private", json.dumps(result))
@@ -332,7 +348,7 @@ class HistoricalDataTests(unittest.TestCase):
         """Count UTF-8 bytes rather than characters when bounding a metadata frame."""
         ws = self.ws_response([], {})
         ws.recv.side_effect = ['{"type":"auth_required","padding":"' + "א" * (MAX_SOURCE_BYTES // 2) + '"}']
-        with patch("ha_data.websocket.create_connection", return_value=ws):
+        with patch("ha_client.websocket.create_connection", return_value=ws):
             result = self.engine.dispatch(self.payload("statistics"))
         self.assertEqual(result["status"], "unavailable")
         self.assertIn("query limit", result["message"])
@@ -353,7 +369,7 @@ class HistoricalDataTests(unittest.TestCase):
     def test_absent_credentials_do_not_open_any_network_connection(self):
         """Fail locally when automatic HA authentication is unavailable."""
         self.worker.ha_token.return_value = ""
-        with patch("ha_data.requests.get") as rest, patch("ha_data.websocket.create_connection") as ws:
+        with patch("ha_data.requests.get") as rest, patch("ha_client.websocket.create_connection") as ws:
             for operation in ("history", "statistics"):
                 self.assertIn("authentication", self.engine.dispatch(self.payload(operation))["message"])
         rest.assert_not_called()
@@ -404,7 +420,7 @@ class HistoricalDataTests(unittest.TestCase):
                 for index in range(5000)]
         ws = self.ws_response([{"statistic_id": "sensor.kitchen", "display_unit_of_measurement": "kWh"}],
                               {"sensor.kitchen": rows})
-        with patch("ha_data.websocket.create_connection", return_value=ws):
+        with patch("ha_client.websocket.create_connection", return_value=ws):
             receipt = self.engine.dispatch(self.payload("statistics", max_points=5000, types=STATISTIC_TYPES,
                                                         end_time="2026-09-01T00:00:00Z"))
         result = self.saved_result(receipt)
