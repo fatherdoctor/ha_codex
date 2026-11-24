@@ -254,7 +254,7 @@ class SessionTests(unittest.TestCase):
         return {"method": method, "params": {
             "threadId": thread, "turnId": turn, "startedAtMs": 1, "reviewId": "review-1", "targetItemId": "item",
             "review": {"status": "inProgress", "riskLevel": None, "userAuthorization": None, "rationale": None, **review},
-            "action": {"type": "command", "source": "shell", "command": "ls", "cwd": "/config"}}}
+            "action": {"type": "command", "source": "shell", "command": "ls", "cwd": "/homeassistant"}}}
 
     def auto_review_session(self):
         settings = {"approvalPolicy": "on-request", "approvalsReviewer": "auto_review"}
@@ -655,14 +655,14 @@ class PageTests(unittest.TestCase):
         start = html.index('id="permissions-dialog"')
         dialog = html[start:html.index("</dialog>", start)]
         modes = [part.split('"', 1)[0] for part in dialog.split('data-mode="')[1:]]
-        self.assertEqual(modes, ["default", "auto-review", "read-only", "full-access"])
+        self.assertEqual(modes, ["default", "auto-review", "full-access", "read-only"])
         self.assertNotIn("Coming", dialog)
         self.assertIn("It does not ask you.", dialog)
         self.assertNotIn("Administrators only", dialog)
 
     def test_the_button_names_each_mode(self):
         script = (ROOT / "web" / "assets" / "studio.js").read_text(encoding="utf-8")
-        for name in ('"auto-review": "Auto-review"', '"full-access": "Full access"'):
+        for name in ('"auto-review": "Approve for me"', '"full-access": "Full access"'):
             self.assertIn(name, script)
 
 

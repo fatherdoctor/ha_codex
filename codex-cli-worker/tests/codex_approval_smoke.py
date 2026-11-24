@@ -1,12 +1,15 @@
 """Exercise real pinned-CLI approvals against a local model fixture, without an account."""
 
 import argparse
-from contextlib import ExitStack, contextmanager
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager, suppress
+import ctypes
 import json
 import os
 import re
 from pathlib import Path
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
@@ -18,6 +21,42 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from approvals import AppServerSession
 import server
 from server import FINAL_RESPONSE_SCHEMA
+
+PR_SET_CHILD_SUBREAPER = 36
+
+
+@contextmanager
+def codex_process(command: list[str], **options) -> Iterator[subprocess.Popen]:
+    """Stop and reap the CLI's group, including children that outlive it."""
+    with subprocess.Popen(command, start_new_session=True, **options) as process:
+        try:
+            yield process
+        finally:
+            try:
+                process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                with suppress(ProcessLookupError):
+                    os.killpg(process.pid, signal.SIGTERM)
+                with suppress(subprocess.TimeoutExpired):
+                    process.wait(timeout=5)
+            finally:
+                # Git can still write plugin files after the CLI exits.
+                with suppress(ProcessLookupError):
+                    os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
+                with suppress(ChildProcessError):
+                    while True:
+                        os.waitpid(-process.pid, 0)
+
+
+def run_codex(command: list[str], *, cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    """Capture exec output without waiting for descendants to close pipes."""
+    with tempfile.TemporaryFile(mode="w+t") as stdout, tempfile.TemporaryFile(mode="w+t") as stderr:
+        with codex_process(command, cwd=cwd, env=env, stdout=stdout, stderr=stderr) as process:
+            process.wait(timeout=30)
+        stdout.seek(0)
+        stderr.seek(0)
+        return subprocess.CompletedProcess(command, process.returncode, stdout.read(), stderr.read())
 
 
 def assert_restricted_full_access(result):
@@ -75,7 +114,7 @@ def worker_approval_session(proc, workspace, root, mode, resume_id, approve, fin
         return True
 
     with (
-        patch.object(server, "tasks", {task_id: task}),
+        patch.dict(server.tasks, {task_id: task}, clear=True),
         patch.object(server, "running_processes", {task_id: proc}),
         patch.object(server, "api_token", return_value="fixture-worker-token"),
         patch.object(server, "update_task", side_effect=update_task),
@@ -91,10 +130,10 @@ def worker_approval_session(proc, workspace, root, mode, resume_id, approve, fin
         policy = session.turn_params["sandboxPolicy"]
         assert policy["networkAccess"] is False, policy
         assert policy["type"] == ("readOnly" if mode == "read-only" else "workspaceWrite"), policy
-        assert session.thread_params["cwd"] == "/config", session.thread_params
+        assert session.thread_params["cwd"] == "/homeassistant", session.thread_params
         session.thread_params["cwd"] = str(workspace)
         if mode == "workspace-write":
-            assert policy["writableRoots"] == ["/config", "/share"], policy
+            assert policy["writableRoots"] == ["/homeassistant", "/share"], policy
             policy["writableRoots"] = [str(workspace)]
         save_approvals = session.on_approvals
         save_final = session.on_final
@@ -121,6 +160,10 @@ def main():
     args = parser.parse_args()
     binary = os.environ.get("HA_TEST_CODEX", "/usr/local/bin/codex")
     assert "0.166.0" in subprocess.check_output([binary, "--version"], text=True)
+    # Adopt orphaned plugin workers so the test can wait for them on Linux.
+    if ctypes.CDLL(None, use_errno=True).prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error))
     cache = Path.home() / ".cache"
     cache.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="ha-approval-smoke-", dir=cache) as temporary, ExitStack() as resources:
@@ -225,14 +268,14 @@ def main():
             # old transport is exercised in workspace-write; a full-access request must either fail
             # or report both requirements warnings and a restricted effective fallback.
             if Path("/etc/codex/requirements.toml").is_file():
-                refused = subprocess.run([binary, "exec", "--sandbox", "danger-full-access", "--skip-git-repo-check",
-                                          "--json", "--model", "gpt-5.1-codex", *config_args, "Say fixture finished"],
-                                         cwd=workspace, env=environment, capture_output=True, text=True, timeout=30)
+                refused = run_codex([binary, "exec", "--sandbox", "danger-full-access", "--skip-git-repo-check",
+                                     "--json", "--model", "gpt-5.1-codex", *config_args, "Say fixture finished"],
+                                    cwd=workspace, env=environment)
                 outcome = assert_restricted_full_access(refused)
                 print(f"Managed full-access request: {outcome}; source /etc/codex/requirements.toml.")
-            legacy = subprocess.run([binary, "exec", "--sandbox", "workspace-write", "--skip-git-repo-check", "--json",
-                                     "--model", "gpt-5.1-codex", *config_args, "Say fixture finished"],
-                                    cwd=workspace, env=environment, capture_output=True, text=True, timeout=30)
+            legacy = run_codex([binary, "exec", "--sandbox", "workspace-write", "--skip-git-repo-check", "--json",
+                                "--model", "gpt-5.1-codex", *config_args, "Say fixture finished"],
+                               cwd=workspace, env=environment)
             assert legacy.returncode == 0, (legacy.stdout, legacy.stderr)
             thread_id = next(json.loads(line)["thread_id"] for line in legacy.stdout.splitlines() if json.loads(line).get("type") == "thread.started")
             final_only = False
@@ -249,9 +292,14 @@ def main():
                 records = []
                 finals = []
                 events = []
-                with (root / "stderr.log").open("w+") as errors, ExitStack() as session_context:
-                    proc = subprocess.Popen([binary, "app-server", *config_args], cwd=workspace, env=environment,
-                                            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=errors, text=True, bufsize=1)
+                error_log = root / "stderr.log"
+                with (
+                    error_log.open("w") as errors,
+                    ExitStack() as session_context,
+                    codex_process([binary, "app-server", *config_args], cwd=workspace, env=environment,
+                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=errors,
+                                  text=True, bufsize=1) as proc,
+                ):
                     params = {"cwd": str(workspace), "model": "gpt-5.1-codex", "sandbox": mode,
                               "approvalPolicy": "on-request", "approvalsReviewer": "user"}
                     if resume_id:
@@ -281,14 +329,8 @@ def main():
                         assert session.finished.wait(45), "App-server approval timed out"
                     finally:
                         session.close()
-                        try:
-                            proc.wait(timeout=3)
-                        except subprocess.TimeoutExpired:
-                            proc.terminate()
-                            proc.wait(timeout=5)
-                        reader.join(3)
-                    errors.seek(0)
-                    diagnostic = (session.error, errors.read()[-6000:], events[-5:])
+                reader.join(3)
+                diagnostic = (session.error, error_log.read_text()[-6000:], events[-5:])
                 assert session.returncode == 0 and finals, diagnostic
                 if file_case:
                     assert len(records) == 2 and [record["status"] for record in records] == ["allowed", "denied"], (records, diagnostic)

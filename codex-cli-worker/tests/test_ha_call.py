@@ -74,7 +74,7 @@ class CallTestCase(unittest.TestCase):
         self.calls = HomeAssistantCall(self.worker)
         tool_threads.CHATS.bind("t1", THREAD)
         self.addCleanup(tool_threads.CHATS.release, "t1")
-        self.key = self.calls.begin("t1")
+        self.calls.begin("t1")
 
     def call(self, arguments, thread=None):
         return self.calls.dispatch({"thread_id": THREAD if thread is None else thread, "arguments": arguments})
@@ -140,7 +140,7 @@ class NothingSentTests(CallTestCase):
                 if thread is not None:
                     payload["thread_id"] = thread
                 self.assert_nothing_sent(self.calls.dispatch(payload))
-        for key in ("", "wrong", "invented-verification-key", self.key):
+        for key in ("", "wrong", "invented-verification-key"):
             with self.subTest(key=key):
                 self.assert_nothing_sent(self.calls.dispatch(
                     {"capability": key, "arguments": {"service": "light.turn_off"}}))
@@ -260,10 +260,10 @@ class BridgeTests(CallTestCase):
         self.assertEqual(result["status"], "refused")
         self.assertEqual(self.fake.requests, [])
 
-    def test_a_shell_command_with_its_own_key_meets_the_same_checks(self):
-        """A request written straight to the socket, as a command could, gets no further than the bridge's."""
+    def test_a_request_with_an_old_relay_key_meets_the_same_checks(self):
+        """The chat socket reads no key (D-CX-KEYS): a key of an older version neither opens nor names a chat."""
         with patch.dict("os.environ", {"HA_CALL_CAPABILITY": "guessed"}):
-            _, result = self.tool_call({"service": "light.turn_off"})
+            _, result = self.tool_call({"service": "light.turn_off"}, thread="")
         self.assertEqual(result["status"], "unavailable")
         self.assertEqual(self.fake.requests, [])
 
@@ -400,7 +400,7 @@ class LaunchTests(unittest.TestCase):
 
     def launches(self):
         task = {"task_id": "t", "turns": [], "chat_settings": server.DEFAULT_CHAT_SETTINGS}
-        with patch.object(server, "tasks", {"t": task}), patch.object(server, "read_options", return_value={}):
+        with patch.dict(server.tasks, {"t": task}, clear=True), patch.object(server, "read_options", return_value={}):
             return {"page": server.build_app_server_args()}
 
     def test_the_chat_launch_gets_the_tool_without_a_key(self):
@@ -409,10 +409,14 @@ class LaunchTests(unittest.TestCase):
         self.assertTrue(call_values)
         self.assertFalse([value for value in call_values if ".env_vars=" in value])
 
-    def test_only_the_relay_launch_hands_the_bridge_a_key(self):
+    def test_only_the_relay_launch_hands_the_bridge_the_apps_socket(self):
         relay = [value for value in configured(server.relay_tool_args())
                  if value.startswith("mcp_servers.home_assistant_call.")]
-        self.assertIn('mcp_servers.home_assistant_call.env_vars=["HA_CALL_CAPABILITY"]', relay)
+        self.assertIn('mcp_servers.home_assistant_call.env_vars=["HA_CALL_SOCKET"]', relay)
+        for name, args in self.launches().items():
+            with self.subTest(launch=name):
+                self.assertFalse([value for value in configured(args) if "env_vars" in value
+                                  and value.startswith("mcp_servers.home_assistant_call.")])
 
     def test_the_page_launch_asks_for_each_call(self):
         call_values = [value for value in configured(self.launches()["page"])
@@ -475,7 +479,9 @@ class RunTaskLaunchTests(unittest.TestCase):
                  "refresh_core_address", "start_phase", "prepare_ha_docs")
         with ExitStack() as stack:
             for name, value in replaced.items():
-                if name in ("tasks", "ha_call"):
+                if name == "tasks":
+                    stack.enter_context(patch.dict(server.tasks, value, clear=True))
+                elif name == "ha_call":
                     stack.enter_context(patch.object(server, name, value))
                 else:
                     stack.enter_context(patch.object(server, name, return_value=value))
@@ -486,10 +492,10 @@ class RunTaskLaunchTests(unittest.TestCase):
             stack.enter_context(patch.object(server.subprocess, "Popen", side_effect=popen))
             with self.assertRaises(Launched):
                 server.run_task("t", "Turn off the kitchen ceiling.")
-            started["key_held"] = "t" in server.ha_call.capabilities
+            started["begun"] = "t" in server.ha_call.begun
         return started
 
-    def test_every_exchange_gets_the_tool_and_its_key(self):
+    def test_every_exchange_gets_the_tool_and_is_begun(self):
         """A scheduled run starts like a chat on the page; so does a chat that the removed lead channel started."""
         for source in ("page", None, "schedule", "lead"):
             with self.subTest(task_source=source):
@@ -498,25 +504,25 @@ class RunTaskLaunchTests(unittest.TestCase):
                                  if value.startswith("mcp_servers.home_assistant_call.")])
                 self.assertFalse([value for value in configured(started["args"]) if "HA_CALL_CAPABILITY" in value])
                 self.assertNotIn("HA_CALL_CAPABILITY", started["env"])
-                self.assertTrue(started["key_held"])
+                self.assertTrue(started["begun"])
 
-    def test_the_key_is_withdrawn_when_the_exchange_ends(self):
+    def test_the_calls_end_when_the_exchange_ends(self):
         calls = HomeAssistantCall(call_worker())
 
         def run_task(task_id, *_):
             calls.begin(task_id)
 
         with patch.object(server, "ha_call", calls), patch.object(server, "run_task", side_effect=run_task), \
-                patch.object(server, "record_diagnostic"), patch.object(server, "tasks", {"t": {"task_id": "t"}}), \
+                patch.object(server, "record_diagnostic"), patch.dict(server.tasks, {"t": {"task_id": "t"}}, clear=True), \
                 patch.object(server, "running_processes", {}):
             server._run_background_task("t", "Turn off the kitchen ceiling.", None, None)
-        self.assertNotIn("t", calls.capabilities)
+        self.assertNotIn("t", calls.begun)
 
 
     def test_every_exchange_is_told_to_use_the_tool(self):
         for source, has_tool in (("page", True), ("schedule", True), ("lead", True)):
             task = {"task_id": "t", "turns": [], "task_source": source}
-            with self.subTest(task_source=source), patch.object(server, "tasks", {"t": task}), \
+            with self.subTest(task_source=source), patch.dict(server.tasks, {"t": task}, clear=True), \
                     patch.object(server, "read_options", return_value={"HA_TOKEN": "invented-token"}):
                 text = server.exchange_info("t", None)["home_assistant_api"]
             self.assertEqual("home_assistant_call" in text, has_tool)

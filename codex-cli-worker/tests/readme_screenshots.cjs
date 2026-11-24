@@ -70,6 +70,12 @@ async function openSettings(page) {
   await page.getByRole('button', {name: 'Open settings', exact: true}).click();
 }
 
+/** Open a Settings section that starts collapsed; a section that is already open stays open. */
+async function expandSection(page, id) {
+  const toggle = page.locator(`#${id} > :is(h3, h4) > .settings-toggle`);
+  if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click();
+}
+
 /** Make the window tall enough that each Settings section fits in one capture. */
 async function tallWindow(page, size) {
   await page.setViewportSize({...sizes[size], height: 1600});
@@ -150,6 +156,7 @@ async function settings(browser, size, scheme) {
   const page = await openPage(browser, size, scheme);
   await tallWindow(page, size);
   await openSettings(page);
+  await expandSection(page, 'scheduled-work');
   const schedules = page.locator('#schedule-list');
   await schedules.getByRole('button', {name: 'Approve this proposal', exact: true}).waitFor();
   await shootRange(page, page.locator('#scheduled-work h3').first(), schedules, `schedule-proposal-${scheme}-${size}.png`);
@@ -161,15 +168,21 @@ async function signIn(browser, size, scheme) {
   const page = await openPage(browser, size, scheme);
   await tallWindow(page, size);
   await openSettings(page);
+  await expandSection(page, 'accounts-section');
+  await expandSection(page, 'chatgpt-section');
   const card = page.locator('#login-card');
   await card.locator('.signin-code').waitFor();
-  await card.locator('.signin-qr').evaluate(image => image.complete || new Promise(done => { image.onload = done; }));
+  // A QR image that failed to load (the fixture answers 500 without the qrcode package) is still
+  // "complete", with no pixels; a shot of it shows a blank square, so stop instead.
+  const qrWidth = await card.locator('.signin-qr').evaluate(image => (image.complete ? Promise.resolve()
+    : new Promise(done => { image.onload = done; image.onerror = done; })).then(() => image.naturalWidth));
+  if (!qrWidth) throw new Error('The sign-in QR code did not load; install the qrcode package (see SCREENSHOTS.md).');
   // Cover the sample code with a plain block and blur the QR code past reading; both are samples, but a
   // reader cannot tell that from the picture.
   await page.addStyleTag({content:
     '.signin-code { color: transparent !important; background: #8888; border-radius: 4px; }' +
     ' .signin-qr { filter: blur(16px); }'});
-  await shootRange(page, page.locator('#settings h3').filter({hasText: 'ChatGPT account'}), card,
+  await shootRange(page, page.locator('#settings h4').filter({hasText: 'ChatGPT account'}), card,
     `sign-in-${scheme}-${size}.png`);
   return page;
 }

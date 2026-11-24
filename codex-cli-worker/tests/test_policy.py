@@ -102,11 +102,11 @@ class ProtectedPolicyTests(unittest.TestCase):
         """A task under a refused mode fails as "needs support" and no Codex process starts."""
         with (
             patch.object(server, "read_options", return_value={"codex_sandbox": "danger-full-access"}),
-            patch.object(server, "tasks", {"task": {"task_id": "task", "status": "queued", "turns": []}}),
+            patch.dict(server.tasks, {"task": {"task_id": "task", "status": "queued", "turns": []}}, clear=True),
             patch.object(server, "running_processes", {}),
             patch.object(server, "get_run_dir", return_value=self.root / "run"),
-            patch.object(server, "get_task_dir", side_effect=lambda task_id: self.root / "tasks" / task_id),
-            patch.object(server, "save_task_index"),
+            patch.object(server.store, "task_dir", side_effect=lambda task_id: self.root / "tasks" / task_id),
+            patch.object(server.store, "save_index"),
             patch.object(server, "write_task_log"),
             patch.object(server, "record_baseline", return_value={}) as baseline,
             patch.object(server, "prepare_ha_docs"),

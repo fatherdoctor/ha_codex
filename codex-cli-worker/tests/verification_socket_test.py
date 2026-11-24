@@ -18,9 +18,9 @@ THREAD = "11111111-2222-4333-8444-555555555555"
 def test_parallel_request_is_rejected_while_active_check_is_blocked(tmp_path, monkeypatch):
     """Reject a second request before the first finishes, without recording it."""
     pytest_socket.socket_allow_hosts(["127.0.0.1"], allow_unix_socket=True)
-    monkeypatch.setattr(server, "tasks", {"chat": {"task_id": "chat", "status": "running", "current_turn_id": "turn"}})
-    monkeypatch.setattr(server, "save_task_index", lambda: None)
-    monkeypatch.setattr(server, "get_task_dir", lambda _task_id: tmp_path / "chat")
+    monkeypatch.setitem(server.tasks, "chat", {"task_id": "chat", "status": "running", "current_turn_id": "turn"})
+    monkeypatch.setattr(server.store, "save_index", lambda: None)
+    monkeypatch.setattr(server.store, "task_dir", lambda _task_id: tmp_path / "chat")
     engine = Verification(server)
     engine.begin("chat")
     tool_threads.CHATS.bind("chat", THREAD)

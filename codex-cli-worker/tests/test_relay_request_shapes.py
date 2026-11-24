@@ -23,7 +23,7 @@ class RequestShapeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path=Path(tmp)/'relay.sock';service=self.broker.serve(path)
             try:
-                with patch.dict(os.environ,{'HA_RELAY_SOCKET':str(path),'HA_RELAY_CAPABILITY':self.cap}):yield
+                with patch.dict(os.environ,{'HA_RELAY_SOCKET':str(path)}):yield
             finally:service.shutdown();service.server_close()
 
     def test_states_with_all_empty_or_null_optional_fields(self):
@@ -78,11 +78,11 @@ class RequestShapeTests(unittest.TestCase):
         self.assertFalse(result['ok']);self.assertEqual(result['error'],'Invalid domain.')
         self.fetch.assert_not_called()
 
-    def test_inactive_capability_reason_never_echoes_supplied_value(self):
-        with self.transport(),patch.dict(os.environ,{'HA_RELAY_CAPABILITY':'synthetic-wrong-capability'}):
-            result=mcp.read({'operation':'states'})
-        self.assertEqual(result['error'],'Inactive relay capability.')
-        self.assertNotIn('synthetic-wrong',json.dumps(result));self.fetch.assert_not_called()
+    def test_a_stopped_relay_gets_a_fixed_reason(self):
+        self.stopping=True
+        with self.transport():result=mcp.read({'operation':'states'})
+        self.assertEqual(result['error'],'Remote control is not running.')
+        self.fetch.assert_not_called()
 
     def test_backend_value_error_text_is_never_forwarded(self):
         self.fetch.side_effect=ValueError('synthetic-private-backend-detail')

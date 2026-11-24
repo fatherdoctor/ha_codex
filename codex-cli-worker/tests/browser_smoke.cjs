@@ -43,6 +43,45 @@ function pngBuffer(width = 8, height = 6) {
   ]);
 }
 
+/** Open the model and reasoning panel from the chip (CX-PICKER-PARITY). */
+async function openPicker(page) {
+  await page.locator("#picker-button").click();
+  await page.locator("#effort-popover").waitFor();
+}
+/** The model row in the picker's model list whose name is label. */
+function modelRow(page, label) {
+  return page
+    .locator("#model-options .model-option")
+    .filter({ has: page.getByText(label, { exact: true }) });
+}
+/**
+ * Choose a model the way the desktop app does: the chip opens the panel, the
+ * model name in the panel opens the list, and a model returns to the panel.
+ * Returns once the choice is saved.
+ */
+async function chooseModel(page, label) {
+  if (await page.locator("#effort-popover").isHidden()) await openPicker(page);
+  await page.locator("#effort-model").click();
+  await page.locator("#model-popover").waitFor();
+  await modelRow(page, label).click();
+  await page.locator("#effort-popover").waitFor();
+  await page.waitForFunction(
+    (label) =>
+      document.querySelector("#picker-model").textContent === label &&
+      !document.querySelector("#picker-button").disabled,
+    label,
+  );
+}
+/** Wait until the chip shows the reasoning level label and the picker is ready again. */
+async function effortSaved(page, label) {
+  await page.waitForFunction(
+    (label) =>
+      document.querySelector("#effort-label").textContent === label &&
+      !document.querySelector("#picker-button").disabled,
+    label,
+  );
+}
+
 (async () => {
   const output =
     process.env.CODEX_CHAT_QA_DIR || path.join(os.tmpdir(), "codex-chat-qa");
@@ -447,6 +486,33 @@ function pngBuffer(width = 8, height = 6) {
       animations: "disabled",
     });
     await page.setViewportSize({ width: 1440, height: 950 });
+    // Laundry schedule: preserve the equations and the Markdown around them.
+    const inlineMath = String.raw`\(30 + 45 + 20 = 95\)`;
+    const displayMath = String.raw`\[
+15 + 95 = 110
+\]`;
+    const dollarMath = "$$15 + 95 = 110$$";
+    const laundry = await page.evaluate(({ inlineMath, displayMath, dollarMath }) => {
+      const answer = renderMarkdown([
+        "Each load takes " + inlineMath + " minutes.",
+        "**Earliest finish:**",
+        displayMath,
+        dollarMath,
+        "The supply budget is $15.",
+      ].join("\n\n"), "message");
+      return {
+        inline: [...answer.querySelectorAll("p > code")].map(node => node.textContent),
+        blocks: [...answer.querySelectorAll("pre > code")].map(node => node.textContent),
+        label: answer.querySelector("strong")?.textContent,
+        lastLine: answer.lastElementChild.textContent,
+      };
+    }, { inlineMath, displayMath, dollarMath });
+    assert.deepEqual(laundry, {
+      inline: [inlineMath],
+      blocks: [displayMath, dollarMath],
+      label: "Earliest finish:",
+      lastLine: "The supply budget is $15.",
+    });
     // A message that would keep the parser busy, or is very long, stays plain text.
     assert.deepEqual(
       await page.evaluate(() => {
@@ -462,6 +528,131 @@ function pngBuffer(width = 8, height = 6) {
       }),
       ["message", 0, 48000, "message", 0],
     );
+    // CX-REPLY-ALIGN: at phone and desktop widths a finished reply (its "Worked for" line, its text and its
+    // "Completed" line) starts at the left edge of the message column, with no indent, and no part of it is cut off.
+    await page.locator('[data-task-id="preview-01"]').click();
+    await page.locator("#activity.worked .activity-toggle").waitFor();
+    await page.locator("#messages .answer .turn-meta").waitFor();
+    for (const width of [320, 390, 700, 1280]) {
+      await page.setViewportSize({ width, height: 900 });
+      const reply = await page.evaluate(() => {
+        const area = document.querySelector("#messages");
+        const box = area.getBoundingClientRect();
+        const style = getComputedStyle(area);
+        const left = box.left + parseFloat(style.paddingLeft);
+        const right = box.right - parseFloat(style.paddingRight);
+        const exchange = [...area.querySelectorAll(".exchange")].at(-1);
+        const parts = {
+          worked: exchange.querySelector("#activity .activity-toggle"),
+          text: exchange.querySelector(".answer > .message"),
+          completed: exchange.querySelector(".answer > .turn-meta"),
+        };
+        return {
+          left,
+          right,
+          windowRight: innerWidth,
+          scrolled: area.scrollLeft,
+          wider: area.scrollWidth > area.clientWidth,
+          parts: Object.fromEntries(
+            Object.entries(parts).map(([name, node]) => {
+              const rect = node.getBoundingClientRect();
+              // The reply text and the Completed line are measured at their first character, so an indent counts.
+              let left = rect.left;
+              if (name !== "worked") {
+                const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, {
+                  acceptNode: (text) => (text.data.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP),
+                });
+                const text = walker.nextNode();
+                const range = document.createRange();
+                const start = text.data.search(/\S/);
+                range.setStart(text, start);
+                range.setEnd(text, start + 1);
+                left = range.getBoundingClientRect().left;
+              }
+              return [name, { left, right: rect.right, cut: node.scrollWidth > node.clientWidth + 1 }];
+            }),
+          ),
+        };
+      });
+      assert.equal(reply.scrolled, 0, `the messages scroll sideways at ${width} px`);
+      assert.equal(reply.wider, false, `the messages are wider than their column at ${width} px`);
+      for (const [name, part] of Object.entries(reply.parts)) {
+        assert.ok(
+          Math.abs(part.left - reply.left) <= 1,
+          `${name} starts at ${part.left} px, the column at ${reply.left} px (${width} px window)`,
+        );
+        assert.ok(
+          part.right <= reply.right + 0.5 && part.right <= reply.windowRight,
+          `${name} ends at ${part.right} px, past the column at ${reply.right} px (${width} px window)`,
+        );
+        assert.equal(part.cut, false, `${name} is cut off at ${width} px`);
+      }
+      // The pulsing dot of the working line ("Working on your request… · 4 steps · 4s") sits on the middle of
+      // the line, not on its text baseline. A copy of the line is measured; the real one is on screen only while Codex works.
+      const line = await page.evaluate(() => {
+        const block = document.createElement("div");
+        block.className = "activity running";
+        block.id = "dot-check";
+        const toggle = document.createElement("button");
+        toggle.className = "activity-toggle";
+        const chevron = document.createElement("span");
+        chevron.className = "activity-chevron";
+        const label = document.createElement("span");
+        label.textContent = "Working on your request… · 4 steps";
+        const elapsed = document.createElement("span");
+        elapsed.className = "elapsed";
+        elapsed.textContent = " · 4s";
+        label.append(elapsed);
+        toggle.append(chevron, label);
+        block.append(toggle);
+        const area = document.querySelector("#messages");
+        area.append(block);
+        block.scrollIntoView({ block: "center" });
+        const rect = (node) => {
+          const r = node.getBoundingClientRect();
+          return { x: r.left, y: r.top, width: r.width, height: r.height };
+        };
+        return { toggle: rect(toggle), chevron: rect(chevron), label: rect(label) };
+      });
+      // The dot is drawn by ::before, so find its rows in a picture of the chevron's column of the line.
+      const shot = await page.screenshot({
+        clip: { x: line.chevron.x, y: line.toggle.y, width: line.chevron.width, height: line.toggle.height },
+        animations: "disabled",
+      });
+      const dotRows = await page.evaluate(async (data) => {
+        document.querySelector("#dot-check").remove();
+        const image = new Image();
+        image.src = `data:image/png;base64,${data}`;
+        await image.decode();
+        const canvas = document.createElement("canvas");
+        canvas.width = image.width;
+        canvas.height = image.height;
+        const context = canvas.getContext("2d");
+        context.drawImage(image, 0, 0);
+        const pixels = context.getImageData(0, 0, image.width, image.height).data;
+        const background = pixels.slice(0, 3);
+        const rows = [];
+        for (let y = 0; y < image.height; y++)
+          for (let x = 0; x < image.width; x++) {
+            const at = (y * image.width + x) * 4;
+            if ([0, 1, 2].some((c) => Math.abs(pixels[at + c] - background[c]) > 40)) {
+              rows.push(y);
+              break;
+            }
+          }
+        return rows;
+      }, shot.toString("base64"));
+      assert.ok(dotRows.length >= 4, `the working dot is not drawn at ${width} px`);
+      const dot = {
+        dot: line.toggle.y + (dotRows[0] + dotRows.at(-1) + 1) / 2,
+        line: line.label.y + line.label.height / 2,
+      };
+      assert.ok(
+        Math.abs(dot.dot - dot.line) <= 1.5,
+        `the working dot's middle is at ${dot.dot} px, the line's at ${dot.line} px (${width} px window)`,
+      );
+    }
+    await page.setViewportSize({ width: 1440, height: 950 });
     await page.locator('[data-task-id="preview-00"]').click();
     await page
       .locator("#messages")
@@ -473,13 +664,13 @@ function pngBuffer(width = 8, height = 6) {
     // so the line counts the steps instead of reading "Worked for" (CX-FB2-FLOW).
     const storedToggle = page.locator("#activity .activity-toggle");
     await storedToggle.waitFor();
-    assert.equal(await storedToggle.textContent(), "Activity (4 steps)");
+    assert.equal(await storedToggle.textContent(), "Activity (3 steps)");
     assert.equal(await page.locator("#activity-steps").isVisible(), false);
     await storedToggle.click();
-    assert.equal(await page.locator("#activity .step").count(), 4);
+    assert.equal(await page.locator("#activity .step").count(), 3);
     assert.equal(
       await page.locator("#activity .step-command .step-text").textContent(),
-      "cat /config/automations.yaml",
+      "cat /homeassistant/automations.yaml",
     );
     await page.getByRole("button", { name: "Show output" }).click();
     await page.locator("#activity .step-output").waitFor();
@@ -489,39 +680,156 @@ function pngBuffer(width = 8, height = 6) {
     });
     await storedToggle.click();
     assert.equal(await page.locator("#activity-steps").isVisible(), false);
-    await page.locator("#model-button").click();
-    await page
-      .getByRole("button", { name: "GPT-6 Astra", exact: false })
-      .click();
+    // CX-PICKER-PARITY: one chip, the model name and then the level. It opens one panel above it:
+    // the level in bold, the model name with a ">" under it, and a slider with one stop per level.
+    assert.equal(await page.locator("#model-button, #effort-button").count(), 0);
+    assert.equal(await page.locator("#chat-picker button.picker-pill").count(), 1);
+    assert.equal(await page.locator("#picker-model").isVisible(), true);
+    assert.equal(await page.locator("#effort-label").isVisible(), true);
+    assert.equal(await page.locator("#picker-open-label").isVisible(), false);
+    await openPicker(page);
+    assert.equal(await page.locator("#picker-button").getAttribute("aria-expanded"), "true");
+    // While the panel is open the chip reads "Select effort".
+    assert.equal(await page.locator("#picker-open-label").isVisible(), true);
+    assert.equal(await page.locator("#picker-model").isVisible(), false);
+    assert.equal(await page.locator("#effort-label").isVisible(), false);
+    assert.equal(await page.locator("#model-popover").isHidden(), true);
+    assert.equal(
+      await page.locator("#effort-title").evaluate((node) => Number(getComputedStyle(node).fontWeight) >= 600),
+      true,
+    );
+    assert.equal(
+      await page.locator("#effort-model-name").textContent(),
+      await page.locator("#picker-model").textContent(),
+    );
+    assert.equal(await page.locator("#effort-model svg.effort-model-chevron").count(), 1);
+    // CX-04-FB-MODEL: the lightning toggle in the panel turns Fast mode on for this chat and keeps the
+    // panel open; the chip shows a small bolt once the panel closes. Fast stays on to the run checked below.
+    assert.equal(await page.locator("#effort-fast").getAttribute("aria-pressed"), "false");
+    assert.equal(await page.locator("#effort-fast").getAttribute("title"), "Fast mode: off");
+    await page.locator("#effort-fast").click();
     await page.waitForFunction(
       () =>
-        document.querySelector("#model-button").textContent === "GPT-6 Astra" &&
-        !document.querySelector("#model-button").disabled,
+        document.querySelector("#effort-fast").getAttribute("aria-pressed") === "true" &&
+        !document.querySelector("#picker-button").disabled,
     );
-    await page.locator("#effort-button").click();
+    assert.equal(await page.locator("#effort-popover").isVisible(), true);
+    assert.match(await page.locator("#effort-fast").getAttribute("title"), /^Fast mode: on/);
+    assert.equal(await page.locator("#picker-fast").isVisible(), false);
+    await page.keyboard.press("Escape");
+    assert.equal(await page.locator("#picker-fast").isVisible(), true);
+    await openPicker(page);
+    assert.equal(
+      await page.locator("#effort-dots span").count(),
+      Number(await page.locator("#effort-slider").getAttribute("max")) + 1,
+    );
+    // The model name opens the model list; a model returns to the panel.
+    await chooseModel(page, "GPT-6 Astra");
+    assert.equal(await page.locator("#model-popover").isHidden(), true);
+    assert.equal(await page.locator("#effort-model-name").textContent(), "GPT-6 Astra");
     assert.equal(await page.locator("#effort-slider").getAttribute("max"), "5");
+    assert.equal(await page.locator("#effort-dots span").count(), 6);
     await page.locator("#effort-slider").fill("3");
-    await page.waitForFunction(
-      () =>
-        document.querySelector("#effort-label").textContent === "Extra High" &&
-        !document.querySelector("#effort-button").disabled,
+    await effortSaved(page, "Extra High");
+    // Changing the level keeps the panel open, as in the desktop app.
+    assert.equal(await page.locator("#effort-popover").isVisible(), true);
+    assert.equal(await page.locator("#effort-title").textContent(), "Extra High");
+    await page.locator("#effort-model").click();
+    await page.locator("#model-popover").waitFor();
+    assert.equal(await page.locator("#effort-popover").isHidden(), true);
+    assert.equal(await page.locator("#picker-open-label").isVisible(), true);
+    assert.equal(await page.locator("#model-popover .picker-heading").textContent(), "Select model");
+    assert.deepEqual(
+      await page
+        .locator('#model-options .model-option[aria-pressed="true"]')
+        .evaluateAll((options) => options.map((option) => option.textContent)),
+      ["GPT-6 Astra✓"],
     );
-    await page.locator("#model-button").click();
     await page.screenshot({
       path: path.join(output, "model-picker.png"),
       fullPage: true,
     });
     await page.keyboard.press("Escape");
+    assert.equal(await page.locator("#model-popover").isHidden(), true);
+    assert.equal(await page.locator("#effort-popover").isHidden(), true);
     assert.equal(
-      await page.locator("#model-button").getAttribute("aria-expanded"),
+      await page.locator("#picker-button").getAttribute("aria-expanded"),
       "false",
     );
-    await page.locator("#effort-button").click();
+    assert.equal(await page.locator("#picker-model").textContent(), "GPT-6 Astra");
+    assert.equal(await page.locator("#picker-model").isVisible(), true);
+    assert.equal(await page.locator("#effort-label").textContent(), "Extra High");
+    // On a desktop (1280 px) the panel and the model list open right above the chip, with their right
+    // edges on the chip's right edge, as in the desktop app, and inside the window.
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await openPicker(page);
+    for (const id of ["#effort-popover", "#model-popover"]) {
+      if (id === "#model-popover") {
+        await page.locator("#effort-model").click();
+        await page.locator(id).waitFor();
+      }
+      const chip = await page.locator("#picker-button").boundingBox();
+      const box = await page.locator(id).boundingBox();
+      assert.ok(
+        Math.abs(box.x + box.width - (chip.x + chip.width)) <= 4,
+        `${id} right edge ${box.x + box.width} is on the chip's right edge ${chip.x + chip.width}`,
+      );
+      assert.ok(
+        box.y + box.height <= chip.y && chip.y - (box.y + box.height) <= 30,
+        `${id} sits right above the chip (${box.y + box.height} vs ${chip.y})`,
+      );
+      assert.ok(box.x >= 0 && box.x + box.width <= 1280, `${id} is inside the window`);
+    }
+    await page.keyboard.press("Escape");
+    await page.setViewportSize({ width: 1440, height: 950 });
+    // Ctrl+Shift+M opens the panel too; a press outside closes it.
+    await page.locator("#message").focus();
+    await page.keyboard.press("Control+Shift+M");
+    await page.locator("#effort-popover").waitFor();
     await page.screenshot({
       path: path.join(output, "reasoning-picker.png"),
       fullPage: true,
     });
+    const outside = await page.locator("#messages").boundingBox();
+    await page.mouse.click(outside.x + 4, outside.y + outside.height / 2);
+    assert.equal(await page.locator("#effort-popover").isHidden(), true);
+    assert.equal(await page.locator("#picker-open-label").isVisible(), false);
+    // One menu at a time: opening the picker, by any route, closes the add menu
+    // and the permissions pop-up, and opening one of those closes the picker.
+    await page.locator("#attach").click();
+    assert.equal(await page.locator("#plus-menu").isVisible(), true);
+    await page.keyboard.press("Control+Shift+M");
+    await page.locator("#effort-popover").waitFor();
+    assert.equal(await page.locator("#plus-menu").isHidden(), true, "Ctrl+Shift+M closes the add menu");
+    await page.locator("#attach").click();
+    assert.equal(await page.locator("#plus-menu").isVisible(), true);
+    assert.equal(await page.locator("#effort-popover").isHidden(), true, "the add menu closes the picker");
+    await page.locator("#picker-button").click();
+    await page.locator("#effort-popover").waitFor();
+    assert.equal(await page.locator("#plus-menu").isHidden(), true, "the chip closes the add menu");
     await page.keyboard.press("Escape");
+    await page.locator("#message").fill("");
+    await page.locator("#message").pressSequentially("/");
+    assert.equal(await page.locator("#slash-popover").isHidden(), true);
+    await page.keyboard.press("Control+Shift+M");
+    await page.locator("#effort-popover").waitFor();
+    assert.equal(await page.locator("#message").inputValue(), "/");
+    await page.keyboard.press("Escape");
+    await page.locator("#message").fill("");
+    await page.locator("#permission-button").click();
+    assert.equal(await page.locator("#permissions-dialog").evaluate((node) => node.open), true);
+    await page.keyboard.press("Control+Shift+M");
+    await page.locator("#effort-popover").waitFor();
+    assert.equal(
+      await page.locator("#permissions-dialog").evaluate((node) => node.open),
+      false,
+      "Ctrl+Shift+M closes the permissions pop-up",
+    );
+    await page.locator("#permission-button").click();
+    assert.equal(await page.locator("#permissions-dialog").evaluate((node) => node.open), true);
+    assert.equal(await page.locator("#effort-popover").isHidden(), true, "the permissions pop-up closes the picker");
+    await page.keyboard.press("Escape");
+    assert.equal(await page.locator("#permissions-dialog").evaluate((node) => node.open), false);
     await page.locator("#message").fill("Draft that should stay in this chat");
     await page.locator('[data-task-id="preview-01"]').click();
     await page
@@ -638,7 +946,7 @@ function pngBuffer(width = 8, height = 6) {
         exact: true,
       })
       .waitFor();
-    // Four steps from Codex and four from the worker; the timer stops with the run,
+    // Three steps from Codex and four from the worker (its text messages show outside the list); the timer stops with the run,
     // and the closed line reads the exchange's total time (CX-FB2-FLOW).
     await page.waitForFunction(() =>
       /^Worked for \d+s$/.test(
@@ -649,92 +957,108 @@ function pngBuffer(width = 8, height = 6) {
     assert.equal(await page.locator("#activity .activity-toggle").getAttribute("aria-expanded"), "false");
     assert.equal(await page.locator("#activity-steps").isVisible(), false);
     await page.locator("#activity .activity-toggle").click();
-    assert.equal(await page.locator("#activity .step").count(), 8);
+    assert.equal(await page.locator("#activity .step").count(), 7);
     assert.equal(await page.locator(".elapsed").count(), 0);
     assert.equal(await page.locator("#activity").count(), 1);
     assert.equal(await page.locator("#activity .step.is-running").count(), 0);
     assert.equal(await page.locator(".message.user").count(), 2);
     assert.equal(await page.locator(".answer").count(), 2);
+    // CX-REPLY-ALIGN: the text messages Codex wrote along the way ("I'll look for …", "I found …") are blocks of
+    // their own, spaced apart from each other and from the answer, and start where it starts. Once the exchange is
+    // over they sit inside the open list, between its step groups (CX-BLEED-FIX).
+    const narration = await page.evaluate(() => {
+      const exchange = [...document.querySelectorAll("#messages .exchange")].at(-1);
+      const blocks = [...exchange.querySelectorAll("#activity-steps > .message.interim"), exchange.querySelector(".answer > .message")];
+      const firstCharacter = (node) => {
+        const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, {
+          acceptNode: (text) => (text.data.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP),
+        });
+        const text = walker.nextNode();
+        const range = document.createRange();
+        const start = text.data.search(/\S/);
+        range.setStart(text, start);
+        range.setEnd(text, start + 1);
+        return range.getBoundingClientRect().left;
+      };
+      return blocks.map((node) => {
+        const rect = node.getBoundingClientRect();
+        return { top: rect.top, bottom: rect.bottom, left: firstCharacter(node), margin: parseFloat(getComputedStyle(node).marginBottom) };
+      });
+    });
+    // The upper bound (N1 of CX-REPLY-ALIGNc): step groups sit between these blocks, so the gap itself varies; what
+    // is compared with a paragraph gap is the space each narration block leaves below itself. The answer is last.
+    const paragraphGap = await require("./browser_reply_layout.cjs").paragraphGap(page);
+    assert.ok(paragraphGap > 0, "no paragraph gap to compare with");
+    for (const [n, block] of narration.slice(0, -1).entries())
+      assert.ok(block.margin <= paragraphGap + 2, `narration block ${n} leaves ${block.margin} px below it; a paragraph leaves ${paragraphGap} px`);
+    assert.ok(narration.length >= 3, `${narration.length - 1} narration blocks above the answer`);
+    for (let n = 1; n < narration.length; n++) {
+      const gap = narration[n].top - narration[n - 1].bottom;
+      assert.ok(gap >= 8, `block ${n} is ${gap} px below the one above it`);
+      assert.ok(
+        Math.abs(narration[n].left - narration[0].left) <= 1,
+        `block ${n} starts at ${narration[n].left} px, the first at ${narration[0].left} px`,
+      );
+    }
     const saved = await page.evaluate(
       async () => (await (await fetch("tasks/preview-00")).json()).task,
     );
     assert.deepEqual(saved.chat_settings, {
       model: "gpt-6-astra",
       reasoning_effort: "xhigh",
+      fast: true,
     });
+    // The run took the chat's Fast choice with it.
     assert.deepEqual(
       saved.turns.at(-1).execution_settings,
       saved.chat_settings,
     );
-    await page.locator("#effort-button").click();
+    await openPicker(page);
     await page.locator("#effort-slider").press("End");
-    await page.waitForFunction(
-      () =>
-        document.querySelector("#effort-label").textContent === "Ultra" &&
-        !document.querySelector("#effort-button").disabled,
-    );
-    await page.locator("#model-button").click();
-    await page
-      .getByRole("button", { name: "GPT-6.1 Terra", exact: true })
-      .click();
-    await page.waitForFunction(
-      () =>
-        document.querySelector("#model-button").textContent === "GPT-6.1 Terra" &&
-        !document.querySelector("#model-button").disabled,
-    );
+    await effortSaved(page, "Ultra");
+    await chooseModel(page, "GPT-6.1 Terra");
     assert.equal(await page.locator("#effort-label").textContent(), "Ultra");
     assert.deepEqual(
       await page.evaluate(
         async () =>
           (await (await fetch("tasks/preview-00")).json()).task.chat_settings,
       ),
-      { model: "gpt-6.1-terra", reasoning_effort: "ultra" },
+      { model: "gpt-6.1-terra", reasoning_effort: "ultra", fast: true },
     );
     // Choosing the model the add-on runs anyway clears the chat's own selection.
-    await page.locator("#model-button").click();
-    await page
-      .getByRole("button", { name: "GPT-6.1 Sol", exact: true })
-      .click();
-    await page.waitForFunction(
-      () =>
-        document.querySelector("#model-button").textContent === "GPT-6.1 Sol" &&
-        !document.querySelector("#model-button").disabled,
-    );
+    await chooseModel(page, "GPT-6.2 Sol");
     assert.deepEqual(
       await page.evaluate(
         async () =>
           (await (await fetch("tasks/preview-00")).json()).task.chat_settings,
       ),
-      { model: null, reasoning_effort: "ultra" },
+      { model: null, reasoning_effort: "ultra", fast: true },
     );
-    await page.locator("#model-button").click();
-    await page.getByRole("button", { name: "GPT-6 Luna", exact: true }).click();
-    await page.waitForFunction(
-      () =>
-        document.querySelector("#model-button").textContent === "GPT-6 Luna" &&
-        !document.querySelector("#model-button").disabled,
-    );
+    await chooseModel(page, "GPT-6 Luna");
     assert.equal(await page.locator("#effort-label").textContent(), "Medium");
-    await page.locator("#effort-button").click();
+    // The slider follows the model: GPT-6 Luna has five levels, so five stops.
     assert.equal(await page.locator("#effort-slider").getAttribute("max"), "4");
+    assert.equal(await page.locator("#effort-dots span").count(), 5);
     await page.locator("#effort-slider").fill("2");
-    await page.waitForFunction(
-      () =>
-        document.querySelector("#effort-label").textContent === "High" &&
-        !document.querySelector("#effort-button").disabled,
-    );
-    await page.locator("#effort-button").click();
+    await effortSaved(page, "High");
     await page
       .getByRole("button", {
-        name: "Use add-on default reasoning",
+        name: "Use the default model and reasoning",
         exact: true,
       })
       .click();
-    await page.waitForFunction(
-      () =>
-        document.querySelector("#effort-label").textContent === "Medium" &&
-        !document.querySelector("#effort-button").disabled,
+    await effortSaved(page, "Medium");
+    // Reset goes back to the default model too, not only its level. It leaves the Fast choice alone, and the chat
+    // turned Fast on earlier in this flow, so the saved settings keep fast: true.
+    assert.deepEqual(
+      await page.evaluate(
+        async () =>
+          (await (await fetch("tasks/preview-00")).json()).task.chat_settings,
+      ),
+      { model: null, reasoning_effort: null, fast: true },
     );
+    await page.keyboard.press("Escape");
+    assert.equal(await page.locator("#effort-popover").isHidden(), true);
     const divider = await page.locator("#divider").boundingBox();
     await page.mouse.move(divider.x + 2, 300);
     await page.mouse.down();
@@ -764,15 +1088,16 @@ function pngBuffer(width = 8, height = 6) {
       state.chatSettings.set(null, { model: "gone", reasoning_effort: null });
       controls();
     });
-    assert.equal(await page.locator("#model-button").textContent(), "gone");
-    await page.locator("#model-button").click();
+    assert.equal(await page.locator("#picker-model").textContent(), "gone");
+    await openPicker(page);
+    await page.locator("#effort-model").click();
     assert.equal(
       await page.locator('#model-options [aria-pressed="true"]').count(),
       0,
     );
     assert.equal(
       await page.evaluate(() => document.activeElement.textContent),
-      "GPT-6 Astra",
+      "GPT-6.2 Sol",
     );
     await page.keyboard.press("Escape");
     await page.evaluate(() => {
@@ -781,10 +1106,11 @@ function pngBuffer(width = 8, height = 6) {
     });
     // A new chat names the model it runs on, and the menu marks that model.
     assert.equal(
-      await page.locator("#model-button").textContent(),
-      "GPT-6.1 Sol",
+      await page.locator("#picker-model").textContent(),
+      "GPT-6.2 Sol",
     );
-    await page.locator("#model-button").click();
+    await openPicker(page);
+    await page.locator("#effort-model").click();
     assert.deepEqual(
       await page
         .locator("#model-options .model-option")
@@ -793,15 +1119,17 @@ function pngBuffer(width = 8, height = 6) {
             .filter((option) => option.getAttribute("aria-pressed") === "true")
             .map((option) => option.textContent),
         ),
-      ["GPT-6.1 Sol✓"],
+      ["GPT-6.2 Sol✓"],
     );
-    assert.equal(await page.locator("#model-options .model-option").count(), 8);
-    await page
-      .getByRole("button", { name: "GPT-5.6 Luna", exact: true })
-      .click();
-    await page.locator("#effort-button").click();
+    assert.equal(await page.locator("#model-options .model-option").count(), 9);
+    await modelRow(page, "GPT-5.6 Luna").click();
+    await page.locator("#effort-popover").waitFor();
+    await page.waitForFunction(
+      () => document.querySelector("#picker-model").textContent === "GPT-5.6 Luna",
+    );
     await page.locator("#effort-slider").fill("4");
-    assert.equal(await page.locator("#effort-label").textContent(), "Max");
+    await effortSaved(page, "Max");
+    await page.keyboard.press("Escape");
     const hostile = '<img src=x onerror="window.untrustedRan=true">';
     await page.locator("#message").fill(hostile);
     await page
@@ -814,12 +1142,12 @@ function pngBuffer(width = 8, height = 6) {
     assert.equal(await page.locator("#messages img").count(), 0);
     assert.equal(await page.evaluate(() => window.untrustedRan), undefined);
     assert.equal(
-      await page.locator("#model-button").textContent(),
+      await page.locator("#picker-model").textContent(),
       "GPT-5.6 Luna",
     );
-    // The reasoning chip uses an icon chevron, not a text glyph.
+    // The chip uses an icon chevron, not a text glyph.
     assert.equal(
-      await page.locator("#effort-button svg.picker-chevron").count(),
+      await page.locator("#picker-button svg.picker-chevron").count(),
       1,
     );
     // Markdown typed into a message is formatted, but cannot add markup, load
@@ -833,7 +1161,7 @@ function pngBuffer(width = 8, height = 6) {
       "<i>code</i> **stays** as typed",
       "```",
       "",
-      "[script](javascript:window.untrustedRan=true) [file](/config/automations.yaml)",
+      "[script](javascript:window.untrustedRan=true) [file](/homeassistant/automations.yaml)",
       "![remote image](https://example.invalid/pixel.png)",
       "<b>raw</b> <script>window.untrustedRan=true</script>",
       "[site](https://www.home-assistant.io/)",
@@ -865,7 +1193,7 @@ function pngBuffer(width = 8, height = 6) {
     // The same text is in the sent message and in the echoed answer.
     assert.deepEqual(
       await page
-        .locator("#messages a")
+        .locator("#messages a:not(.interim a)")
         .evaluateAll((links) =>
           links.map((link) => [link.textContent, link.href, link.target, link.rel]),
         ),
@@ -1137,7 +1465,7 @@ function pngBuffer(width = 8, height = 6) {
       /waiting in the queue and has not been sent yet/,
     );
     assert.equal(await page.locator("#send").isDisabled(), true);
-    assert.equal(await page.locator("#model-button").isDisabled(), true);
+    assert.equal(await page.locator("#picker-button").isDisabled(), true);
     await page.locator(".chat-row.queued").waitFor();
     assert.equal(
       await page.locator("#chat-list .list-group").first().textContent(),
@@ -1152,8 +1480,16 @@ function pngBuffer(width = 8, height = 6) {
     await page.locator("#queued-edit").fill("Discarded edit");
     await page.locator("#queued-edit").press("Escape");
     assert.equal(await queuedBubble.textContent(), typo);
-    await page.getByRole("button", { name: "Edit", exact: true }).click();
-    await page.locator("#queued-edit").fill(corrected);
+    // Select the text before the first frame, as fill can do when the editor opens.
+    await page
+      .getByRole("button", { name: "Edit", exact: true })
+      .evaluate(async (button) => {
+        button.click();
+        document.querySelector("#queued-edit").select();
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      });
+    await page.keyboard.insertText(corrected);
+    assert.equal(await page.locator("#queued-edit").inputValue(), corrected);
     await page.locator("#queued-edit").press("Enter");
     await page.waitForFunction(
       (text) =>
@@ -1441,8 +1777,12 @@ function pngBuffer(width = 8, height = 6) {
         exact: true,
       })
       .waitFor();
-    assert.equal(await page.locator("#model-button").textContent(), "GPT-6 Luna");
+    // preview-00 was reset to the default model above, so it shows that model.
+    assert.equal(await page.locator("#picker-model").textContent(), "GPT-6.2 Sol");
     assert.equal(await page.locator("#effort-label").textContent(), "Medium");
+    // A tap on a chat keeps the side bar open (CX-04-PHONE-LIST); the scrim closes it.
+    assert.equal(await page.locator("#scrim").isHidden(), false);
+    await page.locator("#scrim").click({ position: { x: 380, y: 600 } });
     assert.equal(await page.locator("#scrim").isHidden(), true);
     assert.equal(
       await page.evaluate(
@@ -1472,14 +1812,17 @@ function pngBuffer(width = 8, height = 6) {
     await page.emulateMedia({ colorScheme: "light" });
     await page.setViewportSize({ width: 390, height: 844 });
     await integrationLine(page, "ok", "");
-    await page.locator("#effort-button").click();
+    await openPicker(page);
     await page.screenshot({
       path: path.join(output, "mobile-reasoning.png"),
       fullPage: true,
     });
     await page.keyboard.press("Escape");
     await page.setViewportSize({ width: 320, height: 568 });
-    await page.locator("#model-button").click();
+    await openPicker(page);
+    const panel = await page.locator("#effort-popover").boundingBox();
+    assert(panel.x >= 0 && panel.y >= 0 && panel.x + panel.width <= 320);
+    await page.locator("#effort-model").click();
     const popover = await page.locator("#model-popover").boundingBox();
     assert(
       popover.x >= 0 && popover.y >= 0 && popover.x + popover.width <= 320,
@@ -1505,7 +1848,7 @@ function pngBuffer(width = 8, height = 6) {
       .last()
       .click();
     await page.emulateMedia({ colorScheme: "dark" });
-    await page.locator("#effort-button").click();
+    await openPicker(page);
     await page.screenshot({
       path: path.join(output, "mobile-dark.png"),
       fullPage: true,
@@ -1544,6 +1887,45 @@ function pngBuffer(width = 8, height = 6) {
     phone.on("pageerror", (error) => errors.push(error.message));
     await phone.goto("http://127.0.0.1:9137/preview/");
     await phone.locator(".chat-row").first().waitFor({ state: "attached" });
+    // CX-PICKER-PARITY on a phone, by touch only: the chip opens the panel, the model name opens the
+    // list, a model returns to the panel, the slider sets the level, and a tap outside closes it.
+    // This page opened on a new chat, so the choices stay in the page and the fixture's chats keep theirs.
+    await phone.waitForFunction(
+      () => !document.querySelector("#picker-button").disabled,
+    );
+    await phone.locator("#picker-button").tap();
+    await phone.locator("#effort-popover").waitFor();
+    assert.equal(await phone.locator("#picker-open-label").isVisible(), true);
+    const phonePanel = await phone.locator("#effort-popover").boundingBox();
+    assert.ok(
+      phonePanel.x >= 0 && phonePanel.y >= 0 && phonePanel.x + phonePanel.width <= 390,
+      `phone picker panel is inside the screen (${JSON.stringify(phonePanel)})`,
+    );
+    await phone.locator("#effort-model").tap();
+    await phone.locator("#model-popover").waitFor();
+    const phoneList = await phone.locator("#model-popover").boundingBox();
+    assert.ok(
+      phoneList.x >= 0 && phoneList.y >= 0 && phoneList.x + phoneList.width <= 390,
+      `phone model list is inside the screen (${JSON.stringify(phoneList)})`,
+    );
+    await modelRow(phone, "GPT-6 Luna").tap();
+    await phone.locator("#effort-popover").waitFor();
+    await phone.waitForFunction(
+      () =>
+        document.querySelector("#effort-model-name").textContent === "GPT-6 Luna" &&
+        !document.querySelector("#effort-slider").disabled,
+    );
+    assert.equal(await phone.locator("#effort-slider").getAttribute("max"), "4");
+    await phone.locator("#effort-slider").fill("2");
+    await effortSaved(phone, "High");
+    assert.equal(
+      await phone.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+      true,
+    );
+    await phone.locator("#greeting").tap();
+    assert.equal(await phone.locator("#effort-popover").isHidden(), true);
+    assert.equal(await phone.locator("#picker-model").textContent(), "GPT-6 Luna");
+    assert.equal(await phone.locator("#effort-label").textContent(), "High");
     await phone
       .getByRole("button", { name: "Open conversations", exact: true })
       .click();
@@ -1581,6 +1963,8 @@ function pngBuffer(width = 8, height = 6) {
       .locator("#messages")
       .getByText("The dashboard configuration is valid.", { exact: true })
       .waitFor();
+    // The tap kept the side bar open (CX-04-PHONE-LIST); close it to reach the chat area.
+    await phone.locator("#scrim").click({ position: { x: 380, y: 600 } });
     // The screenshot the user attached shows with their message.
     // No bold Verification box under the answer: the checks sit in one closed block, readback and note inside.
     // CX-FB2-FLOW: that block is inside the answer's closed "Worked for" line, and a failed check keeps one
@@ -1605,24 +1989,23 @@ function pngBuffer(width = 8, height = 6) {
       await phone.evaluate(() => { const probe = document.createElement("span"); probe.style.color = "var(--error)";
         document.body.append(probe); const color = getComputedStyle(probe).color; probe.remove(); return color; }));
     assert.ok(await closedLine.evaluate(node => node.getBoundingClientRect().height) <= 24);
-    assert.equal(await phone.locator(".verification-note").isVisible(), false);
+    assert.equal(await phone.locator(".verification-result").first().isVisible(), false);
     await phone.locator(".verification > summary").click();
-    assert.equal(await phone.locator(".verification-note").isVisible(), true);
+    assert.equal(await phone.locator(".verification-result").first().isVisible(), true);
     assert.equal(await phone.locator(".verification-result").count(), 2);
     await phone.locator(".verification-result").nth(1).locator("summary").click();
-    assert.equal(await phone.locator(".verification").getByText("Custom element does not exist: sample-card", {exact:true}).isVisible(), true);
-    assert.equal(await phone.locator(".verification").getByText("Custom element does not exist: sample-card", {exact:true}).count(), 1);
-    assert.equal(await phone.locator(".verification").getByText("Blocked diagnostic logging and notifications", {exact:true}).isVisible(), true);
-    assert.equal(await phone.locator(".verification").getByText("4 occurrences · desktop, mobile", {exact:true}).isVisible(), true);
-    assert.equal(await phone.locator(".verification img").count(), 1);
-    assert.equal(await phone.locator(".verification img").evaluate(img => img.complete && img.naturalWidth > 0), true);
+    assert.equal(await phone.locator(".verification-result").nth(1).locator("summary").textContent(), "Failed · /lovelace/energy");
+    assert.equal(await phone.locator(".verification").getByText("Fresh dashboard configuration readback differs from the saved configuration.", {exact:true}).isVisible(), true);
+    // No dashboard is rendered: no screenshot and no screenshot note in the checks.
+    assert.equal(await phone.locator(".verification img").count(), 0);
+    assert.equal(await phone.locator(".verification").getByText(/screenshot/i).count(), 0);
     await phone.screenshot({path: path.join(output, "verification-mobile.png"), fullPage: true});
     // From a closed "Worked for" line, the failed-check line opens the line and the checks in one tap.
     await phone.locator("#activity > .activity-toggle").click();
     await phone.locator(".verification").evaluate(node => { node.open = false; });
     assert.equal(await phone.locator(".verification > summary").isVisible(), false);
     await failedLine.click();
-    assert.equal(await phone.locator(".verification-note").isVisible(), true);
+    assert.equal(await phone.locator(".verification-result").first().isVisible(), true);
     assert.equal(
       await phone.locator("#messages .user-attachments img").count(),
       1,
@@ -1651,10 +2034,15 @@ function pngBuffer(width = 8, height = 6) {
     await webview.close();
     await require("./browser_approvals.cjs")(browser, output, errors);
     await require("./browser_text_size.cjs")(browser, output, errors);
-    await require("./browser_slash.cjs")(browser, output, errors);
+    await require("./browser_slash.cjs")(browser, errors);
+    await require("./browser_file_link.cjs")(browser, output, errors);
+    await require("./browser_answer_bleed.cjs")(browser, output, errors);
+    await require("./browser_thinking.cjs")(browser, output, errors);
+    await require("./browser_reply_layout.cjs")(browser, output, errors);
+    await require("./browser_poll.cjs")(browser, output, errors);
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: queued messages (wait behind a working chat, edit, remove, start in order), choices under a question (pick one, draft kept, late answer refused), attached images (pick, reject, remove, send, render, batch stays with its chat, send waits for decoding), chat actions (pin, rename, delete, long press), generated image attachments, Markdown formatting (sent messages, answers, untrusted text, slow or long text, narrow screens), saved model/reasoning choices, model compatibility, the model a chat runs on by name, quota bars, the line about the Codex integration, keyboard/reset controls, history, pagination, continuation, new chats, drafts, reopening the last chat, safe text, settings, text size (three sizes, kept per device, phone and iPad), slash commands (list, filter, tap, keys, run not sent), resize, mobile and dark mode. Screenshots: " +
+      "PASS: queued messages (wait behind a working chat, edit, remove, start in order), choices under a question (pick one, draft kept, late answer refused), attached images (pick, reject, remove, send, render, batch stays with its chat, send waits for decoding), chat actions (pin, rename, delete, long press), generated image attachments, Markdown formatting (sent messages, answers, untrusted text, slow or long text, narrow screens), saved model/reasoning choices, model compatibility, the model a chat runs on by name, quota bars, the line about the Codex integration, keyboard/reset controls, history, pagination, continuation, new chats, drafts, reopening the last chat, safe text, settings, text size (three sizes, kept per device, phone and iPad), slash-prefixed messages (Enter and Send), file links in answers (card, download, refused paths), narration kept out of the answer (inside the closed list, aligned with it at four widths), the live Thinking line (newest summary, replaced as it streams, under the steps, gone at the end), reply layout (five transcript-shaped examples at four widths: narration count, edges, gaps), the repeating checks and busy buttons (poll, busyAction), resize, mobile and dark mode. Screenshots: " +
         output,
     );
   } finally {

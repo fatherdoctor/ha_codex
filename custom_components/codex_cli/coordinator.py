@@ -83,7 +83,8 @@ class CodexCliCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch the worker status and update the sign-in repair issue.
 
-        Rejected worker authentication raises ConfigEntryAuthFailed; any other failure raises UpdateFailed.
+        Rejected worker authentication raises ConfigEntryAuthFailed and any other worker error raises UpdateFailed;
+        the base class handles an unexpected one.
         """
         try:
             data = await self.client.status()
@@ -91,8 +92,6 @@ class CodexCliCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise ConfigEntryAuthFailed("Worker authentication failed") from exc
         except CodexCliApiError as exc:
             raise UpdateFailed(str(exc)) from exc
-        except Exception as exc:
-            raise UpdateFailed(f"Unexpected worker status error: {exc}") from exc
 
         self._update_repair_issue(data)
         self._update_remote_control_issue(data)

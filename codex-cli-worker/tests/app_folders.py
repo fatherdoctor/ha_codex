@@ -1,4 +1,4 @@
-"""Keep tests off the app's real folders: /data, /config and /addon_config.
+"""Keep tests off the app's real folders: /data, /homeassistant and /addon_config.
 
 On an install these folders hold the owner's chats, sign-in and Home Assistant configuration. A test that runs
 server.main() calls the start-up steps that move and delete files there, so it must run against a temporary copy of
@@ -11,7 +11,8 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
-REAL_ROOTS = (Path("/data"), Path("/config"), Path("/addon_config"))
+# /config is Home Assistant's folder in versions before 0.6; it is kept here so that no test makes it either.
+REAL_ROOTS = (Path("/data"), Path("/homeassistant"), Path("/addon_config"), Path("/config"))
 
 
 def _under(path: Path, root: Path) -> bool:
@@ -24,7 +25,7 @@ def isolated_app_folders(module, base: Path) -> contextlib.ExitStack:
     The replacements start at once and end when the returned stack closes (use it in a with statement, or pass its
     close method to addCleanup).
 
-    /data/codex-home becomes base/data/codex-home, /config/www/codex_cli_auth becomes base/config/www/codex_cli_auth,
+    /data/codex-home becomes base/data/codex-home, /homeassistant/www/codex_cli_auth becomes base/homeassistant/www/codex_cli_auth,
     and so on. Paths built later from DATA_ROOT or CONFIG_ROOT follow, because those two are replaced too.
     """
     stack = contextlib.ExitStack()

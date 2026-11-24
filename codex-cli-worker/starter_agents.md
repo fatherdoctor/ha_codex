@@ -40,10 +40,22 @@ mode of each chat.
   `/share/HomeAssistant` (the app's GitHub clone and link also leave the three folders alone).
 - Backups: keep the old version of each file as rule 3 says, in the folder that the app names. Make no other copy.
 
+## Memory
+
+Keep facts that last between chats in `memory/` in your working folder: one fact per file, and an index
+`memory/MEMORY.md`, one line per file. Read the index when a chat starts. Save what the owner asks you to remember
+and lasting corrections; update a file rather than add a second; delete wrong facts. No secrets there; never commit
+`memory/`.
+
+## This app's sensors
+
+The Codex device holds this app's entities: sign-in, usage limits and resets, running chats (Active tasks), the
+last chat's status and error (Last task), and permission prompts.
+
 ## Git and GitHub
 
 - Before every commit, look at what is staged. Remove anything that does not belong.
-- Never stage `secrets.yaml`, `.storage`, databases, log files, backups, or personal or location data.
+- Never stage `secrets.yaml`, `.storage`, `memory/`, databases, log files, backups, or personal or location data.
 - Keep a `.gitignore` that lists these. Add it before the first commit.
 - Ask the owner before the first push to any new or public repository. A new repository is private by default.
 

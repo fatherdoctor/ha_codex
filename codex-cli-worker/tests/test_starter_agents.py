@@ -167,7 +167,7 @@ class StarterAgentsText(unittest.TestCase):
         self.text = STARTER.read_text(encoding="utf-8")
 
     def test_it_is_small_enough_to_save_from_the_editor(self):
-        self.assertLess(len(STARTER.read_bytes()), 4096)
+        self.assertLess(len(STARTER.read_bytes()), 6144)
         self.assertLess(len(STARTER.read_bytes()), server.AGENTS_MAX_BYTES)
 
     def test_it_says_the_file_is_the_owners_to_change_or_delete(self):
@@ -195,10 +195,23 @@ class StarterAgentsText(unittest.TestCase):
 
     def test_it_keeps_private_data_out_of_git_and_github(self):
         section = self.text.split("## Git and GitHub", 1)[1].split("## About this home", 1)[0]
-        for word in ("staged", "secrets.yaml", ".storage", "databases", "log files", "backups", "personal or location data",
-                     ".gitignore", "Ask the owner before the first push", "private by default"):
+        for word in ("staged", "secrets.yaml", ".storage", "`memory/`", "databases", "log files", "backups",
+                     "personal or location data", ".gitignore", "Ask the owner before the first push", "private by default"):
             with self.subTest(word=word):
                 self.assertIn(word, section)
+
+    def test_it_tells_codex_how_to_keep_a_memory(self):
+        section = self.text.split("## Memory", 1)[1].split("\n## ", 1)[0]
+        for words in ("one fact per file", "`memory/MEMORY.md`", "Read the index when a chat starts",
+                      "update a file rather than add a second", "delete wrong facts", "No secrets", "never commit"):
+            with self.subTest(words=words):
+                self.assertIn(words, " ".join(section.split()))
+
+    def test_it_points_codex_at_the_apps_own_entities(self):
+        section = self.text.split("## This app's sensors", 1)[1].split("\n## ", 1)[0]
+        for words in ("Codex device", "sign-in", "usage limits", "Active tasks", "Last task", "permission prompts"):
+            with self.subTest(words=words):
+                self.assertIn(words, " ".join(section.split()))
 
     def test_it_does_not_ask_for_backup_copies_inside_the_config_folder(self):
         # The worker gives each message its own backup folder and tells Codex to leave no other copies in /config.
@@ -215,7 +228,7 @@ class StarterAgentsText(unittest.TestCase):
         for path in (ROOT.parent / "README.md", ROOT / "README.md"):
             with self.subTest(path=str(path.relative_to(ROOT.parent))):
                 self.assertIn("gets a short starter file there once", " ".join(path.read_text(encoding="utf-8").split()))
-        self.assertIn("**Starter instructions.**", (ROOT / "DOCS.md").read_text(encoding="utf-8"))
+        self.assertIn("**Starter instructions.**", (ROOT.parent / "docs" / "app-reference.md").read_text(encoding="utf-8"))
         self.assertIn("server.py: write_starter_agents_file", (ROOT.parent / "AUDITING.md").read_text(encoding="utf-8"))
 
     def test_it_is_plain_ascii_with_one_final_newline(self):

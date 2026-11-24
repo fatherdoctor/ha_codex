@@ -55,6 +55,10 @@
     if (spec.kind === "cron") return `Cron: ${spec.expression} (${place})`;
     return `Once: ${when(spec.at)}`;
   }
+  /** A wakeup Codex set runs without the owner's approval, so the list says who set it. */
+  function setByCodex(schedule) {
+    return schedule.approved && schedule.author === "codex" ? " · Set by Codex" : "";
+  }
   /** Read every schedule and the recent runs, and learn Home Assistant's time zone. */
   async function load() {
     latest = await api("schedules");
@@ -159,13 +163,41 @@
     for (const run of latest.runs.filter((item) => item.schedule_id === schedule.id).slice(0, 10)) runs.append(runLine(run, editor));
     if (!runs.children.length) runs.append(node("p", "No runs yet.", "muted"));
   }
+  /** A link that closes the window it is in, and Settings, and opens a chat. */
+  function chatLink(text, id, windowToClose) {
+    const link = node("a", text); link.href = "#";
+    link.onclick = async (event) => { event.preventDefault(); windowToClose.close(); if (dialog.open) dialog.close(); await selectChat(id); };
+    return link;
+  }
   /** One line of a run log: when, how it ended, and a link that closes the window and opens the run's chat. */
   function runLine(run, windowToClose) {
     const item = node("p", `${when(run.created)} · ${run.status.replaceAll("_", " ")}${run.error ? ` · ${run.error}` : ""} · `);
-    const link = node("a", "Open chat"); link.href = "#";
-    link.onclick = async (event) => { event.preventDefault(); windowToClose.close(); if (dialog.open) dialog.close(); await selectChat(run.task_id); };
-    item.append(link);
+    item.append(chatLink("Open chat", run.task_id, windowToClose));
     return item;
+  }
+  /**
+   * Titles of chats that are not in the loaded chat list, asked of the worker once each, because the list
+   * refreshes every 15 seconds. A chat the worker no longer has is kept as null; a failed request is not kept.
+   */
+  const chatTitles = new Map();
+  /** The title of a schedule's chat; null when the chat is gone, undefined when the worker could not say. */
+  function chatTitle(id) {
+    const loaded = chatById(id);
+    if (loaded) return loaded.title || "Untitled chat";
+    if (!chatTitles.has(id)) {
+      chatTitles.set(id, api(`tasks/${encodeURIComponent(id)}`).then(
+        (data) => data.task.title || "Untitled chat",
+        (error) => { if (error.status === 404) return null; chatTitles.delete(id); return undefined; }));
+    }
+    return chatTitles.get(id);
+  }
+  /** The line of a listed schedule that names its chat, as a link that opens the chat. */
+  function chatLine(schedule, title) {
+    if (!schedule.chat_id) return node("p", "Chat: a new chat for each run", "muted");
+    if (title === null) return node("p", "Chat: not found; the next run starts a new chat", "muted");
+    const line = node("p", "Chat: ", "muted");
+    line.append(chatLink(title === undefined ? "Open chat" : title, schedule.chat_id, dialog));
+    return line;
   }
   /**
    * Open the editor on a saved schedule, or on a new one for a chat.
@@ -231,10 +263,11 @@
     try {
       const data = await load();
       el("schedule-timezone").textContent = zone ? `Home Assistant time zone: ${zone}` : data.timezone_error;
+      const titles = await Promise.all(data.schedules.map((schedule) => schedule.chat_id ? chatTitle(schedule.chat_id) : ""));
       const list = el("schedule-list"); list.replaceChildren();
-      for (const schedule of data.schedules) {
+      for (const [index, schedule] of data.schedules.entries()) {
         const item = node("div", "");
-        item.append(node("strong", schedule.name), node("p", `${schedule.approved ? schedule.enabled ? "On" : "Paused" : "Needs your approval"} · ${describe(schedule.spec)} · ${schedule.mode === "read-only" ? "Read only" : "Default"} · ${when(schedule.next_due)}`, "muted"));
+        item.append(node("strong", schedule.name), chatLine(schedule, titles[index]), node("p", `${schedule.approved ? schedule.enabled ? "On" : "Paused" : "Needs your approval"}${setByCodex(schedule)} · ${describe(schedule.spec)} · ${schedule.mode === "read-only" ? "Read only" : "Ask for approval"} · ${when(schedule.next_due)}`, "muted"));
         const prompt = node("details", "", "disclosure"); prompt.append(node("summary", "Review prompt"), node("pre", schedule.prompt)); item.append(prompt);
         const actions = node("div", "", "settings-actions");
         const editButton = button("Edit", () => openEditor(schedule));

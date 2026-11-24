@@ -59,8 +59,9 @@ class FakeWorker:
         return self.tasks.get(task_id)
     def submit(self, task_id, prompt, mode, name, schedule_id):
         self.sent.append((task_id, prompt, mode, name, schedule_id))
-        self.tasks[task_id] = {'status': 'queued'}
+        self.tasks[task_id] = {'status': 'queued', 'current_turn_id': 'first-turn'}
         self.blocked = True
+        return scheduling.Placed(task_id, 'first-turn')
 
 
 class ScheduleStoreTests(unittest.TestCase):

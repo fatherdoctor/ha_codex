@@ -4,8 +4,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
-import unittest.mock
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -41,7 +40,7 @@ class DeviceCommandSpeedTests(unittest.TestCase):
 
     def find(self, **arguments):
         import verification
-        engine = verification.Verification(unittest.mock.Mock(ha_token=lambda: 'synthetic'))
+        engine = verification.Verification(Mock(ha_token=lambda: 'synthetic'))
         with patch.object(verification, 'fetch_states', return_value=json.loads(json.dumps(self.STATES))) as fetch:
             result = engine.find(arguments)
         fetch.assert_called_once_with('/states', 'synthetic')
@@ -57,7 +56,7 @@ class DeviceCommandSpeedTests(unittest.TestCase):
         self.assertLess(line.index('home_assistant_call call'), line.index('home_assistant.verify find'))
         self.assertNotIn('home_assistant.verify entity', line)
         self.assertNotIn('home_assistant_actions', rules)
-        self.assertIn('Do not search files under /config or .storage or run shell commands to find an entity', line)
+        self.assertIn('Do not search files under /homeassistant or .storage or run shell commands to find an entity', line)
         self.assertIn('{"operation":"find","name":"kitchen ceiling","domain":"light"}', rules)
 
     def test_rules_no_longer_ask_for_the_owner_file_in_each_message(self):
@@ -97,6 +96,22 @@ class DeviceCommandSpeedTests(unittest.TestCase):
         self.assertNotIn('input_text.office_overhead_note', ids)
         self.assertNotIn('synthetic-value', json.dumps(self.find(name='overhead')))
 
+    def test_find_ranks_a_renamed_light_above_its_siblings(self):
+        light = {'entity_id': 'light.hue_color_lamp_3', 'state': 'off',
+                 'attributes': {'friendly_name': 'Office Overhead'}}
+        siblings = [{'entity_id': f'sensor.office_overhead_status_{n}', 'state': 'on',
+                     'attributes': {'friendly_name': 'Office Overhead Status'}} for n in range(12)]
+        with patch.object(self, 'STATES', [*siblings, light]):
+            result = self.find(name='Office Overhead')
+        self.assertEqual(result['matches'][0], {'entity_id': light['entity_id'], 'name': 'Office Overhead', 'state': 'off'})
+        self.assertEqual((len(result['matches']), result['total_matches'], result['truncated']), (10, 13, True))
+
+    def test_find_accepts_words_split_across_name_and_entity_id(self):
+        sensor = {'entity_id': 'sensor.office_status', 'state': 'on', 'attributes': {'friendly_name': 'Overhead'}}
+        with patch.object(self, 'STATES', [sensor]):
+            result = self.find(name='Office Overhead')
+        self.assertEqual([row['entity_id'] for row in result['matches']], [sensor['entity_id']])
+
     def test_find_caps_its_answer_and_reports_no_match(self):
         import verification
         many = [{'entity_id': f'light.sample_{n:02d}', 'state': 'on', 'attributes': {}} for n in range(25)]
@@ -109,7 +124,7 @@ class DeviceCommandSpeedTests(unittest.TestCase):
 
     def test_find_refuses_bad_arguments_before_any_read(self):
         import verification
-        engine = verification.Verification(unittest.mock.Mock(ha_token=lambda: 'synthetic'))
+        engine = verification.Verification(Mock(ha_token=lambda: 'synthetic'))
         with patch.object(verification, 'fetch_states') as fetch:
             for arguments in ({}, {'name': ''}, {'name': '...'}, {'name': 'x' * 121}, {'name': 7},
                               {'name': 'office', 'domain': 'Light.x'}, {'name': 'office', 'domain': 5}):
@@ -130,7 +145,7 @@ class ApprovalParityTests(unittest.TestCase):
     def test_preserved_action_confirmation_describes_target_and_effect(self):
         import approvals
         record = {'kind': 'command', 'command': '/api/services/light/turn_on -d light.sample',
-                  'cwd': '/config', 'can_allow': True, 'changes': []}
+                  'cwd': '/homeassistant', 'can_allow': True, 'changes': []}
         text = approvals.confirmation(record)
         self.assertEqual(text['what'], 'Run the Home Assistant action light.turn_on.')
         self.assertEqual(text['where'], 'light.sample.')
@@ -149,7 +164,7 @@ class ApprovalParityTests(unittest.TestCase):
 
     def test_protected_request_confirmation_does_not_offer_a_change(self):
         import approvals
-        record = {'kind': 'command', 'command': 'edit protected policy', 'cwd': '/config',
+        record = {'kind': 'command', 'command': 'edit protected policy', 'cwd': '/homeassistant',
                   'can_allow': False, 'changes': [], 'note': 'Protected policy cannot be changed.'}
         self.assertTrue(approvals.confirmation(record)['effect'].startswith('This request cannot be allowed here.'))
 
@@ -158,7 +173,7 @@ class ApprovalParityTests(unittest.TestCase):
         fixture = fixtures.ApprovalTests('runTest')
         fixture.setUp()
         try:
-            approval_id = fixture.request(command='ha services call lock unlock', cwd='/config')
+            approval_id = fixture.request(command='ha services call lock unlock', cwd='/homeassistant')
             record = fixture.records[-1]
             self.assertTrue(record['can_allow'])
             self.assertEqual(record['status'], 'pending')

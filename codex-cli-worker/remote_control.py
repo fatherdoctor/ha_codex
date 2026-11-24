@@ -38,6 +38,15 @@ from typing import Any
 
 import websocket
 
+from app_paths import CONFIG_ROOT
+
+# Remote control is paused in this version (the ChatGPT app could read a chat but not reply while this app kept it loaded). While
+# PAUSED is True the remote-control process never starts and the owner's saved choice is kept untouched, so turning
+# it back on in a later version is this one line. The tests set it to False to check the code that returns.
+PAUSED = True
+PAUSED_MESSAGE = "Remote Control is paused while we fix it. It will come back in a later version."
+PAUSED_KEPT_LOG = "Remote Control is paused in this version; your setting is kept for when it returns."
+
 CONTROL_FOLDER = "remote_control_control"
 DEFAULT_NAME = "Home Assistant"
 FALLBACK_NAME = "Home-Assistant"
@@ -49,8 +58,11 @@ BACKOFF_CAP = 300.0
 HEALTHY_RUN = 600.0
 STOP_GRACE = 10.0
 LOG_LINES = 40
-# Keep the chat path's explicitly configured Core API pair. Supervisor tokens
-# and per-turn MCP capabilities never belong to a relay process.
+# Keep the chat path's explicitly configured Core API pair, and strip the Supervisor token and the per-turn MCP
+# capabilities from the base environment. When the Home Assistant MCP option is on, server.relay_env adds the
+# Supervisor token back under HA_MCP_CAPABILITY for the bundled hass-mcp only (hass_mcp.py): the shell exclude
+# HA_*_CAPABILITY keeps it from each command's environment, but a command that runs outside the sandbox can read
+# the environment of the relay's Codex process.
 STRIPPED_ENV = (
     "SUPERVISOR_TOKEN", "HASSIO_TOKEN",
     "HA_VERIFICATION_CAPABILITY", "HA_DATA_CAPABILITY", "HA_DATA_SOCKET",
@@ -111,8 +123,8 @@ def remote_env(base: dict[str, str]) -> dict[str, str]:
     return env
 
 
-# The tool keys a command must never see; server.SHELL_EXCLUDED_ENV sets the same pattern on each launch,
-# and the managed config (/etc/codex/managed_config.toml) sets it above every client setting.
+# The names a command must never see (since D-CX-KEYS only HA_MCP_CAPABILITY, the token of the bundled hass-mcp);
+# server.SHELL_EXCLUDED_ENV sets the same pattern on each launch, and the managed config (/etc/codex/managed_config.toml) sets it above every client setting.
 TOOL_KEY_EXCLUDE = "HA_*_CAPABILITY"
 
 
@@ -238,8 +250,8 @@ class Supervisor:
 
         env_factory gives the environment of the probe (the namespace check), which
         runs for every Start request. launch_env_factory, when given, gives the environment of a real launch
-        only; it may issue keys, because a probe or a second Start never calls it. Without it, env_factory
-        serves both.
+        only; it may start the launch's read session, because a probe or a second Start never calls it.
+        Without it, env_factory serves both.
         """
         self.control_factory = control_factory
         self.instructions_factory = instructions_factory
@@ -286,18 +298,32 @@ class Supervisor:
 
     def resume(self) -> dict[str, Any]:
         """At app start, run remote control again if the owner left it on."""
+        if PAUSED:
+            if self.enabled():
+                print(PAUSED_KEPT_LOG, flush=True)
+            return self.paused()
         if not self.enabled():
             return self.snapshot()
         return self._launch()
 
+    def paused(self) -> dict[str, Any]:
+        """Report the paused state; the saved choice is neither read for a launch nor written."""
+        self.set_status("paused", PAUSED_MESSAGE, pairing_code="", pairing_url="")
+        return self.snapshot()
+
     def start(self) -> dict[str, Any]:
         """Turn remote control on and save the choice."""
+        if PAUSED:
+            return self.paused()
         self._name_supported = None
         self.save_enabled(True)
         return self._launch()
 
     def stop(self) -> dict[str, Any]:
         """Turn remote control off and end the process; the choice is saved before the process is asked to stop."""
+        if PAUSED:
+            # No process runs, and an owner who had it on keeps that choice for when it returns.
+            return self.paused()
         self.save_enabled(False)
         self.wake.set()
         with self.lock:
@@ -310,6 +336,8 @@ class Supervisor:
 
     def pair(self) -> tuple[bool, dict[str, Any]]:
         """Ask Codex for a new pairing code, for when the ChatGPT app has lost this machine."""
+        if PAUSED:
+            return False, {**self.paused(), "error": PAUSED_MESSAGE}
         with self.lock:
             proc, path = self.proc, self.control_socket
             self.status["pairing_code"] = ""
@@ -355,7 +383,7 @@ class Supervisor:
         if self._name_supported is None or self._checked_name != name:
             self._checked_name = name
             try:
-                probe = self.run(build_command("/bin/true", name), env=remote_env(self.env_factory()), cwd="/config",
+                probe = self.run(build_command("/bin/true", name), env=remote_env(self.env_factory()), cwd=CONFIG_ROOT.as_posix(),
                                  capture_output=True, text=True, timeout=10, check=False)
                 self._name_supported = probe.returncode == 0
             except (OSError, subprocess.SubprocessError):
@@ -372,7 +400,9 @@ class Supervisor:
                 else [RELAY_LAUNCHER, "--plain", self.codex_binary, *arguments])
 
     def _launch(self) -> dict[str, Any]:
-        """Start the supervising thread unless one is already running."""
+        """Start the supervising thread unless one is already running, or report the pause."""
+        if PAUSED:
+            return self.paused()
         with self.lock:
             if self.thread is not None and self.thread.is_alive():
                 return self.snapshot()
@@ -402,14 +432,14 @@ class Supervisor:
                 # Namespace probing and environment refresh can call Supervisor.
                 # Keep both outside the lock used by snapshot, reads and stop.
                 command = self._command("app-server", "--listen", f"unix://{path}", "--remote-control")
-                # The keys of a launch are made here and nowhere else: a probe must not end the running relay's.
+                # A launch's read session starts here and nowhere else: a probe must not end the running relay's.
                 environment = remote_env(self.launch_env_factory())
                 with self.lock:
                     if self.wake.is_set() or not self.enabled():
                         private.cleanup()
                         return
                     proc = self.popen(command,
-                                      env=environment, cwd="/config", stdin=subprocess.DEVNULL,
+                                      env=environment, cwd=CONFIG_ROOT.as_posix(), stdin=subprocess.DEVNULL,
                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                       start_new_session=True)
                     self.proc = proc
@@ -555,6 +585,7 @@ class Supervisor:
         return {
             **status,
             "enabled": self.enabled(),
+            "paused": PAUSED,
             # Nothing of the app's own can block remote control; the page still reads these two keys.
             "available": True,
             "blocked_reason": "",

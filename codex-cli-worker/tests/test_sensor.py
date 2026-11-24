@@ -39,9 +39,10 @@ def _load_sensor_module() -> types.ModuleType:
         pass
 
     class SensorDeviceClass:
-        """Stand-in with the device class the reset sensors use."""
+        """Stand-in with the device classes the reset sensors and the word sensors use."""
 
         TIMESTAMP = "timestamp"
+        ENUM = "enum"
 
     class SensorStateClass:
         """Stand-in with the state class the limit sensors use."""
@@ -238,10 +239,12 @@ class LastTaskSensorTests(unittest.TestCase):
 
         self.assertEqual(last_task.native_value, "failed")
         self.assertEqual(last_task.extra_state_attributes["error"], "boom")
-        self.assertEqual(last_task.extra_state_attributes["summary"], "Codex could not start")
-        # Without any task the sensor is unknown and has no error.
+        # Every Home Assistant user reads the attributes, so the chat's own text is not one of them.
+        self.assertNotIn("summary", last_task.extra_state_attributes)
+        self.assertNotIn("title", last_task.extra_state_attributes)
+        # Without any task the sensor is unknown (None) and has no error.
         coordinator.data = {}
-        self.assertEqual(last_task.native_value, "unknown")
+        self.assertIsNone(last_task.native_value)
         self.assertIsNone(last_task.extra_state_attributes["error"])
 
     def test_waiting_task_reports_its_question_choices_and_turn(self) -> None:

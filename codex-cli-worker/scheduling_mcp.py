@@ -6,21 +6,22 @@ import socket
 import sys
 from typing import Any
 
+import scheduling
 import tool_threads
 
 PROPOSAL: dict[str, Any] = {'type': 'object', 'additionalProperties': False,
             'properties': {'name': {'type': 'string', 'maxLength': 80},
                            'prompt': {'type': 'string', 'maxLength': 16000},
                            'mode': {'enum': ['default', 'read-only']},
-                           'spec': {'type': 'object', 'description': 'interval: kind/seconds; cron: kind/expression (five numeric UTC fields); once: kind/at (ISO with offset).'}},
+                           'spec': {'type': 'object', 'description': 'interval: kind/seconds; cron: kind/expression (five numeric fields in the Home Assistant time zone); once: kind/at (an ISO time; without an offset it is in the Home Assistant time zone).'}},
             'required': ['name', 'prompt', 'spec']}
 # No minimum or maximum here: a limit outside 1-20 is clamped by the service
 # (a larger one returns 20 items and a next_offset), never refused.
 LIMIT: dict[str, Any] = {'type': 'integer', 'description': 'Items per page, 1-20 (default 10). A larger number returns 20 items and a next_offset to continue from.'}
 TOOLS: list[dict[str, Any]] = [
-    {'name': 'propose_schedule', 'description': 'Save a schedule proposal for owner review. It remains disabled until a Home Assistant administrator approves its exact current contents on the page. Cannot approve or activate it.', 'inputSchema': PROPOSAL},
-    {'name': 'list_schedules', 'description': 'Read a bounded page of schedule summaries. This does not enable or change schedules.',
-     'inputSchema': {'type': 'object', 'additionalProperties': False, 'properties': {'offset': {'type': 'integer', 'minimum': 0, 'maximum': 100}, 'limit': LIMIT}}},
+    {'name': 'propose_schedule', 'description': 'Save a schedule. A one-time wakeup (kind once) is on when saved and runs in this chat at its time. A repeating schedule remains disabled until a Home Assistant administrator approves its exact current contents on the page; this tool cannot approve or activate it. The answer gives next_run in the Home Assistant time zone.', 'inputSchema': PROPOSAL},
+    {'name': 'list_schedules', 'description': 'Read a bounded page of schedule summaries: active, paused and waiting ones first, then one-time wakeups that already ran. This does not enable or change schedules.',
+     'inputSchema': {'type': 'object', 'additionalProperties': False, 'properties': {'offset': {'type': 'integer', 'minimum': 0, 'maximum': scheduling.LISTED}, 'limit': LIMIT}}},
 ]
 
 

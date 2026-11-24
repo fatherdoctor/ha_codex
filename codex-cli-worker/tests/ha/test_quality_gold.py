@@ -20,7 +20,7 @@ integration = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = integration
 spec.loader.exec_module(integration)
 coordinator_module = sys.modules["gold_ha_test.coordinator"]
-auth = sys.modules["gold_ha_test.browser_auth"]
+core_logs = sys.modules["gold_ha_test.core_logs"]
 
 ISSUES = ("codex_not_signed_in", "remote_control_config_change", "github_access_lost")
 
@@ -93,11 +93,11 @@ def test_the_list_names_every_issue_the_coordinator_raises():
 
 @pytest.mark.parametrize("state", [s for s in ConfigEntryState if s is not ConfigEntryState.LOADED])
 async def test_one_helper_picks_only_loaded_entries(hass, state):
-    """Actions and the browser view pick an entry through one helper, and it skips every entry not loaded."""
+    """Actions and the Core log view pick an entry through one helper, and it skips every entry not loaded."""
     idle = add_entry(hass, state)
     idle.runtime_data = "not loaded"
     loaded = add_entry(hass)
     loaded.runtime_data = "loaded"
-    assert list(auth.loaded_runtime_data(hass)) == ["loaded"]
+    assert list(core_logs.loaded_runtime_data(hass)) == ["loaded"]
     assert "loaded_runtime_data(" in (ROOT / "__init__.py").read_text()
     assert "async_entries(" not in (ROOT / "__init__.py").read_text().split("def _first_runtime", 1)[1].split("\ndef ", 1)[0]

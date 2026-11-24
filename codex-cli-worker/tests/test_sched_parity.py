@@ -62,9 +62,9 @@ class LaunchParityTests(unittest.TestCase):
         self.assertIn(CALL_PREFIX + 'tools.call.approval_mode="prompt"', values)
         self.assertFalse([value for value in values if "default_tools_approval_mode" in value])
 
-    def test_a_scheduled_run_holds_its_key_in_the_worker_only(self):
+    def test_a_scheduled_run_is_begun_and_holds_no_key(self):
         started = self.launch("schedule")
-        self.assertTrue(started["key_held"])
+        self.assertTrue(started["begun"])
         self.assertNotIn("HA_CALL_CAPABILITY", started["env"])
         self.assertNotIn("CAPABILITY", " ".join(started["args"]))
 
@@ -72,7 +72,7 @@ class LaunchParityTests(unittest.TestCase):
         options = {"HA_TOKEN": "invented-token"}
         texts = {}
         for name, task in (("schedule", scheduled_task()), ("page", page_task())):
-            with patch.object(server, "tasks", {"t": task}), patch.object(server, "read_options", return_value=options):
+            with patch.dict(server.tasks, {"t": task}, clear=True), patch.object(server, "read_options", return_value=options):
                 texts[name] = server.exchange_info("t", None)["home_assistant_api"]
         self.assertIn("home_assistant_call call tool", texts["schedule"])
         self.assertEqual(texts["schedule"], texts["page"])
@@ -120,7 +120,7 @@ class ModeTestCase(unittest.TestCase):
     def session_settings(self, task, app_options=None):
         """Return the thread and turn settings create_approval_session passes to Codex for this task."""
         process = type("Process", (), {"stdin": Mock(), "poll": lambda _: None})()
-        with patch.object(server, "tasks", {"t": task}), \
+        with patch.dict(server.tasks, {"t": task}, clear=True), \
                 patch.object(server, "read_options", return_value=app_options or {}), \
                 patch.object(server, "AppServerSession") as session:
             server.create_approval_session("t", process, "Turn off the kitchen light", self.root / "final", None, {},
@@ -245,7 +245,7 @@ class KeptDifferenceTests(ModeTestCase):
     def test_a_scheduled_runs_question_sends_no_notification(self):
         """A permission request of a scheduled run notifies; a question it asks at the end of its turn does not."""
         for name, task, notified in (("schedule", scheduled_task(), False), ("page", page_task(), True)):
-            with self.subTest(task=name), patch.object(server, "tasks", {"t": task}), \
+            with self.subTest(task=name), patch.dict(server.tasks, {"t": task}, clear=True), \
                     patch.object(server, "notify_question") as notify:
                 server.notify_task_outcome("t", "needs_input", "", question="Which door?")
                 self.assertEqual(notify.called, notified)
