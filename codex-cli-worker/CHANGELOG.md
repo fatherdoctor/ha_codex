@@ -2,6 +2,9 @@
 
 ## 0.6.0 (unreleased)
 
+- **Settings > Scheduled runs** shows the name of each schedule's chat as a link. The link closes Settings and opens
+  that chat. A schedule of no chat says that each run starts a new chat; a schedule whose chat is gone says that its
+  next run starts a new one.
 - **Fast mode works.** The lightning button in the model and reasoning panel turns Fast mode on or off for a chat.
   Codex then runs the model on its Fast service tier (about twice the speed; it uses more of your plan). The chip
   shows a small bolt while Fast is on. A chat that never chose follows the model's own default from the Codex model
