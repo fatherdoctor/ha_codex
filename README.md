@@ -268,6 +268,7 @@ of the release that the project started from ([Credit](#credit)), plus one more.
 
 | Version | Changes |
 |---|---|
+| 0.5.1 | Codex works from `/media/.agents/codex` instead of `/config`; calendar and weather data come from Home Assistant actions; Codex does not call Home Assistant's own address itself, except for the API call that the Home Assistant access token option allows; settings polish. |
 | 0.3.6 | The app's own command checks are removed: Codex's permission modes and the sandbox are the protection. Four permission modes, with Full access off until an administrator turns it on. A notification shows only while a chat waits for you. |
 | 0.3.0 (unreleased) | GitHub sign-in on the page (device sign-in, clone and link under /share or /config, every push through the push guard, a Repairs issue when access changes). The app installs and updates its own integration (one install and one restart); setup from discovery asks for confirmation. |
 | 0.1.81.2 (unreleased) | No full-access mode (changed in 0.3.6); a protected permission policy in the image, no bundled house rules and owner workspace instructions; permission answers and the integration's actions only from Home Assistant administrators; a permission-prompt sensor. |
