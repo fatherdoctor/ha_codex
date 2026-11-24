@@ -258,7 +258,7 @@ class HostTest(unittest.TestCase):
         self.assertTrue(self.host.ready_for_message())
 
     def wake(self, chat_id: str) -> str:
-        return self.host.wake(chat_id, {"cwd": "/config"}, TOOLS)
+        return self.host.wake(chat_id, {"cwd": "/homeassistant"}, TOOLS)
 
     def begin(self, chat_id: str) -> FakeSession:
         """Wake a chat and attach a session to it, as an exchange does."""
@@ -341,7 +341,7 @@ class ProcessTests(HostTest):
 
     def test_after_a_restart_every_chat_is_paused_and_the_selected_one_wakes(self) -> None:
         self.start()
-        self.assertTrue(self.host.select("chat-a", {"cwd": "/config"}, TOOLS))
+        self.assertTrue(self.host.select("chat-a", {"cwd": "/homeassistant"}, TOOLS))
         self.wake("chat-b")
         thread_a = self.host.chat("chat-a").thread_id
         self.host.request_restart("options saved")
@@ -509,14 +509,14 @@ class CapTests(HostTest):
 
     def test_never_more_live_chats_than_the_cap(self) -> None:
         for cap in self.each_cap():
-            self.host.select("chat-0", {"cwd": "/config"}, TOOLS)
+            self.host.select("chat-0", {"cwd": "/homeassistant"}, TOOLS)
             for number in range(cap + 3):
                 self.clock.now += 1
                 if number % 2:
                     self.begin(f"chat-{number}")  # A message wakes the chat ...
                     self.host.detach(f"chat-{number}")  # ... and its exchange ends.
                 else:
-                    self.host.select(f"chat-{number}", {"cwd": "/config"}, TOOLS)
+                    self.host.select(f"chat-{number}", {"cwd": "/homeassistant"}, TOOLS)
                 self.assertLessEqual(len(self.host.live_chats()), cap)
             self.assertEqual(len(self.host.live_chats()), cap)
 
@@ -535,7 +535,7 @@ class CapTests(HostTest):
     def test_the_selected_chat_is_paused_last(self) -> None:
         for cap in self.each_cap():
             self.clock.now += 1
-            self.host.select("chat-selected", {"cwd": "/config"}, TOOLS)
+            self.host.select("chat-selected", {"cwd": "/homeassistant"}, TOOLS)
             for number in range(1, cap):
                 self.clock.now += 1
                 self.wake(f"chat-{number}")
@@ -546,7 +546,7 @@ class CapTests(HostTest):
 
     def test_the_selected_chat_is_paused_when_it_is_the_only_idle_one(self) -> None:
         for cap in self.each_cap():
-            self.host.select("chat-selected", {"cwd": "/config"}, TOOLS)
+            self.host.select("chat-selected", {"cwd": "/homeassistant"}, TOOLS)
             for number in range(1, cap):
                 self.begin(f"chat-{number}")
             self.wake("chat-new")
@@ -567,14 +567,14 @@ class CapTests(HostTest):
         for cap in self.each_cap():
             for number in range(cap):
                 self.begin(f"chat-{number}")
-            self.assertFalse(self.host.select("chat-new", {"cwd": "/config"}, TOOLS))
+            self.assertFalse(self.host.select("chat-new", {"cwd": "/homeassistant"}, TOOLS))
             self.assertNotIn("chat-new", self.host.live_chats())
             self.assertEqual(self.host.selected, "chat-new")
             self.assertEqual(len(self.host.live_chats()), cap)
 
     def test_a_scheduled_run_wakes_a_chat_that_is_not_selected(self) -> None:
         for cap in self.each_cap():
-            self.host.select("chat-selected", {"cwd": "/config"}, TOOLS)
+            self.host.select("chat-selected", {"cwd": "/homeassistant"}, TOOLS)
             self.begin("chat-scheduled")
             self.host.detach("chat-scheduled")
             self.assertIn("chat-scheduled", self.host.live_chats())

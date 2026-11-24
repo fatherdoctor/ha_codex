@@ -136,7 +136,7 @@ class ReadCodexModelsTests(unittest.TestCase):
             real_popen = subprocess.Popen
 
             def popen(command, **kwargs):
-                # The worker runs Codex in /config; the stand-in runs in the temporary folder.
+                # The worker runs Codex in /homeassistant; the stand-in runs in the temporary folder.
                 self.assertEqual(command[1:], ["app-server", "--config", "check_for_update_on_startup=false"])
                 return real_popen(command, **{**kwargs, "cwd": folder, "env": dict(os.environ)})
 

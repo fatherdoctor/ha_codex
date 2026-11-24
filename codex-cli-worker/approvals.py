@@ -577,7 +577,7 @@ class AppServerSession:
             clipped |= truncated or folder_truncated
             record["scope"] = (
                 "Allow this command once outside the configured sandbox. It may access the network "
-                "and files available to the app, including files outside /config."
+                "and files available to the app, including files outside /homeassistant."
             )
             if request_kind == "writeStdin":
                 record["scope"] = "Send this input to a command that is already running outside the configured sandbox."
@@ -587,7 +587,7 @@ class AppServerSession:
                 record["network"], _ = self._display(network.get("host"))
         else:
             record["changes"] = copy.deepcopy(self._file_changes.get(str(params.get("itemId")), []))
-            record["scope"] = "Allow these file changes once, including any listed paths outside /config."
+            record["scope"] = "Allow these file changes once, including any listed paths outside /homeassistant."
             record["can_allow"] = bool(record["changes"]) and all(
                 change.get("path") and change.get("diff") and change.get("kind") in {"add", "update", "delete"}
                 for change in record["changes"])

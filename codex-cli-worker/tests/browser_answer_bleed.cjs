@@ -23,9 +23,9 @@ const SHAPES = {
     steps: [
       ["message", "I'll check the visitor counts against the official records, then build and check the workbook."],
       ["web_search", "Searched: sample visitor statistics"],
-      ["command", "ls /config/www"],
+      ["command", "ls /homeassistant/www"],
       ["message", "The ranking holds. I will chart both totals and the changes."],
-      ["file_change", "Edited /config/www/sample.xlsx"],
+      ["file_change", "Edited /homeassistant/www/sample.xlsx"],
     ],
     summary: "**Park C grew fastest.** The workbook has both years, the change as formulas, and a chart.",
     details: "Sources: [sample statistics](https://example.com/stats).\n\nThe change uses the first year as its base.",
