@@ -25,7 +25,9 @@ without a terminal: they read state or act on the open chat, and they change no 
 
 Read from the source of the pinned Codex CLI 0.166.0 (`codex-rs/tui/src/slash_command.rs` and
 `codex-rs/app-server-protocol/src/protocol/common.rs` at tag `rust-v0.166.0`). That version marks none of the requests
-below as experimental. A build checks each one again against the pinned binary.
+that the page calls as experimental. The one request in the table with an experimental mark is
+`thread/backgroundTerminals/clean`, in the `/stop` row; the page does not call it. A build checks each request again
+against the pinned binary.
 
 | CLI command | What the CLI does | `app-server` request | On the page |
 |---|---|---|---|
@@ -58,8 +60,15 @@ Codex as text, as in 0.5. This design adds no limit and keeps none.
 
 - **Page.** `SLASH_COMMANDS_ENABLED` becomes `true` in `codex-cli-worker/web/assets/chat.js`, and the list holds
   the commands above. Each Codex command has `kind: "codex"`. Its `run` sends `POST /tasks/<task_id>/command` with
-  `{"name": ..., "args": ...}`. `/review` and `/compact` take the rest of the line as an argument (the CLI does the
-  same for `/review`). The list keeps today's keys (arrows, Enter or Tab, Escape) and its `available()` rules.
+  `{"name": ..., "args": ...}`. Only `/review` takes the rest of the line as an argument, as in the CLI. `/compact`
+  takes none (`ThreadCompactStartParams` holds only `thread_id`, and the CLI gives it no argument): when text follows
+  `/compact`, the page does not run the command and sends the whole line to Codex as text, as for an unlisted
+  command, so nothing the user typed is lost. The list keeps today's keys (arrows, Enter or Tab, Escape) and its
+  `available()` rules.
+- **The review target.** `ReviewStartParams` needs a `target`. `/review` with no text sends `uncommittedChanges`.
+  `/review <text>` sends `custom` with the text as `instructions`, so a user who wants a branch or a commit
+  reviewed says so in words. The two other targets, `baseBranch` and `commit`, are left out: each needs a picker of
+  branches or commits, and the page has none.
 - **Worker.** One new module, `codex-cli-worker/slash_commands.py`, holds the request for each command and the
   shape of its result. The route in `server.py` only checks the request and calls the module. Nothing about the
   commands goes into the long message handlers.
@@ -68,8 +77,20 @@ Codex as text, as in 0.5. This design adds no limit and keeps none.
   off, `/status` and `/mcp` use a short `app-server` process, as the usage and model reads do today;
   `/compact` and `/review` go through the message queue as an exchange of their own kind, so they run in the same
   process path as a message.
-- **When.** As in the CLI: `/compact`, `/review`, `/archive` and `/delete` are not in the list while the chat runs
-  an answer or has a queued message. `/status`, `/mcp`, `/stop` and `/new` are always in the list.
+- **When.** The rule is the page's own. `/compact`, `/review`, `/archive` and `/delete` are not in the list while
+  the chat runs an answer or has a queued message. `/status`, `/mcp`, `/stop` and `/new` are always in the list.
+  For `/compact` and `/review` this is the CLI's rule too (`available_during_task` is false for both). It differs
+  from the CLI for two commands:
+  - `/new`: the CLI leaves `/new` out while a task runs (`available_during_task` is false). The page holds many
+    chats, and a new chat does not stop the chat that runs, so `/new` stays in the list.
+  - `/archive`: the CLI keeps `/archive` while a task runs (`available_during_task` is true). The page leaves it out then, as it leaves out
+    `/delete`, so that a chat is not put away while its answer still arrives and the work log of that answer stays
+    in view.
+- **Where `/review` shows.** The app makes no git repository in the working folder, so on most installs there are
+  no changes for `/review` to read. `/review` is in the list only when the working folder is a git repository: the
+  worker reports this with the chat's settings (`git rev-parse --is-inside-work-tree` in the working folder, read
+  when the chat opens). Without a repository, `/review` typed by hand goes to Codex as text, as an unlisted command
+  does.
 - **Permissions.** `/review` and `/compact` are turns in the chat. They run with the chat's permission mode and
   sandbox, and any permission request shows the normal card. `/status` and `/mcp` only read.
 
@@ -99,7 +120,7 @@ Codex as text, as in 0.5. This design adds no limit and keeps none.
 | `/compact` or `/review` starts while an answer runs | They are not in the list then, and the worker refuses them with the same busy rule as a message. |
 | The host pauses the chat between the click and the request | The worker wakes the chat first, as it does for a message; if the host has no room, the command waits in the queue. |
 | `warm_start` is off | `/status` and `/mcp` use a short process; `/compact` and `/review` use the message path. Both ways get a test. |
-| `/review` in a working folder with no git repository | Codex answers with its own error. The page shows it as a failed command line. |
+| `/review` in a working folder with no git repository (the usual install: the app makes none) | `/review` is not in the list then (see "Where `/review` shows"). Typed by hand, it goes to Codex as text. If the folder stops being a repository after the chat opened, Codex answers with its own error, and the page shows it as a failed command line. |
 | A status card shows a secret | The card shows only the named fields above, from the worker. The diagnostics scrub (`diagnostics_scrub.py`) runs over the values, and a test feeds a token-shaped value. |
 | The command list hides a control that a user needs | Every removed page command keeps its control on the page (text size, Settings, pin). |
 | A screen reader user cannot use the list | The list keeps today's `aria` attributes, which 0.5 removed when it turned the list off. |
@@ -118,12 +139,15 @@ small unit of build effort on the maintainer's scale.
    the refusal while busy and both `warm_start` settings.
 3. **`/status`** (1 point). Record the last `thread/tokenUsage/updated` for each chat; build the status card. Test
    the token-shaped value case.
-4. **`/compact` and `/review`** (2 points). Both as exchanges of their own kind; show the compaction line and the
-   review answer. Tests with a fake `app-server` for each item and for "no changes".
+4. **`/compact` and `/review`** (2.5 points). Both as exchanges of their own kind; show the compaction line and the
+   review answer. `/review` maps no text to `uncommittedChanges` and text to `custom`; the worker reports whether
+   the working folder is a git repository, and the list shows `/review` only then. `/compact` with text after it
+   goes to Codex as text. Tests with a fake `app-server` for each item, for "no changes", for both review targets,
+   and for a working folder with and without a repository.
 5. **Lab check** (0.5 point). On a test machine: each command once, with `warm_start` on and off. Record what the
    chat shows in `codex-cli-worker/SANDBOX_TESTING.md`.
 
-Total about 6 points.
+Total about 6.5 points.
 
 ## Open points
 
