@@ -31,7 +31,7 @@ async def test_integration_download_matches_worker_schema_and_redacts_again(tmp_
         # Repeated synthetic entity IDs exercise the shared scrubber.
         'entities': ['light.synthetic', 'light.synthetic'],
         # The private filename must reduce to a folder and extension.
-        'paths': ['/config/scripts/private_canary.yaml'],
+        'paths': ['/homeassistant/scripts/private_canary.yaml'],
         # The error message stands for private exception prose and must be discarded.
         'events': [{'kind': 'tool', 'name': 'commandExecution', 'result': 'done'}, {'kind': 'error', 'type': 'ValueError', 'message': 'PRIVATE_ERROR_CANARY'}],
     })

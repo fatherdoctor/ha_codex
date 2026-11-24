@@ -46,7 +46,7 @@ class HostInterface(HostTest):
         self.assertTrue(self.host.ready_for_message())
         self.assertTrue(self.host.running())
         self.assertEqual(self.spawned_args[0][-2:], codex_host.UNLOAD_ARGS)
-        self.assertTrue(self.host.select("a", {"cwd": "/config"}, TOOLS))
+        self.assertTrue(self.host.select("a", {"cwd": "/homeassistant"}, TOOLS))
         first = self.host.chat("a").thread_id
         self.assertEqual(self.host.chat_for_thread(first), "a")
         self.assertEqual(self.host.chat_for_thread(None), "")
@@ -97,10 +97,10 @@ class HostInterface(HostTest):
         self.host.attach("a", FakeSession("a"))
         with self.assertRaises(codex_host.AllChatsBusy):
             self.wake("b")
-        self.assertFalse(self.host.select("b", {"cwd": "/config"}, TOOLS))
+        self.assertFalse(self.host.select("b", {"cwd": "/homeassistant"}, TOOLS))
         self.assertEqual(self.host.live_chats(), ["a"])
         self.host.detach("a")
-        self.assertTrue(self.host.select("b", {"cwd": "/config"}, TOOLS))
+        self.assertTrue(self.host.select("b", {"cwd": "/homeassistant"}, TOOLS))
         self.assertEqual(self.host.live_chats(), ["b"])
 
     def test_stderr_marks_redaction_and_generation_guard(self):

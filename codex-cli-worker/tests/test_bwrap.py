@@ -63,9 +63,9 @@ class BubblewrapCompatibilityTests(unittest.TestCase):
             .replace("REAL_BWRAP=/opt/codex-sandbox/bwrap.real", f"REAL_BWRAP={self.real}")
             .replace('HIDDEN_DIRS="/run/s6 /data/remote_control_control /data/github"',
                      f'HIDDEN_DIRS="{root}/run/s6 {root}/data/remote_control_control {root}/data/github"')
-            .replace('HIDDEN_FILES="/config/secrets.yaml /config/.storage/auth',
+            .replace('HIDDEN_FILES="/homeassistant/secrets.yaml /homeassistant/.storage/auth',
                      f'HIDDEN_FILES="{root}/config/secrets.yaml {root}/config/.storage/auth')
-            .replace('READ_ONLY_DIRS="/config/.storage"', f'READ_ONLY_DIRS="{root}/config/.storage"')
+            .replace('READ_ONLY_DIRS="/homeassistant/.storage"', f'READ_ONLY_DIRS="{root}/config/.storage"')
             .replace("/usr/bin/python3 /opt/codex-sandbox/codex-bwrap-probe.py",
                      f"{sys.executable} {helper}"),
             encoding="utf-8",

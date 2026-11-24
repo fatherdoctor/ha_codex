@@ -2,6 +2,12 @@
 
 ## 0.6.0 (unreleased)
 
+- Home Assistant's configuration folder is now at `/homeassistant` inside the app, as in the Claude add-on and the
+  Supervisor's default. `/config` no longer exists inside the app. Home Assistant and your files do not move. If your
+  workspace instructions, your working folder's notes or a scheduled prompt say `/config/...`, change them to
+  `/homeassistant/...`; the app tells you once where it found such a line. Codex is told that an old `/config/` path
+  in a chat means the same file under `/homeassistant/`, and that `/config/` inside Home Assistant's own YAML stays.
+  The app never rewrites your text. After a rollback to 0.5, text that says `/homeassistant/` does not work there.
 - A new test file, `tests/test_run_task_exits.py`, runs one whole exchange for each way a run can end: an answer, a
   question, a failure Codex reports, a turn that ends in an error, a Codex that cannot start or that stops before its
   turn, an answer or prompt file that cannot be prepared, a cancel before, during or right after the start, during
@@ -19,6 +25,9 @@
   process of its own, and both paths return the same result. A cancel now ends these steps through one exception
   that is caught in one place, and each refused step through another, so the six copies of the failure report are
   one. No step is longer than 80 lines. No behavior changes; `tests/test_run_task_exits.py` passes unchanged.
+- The chat page's repeating checks (the chat list, the steps of a working chat, the quota, the two sign-ins, remote
+  control and the code countdowns) now run through one scheduler, `poll()`, and the buttons that wait for the worker
+  share one helper, `busyAction()`. Each check keeps its timing, and nothing looks different.
 
 ## 0.5.0 (draft)
 

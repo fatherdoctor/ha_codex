@@ -1,4 +1,4 @@
-"""The guard that keeps tests off the app's real /data, /config and /addon_config folders."""
+"""The guard that keeps tests off the app's real /data, /homeassistant and /addon_config folders."""
 import os
 import re
 import tempfile
@@ -33,7 +33,7 @@ class IsolatedFolders(unittest.TestCase):
             self.assertEqual(real_paths(server), {})
             self.assertEqual(server.DATA_ROOT, self.base / "data")
             self.assertEqual(server.CODEX_HOME, self.base / "data" / "codex-home")
-            self.assertEqual(server.OLD_AUTH_QR_DIR, self.base / "config" / "www" / "codex_cli_auth")
+            self.assertEqual(server.OLD_AUTH_QR_DIR, self.base / "homeassistant" / "www" / "codex_cli_auth")
             self.assertEqual(server.task_root(), self.base / "data" / "codex_tasks")
             self.assertEqual(server.interaction_logs.path, self.base / "data" / "interaction-diagnostics.json")
         self.assertEqual(real_paths(server), before)

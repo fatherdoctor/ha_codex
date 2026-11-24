@@ -77,11 +77,24 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(thread["method"], "thread/resume")
         self.assertEqual(thread["params"]["threadId"], "thread")
         self.assertEqual(thread["params"]["developerInstructions"], server.PAGE_INSTRUCTIONS)
+        # A chat from before 0.6 resumes in the new folder and is told what its old /config/ paths mean (CX-HA-PATH).
+        self.assertEqual(thread["params"]["cwd"], server.CONFIG_ROOT.as_posix())
+        self.assertIn(server.old_config_note(), thread["params"]["developerInstructions"])
         self.assertEqual(turn["params"]["input"], [{"type": "text", "text": OWNER_TEXT}])
 
 
 class FixedTextTests(unittest.TestCase):
     """The fixed rules hold nothing that changes from one message to the next."""
+
+    def test_the_rules_map_an_old_config_path_and_keep_home_assistants_own_yaml(self):
+        """Since 0.6 the folder is /homeassistant; /config/ in Home Assistant's own YAML stays (CX-HA-PATH)."""
+        text = server.PAGE_INSTRUCTIONS
+        self.assertIn("Workspace: /homeassistant\n", text)
+        self.assertIn("Home Assistant's configuration folder is /homeassistant. /config does not exist here; a path "
+                      "in this chat or in the owner's text that starts with /config/ means the same file under "
+                      "/homeassistant/. Inside Home Assistant's own YAML, /config/ is Home Assistant's own path and "
+                      "stays as it is.", text)
+        self.assertNotIn("@@", text)
 
     def test_the_rules_name_no_per_message_detail(self):
         """No task id, backup folder, attachment, token note, documentation date, GitHub note or user message."""
@@ -115,7 +128,7 @@ class FixedTextTests(unittest.TestCase):
         self.assertIn("before your first command, file change or tool call in a message (ask_owner and "
                       "report_failure excepted), and when the message can refer to a file", text)
         self.assertIn("call the home_assistant_data exchange_info tool once.", text)
-        self.assertIn("Follow its backups text before you change, move, or delete a file under /config.", text)
+        self.assertIn("Follow its backups text before you change, move, or delete a file under /homeassistant.", text)
 
     def test_a_message_about_a_document_calls_exchange_info_without_the_word_attached(self):
         """Only exchange_info names an attached document (images go in the turn input), so "Summarize this" with a
@@ -178,7 +191,7 @@ class ExchangeRecordTests(unittest.TestCase):
         # Its permissions are told once too: what the app set for the thread is not known here.
         changed = server.PERMISSIONS_CHANGED.format(note=info["permissions"])
         self.assertEqual(message, server.RULES_POINTER + "\n\n" + changed + "\n\nCheck the porch light")
-        self.assertEqual(info["rules"], server.PAGE_INSTRUCTIONS)
+        self.assertEqual(info["rules"], server.build_page_instructions())
         # A resume never marks the thread: only a thread this page starts gets the rules at its first turn.
         self.assertNotIn("page_instructions", server.tasks[task_id])
 
@@ -253,7 +266,7 @@ class ExchangeRecordTests(unittest.TestCase):
         session = server.create_approval_session(
             task_id, attachments.StubAppServer(attachments.SESSION_ID), "Prompt", Path("final"), None, {},
             {"codex_sandbox": "workspace-write"})
-        self.assertEqual(session.thread_params["developerInstructions"], server.PAGE_INSTRUCTIONS)
+        self.assertEqual(session.thread_params["developerInstructions"], server.build_page_instructions())
 
     def run_and_record_plain(self, task_id, session_id=None, reply=None):
         """Run one exchange through run_codex's fake process and return exchange_info's details and the message."""
@@ -279,7 +292,7 @@ class ExchangeInfoToolTests(unittest.TestCase):
         tool_threads.CHATS.bind("chat", data.THREAD)
         self.addCleanup(tool_threads.CHATS.release, "chat")
         self.capability = self.engine.begin("chat")
-        self.engine.set_exchange_info("chat", {"task_id": "chat", "backups": "Copy files to /config/backup-a."})
+        self.engine.set_exchange_info("chat", {"task_id": "chat", "backups": "Copy files to /homeassistant/backup-a."})
 
     def call(self, **fields):
         """Send one exchange_info request as the MCP bridge does."""
@@ -289,14 +302,14 @@ class ExchangeInfoToolTests(unittest.TestCase):
         """The reply holds the recorded details, reads no Home Assistant data and uses no query budget."""
         result = self.call()
         self.assertEqual(result, {"status": "observed", "operation": "exchange_info", "task_id": "chat",
-                                  "backups": "Copy files to /config/backup-a."})
+                                  "backups": "Copy files to /homeassistant/backup-a."})
         self.worker.ha_token.assert_not_called()
         self.assertEqual(self.engine.queries["chat"], 0)
 
     def test_arguments_and_a_wrong_thread_or_ended_exchange_are_refused(self):
         """Arguments are refused; a wrong thread and an ended or released exchange get nothing."""
         with self.assertRaises(DataError):
-            self.call(path="/config")
+            self.call(path="/homeassistant")
         for thread in ("not-a-thread", "", None, "99999999-2222-4333-8444-555555555555"):
             with self.assertRaises(DataError):
                 self.engine.dispatch({"operation": "exchange_info", "thread_id": thread})

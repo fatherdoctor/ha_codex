@@ -93,7 +93,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Bundle the integration into the app image
-        # The app installs this copy in /config at start (codex-cli-worker/integration/README.md).
+        # The app installs this copy in /homeassistant at start (codex-cli-worker/integration/README.md).
         run: python3 scripts/bundle_integration.py
       - name: Build image
         uses: home-assistant/builder/actions/build-image@2026.03.2

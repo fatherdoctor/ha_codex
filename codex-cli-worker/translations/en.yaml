@@ -16,7 +16,7 @@ configuration:
     description: How much of its thinking Codex shows in the chat while it works. Choose concise, detailed or none.
   codex_sandbox:
     name: Sandbox mode
-    description: What Codex may do without asking. Workspace-write lets it edit files in /config. Read-only lets it look but not change.
+    description: What Codex may do without asking. Workspace-write lets it edit files in /homeassistant. Read-only lets it look but not change.
   notify_service:
     name: Notification service
     description: A notify service for questions and failures. Leave it empty to use Home Assistant persistent notifications.

@@ -56,7 +56,7 @@ class DeviceCommandSpeedTests(unittest.TestCase):
         self.assertLess(line.index('home_assistant_call call'), line.index('home_assistant.verify find'))
         self.assertNotIn('home_assistant.verify entity', line)
         self.assertNotIn('home_assistant_actions', rules)
-        self.assertIn('Do not search files under /config or .storage or run shell commands to find an entity', line)
+        self.assertIn('Do not search files under /homeassistant or .storage or run shell commands to find an entity', line)
         self.assertIn('{"operation":"find","name":"kitchen ceiling","domain":"light"}', rules)
 
     def test_rules_no_longer_ask_for_the_owner_file_in_each_message(self):
@@ -145,7 +145,7 @@ class ApprovalParityTests(unittest.TestCase):
     def test_preserved_action_confirmation_describes_target_and_effect(self):
         import approvals
         record = {'kind': 'command', 'command': '/api/services/light/turn_on -d light.sample',
-                  'cwd': '/config', 'can_allow': True, 'changes': []}
+                  'cwd': '/homeassistant', 'can_allow': True, 'changes': []}
         text = approvals.confirmation(record)
         self.assertEqual(text['what'], 'Run the Home Assistant action light.turn_on.')
         self.assertEqual(text['where'], 'light.sample.')
@@ -164,7 +164,7 @@ class ApprovalParityTests(unittest.TestCase):
 
     def test_protected_request_confirmation_does_not_offer_a_change(self):
         import approvals
-        record = {'kind': 'command', 'command': 'edit protected policy', 'cwd': '/config',
+        record = {'kind': 'command', 'command': 'edit protected policy', 'cwd': '/homeassistant',
                   'can_allow': False, 'changes': [], 'note': 'Protected policy cannot be changed.'}
         self.assertTrue(approvals.confirmation(record)['effect'].startswith('This request cannot be allowed here.'))
 
@@ -173,7 +173,7 @@ class ApprovalParityTests(unittest.TestCase):
         fixture = fixtures.ApprovalTests('runTest')
         fixture.setUp()
         try:
-            approval_id = fixture.request(command='ha services call lock unlock', cwd='/config')
+            approval_id = fixture.request(command='ha services call lock unlock', cwd='/homeassistant')
             record = fixture.records[-1]
             self.assertTrue(record['can_allow'])
             self.assertEqual(record['status'], 'pending')
