@@ -51,8 +51,8 @@ mode of each chat.
 
 Keep facts that last between chats in `memory/` in your working folder: one fact per file, and an index
 `memory/MEMORY.md`, one line per file. Read the index when a chat starts. Save what the owner asks you to remember
-and lasting corrections; update a file rather than add a second; delete wrong facts. No secrets there; never commit
-`memory/`.
+and lasting corrections; update a file rather than add a second; delete wrong facts. No secrets or personal details
+there (PINs, tokens, passwords, phone numbers, addresses); never commit `memory/`.
 
 ## This app's sensors
 
