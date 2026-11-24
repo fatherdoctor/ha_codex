@@ -16,6 +16,9 @@
 - The chat page's repeating checks (the chat list, the steps of a working chat, the quota, the two sign-ins, remote
   control and the code countdowns) now run through one scheduler, `poll()`, and the buttons that wait for the worker
   share one helper, `busyAction()`. Each check keeps its timing, and nothing looks different.
+- A reply that arrives after Settings closes no longer restarts the sign-in or remote-control check: `poll()` now
+  ends its repeats when `stop()` is called while a check is still working. The page test also checks that the quota
+  check repeats every minute and the chat list at its working or idle pace.
 
 ## 0.5.0 (draft)
 

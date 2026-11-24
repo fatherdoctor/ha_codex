@@ -453,7 +453,8 @@ const polls = {};
 /**
  * Register a check that repeats. run() calls fn now, unless the page is
  * hidden, and then waits delayFn(result) milliseconds before the next run;
- * null from delayFn ends the repeats until the next run() or after(). result
+ * null from delayFn ends the repeats until the next run() or after(); a stop()
+ * while fn is still working ends them too. result
  * is what fn returned, or undefined when the page was hidden or fn failed.
  * run() returns what fn returns, and a failure of fn reaches its caller; a
  * failure in a run that the timer started goes to onError. whileHidden is for
@@ -461,6 +462,8 @@ const polls = {};
  */
 function poll(name, fn, delayFn, { whileHidden = false, onError = () => {} } = {}) {
   let timer = 0;
+  // Counts the stops, so a run that was in flight when stop() was called does not schedule its repeat.
+  let stops = 0;
   const entry = {
     /** Whether a later run is scheduled. */
     get waiting() {
@@ -469,6 +472,7 @@ function poll(name, fn, delayFn, { whileHidden = false, onError = () => {} } = {
     stop() {
       clearTimeout(timer);
       timer = 0;
+      stops += 1;
     },
     /** Run after this many milliseconds, in place of any run that was scheduled. */
     after(delay) {
@@ -480,12 +484,14 @@ function poll(name, fn, delayFn, { whileHidden = false, onError = () => {} } = {
     },
     async run() {
       entry.stop();
+      const started = stops;
       let result;
       try {
         if (whileHidden || !document.hidden) result = await fn();
         return result;
       } finally {
-        const delay = delayFn(result);
+        // A stop() during fn (Settings closed while the reply was in flight) ends the repeats.
+        const delay = stops === started ? delayFn(result) : null;
         if (delay !== null) entry.after(delay);
       }
     },
