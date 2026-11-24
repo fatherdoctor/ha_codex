@@ -63,9 +63,7 @@ class BubblewrapCompatibilityTests(unittest.TestCase):
             .replace("REAL_BWRAP=/opt/codex-sandbox/bwrap.real", f"REAL_BWRAP={self.real}")
             .replace('HIDDEN_DIRS="/run/s6 /data/remote_control_control /data/github"',
                      f'HIDDEN_DIRS="{root}/run/s6 {root}/data/remote_control_control {root}/data/github"')
-            .replace('HIDDEN_FILES="/config/secrets.yaml /config/.storage/auth',
-                     f'HIDDEN_FILES="{root}/config/secrets.yaml {root}/config/.storage/auth')
-            .replace('READ_ONLY_DIRS="/config/.storage"', f'READ_ONLY_DIRS="{root}/config/.storage"')
+            .replace(' /data/', f' {root}/data/').replace('HIDDEN_FILES="/data/', f'HIDDEN_FILES="{root}/data/')
             .replace("/usr/bin/python3 /opt/codex-sandbox/codex-bwrap-probe.py",
                      f"{sys.executable} {helper}"),
             encoding="utf-8",
@@ -143,21 +141,28 @@ class BubblewrapCompatibilityTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 19)
                 self.assertEqual(record["args"], ["--cap-drop", "ALL", *args])
 
-    def test_secrets_and_the_container_environment_are_hidden_in_every_sandbox(self) -> None:
-        """Existing secret files get /dev/null and the s6 folder a tmpfs, just before the first separator."""
+    def test_the_app_private_files_are_hidden_and_config_files_are_not(self) -> None:
+        """The app's tokens and the s6 folder are masked just before the first separator; nothing in /config is."""
         root = Path(self.directory.name)
         (root / "run" / "s6" / "container_environment").mkdir(parents=True)
         (root / "config" / ".storage").mkdir(parents=True)
-        (root / "config" / "secrets.yaml").write_text("token: x\n", encoding="utf-8")
-        (root / "config" / ".storage" / "auth").write_text("{}", encoding="utf-8")
+        (root / "data").mkdir()
+        config_files = [root / "config" / "secrets.yaml", root / "config" / ".storage" / "auth",
+                        root / "config" / ".storage" / "auth_provider.homeassistant"]
+        private_files = [root / "data" / name for name in ("options.json", "worker_api_token", "schedules.sqlite3")]
+        for path in config_files + private_files:
+            path.write_text("synthetic\n", encoding="utf-8")
         args = ["--ro-bind", "/", "/", "--bind", str(root / "config"), str(root / "config"), "--",
                 "/usr/local/bin/codex", "--apply-seccomp-then-exec", "--", "/bin/sh", "-c", "cat secrets.yaml"]
         _, record = self.run_wrapper(args, stderr=b"", exit_code=0)
-        masks = ["--ro-bind", str(root / "config" / ".storage"), str(root / "config" / ".storage"),
-                 "--tmpfs", str(root / "run" / "s6"),
-                 "--ro-bind", "/dev/null", str(root / "config" / "secrets.yaml"),
-                 "--ro-bind", "/dev/null", str(root / "config" / ".storage" / "auth")]
+        masks = ["--tmpfs", str(root / "run" / "s6")]
+        for path in private_files:
+            masks += ["--ro-bind", "/dev/null", str(path)]
         self.assertEqual(record["args"], ["--cap-drop", "ALL", *args[:6], *masks, *args[6:]])
+        # The owner's secrets.yaml and Home Assistant's sign-in files stay readable, as in the Claude add-on.
+        for path in config_files:
+            with self.subTest(path=path.name):
+                self.assertNotIn(str(path), record["args"])
 
     def test_the_github_folder_is_hidden_in_every_sandbox(self) -> None:
         """A task's sandbox cannot read the GitHub sign-in: /data/github gets an empty tmpfs before the first --."""

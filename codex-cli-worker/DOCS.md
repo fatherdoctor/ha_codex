@@ -70,12 +70,16 @@ More: [Sandbox](https://github.com/fatherdoctor/ha_codex/blob/main/docs/app-refe
 ## Your files
 
 - Your Home Assistant configuration is at `/config`, and `/share` is shared with other apps.
+- Codex starts each chat in its working folder, `/media/.agents/codex`, for its notes and drafts. It may write in
+  `/config`, `/share`, `/media` and `/addon_config` (the app's own folder) without a request. The automatic backup
+  leaves `/media` out unless you include it.
 - Rules for your house go in **Settings** > **Workspace instructions**, the app's `AGENTS.md`. A new install gets a
   short starter file once. It is yours to change or delete.
 - Chats and the files you attach to a message (PNG, JPEG, GIF or WebP) stay in the app's private storage, not in
   `/config`. Attachments are removed after 7 days or with the chat.
 - Keep your own Home Assistant backups. The app's saved copies of changed files can be missing, and `secrets.yaml`
-  and `.storage` are never copied.
+  and `.storage` are never copied. Codex can read and change both, like the rest of `/config`; the starter
+  `AGENTS.md` tells it when to leave them alone.
 
 More: [Backups](https://github.com/fatherdoctor/ha_codex/blob/main/docs/app-reference.md#backups).
 
@@ -127,6 +131,23 @@ Assistant user it signed in as, and the **Enable built-in browser** and **Browse
 change a dashboard, Codex now reads its configuration back. The integration removes the old user on its first
 start. Restart Home Assistant after the update.
 More: [Upgrading from an earlier version](https://github.com/fatherdoctor/ha_codex/blob/main/codex-cli-worker/VERIFICATION.md#upgrading-from-an-earlier-version).
+
+## What the sandbox still keeps back
+
+In Ask for approval and Approve for me, the sandbox keeps only these limits. Read only keeps them too, and also makes every file
+read-only. **Allow once** on a card gets past each of them for that one action.
+
+- **The app's own private files are hidden.** These are `/run/s6` and, in `/data`, the app's settings, its API token,
+  the remote control and GitHub sign-ins and the schedule database. The rest of `/data` is read-only, except the
+  chat's backup and files folders. Why: these tokens can answer the app's own permission cards or call Home
+  Assistant directly, so a task that reads them could get around the cards. They are the app's state, not your files.
+- **A `.git`, `.codex` or `.agents` folder directly in `/config`, `/share` or `/media` is read-only.** For example,
+  `/config/.git` needs a card, but `/share/<repository>/.git` does not. Why: this is Codex's own sandbox rule, not
+  the app's. In a project, these folders hold history, settings or skills that Codex loads, so a change there could
+  change what Codex does next. `/media/.agents` is a writable place of its own, so Codex's working folder is not
+  affected.
+
+More: [Sandbox](https://github.com/fatherdoctor/ha_codex/blob/main/docs/app-reference.md#sandbox).
 
 ## Get help
 

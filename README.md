@@ -17,8 +17,9 @@ on a test Home Assistant first.
 
 - A chat page in Home Assistant, with saved conversations and a task queue. Codex works in a sandbox.
 - In the default mode, Codex edits files in your configuration folder without a question. It asks before a command
-  that uses the network, a write outside your configuration folder and `/share`, or a change to a device. Only an
-  administrator can answer. The other [permission modes](#permission-modes) ask less or more.
+  that uses the network, a write outside your configuration folder, `/share`, `/media` and the app's own folder
+  (`/addon_config`, where its `AGENTS.md` is), or a change to a device. Only an administrator can answer. The other
+  [permission modes](#permission-modes) ask less or more.
 - Codex is told to save the earlier copy of a file before it changes it, and the chat lists the copies it saved. A
   copy can be missing, and `secrets.yaml` and the files under `.storage` (dashboards kept there too) are never
   copied, so keep your own Home Assistant backups ([Backups](docs/app-reference.md#backups)).
@@ -158,7 +159,7 @@ only Codex's own settings.
 
 | Mode | What Codex can do without asking |
 |---|---|
-| Ask for approval | Edit files in your configuration folder. Shell networking and a write outside your configuration folder and `/share` need your permission. |
+| Ask for approval | Edit files in your configuration folder. Shell networking and a write outside your configuration folder, `/share`, `/media` and the app's own folder need your permission. |
 | Approve for me | As Ask for approval, but Codex's own reviewer answers each request instead of you. |
 | Read only | Read files. A write, a device change or shell networking needs your permission for that one action. |
 | Full access | Everything, without a sandbox and without asking. Off until an administrator turns it on in Settings. |
@@ -171,8 +172,9 @@ and **Deny**. Only a Home Assistant administrator can answer it.
 Codex's own permission modes and the sandbox are the protection, as in the Claude add-on. The app adds no command
 check of its own.
 
-- **The sandbox.** Commands run with their own user, mount, process and network space. The sandbox hides
-  `secrets.yaml`, Home Assistant's sign-in store and the app's own private files.
+- **The sandbox.** Commands run with their own user, mount, process and network space. The sandbox hides the app's
+  own private files. It hides nothing in `/config`, as in the Claude add-on: `secrets.yaml` and `.storage` are left
+  to your `AGENTS.md`.
 - **Complete cards.** A command or file change that is incomplete, too large or redacted can be denied but never
   allowed: its card has no **Allow once** button.
 - **A protected policy.** The allowed modes come from a file inside the app image. Options and chats cannot loosen it.

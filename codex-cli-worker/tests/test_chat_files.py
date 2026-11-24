@@ -140,7 +140,8 @@ class ChatFilesTests(unittest.TestCase):
         with patch.object(server, "task_mode_settings", return_value={
                 "sandbox": "workspace-write", "approval_policy": "on-request", "approvals_reviewer": "user"}):
             session = server.create_approval_session(TASK_ID, proc, "Make a table", final, None, {}, options)
-        self.assertEqual(session.turn_params["sandboxPolicy"]["writableRoots"], ["/config", "/share", str(folder)])
+        self.assertEqual(session.turn_params["sandboxPolicy"]["writableRoots"],
+                         ["/config", "/share", "/media", "/media/.agents", "/addon_config", str(folder)])
         with patch.object(server, "task_mode_settings", return_value={
                 "sandbox": "read-only", "approval_policy": "on-request", "approvals_reviewer": "user"}):
             reader = server.create_approval_session(TASK_ID, proc, "Read", final, None, {}, options)
