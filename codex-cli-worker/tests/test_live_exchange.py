@@ -161,7 +161,7 @@ class _Errors:
 
 
 # An invented live model list: (model id, display name, reasoning levels).
-INVENTED_LIVE_MODELS = (("invented-default-model", "Invented Default", ("low", "medium", "high")),)
+INVENTED_LIVE_MODELS = (server.ChatModel("invented-default-model", "Invented Default", ("low", "medium", "high")),)
 
 
 class LiveExchangeTests(unittest.TestCase):
@@ -215,8 +215,9 @@ class LiveExchangeTests(unittest.TestCase):
         self.started_alone.append(process)
         return process
 
-    def message(self, session_id=None, model=None) -> dict:
-        """Queue one message in the chat and run it, as start_background_task does; model as the turn resolved it."""
+    def message(self, session_id=None, model=None, fast=None) -> dict:
+        """Queue one message in the chat and run it, as start_background_task does; model and fast as the turn
+        resolved them (fast left out of the settings when None, as in a turn saved before Fast mode existed)."""
         self.turn += 1
         turn_id = f"worker-turn-{self.turn}"
         task = server.tasks.setdefault("task", {"task_id": "task", "turns": []})
@@ -224,6 +225,8 @@ class LiveExchangeTests(unittest.TestCase):
         turn = {"turn_id": turn_id, "message": f"Message {self.turn}"}
         if model:
             turn["execution_settings"] = {"model": model, "reasoning_effort": "medium"}
+            if fast is not None:
+                turn["execution_settings"]["fast"] = fast
         task["turns"].append(turn)
         server.run_task("task", f"Message {self.turn}", session_id)
         return dict(server.tasks["task"])
@@ -412,10 +415,31 @@ class LiveExchangeTests(unittest.TestCase):
         turns = self.spawned[0].methods("turn/start")
         self.assertEqual([turn["params"]["model"] for turn in turns], ["invented-model-a", "invented-default-model"])
 
+    def test_each_turn_names_its_service_tier_when_the_model_has_fast(self):
+        # Codex keeps a turn's tier for the turns after it, so turning Fast off must send null, not nothing.
+        session_id = self.message(model="invented-model-a", fast=True)["session_id"]
+        self.message(session_id, model="invented-model-a", fast=False)
+        self.message(session_id, model="invented-model-a")
+        turns = [turn["params"] for turn in self.spawned[0].methods("turn/start")]
+        self.assertEqual(turns[0]["serviceTier"], "priority")
+        self.assertIn("serviceTier", turns[1])
+        self.assertIsNone(turns[1]["serviceTier"])
+        # Settings saved before Fast mode existed, or a model without it: the field is left out.
+        self.assertNotIn("serviceTier", turns[2])
+
     def test_the_default_names_no_model_before_the_cli_named_its_pick(self):
         with patch.dict(server.usage_state, {"_default_model": ""}):
             self.assertEqual(self.message(model="default")["status"], "completed")
         self.assertNotIn("model", self.spawned[0].methods("turn/start")[0]["params"])
+
+    def test_the_default_names_no_service_tier_before_the_cli_named_its_pick(self):
+        # fast=False is the Fast default of the model the worker assumed (the built-in default); Codex runs its own
+        # pick, which may run on Fast by default, so the turn must not name the standard tier.
+        with patch.dict(server.usage_state, {"_default_model": ""}):
+            self.assertEqual(self.message(model="default", fast=False)["status"], "completed")
+        turn = self.spawned[0].methods("turn/start")[0]["params"]
+        self.assertNotIn("model", turn)
+        self.assertNotIn("serviceTier", turn)
 
     def test_the_default_names_no_model_when_the_worker_does_not_know_the_cli_pick(self):
         # /status gives a display name, not a model id, for a model that neither model list has.

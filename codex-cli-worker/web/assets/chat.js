@@ -65,22 +65,31 @@ const effortDescriptions = {
   max: "Maximum reasoning for the hardest problems.",
   ultra: "Maximum reasoning with automatic task delegation.",
 };
+/** The settings of a chat that chose nothing: every value follows the add-on setting or the model. */
+const NO_SELECTION = Object.freeze({
+  model: null,
+  reasoning_effort: null,
+  fast: null,
+});
 /**
- * Return the model and reasoning level selected for the open chat. A null
- * value means the chat follows the add-on setting.
+ * Return the model, reasoning level and Fast mode selected for the open chat.
+ * A null value means the chat follows the add-on setting (for Fast mode, the
+ * model's own default).
  */
 function selectedSettings() {
-  return (
-    state.chatSettings.get(state.id) || { model: null, reasoning_effort: null }
-  );
+  return state.chatSettings.get(state.id) || NO_SELECTION;
 }
 /** The models a chat can run on, with the add-on's own model when it is not one of the usual choices. */
 function chatModels() {
-  const { models = [], default_model: id, default_efforts: efforts } =
-    state.catalog || {};
+  const {
+    models = [],
+    default_model: id,
+    default_efforts: efforts,
+    default_fast: fast = null,
+  } = state.catalog || {};
   return !id || models.some((model) => model.id === id)
     ? models
-    : [{ id, label: id, efforts }, ...models];
+    : [{ id, label: id, efforts, fast }, ...models];
 }
 /**
  * Return the entry of the model a chat runs on: the one it selected, or else
@@ -115,6 +124,37 @@ function effectiveEffort(settings = selectedSettings()) {
   return selectedModel(settings) && !selectedEfforts(settings).includes(effort)
     ? "medium"
     : effort;
+}
+/**
+ * Return whether a chat runs on Fast: null when its model has no Fast tier,
+ * else the chat's own choice, or the model's default when it chose nothing.
+ * The worker decides the same way (run_fast in server.py).
+ */
+function effectiveFast(settings = selectedSettings()) {
+  const model = selectedModel(settings);
+  const offered = model ? (model.fast ?? null) : null;
+  if (offered === null) return null;
+  return settings.fast ?? offered;
+}
+/**
+ * Show the lightning toggle in the panel for the open chat: pressed while it
+ * runs on Fast, disabled with a plain tooltip when its model has no Fast tier.
+ */
+function renderFast() {
+  const fast = effectiveFast();
+  const button = $("effort-fast");
+  button.disabled = $("picker-button").disabled || fast === null;
+  button.setAttribute("aria-pressed", String(fast === true));
+  button.title =
+    fast === null
+      ? "Fast mode is not available for this model"
+      : `Fast mode: ${fast ? "on (about 2x speed, uses more of your plan)" : "off"}`;
+}
+/** Turn Fast mode on or off for the open chat; nothing happens when its model has no Fast tier. */
+async function toggleFast() {
+  const fast = effectiveFast();
+  if (fast === null) return;
+  await saveSelection({ ...selectedSettings(), fast: !fast });
 }
 /** True while the picker panel or its model list is open. */
 function pickerOpen() {
@@ -156,14 +196,16 @@ function renderEffort(effort = effectiveEffort()) {
   $("effort-dots").replaceChildren(...efforts.map(() => textNode("span", "")));
   $("effort-description").textContent =
     effortDescriptions[effort] || "Using the add-on default reasoning level.";
+  renderFast();
 }
 /** The name of the model a chat runs on, whether it selected one or follows the add-on setting. */
 function modelLabel(settings = selectedSettings()) {
   return selectedModel(settings)?.label || settings.model || "Model";
 }
 /**
- * Show the chip: the model name and the reasoning level in grey, or
- * "Select effort" while the picker is open, as in the ChatGPT desktop app.
+ * Show the chip: the model name, a small bolt while the chat runs on Fast,
+ * and the reasoning level in grey, or "Select effort" while the picker is
+ * open, as in the ChatGPT desktop app.
  */
 function renderChip() {
   const settings = selectedSettings();
@@ -172,6 +214,7 @@ function renderChip() {
   $("picker-model").textContent = modelLabel(settings);
   $("effort-label").textContent = effortLabels[effort] || effort;
   $("picker-model").hidden = open;
+  $("picker-fast").hidden = open || effectiveFast(settings) !== true;
   $("effort-label").hidden = open;
   $("picker-open-label").hidden = !open;
   $("picker-button").title = settings.reasoning_effort
@@ -203,6 +246,7 @@ function renderPicker() {
     $(id).disabled = disabled;
   for (const option of $("model-options").children) option.disabled = disabled;
   if (disabled && !state.settingsBusy) closePicker();
+  renderFast();
   renderChip();
   if (!$("effort-popover").hidden) renderEffort();
   if (!$("model-popover").hidden) renderModels();
@@ -379,6 +423,10 @@ $("effort-slider").addEventListener("change", async () => {
   await saveSelection({ ...selectedSettings(), reasoning_effort: effort });
   if (!$("effort-popover").hidden) $("effort-slider").focus();
 });
+$("effort-fast").onclick = async () => {
+  await toggleFast();
+  if (!$("effort-popover").hidden) $("effort-fast").focus();
+};
 // Reset goes back to the default model and its level, whatever the chat had selected, as in the ChatGPT apps.
 $("effort-reset").onclick = async () => {
   await saveSelection({ ...selectedSettings(), model: null, reasoning_effort: null });
@@ -2419,7 +2467,7 @@ async function fetchSelected(force = false) {
   if (!state.chatSettings.has(id))
     state.chatSettings.set(
       id,
-      data.task.chat_settings || { model: null, reasoning_effort: null },
+      data.task.chat_settings || NO_SELECTION,
     );
   state.loading = false;
   renderTask(force);
@@ -3263,7 +3311,11 @@ if (!SLASH_COMMANDS_ENABLED) {
   message.removeAttribute("aria-expanded");
 }
 
-/** Page shortcuts and their availability when slash commands are enabled. */
+/**
+ * Page shortcuts and their availability when slash commands are enabled.
+ * /fast turns Fast mode on or off, as the lightning toggle in the picker
+ * does; it is listed only while the chat's model has a Fast tier.
+ */
 const SLASH_COMMANDS = [
   {
     name: "new",
@@ -3292,6 +3344,16 @@ const SLASH_COMMANDS = [
     description: "Choose how long Codex thinks before it answers",
     available: () => Boolean(state.catalog) && !$("picker-button").disabled,
     run: () => openPicker("effort"),
+  },
+  {
+    name: "fast",
+    icon: "⚡",
+    description: "Turn Fast mode on or off for this chat",
+    available: () =>
+      Boolean(state.catalog) &&
+      !$("picker-button").disabled &&
+      effectiveFast() !== null,
+    run: () => toggleFast(),
   },
   {
     name: "rename",
