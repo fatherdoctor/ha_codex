@@ -4,7 +4,7 @@
   "result": "fail",
   "commit": "020fe19e597d2846adb31999c53cf654af890ede",
   "date": "2026-11-24",
-  "lab": "VM 220, Home Assistant Core 2026.11.0, the app rebuilt in place from this commit with the integration bundled (integration unchanged since 14d55414); the lab app has the HA_TOKEN option set",
+  "lab": "VM 220, Home Assistant Core 2026.11.0, the app rebuilt in place from this commit with the integration bundled (integration unchanged since 14d55414); the (d) calendar test ran with the HA_TOKEN option cleared, the other steps with it set",
   "starter": "the lab's AGENTS.md is the 0.5.0 starter from 11-23; the image's starter_agents.md equals the release's (names /config/memory/); the first-start write was not run, because a fresh install would drop the lab's ChatGPT sign-in",
   "checks_0_5_1": {
     "media-is-ha-share": "pass on 14d55414 (a file written at /media in the app appeared in the VM's /mnt/data/supervisor/media, then removed); not repeated on 020fe19e, whose change does not touch the mounts",
@@ -20,9 +20,11 @@
     "question-notice": "pass"
   },
   "action_data_d": {
-    "calendar-today": "fail: in two new chats Codex asked to run a shell python script that reads $HA_URL/api/calendars with $HA_TOKEN; both cards denied; both chats failed saying no tool can list events. It never used home_assistant_call.call for calendar.get_events",
-    "weather-tomorrow": "pass after one reply: Codex found no weather entity by name and asked for a city; after the reply named weather.demo_weather_south, home_assistant_mcp.call_service_tool and then home_assistant_call.call ran weather.get_forecasts (both allowed), and the answer used the returned forecast",
-    "core-auth-log": "pass (no invalid authentication or Banned IP line since the install; no ip_bans.yaml)",
-    "ha-url-unset-without-ha-token": "not tested: the lab app has the HA_TOKEN option, so its Codex processes have HA_URL and HA_TOKEN by design"
-  }
+    "calendar-today-no-token": "fail: two new chats (20261124T154433Z-843368bb, 20261124T154741Z-e99e29ff), Ask for approval, no HA_TOKEN option. Each time Codex used the bundled hass-mcp tool home_assistant_mcp.call_service_tool for calendar.get_events (card allowed); Home Assistant answered HTTP 400 because that tool does not ask for the response, and Codex answered from the calendar entities' state (current and next event only), saying the full-day query failed. Chat 1 ended failed, chat 2 completed. Codex never used home_assistant_call.call, the tool #312 fixed. No shell or HTTP card",
+    "no-token-environment": "pass: after the option was cleared and the app restarted, the Codex app-server had neither HA_URL nor HA_TOKEN",
+    "core-auth-log": "pass (no invalid authentication or Banned IP line in the lab Core journal since the install or since the no-token restart; no ip_bans.yaml)",
+    "weather-tomorrow-token-set": "pass after one reply: Codex found no weather entity by name and asked for a city; after the reply named weather.demo_weather_south, home_assistant_mcp.call_service_tool and then home_assistant_call.call ran weather.get_forecasts (both allowed), and the answer used the returned forecast",
+    "note-token-set": "token set: Codex uses the allowed direct API path; denied in the test (two chats, shell python reading $HA_URL/api/calendars with $HA_TOKEN)"
+  },
+  "result_reason": "the no-token calendar test did not answer from the returned events: the bundled hass-mcp call_service_tool gets HTTP 400 for calendar.get_events, and Codex did not use home_assistant_call.call"
 }
