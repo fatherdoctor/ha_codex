@@ -5,7 +5,8 @@
 - A one-time wakeup that Codex proposes (a schedule with a single time) is now on when Codex saves it. It runs one
   time, as the next message in the chat it came from, and that run still asks for permission like any other. A
   repeating proposal still waits for an administrator's approval. A wakeup counts against the 100 approved
-  schedules. The answer Codex gets after a proposal now gives the next run in Home Assistant's time zone
+  schedules until it has run; a one-time schedule that ran no longer counts, so old wakeups never fill that limit.
+  Settings > Scheduled runs shows "Set by Codex" on a wakeup. The answer Codex gets after a proposal now gives the next run in Home Assistant's time zone
   (`next_run`), and Codex's rules tell it to give the owner times in that zone, never in UTC. The tool text no longer
   says that cron fields are UTC; they always followed Home Assistant's time zone.
 - A new test file, `tests/test_run_task_exits.py`, runs one whole exchange for each way a run can end: an answer, a

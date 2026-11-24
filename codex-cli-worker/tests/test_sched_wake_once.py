@@ -69,6 +69,31 @@ class WakeupStoreTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'Approved schedule limit reached'):
                 self.propose(wakeup(NOW + 700))
 
+    def spend_wakeups(self, count):
+        """Have Codex set count wakeups and let each one run, one a day (64 scheduled runs a day is a limit too)."""
+        for index in range(count):
+            item = self.propose(wakeup())
+            self.assertIsNotNone(self.store.reserve(NOW + 600 + index * 86400, item['id']))
+
+    def test_wakeups_that_ran_leave_room_for_codex_and_the_owner(self):
+        self.spend_wakeups(scheduling.MAX_SCHEDULES)
+        self.assertTrue(self.propose(wakeup(NOW + 7200))['approved'])
+        daily = proposal(name='Owner daily', spec={'kind': 'cron', 'expression': '0 7 * * *'})
+        self.assertTrue(self.store.save(daily, owner=True, now=NOW)['approved'])
+        waiting = self.propose(proposal(name='Codex hourly'))
+        self.store.action(waiting['id'], 'approve', NOW, revision=waiting['revision'])
+        self.assertTrue(next(s for s in self.store.schedules() if s['id'] == waiting['id'])['approved'])
+
+    def test_wakeups_that_still_wait_to_run_keep_their_place(self):
+        with patch.object(scheduling, 'MAX_SCHEDULES', 2):
+            self.spend_wakeups(1)
+            waiting = self.propose(wakeup(NOW + 7200)); self.propose(wakeup(NOW + 7300))
+            with self.assertRaisesRegex(ValueError, 'Approved schedule limit reached'):
+                self.propose(wakeup(NOW + 7400))
+            self.store.action(waiting['id'], 'pause', NOW)  # paused, it can still be resumed: it keeps its place
+            with self.assertRaisesRegex(ValueError, 'Approved schedule limit reached'):
+                self.store.save(proposal(name='Owner hourly'), owner=True, now=NOW)
+
     def test_the_owner_still_edits_and_deletes_a_codex_wakeup(self):
         item = self.propose(wakeup())
         with self.assertRaises(LookupError):

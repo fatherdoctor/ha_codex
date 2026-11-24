@@ -128,6 +128,17 @@ def starts_approved(owner, spec):
     return owner or spec['kind'] == 'once'
 
 
+# A one-time schedule that ran is off with no next run; it cannot run again until the owner edits it, so it does
+# not use up a place under MAX_SCHEDULES (otherwise every wakeup Codex ever set would fill the owner's room).
+SPENT = "enabled=0 AND next_due IS NULL AND json_extract(spec, '$.kind')='once'"
+
+
+def counted(db, approved, schedule_id=''):
+    """Return how many schedules hold a place under the limit of their kind (approved or proposals)."""
+    return db.execute(f'SELECT count(*) FROM schedules WHERE approved=? AND id!=? AND NOT ({SPENT})',
+                      (approved, schedule_id)).fetchone()[0]
+
+
 def local_text(stamp, zone):
     """Say a time in the home's time zone, for example 'Tuesday, November 24, 2026 at 6:50 PM CST'."""
     moment = datetime.fromtimestamp(stamp, ZoneInfo(zone))
@@ -337,8 +348,7 @@ class Store:
                 raise LookupError('Schedule not found.')
             approved = int(starts_approved(owner, value['spec']))
             cap = MAX_SCHEDULES if approved else MAX_PROPOSALS
-            count = db.execute('SELECT count(*) FROM schedules WHERE approved=? AND id!=?', (approved, schedule_id or '')).fetchone()[0]
-            if count >= cap:
+            if counted(db, approved, schedule_id or '') >= cap:
                 raise ValueError('Approved schedule limit reached.' if approved else 'Proposal limit reached.')
             schedule_id = schedule_id or uuid.uuid4().hex
             # An edit that does not name the chat or the model keeps the saved one.
@@ -360,7 +370,7 @@ class Store:
                 raise ValueError('Unknown schedule action.')
             if action == 'approve' and revision != row['revision']:
                 raise ValueError('This proposal changed. Refresh and review it before approving.')
-            if action == 'approve' and not row['approved'] and db.execute('SELECT count(*) FROM schedules WHERE approved=1').fetchone()[0] >= MAX_SCHEDULES:
+            if action == 'approve' and not row['approved'] and counted(db, 1) >= MAX_SCHEDULES:
                 raise ValueError('Approved schedule limit reached.')
             approved = bool(row['approved']) or action == 'approve'
             if action == 'resume' and not approved:
