@@ -57,6 +57,7 @@ jobs:
           done
           node codex-cli-worker/tests/browser_smoke.cjs
           node codex-cli-worker/tests/browser_copy.cjs
+          node codex-cli-worker/tests/browser_code_copy.cjs
           node codex-cli-worker/tests/browser_settings_phone.cjs
           node codex-cli-worker/tests/browser_remote_name.cjs
           node codex-cli-worker/tests/browser_full_access.cjs
