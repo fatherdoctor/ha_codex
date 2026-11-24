@@ -70,6 +70,10 @@
 - The chat page's repeating checks (the chat list, the steps of a working chat, the quota, the two sign-ins, remote
   control and the code countdowns) now run through one scheduler, `poll()`, and the buttons that wait for the worker
   share one helper, `busyAction()`. Each check keeps its timing, and nothing looks different.
+- The chat page's script starts its cut into smaller files. `chat-core.js` holds what every part of the page uses
+  (the element helper, the state, the requests to the worker, `poll()`, `busyAction()`, the icons and the theme), and
+  `chat-settings.js` holds the Settings window and the account lines. The rest stays in `chat.js` for now. The code
+  moved without a change, and nothing looks different.
 - The GitHub card explains its repository count: Codex reaches only the repositories that the GitHub App is installed
   on. A new **Add repositories** link under the list opens the App's Configure page on GitHub, where you add more. The
   link comes from GitHub's answer for the installation and shows only for an App sign-in, not for a token.
