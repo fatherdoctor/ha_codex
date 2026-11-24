@@ -144,6 +144,41 @@ class VerificationTests(unittest.TestCase):
         self.assertEqual(json.loads(ws.send.call_args_list[0].args[0]), {"type": "auth", "access_token": "supervisor-secret"})
         ws.close.assert_called_once()
 
+    def readback_error(self, *replies):
+        """Run ws_read against a stand-in connection that answers with replies; return the ValueError text."""
+        ws = Mock(spec=["recv", "send", "close", "settimeout"])
+        ws.recv.side_effect = [reply if isinstance(reply, str) else json.dumps(reply) for reply in replies]
+        with patch("ha_client.websocket.create_connection", return_value=ws), \
+                patch.object(server, "ha_token", return_value="supervisor-secret"), \
+                self.assertRaises(ValueError) as caught:
+            self.engine.ws_read({"type": "lovelace/config"})
+        return str(caught.exception)
+
+    def test_websocket_read_keeps_home_assistant_error_text_out(self):
+        """A failed reply gives the fixed message: Home Assistant's own error text never reaches the agent."""
+        failure = {"id": 1, "type": "result", "success": False,
+                   "error": {"code": "config_not_found", "message": "synthetic-ha-detail"}}
+        message = self.readback_error({"type": "auth_required"}, {"type": "auth_ok"}, failure)
+        self.assertEqual(message, "Home Assistant could not read this dashboard")
+        self.assertNotIn("synthetic-ha-detail", message)
+
+    def test_websocket_read_refuses_a_frame_over_one_mebibyte(self):
+        """A dashboard reply larger than 1 MiB ends the read with the limit message; one just under it is read."""
+        login = ({"type": "auth_required"}, {"type": "auth_ok"})
+        reply = '{"id":1,"type":"result","success":true,"result":{"pad":"%s"}}'
+        envelope = len(reply % "")
+        over = reply % ("x" * (1024 * 1024 - envelope + 1))
+        self.assertEqual(self.readback_error(*login, over), "Dashboard response exceeds the verification limit")
+        ws = Mock(spec=["recv", "send", "close", "settimeout"])
+        ws.recv.side_effect = [*map(json.dumps, login), reply % ("x" * (1024 * 1024 - envelope))]
+        with patch("ha_client.websocket.create_connection", return_value=ws), \
+                patch.object(server, "ha_token", return_value="supervisor-secret"):
+            self.assertEqual(len(self.engine.ws_read({"type": "lovelace/config"})["pad"]), 1024 * 1024 - envelope)
+
+    def test_websocket_read_refuses_a_login_without_auth_required(self):
+        """A direct auth_ok is an authentication failure, and no dashboard command is sent."""
+        self.assertEqual(self.readback_error({"type": "auth_ok"}), "Home Assistant WebSocket authentication failed")
+
     def test_no_operation_renders_or_screenshots_a_dashboard(self):
         """The dashboard capture is gone: the tool does not offer it and the worker refuses it without a Core call."""
         self.assertNotIn("dashboard", verification_mcp.TOOL["inputSchema"]["properties"]["operation"]["enum"])

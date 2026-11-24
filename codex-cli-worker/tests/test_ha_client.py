@@ -168,6 +168,16 @@ class ServerCallerTests(unittest.TestCase):
                 self.assertRaisesRegex(RuntimeError, "refused the credential"):
             server.lookup_ha_users()
 
+    def test_user_list_fails_closed(self):
+        """A failed command, or a result that is not a list, raises: the caller then refuses, never allows."""
+        failure = {"id": 1, "type": "result", "success": False, "error": {"message": "synthetic"}}
+        not_a_list = {"id": 1, "type": "result", "success": True, "result": {"id": "u1", "is_admin": True}}
+        for reply in (failure, not_a_list):
+            with self.subTest(reply=reply), \
+                    patch.object(ha_client.websocket, "create_connection", return_value=fake_socket(*LOGIN, reply)), \
+                    self.assertRaisesRegex(RuntimeError, "did not return its user list"):
+                server.lookup_ha_users()
+
     def test_dashboard_save_reports_home_assistant_error(self):
         """save_lovelace_dashboard sends lovelace/config/save and returns Home Assistant's error text on failure."""
         error = {"code": "invalid_format", "message": "bad view"}

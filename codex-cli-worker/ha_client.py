@@ -1,7 +1,9 @@
-"""The worker's one client for Home Assistant: REST, WebSocket and persistent notifications.
+"""The worker's client for Home Assistant: REST, WebSocket and persistent notifications.
 
-Every call goes through the Supervisor proxy with the Supervisor token. The app's `ha_url` option is only the
-address Codex gets for its own calls (core_address.py); the worker never uses it.
+server.py, ha_data.py and verification.py make their Home Assistant calls here, through the Supervisor proxy with
+the Supervisor token. Three files still talk to Home Assistant on their own: update_status.py (its own WebSocket
+login), relay_reads.py and ha_call.py (their own proxy address); a later step moves them here. The app's `ha_url`
+option is only the address Codex gets for its own calls (core_address.py); the worker never uses it.
 """
 from __future__ import annotations
 

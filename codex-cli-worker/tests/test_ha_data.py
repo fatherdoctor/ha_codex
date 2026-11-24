@@ -16,7 +16,7 @@ from unittest.mock import Mock, patch
 from app_folders import isolated_app_folders
 from test_server import server
 import tool_threads
-from ha_data import HomeAssistantData, MAX_EXPORT_BYTES, MAX_QUERIES, MAX_SOURCE_BYTES, MAX_TURN_BYTES
+from ha_data import DataError, HomeAssistantData, MAX_EXPORT_BYTES, MAX_QUERIES, MAX_SOURCE_BYTES, MAX_TURN_BYTES
 from ha_data_mcp import MAX_RESPONSE_BYTES, STATISTIC_TYPES, TOOLS, respond
 
 START = "2026-01-01T00:00:00+00:00"
@@ -82,6 +82,22 @@ class HistoricalDataTests(unittest.TestCase):
             {"id": 2, "type": "result", "success": True, "result": statistics},
         ]]
         return ws
+
+    def read_with_reply_at(self, elapsed):
+        """Run ws_read on a clock where the read starts at 100, the login comes at once and the reply at 100 + elapsed."""
+        ws = self.ws_response([], {})
+        clock = iter([100.0, 100.0, 100.0, 100.0 + elapsed])
+        with patch("ha_client.websocket.create_connection", return_value=ws), \
+                patch("ha_client.time.monotonic", side_effect=lambda: next(clock)):
+            return ws, self.engine.ws_read([{"type": "recorder/get_statistics_metadata", "statistic_ids": ["sensor.x"]}])
+
+    def test_statistics_read_stops_at_45_seconds(self):
+        """The whole read is bounded: a reply due at 45 seconds is not read, and the agent sees the timeout."""
+        ws, results = self.read_with_reply_at(44)
+        self.assertEqual(results, [[]])
+        self.assertEqual([call.args[0] for call in ws.settimeout.call_args_list], [15, 15, 1])
+        with self.assertRaisesRegex(DataError, "^Statistics query timed out$"):
+            self.read_with_reply_at(45)
 
     def test_untrusted_arguments_fail_before_network_access(self):
         """Reject unscoped queries, arbitrary operations, malformed windows and oversized work."""

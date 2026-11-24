@@ -2,8 +2,9 @@
 
 ## 0.6.0 (unreleased)
 
-- The app now has one Home Assistant client, `ha_client.py`, for its REST calls, its WebSocket reads and its
-  persistent notifications. The four copies of the WebSocket login are now one. That login is strict everywhere:
+- The app now has one Home Assistant client, `ha_client.py`, for the REST calls, WebSocket reads and persistent
+  notifications of the worker's main modules (three smaller files move to it later). The four copies of the
+  WebSocket login in those modules are now one. That login is strict everywhere:
   Home Assistant must ask for authentication before it accepts it, as the statistics read already required. The
   REST calls no longer build a second, Supervisor-only attempt, because the first attempt already went to the
   Supervisor; an error still names the URL. Nothing changes for an owner. The `ha_url` option still sets only the
