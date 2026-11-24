@@ -56,6 +56,8 @@ the version.
   in writing with the reason.
 - A change to permissions, approvals, sign-in, the sandbox, remote control or writes under `/config` states its
   safety reasoning in the pull request and comes with tests that fail without it.
+- No directory restriction (a folder hidden, read-only or not writable in the sandbox) unless it has been checked
+  against what the Claude Code add-on allows today; the app aims at the same file access. Say the check in the PR.
 - Keep the pins: the base image by digest, the packaged Codex CLI by version and checksum, no self-update
   (`codex-cli-worker/tests/test_fork_pins.py` checks them). Moving a pin is its own pull request.
 - The app and the integration carry one version: `codex-cli-worker/config.yaml` and `manifest.json` change

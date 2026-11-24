@@ -223,6 +223,97 @@ class NoAnswerTests(CallTestCase):
         self.assertEqual(result, {"status": "failed", "message": "No answer from Home Assistant (ConnectionError)"})
 
 
+class ScriptedHomeAssistant(FakeHomeAssistant):
+    """A fake Home Assistant that gives each request the next of a list of (status, answer) pairs."""
+
+    def __init__(self, answers):
+        super().__init__()
+        self.answers = list(answers)
+
+    def post(self, url, **options):
+        self.requests.append({"method": "POST", "url": url, **options})
+        status, answer = self.answers.pop(0)
+        text = answer if isinstance(answer, str) else json.dumps(answer)
+        return SimpleNamespace(status_code=status, json=lambda: json.loads(text), text=text)
+
+
+# Home Assistant's answer to a call of an action that only answers with data, sent without ?return_response.
+NEEDS_RESPONSE = ("Service call requires responses but caller did not ask for responses. "
+                  "Add ?return_response to query parameters.")
+
+
+class ResponseTests(CallTestCase):
+    """An action that answers with data: sent again once with ?return_response, and its data given to Codex."""
+
+    def scripted(self, *answers):
+        fake = ScriptedHomeAssistant(answers)
+        patcher = patch.object(ha_call.requests, "post", fake.post)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return fake
+
+    def test_calendar_events_are_returned_after_the_call_is_sent_again_with_return_response(self):
+        events = {"calendar.family": {"events": [{"start": "2030-01-07T09:00:00-06:00",
+                                                  "end": "2030-01-07T10:00:00-06:00", "summary": "Invented event"}]}}
+        fake = self.scripted((400, NEEDS_RESPONSE), (200, {"changed_states": [], "service_response": events}))
+        arguments = {"service": "calendar.get_events", "target": {"entity_id": "calendar.family"},
+                     "data": {"duration": {"hours": 24}}}
+        result = self.call(arguments)
+        body = {"duration": {"hours": 24}, "entity_id": "calendar.family"}
+        self.assertEqual([(item["url"], item["json"]) for item in fake.requests],
+                         [("http://supervisor/core/api/services/calendar/get_events", body),
+                          ("http://supervisor/core/api/services/calendar/get_events?return_response", body)])
+        self.assertTrue(all(item["headers"] == {"Authorization": f"Bearer {WORKER_TOKEN}"}
+                            and item["allow_redirects"] is False for item in fake.requests))
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["service"], "calendar.get_events")
+        self.assertEqual(result["changed"], [])
+        self.assertEqual(result["response"], events)
+        self.assertNotIn("response_cut", result)
+
+    def test_changed_states_in_the_answer_are_reported(self):
+        self.scripted((400, NEEDS_RESPONSE),
+                      (200, {"changed_states": [{"entity_id": "todo.shopping", "state": "2"}],
+                             "service_response": {"todo.shopping": {"items": []}}}))
+        result = self.call({"service": "todo.get_items", "target": {"area_id": "kitchen"}})
+        self.assertEqual(result, {"status": "ok", "service": "todo.get_items", "changed": ["todo.shopping"],
+                                  "response": {"todo.shopping": {"items": []}}})
+
+    def test_a_normal_call_sends_one_request_and_answers_as_before(self):
+        fake = self.scripted((200, [{"entity_id": "light.kitchen_ceiling", "state": "off"}]))
+        result = self.call({"service": "light.turn_off", "target": {"area_id": "kitchen"}})
+        self.assertEqual([item["url"] for item in fake.requests],
+                         ["http://supervisor/core/api/services/light/turn_off"])
+        self.assertEqual(result, {"status": "ok", "service": "light.turn_off", "changed": ["light.kitchen_ceiling"]})
+
+    def test_an_oversized_answer_is_cut_and_says_so(self):
+        events = {"calendar.family": {"events": [{"summary": f'Invented "event" {number}', "description": "x" * 200}
+                                                 for number in range(400)]}}
+        self.scripted((400, NEEDS_RESPONSE), (200, {"changed_states": [], "service_response": events}))
+        result = self.call({"service": "calendar.get_events", "target": {"entity_id": "calendar.family"}})
+        self.assertEqual(result["status"], "ok")
+        self.assertIs(result["response_cut"], True)
+        self.assertIsInstance(result["response"], str)
+        self.assertTrue(json.dumps(events).startswith(result["response"]))
+        self.assertLessEqual(len(json.dumps(result["response"])), ha_call.MAX_RESPONSE_BYTES)
+        self.assertIn("cut at", result["response_note"])
+        # The whole answer, as the socket writes it, fits the bridge's 64 KB line.
+        self.assertLess(len(json.dumps(result)), 64 * 1024)
+
+    def test_a_400_for_another_reason_is_not_sent_again(self):
+        fake = self.scripted((400, {"message": "invented validation error"}))
+        result = self.call({"service": "calendar.get_events", "target": {"entity_id": "calendar.family"}})
+        self.assertEqual(len(fake.requests), 1)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["http_status"], 400)
+
+    def test_a_failed_second_request_is_reported_and_not_sent_a_third_time(self):
+        fake = self.scripted((400, NEEDS_RESPONSE), (400, NEEDS_RESPONSE))
+        result = self.call({"service": "calendar.get_events", "target": {"entity_id": "calendar.family"}})
+        self.assertEqual(len(fake.requests), 2)
+        self.assertEqual((result["status"], result["http_status"]), ("failed", 400))
+
+
 class BridgeTests(CallTestCase):
     """The bridge forwards to the worker's socket; the socket, not the bridge, decides."""
 
@@ -386,6 +477,13 @@ class ByNameTests(CallTestCase):
         self.assertIn("read the state with a read tool", ha_call_mcp.TOOL["description"])
         self.assertNotIn("home_assistant.verify", ha_call_mcp.TOOL["description"])
 
+    def test_the_tool_description_claims_actions_that_answer_with_data(self):
+        description = ha_call_mcp.TOOL["description"]
+        for action in ("calendar.get_events", "weather.get_forecasts", "todo.get_items"):
+            self.assertIn(action, description)
+        self.assertIn("not home_assistant_mcp's call_service_tool", description)
+        self.assertIn("returns it in response", ha_call_mcp.TOOL["description"])
+
 
 def configured(args):
     """Return every --config value of a Codex command line."""
@@ -536,6 +634,15 @@ class InstructionTests(unittest.TestCase):
         self.assertIn("a reload and a restart included, use the home_assistant_call call tool", text)
         self.assertNotIn("automation/reload", text)
         self.assertEqual(server.home_assistant_api_instructions({}), "")
+
+    def test_the_rules_forbid_calling_home_assistant_directly(self):
+        """A call without a token counts as a failed login, and Home Assistant bans the app after a few."""
+        rule = "Never call HA_URL or the Home Assistant REST or WebSocket API yourself, with or without a token."
+        for text in (server.build_page_instructions(), server.remote_control_instructions({}),
+                     server.remote_control_instructions({"HA_TOKEN": "invented-token"})):
+            self.assertIn(rule, text)
+            self.assertIn("If they cannot do it, say so and stop.", text)
+            self.assertIn("An unauthenticated call counts as a failed login and gets the app banned.", text)
 
     def test_the_app_token_text_points_changes_to_the_tool_too(self):
         text = server.remote_control_instructions({"HA_TOKEN": "invented-token"})

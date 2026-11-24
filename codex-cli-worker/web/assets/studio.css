@@ -57,7 +57,8 @@ main { min-width: 0; background: var(--bg); }
 .document-attachment { display: block; padding: 12px 16px; border: 1px solid var(--line); border-radius: 12px; color: var(--text); background: var(--sidebar); overflow-wrap: anywhere; }
 .studio-sheet, #settings { background: var(--sidebar); color: var(--text); border: 1px solid var(--line); max-height: 88dvh; width: min(640px, calc(100vw - 32px)); border-radius: 20px; padding: 24px; }
 /* Settings keeps one size: opening a section scrolls inside the window instead of growing it. */
-#settings { height: min(720px, 88dvh); overflow-y: auto; }
+/* The scrollbar keeps its space, so text does not reflow when an expanded part makes the page scroll. */
+#settings { height: min(720px, 88dvh); overflow-y: auto; scrollbar-gutter: stable; }
 dialog::backdrop { background: #0006; }
 .studio-sheet .dialog-header h2 { font-size: calc(20px * var(--text-scale)); overflow-wrap: anywhere; }
 .permission-option { display: block; width: 100%; padding: 16px; text-align: left; background: transparent; color: var(--text); border: 1px solid var(--line); margin: 10px 0; }

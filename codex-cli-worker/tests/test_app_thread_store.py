@@ -83,7 +83,7 @@ class FixedTextTests(unittest.TestCase):
     def test_the_rules_name_no_per_message_detail(self):
         """No task id, backup folder, attachment, token note, documentation date, GitHub note or user message."""
         text = server.PAGE_INSTRUCTIONS
-        for changing in ("Task id", "codex_tasks", "copy it to", "The user attached", "HA_URL", "stored locally",
+        for changing in ("Task id", "codex_tasks", "copy it to", "The user attached", "$HA_URL/api", "stored locally",
                          "github_git", "Current user message"):
             self.assertNotIn(changing, text)
         self.assertIn("call the home_assistant_data exchange_info tool once", text)
@@ -251,6 +251,18 @@ class ExchangeRecordTests(unittest.TestCase):
             task_id, attachments.StubAppServer(attachments.SESSION_ID), "Prompt", Path("final"), None, {},
             {"codex_sandbox": "workspace-write"})
         self.assertEqual(session.thread_params["developerInstructions"], server.PAGE_INSTRUCTIONS)
+
+    def test_codex_starts_in_its_working_folder_and_keeps_config_writable(self):
+        """The thread starts in its working folder; /config, /share and /media are the writable roots."""
+        task_id = self.create(OWNER_TEXT)
+        workdir = Path(self.enterContext(tempfile.TemporaryDirectory())) / "codex"
+        workdir.mkdir()
+        with patch.object(server, "CODEX_WORKDIR", workdir):
+            session = server.create_approval_session(
+                task_id, attachments.StubAppServer(attachments.SESSION_ID), "Prompt", Path("final"), None, {},
+                {"codex_sandbox": "workspace-write"})
+        self.assertEqual(session.thread_params["cwd"], str(workdir))
+        self.assertEqual(session.turn_params["sandboxPolicy"]["writableRoots"][:4], ["/config", "/share", "/media", "/media/.agents"])
 
     def run_and_record_plain(self, task_id, session_id=None, reply=None):
         """Run one exchange through run_codex's fake process and return exchange_info's details and the message."""
