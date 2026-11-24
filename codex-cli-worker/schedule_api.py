@@ -112,7 +112,7 @@ def page_arguments(operation, args):
     """
     if set(args) - {'offset', 'limit'}:
         raise ValueError(f'{operation} accepts only offset and limit.')
-    maximum = scheduling.MAX_SCHEDULES + scheduling.MAX_PROPOSALS
+    maximum = scheduling.LISTED
     offset = args.get('offset', 0)
     limit = args.get('limit', DEFAULT_PAGE_LIMIT)
     # bool is a subclass of int; true and false are not page numbers.
@@ -192,7 +192,8 @@ class Service:
                 return proposal_answer(item, store.timezone)
             if operation == 'list_schedules':
                 offset, limit = page_arguments(operation, args)
-                rows = store.schedules()
+                # Spent wakeups past the first LISTED rows are left out; every active schedule and proposal is in.
+                rows = store.schedules()[:scheduling.LISTED]
                 page = rows[offset:offset + limit]
                 for row in page:
                     for key in scheduling.OWNER_FIELDS:
