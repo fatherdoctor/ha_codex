@@ -770,8 +770,26 @@ h1 {
   background: var(--surface);
   overflow: hidden;
 }
+.md-code-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 10px 0;
+  user-select: none;
+}
+.md-copy {
+  min-height: 24px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: calc(11px * var(--text-scale));
+  cursor: pointer;
+}
+.md-copy:hover { color: var(--text); }
 .md-lang {
-  padding: 7px 14px 0;
   color: var(--muted);
   font-size: calc(10px * var(--text-scale));
   line-height: 1.5;

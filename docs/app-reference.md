@@ -927,7 +927,7 @@ trigger:
 ```
 ````
 
-Single backticks mark inline code, such as an entity id. Headings, bold and italic text, strikethrough, bulleted and numbered lists, task lists, quotes, tables, horizontal rules, and links are formatted as well. Code blocks keep their indentation and scroll sideways when a line is too long, and so do wide tables. A single Enter stays a line break, and `<br>` breaks a line inside a table cell. The preview of each chat in the sidebar shows the answer without the symbols.
+Single backticks mark inline code, such as an entity id. Headings, bold and italic text, strikethrough, bulleted and numbered lists, task lists, quotes, tables, horizontal rules, and links are formatted as well. Code blocks keep their indentation and scroll sideways when a line is too long, and so do wide tables. Each code block has a **Copy** button at its top left that copies the code; where the clipboard is not available, as in some phone apps, it selects the code so you can copy it by hand. A single Enter stays a line break, and `<br>` breaks a line inside a table cell. The preview of each chat in the sidebar shows the answer without the symbols.
 
 Your own messages follow the same rules, so a line that starts with `#`, `-`, or `1.` becomes a heading or a list item, and text between asterisks or underscores is emphasized. Put configuration, templates, and logs in a code block to show them exactly as written.
 
