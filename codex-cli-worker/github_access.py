@@ -1089,8 +1089,8 @@ class GitHubService:
                 failure = failure or f"GitHub did not return {name} (HTTP {response.status_code})"
         ok = bool(names) and not failure
         text = (f"Read OK: {good} repositor{'y' if good == 1 else 'ies'}." if ok
-                else "Read failed: " + (failure or "no repository is connected") + ". Choose Check now to see "
-                "which repositories the sign-in reaches, or try again later.")
+                else "Read failed: " + (failure or "no repository is connected") + ". Look at the repositories listed on the card to see "
+                "which ones the sign-in reaches, or try again later.")
         self.last_test = {"at": iso(utc_now()), "ok": ok, "text": text}
         return self.status()
 

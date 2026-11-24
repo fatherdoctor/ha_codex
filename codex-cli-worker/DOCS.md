@@ -30,7 +30,7 @@ about GitHub into the chat.
    the repositories it reaches as soon as GitHub confirms. The code works for 15 minutes. After that, choose
    **Connect GitHub** again for a new one.
 4. Codex reaches only the repositories that the App is installed on. To add one, choose **Add repositories** under
-   the list, pick the repository on GitHub's page, then choose **Check now** and **Accept this access**.
+   the list, pick the repository on GitHub's page, then choose **Accept this access** when it appears.
 
 If your organization does not allow the App, choose **Use a token instead**. On github.com, make a fine-grained
 token (**Settings** > **Developer settings** > **Fine-grained tokens**) for **one** repository, with **Contents:

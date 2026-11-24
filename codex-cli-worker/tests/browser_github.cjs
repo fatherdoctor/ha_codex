@@ -134,7 +134,7 @@ function status(state, extra = {}) {
       // '1 repository' is the App installation's set: one line says so and links to GitHub's page that adds more.
       assert.equal(await page.locator('#github-add-repositories').isVisible(), true);
       assert.equal(await page.locator('#github-add-repositories-link').getAttribute('href'), CONFIGURE);
-      assert.match(shown, /Codex reaches only the repositories that the GitHub App is installed on\. Add repositories on GitHub/);
+      assert.match(shown, /Codex reaches only the repositories that the GitHub App is installed on\. Add repositories on GitHub, then press Accept this access when it appears\./);
 
       // Connected: Sign in and Sign out, and no Read test or Check now (the 0.5.1 box test).
       assert.equal(await page.locator('#github-connect').textContent(), 'Sign in');
