@@ -89,8 +89,9 @@ A scheduled run sends a chat's message again on a timetable, such as every morni
 next message in that chat, so Codex remembers everything said before. If the chat was deleted or archived, or Codex
 cannot resume it, the run starts a new chat.
 
-- Codex can **propose** a schedule, but a proposal stays off until an administrator approves it under **Settings** >
-  **Scheduled runs**.
+- Codex can **propose** a schedule. A repeating proposal stays off until an administrator approves it under
+  **Settings** > **Scheduled runs**. A one-time wakeup that Codex proposes is on at once: it runs one time, in the
+  same chat. Pause or delete it in the same place.
 - A scheduled run still asks before a step that needs more access. Open its chat to answer with **Allow once** or
   **Deny**. The run waits for your answer only until its **Time limit for a task** (one hour by default) ends. Then
   the run stops, and the step it asked about does not run.

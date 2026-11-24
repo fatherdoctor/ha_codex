@@ -201,9 +201,18 @@ const assert = require('node:assert/strict');
       assert.ok((await page.locator('#schedule-runs').textContent()).includes('waiting for approval'));
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
       await page.locator('#close-settings').click();
+      // A wakeup Codex set is on without the owner's approval, so its row says who set it.
+      schedules=[{...created,id:'wakeup',name:'Sample wakeup',spec:{kind:'once',at:1803862800},author:'codex',approved:true,enabled:true,revision:'wakeup',next_due:1803862800},
+                 {...created,id:'own',name:'Sample own',author:'owner',approved:true,enabled:true,revision:'own',next_due:1803862800}];
+      await openSettings();
+      await page.locator('#schedule-list').getByText('Sample wakeup',{exact:true}).waitFor();
+      const rows=await page.locator('#schedule-list p').allTextContents();
+      assert.ok(rows.some((text)=>text.startsWith('On · Set by Codex · ')),rows.join(' | '));
+      assert.equal(rows.filter((text)=>text.includes('Set by Codex')).length,1,rows.join(' | '));
+      await page.locator('#close-settings').click();
       assert.deepEqual(errors,[]);
       await page.close();
-      console.log(`PASS ${width}px: schedule editor from a chat's menu (hourly, daily, weekly, custom), HA-zone one-off entry, masked prompt read-only, proposal approval, literal rendering and pending status.`);
+      console.log(`PASS ${width}px: schedule editor from a chat's menu (hourly, daily, weekly, custom), HA-zone one-off entry, masked prompt read-only, proposal approval, 'Set by Codex' on a wakeup, literal rendering and pending status.`);
     }
   } finally {await browser.close();}
 })().catch(error=>{console.error(error.stack);process.exitCode=1;});

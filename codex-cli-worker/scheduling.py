@@ -117,6 +117,35 @@ def next_due(spec, after, zone='UTC'):
     raise ValueError('Cron has no occurrence in the next 366 days.')
 
 
+def starts_approved(owner, spec):
+    """Return whether a schedule runs without the owner's approval.
+
+    The owner's own schedules run as saved. A one-time wakeup that Codex
+    proposes runs once, at its time, as the next message in the chat it came
+    from, and that run asks for permission like any other. A repeating proposal
+    waits for the owner, because it would go on running by itself.
+    """
+    return owner or spec['kind'] == 'once'
+
+
+# A one-time schedule that ran is off with no next run; it cannot run again until the owner edits it, so it does
+# not use up a place under MAX_SCHEDULES (otherwise every wakeup Codex ever set would fill the owner's room).
+SPENT = "enabled=0 AND next_due IS NULL AND json_extract(spec, '$.kind')='once'"
+
+
+def counted(db, approved, schedule_id=''):
+    """Return how many schedules hold a place under the limit of their kind (approved or proposals)."""
+    return db.execute(f'SELECT count(*) FROM schedules WHERE approved=? AND id!=? AND NOT ({SPENT})',
+                      (approved, schedule_id)).fetchone()[0]
+
+
+def local_text(stamp, zone):
+    """Say a time in the home's time zone, for example 'Tuesday, November 24, 2026 at 6:50 PM CST'."""
+    moment = datetime.fromtimestamp(stamp, ZoneInfo(zone))
+    hour = moment.hour % 12 or 12
+    return f'{moment:%A, %B} {moment.day}, {moment.year} at {hour}:{moment:%M %p %Z}'
+
+
 def owner_fields(payload):
     """Return the chat and model an owner's request names; a field left out is left out.
 
@@ -317,11 +346,10 @@ class Store:
             old = db.execute('SELECT * FROM schedules WHERE id=?', (schedule_id,)).fetchone() if schedule_id else None
             if schedule_id and old is None:
                 raise LookupError('Schedule not found.')
-            approved = int(owner)
-            cap = MAX_SCHEDULES if owner else MAX_PROPOSALS
-            count = db.execute('SELECT count(*) FROM schedules WHERE approved=? AND id!=?', (approved, schedule_id or '')).fetchone()[0]
-            if count >= cap:
-                raise ValueError('Approved schedule limit reached.' if owner else 'Proposal limit reached.')
+            approved = int(starts_approved(owner, value['spec']))
+            cap = MAX_SCHEDULES if approved else MAX_PROPOSALS
+            if counted(db, approved, schedule_id or '') >= cap:
+                raise ValueError('Approved schedule limit reached.' if approved else 'Proposal limit reached.')
             schedule_id = schedule_id or uuid.uuid4().hex
             # An edit that does not name the chat or the model keeps the saved one.
             chat_id = value.get('chat_id', old['chat_id'] if old else '')
@@ -342,7 +370,7 @@ class Store:
                 raise ValueError('Unknown schedule action.')
             if action == 'approve' and revision != row['revision']:
                 raise ValueError('This proposal changed. Refresh and review it before approving.')
-            if action == 'approve' and not row['approved'] and db.execute('SELECT count(*) FROM schedules WHERE approved=1').fetchone()[0] >= MAX_SCHEDULES:
+            if action == 'approve' and not row['approved'] and counted(db, 1) >= MAX_SCHEDULES:
                 raise ValueError('Approved schedule limit reached.')
             approved = bool(row['approved']) or action == 'approve'
             if action == 'resume' and not approved:
