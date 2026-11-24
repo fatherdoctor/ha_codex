@@ -57,6 +57,9 @@
   the same call once more with `?return_response`; Home Assistant refused it before the action ran, so the action
   runs once. Codex gets the data, cut at 20,000 bytes with a note when it is larger. Every other call is sent once,
   as before.
+  Codex is also told to use this tool, not the bundled `home_assistant_mcp` server's `call_service_tool`, for
+  `calendar.get_events`, `weather.get_forecasts` and `todo.get_items`: the bundled tool cannot return their data, and
+  in a lab test Codex chose it and answered a calendar question from the entity state alone.
 - **Codex no longer calls Home Assistant's API by itself.** When a tool could not do a task, Codex could write its
   own script to Home Assistant's address without a token. Home Assistant counts each such call as a failed login
   and, after a few, bans the app's address. The instructions now tell Codex never to call Home Assistant's REST or
