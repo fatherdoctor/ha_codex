@@ -8,6 +8,14 @@
   list, and each turn that names its model tells Codex the tier, so a choice never carries over by mistake. A turn
   that does not yet know which model Codex picks sends no tier and leaves the choice to Codex. The button is dimmed
   for a model without Fast.
+- A one-time wakeup that Codex proposes (a schedule with a single time) is now on when Codex saves it. It runs one
+  time, as the next message in the chat it came from, and that run still asks for permission like any other. A
+  repeating proposal still waits for an administrator's approval. A wakeup counts against the 100 approved
+  schedules until it has run; a one-time schedule that ran no longer counts, so old wakeups never fill that limit.
+  Settings > Scheduled runs shows "Set by Codex" on a wakeup. The answer Codex gets after a proposal now gives the
+  next run in Home Assistant's time zone (`next_run`), and Codex's rules tell it to give the owner times in that zone,
+  never in UTC. The tool text no longer says that cron fields are UTC; they always followed Home Assistant's time
+  zone.
 - Home Assistant's configuration folder is now at `/homeassistant` inside the app, as in the Claude add-on and the
   Supervisor's default. `/config` no longer exists inside the app. Home Assistant and your files do not move. If your
   workspace instructions, your working folder's notes or a scheduled prompt say `/config/...`, change them to

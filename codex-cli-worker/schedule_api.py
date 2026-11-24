@@ -123,6 +123,21 @@ def page_arguments(operation, args):
     return offset, min(max(limit, 1), PAGE_LIMIT)
 
 
+def proposal_answer(item, zone):
+    """Tell Codex what happens to its proposal, with the next run in the home's time zone.
+
+    Codex repeats this answer to the owner, so the time is written out in the
+    Home Assistant time zone (a reply once gave the owner a UTC time).
+    """
+    if item['approved']:
+        message = 'This one-time wakeup is on. It runs in this chat at next_run. Tell the owner that time as written.'
+    else:
+        message = ('Waiting for owner approval on the Codex page. '
+                   'Tell the owner times in the Home Assistant time zone, as next_run shows.')
+    return {'ok': True, 'schedule_id': item['id'], 'approved': item['approved'], 'enabled': item['enabled'],
+            'next_run': scheduling.local_text(item['next_due'], zone), 'timezone': zone, 'message': message}
+
+
 class Service:
     def __init__(self, worker):
         self.worker = worker
@@ -174,8 +189,7 @@ class Service:
                 raise ValueError('Arguments must be an object.')
             if operation == 'propose_schedule':
                 item = store.save(args, owner=False, author='codex', now=time.time(), made_in=task_id)
-                return {'ok': True, 'schedule_id': item['id'], 'approved': False, 'enabled': False,
-                        'message': 'Waiting for owner approval on the Codex page.'}
+                return proposal_answer(item, store.timezone)
             if operation == 'list_schedules':
                 offset, limit = page_arguments(operation, args)
                 rows = store.schedules()

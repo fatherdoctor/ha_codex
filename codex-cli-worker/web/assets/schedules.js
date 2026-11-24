@@ -55,6 +55,10 @@
     if (spec.kind === "cron") return `Cron: ${spec.expression} (${place})`;
     return `Once: ${when(spec.at)}`;
   }
+  /** A wakeup Codex set runs without the owner's approval, so the list says who set it. */
+  function setByCodex(schedule) {
+    return schedule.approved && schedule.author === "codex" ? " · Set by Codex" : "";
+  }
   /** Read every schedule and the recent runs, and learn Home Assistant's time zone. */
   async function load() {
     latest = await api("schedules");
@@ -234,7 +238,7 @@
       const list = el("schedule-list"); list.replaceChildren();
       for (const schedule of data.schedules) {
         const item = node("div", "");
-        item.append(node("strong", schedule.name), node("p", `${schedule.approved ? schedule.enabled ? "On" : "Paused" : "Needs your approval"} · ${describe(schedule.spec)} · ${schedule.mode === "read-only" ? "Read only" : "Ask for approval"} · ${when(schedule.next_due)}`, "muted"));
+        item.append(node("strong", schedule.name), node("p", `${schedule.approved ? schedule.enabled ? "On" : "Paused" : "Needs your approval"}${setByCodex(schedule)} · ${describe(schedule.spec)} · ${schedule.mode === "read-only" ? "Read only" : "Ask for approval"} · ${when(schedule.next_due)}`, "muted"));
         const prompt = node("details", "", "disclosure"); prompt.append(node("summary", "Review prompt"), node("pre", schedule.prompt)); item.append(prompt);
         const actions = node("div", "", "settings-actions");
         const editButton = button("Edit", () => openEditor(schedule));
