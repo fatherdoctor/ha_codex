@@ -3813,14 +3813,15 @@ def ha_token_source() -> str:
     return "none"
 
 
-def create_persistent_notification(title: str, message: str, notification_id: str) -> None:
-    """Create or replace a persistent notification in Home Assistant, logging a failure."""
+def create_persistent_notification(title: str, message: str, notification_id: str) -> bool:
+    """Create or replace a persistent notification in Home Assistant, logging a failure; return whether it was sent."""
     ok, detail = call_ha_service(
         "persistent_notification.create",
         {"title": title, "message": message, "notification_id": notification_id},
     )
     if not ok:
         print(f"Persistent notification failed: {detail}", flush=True)
+    return bool(ok)
 
 
 def dismiss_persistent_notification(notification_id: str) -> None:

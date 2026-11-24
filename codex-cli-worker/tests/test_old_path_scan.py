@@ -27,8 +27,13 @@ class ScanTests(unittest.TestCase):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             result = old_path_scan.scan_once(self.root, self.agents, lambda: self.schedules,
-                                             lambda *notice: self.notices.append(notice))
+                                             self.notify)
         return result, out.getvalue()
+
+    def notify(self, *notice):
+        """Record the notice; report it sent unless a test set self.sent to False."""
+        self.notices.append(notice)
+        return getattr(self, "sent", True)
 
     def test_a_planted_line_in_each_place_is_counted(self):
         self.agents.write_text(f"Keep notes in /config/notes.md {PLANTED}\nNothing here\nAlso /config/www/x\n")
@@ -69,12 +74,25 @@ class ScanTests(unittest.TestCase):
         self.assertEqual(self.notices, [])
         self.assertEqual(log, "")
 
+    def test_a_notice_that_was_not_sent_leaves_no_marker_so_the_next_start_scans_again(self):
+        self.agents.write_text("/config/x\n")
+        self.sent = False
+        findings, log = self.scan()
+        self.assertEqual(len(findings), 1)
+        self.assertFalse((self.root / old_path_scan.MARKER_NAME).exists())
+        self.assertIn("the scan runs again at the next start", log)
+        self.sent = True
+        findings, _ = self.scan()
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(len(self.notices), 2)
+        self.assertTrue((self.root / old_path_scan.MARKER_NAME).exists())
+
     def test_a_missing_file_and_a_broken_schedule_store_find_nothing(self):
         def broken():
             raise OSError("database is locked")
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            findings = old_path_scan.scan_once(self.root, self.agents, broken, lambda *notice: self.notices.append(notice))
+            findings = old_path_scan.scan_once(self.root, self.agents, broken, self.notify)
         self.assertEqual(findings, [])
         self.assertIn("could not read the schedules (OSError)", out.getvalue())
         self.assertNotIn("database is locked", out.getvalue())

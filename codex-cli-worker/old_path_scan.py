@@ -79,10 +79,12 @@ def notification_message(findings: list[Finding]) -> str:
 
 
 def scan_once(data_root: Path, agents_path: Path, read_schedules: Callable[[], list[dict]],
-              notify: Callable[[str, str, str], None]) -> list[Finding] | None:
+              notify: Callable[[str, str, str], bool]) -> list[Finding] | None:
     """Scan at the first start of this version only; return the findings, or None when the marker says it ran.
 
-    A failure to read the schedules counts as none found, so a broken database never stops the start.
+    A failure to read the schedules counts as none found, so a broken database never stops the start. notify returns
+    whether the notice reached Home Assistant: the marker is written only when nothing was found or the notice was
+    sent, so a notice that failed (Home Assistant still starting) is tried again at the next start.
     """
     marker = data_root / MARKER_NAME
     if marker.exists():
@@ -96,7 +98,9 @@ def scan_once(data_root: Path, agents_path: Path, read_schedules: Callable[[], l
     for finding in findings:
         print(f"Config path scan: {describe(finding)}.", flush=True)
     if findings:
-        notify(NOTIFICATION_TITLE, notification_message(findings), NOTIFICATION_ID)
+        if not notify(NOTIFICATION_TITLE, notification_message(findings), NOTIFICATION_ID):
+            print("Config path scan: the notification was not sent; the scan runs again at the next start.", flush=True)
+            return findings
     else:
         print(f"Config path scan: no {OLD_CONFIG_ROOT}/ path in the workspace instructions or schedules.", flush=True)
     marker.write_text(json.dumps({"version": SCAN_VERSION, "found": len(findings)}) + "\n", encoding="utf-8")
