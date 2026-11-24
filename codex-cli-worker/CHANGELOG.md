@@ -5,6 +5,23 @@
 - **Settings > Scheduled runs** shows the name of each schedule's chat as a link. The link closes Settings and opens
   that chat. A schedule of no chat says that each run starts a new chat; a schedule whose chat is gone says that its
   next run starts a new one.
+- The integration's entities no longer show what only an administrator should see. Every Home Assistant user can
+  read an entity's attributes, and the recorder keeps them. The **Auth status** sensor no longer has the sign-in code,
+  its address or the QR address; the app page shows them, and `codex_cli.get_login_status` returns them to an
+  administrator. The **Last task** sensor no longer has the chat's `title` and `summary` (the `codex_cli_task_result`
+  event still carries them), and the usage sensors no longer have `raw_excerpt`. The question, its choices and the
+  ids an automation needs to answer stay. If an automation or card read one of the removed attributes, change it to
+  read the event or call the action.
+- **Last task** and **Auth status** are now enum sensors with translated states. **Last task** is `unknown` when there
+  is no task; it showed the word `unknown` as a state before.
+- The actions that take a `task_id` refuse an id that is not in the form the app makes, so a `/`, `?` or `#` in a
+  template can no longer send the request to a different worker route.
+- The device page has no "Visit" link any more: it pointed at the app's internal address, which no browser opens.
+- Removed from the integration, with nothing changed for an owner: `strings.json` (Home Assistant reads
+  `translations/en.json` for a custom integration), the reload on an options change (there are no options), a
+  discovery branch for an app without a slug, unused client members, and a second catch of unexpected errors that
+  the coordinator's base class already handles.
+
 - **Fast mode works.** The lightning button in the model and reasoning panel turns Fast mode on or off for a chat.
   Codex then runs the model on its Fast service tier (about twice the speed; it uses more of your plan). The chip
   shows a small bolt while Fast is on. A chat that never chose follows the model's own default from the Codex model
