@@ -1,6 +1,6 @@
 name: ChatGPT (0.4 drop)
 description: Daily test build of release/0.4, built on this box. Not a release.
-version: "0.5.1.0-drop.20261124"
+version: "0.5.1.1-drop.20261124"
 slug: codex_cli_worker
 url: https://github.com/fatherdoctor/ha_codex
 init: false

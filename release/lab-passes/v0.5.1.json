@@ -2,14 +2,14 @@
   "version": "0.5.1",
   "kind": "lab-pass",
   "result": "pass",
-  "commit": "14d55414727f125428c49f985842f020b09dfee9",
+  "commit": "7d3b5965425b36d6c662806825490daa8d33af0b",
   "date": "2026-11-24",
-  "lab": "VM 220, Home Assistant Core 2026.11.0, the app built locally from this commit with the integration bundled, updated in place from 0.5.0",
-  "starter": "the lab's AGENTS.md is the 0.5.0 starter from 11-23; the image's starter_agents.md equals this commit's (names /config/memory/); the first-start write was not run, because a fresh install would drop the lab's ChatGPT sign-in",
+  "lab": "VM 220, Home Assistant Core 2026.11.0, the app rebuilt in place from this commit with the integration bundled (integration unchanged since 14d55414); the (d) chats ran with the HA_TOKEN option cleared, the smoke steps with it set",
+  "starter": "the lab's AGENTS.md is the 0.5.0 starter from 11-23; the image's starter_agents.md equals the release's (names /config/memory/); the first-start write was not run, because a fresh install would drop the lab's ChatGPT sign-in",
   "checks_0_5_1": {
-    "media-is-ha-share": "pass (a file written at /media in the app appeared in the VM's /mnt/data/supervisor/media, then removed)",
-    "working-folder": "pass (/media/.agents/codex exists; CODEX_WORKDIR = /media/.agents/codex in the image)",
-    "integration-install": "pass (Integration install: updated 0.5.1; marker app_version 0.5.1; no codex_cli errors after the Core restart)"
+    "media-is-ha-share": "pass on 14d55414 (a file written at /media in the app appeared in the VM's /mnt/data/supervisor/media, then removed); not repeated on 020fe19e, whose change does not touch the mounts",
+    "working-folder": "pass on 14d55414 (/media/.agents/codex)",
+    "integration-install": "pass (Integration install: current 0.5.1)"
   },
   "steps": {
     "entities": "pass",
@@ -18,5 +18,13 @@
     "write-asks": "pass",
     "failed-action": "pass",
     "question-notice": "pass"
+  },
+  "action_data_d": {
+    "no-token-environment": "pass: after the HA_TOKEN option was cleared and the app restarted, the Codex app-server had neither HA_URL nor HA_TOKEN",
+    "calendar-today-no-token": "pass: two new chats (20261124T160535Z-a89f735d, 20261124T160604Z-31eb370f), Ask for approval; each made one card, home_assistant_call.call calendar.get_events (allowed), and listed both of the lab's events today (Current Event 15:33-16:33, Future Event 16:33-17:33, the second with its location) from the returned data; no shell or HTTP card",
+    "weather-tomorrow-no-token": "pass: new chat 20261124T160625Z-3894a30a asked for a city; after the reply named weather.demo_weather_south, one card, home_assistant_call.call weather.get_forecasts (allowed); the answer (rainy, 19/8 C, 30%, 5 mm on Nov 25) equals the returned forecast; no shell or HTTP card",
+    "core-auth-log": "pass (no invalid authentication or Banned IP line in the lab Core journal this boot; no ip_bans.yaml)",
+    "note-token-set": "token set: Codex uses the allowed direct API path; denied in the test (two chats, shell python reading $HA_URL/api/calendars with $HA_TOKEN)",
+    "note-020fe19e": "on 020fe19e without the token, Codex used home_assistant_mcp.call_service_tool, which got HTTP 400; #314 steers these actions to home_assistant_call.call"
   }
 }

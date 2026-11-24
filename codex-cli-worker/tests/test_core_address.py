@@ -84,19 +84,30 @@ class AddressTests(unittest.TestCase):
             core_address.fetch_info('')
         no_request.assert_not_called()
 
-    def test_address_export_needs_no_core_token_and_strips_inherited_credentials(self):
+    def test_address_export_needs_the_core_token_and_strips_inherited_credentials(self):
+        """Without the HA_TOKEN option Codex gets neither HA_TOKEN nor HA_URL; with it, both.
+
+        A call to HA_URL without a token counts as a failed login, and Home Assistant bans the app after a few.
+        """
+        options = {**server.DEFAULT_OPTIONS, 'HA_TOKEN': ''}
         with patch.object(server, 'core_address', core_address.CoreAddress()), \
-             patch.object(server, 'read_options', return_value={**server.DEFAULT_OPTIONS, 'HA_TOKEN': ''}), \
+             patch.object(server, 'read_options', return_value=options), \
              patch.object(server, 'ha_token', return_value='synthetic-supervisor'), \
              patch.object(core_address, 'get_json', return_value=info(80)), \
-             patch.dict(os.environ, {'SUPERVISOR_TOKEN': 'synthetic-supervisor', 'HA_TOKEN': 'inherited', 'HA_RELAY_CAPABILITY': 'stale'}):
+             patch.dict(os.environ, {'SUPERVISOR_TOKEN': 'synthetic-supervisor', 'HA_TOKEN': 'inherited',
+                                     'HA_URL': 'http://stale.example.test', 'HA_RELAY_CAPABILITY': 'stale'}):
             server.refresh_core_address(); env = server.codex_env()
-            self.assertEqual(env['HA_URL'], 'http://homeassistant:80')
-            for name in ('SUPERVISOR_TOKEN', 'HA_TOKEN', 'HA_RELAY_CAPABILITY'):
+            for name in ('SUPERVISOR_TOKEN', 'HA_TOKEN', 'HA_URL', 'HA_RELAY_CAPABILITY'):
                 self.assertNotIn(name, env)
             relay_env = server.relay_env()
-            self.assertNotIn('HA_RELAY_CAPABILITY', relay_env); self.assertNotIn('SUPERVISOR_TOKEN', relay_env)
-            self.assertEqual(relay_env['HA_URL'], 'http://homeassistant:80')
+            for name in ('SUPERVISOR_TOKEN', 'HA_TOKEN', 'HA_URL', 'HA_RELAY_CAPABILITY'):
+                self.assertNotIn(name, relay_env)
+            options['HA_TOKEN'] = ' synthetic-core '
+            env, relay_env = server.codex_env(), server.relay_env()
+            for environment in (env, relay_env):
+                self.assertEqual((environment['HA_TOKEN'], environment['HA_URL']),
+                                 ('synthetic-core', 'http://homeassistant:80'))
+                self.assertNotIn('SUPERVISOR_TOKEN', environment); self.assertNotIn('HA_RELAY_CAPABILITY', environment)
 
     def test_task_launch_refreshes_before_baseline_and_process_start(self):
         class Boundary(BaseException):
@@ -131,7 +142,8 @@ class AddressTests(unittest.TestCase):
             supervisor._loop()
             args, kwargs = popen.call_args
             self.assertTrue(any('relay_reads_mcp.py' in value for value in args[0]))
-            self.assertEqual(kwargs['env']['HA_URL'], 'http://homeassistant:80')
+            # Without the HA_TOKEN option the relay gets no address to call by hand either.
+            self.assertNotIn('HA_URL', kwargs['env'])
             self.assertNotIn('HA_TOKEN', kwargs['env']); self.assertNotIn('SUPERVISOR_TOKEN', kwargs['env'])
             self.assertNotIn('HA_RELAY_CAPABILITY', kwargs['env']); self.assertGreaterEqual(metadata.call_count, 1)
 

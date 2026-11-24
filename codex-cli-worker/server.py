@@ -4993,6 +4993,8 @@ def codex_env() -> dict[str, str]:
     The Supervisor tokens and inherited tool capabilities are removed, HOME and
     CODEX_HOME point into the add-on's data folder, and HA_TOKEN is set only
     from the add-on option, together with HA_URL, the address it works at.
+    Without the option HA_URL is not set either: a call to it without a token
+    counts as a failed login, and Home Assistant bans the app after a few.
     """
     env = dict(os.environ)
     # The *_CAPABILITY names are no longer set for a chat; they are still removed in case a parent process has them.
@@ -5009,9 +5011,9 @@ def codex_env() -> dict[str, str]:
     token = str(options.get("HA_TOKEN") or "").strip()
     if token:
         env["HA_TOKEN"] = token
-    url = codex_ha_url(options)
-    if url:
-        env["HA_URL"] = url
+        url = codex_ha_url(options)
+        if url:
+            env["HA_URL"] = url
     return env
 
 
@@ -5112,7 +5114,12 @@ def remote_control_instructions(options: dict[str, Any]) -> str:
         "request native approval for that specific network command on your own; do not silently give up after a sandbox network denial. "
         "Keep API credentials private. A sandboxed command needing network or file access outside its sandbox must request "
         "native approval for that specific action. Never bypass a denial or request permanent permission rules. "
-        "Native approval does not supply credentials. If HA_URL is unset, report address discovery unavailable instead of guessing a port. "
+        "Native approval does not supply credentials. HA_URL is set only with a configured HA_TOKEN; when it is unset, use the tools instead of guessing a port. "
+        "Never call HA_URL or the Home Assistant REST or WebSocket API yourself, with or without a token. "
+        "Use the Home Assistant tools. If they cannot do it, say so and stop. "
+        "For an action that answers with data (calendar.get_events, weather.get_forecasts, todo.get_items), use home_assistant_call.call: home_assistant_mcp's call_service_tool cannot return that data. "
+        "An unauthenticated call counts as a failed login and gets the app banned. "
+        "The only exception is an API call with a configured HA_TOKEN, as the text below allows. "
         + (home_assistant_api_instructions(options) or
            "No Core API token is configured for direct commands. The read tool and the call tool still work through "
            "the worker. "
@@ -5151,6 +5158,7 @@ Use the home_assistant MCP verify tool for authenticated Home Assistant checks, 
   {"operation":"logs"}
   {"operation":"dashboard_readback","path":"/lovelace/0"}
 The MCP tool runs through the worker outside the shell network sandbox. Use it for supported verification instead of shell socket commands. If the user's task needs a different API or shell networking in a sandboxed mode, request approval for that specific command. Approval does not supply API credentials. Logs are limited to Core.
+Never call HA_URL or the Home Assistant REST or WebSocket API yourself, with or without a token. Use the Home Assistant tools. For an action that answers with data (calendar.get_events, weather.get_forecasts, todo.get_items), use home_assistant_call.call: home_assistant_mcp's call_service_tool cannot return that data. If they cannot do it, say so and stop. An unauthenticated call counts as a failed login and gets the app banned. The only exception is an API call that exchange_info's home_assistant_api text allows, with HA_TOKEN.
 Use fresh entity readback after any user-authorized reload or change. These read tools do not perform reloads or device actions; the home_assistant_call call tool does, and only when the user asked for the change. A matching state does not prove automation behavior. Do not expose credentials or try to obtain the user's login. Verification results are attached to this exchange automatically.
 To change a dashboard, make the change, read its configuration back with dashboard_readback, and report what changed. After a storage-dashboard edit, add "save_pending":true to the dashboard_readback request to have the worker save that turn's pending edit first and compare the readback with it. This requires auto_save_lovelace to be enabled. Without save_pending, the readback reads the dashboard currently loaded in Home Assistant, and the worker saves the edit when the turn ends. No tool renders or screenshots a dashboard.
 
