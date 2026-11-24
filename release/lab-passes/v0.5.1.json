@@ -1,0 +1,22 @@
+{
+  "version": "0.5.1",
+  "kind": "lab-pass",
+  "result": "pass",
+  "commit": "14d55414727f125428c49f985842f020b09dfee9",
+  "date": "2026-11-24",
+  "lab": "VM 220, Home Assistant Core 2026.11.0, the app built locally from this commit with the integration bundled, updated in place from 0.5.0",
+  "starter": "the lab's AGENTS.md is the 0.5.0 starter from 11-23; the image's starter_agents.md equals this commit's (names /config/memory/); the first-start write was not run, because a fresh install would drop the lab's ChatGPT sign-in",
+  "checks_0_5_1": {
+    "media-is-ha-share": "pass (a file written at /media in the app appeared in the VM's /mnt/data/supervisor/media, then removed)",
+    "working-folder": "pass (/media/.agents/codex exists; CODEX_WORKDIR = /media/.agents/codex in the image)",
+    "integration-install": "pass (Integration install: updated 0.5.1; marker app_version 0.5.1; no codex_cli errors after the Core restart)"
+  },
+  "steps": {
+    "entities": "pass",
+    "lead-gone": "pass (worker routes not reachable from the lab test client)",
+    "read-light": "pass",
+    "write-asks": "pass",
+    "failed-action": "pass",
+    "question-notice": "pass"
+  }
+}
