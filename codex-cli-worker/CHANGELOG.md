@@ -260,6 +260,12 @@ These are draft checks for the installed release. They do not report a live-syst
   system user or issues it browser sessions. On its first start it removes the user an earlier version created,
   only when its own file names a system user with that exact name, and logs one line. Restart Home Assistant after
   the update.
+- **Settings polish from a box test.** The Settings scrollbar keeps its space, so text no longer reflows when a part
+  opens. The Ask for approval and Read only texts say what each mode asks. The ChatGPT account part shows a line about
+  Codex access only when you must sign in, and no longer lists which plans include Codex. The GitHub buttons are
+  **Sign in** and **Sign out**; **Read test** and **Check now** are gone (the app still checks every hour). A schedule
+  no longer has **Review prompt** (**Edit** shows the prompt). The workspace rules window is named **Workspace rules
+  (Codex AGENTS.md)** and has **Cancel**. Thinking lines before an answer have more space between them.
 - **Codex changes the app's `AGENTS.md` without a card.** `/addon_config`, the app's own folder that holds its
   `AGENTS.md`, is now a writable place in `workspace-write` beside `/config`, `/share` and `/media`, on the chat page
   and over the remote connection. When you ask a chat to change your workspace instructions, Codex writes the file

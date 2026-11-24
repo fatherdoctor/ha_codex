@@ -93,7 +93,7 @@ class AccountAccess:
                 self.confirmed_signature = signature
 
     def snapshot(self, login):
-        """Expose a fixed message and optional plan label; no entitlement inference from plans."""
+        """Expose the state and optional plan label; a message only when the owner must sign in. No entitlement inference from plans."""
         signature = self.signature()
         with self.lock:
             current = signature is not None and signature == self.last_signature
@@ -108,10 +108,10 @@ class AccountAccess:
             message = 'Sign in with a ChatGPT account that has Codex access.'
         elif login.get('status_ok') and confirmed:
             state, needs = 'confirmed_by_turn', False
-            message = 'A successful turn confirmed Codex access with the current sign-in.'
+            message = ''
         else:
             state = 'unconfirmed'
             needs = False if login.get('status_ok') else None
-            message = 'Codex access cannot be confirmed by a passive read. Plan type is information only.'
+            message = ''
         return {'state': state, 'needs_sign_in': needs, 'plan_type': plan,
                 'checked_at': checked, 'message': message}

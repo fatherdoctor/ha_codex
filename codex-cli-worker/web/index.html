@@ -429,10 +429,10 @@
     <dialog id="permissions-dialog" class="studio-sheet" aria-labelledby="permissions-title">
       <div class="dialog-header"><h2 id="permissions-title">How should ChatGPT actions be approved?</h2><button class="icon icon-close" data-close="permissions-dialog" aria-label="Close permissions"></button></div>
       <p class="muted">Choose how this chat starts its next turn. These are the four modes of the ChatGPT app, with Codex's own settings.</p>
-      <button class="permission-option" data-mode="default"><strong>Ask for approval</strong><span>Codex works in the sandbox and asks you before a change it needs permission for.</span></button>
+      <button class="permission-option" data-mode="default"><strong>Ask for approval</strong><span>Codex edits files in your config folder on its own, and asks before anything beyond that.</span></button>
       <button class="permission-option" data-mode="auto-review"><strong>Approve for me</strong><span>As Ask for approval, but Codex's own reviewer allows or denies each request. It does not ask you.</span></button>
       <button class="permission-option" data-mode="full-access" disabled><strong>Full access</strong><span id="full-access-option-text">Off. An administrator can turn it on in Settings.</span></button>
-      <button class="permission-option" data-mode="read-only"><strong>Read only</strong><span>Codex reads in a read-only sandbox and asks you before any change.</span></button>
+      <button class="permission-option" data-mode="read-only"><strong>Read only</strong><span>Codex asks before every change, even in the config folder.</span></button>
       <p id="permission-result" role="status"></p>
     </dialog>
     <dialog id="full-access-dialog" aria-labelledby="full-access-title">
@@ -444,9 +444,9 @@
       </div>
     </dialog>
     <dialog id="connection-dialog" data-remote class="studio-sheet" aria-labelledby="connection-title"><div class="dialog-header"><button id="connection-back" class="icon icon-back" type="button" aria-label="Back to Settings"></button><h2 id="connection-title">Remote connection</h2><button class="icon icon-close" data-close="connection-dialog" aria-label="Close remote connection"></button></div><div id="connection-content"></div><p id="connection-result" role="alert"></p></dialog>
-    <dialog id="workspace-dialog" class="studio-sheet" aria-labelledby="workspace-title"><div class="dialog-header"><h2 id="workspace-title">Workspace rules</h2><button class="icon icon-close" data-close="workspace-dialog" aria-label="Close workspace rules"></button></div><div id="workspace-content"><label for="agents">AGENTS.md</label
+    <dialog id="workspace-dialog" class="studio-sheet" aria-labelledby="workspace-title"><div class="dialog-header"><h2 id="workspace-title">Workspace rules (Codex AGENTS.md)</h2><button class="icon icon-close" data-close="workspace-dialog" aria-label="Close workspace rules"></button></div><div id="workspace-content"><label for="agents">AGENTS.md</label
       ><textarea id="agents" rows="12" spellcheck="false"></textarea
-      ><button id="save-agents">Save instructions</button></div><p id="workspace-result" role="status"></p></dialog>
+      ><div class="dialog-actions"><button type="button" class="subtle" data-close="workspace-dialog">Cancel</button><button id="save-agents">Save instructions</button></div></div><p id="workspace-result" role="status"></p></dialog>
     <dialog id="settings">
       <div class="dialog-header">
         <h2>Settings</h2>
@@ -459,7 +459,7 @@
           <p id="login-status" class="muted signin-hide">Loading account status…</p>
           <p id="codex-access" class="muted signin-hide" hidden></p>
           <dl id="chatgpt-details" class="account-details signin-hide" hidden></dl>
-          <p id="login-requirement" class="muted signin-hide">A ChatGPT account with Codex access is required. As of November 13, 2026, OpenAI includes Codex across plans, including Free and Go; limits and workspace access vary. <a href="https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan" target="_blank" rel="noopener noreferrer">Check current availability</a>.</p>
+          <p id="login-requirement" class="muted signin-hide">A ChatGPT account with Codex access is required.</p>
           <div id="login-card"></div>
           <div class="settings-actions">
             <button id="login">Sign in</button
@@ -477,12 +477,9 @@
           <div class="settings-actions">
             <button id="github-connect">Connect GitHub</button
             ><button id="github-cancel" class="subtle" hidden>Cancel</button
-            ><button id="github-test" class="subtle signin-hide" hidden>Read test</button
-            ><button id="github-check" class="subtle signin-hide" hidden>Check now</button
             ><button id="github-accept" class="subtle signin-hide" hidden>Accept this access</button
-            ><button id="github-disconnect" class="subtle signin-hide" hidden>Disconnect</button>
+            ><button id="github-disconnect" class="subtle signin-hide" hidden>Sign out</button>
           </div>
-          <p id="github-test-result" class="muted signin-hide" role="status" hidden></p>
           <details id="github-token" class="disclosure signin-hide">
             <summary>Use a token instead</summary>
             <p class="muted">For an account that cannot install the GitHub App. On github.com open Settings, Developer settings, Fine-grained tokens. Choose Only select repositories with one repository, Contents: Read and write, and an expiry of 90 days or less. Paste it here once. It is not shown again.</p>
