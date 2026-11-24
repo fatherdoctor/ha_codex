@@ -8,6 +8,20 @@
   list, and each turn that names its model tells Codex the tier, so a choice never carries over by mistake. A turn
   that does not yet know which model Codex picks sends no tier and leaves the choice to Codex. The button is dimmed
   for a model without Fast.
+- A new test file, `tests/test_run_task_exits.py`, runs one whole exchange for each way a run can end: an answer, a
+  question, a failure Codex reports, a turn that ends in an error, a Codex that cannot start or that stops before its
+  turn, an answer or prompt file that cannot be prepared, a cancel before, during or right after the start, during
+  the review of changes or at the final update, a timeout, a stall, and a run that the policy, the sandbox check or
+  the model pin refuses. Each test checks the state, the log line, the result event and the notice that the run
+  leaves. No behavior changes; the tests guard the next step, which splits the run function into smaller parts.
+- The chats the worker keeps move from `server.py` to a new module, `task_store.py`. One `TaskStore` object holds the
+  chats in memory, the lock that guards them, the set of chats with a runner, and the code that writes `task.json` and
+  the task index and reads them at startup. No behavior changes, and the stored files keep the same form. New snapshot
+  tests keep the Home Assistant event, the API record and the saved files of a completed, a waiting, a continued, a
+  failed and a cancelled chat. Tests that replaced the chat list or the task file helpers now change the store instead.
+- The chat page's repeating checks (the chat list, the steps of a working chat, the quota, the two sign-ins, remote
+  control and the code countdowns) now run through one scheduler, `poll()`, and the buttons that wait for the worker
+  share one helper, `busyAction()`. Each check keeps its timing, and nothing looks different.
 
 ## 0.5.0 (draft)
 

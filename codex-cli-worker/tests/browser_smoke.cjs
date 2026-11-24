@@ -1480,8 +1480,16 @@ async function effortSaved(page, label) {
     await page.locator("#queued-edit").fill("Discarded edit");
     await page.locator("#queued-edit").press("Escape");
     assert.equal(await queuedBubble.textContent(), typo);
-    await page.getByRole("button", { name: "Edit", exact: true }).click();
-    await page.locator("#queued-edit").fill(corrected);
+    // Select the text before the first frame, as fill can do when the editor opens.
+    await page
+      .getByRole("button", { name: "Edit", exact: true })
+      .evaluate(async (button) => {
+        button.click();
+        document.querySelector("#queued-edit").select();
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      });
+    await page.keyboard.insertText(corrected);
+    assert.equal(await page.locator("#queued-edit").inputValue(), corrected);
     await page.locator("#queued-edit").press("Enter");
     await page.waitForFunction(
       (text) =>
@@ -2031,9 +2039,10 @@ async function effortSaved(page, label) {
     await require("./browser_answer_bleed.cjs")(browser, output, errors);
     await require("./browser_thinking.cjs")(browser, output, errors);
     await require("./browser_reply_layout.cjs")(browser, output, errors);
+    await require("./browser_poll.cjs")(browser, output, errors);
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: queued messages (wait behind a working chat, edit, remove, start in order), choices under a question (pick one, draft kept, late answer refused), attached images (pick, reject, remove, send, render, batch stays with its chat, send waits for decoding), chat actions (pin, rename, delete, long press), generated image attachments, Markdown formatting (sent messages, answers, untrusted text, slow or long text, narrow screens), saved model/reasoning choices, model compatibility, the model a chat runs on by name, quota bars, the line about the Codex integration, keyboard/reset controls, history, pagination, continuation, new chats, drafts, reopening the last chat, safe text, settings, text size (three sizes, kept per device, phone and iPad), slash-prefixed messages (Enter and Send), file links in answers (card, download, refused paths), narration kept out of the answer (inside the closed list, aligned with it at four widths), the live Thinking line (newest summary, replaced as it streams, under the steps, gone at the end), reply layout (five transcript-shaped examples at four widths: narration count, edges, gaps), resize, mobile and dark mode. Screenshots: " +
+      "PASS: queued messages (wait behind a working chat, edit, remove, start in order), choices under a question (pick one, draft kept, late answer refused), attached images (pick, reject, remove, send, render, batch stays with its chat, send waits for decoding), chat actions (pin, rename, delete, long press), generated image attachments, Markdown formatting (sent messages, answers, untrusted text, slow or long text, narrow screens), saved model/reasoning choices, model compatibility, the model a chat runs on by name, quota bars, the line about the Codex integration, keyboard/reset controls, history, pagination, continuation, new chats, drafts, reopening the last chat, safe text, settings, text size (three sizes, kept per device, phone and iPad), slash-prefixed messages (Enter and Send), file links in answers (card, download, refused paths), narration kept out of the answer (inside the closed list, aligned with it at four widths), the live Thinking line (newest summary, replaced as it streams, under the steps, gone at the end), reply layout (five transcript-shaped examples at four widths: narration count, edges, gaps), the repeating checks and busy buttons (poll, busyAction), resize, mobile and dark mode. Screenshots: " +
         output,
     );
   } finally {

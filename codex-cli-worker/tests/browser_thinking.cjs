@@ -16,8 +16,7 @@ const PAGE = "http://127.0.0.1:9137/preview/";
 async function showSteps(page, steps, running = true) {
   await page.evaluate(
     ({ steps, running }) => {
-      clearTimeout(activityTimer);
-      activityTimer = null;
+      polls.activity.stop();
       state.task.status = running ? "running" : "completed";
       state.latestChecks = null;
       const activity = state.activity?.id === state.id ? state.activity : null;

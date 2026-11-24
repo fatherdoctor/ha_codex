@@ -157,10 +157,11 @@ def task_started_by_service(prompt: str) -> dict:
     started = MagicMock()
     with tempfile.TemporaryDirectory() as temp_dir, ExitStack() as stack:
         root = Path(temp_dir)
-        stack.enter_context(patch.object(server, "get_task_dir", side_effect=lambda task_id: root / task_id))
+        stack.enter_context(patch.object(server.store, "task_dir", side_effect=lambda task_id: root / task_id))
         stack.enter_context(patch.object(server, "api_token", return_value="test-token"))
         stack.enter_context(patch.object(server, "start_background_task", started))
-        for name in ("save_task_index", "fire_ha_event", "notify", "refresh_usage_status_async"):
+        stack.enter_context(patch.object(server.store, "save_index"))
+        for name in ("fire_ha_event", "notify", "refresh_usage_status_async"):
             stack.enter_context(patch.object(server, name))
         response = server.app.test_client().post(
             "/tasks", headers={"Authorization": "Bearer test-token"}, json={"prompt": prompt})
@@ -220,7 +221,7 @@ class WaysInTests(unittest.TestCase):
         """
         task = task_started_by_service("Turn on a light")
         self.assertNotIn(task.get("task_source"), {"schedule", "lead"})
-        with patch.object(server, "tasks", {task["task_id"]: task}):
+        with patch.dict(server.tasks, {task["task_id"]: task}, clear=True):
             self.assertFalse(server.background_task(task["task_id"]))
         self.assertEqual(tools_of(page_args()), self.page)
 

@@ -23,7 +23,7 @@ class ChatFilesTests(unittest.TestCase):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
-        self.stack.enter_context(patch.object(server, "tasks", {TASK_ID: {"task_id": TASK_ID, "status": "completed"}}))
+        self.stack.enter_context(patch.dict(server.tasks, {TASK_ID: {"task_id": TASK_ID, "status": "completed"}}, clear=True))
         self.stack.enter_context(patch.object(server, "task_root", return_value=self.root / "tasks"))
         self.stack.enter_context(patch.object(server, "api_token", return_value="test-token"))
         self.stack.enter_context(patch.object(server, "write_task_log"))
