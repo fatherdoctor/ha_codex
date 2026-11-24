@@ -629,6 +629,15 @@ class InstructionTests(unittest.TestCase):
         self.assertNotIn("automation/reload", text)
         self.assertEqual(server.home_assistant_api_instructions({}), "")
 
+    def test_the_rules_forbid_calling_home_assistant_directly(self):
+        """A call without a token counts as a failed login, and Home Assistant bans the app after a few."""
+        rule = "Never call HA_URL or the Home Assistant REST or WebSocket API yourself, with or without a token."
+        for text in (server.build_page_instructions(), server.remote_control_instructions({}),
+                     server.remote_control_instructions({"HA_TOKEN": "invented-token"})):
+            self.assertIn(rule, text)
+            self.assertIn("If they cannot do it, say so and stop.", text)
+            self.assertIn("An unauthenticated call counts as a failed login and gets the app banned.", text)
+
     def test_the_app_token_text_points_changes_to_the_tool_too(self):
         text = server.remote_control_instructions({"HA_TOKEN": "invented-token"})
         self.assertIn("a reload and a restart included, use the home_assistant_call call tool", text)
