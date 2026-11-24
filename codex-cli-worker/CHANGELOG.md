@@ -3,7 +3,9 @@
 ## 0.5.1 (unreleased)
 
 - **Memory note.** The starter instructions now tell Codex to keep personal details, not only secrets, out of its
-  memory files: PINs, tokens, passwords, phone numbers and addresses.
+  memory files: PINs, tokens, passwords, phone numbers and addresses. They also name the memory folder by its full
+  path, `/config/memory/`, rather than `memory/` in the working folder, so the memory stays in the backup and in the
+  same place when the working folder changes. An install that already has its instructions file keeps its text.
 
 ## 0.5.0 (draft)
 

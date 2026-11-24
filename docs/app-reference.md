@@ -747,8 +747,8 @@ none. The text is `starter_agents.md` in the app's source. It tells Codex what `
 rules. Four of them matter most: change the home only on the owner's word, keep secrets secret, keep the old version
 of a changed file, and check the configuration before a restart. A short section after the rules lists three safeguard
 defaults (secrets, protected places, backups) and says that they are defaults the owner can change, not locks in
-the app. Two more sections tell Codex how to keep a memory across chats (one fact per file in a `memory` folder of
-its working folder, with an index `memory/MEMORY.md` it reads at the start of each chat, and never a secret) and say
+the app. Two more sections tell Codex how to keep a memory across chats (one fact per file in `/config/memory/`,
+with an index `/config/memory/MEMORY.md` it reads at the start of each chat, and never a secret) and say
 that the Codex device holds this app's own entities. The app never replaces a file that is already there,
 a link included. It writes the starter once: when you delete the file, it stays deleted while the app keeps
 its data, and an update of an app that has started before writes nothing. The rules are instructions to Codex and not a safeguard; the sandbox, the
