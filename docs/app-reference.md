@@ -653,8 +653,8 @@ The app keeps the sign-in in its own private folder, `/data/github`. That folder
 ### Connect
 
 1. Install the **Codex for Home Assistant** GitHub App on the repositories of your choice. Use GitHub's own page for this. You can change the set there later.
-2. In **Settings > Accounts and connections > GitHub**, press **Connect GitHub**. The card shows a code in large letters and a link to `github.com/login/device`.
-3. Open the link, type the code and approve the App. The card checks every 5 seconds and shows your account, the repositories it reaches and their access as soon as GitHub confirms. Press **Cancel** to stop a sign-in that is waiting. The code works for 15 minutes; after that, press **Connect GitHub** again for a new code.
+2. In **Settings > Accounts and connections > GitHub**, press **Connect GitHub**. The card shows a code in large letters, a link to `github.com/login/device` and a QR code of that page, as the ChatGPT sign-in does. The app draws the QR code itself (`github/qr.svg`, behind the Home Assistant sign-in) and serves it only while a GitHub sign-in waits. On a phone-sized window it starts folded under **Show QR code**.
+3. Open the link, or scan the QR code with another device, type the code and approve the App. The card checks every 5 seconds and shows your account, the repositories it reaches and their access as soon as GitHub confirms. Press **Cancel** to stop a sign-in that is waiting. The code works for 15 minutes; after that, press **Connect GitHub** again for a new code.
 
 The App asks for Contents read and write only (GitHub adds Metadata read). The sign-in reaches only what you can reach and what the App was installed on. An App sign-in does not expire. It lasts until you revoke it on GitHub or uninstall the App.
 

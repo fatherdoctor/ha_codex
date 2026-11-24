@@ -1168,7 +1168,7 @@ class GitHubService:
 def register(worker, service: GitHubService) -> GitHubService:
     """The page routes (section 2.5 of the design). Reads need the worker token or Ingress; every change also
     needs Ingress and a Home Assistant administrator."""
-    from flask import jsonify, request
+    from flask import Response, jsonify, request
 
     app = worker.app
 
@@ -1204,6 +1204,18 @@ def register(worker, service: GitHubService) -> GitHubService:
     @worker.require_auth
     def github_status():
         return jsonify(ok=True, github=service.status())
+
+    @app.get("/github/qr.svg")
+    @worker.require_auth
+    def github_qr():
+        """The QR code of GitHub's sign-in page while a device sign-in waits; 404 otherwise."""
+        flow = service.status()["flow"]
+        url = str(flow.get("verification_uri") or "")
+        if flow.get("status") != "waiting_for_user" or not url.startswith("https://github.com/"):
+            return jsonify(ok=False, error="no GitHub sign-in is waiting"), 404
+        response = Response(worker.login_qr_svg(url), mimetype="image/svg+xml")
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.post("/github/connect", endpoint="github_connect")
     @admin

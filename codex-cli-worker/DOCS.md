@@ -25,8 +25,8 @@ about GitHub into the chat.
    does this, and you can change the set there later. The App asks for Contents read and write, and GitHub adds
    Metadata read.
 2. In the chat, choose **Settings** > **Accounts and connections** > **GitHub**, then **Connect GitHub**. The card
-   shows a code in large letters and a link to `github.com/login/device`.
-3. Open the link, type the code and approve the App. The card checks every few seconds and shows your account and
+   shows a code in large letters, a link to `github.com/login/device` and a QR code of that page.
+3. Open the link, or scan the QR code with a phone, type the code and approve the App. The card checks every few seconds and shows your account and
    the repositories it reaches as soon as GitHub confirms. The code works for 15 minutes. After that, choose
    **Connect GitHub** again for a new one.
 

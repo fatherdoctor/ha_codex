@@ -103,6 +103,24 @@ class GitHubRouteTests(unittest.TestCase):
         self.assertNotIn("synthetic-device-code", json.dumps(response.json))
         self.assertEqual(self.ingress("POST", "/github/cancel").json["github"]["flow"]["status"], "canceled")
 
+    def test_the_qr_code_shows_only_while_a_sign_in_waits(self):
+        self.assertEqual(self.client.get("/github/qr.svg").status_code, 401)
+        self.assertEqual(self.client.get("/github/qr.svg", headers=self.worker).status_code, 404)
+        self.http.posts = [Response(200, {"device_code": "synthetic-device-code", "user_code": "WXYZ-1234",
+                                          "verification_uri": "https://github.com/login/device",
+                                          "expires_in": 900, "interval": 5})]
+        self.assertEqual(self.ingress("POST", "/github/connect").status_code, 200)
+        # The qrcode package is in the app image only; the ChatGPT sign-in's tests cover the drawing itself.
+        with patch.object(server, "login_qr_svg", return_value=b"<svg>synthetic</svg>") as make_qr:
+            response = self.client.get("/github/qr.svg?flow=synthetic", headers=self.worker)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, "image/svg+xml")
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertEqual(response.data, b"<svg>synthetic</svg>")
+        make_qr.assert_called_once_with("https://github.com/login/device")
+        self.ingress("POST", "/github/cancel")
+        self.assertEqual(self.client.get("/github/qr.svg", headers=self.worker).status_code, 404)
+
     def test_status_carries_github_without_the_token(self):
         self.service._complete_app(APP_TOKEN)
         quiet = {name: patch.object(server, name, return_value={}) for name in (
