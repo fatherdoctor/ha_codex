@@ -91,6 +91,11 @@ function status(state, extra = {}) {
       await card.locator('.signin-code').waitFor();
       assert.equal(await card.locator('.signin-code').textContent(), CODE);
       assert.equal(await card.locator('a[href="https://github.com/login/device"]').count(), 1);
+      // The QR code of the same page, from the worker, folded on a phone like the ChatGPT one.
+      const qr = card.locator('img.signin-qr');
+      assert.equal(await qr.getAttribute('src'), 'github/qr.svg?flow=' + encodeURIComponent('2026-11-16T13:15:00Z'));
+      assert.equal(await qr.getAttribute('alt'), 'QR code that opens the GitHub sign-in page');
+      assert.equal(await card.locator('details.signin-qr-fold').evaluate(d => d.open), width > 700);
       assert.equal(await page.locator('#github-cancel').isVisible(), true);
       assert.match(await card.locator('.signin-expiry').textContent(), /^The code expires in \d+:\d\d\.$/);
       assert.equal(await card.locator('.settings-status').textContent(), 'Connecting: enter the code');

@@ -174,6 +174,23 @@ const assert = require('node:assert/strict');
       await editor.getByRole('button',{name:'Cancel',exact:true}).click();
       await page.locator('#schedule-list').getByRole('button',{name:'Pause',exact:true}).click();
       await page.locator('#schedule-list').getByRole('button',{name:'Resume',exact:true}).waitFor();
+      // Each listed schedule names its chat; the name is a link that closes Settings and opens that chat.
+      const chatTitle=await page.evaluate(id=>chatById(id).title,chatId);
+      const chatLink=page.locator('#schedule-list').getByRole('link',{name:chatTitle,exact:true});
+      assert.equal(await chatLink.count(),1);
+      await chatLink.click();
+      await page.waitForFunction(id=>state.id===id&&!document.querySelector('#settings').open,chatId);
+      // A chat outside the loaded list is asked of the worker; a gone chat and a schedule of no chat say so.
+      await page.route('**/tasks/sample-unloaded', route=>route.fulfill({json:{ok:true,task:{task_id:'sample-unloaded',title:'Sample older chat',turns:[]}}}));
+      await page.route('**/tasks/sample-gone', route=>route.fulfill({status:404,json:{ok:false,error:'task not found'}}));
+      const kept=schedules[0];
+      schedules=[{...kept,id:'unloaded',name:'Older',chat_id:'sample-unloaded'},{...kept,id:'gone',name:'Gone',chat_id:'sample-gone'},{...kept,id:'none',name:'None',chat_id:''}];
+      await openSettings();
+      await page.locator('#schedule-list').getByRole('link',{name:'Sample older chat',exact:true}).waitFor();
+      await page.locator('#schedule-list').getByText('Chat: not found; the next run starts a new chat',{exact:true}).waitFor();
+      await page.locator('#schedule-list').getByText('Chat: a new chat for each run',{exact:true}).waitFor();
+      schedules=[kept];
+      await page.evaluate(()=>document.querySelector('#settings').close()); await openSettings();
       // A masked prompt cannot be edited from Settings or from the chat: only read, paused or deleted.
       schedules[0].prompt='Use [redacted]'; schedules[0].prompt_redacted=true; schedules[0].chat_id=chatId;
       await page.evaluate(()=>document.querySelector('#settings').close()); await openSettings();

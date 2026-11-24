@@ -3808,19 +3808,24 @@ function signInCard(auth) {
   } else {
     card.append(textNode("p", "Waiting for the sign-in code…", "muted"));
   }
-  if (auth.qr_path) {
-    const img = document.createElement("img");
-    img.src = auth.qr_path;
-    img.alt = "QR code that opens the ChatGPT sign-in page";
-    img.className = "signin-qr";
-    img.width = img.height = 220;
-    const fold = document.createElement("details");
-    fold.className = "disclosure signin-qr-fold";
-    fold.open = !matchMedia("(max-width:700px)").matches;
-    fold.append(textNode("summary", "Show QR code"), img);
-    card.append(fold);
-  }
+  if (auth.qr_path) card.append(signInQr(auth.qr_path, "QR code that opens the ChatGPT sign-in page"));
   return card;
+}
+/**
+ * The QR code of a sign-in page, served by the worker, in a fold. A phone
+ * cannot scan its own screen, so on a phone-sized window the fold starts closed.
+ */
+function signInQr(src, alt) {
+  const img = document.createElement("img");
+  img.src = src;
+  img.alt = alt;
+  img.className = "signin-qr";
+  img.width = img.height = 220;
+  const fold = document.createElement("details");
+  fold.className = "disclosure signin-qr-fold";
+  fold.open = !matchMedia("(max-width:700px)").matches;
+  fold.append(textNode("summary", "Show QR code"), img);
+  return fold;
 }
 /**
  * Show the ChatGPT sign-in state in the settings dialog and, while the
@@ -4023,7 +4028,7 @@ function githubExpiry(github) {
   if (Number.isNaN(days)) return "";
   return `${githubDate(github.expires_at)} (${days < 0 ? "expired" : days === 0 ? "today" : `in ${days} day${days === 1 ? "" : "s"}`})`;
 }
-/** The device-sign-in card: the code in large letters and GitHub's own page. */
+/** The device-sign-in card: the code in large letters, GitHub's own page and its QR code. */
 function githubFlowCard(flow) {
   const card = document.createElement("div");
   card.className = "signin-card github-flow-card";
@@ -4040,7 +4045,12 @@ function githubFlowCard(flow) {
   } else {
     card.append(textNode("p", "Waiting for the GitHub code…", "muted"));
   }
-  if (flow.user_code) card.append(...codeExpiry(flow.expires_in, newGithubCode, "github"));
+  if (flow.user_code) {
+    card.append(...codeExpiry(flow.expires_in, newGithubCode, "github"));
+    // The query names this code's expiry, so a new code never shows the QR image of the last one.
+    const qr = `github/qr.svg?flow=${encodeURIComponent(flow.expires_at || "")}`;
+    card.append(signInQr(qr, "QR code that opens the GitHub sign-in page"));
+  }
   return card;
 }
 /** Replace a waiting GitHub sign-in with a new one, for a code that expired. */
