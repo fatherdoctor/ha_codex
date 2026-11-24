@@ -6,6 +6,7 @@
 // 3. The steps line keeps its count and its elapsed time.
 // 4. The line sits under the step list, so with the list open the newest thought is next to the newest step.
 // 5. The line is gone once the turn ends, and absent while no reasoning step has text.
+// 6. While the turn runs, the steps line and the Thinking line have vertical room; a finished list keeps its own.
 const assert = require("node:assert/strict");
 
 const WIDTHS = [320, 1280];
@@ -56,6 +57,9 @@ async function checkWidth(page, label) {
   await showSteps(page, [step(1, "reasoning", "Reviewing the\ninput")]);
   assert.equal(await thinkingText(page), "Thinking: Reviewing the input", `${label}: line breaks fold into spaces`);
   assert.match(await page.locator(".activity-toggle").textContent(), /1 step.*3s/, `${label}: count and time stay`);
+  const pad = (selector) => page.locator(selector).evaluate((el) => getComputedStyle(el).paddingBottom);
+  assert.equal(await pad(".activity-toggle"), "8px", `${label}: the running steps line has room`);
+  assert.equal(await pad(".activity-thinking"), "10px", `${label}: the Thinking line has room under it`);
 
   await showSteps(page, [step(1, "reasoning", "Checking the results")]);
   assert.equal(await thinkingText(page), "Thinking: Checking the results", `${label}: an update replaces the line`);
@@ -74,6 +78,7 @@ async function checkWidth(page, label) {
 
   await showSteps(page, [step(1, "reasoning", "Latest summary", "done")], false);
   assert.equal(await thinkingText(page), null, `${label}: gone once the turn ends`);
+  assert.equal(await pad(".activity-toggle"), "4px", `${label}: a finished list keeps its spacing`);
 
   await showSteps(page, [step(3, "command", "Checking")]);
   assert.equal(await thinkingText(page), null, `${label}: absent without a summary`);

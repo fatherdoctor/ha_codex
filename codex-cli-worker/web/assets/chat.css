@@ -2825,6 +2825,21 @@ a.ha-nav-row:focus-visible {
 .activity-text > .message {
   margin-bottom: 12px;
 }
+/* While a turn runs, its four rows (the steps line, the Thinking line, the progress text and the "Working" footer)
+   get clear vertical room, so they do not read as one dense block; a finished exchange keeps its layout. */
+.activity.running .activity-toggle {
+  padding-block: 8px;
+}
+.activity.running .activity-thinking {
+  padding-block: 4px 10px;
+  line-height: 1.6;
+}
+.activity.running ~ .activity-text > .message {
+  margin-block: 6px 16px;
+}
+.activity.running ~ .answer .turn-meta {
+  margin-top: 22px;
+}
 /* CX-04-PHONE-LIST: at phone width the rows are 48 px (--fb2-row-height) and the menu button 44 px, and the selected chat shows its menu button in place of its date. */
 @media (max-width: 700px) {
   .chats-card .chat-row .row-menu {
