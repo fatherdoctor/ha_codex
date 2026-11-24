@@ -135,7 +135,7 @@
           "details": "",
           "error": "",
           "execution_settings": {
-            "fast": false,
+            "fast": null,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -227,7 +227,7 @@
           "details": "",
           "error": "",
           "execution_settings": {
-            "fast": false,
+            "fast": null,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -396,7 +396,7 @@
           "details": "Removed the copies.",
           "error": "",
           "execution_settings": {
-            "fast": false,
+            "fast": null,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -495,7 +495,7 @@
           "details": "Removed the copies.",
           "error": "",
           "execution_settings": {
-            "fast": false,
+            "fast": null,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -658,7 +658,7 @@
           "details": "Could not start /usr/local/bin/codex: no such file",
           "error": "Could not start /usr/local/bin/codex: no such file",
           "execution_settings": {
-            "fast": false,
+            "fast": null,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -750,7 +750,7 @@
           "details": "Could not start /usr/local/bin/codex: no such file",
           "error": "Could not start /usr/local/bin/codex: no such file",
           "execution_settings": {
-            "fast": false,
+            "fast": null,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -934,7 +934,7 @@
           "details": "",
           "error": "",
           "execution_settings": {
-            "fast": false,
+            "fast": null,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -1039,7 +1039,7 @@
           "details": "",
           "error": "",
           "execution_settings": {
-            "fast": false,
+            "fast": null,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -1269,7 +1269,7 @@
           "details": "",
           "error": "",
           "execution_settings": {
-            "fast": false,
+            "fast": null,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -1309,7 +1309,7 @@
           "details": "",
           "error": "",
           "execution_settings": {
-            "fast": false,
+            "fast": null,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -1419,7 +1419,7 @@
           "details": "",
           "error": "",
           "execution_settings": {
-            "fast": false,
+            "fast": null,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -1459,7 +1459,7 @@
           "details": "",
           "error": "",
           "execution_settings": {
-            "fast": false,
+            "fast": null,
             "model": "default",
             "reasoning_effort": "medium"
           },

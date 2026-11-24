@@ -380,6 +380,16 @@ class AccountDefaultTests(ModelListStateMixin, unittest.TestCase):
         self.assertEqual(server.default_model({}), "gpt-6-astra")
         self.assertEqual(server.turn_model("default"), {"model": "gpt-6-astra"})
 
+    def test_without_a_pick_only_the_chats_own_fast_choice_reaches_the_turn(self):
+        # The turn names no model, so the Fast default of the assumed model would be a guess: None, not False.
+        for choice in (None, True, False):
+            with self.subTest(choice=choice):
+                settings = server.parse_chat_settings({"chat_settings": {"model": None, "fast": choice}})
+                self.assertIs(server.resolve_chat_settings(settings, {})["fast"], choice)
+        # Once Codex named a known pick, a chat that chose nothing follows that model's default again.
+        self.seen.return_value = "gpt-6-sol"
+        self.assertIs(server.resolve_chat_settings({"model": None, "fast": None}, {})["fast"], True)
+
     def test_then_the_newest_sol_in_the_live_list(self):
         self.use_live(SOL_LIVE)
         # Versions compare as numbers: 7.10 is newer than 7.9.
