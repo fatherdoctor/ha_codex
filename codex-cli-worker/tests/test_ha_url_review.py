@@ -136,7 +136,7 @@ class TransportEdges(unittest.TestCase):
     def test_f5_each_relay_launch_retries_after_an_unavailable_launch(self):
         metadata=Mock(side_effect=[ValueError(),ValueError(),{'result':'ok','data':{'port':80,'ssl':False}}])
         with patch.object(server,'core_address',core_address.CoreAddress()),patch.object(server,'ha_token',return_value='synthetic'), \
-             patch.object(server,'read_options',return_value={**server.DEFAULT_OPTIONS,'HA_TOKEN':''}), \
+             patch.object(server,'read_options',return_value={**server.DEFAULT_OPTIONS,'HA_TOKEN':'synthetic-core'}), \
              patch.object(core_address,'get_json',metadata),patch.object(server,'probe_core',return_value=False),patch.object(server.time,'sleep'):
             first=server.relay_env();second=server.relay_env()
         self.assertNotIn('HA_URL',first);self.assertEqual(second['HA_URL'],'http://homeassistant:80')

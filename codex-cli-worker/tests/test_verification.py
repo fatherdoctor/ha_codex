@@ -228,7 +228,10 @@ class VerificationTests(unittest.TestCase):
             self.assertNotIn("HA_TOKEN", environment)
             self.assertNotIn("HA_URL", environment)
             server.core_address.refresh({}, 'synthetic', fetch=lambda _: {'result': 'ok', 'data': {'port': 8123, 'ssl': False}})
-            self.assertIn('HA_URL', server.codex_env())
+            # Without the HA_TOKEN option there is no HA_URL either: an unauthenticated call gets the app banned.
+            self.assertNotIn('HA_URL', server.codex_env())
+            with patch.dict(self.options, {"HA_TOKEN": "token"}):
+                self.assertIn('HA_URL', server.codex_env())
             addresses = {
                 None: "http://homeassistant:8123",
                 "  ": "http://homeassistant:8123",

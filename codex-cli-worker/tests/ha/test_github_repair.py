@@ -88,7 +88,7 @@ async def test_each_bad_state_raises_the_repair_and_ok_clears_it(hass, state, se
     ("failed", "github_access_check_failed"),
 ])
 async def test_a_token_connection_is_sent_to_the_token_form(hass, state, key):
-    """Astro F4: Connect again starts an App sign-in, so a token's Repair names Use a token instead."""
+    """Astro F4: Sign in starts an App sign-in, so a token's Repair names Use a token instead."""
     client = AsyncMock()
     coordinator = integration.CodexCliCoordinator(hass, client)
     await poll(coordinator, client, github_status(state, kind="token"))
@@ -109,8 +109,10 @@ async def test_the_repair_text_fits_the_state(hass):
         assert "cannot fetch, pull or push" in strings[key]["description"]
     assert "Use a token instead" in strings["github_access_lost_token"]["description"]
     assert "Use a token instead" in strings["github_access_near_expiry_token"]["description"]
-    assert "Connect again" not in strings["github_access_lost_token"]["description"]
-    assert "Connect again" in strings["github_access_lost"]["description"]
+    assert "Sign in" not in strings["github_access_lost_token"]["description"]
+    assert "Sign in" in strings["github_access_lost"]["description"]
+    for key in ("github_access_changed", "github_access_check_failed"):
+        assert "Check now" not in strings[key]["description"]
     client = AsyncMock()
     coordinator = integration.CodexCliCoordinator(hass, client)
     await poll(coordinator, client, github_status("near_expiry", expires_at="2026-11-20T12:00:00+00:00"))

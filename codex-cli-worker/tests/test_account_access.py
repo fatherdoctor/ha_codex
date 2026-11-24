@@ -114,6 +114,17 @@ class AccountAccessTests(unittest.TestCase):
         self.signature = 'new-synthetic-generation'
         self.assertEqual(self.check.snapshot(self.login)['state'], 'unconfirmed')
 
+    def test_only_a_needed_sign_in_carries_a_message(self):
+        """The page shows no line about confirmed or unconfirmed access; it names only a sign-in to do."""
+        self.assertEqual(self.check.snapshot(self.login)['message'], '')
+        self.check.successful_turn(self.signature)
+        self.assertEqual(self.check.snapshot(self.login)['state'], 'confirmed_by_turn')
+        self.assertEqual(self.check.snapshot(self.login)['message'], '')
+        for login in ({'status_ok': False, 'has_auth_file': False},
+                      {'status_ok': False, 'has_auth_file': True, 'server_check': 'rejected'}):
+            with self.subTest(login=login):
+                self.assertIn('Sign in', self.check.snapshot(login)['message'])
+
 
 class AccountAccessWorkerTests(unittest.TestCase):
     def test_existing_usage_read_updates_safe_plan_metadata(self):
