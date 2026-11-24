@@ -4,6 +4,7 @@ import json
 import os
 import socket
 import sys
+from typing import Any
 
 ATTRIBUTES = ['friendly_name', 'unit_of_measurement', 'device_class', 'supported_features', 'brightness',
               'color_temp', 'current_temperature', 'temperature', 'hvac_modes', 'supported_color_modes', 'assumed_state', 'icon']
@@ -22,7 +23,8 @@ TOOL = {'name': 'read', 'description': 'Read entity ids and current states throu
         'annotations': {'readOnlyHint': True, 'destructiveHint': False, 'idempotentHint': True, 'openWorldHint': False}}
 
 
-def read(arguments):
+def read(arguments: Any) -> dict[str, Any]:
+    """Send one read request to the worker socket and return its JSON answer."""
     if not isinstance(arguments, dict) or set(arguments) - set(TOOL['inputSchema']['properties']):
         raise ReadRequestError('Unsupported read arguments.')
     raw = json.dumps({'arguments': arguments}).encode() + b'\n'
@@ -39,7 +41,8 @@ def read(arguments):
     return json.loads(response)
 
 
-def respond(request):
+def respond(request: dict[str, Any]) -> dict[str, Any]:
+    """Answer one JSON-RPC request: initialize, ping, tools/list or the one read call."""
     method = request.get('method')
     if method == 'initialize':
         return {'protocolVersion': '2024-11-05', 'capabilities': {'tools': {}}, 'serverInfo': {'name': 'home-assistant-relay-reads', 'version': '1'}}
@@ -61,7 +64,8 @@ def respond(request):
     raise ValueError('Unsupported method')
 
 
-def main():
+def main() -> int:
+    """Serve bounded JSON-RPC lines on stdin and stdout; return 1 for an oversized line."""
     while raw := sys.stdin.buffer.readline(65537):
         if len(raw) > 65536:
             return 1
