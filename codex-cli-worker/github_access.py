@@ -898,7 +898,7 @@ class GitHubService:
             raise GitHubError("The new sign-in could not be checked: " + str(exc)) from None
         if not live.get("repositories"):
             raise GitHubError("The GitHub App is not installed on any repository you can reach. Install it on "
-                              "the repositories of your choice, then press Connect again.")
+                              "the repositories of your choice, then sign in again.")
         self._save_connection("app", token, live, None)
         self.log("GitHub sign-in connected (app).")
 
@@ -974,7 +974,7 @@ class GitHubService:
 
     # -- checking ------------------------------------------------------------------------------------------
     def check(self) -> dict[str, Any]:
-        """The monitoring check: at start, hourly and on Check now. One event and one notice per change."""
+        """The monitoring check: at start, hourly and on a POST to /github/check. One event and one notice per change."""
         credential = self.store.read_credential()
         self.next_check = time.monotonic() + GITHUB_CHECK_SECONDS
         if not credential:

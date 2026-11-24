@@ -692,10 +692,9 @@ If you cannot install the App (for example, an organization forbids third-party 
 
 ### The card
 
-- **Read test** reads each connected repository once and shows the result.
-- **Check now** runs the access check at once (see below).
+- **Sign in** starts a new GitHub App sign-in while one is saved; the saved one stays until the new one finishes.
 - **Accept this access** appears when the repositories changed on GitHub but the access is still exactly Contents read and write. It makes the current set the one the check expects. If the access itself changed, change it back on GitHub instead.
-- **Disconnect** forgets the sign-in on this box. It cannot revoke it on GitHub, because that needs a secret the app does not carry. So the card then shows the link to revoke it: `https://github.com/settings/apps/authorizations` for the App, `https://github.com/settings/tokens` for a token. Disconnect waits while a task runs.
+- **Sign out** forgets the sign-in on this box. It cannot revoke it on GitHub, because that needs a secret the app does not carry. So the card then shows the link to revoke it: `https://github.com/settings/apps/authorizations` for the App, `https://github.com/settings/tokens` for a token. Sign out waits while a task runs.
 - **Repositories on this box**: **Clone** copies a connected repository into a new folder directly under `/share`; the folder name starts as the repository's name, so a clone goes to `/share/<repository>`. **Link** points an existing git folder under `/share` or `/config` at a connected repository (it sets `origin`). Release 0.3 maps Home Assistant's `/share` folder read-write into the app for this. Neither writes a credential into the repository, so git on this box reaches GitHub with the sign-in only through the app. A list of the git folders on this box, with menus, comes in 0.3.1.
 
 You can also ask the assistant in chat to clone or link a connected repository. It uses the same `github_git` tool.
@@ -712,13 +711,13 @@ Limits of a push:
 
 ### Monitoring
 
-The app checks the sign-in at start, every hour, and when you press **Check now**. The states are: OK, expires within 7 days, expired, revoked, access changed (repositories missing or added, or access other than Contents read and write), and cannot be checked (GitHub unreachable three times in a row).
+The app checks the sign-in at start, and every hour. The states are: OK, expires within 7 days, expired, revoked, access changed (repositories missing or added, or access other than Contents read and write), and cannot be checked (GitHub unreachable three times in a row).
 
 When the state changes, and only then:
 
 - The app fires the Home Assistant event `codex_cli_github_access` with the state, the previous state, the reason, the account login, the missing and added repositories, the permission problem and the expiry. It never sends a token or a code. The integration fires the same event, with `source: integration`, when it sees the change, so an automation still works if the app's own call failed. An automation can route it to your notify service.
 - The app sends one notification through its `notify_service` option, or a persistent notification (`codex_cli_github`) without one.
-- The integration raises one repair (`github_access_lost`). It is an error for expired, revoked and cannot be checked, and a warning for expires soon and access changed. Its text fits the state and the kind of sign-in: for expires soon it says that GitHub still works and gives the date, and for a token it names **Use a token instead**, because **Connect again** starts an App sign-in. It clears when the check is OK or you disconnect. If you never connected, there is no repair.
+- The integration raises one repair (`github_access_lost`). It is an error for expired, revoked and cannot be checked, and a warning for expires soon and access changed. Its text fits the state and the kind of sign-in: for expires soon it says that GitHub still works and gives the date, and for a token it names **Use a token instead**, because **Sign in** starts an App sign-in. It clears when the check is OK or you disconnect. If you never connected, there is no repair.
 - A banner above the chat offers **Open GitHub settings**.
 
 ### When GitHub stops working
@@ -727,13 +726,13 @@ Open **Settings > Accounts and connections > GitHub** in the app page. The card 
 
 - **Not connected to GitHub:** No sign-in is saved, or the app was restored from a backup. Press **Connect GitHub** to connect the App. If you use a fine-grained token, open **Use a token instead**.
 - **Connecting:** The App is waiting for you to finish on GitHub. Follow the link on the card. If the code expires, press **Get a new code**. To start over while it is waiting, press **Cancel**, then **Connect GitHub**.
-- **Connected to GitHub:** The access check is OK. If a repository operation still fails, press **Read test** to check the connected repositories.
-- **GitHub still works, but this sign-in (or token) expires within 7 days:** The assistant can still use GitHub. Before the date, press **Connect again** for the App, or create a new fine-grained token and open **Use a token instead** for a token.
-- **The GitHub sign-in expired** or **This GitHub token expired:** The saved sign-in is past its expiry. For the App, press **Connect again**. For a token, create a new one on GitHub, then open **Use a token instead**.
-- **GitHub no longer accepts this sign-in (or token):** GitHub refused the saved sign-in (revoked). For the App, press **Connect again**; if GitHub still refuses it, restore the App's repository access on GitHub. For a token, create a new one, then open **Use a token instead**.
-- **The new GitHub sign-in failed:** A **Connect again** did not finish. The card gives GitHub's reason, and the previous sign-in stays as it was.
-- **The GitHub sign-in reaches different repositories or access than you connected:** GitHub reports a changed repository list or permissions. Check the list and access shown on the card. If the repository change is intended and **Accept this access** is available, press it. If you did not intend the repository change, restore the repository selection for the App on GitHub. Then press **Check now**. If permissions changed, restore Contents read and write on GitHub, then press **Check now**.
-- **The GitHub sign-in cannot be checked:** GitHub could not be reached repeatedly, or the check found another error. Check the last-check reason and your connection, then press **Check now**.
+- **Connected to GitHub:** The access check is OK. If a repository operation still fails, check that the repository is in the list on the card.
+- **GitHub still works, but this sign-in (or token) expires within 7 days:** The assistant can still use GitHub. Before the date, press **Sign in** for the App, or create a new fine-grained token and open **Use a token instead** for a token.
+- **The GitHub sign-in expired** or **This GitHub token expired:** The saved sign-in is past its expiry. For the App, press **Sign in**. For a token, create a new one on GitHub, then open **Use a token instead**.
+- **GitHub no longer accepts this sign-in (or token):** GitHub refused the saved sign-in (revoked). For the App, press **Sign in**; if GitHub still refuses it, restore the App's repository access on GitHub. For a token, create a new one, then open **Use a token instead**.
+- **The new GitHub sign-in failed:** A new **Sign in** did not finish. The card gives GitHub's reason, and the previous sign-in stays as it was.
+- **The GitHub sign-in reaches different repositories or access than you connected:** GitHub reports a changed repository list or permissions. Check the list and access shown on the card. If the repository change is intended and **Accept this access** is available, press it. If you did not intend the repository change, restore the repository selection for the App on GitHub. The next hourly check sees the change. If permissions changed, restore Contents read and write on GitHub; the next hourly check sees that too.
+- **The GitHub sign-in cannot be checked:** GitHub could not be reached repeatedly, or the check found another error. Check the last-check reason and your connection. The app tries again every hour; **Sign in** makes a new sign-in at once.
 
 ### Backups
 
@@ -1187,8 +1186,8 @@ bottom: **Codex** (the ChatGPT sign-in), **GitHub** and **Remote** (the ChatGPT 
 or two such as Ready, Off or Not signed in; the 5-hour and weekly quota with a line for the plan type and the reset
 times; and **Settings**. Select Codex, GitHub or Remote to open Settings at that part of Accounts and connections;
 **Manage remote connection** there opens the window that pairs the ChatGPT app. A row that needs you shows an amber
-dot, and a row whose state could not be read shows a red dot and Unavailable. The ChatGPT account part says whether
-a turn has confirmed Codex access with the current sign-in. While signed in, it also lists the sign-in method, the
+dot, and a row whose state could not be read shows a red dot and Unavailable. The ChatGPT account part shows a line about
+Codex access only when you must sign in. While signed in, it also lists the sign-in method, the
 plan, when OpenAI last accepted the sign-in and the weekly quota left, each only when the app knows it, and it shows
 **Sign out** instead of **Sign in**. It shows no account name or email.
 
@@ -1300,7 +1299,7 @@ state, and clears on a good sign-in or a successful task using the same credenti
 nothing. The passive readers recognize explicit revoked-token markers and the pinned refresh-token expired, reused and invalidated codes and their exact user-facing messages; generic HTTP errors, quota exhaustion and plan names do not imply missing access. No distinct
 task-level entitlement error was verified, so no entitlement mapping is added. Task sign-in failures now use
 the same explicit rejection signals as passive checks, plus the exact observed revocation phrase
-`workspace routing discovery unauthorized (401)`; generic task HTTP failures do not raise the Repair. Status explicitly says when passive reads cannot confirm Codex access.
+`workspace routing discovery unauthorized (401)`; generic task HTTP failures do not raise the Repair. The page shows no line about confirmed or unconfirmed access; it names only a sign-in to do.
 
 Passive usage failures treat generic HTTP 401/403, rate exhaustion and network errors as unknown, not expired sign-in. Only explicit Codex sign-in rejection signals can raise the sign-in Repair. Status exposes fixed usage-error messages with `rate_limits_error_category` (`unavailable`, `sign_in_rejected` or `missing_window`); raw upstream errors and failed-read excerpts are omitted, including older cached failures.
 A real successful turn can confirm access for its current sign-in; changing credentials invalidates that

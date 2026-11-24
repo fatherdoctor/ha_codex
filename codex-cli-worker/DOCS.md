@@ -44,8 +44,8 @@ What to know:
   already have under `/share` or `/config` at a connected repository. You can also ask Codex in the chat.
 - GitHub refuses a push that changes `.github/workflows/` with this access. Change workflow files on GitHub or on
   another computer.
-- **Disconnect** only makes this app forget the sign-in. To revoke it, use the link the card shows on GitHub.
-- A restore from a Home Assistant backup does not bring the sign-in back. Connect again.
+- **Sign out** only makes this app forget the sign-in. To revoke it, use the link the card shows on GitHub.
+- A restore from a Home Assistant backup does not bring the sign-in back. Sign in again.
 
 If the card shows a warning, it says what happened and which button to press. More:
 [GitHub sign-in](https://github.com/fatherdoctor/ha_codex/blob/main/docs/app-reference.md#github-sign-in).
