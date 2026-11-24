@@ -859,7 +859,7 @@ To remove a connection, revoke its dedicated public key on the remote server, th
 
 ## Usage Status
 
-The worker reads usage from Codex's own account read: it starts `codex app-server`, asks `account/rateLimits/read`, and places each window by its length (up to a day is the 5-hour window, a week or more the weekly one), showing the percentage left and the reset time. Some accounts report both windows, while others currently report only a weekly window. If that read fails or names no window, the worker falls back to starting a pseudo-terminal session and reading Codex's `/status` screen; the figures are then marked estimated: the usage sensors' `source` attribute is `status_screen` and their `note` attribute says so (`source` is `rate_limits` otherwise).
+The worker reads usage from Codex's own account read: it starts `codex app-server`, asks `account/rateLimits/read`, and places each window by its length (up to a day is the 5-hour window, a week or more the weekly one), showing the percentage used (100 minus the percentage Codex reports as left) and the reset time. Some accounts report both windows, while others currently report only a weekly window. If that read fails or names no window, the worker falls back to starting a pseudo-terminal session and reading Codex's `/status` screen; the figures are then marked estimated: the usage sensors' `source` attribute is `status_screen` and their `note` attribute says so (`source` is `rate_limits` otherwise).
 
 The worker disables Codex update checks at startup. Codex CLI is installed and verified as part of the app image, so it must be updated by installing a newer app image rather than from an interactive Codex update prompt.
 

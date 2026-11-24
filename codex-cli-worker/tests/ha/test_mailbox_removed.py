@@ -111,3 +111,23 @@ async def test_setup_continues_when_the_saved_ids_file_cannot_be_removed(hass, c
 def test_no_sensor_reads_the_mailbox():
     """The sensor platform has no mailbox sensor class."""
     assert not hasattr(sensors, "CodexMailboxUnreadSensor")
+
+
+async def test_setup_removes_the_percent_left_limit_sensors(hass, hass_storage):
+    """The two old "percent left" limit sensors are removed, so a reader of their ids fails loudly; the new ones stay."""
+    entry = MockConfigEntry(domain="codex_cli", data={"base_url": "http://worker"},
+                            state=ConfigEntryState.SETUP_IN_PROGRESS)
+    entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    old = [registry.async_get_or_create("sensor", "codex_cli", f"{entry.entry_id}_{key}", config_entry=entry)
+           for key in ("five_hour_limit", "weekly_limit")]
+    new = [registry.async_get_or_create("sensor", "codex_cli", f"{entry.entry_id}_{key}", config_entry=entry)
+           for key in ("five_hour_used", "weekly_used")]
+    client = AsyncMock()
+    client.status.return_value = STATUS
+
+    await _set_up(hass, entry, client)
+
+    assert [registry.async_get(e.entity_id) for e in old] == [None, None]
+    assert all(registry.async_get(e.entity_id) is not None for e in new)
+    await _stop_polling(entry)

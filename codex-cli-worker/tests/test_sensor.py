@@ -134,9 +134,9 @@ def _usage_sensors(usage: dict[str, Any]) -> tuple[Any, Any, Any, Any]:
         data={"base_url": "http://codex-worker.test"},
     )
     return (
-        sensor.CodexFiveHourLimitSensor(coordinator, entry),
+        sensor.CodexFiveHourUsedSensor(coordinator, entry),
         sensor.CodexFiveHourResetSensor(coordinator, entry),
-        sensor.CodexWeeklyLimitSensor(coordinator, entry),
+        sensor.CodexWeeklyUsedSensor(coordinator, entry),
         sensor.CodexWeeklyResetSensor(coordinator, entry),
     )
 
@@ -157,7 +157,7 @@ class UsageSensorTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(weekly_limit.native_value, 87)
+        self.assertEqual(weekly_limit.native_value, 13)  # 87 left is 13 used
         self.assertIs(weekly_limit.extra_state_attributes["reported"], True)
         self.assertEqual(weekly_limit.extra_state_attributes["limit"], "Weekly limit")
         self.assertEqual(
@@ -208,7 +208,7 @@ class UsageSensorTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(five_hour_limit.native_value, 64)
+        self.assertEqual(five_hour_limit.native_value, 36)  # 64 left is 36 used
         self.assertIs(five_hour_limit.extra_state_attributes["reported"], True)
         self.assertEqual(five_hour_limit.extra_state_attributes["weekly_percent"], "91")
         self.assertEqual(
@@ -217,7 +217,7 @@ class UsageSensorTests(unittest.TestCase):
         )
         self.assertIs(five_hour_reset.extra_state_attributes["reported"], True)
 
-        self.assertEqual(weekly_limit.native_value, 91)
+        self.assertEqual(weekly_limit.native_value, 9)  # 91 left is 9 used
         self.assertIs(weekly_limit.extra_state_attributes["reported"], True)
         self.assertEqual(weekly_limit.extra_state_attributes["five_hour_percent"], "64")
         self.assertEqual(
@@ -225,6 +225,22 @@ class UsageSensorTests(unittest.TestCase):
             datetime.fromisoformat("2026-08-08T12:00:00+03:00"),
         )
         self.assertIs(weekly_reset.extra_state_attributes["reported"], True)
+
+
+class UsedPercentTests(unittest.TestCase):
+    """The limit sensors report percent used: 100 minus what Codex reports as left."""
+
+    def test_used_is_one_hundred_minus_left_and_stays_in_range(self) -> None:
+        """A figure of 97 left reads 3 used; the ends and out-of-range figures are clamped."""
+        for left, used in (("97", 3), ("100", 0), ("0", 100), ("150", 0), ("-5", 100)):
+            with self.subTest(left=left):
+                self.assertEqual(sensor._used_percent(left), used)
+
+    def test_missing_or_text_figures_are_unknown(self) -> None:
+        """An empty, missing or non-integer figure gives None, never 100 used."""
+        for left in ("", None, "n/a", "7.5"):
+            with self.subTest(left=left):
+                self.assertIsNone(sensor._used_percent(left))
 
 
 class LastTaskSensorTests(unittest.TestCase):
