@@ -17,8 +17,9 @@ on a test Home Assistant first.
 
 - A chat page in Home Assistant, with saved conversations and a task queue. Codex works in a sandbox.
 - In the default mode, Codex edits files in your configuration folder without a question. It asks before a command
-  that uses the network, a write outside your configuration folder and `/share`, or a change to a device. Only an
-  administrator can answer. The other [permission modes](#permission-modes) ask less or more.
+  that uses the network, a write outside your configuration folder, `/share`, `/media` and the app's own folder
+  (`/addon_config`, where its `AGENTS.md` is), or a change to a device. Only an administrator can answer. The other
+  [permission modes](#permission-modes) ask less or more.
 - Codex is told to save the earlier copy of a file before it changes it, and the chat lists the copies it saved. A
   copy can be missing, and `secrets.yaml` and the files under `.storage` (dashboards kept there too) are never
   copied, so keep your own Home Assistant backups ([Backups](docs/app-reference.md#backups)).
@@ -35,7 +36,8 @@ on a test Home Assistant first.
 4. Add **Discovered: Codex** under **Settings** > **Devices & services**.
 5. Open the chat and [sign in](#sign-in).
 
-Details and other ways to install: [Installation](#installation). If a step fails because a download is not there,
+Start with the app (step 1). The Marketplace and HACS install only the integration, which does nothing without the
+app. Details and other ways to install: [Installation](#installation). If a step fails because a download is not there,
 see [If a download is missing](#if-a-download-is-missing).
 
 ## Contents
@@ -80,9 +82,9 @@ notification buttons. The web page opens only through Home Assistant Ingress; th
 **Installing the integration yourself.** Turn off the app option **Install the Codex integration**
 (`install_integration`) first. Then do one of these, and restart Home Assistant:
 
-- Home Assistant 2026.11 or later: connect a GitHub account, then open **Settings** > **Marketplace** >
-  **Custom repositories** and add `https://github.com/fatherdoctor/ha_codex` with the category **Integration**.
-  Accept the warning shown the first time, and install **Codex**.
+- Home Assistant 2026.11 or later: in the **Marketplace**, add `https://github.com/fatherdoctor/ha_codex` as a
+  custom repository with the category **Integration**, and install **Codex**. The Marketplace takes the integration
+  only; it does not list apps, so install the app first from **Settings** > **Apps**.
 - Older releases: add the same custom repository in HACS as an **Integration**.
 - By hand: copy `custom_components/codex_cli` to `/config/custom_components/codex_cli`.
 
@@ -120,7 +122,7 @@ How releases are tested and how a bad release is undone: [docs/updates-and-rollb
 1. **Settings** > **Devices & services** > **Codex**. Delete the integration entry.
 2. Uninstall **Codex for Home Assistant** under **Settings** > **Apps**.
 3. Uninstalling the app does not remove the integration. Delete `/config/custom_components/codex_cli` (or remove
-   **Codex** in **Settings** > **Marketplace** if you installed it there), and restart Home Assistant.
+   **Codex** in the Marketplace or HACS if you installed it there), and restart Home Assistant.
 
 The chats and their logs are in the app's private folder (`/data/codex_tasks`), which uninstalling the app removes.
 
@@ -158,7 +160,7 @@ only Codex's own settings.
 
 | Mode | What Codex can do without asking |
 |---|---|
-| Ask for approval | Edit files in your configuration folder. Shell networking and a write outside your configuration folder and `/share` need your permission. |
+| Ask for approval | Edit files in your configuration folder. Shell networking and a write outside your configuration folder, `/share`, `/media` and the app's own folder need your permission. |
 | Approve for me | As Ask for approval, but Codex's own reviewer answers each request instead of you. |
 | Read only | Read files. A write, a device change or shell networking needs your permission for that one action. |
 | Full access | Everything, without a sandbox and without asking. Off until an administrator turns it on in Settings. |
@@ -171,8 +173,9 @@ and **Deny**. Only a Home Assistant administrator can answer it.
 Codex's own permission modes and the sandbox are the protection, as in the Claude add-on. The app adds no command
 check of its own.
 
-- **The sandbox.** Commands run with their own user, mount, process and network space. The sandbox hides
-  `secrets.yaml`, Home Assistant's sign-in store and the app's own private files.
+- **The sandbox.** Commands run with their own user, mount, process and network space. The sandbox hides the app's
+  own private files. It hides nothing in `/config`, as in the Claude add-on: `secrets.yaml` and `.storage` are left
+  to your `AGENTS.md`.
 - **Complete cards.** A command or file change that is incomplete, too large or redacted can be denied but never
   allowed: its card has no **Allow once** button.
 - **A protected policy.** The allowed modes come from a file inside the app image. Options and chats cannot loosen it.
@@ -263,6 +266,7 @@ of the release that the project started from ([Credit](#credit)), plus one more.
 
 | Version | Changes |
 |---|---|
+| 0.5.0 | Four permission modes named as in the ChatGPT desktop app; the account's default model and a model picker; downloadable files; schedules that continue their chat; the Home Assistant MCP server on by default; chats in the app's private folder with retention; answers that lead with the result, with work steps folded. Remote Control is paused. |
 | 0.3.6 | The app's own command checks are removed: Codex's permission modes and the sandbox are the protection. Four permission modes, with Full access off until an administrator turns it on. A notification shows only while a chat waits for you. |
 | 0.3.0 (unreleased) | GitHub sign-in on the page (device sign-in, clone and link under /share or /config, every push through the push guard, a Repairs issue when access changes). The app installs and updates its own integration (one install and one restart); setup from discovery asks for confirmation. |
 | 0.1.81.2 (unreleased) | No full-access mode (changed in 0.3.6); a protected permission policy in the image, no bundled house rules and owner workspace instructions; permission answers and the integration's actions only from Home Assistant administrators; a permission-prompt sensor. |

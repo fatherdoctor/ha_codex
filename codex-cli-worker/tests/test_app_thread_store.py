@@ -252,6 +252,18 @@ class ExchangeRecordTests(unittest.TestCase):
             {"codex_sandbox": "workspace-write"})
         self.assertEqual(session.thread_params["developerInstructions"], server.PAGE_INSTRUCTIONS)
 
+    def test_codex_starts_in_its_working_folder_and_keeps_config_writable(self):
+        """The thread starts in its working folder; /config, /share and /media are the writable roots."""
+        task_id = self.create(OWNER_TEXT)
+        workdir = Path(self.enterContext(tempfile.TemporaryDirectory())) / "codex"
+        workdir.mkdir()
+        with patch.object(server, "CODEX_WORKDIR", workdir):
+            session = server.create_approval_session(
+                task_id, attachments.StubAppServer(attachments.SESSION_ID), "Prompt", Path("final"), None, {},
+                {"codex_sandbox": "workspace-write"})
+        self.assertEqual(session.thread_params["cwd"], str(workdir))
+        self.assertEqual(session.turn_params["sandboxPolicy"]["writableRoots"][:4], ["/config", "/share", "/media", "/media/.agents"])
+
     def run_and_record_plain(self, task_id, session_id=None, reply=None):
         """Run one exchange through run_codex's fake process and return exchange_info's details and the message."""
         recorded = []

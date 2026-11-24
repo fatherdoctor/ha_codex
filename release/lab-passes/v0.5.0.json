@@ -1,0 +1,17 @@
+{
+  "version": "0.5.0",
+  "kind": "lab-pass",
+  "result": "pass",
+  "commit": "d3f882c70eb2a2f421e7c167fe1e7315916440e4",
+  "date": "2026-11-23",
+  "lab": "VM 220, Home Assistant Core 2026.11.0, the app built locally from this commit with the integration bundled",
+  "starter": "the release's starter_agents.md as the owner's AGENTS.md",
+  "steps": {
+    "entities": "pass",
+    "lead-gone": "pass (worker routes not reachable from the lab test client)",
+    "read-light": "pass",
+    "write-asks": "pass",
+    "failed-action": "pass",
+    "question-notice": "pass"
+  }
+}

@@ -1,31 +1,87 @@
 # Changelog
 
-## 0.5.0 (draft)
+## 0.5.1 - 2026-11-24
 
-This draft summarizes changes since the 0.3.6 tag, through release branch commit `0bcdccd87d4d`.
-The detailed 0.4.0 notes below remain as a record; where they describe an earlier step, this summary
-reflects the later change. The checks describe expected behavior and still need a check on the installed build.
+- **Memory note.** The starter instructions now tell Codex to keep personal details, not only secrets, out of its
+  memory files: PINs, tokens, passwords, phone numbers and addresses. They also name the memory folder by its full
+  path, `/config/memory/`, rather than `memory/` in the working folder, so the memory stays in the backup and in the
+  same place when the working folder changes. An install that already has its instructions file keeps its text.
+- **Codex works from `/media/.agents/codex`.** Codex's working folder is now `/media/.agents/codex` instead of
+  `/config`, so its notes, scratch files and drafts no longer land in Home Assistant's configuration, and the
+  automatic backup leaves them out unless you include the media folder in your backup settings. The app now maps
+  Home Assistant's `/media` folder read-write, and `/media` is a writable place in `workspace-write` beside
+  `/config` and `/share`, the same `/media` access the Claude add-on has. `/media/.agents` is a writable place of its
+  own, because Codex's sandbox otherwise keeps a folder named `.agents` read-only. The move itself changes
+  no hidden file of the sandbox and no approval card. The app creates the folder at start when it is
+  missing and never moves or empties it; it does not create `/media`. When the folder cannot be created, when `/media` is missing, or when any
+  part of its path is a link, Codex works from `/config` as before and the log says why, naming the link. A link at
+  `/media/.agents` itself also stops Codex from building its sandbox, so commands fail in Ask for approval and Approve
+  for me until you remove the link; Read only still works, and the log line says so. An `AGENTS.md` that you put
+  in the working folder is read as the working folder's instructions, after the app's own `AGENTS.md`. The starter
+  `AGENTS.md` of a new install says to ask before changing files in other apps' folders under `/share` and `/media`.
+  The remote connection for the ChatGPT app starts its Codex in the same working folder. A chat from the ChatGPT app may write
+  `/config` without a request, as in 0.4, and may now also write `/share` and `/media` without a request, the same
+  as a chat on the page. The `github_git` tool and the **Link** form
+  under **Settings** > **GitHub** now refuse a relative path such as `.` and ask for the full path, so a path meant
+  for the working folder cannot name the configuration repository in `/config`.
+- **Secret files are no longer hidden in the sandbox.** Codex can now read `secrets.yaml` and Home Assistant's
+  sign-in files `.storage/auth` and `.storage/auth_provider.homeassistant`, and change them in `workspace-write`
+  without a permission card, like any other file in `/config`. The Claude add-on works the same way. Before, a read
+  saw an empty file, and a change needed a card. Rule 2 of the starter `AGENTS.md` now says to open secret files only
+  when you ask and never to paste them into the chat. An `AGENTS.md` you already have is not changed. Whatever Codex
+  reads goes into the chat and to the model provider. If you want these files kept back, say so in your `AGENTS.md`.
+  The app's own private files stay hidden: its options, API token, schedule database, GitHub sign-in and the
+  container environment that holds the Supervisor token.
+- **`.storage` is no longer read-only in the sandbox.** In 0.5.0 a change to a file under `.storage` asked you on a
+  permission card in Ask for approval. Now the sandbox keeps `.storage` writable like the rest of `/config`, as the
+  Claude add-on does, and the change runs with no card. The sign-in files under `.storage` are no longer hidden
+  either (see the entry above). Rule 5 of the starter `AGENTS.md` now says not to edit `.storage` files while Home
+  Assistant runs, because Home Assistant writes over a changed file from memory, and to use the API or the settings
+  pages. An `AGENTS.md` you already have is not changed; copy the rule from `starter_agents.md` if you want it.
+- **Settings polish from a box test.** The Settings scrollbar keeps its space, so text no longer reflows when a part
+  opens. The Ask for approval and Read only texts say what each mode asks. The ChatGPT account part shows a line about
+  Codex access only when you must sign in, and no longer lists which plans include Codex. The GitHub buttons are
+  **Sign in** and **Sign out**; **Read test** and **Check now** are gone (the app still checks every hour). A schedule
+  no longer has **Review prompt** (**Edit** shows the prompt). The workspace rules window is named **Workspace rules
+  (Codex AGENTS.md)** and has **Cancel**. Thinking lines before an answer have more space between them. While Codex
+  works, the four rows of its running reply (the steps line, the Thinking line, the progress text and the
+  **Working** line) have clear space between them; a finished reply keeps its layout.
+- **Codex changes the app's `AGENTS.md` without a card.** `/addon_config`, the app's own folder that holds its
+  `AGENTS.md`, is now a writable place in `workspace-write` beside `/config`, `/share` and `/media`, on the chat page
+  and over the remote connection. When you ask a chat to change your workspace instructions, Codex writes the file
+  without an approval card, as the Claude Code add-on writes its own folder and as the **Settings** editor already
+  did. Before, each such write showed a card. In Read only mode a change still asks first.
+
+## 0.5.0 - 2026-11-23
+
+This summarizes the changes since the 0.3.6 tag, through release branch commit `7ae10f0d`. Version 0.4.0 was not
+released; its detailed notes below remain as a record. Where they describe an earlier step, this summary reflects the
+later change.
 
 ### Changelog
 
 - **Permissions.** The chat uses Ask for approval, Approve for me, Full access and Read only. Connected app
   tools that can change things now ask for approval in Ask for approval; app and tool names are redacted when needed.
-  Read-only app tools run without a question. (#249, #243, #260)
+  Read-only app tools run without a question. When you change a chat's permissions, the next message tells Codex
+  the new permissions. (#249, #243, #260, #277)
 - **Models.** New chats follow the account's default model and reasoning level. The Configuration page accepts a
   default or custom model, and the chat picker lists the available models and levels. (#187, #226, #232, #241)
 - **Chat answers.** Answers appear once, align with the activity line and preserve math delimiters. Work steps start
   closed, can be opened on earlier answers, and show the latest thinking summary while a response runs.
-  The page asks Codex to lead with the answer and use tables for comparisons. (#152, #217, #231, #236, #238, #244, #247, #253)
+  The page asks Codex to lead with the answer and use tables for comparisons. Two or more work steps in a row fold
+  under a one-line heading. (#152, #217, #231, #236, #238, #244, #247, #253, #259)
 - **Files and spreadsheets.** Files made in a chat can be downloaded from their answer links. The app includes a
   spreadsheet library for offline Excel files. Generated files stay with their chat. (#203, #233, #239)
 - **Schedules.** A schedule made in a chat continues that chat, with its scheduled permissions and model. A scheduled
-  run can request approval for a Home Assistant action. (#170, #188, #248)
+  run can request approval for a Home Assistant action. A schedule that Codex proposes in a chat belongs to that
+  chat once you approve it. (#170, #188, #248, #275)
 - **Home Assistant tools.** The bundled Home Assistant MCP server is enabled by default. It provides read and action
   tools, with actions governed by the chat's permission mode. Entity search favors closer name and ID matches. (#186, #224)
 - **Faster follow-ups.** Codex can keep one process running between messages. A plain question can be answered without
   an unnecessary tool call. (#219, #220)
 - **Sign-in and warnings.** Sign-in panels put the link and code first and fit a phone screen. The Settings icon
-  warns when sign-in, an approval or a schedule needs attention. (#171, #184, #211, #218)
+  warns when sign-in, an approval or a schedule needs attention. While ChatGPT is signed in, Settings shows the
+  sign-in method, the plan and the weekly quota left, and hides **Sign in**. (#171, #184, #211, #218, #276)
 - **Phone controls.** The chat list stays open after a chat is selected, and its menu is easier to reach. Pop-ups
   close on an outside click unless an edited dialog would lose changes. (#190, #221)
 - **Chat commands.** Slash-prefixed messages go to Codex as text. Use page controls for chat actions. (#234)
@@ -35,9 +91,12 @@ reflects the later change. The checks describe expected behavior and still need 
   generated images stay in the app backup. Inactive chats are deleted after 14 days by default, except pinned chats.
   Secret files are excluded from snapshots and their changes are not shown in chat records. (#151, #194, #197, #202, #203)
 - **Workspace instructions.** The global instructions file moves to the app's own configuration folder, with a backup
-  on migration. Starter instructions describe safeguards and keeping private data out of Git. (#168, #193, #200)
-- **Documentation and identity.** The Info and Documentation tabs are shorter. New Git commits use the configured
-  identity, which defaults to ChatGPT Codex. The app and integration use the new project mark. (#154, #229, #242)
+  on migration. Starter instructions describe safeguards, keeping private data out of Git, a `memory` folder for
+  facts that last between chats, and the app's own sensors. (#168, #193, #200, #273)
+- **Documentation and identity.** The Info and Documentation tabs are rewritten as short guides, with GitHub,
+  scheduled runs, backups, models and usage, and new screenshots. New Git commits use the configured identity,
+  which defaults to ChatGPT Codex. The app and integration use the new project mark.
+  (#154, #229, #242, #274, #282, #283, #284, #285)
 - **Removed or paused features.** Remote Control is hidden and does not start in this version; its settings are kept.
   Built-in dashboard screenshots, the dashboard verification user, the lead channel and its mailbox are removed.
   Automations that used the mailbox sensor or event need an alternative. (#145, #159, #240, #245)
@@ -46,7 +105,7 @@ reflects the later change. The checks describe expected behavior and still need 
 
 ### Test steps
 
-These are draft checks for the installed release. They do not report a live-system result.
+These are the checks for the installed release.
 
 1. **Do:** Open the app's Configuration page and the chat Permissions menu.
    **Expect:** The model setting is available, and the menu shows the four permission names listed above.
