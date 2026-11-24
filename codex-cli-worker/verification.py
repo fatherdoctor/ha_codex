@@ -8,8 +8,9 @@ import secrets
 import socketserver
 import threading
 import time
-from contextlib import closing
+from contextlib import AbstractContextManager, closing
 from pathlib import Path
+from typing import Any, Protocol
 
 import requests
 import websocket
@@ -24,7 +25,39 @@ DOMAIN_RE = re.compile(r"[a-z_][a-z0-9_]*")
 PATH_RE = re.compile(r"/[a-zA-Z0-9_-]+(?:/[a-zA-Z0-9_-]+)?/?")
 
 
-def public_check(entry):
+class VerificationWorker(Protocol):
+    """What this module uses of the worker: the tasks, the options, and the worker's access to Home Assistant.
+
+    server.py passes an object that returns its own module globals by name, and the tests pass the server module.
+    Each name that the code below reads from `self.worker` is listed here, with the type that server.py gives it,
+    so that a reader and a type checker see the whole dependency. tests/test_verification.py fails when the code
+    reads a name that is not in this list, or when server.py does not have a listed name.
+    """
+
+    CONFIG_ROOT: Path
+    # threading.RLock; the worker's one lock for `tasks`.
+    lock: AbstractContextManager[Any]
+    tasks: dict[str, dict[str, Any]]
+
+    def api_token(self) -> str: ...
+    def build_manifest(self) -> dict[str, dict[str, Any]]: ...
+    def check_home_assistant_config(self) -> dict[str, str]: ...
+    def diff_manifests(self, before: dict[str, Any], after: dict[str, Any]) -> dict[str, list[str]]: ...
+    def find_lovelace_dashboard_refs(self, changes: dict[str, list[str]]) -> list[dict[str, str]]: ...
+    def get_run_dir(self, task_id: str) -> Path: ...
+    def get_task_dir(self, task_id: str) -> Path: ...
+    def ha_token(self) -> str: ...
+    def redact(self, text: str) -> str: ...
+    def save_lovelace_dashboard(self, ref: dict[str, str]) -> tuple[bool, str]: ...
+    def task_cancellation_requested(self, task_id: str) -> bool: ...
+    def task_options(self, task_id: str) -> dict[str, Any]: ...
+    def task_turns(self, task: dict[str, Any]) -> list[dict[str, Any]]: ...
+    def update_task(self, task_id: str, **updates: Any) -> bool: ...
+    def utc_now(self) -> str: ...
+    def validate_changed_files(self, changes: dict[str, list[str]]) -> list[str]: ...
+
+
+def public_check(entry: Any) -> Any:
     """Return a check without exact blocked-request details, saved scopes or grants.
 
     Only dashboard captures of versions before 0.4.0 have these fields, and saved chats keep them. Request
@@ -35,7 +68,7 @@ def public_check(entry):
         return entry
     result = {key: value for key, value in entry.items() if key not in {"permission_scope", "permission_grants"}}
 
-    def labels(items):
+    def labels(items: Any) -> list[dict[str, Any]]:
         """Keep only the readable label of each described request."""
         return [{"label": item.get("label", "")} for item in items if isinstance(item, dict)] if isinstance(items, list) else []
 
@@ -48,7 +81,7 @@ def public_check(entry):
     return result
 
 
-def dashboard_path(payload):
+def dashboard_path(payload: dict[str, Any]) -> str:
     """Return the payload's dashboard path, /lovelace/0 when it names none; raise ValueError when it is not local."""
     path = payload.get("path", "/lovelace/0")
     if not isinstance(path, str) or not PATH_RE.fullmatch(path):
@@ -56,7 +89,7 @@ def dashboard_path(payload):
     return path
 
 
-def find_row(row, words, domain):
+def find_row(row: dict[str, Any], words: list[str], domain: str | None) -> tuple[int, dict[str, str]] | None:
     """Return (other words, answer row) for one item of Core's state list, or None when it does not match or is hidden.
 
     A match holds every word across its friendly name and entity id. Rank by the fewest extra words in either
@@ -90,17 +123,17 @@ def find_row(row, words, domain):
 class Verification:
     """Run the bounded checks a running task may request with its capability, and record them on its current turn."""
 
-    def __init__(self, worker):
+    def __init__(self, worker: VerificationWorker) -> None:
         """Keep the worker that provides tasks, options and Home Assistant access; no capability is issued yet."""
         self.worker = worker
         # One private exchange id per running task; the manual check from the page still sends one. A chat's tool
         # request names its thread instead (tool_threads.py); the name and the "capability expired" answer are
         # kept from earlier versions.
-        self.capabilities = {}
+        self.capabilities: dict[str, str] = {}
         self.lock = threading.RLock()
         self.execution_lock = threading.Lock()
 
-    def begin(self, task_id):
+    def begin(self, task_id: str) -> str:
         """Start the exchange's checks: a new exchange id, no recorded checks, and no expired screenshots.
 
         The screenshots are those of versions before 0.4.0 (cleanup).
@@ -114,12 +147,12 @@ class Verification:
         self.worker.update_task(task_id, verification=[], verification_attachments=[])
         return capability
 
-    def end(self, task_id):
+    def end(self, task_id: str) -> None:
         """End the exchange's checks, so later requests for its chat are refused."""
         with self.lock:
             self.capabilities.pop(task_id, None)
 
-    def dispatch(self, payload):
+    def dispatch(self, payload: Any) -> dict[str, Any]:
         """Run a request's check for the chat that its thread id names; raise ValueError if no exchange runs there."""
         if not isinstance(payload, dict):
             raise ValueError("Expected a verification object")
@@ -133,7 +166,7 @@ class Verification:
                 raise ValueError("No running exchange for this chat")
         return self.run(task_id, {k: v for k, v in payload.items() if k != "thread_id"}, supplied)
 
-    def active(self, task_id, turn_id, capability):
+    def active(self, task_id: str, turn_id: str | None, capability: str | None) -> bool:
         """Reject checks that outlive cancellation, completion, or a replaced turn."""
         with self.lock:
             current = self.capabilities.get(task_id)
@@ -143,7 +176,7 @@ class Verification:
             return bool(capability and task and authorized and task.get("current_turn_id") == turn_id
                         and not self.worker.task_cancellation_requested(task_id))
 
-    def core(self, method, path, **kwargs):
+    def core(self, method: str, path: str, **kwargs: Any) -> Any:
         """Call a Core API path through the Supervisor proxy and return the JSON of its answer.
 
         Requests to the integration's own codex_cli/ paths also carry the worker token in their JSON body.
@@ -168,7 +201,7 @@ class Verification:
                     raise ValueError("Home Assistant response exceeds the diagnostic limit")
         return json.loads(content)
 
-    def ws_read(self, message):
+    def ws_read(self, message: dict[str, Any]) -> Any:
         """Send one command over the Core WebSocket and return its result.
 
         Raises ValueError when authentication fails, a reply exceeds 1 MiB, or no successful result arrives.
@@ -193,7 +226,7 @@ class Verification:
                     return result["result"]
         raise ValueError("Home Assistant did not return a result")
 
-    def run(self, task_id, payload, capability=None):
+    def run(self, task_id: str, payload: dict[str, Any], capability: str | None = None) -> dict[str, Any]:
         """Run one check for the task's current turn and add its redacted result to the turn's verification list.
 
         Returns an "unavailable" result instead of raising when another check is running, the capability
@@ -251,7 +284,7 @@ class Verification:
         finally:
             self.execution_lock.release()
 
-    def entity(self, payload):
+    def entity(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Read an entity's state from Core, compare it with any expected_state, and keep only the named attributes."""
         entity_id = payload.get("entity_id", "")
         if not isinstance(entity_id, str) or not ENTITY_RE.fullmatch(entity_id):
@@ -272,7 +305,7 @@ class Verification:
                 "attributes": attributes, "last_updated": state.get("last_updated"),
                 "message": "Fresh entity state readback. This does not verify automation triggers, conditions, or actions."}
 
-    def find(self, payload):
+    def find(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Find entities by the name a person uses for them, so a device command needs no search of the registry files.
 
         An entity matches when its friendly name or entity id holds every word of the name. The answer is at
@@ -307,7 +340,7 @@ class Verification:
         return {"status": "observed", "name": name, "domain": domain, "matches": shown,
                 "total_matches": len(matches), "truncated": len(matches) > len(shown), "message": message}
 
-    def dashboard_readback(self, path, expected):
+    def dashboard_readback(self, path: str, expected: Any) -> dict[str, Any]:
         """Read the dashboard at a checked path from Core and compare it with expected when one is given."""
         dashboard = path.strip("/").split("/")[0]
         message = {"type": "lovelace/config"}
@@ -320,7 +353,7 @@ class Verification:
                  " differs from the saved configuration." if expected is not None else "."),
                 "view_count": len(actual.get("views", []))}
 
-    def require_dashboard_save_permission(self, task_id):
+    def require_dashboard_save_permission(self, task_id: str) -> None:
         """Worker writes obey the same narrowed mode as the current chat turn."""
         options = self.worker.task_options(task_id)
         if options.get("codex_sandbox") == "read-only":
@@ -328,7 +361,7 @@ class Verification:
         if not options.get("auto_save_lovelace", True):
             raise ValueError("Dashboard auto-save is disabled; read the loaded dashboard back without save_pending")
 
-    def save_pending_dashboard(self, task_id, path):
+    def save_pending_dashboard(self, task_id: str, path: str) -> None:
         """Save only a dashboard edited in this turn, so the readback that follows reads the edit."""
         self.require_dashboard_save_permission(task_id)
         manifest = self.worker.get_run_dir(task_id) / "manifest-before.json"
@@ -353,7 +386,7 @@ class Verification:
             if check["status"] != "passed":
                 raise ValueError("The pending dashboard was accepted but API readback differs")
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         """Delete expired dashboard screenshots that versions before 0.4.0 kept, from known conversation metadata.
 
         Version 0.4.0 takes no screenshots, and the last ones expire seven days after the update.
@@ -371,7 +404,7 @@ class Verification:
                     if path.is_relative_to(root) and path.is_file():
                         path.unlink(missing_ok=True)
 
-    def serve(self, path):
+    def serve(self, path: str | Path) -> socketserver.ThreadingUnixStreamServer:
         """Start a Unix socket server at path that answers verification requests in background threads, and return it.
 
         Any existing socket file is replaced, and the new one is accessible to its owner only.
@@ -381,7 +414,7 @@ class Verification:
         class Handler(socketserver.StreamRequestHandler):
             """Answer one newline-terminated JSON request per connection."""
 
-            def handle(self):
+            def handle(self) -> None:
                 """Read one request of at most 16384 bytes, dispatch it and write the result as a JSON line.
 
                 A request that is invalid, too large or refused gets a generic "unavailable" result.
