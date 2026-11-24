@@ -29,6 +29,8 @@ about GitHub into the chat.
 3. Open the link, or scan the QR code with a phone, type the code and approve the App. The card checks every few seconds and shows your account and
    the repositories it reaches as soon as GitHub confirms. The code works for 15 minutes. After that, choose
    **Connect GitHub** again for a new one.
+4. Codex reaches only the repositories that the App is installed on. To add one, choose **Add repositories** under
+   the list, pick the repository on GitHub's page, then choose **Check now** and **Accept this access**.
 
 If your organization does not allow the App, choose **Use a token instead**. On github.com, make a fine-grained
 token (**Settings** > **Developer settings** > **Fine-grained tokens**) for **one** repository, with **Contents:

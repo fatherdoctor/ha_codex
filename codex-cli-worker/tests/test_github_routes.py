@@ -15,7 +15,7 @@ from test_github_access import APP_TOKEN, REPO, FakeHttp, Response, app_answers
 
 CONTRACT = {"state", "kind", "account", "client_id_source", "repositories", "expected_repositories", "missing",
             "extra", "permissions", "permission_problem", "expires_at", "connected_at", "last_check", "last_test",
-            "revoke_url", "flow"}
+            "revoke_url", "add_repositories_url", "flow"}
 WRITES = ("/github/connect", "/github/cancel", "/github/token", "/github/test", "/github/check", "/github/accept",
           "/github/disconnect", "/github/repos/clone", "/github/repos/link")
 
