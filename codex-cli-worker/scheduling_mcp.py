@@ -5,6 +5,7 @@ import os
 import socket
 import sys
 
+import scheduling
 import tool_threads
 
 PROPOSAL = {'type': 'object', 'additionalProperties': False,
@@ -18,8 +19,8 @@ PROPOSAL = {'type': 'object', 'additionalProperties': False,
 LIMIT = {'type': 'integer', 'description': 'Items per page, 1-20 (default 10). A larger number returns 20 items and a next_offset to continue from.'}
 TOOLS = [
     {'name': 'propose_schedule', 'description': 'Save a schedule. A one-time wakeup (kind once) is on when saved and runs in this chat at its time. A repeating schedule remains disabled until a Home Assistant administrator approves its exact current contents on the page; this tool cannot approve or activate it. The answer gives next_run in the Home Assistant time zone.', 'inputSchema': PROPOSAL},
-    {'name': 'list_schedules', 'description': 'Read a bounded page of schedule summaries. This does not enable or change schedules.',
-     'inputSchema': {'type': 'object', 'additionalProperties': False, 'properties': {'offset': {'type': 'integer', 'minimum': 0, 'maximum': 100}, 'limit': LIMIT}}},
+    {'name': 'list_schedules', 'description': 'Read a bounded page of schedule summaries: active, paused and waiting ones first, then one-time wakeups that already ran. This does not enable or change schedules.',
+     'inputSchema': {'type': 'object', 'additionalProperties': False, 'properties': {'offset': {'type': 'integer', 'minimum': 0, 'maximum': scheduling.LISTED}, 'limit': LIMIT}}},
 ]
 
 
